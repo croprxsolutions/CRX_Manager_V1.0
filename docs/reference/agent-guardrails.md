@@ -31,7 +31,7 @@
 > `owner-approval-prompt.mjs`, wired in `prompt-router.mjs`). The request binds the migration's sha256, the PR number
 > and exact head, the flagged categories, a nonce and a 6-digit code, with a 24-hour reply deadline. Only a WHOLE
 > message of exactly `approve <code>` (a trailing `.` or `!` is accepted) turns it into an approval, valid 30 minutes
-> from the reply. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook
+> from the reply; the code is then retired in that folder, so no later request reuses it. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook
 > records the reply only when it arrives in that session (`session_id`), and the gate refuses the approval in any
 > other applying session, so the request is built, answered and applied in one conversation. It is checked LAST,
 > after the landing gate, against the PR and head that gate confirmed. Only `apply-migration-file.mjs` (the

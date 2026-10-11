@@ -40,7 +40,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomInt } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
@@ -95,6 +95,9 @@ export const safeMigrationName = (migName) => String(migName).replace(/[^A-Za-z0
 export const approvalFileName = (safeName) => `owner-approval-${safeName}.json`;
 export const requestFileName = (code) => `owner-approval-request-${code}.json`;
 export const selfTestResultName = (code) => `owner-approval-selftest-${code}.json`;
+// A code is retired once a reply uses it, so an old `approve <code>` can never
+// match a later request that drew the same 6 digits (Luna MED, round 3, PR #894).
+export const usedCodeMarkerName = (code) => `owner-approval-code-used-${code}.json`;
 
 /** A fresh 6-digit code: short enough to type on a phone. */
 export const newApprovalCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -158,10 +161,16 @@ export function buildSelfTestPayload({ issuedAt, expiresAt, nonce, code, session
 // A Claude Code session id as the hook payload and CLAUDE_CODE_SESSION_ID carry it.
 const usableSessionId = (s) => typeof s === "string" && /^[0-9A-Za-z_-]{8,128}$/.test(s);
 
-/** Save a request where the reply hook will look. "wx": a code already pending in this checkout throws. */
+/**
+ * Save a request where the reply hook will look. A code already pending ("wx") or
+ * already used in this checkout throws with code EEXIST, so the caller draws another.
+ */
 export function writeApprovalRequest(stateDir, payloadText) {
   const p = JSON.parse(payloadText);
   if (!/^\d{6}$/.test(String(p.code || ""))) throw new Error("the request has no usable code");
+  if (existsSync(path.join(stateDir, usedCodeMarkerName(p.code)))) {
+    throw Object.assign(new Error(`code ${p.code} was already used in this checkout`), { code: "EEXIST" });
+  }
   mkdirSync(stateDir, { recursive: true });
   const file = path.join(stateDir, requestFileName(p.code));
   writeFileSync(file, `${JSON.stringify({ payload: payloadText }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
@@ -209,6 +218,7 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, now = Date.n
   if (!hits.length) return no(`no pending approval request has the code ${code}`);
   if (hits.length > 1) return no(`${hits.length} pending requests share the code ${code}, so it is ambiguous`);
   const { dir, file } = hits[0];
+  if (existsSync(path.join(dir, usedCodeMarkerName(code)))) return no(`the code ${code} was already used; ask for a fresh one`);
   let payloadText;
   let p;
   try {
@@ -228,12 +238,24 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, now = Date.n
   if (!Number.isFinite(deadline) || now > deadline) return no(`the request for code ${code} expired at ${p.expiresAt}`);
   const approval = { payload: payloadText, approvedAt: new Date(now).toISOString(), via: OWNER_APPROVAL_VIA, reply: clip(String(reply ?? "").trim(), 40) };
   const out = path.join(dir, selftest ? selfTestResultName(code) : approvalFileName(safeMigrationName(p.migration)));
-  try { writeFileSync(out, `${JSON.stringify(approval, null, 2)}\n`, "utf8"); }
-  catch (e) { return no(`the approval could not be saved (${errText(e)})`); }
+  // Write beside the target, then rename into place: the apply gate never reads a
+  // half-written approval, and replacing an earlier one is atomic (CodeRabbit, PR #894).
+  const tmp = `${out}.tmp-${process.pid}-${now}`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(approval, null, 2)}\n`, "utf8");
+    renameSync(tmp, out);
+  } catch (e) {
+    try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+    return no(`the approval could not be saved (${errText(e)})`);
+  }
   // Once the approval file exists it IS the authorization, so a failure to remove
   // the request afterwards (a Windows file lock) still reports success; saying
   // "nothing was approved" would misstate what the apply gate will accept (Codex
   // P2, PR #894). A leftover request can only be re-approved by another reply.
+  // Retire the code. Best effort: if this marker cannot be written, a later request
+  // drawing the same code is the one-in-a-million case this marker exists to remove.
+  try { writeFileSync(path.join(dir, usedCodeMarkerName(code)), `${JSON.stringify({ code, usedAt: approval.approvedAt }, null, 2)}\n`, "utf8"); }
+  catch { /* see above */ }
   let requestLeft = false;
   try { removeRequest(file); } catch { requestLeft = true; }
   return { ok: true, kind: selftest ? "selftest" : "migration", payload: p, file: out, requestLeft };

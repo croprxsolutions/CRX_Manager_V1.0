@@ -18,7 +18,10 @@ less." He was told the trade-off below and replied "go - i accept the trade off"
   counts only when its `session_id` is the session that built the request, since two sessions can
   share one checkout (Luna HIGH, round 2). If the approval is saved
   but the used request cannot be removed (a Windows file lock), the hook still reports it recorded,
-  because the approval file is what the gate accepts (Codex P2). Any other message does nothing.
+  because the approval file is what the gate accepts (Codex P2). A used code is retired in its
+  folder, so no later request draws it and an old reply cannot approve a later request (Luna MED,
+  round 3). The approval file is written to a temporary name and renamed into place, so the gate
+  never reads a half-written one (CodeRabbit). Any other message does nothing.
   A peer session's message (envelope or preamble), a subagent report, a quote, inline code, or a
   sentence around the reply never matches. A code pending in two checkouts approves neither.
 - `owner-approval-lib.mjs`: the key, Windows Hello helper and signature checks are gone (purpose
@@ -46,9 +49,10 @@ with his permissions, and only Windows Hello could rule that out. The file sits 
 `.claude/session-state`, which the review-proof guard protects like every other proof.
 
 **Proof observed.**
-- `owner-approval-lib.test.mjs`: 137 assertions. They include every verifier refusal, 21 messages
-  that must not count as a reply (peer, quoted, code, longer sentences, wrong length), and replies
-  from another session or folder. The reply hook also runs as a real process, alone and through
+- `owner-approval-lib.test.mjs`: 145 assertions. They include every verifier refusal, 21 messages
+  that must not count as a reply (peer, quoted, code, longer sentences, wrong length), replies
+  from another session or folder, a retired code, and the atomic write (replace, failure, no
+  temporary file left). The reply hook also runs as a real process, alone and through
   `prompt-router.mjs`. In that run the recorded approval verifies at the apply, an unknown code is
   reported, a peer's relayed reply records nothing, and the exact reply from another session sharing
   the folder records nothing.

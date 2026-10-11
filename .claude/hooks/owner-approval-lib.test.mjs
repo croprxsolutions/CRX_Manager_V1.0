@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,7 @@ import {
   requestFileName,
   safeMigrationName,
   selfTestResultName,
+  usedCodeMarkerName,
   usedMarkerName,
   verifyOwnerApproval,
   writeApprovalRequest,
@@ -231,12 +232,22 @@ try {
   ok(r.ok && r.kind === "migration" && r.requestLeft === false, `Mason's reply records an approval: ${r.reason}`);
   ok(r.file === path.join(dir, approvalFileName(safeMigrationName(base.migration))), "the approval is saved beside its request, by migration name");
   ok(!existsSync(reqFile), "the request is used up by the reply");
+  ok(!readdirSync(dir).some((n) => n.includes(".tmp-")), "no temporary file is left behind by the atomic write");
   const saved = JSON.parse(readFileSync(r.file, "utf8"));
   ok(saved.via === OWNER_APPROVAL_VIA && saved.approvedAt === new Date(APPROVED).toISOString() && saved.reply === "Approve 482913.",
     "the approval records how and when Mason replied");
   ok(check(saved).ok, "the recorded approval verifies at the apply");
   refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED }), "no pending approval request",
     "the same reply twice records nothing more");
+  // A used code is retired: no later request may draw it, and a request placed
+  // under it anyway is not approved by the old reply (Luna MED, round 3).
+  ok(existsSync(path.join(dir, usedCodeMarkerName(base.code))), "the used code is retired in the request's folder");
+  assert.throws(() => writeApprovalRequest(dir, buildApprovalPayload({ ...base, migration: "20260914101300_later" })),
+    (e) => e.code === "EEXIST" && /already used/.test(e.message), "a later request cannot draw a retired code"); pass++;
+  writeFileSync(path.join(dir, requestFileName(base.code)), JSON.stringify({ payload: buildApprovalPayload({ ...base, migration: "20260914101300_later" }) }));
+  refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED }), "already used",
+    "an old reply never approves a later request filed under its retired code");
+  rmSync(path.join(dir, requestFileName(base.code)));
 
   // The same code pending in two checkouts is ambiguous: neither is approved.
   writeApprovalRequest(dir, buildApprovalPayload({ ...base, code: "222222" }));
@@ -280,6 +291,19 @@ try {
   const locked = rec({ code: "999000", dirs: [dir], reply: "approve 999000", now: APPROVED,
     removeRequest: () => { throw new Error("EBUSY: resource busy or locked"); } });
   ok(locked.ok && locked.requestLeft === true && existsSync(locked.file), "a locked request still reports the saved approval as recorded");
+  // Replacing an earlier approval for the same migration goes through the same
+  // rename, so the file is always one complete approval.
+  writeApprovalRequest(dir, buildApprovalPayload({ ...base, migration: "20260914101200_locked", code: "999002", nonce: "fedcba9876543210fedcba9876543210" }));
+  const again = rec({ code: "999002", dirs: [dir], reply: "approve 999002", now: APPROVED + 1000 });
+  ok(again.ok && again.file === locked.file && JSON.parse(readFileSync(again.file, "utf8")).approvedAt === new Date(APPROVED + 1000).toISOString(),
+    "a later approval of the same migration atomically replaces the earlier file");
+  // A failed write reports not recorded and leaves no temporary file.
+  mkdirSync(path.join(dir, approvalFileName(safeMigrationName("20260914101400_blocked"))));
+  writeApprovalRequest(dir, buildApprovalPayload({ ...base, migration: "20260914101400_blocked", code: "999003" }));
+  refuses(rec({ code: "999003", dirs: [dir], reply: "approve 999003", now: APPROVED }), "could not be saved",
+    "an approval that cannot be put in place is reported as not recorded");
+  ok(!readdirSync(dir).some((n) => n.includes(".tmp-")), "a failed atomic write leaves no temporary file");
+  ok(existsSync(path.join(dir, requestFileName("999003"))), "a failed write leaves the request pending");
   ok(rec({ code: "999001", dirs: [dir], reply: "x", now: APPROVED }).ok === false, "(control) an unknown code is still refused");
 
   // Used markers: the apply's single-use claim.

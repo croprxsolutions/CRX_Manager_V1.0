@@ -338,6 +338,10 @@ export function evaluateMigrationApply({
   // hook leaves it unset and a parked migration is refused there as before. It
   // proves nothing by itself — without a valid approval the refusal stands.
   ownerApprovalDoor = false,
+  // The Claude Code session running the apply (CLAUDE_CODE_SESSION_ID): Mason's
+  // reply counts only in the conversation that asked him, so an approval from any
+  // other session is refused. Unset → a parked migration is refused (fail closed).
+  ownerSessionId,
   // Test injection point: throws unless the approval files on disk are the
   // reviewed commit's bytes. Real callers leave it unset and get
   // assertOwnerTrustFilesReviewed (Sol HIGH, PR #857).
@@ -1148,6 +1152,7 @@ export function evaluateMigrationApply({
         pullRequest: landing.pullRequest,
         prHead: landing.head,
         categories: parked,
+        sessionId: ownerSessionId,
       };
       let usedNonces;
       try { usedNonces = readUsedNonces(proofDirs); }

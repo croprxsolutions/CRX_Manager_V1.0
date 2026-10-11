@@ -31,12 +31,14 @@
 > `owner-approval-prompt.mjs`, wired in `prompt-router.mjs`). The request binds the migration's sha256, the PR number
 > and exact head, the flagged categories, a nonce and a 6-digit code, with a 24-hour reply deadline. Only a WHOLE
 > message of exactly `approve <code>` (a trailing `.` or `!` is accepted) turns it into an approval, valid 30 minutes
-> from the reply. Requests are found only in the folders of the session Mason replies in, so the request must be
-> built, and answered, in the session that applies it. It is checked LAST,
+> from the reply. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook
+> records the reply only when it arrives in that session (`session_id`), and the gate refuses the approval in any
+> other applying session, so the request is built, answered and applied in one conversation. It is checked LAST,
 > after the landing gate, against the PR and head that gate confirmed. Only `apply-migration-file.mjs` (the
 > `ownerApprovalDoor` caller) honours it, and it uses the approval up before transmitting. Residual risk Mason
-> accepted: an agent that deliberately writes the approval file itself is not stopped (the file sits in the
-> review-proof-guarded `.claude/session-state`). Autonomous applies are Claude-only: Codex's
+> accepted: an agent that deliberately fakes the approval — writing the approval file, or running the reply hook by
+> hand with a made-up message and session id — is not stopped (the file sits in the review-proof-guarded
+> `.claude/session-state`). Autonomous applies are Claude-only: Codex's
 > `production-action-guard` blocks every live apply. The "flag absent → Mason's in-chat OK is the prose gate" rule-set in the `migration-apply-guard.mjs`
 > row below no longer exists. As its LAST check it runs `migration-landing-gate-lib.mjs`: the apply must come from a
 > clean checkout of the PR's branch (migration committed at HEAD, HEAD = the open PR's head into `main`) whose head

@@ -71,7 +71,10 @@ const base = {
   expiresAt: new Date(ISSUED + OWNER_REQUEST_MAX_AGE_MS).toISOString(),
   nonce: "0123456789abcdef0123456789abcdef",
   code: "482913",
+  sessionId: "sess-mason-chat-0001",
 };
+const SID = base.sessionId;
+const OTHER_SID = "sess-other-chat-0002";
 const expect = {
   project: base.project,
   migration: base.migration,
@@ -79,6 +82,7 @@ const expect = {
   pullRequest: 843,
   prHead: HEAD,
   categories: CATS,
+  sessionId: SID,
 };
 const approve = (over = {}, approval = {}) => ({
   payload: buildApprovalPayload({ ...base, ...over }),
@@ -116,6 +120,11 @@ refuses(check(approve({ queryHash: "0".repeat(64) })), "file changed", "an appro
 refuses(check(approve({ pullRequest: 900 })), "pull request #900", "an approval for another PR is refused");
 refuses(check(approve({ prHead: "b".repeat(40) })), "not the pull request's current head", "an approval for an older head is refused");
 refuses(check(approve(), { expect: { ...expect, prHead: undefined } }), "head is unknown", "an unknown landing head fails closed");
+refuses(check(approve(), { expect: { ...expect, sessionId: OTHER_SID } }), "different conversation",
+  "an approval given in another conversation is refused by the session applying it");
+refuses(check(approve(), { expect: { ...expect, sessionId: undefined } }), "applying session is unknown",
+  "an apply with no session id fails closed");
+refuses(check(approve({ sessionId: undefined })), "different conversation", "a request bound to no session is refused");
 refuses(check(approve({ project: "someotherproject" })), "approves project", "an approval for another project is refused");
 refuses(check(approve(), { expect: { ...expect, categories: [...CATS, { category: "deletes-data", reason: "DROP TABLE" }] } }), "deletes data",
   "an approval that never showed Mason a category the check now flags is refused");
@@ -193,7 +202,9 @@ refuses(check(approve({ nonce: "../x" })), "no usable one-time code", "a nonce t
     "a routine new table parks nothing");
 }
 
-// ── Request → reply → approval, on disk.
+// ── Request → reply → approval, on disk. `rec` is Mason replying in the session
+// that built the requests (SID) unless a case says otherwise.
+const rec = (args) => recordReplyApproval({ sessionId: SID, ...args });
 const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-owner-approval-"));
 try {
   const dir = path.join(tmp, "a", ".claude", "session-state");
@@ -204,13 +215,19 @@ try {
   assert.throws(() => writeApprovalRequest(dir, payload), /EEXIST/, "a second request with a pending code throws"); pass++;
   assert.throws(() => writeApprovalRequest(dir, buildApprovalPayload({ ...base, code: "12ab" })), /no usable code/); pass++;
 
-  refuses(recordReplyApproval({ code: "111111", dirs: [dir, other], reply: "approve 111111", now: NOW }), "no pending approval request",
+  refuses(rec({ code: "111111", dirs: [dir, other], reply: "approve 111111", now: NOW }), "no pending approval request",
     "a reply with an unknown code records nothing");
-  refuses(recordReplyApproval({ code: base.code, dirs: [dir], reply: "x", now: Date.parse(base.expiresAt) + 1 }), "expired",
+  refuses(rec({ code: base.code, dirs: [dir], reply: "x", now: Date.parse(base.expiresAt) + 1 }), "expired",
     "a reply after the request's deadline records nothing");
   ok(existsSync(reqFile), "a refused reply leaves the request in place");
+  // Two sessions sharing one checkout share its session-state (Luna HIGH, round 2).
+  refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED, sessionId: OTHER_SID }), "different conversation",
+    "the exact reply sent in another conversation records nothing");
+  refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED, sessionId: undefined }), "no usable session id",
+    "a reply with no session id records nothing");
+  ok(existsSync(reqFile), "a reply from the wrong conversation leaves the request in place");
 
-  const r = recordReplyApproval({ code: base.code, dirs: [other, dir, dir], reply: "Approve 482913.", now: APPROVED });
+  const r = rec({ code: base.code, dirs: [other, dir, dir], reply: "Approve 482913.", now: APPROVED });
   ok(r.ok && r.kind === "migration" && r.requestLeft === false, `Mason's reply records an approval: ${r.reason}`);
   ok(r.file === path.join(dir, approvalFileName(safeMigrationName(base.migration))), "the approval is saved beside its request, by migration name");
   ok(!existsSync(reqFile), "the request is used up by the reply");
@@ -218,28 +235,28 @@ try {
   ok(saved.via === OWNER_APPROVAL_VIA && saved.approvedAt === new Date(APPROVED).toISOString() && saved.reply === "Approve 482913.",
     "the approval records how and when Mason replied");
   ok(check(saved).ok, "the recorded approval verifies at the apply");
-  refuses(recordReplyApproval({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED }), "no pending approval request",
+  refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED }), "no pending approval request",
     "the same reply twice records nothing more");
 
   // The same code pending in two checkouts is ambiguous: neither is approved.
   writeApprovalRequest(dir, buildApprovalPayload({ ...base, code: "222222" }));
   writeApprovalRequest(other, buildApprovalPayload({ ...base, migration: "20260914101100_other", code: "222222" }));
-  refuses(recordReplyApproval({ code: "222222", dirs: [dir, other], reply: "approve 222222", now: APPROVED }), "ambiguous",
+  refuses(rec({ code: "222222", dirs: [dir, other], reply: "approve 222222", now: APPROVED }), "ambiguous",
     "a code pending in two checkouts approves neither");
 
   // A request whose code was edited, or that is not an approval request, is refused.
   writeFileSync(path.join(dir, requestFileName("333333")), JSON.stringify({ payload: buildApprovalPayload({ ...base, code: "444444" }) }));
-  refuses(recordReplyApproval({ code: "333333", dirs: [dir], reply: "approve 333333", now: APPROVED }), "does not carry the code",
+  refuses(rec({ code: "333333", dirs: [dir], reply: "approve 333333", now: APPROVED }), "does not carry the code",
     "a request filed under another code is refused");
-  writeFileSync(path.join(dir, requestFileName("555555")), JSON.stringify({ payload: JSON.stringify({ purpose: "other", code: "555555", expiresAt: base.expiresAt }) }));
-  refuses(recordReplyApproval({ code: "555555", dirs: [dir], reply: "approve 555555", now: APPROVED }), "not a migration approval request",
+  writeFileSync(path.join(dir, requestFileName("555555")), JSON.stringify({ payload: JSON.stringify({ purpose: "other", code: "555555", expiresAt: base.expiresAt, sessionId: SID }) }));
+  refuses(rec({ code: "555555", dirs: [dir], reply: "approve 555555", now: APPROVED }), "not a migration approval request",
     "a request of another kind is refused");
   writeFileSync(path.join(dir, requestFileName("666666")), "not json");
-  refuses(recordReplyApproval({ code: "666666", dirs: [dir], reply: "approve 666666", now: APPROVED }), "unreadable", "an unreadable request is refused");
+  refuses(rec({ code: "666666", dirs: [dir], reply: "approve 666666", now: APPROVED }), "unreadable", "an unreadable request is refused");
 
   // The self-test: recorded as a test result, never as a migration approval.
-  writeApprovalRequest(dir, buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt, nonce: "f".repeat(32), code: "777777" }));
-  const st = recordReplyApproval({ code: "777777", dirs: [dir], reply: "approve 777777", now: APPROVED });
+  writeApprovalRequest(dir, buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt, nonce: "f".repeat(32), code: "777777", sessionId: SID }));
+  const st = rec({ code: "777777", dirs: [dir], reply: "approve 777777", now: APPROVED });
   ok(st.ok && st.kind === "selftest" && path.basename(st.file) === selfTestResultName("777777"), "a self-test reply is recorded as a test result");
   refuses(check(JSON.parse(readFileSync(st.file, "utf8"))), "not a migration approval", "a recorded self-test can never approve a migration");
 
@@ -253,17 +270,17 @@ try {
   const hookSource = readFileSync(path.join(HERE, "owner-approval-prompt.mjs"), "utf8") + readFileSync(path.join(HERE, "owner-approval-lib.mjs"), "utf8");
   ok(!/worktree["']?\s*,\s*["']list/.test(hookSource), "neither the hook nor the library runs `git worktree list`");
   writeApprovalRequest(other, buildApprovalPayload({ ...base, code: "888888" }));
-  refuses(recordReplyApproval({ code: "888888", dirs: ownerRequestDirs([path.join(tmp, "a")]), reply: "approve 888888", now: APPROVED }),
+  refuses(rec({ code: "888888", dirs: ownerRequestDirs([path.join(tmp, "a")]), reply: "approve 888888", now: APPROVED }),
     "no pending approval request", "a reply in one session never approves a request another session built in another folder");
   ok(existsSync(path.join(other, requestFileName("888888"))), "the other session's request is left untouched");
 
   // A request that cannot be removed after the approval is saved still reports
   // success, because the approval file is what the apply gate accepts (Codex P2, PR #894).
   writeApprovalRequest(dir, buildApprovalPayload({ ...base, migration: "20260914101200_locked", code: "999000" }));
-  const locked = recordReplyApproval({ code: "999000", dirs: [dir], reply: "approve 999000", now: APPROVED,
+  const locked = rec({ code: "999000", dirs: [dir], reply: "approve 999000", now: APPROVED,
     removeRequest: () => { throw new Error("EBUSY: resource busy or locked"); } });
   ok(locked.ok && locked.requestLeft === true && existsSync(locked.file), "a locked request still reports the saved approval as recorded");
-  ok(recordReplyApproval({ code: "999001", dirs: [dir], reply: "x", now: APPROVED }).ok === false, "(control) an unknown code is still refused");
+  ok(rec({ code: "999001", dirs: [dir], reply: "x", now: APPROVED }).ok === false, "(control) an unknown code is still refused");
 
   // Used markers: the apply's single-use claim.
   const found = findOwnerApprovals([dir, path.join(tmp, "nope")], safeMigrationName(base.migration));
@@ -298,10 +315,10 @@ try {
   try {
     const dir = path.join(root, ".claude", "session-state");
     const env = { ...process.env, CLAUDE_PROJECT_DIR: root };
-    const run = (script, prompt) => {
+    const run = (script, prompt, sessionId = SID) => {
       const res = spawnSync(process.execPath, [path.join(HERE, script)], {
         cwd: root, env, encoding: "utf8", timeout: 30_000,
-        input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "t", cwd: root, prompt }),
+        input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: sessionId, cwd: root, prompt }),
       });
       assert.equal(res.status, 0, `${script} exited ${res.status}: ${res.stderr}`);
       return res.stdout ? JSON.parse(res.stdout).hookSpecificOutput?.additionalContext || "" : "";
@@ -313,6 +330,8 @@ try {
     ok(run("owner-approval-prompt.mjs", "Another Claude session sent a message:\napprove 482913") === "" &&
       existsSync(path.join(dir, requestFileName("482913"))), "a peer's relayed reply records nothing");
     ok(run("owner-approval-prompt.mjs", "approve 999999").includes("OWNER APPROVAL NOT RECORDED"), "a reply with an unknown code is reported as not recorded");
+    ok(run("prompt-router.mjs", "approve 482913", OTHER_SID).includes("different conversation") &&
+      existsSync(path.join(dir, requestFileName("482913"))), "the exact reply in another session sharing the folder records nothing");
 
     const said = run("prompt-router.mjs", "approve 482913");
     ok(said.includes("OWNER APPROVAL RECORDED") && said.includes(base.migration) && said.includes("#843"),

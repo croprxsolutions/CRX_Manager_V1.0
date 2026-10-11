@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // UserPromptSubmit half of Mason's owner approval (owner-approval-lib.mjs;
 // Mason 2026-10-09: replaces Windows Hello so he can approve from his phone).
-//   - His WHOLE message is `approve <6-digit code>` → the pending request with that
-//     code (built by scripts/owner-approve-migration.mjs) becomes an approval good
-//     for 30 minutes, and the agent is told so.
-//   - Any other message → nothing happens.
-// A hook runs on a message sent into the session, never on a tool call, so no
-// command an agent runs approves a parked migration through it.
+//   - His WHOLE message is `approve <6-digit code>`, in the session that built the
+//     pending request with that code (scripts/owner-approve-migration.mjs) → the
+//     request becomes an approval good for 30 minutes, and the agent is told so.
+//   - Any other message, or the reply in another session → nothing is approved.
+// Claude Code runs this on each message sent into a session. Nothing stops an
+// agent running it by hand with a made-up message; that is the deliberate
+// forgery Mason accepted as the residual (owner-approval-lib.mjs header).
 
 import { readFileSync } from "node:fs";
 import { approvalCodeFromReply, ownerRequestDirs, recordReplyApproval } from "./owner-approval-lib.mjs";
@@ -29,7 +30,7 @@ let result;
 try {
   // Only THIS session's folders: a request another session built is never found here.
   const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
-  result = recordReplyApproval({ code, dirs, reply });
+  result = recordReplyApproval({ code, dirs, reply, sessionId: payload?.session_id });
 } catch (error) {
   result = { ok: false, reason: `the approval hook failed (${error?.message || error})` };
 }

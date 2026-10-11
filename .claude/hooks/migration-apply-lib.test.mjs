@@ -1705,6 +1705,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       expiresAt: new Date(issued + OWNER_REQUEST_MAX_AGE_MS).toISOString(),
       nonce: `nonce-${Math.random().toString(16).slice(2)}`,
       code: "482913",
+      sessionId: "sess-mason-chat-0001",
       ...over,
     });
     return { payload, approvedAt: new Date(Date.now() - 60_000).toISOString(), via: OWNER_APPROVAL_VIA, reply: "approve 482913", ...approval };
@@ -1722,7 +1723,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     return root;
   };
   const scriptDoor = (root, sql, over = {}) => evaluate(root, {
-    query: sql, ownerApprovalDoor: true, ownerTrustCheck: () => {}, landingGate: readyLanding, ...over,
+    query: sql, ownerApprovalDoor: true, ownerSessionId: "sess-mason-chat-0001", ownerTrustCheck: () => {}, landingGate: readyLanding, ...over,
   });
 
   for (const [category, sql] of Object.entries(parkedSql)) {
@@ -1748,6 +1749,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "malformed", "an approval file not written by the reply hook's shape is refused");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {}, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
     "30 minutes after Mason replied", "an approval more than 30 minutes after his reply is refused");
+  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
+    "different conversation", "an approval given in another conversation is refused by the session applying it");
+  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: undefined }),
+    "applying session is unknown", "an apply with no session id fails closed");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
     "not the pull request's current head", "an approval for another head is refused");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { categories: [{ category: "changes-access", reason: "adds a comment" }] }) }), ACCESS),

@@ -48,6 +48,12 @@ function die(code, msg) {
 
 const checkout = process.cwd();
 const stateDir = path.join(checkout, ".claude", "session-state");
+// The request is bound to the Claude Code session that builds it: Mason's reply
+// counts only there, and only that session may apply it.
+const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
+if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) {
+  die(1, "owner-approve-migration: run this from inside the Claude Code session that will apply the migration (CLAUDE_CODE_SESSION_ID is not set).");
+}
 
 /** Save the request under a fresh code; retry if that code is already pending here. */
 function saveRequest(build) {
@@ -69,6 +75,7 @@ if (argv.length === 1 && argv[0] === "--selftest") {
     expiresAt: new Date(now + OWNER_REQUEST_MAX_AGE_MS).toISOString(),
     nonce: randomBytes(16).toString("hex"),
     code: c,
+    sessionId,
   }));
   console.log("Show Mason this, word for word:\n");
   for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
@@ -153,6 +160,7 @@ const { code, payload } = saveRequest((c) => buildApprovalPayload({
   expiresAt: new Date(now + OWNER_REQUEST_MAX_AGE_MS).toISOString(),
   nonce: randomBytes(16).toString("hex"),
   code: c,
+  sessionId,
 }));
 
 console.log(`Approval request saved for ${migName} (PR #${pr.number}, head ${head.slice(0, 12)}):`);

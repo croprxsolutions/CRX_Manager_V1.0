@@ -328,8 +328,10 @@ try {
     // aliased filename inherit another migration's proof; see the note in the lib.
     requireExactProofName: true,
     // This door may carry Mason's chat-reply approval for a parked migration.
-    // It proves nothing alone: the rule book still needs his valid approval.
+    // It proves nothing alone: the rule book still needs his valid approval, made
+    // in THIS Claude Code session (his reply counts only where he was asked).
     ownerApprovalDoor: true,
+    ownerSessionId: process.env.CLAUDE_CODE_SESSION_ID,
   });
 } catch (err) {
   die(2,

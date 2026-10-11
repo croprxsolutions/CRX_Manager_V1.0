@@ -11,24 +11,28 @@
 // the chat:
 //   1. scripts/owner-approve-migration.mjs builds a REQUEST from the file itself:
 //      the exact migration (its name and the sha256 of its LF-normalized SQL), the
-//      pull request and its exact head, what the safety check flagged, and a
-//      6-digit code. It is saved beside the checkout's other proofs.
+//      pull request and its exact head, what the safety check flagged, the Claude
+//      Code session it was built in, and a 6-digit code. It is saved beside the
+//      checkout's other proofs.
 //   2. The agent shows Mason the plain-English summary and the exact reply.
-//   3. He replies `approve <code>` from anywhere. owner-approval-prompt.mjs, a
-//      UserPromptSubmit hook, turns that request into an APPROVAL good for 30
-//      minutes. A hook runs on a message sent into the session, never on a tool
-//      call, so no command an agent runs produces one through it.
+//   3. He replies `approve <code>` from anywhere, in THAT conversation.
+//      owner-approval-prompt.mjs, which Claude Code runs as a UserPromptSubmit hook
+//      on each message sent into a session, turns the request into an APPROVAL good
+//      for 30 minutes only when the reply arrives in the session that built it.
 //   4. scripts/apply-migration-file.mjs checks it LAST, after the reviewer proofs,
-//      the Sol proof and the landing gate, and uses it up once.
+//      the Sol proof and the landing gate, refuses it in any other session, and
+//      uses it up once.
 //
 // THE TRADE-OFF MASON ACCEPTED. The reply must be the WHOLE message, so a peer
 // session's message (always wrapped in an envelope or preamble), a subagent's
-// report or a quoted line never matches. That stops a parked migration being
-// applied by mistake, on a misread handoff, or on a relayed "Mason said yes". It
-// does not stop an agent that deliberately writes the approval file itself:
-// agents run on Mason's PC with his permissions, and only Windows Hello could
-// rule that out. The file lives in .claude/session-state, which the review proof
-// guard protects like every other proof.
+// report or a quoted line never matches, and a reply in another conversation
+// never counts. That stops a parked migration being applied by mistake, on a
+// misread handoff, or on a relayed "Mason said yes". It does not stop an agent
+// that deliberately fakes the approval — by writing the approval file, or by
+// running the reply hook by hand with a made-up message and session id: agents
+// run on Mason's PC with his permissions, and only Windows Hello could rule that
+// out (Luna round 2, PR #894, made the second route explicit). The file lives in
+// .claude/session-state, which the review proof guard protects like every other proof.
 //
 // It is NOT a general override. It only lets a parked migration continue to the
 // SAME checks every other migration must pass; it only works through
@@ -128,7 +132,7 @@ export function ownerApprovalSummary(p) {
 }
 
 /** The request Mason approves. Field order is fixed; expiresAt is his reply deadline. */
-export function buildApprovalPayload({ project, migration, queryHash, pullRequest, prHead, categories, issuedAt, expiresAt, nonce, code }) {
+export function buildApprovalPayload({ project, migration, queryHash, pullRequest, prHead, categories, issuedAt, expiresAt, nonce, code, sessionId }) {
   const p = {
     purpose: OWNER_APPROVAL_PURPOSE,
     project,
@@ -141,14 +145,18 @@ export function buildApprovalPayload({ project, migration, queryHash, pullReques
     expiresAt,
     nonce,
     code,
+    sessionId,
   };
   return JSON.stringify({ ...p, summary: ownerApprovalSummary(p) }, null, 2);
 }
 
-export function buildSelfTestPayload({ issuedAt, expiresAt, nonce, code }) {
-  const p = { purpose: OWNER_SELFTEST_PURPOSE, issuedAt, expiresAt, nonce, code };
+export function buildSelfTestPayload({ issuedAt, expiresAt, nonce, code, sessionId }) {
+  const p = { purpose: OWNER_SELFTEST_PURPOSE, issuedAt, expiresAt, nonce, code, sessionId };
   return JSON.stringify({ ...p, summary: ownerApprovalSummary(p) }, null, 2);
 }
+
+// A Claude Code session id as the hook payload and CLAUDE_CODE_SESSION_ID carry it.
+const usableSessionId = (s) => typeof s === "string" && /^[0-9A-Za-z_-]{8,128}$/.test(s);
 
 /** Save a request where the reply hook will look. "wx": a code already pending in this checkout throws. */
 export function writeApprovalRequest(stateDir, payloadText) {
@@ -190,8 +198,9 @@ export function ownerRequestDirs(sessionFolders) {
  *
  * @returns {{ok: true, kind: "migration"|"selftest", payload: object, file: string, requestLeft: boolean}|{ok: false, reason: string}}
  */
-export function recordReplyApproval({ code, dirs, reply, now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }) }) {
+export function recordReplyApproval({ code, dirs, reply, sessionId, now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }) }) {
   const no = (reason) => ({ ok: false, reason });
+  if (!usableSessionId(sessionId)) return no("the message carried no usable session id");
   const hits = [];
   for (const dir of new Set(dirs || [])) {
     const file = path.join(dir, requestFileName(code));
@@ -211,6 +220,10 @@ export function recordReplyApproval({ code, dirs, reply, now = Date.now(), remov
   if (String(p?.code) !== code) return no(`the request file does not carry the code ${code}`);
   const selftest = p.purpose === OWNER_SELFTEST_PURPOSE;
   if (!selftest && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
+  // Sessions that share a checkout share its session-state: the request names the
+  // session that built it, and only a reply in that session counts (Luna HIGH,
+  // round 2, PR #894).
+  if (p.sessionId !== sessionId) return no(`the request for code ${code} was built in a different conversation; Mason must reply in the one that asked him`);
   const deadline = Date.parse(p.expiresAt);
   if (!Number.isFinite(deadline) || now > deadline) return no(`the request for code ${code} expired at ${p.expiresAt}`);
   const approval = { payload: payloadText, approvedAt: new Date(now).toISOString(), via: OWNER_APPROVAL_VIA, reply: clip(String(reply ?? "").trim(), 40) };
@@ -357,7 +370,8 @@ export function findOwnerApprovals(dirs, safeName) {
  * @param {object} args
  * @param {{payload: string, approvedAt: string, via: string}} args.approval
  * @param {object} args.expect  project, migration, queryHash, pullRequest, prHead,
- *   categories ([{category, reason}] exactly as parkedCategories returns them now)
+ *   categories ([{category, reason}] exactly as parkedCategories returns them now),
+ *   sessionId (the Claude Code session running the apply)
  * @param {string[]|null} [args.appliedNames]  the live ledger snapshot; null skips that check
  * @param {Set<string>} [args.usedNonces]
  * @returns {{ok: true, payload: object, expiresAt: string}|{ok: false, reason: string}}
@@ -373,6 +387,10 @@ export function verifyOwnerApproval({ approval, expect, appliedNames = null, use
   if (p.project !== expect.project) return no(`it approves project ${p.project}, not ${expect.project}`);
   if (p.migration !== expect.migration) return no(`it approves ${p.migration}, not ${expect.migration}`);
   if (p.queryHash !== expect.queryHash) return no("the migration file changed after Mason approved it (different fingerprint)");
+  // His reply counts only in the conversation that asked him, and that is the one
+  // that must apply it (AGENTS.md: approval in the current conversation).
+  if (!usableSessionId(expect.sessionId)) return no("the applying session is unknown (fail closed)");
+  if (p.sessionId !== expect.sessionId) return no("it was approved in a different conversation than the one applying it; ask Mason here");
   if (!/^[0-9a-f]{40}$/i.test(String(expect.prHead || "")) || !Number.isInteger(Number(expect.pullRequest)) || !(Number(expect.pullRequest) > 0)) {
     return no("the pull request or its head is unknown (fail closed)");
   }

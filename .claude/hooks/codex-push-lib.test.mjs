@@ -3506,8 +3506,18 @@ assert.equal(pushNamesRefspec("git push --future-option origin main:refs/heads/f
   ).computed, false, "a read-only loop with a $( ) assignment is not a run-time program");
   // Codex connector, PR #882: an arithmetic `$(( ))` is not a command, so its
   // variable is not a run-time program (the substitution split had refused it).
-  for (const command of ["i=$(($i+1)); git status", "echo $(($n*2)); git log -1", "git status; echo '$('"]) {
+  for (const command of [
+    "i=$(($i+1)); git status", "echo $(($n*2)); git log -1", "git status; echo '$('",
+    // CodeRabbit, PR #882: arithmetic at the depth limit is not a command.
+    "x=$(y=$(z=$(w=$(echo $(( 1 + 2 )))))); git status",
+  ]) {
     assert.equal(expandNestedCommands(command).computed, false, `not a run-time program: ${command}`);
+  }
+  for (const command of [
+    "x=$(y=$(z=$(w=$(echo `$P pr merge 1 --admin`)))); git status",
+    "x=$(y=$(z=$(w=$(echo $(( 1 )) $($P pr merge 1 --admin))))); git status",
+  ]) {
+    assert.equal(expandNestedCommands(command).computed, true, `a command at the depth limit still counts: ${command}`);
   }
   // CodeRabbit, PR #882: a substitution left at the depth limit, or one before a
   // `$(` that never closes, was read as plain words and the merge was allowed.

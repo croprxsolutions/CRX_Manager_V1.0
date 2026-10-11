@@ -3461,11 +3461,15 @@ const POWERSHELL_ASSIGNMENT_WORD_RE = /^\$\{?[A-Za-z_][\w:]*\}?[+\-*/%]?=/;
 // Past NESTED_MAX_DEPTH a substitution is not unwrapped, so one still left there
 // counts as built at run time: reading it as plain words skipped the assignment
 // `x=$($P` and allowed `x=$(x=$(x=$(x=$(x=$($P pr merge 1 --admin)))))`
-// (CodeRabbit, PR #882).
+// (CodeRabbit, PR #882). An arithmetic `$(( … ))` there is not a command and
+// does not count; a backtick or an unclosed `$(` still does.
 function programBuiltAtRuntime(text, runtimeText = RUNTIME_TEXT_RE, depth = 0) {
   const source = String(text || "");
-  if (depth >= NESTED_MAX_DEPTH) return /\$\(|`/.test(source) || programWordBuiltAtRuntime(source, runtimeText);
   const split = splitSubstitutions(source);
+  if (depth >= NESTED_MAX_DEPTH) {
+    return source.includes("`") || split.inners.length > 0 || /\$\((?![()])/.test(split.outer) ||
+      programWordBuiltAtRuntime(source, runtimeText);
+  }
   if (split.inners.some((inner) => programBuiltAtRuntime(inner, runtimeText, depth + 1))) return true;
   return programWordBuiltAtRuntime(split.outer, runtimeText);
 }

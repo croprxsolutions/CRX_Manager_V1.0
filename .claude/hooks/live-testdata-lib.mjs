@@ -329,7 +329,10 @@ const AUTH_SCHEMA_BEFORE_RE = schemaBefore("auth");
 const PG_CATALOG_BEFORE_RE = schemaBefore("pg_catalog");
 
 export function findNonReadFunctionCall(sqlText) {
-  const text = String(sqlText || "");
+  // Comments go first (quote-aware, each becomes one space): `evil./*x*/fn(1)`
+  // hid its schema and `fn/**/(1)` hid the call itself (Codex connector, PR #882),
+  // and comment prose such as `-- cancel_order(42)` is not a call.
+  const text = stripCommentsQuoteAware(String(sqlText || ""));
   if (!/\bselect\b/i.test(text)) return null;
   // A name starts after any identifier character, `$` included: `my$count(…)` is
   // one function named my$count, not the built-in count (Luna, PR #882).

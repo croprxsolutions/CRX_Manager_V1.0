@@ -122,6 +122,13 @@ ok(['SELECT "AUTH".uid()', 'SELECT "Auth".uid()', 'SELECT auth."UID"()',
   .every((sql) => classifySql(sql).block), "a quoted name with capitals is not the vouched-for object");
 ok(["SELECT x$auth.uid()", "SELECT x$pg_catalog.pg_get_triggerdef(1)", "SELECT my$count(1)", "SELECT my$public.count(1)"]
   .every((sql) => classifySql(sql).block), "a `$` inside an identifier makes it another schema or function (Luna, PR #882)");
+ok(["SELECT evil./*x*/pg_get_triggerdef(1)", "SELECT evil.--x\npg_get_triggerdef(1)", "SELECT public/**/./**/count(1)",
+  "SELECT cancel_order/**/(42)", "SELECT cancel_order --x\n(42)"]
+  .every((sql) => classifySql(sql).block), "a comment cannot hide a schema or a call (Codex connector, PR #882)");
+ok(!classifySql("SELECT count(*) FROM orders -- cancel_order(42) would be wrong here").block &&
+  !classifySql("SELECT /* get rid of delete_all() */ count(*) FROM orders").block &&
+  !classifySql("SELECT pg_catalog./**/pg_get_triggerdef(t.oid), '--' AS x, '/*' AS y FROM pg_trigger t").block,
+  "comment prose is not a call, and comment-like text inside a string stays data");
 ok(["SELECT AUTH.uid()", "SELECT auth.UID()", "SELECT PG_CATALOG.pg_get_triggerdef(1)",
   'SELECT "count"(*) FROM orders', "SELECT COUNT(*) FROM orders"]
   .every((sql) => !classifySql(sql).block), "an unquoted name folds to lower case and is still a read");

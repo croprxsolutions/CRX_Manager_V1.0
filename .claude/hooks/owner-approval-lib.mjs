@@ -40,7 +40,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomInt } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
@@ -196,8 +196,21 @@ export function approvalCodeFromReply(prompt) {
  * his approval in the applying conversation).
  */
 export function ownerRequestDirs(sessionFolders) {
-  return [...new Set((sessionFolders || []).filter(Boolean).map((s) => path.resolve(s)))]
-    .map((r) => path.join(r, ".claude", "session-state"));
+  // The payload cwd, CLAUDE_PROJECT_DIR and the hook's cwd may name one checkout
+  // with different drive-letter or folder casing on Windows. Without a canonical
+  // key the same request is found twice and a valid reply is refused as
+  // ambiguous (Codex P2, PR #894).
+  const canonical = (s) => {
+    const r = path.resolve(s);
+    try { return realpathSync.native(r); } catch { return r; }
+  };
+  const key = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const roots = new Map();
+  for (const s of (sessionFolders || []).filter(Boolean)) {
+    const c = canonical(s);
+    if (!roots.has(key(c))) roots.set(key(c), c);
+  }
+  return [...roots.values()].map((r) => path.join(r, ".claude", "session-state"));
 }
 
 /**

@@ -274,6 +274,18 @@ try {
   // Where the hook looks: ONLY the replying session's own folders (Codex P1, PR #894).
   const dirs = ownerRequestDirs([path.join(tmp, "a"), undefined, path.join(tmp, "a")]);
   ok(dirs.length === 1 && dirs[0] === dir, "request folders are only this session's folders, once each");
+  if (process.platform === "win32") {
+    // One checkout named with different casing is ONE folder (Codex P2, PR #894).
+    const a = path.join(tmp, "a");
+    const variants = [a, a.toUpperCase(), a.toLowerCase(), a.replace(/\\/g, "/")];
+    ok(ownerRequestDirs(variants).length === 1, "casing and slash variants of one checkout collapse to one folder");
+    writeApprovalRequest(dir, buildApprovalPayload({ ...base, migration: "20260914101500_casing", code: "121212" }));
+    const r2 = rec({ code: "121212", dirs: ownerRequestDirs(variants), reply: "approve 121212", now: APPROVED });
+    ok(r2.ok, `a valid reply is not refused as ambiguous when the folder is named with different casing: ${r2.reason}`);
+  } else {
+    ok(true, "(casing variants only apply on Windows)");
+    ok(true, "(casing variants only apply on Windows)");
+  }
   // Mutation guard: the pre-fix signature took a worktree lister and added every
   // worktree it returned. Passing one must change nothing now.
   ok(ownerRequestDirs([path.join(tmp, "a")], () => [path.join(tmp, "a"), path.join(tmp, "b")]).length === 1,

@@ -32,7 +32,8 @@
 > and exact head, the flagged categories, a nonce and a 6-digit code, with a 24-hour reply deadline. Only a WHOLE
 > message of exactly `approve <code>` (a trailing `.` or `!` is accepted) turns it into an approval, valid 30 minutes
 > from the reply; the code is then retired in that folder, so no later request reuses it. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook
-> records the reply only when it arrives in that session (`session_id`), and the gate refuses the approval in any
+> records the reply only when it arrives in that session (`session_id`; the session's folders are compared by their
+> canonical path, case-insensitively on Windows), and the gate refuses the approval in any
 > other applying session, so the request is built, answered and applied in one conversation. It is checked LAST,
 > after the landing gate, against the PR and head that gate confirmed. Only `apply-migration-file.mjs` (the
 > `ownerApprovalDoor` caller) honours it, and it uses the approval up before transmitting. Residual risk Mason

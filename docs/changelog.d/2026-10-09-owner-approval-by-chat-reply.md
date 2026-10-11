@@ -21,7 +21,10 @@ less." He was told the trade-off below and replied "go - i accept the trade off"
   because the approval file is what the gate accepts (Codex P2). A used code is retired in its
   folder, so no later request draws it and an old reply cannot approve a later request (Luna MED,
   round 3). The approval file is written to a temporary name and renamed into place, so the gate
-  never reads a half-written one (CodeRabbit). Any other message does nothing.
+  never reads a half-written one (CodeRabbit). The session's folders are reduced to their canonical
+  path (case-insensitive on Windows) before lookup, so one checkout named with different casing is
+  not mistaken for two and a valid reply is not refused as ambiguous (Codex P2). Any other message
+  does nothing.
   A peer session's message (envelope or preamble), a subagent report, a quote, inline code, or a
   sentence around the reply never matches. A code pending in two checkouts approves neither.
 - `owner-approval-lib.mjs`: the key, Windows Hello helper and signature checks are gone (purpose
@@ -49,7 +52,7 @@ with his permissions, and only Windows Hello could rule that out. The file sits 
 `.claude/session-state`, which the review-proof guard protects like every other proof.
 
 **Proof observed.**
-- `owner-approval-lib.test.mjs`: 145 assertions. They include every verifier refusal, 21 messages
+- `owner-approval-lib.test.mjs`: 147 assertions. They include every verifier refusal, 21 messages
   that must not count as a reply (peer, quoted, code, longer sentences, wrong length), replies
   from another session or folder, a retired code, and the atomic write (replace, failure, no
   temporary file left). The reply hook also runs as a real process, alone and through

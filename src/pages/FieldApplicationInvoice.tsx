@@ -19,6 +19,8 @@ import {
   createdInvoiceIdFromAddress,
   draftCreateIdempotencyKey,
   draftTokenFromAddress,
+  draftTokenStartedAt,
+  mintDraftToken,
   newInvoiceAddressSearch,
 } from '../lib/fieldAppNewInvoiceAddress';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
@@ -144,6 +146,20 @@ interface FieldLocation {
 }
 
 type TabKey = 'locations' | 'chemicals' | 'customers' | 'applied_info' | 'notifications';
+
+/** A field-application invoice this user created since the page's draft started. */
+interface LostCreateCandidate {
+  id: string;
+  invoice_number: string | null;
+  status: string;
+  created_at: string;
+}
+
+type LostCreateCheck =
+  | { state: 'none' }
+  | { state: 'checking' }
+  | { state: 'failed' }
+  | { state: 'found'; invoices: LostCreateCandidate[] };
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'locations', label: 'Locations', icon: <MapPin className="w-4 h-4" /> },
@@ -453,6 +469,16 @@ export default function FieldApplicationInvoice() {
   // The draft token this page's create uses (see fieldAppNewInvoiceAddress): the address's
   // token when the page opened (a refresh or Back of a draft), else minted by the first Save.
   const draftTokenRef = useRef<string | null>(draftTokenFromAddress(searchParams));
+  // Opened at a draft address with no created id: an earlier Save on this draft may have
+  // created the invoice and lost its reply. Saving again with the draft's key is not enough:
+  // the database keeps that create's answer only 24 hours, and it replays the FIRST
+  // submission, not what is typed now. So the page first looks for field-application
+  // invoices this user created since the draft started; while there are any, Save waits until
+  // the user opens one or chooses to start a new invoice (Codex review, PR #893).
+  const [lostCreateCheck, setLostCreateCheck] = useState<LostCreateCheck>(() => (
+    !id && draftTokenRef.current && !createdIdInAddress ? { state: 'checking' } : { state: 'none' }
+  ));
+  const lostCreateDraftRef = useRef(lostCreateCheck.state === 'checking' ? draftTokenRef.current : null);
 
   const isNew = !id;
   const transactionSeason = useMemo(() => {
@@ -572,6 +598,52 @@ export default function FieldApplicationInvoice() {
     })();
     return () => { cancelled = true; };
   }, [isNew, createdIdInAddress, profile?.id, toast, navigate]);
+
+  // The lost-create check above. A token minted before this change carries no time, so it
+  // looks back 30 days; an hour of slack covers a computer clock running ahead of the server.
+  useEffect(() => {
+    const draft = lostCreateDraftRef.current;
+    if (!draft || !profile?.id) return;
+    const userId = profile.id;
+    const startedAt = draftTokenStartedAt(draft) ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const since = new Date(startedAt - 60 * 60 * 1000).toISOString();
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('invoices')
+          .select('id, invoice_number, status, created_at')
+          .eq('invoice_type', 'field_application')
+          .eq('created_by', userId)
+          .is('deleted_at', null)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(20);
+        if (error) throw error;
+        if (cancelled) return;
+        const invoices = (data ?? []) as LostCreateCandidate[];
+        // None found: no earlier create committed, so this draft's key stays (a create still
+        // in flight when the page reloaded is then answered by its stored reply, not doubled).
+        setLostCreateCheck(invoices.length > 0 ? { state: 'found', invoices } : { state: 'none' });
+      } catch (err) {
+        if (cancelled) return;
+        Sentry.captureException(err, { tags: { context: 'field_app_lost_create_check' } });
+        setLostCreateCheck({ state: 'failed' });
+        toast('error', 'Could not check whether your last Save on this page created the invoice. Reload the page to try again; nothing will be saved until then.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.id, toast]);
+
+  // "None of these": drop the draft (the next Save mints a new one, so its create is not
+  // answered with the old draft's stored reply). Same page, typed values kept.
+  const startFreshDraft = () => {
+    lostCreateDraftRef.current = null;
+    draftTokenRef.current = null;
+    setLostCreateCheck({ state: 'none' });
+    skipUnsavedPromptRef.current = true;
+    navigate({ search: '' }, { replace: true });
+  };
 
   // False once this page has been left (unmounted). A Save still running then finishes its
   // writes but must not move the user, who is already on another page (e.g. pressed New).
@@ -1631,6 +1703,16 @@ export default function FieldApplicationInvoice() {
         : 'One moment — checking the invoice your last Save created.');
       return;
     }
+    // A reopened draft whose earlier Save may already have created the invoice (see the
+    // lost-create check): never create or replay blind.
+    if (isNew && lostCreateCheck.state !== 'none') {
+      toast('info', lostCreateCheck.state === 'checking'
+        ? 'One moment — checking whether your last Save on this page already created the invoice.'
+        : lostCreateCheck.state === 'failed'
+          ? 'Could not check whether your last Save on this page created the invoice, so nothing was saved. Reload the page to try again.'
+          : 'Your last Save on this page may already have created this invoice. Open it from the list at the top, or choose “Start a new invoice instead”.');
+      return;
+    }
     if (crossSeasonDateEdit) {
       toast('error', filedSeasonDateMessage);
       return;
@@ -1759,7 +1841,7 @@ export default function FieldApplicationInvoice() {
     let createKey: string | null = null;
     if (creating) {
       if (!draftTokenRef.current) {
-        draftTokenRef.current = crypto.randomUUID();
+        draftTokenRef.current = mintDraftToken();
         skipUnsavedPromptRef.current = true;
         navigate({ search: newInvoiceAddressSearch({ draft: draftTokenRef.current }) }, { replace: true });
       }
@@ -2698,6 +2780,31 @@ export default function FieldApplicationInvoice() {
           { label: isNew ? 'New Field Application' : `Invoice ${invoiceNumber || id?.slice(0, 8)}` },
         ]}
       />
+
+      {isNew && lostCreateCheck.state === 'found' && (
+        <div role="alert" className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-amber-800 space-y-2">
+            <p>
+              Your last Save on this page may already have created this invoice (the page was
+              reloaded before the answer came back). Field-application invoices you created since
+              this draft started:
+            </p>
+            <ul className="list-disc pl-5">
+              {lostCreateCheck.invoices.map((inv) => (
+                <li key={inv.id}>
+                  <Link className="font-medium underline" to={`/invoices/field-app/${inv.id}`}>
+                    {inv.invoice_number || inv.id.slice(0, 8)}
+                  </Link>
+                  {` (${inv.status}, created ${new Date(inv.created_at).toLocaleString()})`}
+                </li>
+              ))}
+            </ul>
+            <p>Open the one you saved to check it. If none of these is the invoice you were entering, start a new one.</p>
+            <Button size="sm" variant="secondary" onClick={startFreshDraft}>Start a new invoice instead</Button>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

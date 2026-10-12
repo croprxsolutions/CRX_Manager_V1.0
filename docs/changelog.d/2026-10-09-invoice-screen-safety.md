@@ -97,6 +97,15 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   address (`?draft=<tag>`); the create's repeat-protection key is built from that tag and the
   user, so a Save from the refreshed page sends the same key and the database answers with the
   invoice it already created. New starts a new draft with a new tag.
+- That stored answer only lasts 24 hours, and it repeats the FIRST submission, not what was
+  re-typed after the refresh (Codex review on PR #893: P1 and P2; the 24-hour expiry was
+  confirmed read-only on the live database, 2026-10-12). So a page reopened at a draft address
+  no longer saves blind. It first looks for field-application invoices this user created since
+  the draft started (the draft tag now carries its start time; the search allows an hour for a
+  computer clock running fast). If there are any, a box at the top lists them with links, and
+  Save waits until the user opens one or presses **Start a new invoice instead** (which starts a
+  new draft, keeping what was typed). If there are none, Save goes ahead with the same draft. If
+  the search cannot run, Save refuses until a reload.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -176,10 +185,22 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   left" flag is cleared in the same commit that removes the page (a layout effect). Not
   changed: the lost-reply test proves the page re-sends the same key; the database's replay of
   a stored answer for a repeated key is existing `save_field_app_invoice` behaviour.
+- Codex review of 585b34f74 (P1: the stored answer expires after 24 hours; P2: a replay keeps
+  the first submission): fixed with the reopened-draft check above. Three new page tests (an
+  invoice created two days earlier is listed and Save waits, then "Start a new invoice instead"
+  creates under a new draft; Save refuses when the check cannot run; a new draft tag carries
+  its start time) failed against 585b34f74; new unit tests cover the draft tag's time.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 
 ### Known gaps and deferred items (not fixed in this change)
+
+- **A reopened draft whose first create was still running.** If the page is refreshed while the
+  first create is still on its way, the reopened page's search can finish before that create
+  is saved and find nothing. A Save then sends the same draft key: inside 24 hours the
+  database answers with the first create (no duplicate, but the first submission's values, not
+  what was re-typed; the page then opens that invoice). The real fix is a database link from an
+  invoice to its draft, which needs a migration.
 
 In plain English, everything the review rounds found that this change deliberately does not fix:
 

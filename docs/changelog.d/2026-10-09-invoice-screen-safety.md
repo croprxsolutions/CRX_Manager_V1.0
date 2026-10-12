@@ -91,6 +91,12 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   stays where it is and Save refuses until a reload, so there is neither a duplicate nor an
   unchecked invoice; Save also waits while the check runs. A Save still running when the user
   presses New finishes its writes but no longer pulls them back to the old invoice.
+- If the database created the invoice but its reply was lost (a network blip) and the page is
+  then refreshed, saving again no longer creates a second invoice (CodeRabbit on PR #893, second
+  review). Just before the first Save sends its create, the page writes a draft tag into its
+  address (`?draft=<tag>`); the create's repeat-protection key is built from that tag and the
+  user, so a Save from the refreshed page sends the same key and the database answers with the
+  invoice it already created. New starts a new draft with a new tag.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -161,6 +167,11 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   same page; the route wrapper now gives a fresh page on every New (PUSH) or Back/Forward (POP)
   arrival and keeps it only for the page's own REPLACE address rewrites (new test failed with the
   previous wrapper). Two items are recorded below as known gaps, not fixed here.
+  CodeRabbit's second review (head eb1200120): a lost create reply followed by a refresh could
+  still duplicate. Fixed with the draft tag; three new tests (draft written before the create is
+  sent and used for its key; a refresh at the draft address reusing the key; New giving a new
+  key) failed against eb1200120. The invoice-list half of this PR moved to its own PR (#895) on
+  2026-10-12 so it is not held up by this page.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 

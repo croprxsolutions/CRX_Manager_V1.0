@@ -290,8 +290,10 @@ describe('FieldApplicationInvoice — new invoice (no id)', () => {
       p_invoice_id: null,
       p_performed_by: 'user-1',
       p_application_service_id: null,
-      p_idempotency_key: 'test-idem-key',
     });
+    // A create's key is built from the page's draft token (see fieldAppNewInvoiceAddress),
+    // so a repeat after a lost reply and a refresh replays the same create.
+    expect(args.p_idempotency_key).toMatch(/^save_field_app_invoice:user-1:[0-9a-f-]{36}$/);
     expect(args.p_invoice).toBeDefined();
     expect(Array.isArray(args.p_locations)).toBe(true);
     expect(Array.isArray(args.p_chemicals)).toBe(true);

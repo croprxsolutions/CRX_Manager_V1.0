@@ -15,7 +15,12 @@ import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/in
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey } from '../lib/idempotency';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
-import { CREATED_INVOICE_PARAM, createdInvoiceIdFromAddress } from '../lib/fieldAppNewInvoiceAddress';
+import {
+  createdInvoiceIdFromAddress,
+  draftCreateIdempotencyKey,
+  draftTokenFromAddress,
+  newInvoiceAddressSearch,
+} from '../lib/fieldAppNewInvoiceAddress';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
@@ -445,6 +450,9 @@ export default function FieldApplicationInvoice() {
   const createdInvoiceIdRef = useRef<string | null>(null);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
+  // The draft token this page's create uses (see fieldAppNewInvoiceAddress): the address's
+  // token when the page opened (a refresh or Back of a draft), else minted by the first Save.
+  const draftTokenRef = useRef<string | null>(draftTokenFromAddress(searchParams));
 
   const isNew = !id;
   const transactionSeason = useMemo(() => {
@@ -551,7 +559,7 @@ export default function FieldApplicationInvoice() {
       if (cancelled) return;
       if (!ownUnpostedInvoice) {
         rejectedCreatedIdRef.current = createdId;
-        navigate({ search: '' }, { replace: true });
+        navigate({ search: newInvoiceAddressSearch({ draft: draftTokenRef.current }) }, { replace: true });
         return;
       }
       createdInvoiceIdRef.current = createdId;
@@ -1738,9 +1746,22 @@ export default function FieldApplicationInvoice() {
     // still-/new page already created. Only when neither exists does the save CREATE.
     const targetInvoiceId = id || createdInvoiceIdRef.current;
     const creating = !targetInvoiceId;
+    // A create's key comes from the page's draft token, written into the address BEFORE the
+    // create is sent: if the database creates the invoice but the reply is lost and the page
+    // is refreshed, saving again sends the same key and gets that invoice back, not a second
+    // one. Every other save keeps the per-page key.
+    let createKey: string | null = null;
+    if (creating) {
+      if (!draftTokenRef.current) {
+        draftTokenRef.current = crypto.randomUUID();
+        skipUnsavedPromptRef.current = true;
+        navigate({ search: newInvoiceAddressSearch({ draft: draftTokenRef.current }) }, { replace: true });
+      }
+      createKey = draftCreateIdempotencyKey(profile.id, draftTokenRef.current);
+    }
     setSaving(true);
     try {
-      const key = saveIdem.getKey();
+      const key = createKey ?? saveIdem.getKey();
       const { data, error } = await supabase.rpc('save_field_app_invoice', {
         // save_field_app_invoice accepts NULL p_invoice_id to create a new
         // invoice (live signature is nullable; generated type narrows to string).
@@ -1806,7 +1827,7 @@ export default function FieldApplicationInvoice() {
         // this one move past the leave-page guard. Not once the page has been left.
         if (pageActiveRef.current) {
           skipUnsavedPromptRef.current = true;
-          navigate({ search: `?${CREATED_INVOICE_PARAM}=${ids[0]}` }, { replace: true });
+          navigate({ search: newInvoiceAddressSearch({ draft: draftTokenRef.current, created: ids[0] }) }, { replace: true });
         }
       }
 

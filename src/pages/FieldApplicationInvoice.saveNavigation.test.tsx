@@ -141,6 +141,15 @@ function mockSaveWithFirstBillingFailure(invoiceId: string) {
   });
 }
 
+/** One value from the router's current address (?draft=…&created=…). */
+function addressParam(router: { state: { location: { search: string } } }, name: string) {
+  return new URLSearchParams(router.state.location.search).get(name);
+}
+
+function saveKey(call: number) {
+  return (saveCalls()[call][1] as { p_idempotency_key: string }).p_idempotency_key;
+}
+
 function saveCalls() {
   return mockRpc.mock.calls.filter(([name]) => name === 'save_field_app_invoice');
 }
@@ -218,9 +227,74 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await createWithPartialFailureAndStay();
 
     expect(router.state.location.pathname).toBe(NEW_PATH);
-    expect(router.state.location.search).toBe(`?created=${CREATED_ID}`);
+    expect(addressParam(router, 'created')).toBe(CREATED_ID);
     // Same page: nothing typed was thrown away.
     expect(headerNotes().value).toBe('Spray north field');
+  });
+
+  it('the first Save writes a draft tag into the address before the create is sent, and keys the create on it', async () => {
+    let finishCreate: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') return new Promise((resolve) => { finishCreate = resolve; });
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+
+    // The reply has not come back yet, and the address already names the draft.
+    const draft = addressParam(router, 'draft');
+    expect(draft).toMatch(/^[0-9a-f-]{36}$/);
+    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${draft}`);
+    expect(headerNotes().value).toBe('Spray north field');
+
+    await act(async () => {
+      finishCreate({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+    });
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+  });
+
+  it('a refresh after a lost reply saves with the same key, so the database returns the invoice it already created', async () => {
+    const DRAFT = '5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f';
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    // The reply to the first create never arrived; the page was refreshed at the draft address.
+    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect(savedInvoiceId(0)).toBeNull();
+    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${DRAFT}`);
+    await waitFor(() => expect(addressParam(router, 'created')).toBe(CREATED_ID));
+    expect(addressParam(router, 'draft')).toBe(DRAFT);
+  });
+
+  it('New starts a new draft: its create uses a different key', async () => {
+    const created = [CREATED_ID, SECOND_ID];
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        return Promise.resolve({ data: { invoice_ids: [args.p_invoice_id ?? created.shift()], invoice_group_id: null }, error: null });
+      }
+      if (name === 'update_field_app_invoice_billing') return Promise.resolve({ data: null, error: { message: 'network blip' } });
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderAt();
+    await createWithPartialFailureAndStay();
+    const firstDraft = addressParam(router, 'draft');
+
+    await act(async () => {
+      await router.navigate(NEW_PATH);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    await waitFor(() => expect(headerNotes().value).toBe(''));
+    await createWithPartialFailureAndStay();
+
+    const secondDraft = addressParam(router, 'draft');
+    expect(secondDraft).toMatch(/^[0-9a-f-]{36}$/);
+    expect(secondDraft).not.toBe(firstDraft);
+    expect(saveKey(1)).toBe(`save_field_app_invoice:user-1:${secondDraft}`);
+    expect(saveKey(0)).not.toBe(saveKey(1));
   });
 
   it('a refresh of that address opens the created invoice instead of a blank new form', async () => {
@@ -308,7 +382,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
     expect(savedInvoiceId(0)).toBeNull();
     // The new invoice's own id replaces the rejected one, on the same page.
-    await waitFor(() => expect(router.state.location.search).toBe(`?created=${SECOND_ID}`));
+    await waitFor(() => expect(addressParam(router, 'created')).toBe(SECOND_ID));
     expect(headerNotes().value).toBe('My own new invoice');
   });
 
@@ -319,7 +393,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Could not check')));
     expect(router.state.location.pathname).toBe(NEW_PATH);
-    expect(router.state.location.search).toBe(`?created=${CREATED_ID}`);
+    expect(addressParam(router, 'created')).toBe(CREATED_ID);
     editHeaderNotes('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('nothing was saved'));
@@ -390,7 +464,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     const router = await renderAt();
     editHeaderNotes('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(router.state.location.search).toBe(`?created=${CREATED_ID}`));
+    await waitFor(() => expect(addressParam(router, 'created')).toBe(CREATED_ID));
     await waitFor(() => expect(mockRpc.mock.calls.some(([n]) => n === 'update_field_app_invoice_billing')).toBe(true));
 
     await act(async () => {
@@ -427,14 +501,14 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     const router = await renderAt();
 
     await createWithPartialFailureAndStay();
-    expect(router.state.location.search).toBe(`?created=${CREATED_ID}`);
+    expect(addressParam(router, 'created')).toBe(CREATED_ID);
     await act(async () => {
       await router.navigate(NEW_PATH);
     });
     fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
     await waitFor(() => expect(headerNotes().value).toBe(''));
     await createWithPartialFailureAndStay();
-    expect(router.state.location.search).toBe(`?created=${SECOND_ID}`);
+    expect(addressParam(router, 'created')).toBe(SECOND_ID);
     expect(savedInvoiceId(1)).toBeNull();
 
     await act(async () => {

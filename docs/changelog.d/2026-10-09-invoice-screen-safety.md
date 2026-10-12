@@ -171,7 +171,11 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   still duplicate. Fixed with the draft tag; three new tests (draft written before the create is
   sent and used for its key; a refresh at the draft address reusing the key; New giving a new
   key) failed against eb1200120. The invoice-list half of this PR moved to its own PR (#895) on
-  2026-10-12 so it is not held up by this page.
+  2026-10-12 so it is not held up by this page. Luna round 8 (no BLOCKER/HIGH): a rejected
+  address now also drops its draft tag (new test failed against fb788f29d), and the "page was
+  left" flag is cleared in the same commit that removes the page (a layout effect). Not
+  changed: the lost-reply test proves the page re-sends the same key; the database's replay of
+  a stored answer for a repeated key is existing `save_field_app_invoice` behaviour.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 

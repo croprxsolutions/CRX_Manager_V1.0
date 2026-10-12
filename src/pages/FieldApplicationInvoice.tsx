@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   Save, Send, Trash2, MapPin, FlaskConical, Users, ClipboardList, ArrowLeft, Eye, AlertTriangle,
@@ -558,8 +558,12 @@ export default function FieldApplicationInvoice() {
       }
       if (cancelled) return;
       if (!ownUnpostedInvoice) {
+        // The draft tag in this address belongs to the rejected invoice's create; reusing it
+        // would replay that create's stored answer instead of creating a new invoice. Drop
+        // both; the next Save mints a fresh tag.
         rejectedCreatedIdRef.current = createdId;
-        navigate({ search: newInvoiceAddressSearch({ draft: draftTokenRef.current }) }, { replace: true });
+        draftTokenRef.current = null;
+        navigate({ search: '' }, { replace: true });
         return;
       }
       createdInvoiceIdRef.current = createdId;
@@ -571,8 +575,10 @@ export default function FieldApplicationInvoice() {
 
   // False once this page has been left (unmounted). A Save still running then finishes its
   // writes but must not move the user, who is already on another page (e.g. pressed New).
+  // A layout effect: its cleanup runs in the same commit that removes the page, so there is
+  // no moment after the new page appears when the old Save still sees itself as active.
   const pageActiveRef = useRef(true);
-  useEffect(() => {
+  useLayoutEffect(() => {
     pageActiveRef.current = true;
     return () => { pageActiveRef.current = false; };
   }, []);

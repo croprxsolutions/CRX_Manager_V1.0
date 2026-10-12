@@ -270,6 +270,22 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(addressParam(router, 'draft')).toBe(DRAFT);
   });
 
+  it('a rejected address also drops its draft tag, so a new invoice is not answered with the old create', async () => {
+    const OLD_DRAFT = '5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f';
+    // The address's invoice has since been posted, so it is rejected.
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { status: 'posted' }));
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    const router = await renderAt(`${NEW_PATH}?draft=${OLD_DRAFT}&created=${CREATED_ID}`);
+
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    editHeaderNotes('A different application');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect(savedInvoiceId(0)).toBeNull();
+    expect(saveKey(0)).not.toContain(OLD_DRAFT);
+    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${addressParam(router, 'draft')}`);
+  });
+
   it('New starts a new draft: its create uses a different key', async () => {
     const created = [CREATED_ID, SECOND_ID];
     mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {

@@ -398,18 +398,17 @@ export default function FieldInvoicesPostedPanel() {
     [visible],
   );
   // A row with no season counts as not this season (unknown), so it is left out too.
-  // Split-group members are left out too: unpost_invoice unposts one member on its own, so
-  // Unpost All could unpost a group's this-season member and leave an older one posted, and a
-  // season check in the browser cannot bind what the database then does (Codex review and
+  // Split-group members are left out in EVERY scope: unpost_invoice unposts one member on its
+  // own, so Unpost All could leave a group partly unposted (for example beside a paid member),
+  // and a check in the browser cannot bind what the database then does (Codex review and
   // Codex Sol, PR #895). A split group is unposted from its invoice page.
   const candidatePlan = useMemo(() => {
-    if (scope.kind !== 'season') return { candidates: unpostable, skippedOlderSeasonCount: 0, skippedGroupMemberCount: 0 };
-    const thisSeason = unpostable.filter((r) => isCurrentSeason(r.season));
-    const candidates = thisSeason.filter((r) => !r.invoice_group_id);
+    const inScope = scope.kind === 'season' ? unpostable.filter((r) => isCurrentSeason(r.season)) : unpostable;
+    const candidates = inScope.filter((r) => !r.invoice_group_id);
     return {
       candidates,
-      skippedOlderSeasonCount: unpostable.length - thisSeason.length,
-      skippedGroupMemberCount: thisSeason.length - candidates.length,
+      skippedOlderSeasonCount: unpostable.length - inScope.length,
+      skippedGroupMemberCount: inScope.length - candidates.length,
     };
   }, [unpostable, scope.kind]);
   const { candidates, skippedOlderSeasonCount, skippedGroupMemberCount } = candidatePlan;
@@ -786,9 +785,10 @@ export default function FieldInvoicesPostedPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-secondary">
             Print actions apply to all {totals.count} invoice(s) currently shown.
-            {skippedOlderSeasonCount > 0 || skippedGroupMemberCount > 0
-              ? ` Unpost All applies to this season's ${candidates.length} only; ${skippedOlderSeasonCount} from another season are left out.${skippedGroupNote}`
+            {skippedOlderSeasonCount > 0
+              ? ` Unpost All applies to this season's ${candidates.length} only; ${skippedOlderSeasonCount} from another season are left out.`
               : ' Unpost All applies to the unpaid ones.'}
+            {skippedGroupNote}
           </p>
           <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
             <Button variant="secondary" size="sm" icon={<Printer className="w-4 h-4" />} onClick={() => printAll('current')} loading={busy} disabled={visible.length === 0}>

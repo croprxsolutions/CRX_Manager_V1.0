@@ -42,10 +42,12 @@ below).
     month batch in Scope. Month batches from an earlier season are marked "unpaid only", because
     paid invoices from that season are not on this list. The "spans more than one month-end
     batch" warning now looks at what Unpost All would change, not at every row shown.
-    Split-group members are left out of Unpost All in this scope as well: unposting reverses
-    one member at a time, so it could leave a group half-unposted (for example beside an older
-    paid member this list does not load), and a browser check cannot bind the database (Codex
-    review and Codex Sol, PR #895). A split group is unposted from its invoice page.
+    Split-group members are left out of Unpost All in **every** scope (the default and each
+    month batch, which now includes last season's months): unposting reverses one member at a
+    time, so it could leave a group half-unposted (for example beside a paid member), and a
+    browser check cannot bind the database (Codex review and Codex Sol, PR #895). A split group
+    is unposted from its invoice page. The footer names the split-group members left out and no
+    longer says "0 from another season" when only those are skipped (CodeRabbit, PR #895).
   - On the Chemical Sales list, **Select All** picks only this season's invoices, so one Select
     All + Post / Void / Delete cannot reach last season's work. An older invoice can still be
     ticked by hand (it shows a "Season N" tag); if one is selected, the Post confirm says how

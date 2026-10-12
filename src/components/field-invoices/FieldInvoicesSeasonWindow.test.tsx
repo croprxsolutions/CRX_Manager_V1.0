@@ -194,6 +194,26 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
       .toEqual(['FA-NEW-POSTED']);
   });
 
+  it('Unpost All in a month batch scope also leaves split-group members out, and says so without a "0 from another season"', async () => {
+    // Month batches (now including last season's) are unposted one invoice at a time too, so a
+    // split group there could be left partly unposted (Codex Sol, PR #895, head 2728c8072).
+    const thisSeasonPosted = fieldInvoice({ invoice_number: 'FA-NEW-POSTED', status: 'posted', season: 2027, invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
+    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'posted', season: 2027, invoice_group_id: 'grp-u', invoice_date: '2026-10-05', created_at: '2026-10-05T15:00:00+00:00' });
+    mockFrom.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? [...ROWS, thisSeasonPosted, groupNew] : []));
+    mockRpc.mockImplementation(() => Promise.resolve({ data: true, error: null }));
+    renderInRouter(<FieldInvoicesPostedPanel />);
+    await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByLabelText('Posting scope'), { target: { value: '2026-10' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Unpost All (1)' }));
+    expect(screen.queryByText(/0 from another season/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/1 in a split group are left out too/)).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Unpost 1' }));
+    await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'unpost_invoice')).toHaveLength(1));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'unpost_invoice').map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id))
+      .toEqual(['FA-NEW-POSTED']);
+  });
+
   it('All Invoices tab keeps prior-season open invoices but season-windows closed ones', async () => {
     renderInRouter(<FieldInvoicesListPanel />);
 

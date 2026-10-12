@@ -18,14 +18,28 @@ const OLDER_PAGE = [{
   customer: { farm_name: 'Needs Invoice Farm' },
 }];
 const deliveryRanges: Array<[number, number]> = [];
+// When set, every page of the scan is a full page billed outside CRX, so the scan stops at its cap.
+let cappedEmptyScan = false;
+const makeBilledPage = (from: number) => Array.from({ length: 50 }, (_, i) => ({
+  id: `billed-${from + i}`,
+  delivery_number: `DEL-B${from + i}`,
+  order_id: `order-b${from + i}`,
+  completed_at: '2026-04-30T15:00:00Z',
+  customer: { farm_name: 'Chem Man Farm' },
+}));
 
 function query(table: string) {
   const builder: Record<string, unknown> = {};
   let range: [number, number] | null = null;
+  let requestedDeliveryIds: string[] = [];
   const self = () => builder;
-  for (const method of ['select', 'eq', 'is', 'order', 'limit', 'in', 'gte', 'lte', 'lt', 'gt', 'not']) {
+  for (const method of ['select', 'eq', 'is', 'order', 'limit', 'gte', 'lte', 'lt', 'gt', 'not']) {
     builder[method] = vi.fn(self);
   }
+  builder.in = vi.fn((column: string, values: string[]) => {
+    if (table === 'delivery_external_billings' && column === 'delivery_id') requestedDeliveryIds = values;
+    return builder;
+  });
   builder.range = vi.fn((from: number, to: number) => {
     range = [from, to];
     if (table === 'deliveries') deliveryRanges.push(range);
@@ -33,8 +47,13 @@ function query(table: string) {
   });
   builder.then = vi.fn((resolve: (value: unknown) => unknown) => {
     let data: unknown[] = [];
-    if (table === 'deliveries' && range) data = range[0] === 0 ? BILLED_PAGE : range[0] === 50 ? OLDER_PAGE : [];
-    if (table === 'delivery_external_billings') data = BILLED_PAGE.map((d) => ({ delivery_id: d.id }));
+    if (table === 'deliveries' && range) {
+      if (cappedEmptyScan) data = makeBilledPage(range[0]);
+      else data = range[0] === 0 ? BILLED_PAGE : range[0] === 50 ? OLDER_PAGE : [];
+    }
+    if (table === 'delivery_external_billings') {
+      data = requestedDeliveryIds.filter((id) => id.startsWith('billed-')).map((delivery_id) => ({ delivery_id }));
+    }
     return Promise.resolve({ data, error: null }).then(resolve);
   });
   return builder;
@@ -55,7 +74,7 @@ vi.mock('../lib/deliveryInvoiceCoverage', async () => ({
 vi.mock('../lib/db', async () => ({
   supabase: {
     from: vi.fn((table: string) => query(table)),
-    rpc: vi.fn(() => Promise.resolve({ data: null, error: null })),
+    rpc: vi.fn((name: string) => Promise.resolve({ data: name === 'operational_dashboard_summary' ? {} : [], error: null })),
   },
   supabaseUntyped: {
     from: vi.fn((table: string) => query(table)),
@@ -71,11 +90,28 @@ import OfficeCockpit from './OfficeCockpit';
 
 describe('OfficeCockpit "Delivered, not invoiced"', () => {
   it('pages past a full page of deliveries billed outside CRX to find an older unbilled one', async () => {
+    cappedEmptyScan = false;
+    deliveryRanges.length = 0;
     render(<OfficeCockpit />);
 
     expect(await screen.findByText('#DEL-UNBILLED', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByText('#DEL-B0')).toBeNull();
     expect(screen.queryByText('No completed deliveries need invoicing.')).toBeNull();
     expect(deliveryRanges).toEqual([[0, 49], [50, 99]]);
+  });
+
+  it('keeps the page-wide all-clear hidden when the scan reaches its cap without an actionable delivery', async () => {
+    cappedEmptyScan = true;
+    deliveryRanges.length = 0;
+    render(<OfficeCockpit />);
+
+    expect(await screen.findByText(
+      'None of the newest 1,000 completed deliveries need invoicing; older ones were not checked.',
+      {},
+      { timeout: 5000 },
+    )).toBeTruthy();
+    expect(screen.queryByText('All clear!')).toBeNull();
+    expect(deliveryRanges).toHaveLength(20);
+    expect(deliveryRanges[deliveryRanges.length - 1]).toEqual([950, 999]);
   });
 });

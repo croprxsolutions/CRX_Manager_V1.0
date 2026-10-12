@@ -1,9 +1,9 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-10 (America/Chicago) against the live migration ledger** (read-only, after
-PR #889's three applies; the counts and high-water live only in `docs/reference/migration-history.md`).
+**Last verified: 2026-10-12 (America/Chicago) against the live migration ledger** (read-only, after
+PR #889's last two applies; the counts and high-water live only in `docs/reference/migration-history.md`).
 That read re-certified only the applied-migration list in this header and the 2026-10-07 integrity-fix
-entry (`150000`, `150050` and `150100` live; `150200` and `20261010120000` not applied). The
+entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150200` and `20261010120000`). The
 2026-10-07 read re-certified the CRX-LIFE-001 entry (fix live; two post-apply gates still open). Every other entry's status (open, or
 fixed/applied/closed) was last re-checked on 2026-09-26 against that day's ledger snapshot and
 `main`, except where an entry says otherwise; the detailed evidence inside an entry keeps its own
@@ -44,7 +44,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 The fixes for PR #861's failing checks (`20261007150000`, `20261007150050`, `20261007150100`,
 `20261007150200`, NOT APPLIED when written; the first three applied live 2026-10-10 UTC and `150200`
-is not yet — re-checked 2026-10-10; see `docs/reference/migration-history.md`) deliberately
+on 2026-10-12 UTC; see `docs/reference/migration-history.md`) deliberately
 leave these open:
 
 - **Check 2 still flags five products until counted** (Mason chose no physical count on 2026-10-07):
@@ -60,7 +60,7 @@ leave these open:
 - **The Order page and Orders list still offer whole-order invoicing on those 33 orders.** The server
   refuses with `DELIVERY_BILLED_OUTSIDE_CRX`, now shown in plain English, so no double bill.
 - **A delivery invoice is capped at what its delivery delivered** (`20261010120000`, Sol HIGH on
-  PR #889, NOT APPLIED when written); an order is billed either per delivery or whole-order, never
+  PR #889, applied live 2026-10-12 UTC); an order is billed either per delivery or whole-order, never
   both. Still open by design: the quantities on a whole-order invoice are not capped, and unit prices
   are not capped. A posted delivery invoice now needs a completed delivery, whose items are frozen, so
   a delivery cannot shrink under a newly posted invoice; the integrity report's delivery-invoice

@@ -5,7 +5,7 @@
 **What changed (Mason approved "change the script", 2026-10-08).**
 - The wrapper still runs the newest app build first, with no other change.
 - It retries only when that run is a sandbox **startup** failure: a non-zero exit, nothing on stdout, and stderr containing both `Failed to create session` and a sandbox-setup error. The retry happens once, on the npm-installed Codex at its fixed path `<home>\AppData\Roaming\npm\…\codex.exe`, with the same arguments, model (Sol), effort (high), permission profile, and prompt. The path is derived from the home directory, so no PATH lookup or environment variable can choose the reviewer.
-- Every other outcome is final and is never retried: a verdict of any kind, findings, any model output, a timeout, an auth or credit error. A missing fallback, or a fallback that also fails, mints no proof, exactly as before. This keeps verdict-shopping impossible.
+- Every other outcome is final and is never retried: a zero exit, anything on stdout (even whitespace, so any verdict, finding or model output), a launch error, a timeout or signal kill, or a stderr without both markers (such as an auth or credit error). A missing fallback, or a fallback that also fails, mints no proof, exactly as before. This keeps verdict-shopping impossible.
 - A one-line `NOTICE` is printed when the fallback runs. The review capture records which binary ran, and the "proof written" line names it.
 - `scripts/write-apply-proofs.mjs` (migration-apply proofs) shared the binary resolver, so it now uses the same shared runner (`runCodexWithSandboxFallback`) instead of its own copy of the spawn call. Its capture records the binary as well.
 - `scripts/overnight-codex-gate.mjs` has its own resolver and mints no merge proof, so it is unchanged.

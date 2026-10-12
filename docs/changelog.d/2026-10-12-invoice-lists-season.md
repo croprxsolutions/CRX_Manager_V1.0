@@ -29,28 +29,23 @@ below).
   actions leave other-season invoices out by default:
   - **Post All** on the Drafts tab posts only **this season's** invoices. Last season's
     unposted invoices are listed (with their season tag) and counted in the totals, but Post All
-    leaves them out and its confirm says how many; post each one from its own invoice page. A
-    split group is left out if **any** of its members is from another season, including a member
-    hidden by the current filters (the group post would post it too). Just before posting,
-    Post All also reads every draft or unposted member of each group from the database, so a
-    member the tray never loaded (for example past its row limit) is checked too; such a group
-    is left out and named in the result (CodeRabbit, PR #895; the new tray test failed
-    without this check). The check reads every page of members, since one database response
-    is capped at 1,000 rows (a test models the cap and failed without paging). A member saved
-    into the group after this check but before the database posts the group is not caught: only
-    a season check inside the database's posting step could close that (see "Known gaps").
+    leaves them out and its confirm says how many; post each one from its own invoice page.
+    **Split groups** are left out of Post All too (the footer and the confirm say how many) and
+    are posted from their own invoice page. Posting a group posts every member, including ones
+    the tray cannot see, and a season check in the browser cannot bind what the database then
+    posts (Codex Sol HIGH on PR #895, head bf88110d8; an earlier version checked every member
+    from the browser first, which still left a gap between the check and the post). No split
+    groups exist live today (read-only check, 2026-10-12), so nobody loses a working button.
   - **Unpost All** on the Posted tab, in the default "This Season + older unpaid" scope, still
     reverses only **this season's** posted invoices, as it did before. Older unpaid invoices are
     listed but left out (the confirm and the footer say how many); to unpost one, choose its
     month batch in Scope. Month batches from an earlier season are marked "unpaid only", because
     paid invoices from that season are not on this list. The "spans more than one month-end
     batch" warning now looks at what Unpost All would change, not at every row shown.
-    A split group is left out **whole** when any member is from another season, because
-    unposting reverses one member at a time and would otherwise leave the group half-unposted.
-    Before unposting, Unpost All reads every posted, overdue or paid member of each group from
-    the database (page by page), so a member the list did not load (an older paid one) is still
-    checked (Codex review, PR #895; both new tests failed against 49fe477f5). No split groups
-    exist live today (read-only check, 2026-10-12), so nothing could have hit this yet.
+    Split-group members are left out of Unpost All in this scope as well: unposting reverses
+    one member at a time, so it could leave a group half-unposted (for example beside an older
+    paid member this list does not load), and a browser check cannot bind the database (Codex
+    review and Codex Sol, PR #895). A split group is unposted from its invoice page.
   - On the Chemical Sales list, **Select All** picks only this season's invoices, so one Select
     All + Post / Void / Delete cannot reach last season's work. An older invoice can still be
     ticked by hand (it shows a "Season N" tag); if one is selected, the Post confirm says how
@@ -144,14 +139,13 @@ In plain English, everything the review rounds found that this change deliberate
   or unposted member (read-only check, 2026-10-12). Correction: no database rule keeps a group's
   members in one season (a live check found only a rule that a split invoice's season cannot be
   changed later); members are created together, so they normally share one. The Field Invoices
-  tray's Post All now checks every member of a group before posting (below).
+  tabs' Post All and Unpost All leave split groups out entirely.
 - **The season rule for bulk posting lives in the screens, not the database.** Post All /
-  Select All leave other-season invoices out, but `post_invoice` and `post_invoice_group` do not
-  check the season. So an invoice or split-group member that changes (or is added) between the
-  screen's check and the database's posting step can still post into its own season. Closing
-  that needs a season check inside the posting step, which is the open owner decision below; it
-  would ship with the admin-only invoicing database change, not in this screen fix (CodeRabbit,
-  PR #895, accepted here).
+  Select All leave other-season invoices out, but `post_invoice` does not check the season. So
+  an invoice whose season changes between the screen's check and the database's posting step
+  can still post into its own season. Closing that needs a season check inside the posting step,
+  which is the open owner decision below; it would ship with the admin-only invoicing database
+  change, not in this screen fix (CodeRabbit, PR #895, accepted here).
 - **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
   field invoice has to be posted from its own page. Whether Post All should get an "include
   older seasons" option is an owner decision.

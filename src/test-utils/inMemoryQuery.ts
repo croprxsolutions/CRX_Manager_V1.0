@@ -82,11 +82,7 @@ export interface InMemoryQueryLog {
   orExpressions: string[];
 }
 
-/**
- * `maxRows` models the server's response cap (PostgREST max-rows, 1,000 by default on
- * Supabase): no single response returns more rows than that, whatever the query asks for.
- */
-export function buildInMemoryQuery(rows: Row[], log?: InMemoryQueryLog, options?: { maxRows?: number }) {
+export function buildInMemoryQuery(rows: Row[], log?: InMemoryQueryLog) {
   const predicates: Predicate[] = [];
   let headCount = false;
   let limit: number | null = null;
@@ -130,7 +126,6 @@ export function buildInMemoryQuery(rows: Row[], log?: InMemoryQueryLog, options?
     let matched = rows.filter((r) => predicates.every((p) => p(r)));
     if (rangeEnd !== null) matched = matched.slice(offset, rangeEnd + 1);
     if (limit !== null) matched = matched.slice(0, limit);
-    if (options?.maxRows !== undefined) matched = matched.slice(0, options.maxRows);
     return headCount
       ? { data: null, error: null, count: matched.length }
       : { data: matched, error: null, count: matched.length };

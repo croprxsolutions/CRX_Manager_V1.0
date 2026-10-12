@@ -108,7 +108,7 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     // post_invoice does not check the season (it does refuse a closed accounting period),
     // so Post All leaves the two Season 2026 invoices out and names them.
     expect(await screen.findByText(/2 invoice\(s\) not from this season \(Season 2026\) are NOT included/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 target(s)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 invoice(s)' }));
 
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
     const posted = mockRpc.mock.calls
@@ -117,97 +117,27 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     expect(posted).toEqual(['FA-NEW-DRAFT']);
   });
 
-  it('Post All skips a split group with a prior-season member hidden by a filter, and counts that hidden member', async () => {
-    // A this-season member and a Season 2026 member of the same split group. Filtering the
-    // view to the this-season member still must not post the group: post_invoice_group
-    // posts every member, including the hidden Season 2026 one.
-    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
-    const groupOld = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'unposted', season: 2026, invoice_group_id: 'grp-1', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
-    mockFrom.mockImplementation((table: string) =>
-      buildInMemoryQuery(table === 'invoices' ? [groupNew, groupOld, ROWS[6]] : []));
-    mockRpc.mockImplementation((name: string) => {
-      const result = Promise.resolve({ data: name === 'post_invoice_group' ? { posted: 2 } : null, error: null });
+  it('Post All leaves every split group out, even one whose loaded members are all this season', async () => {
+    // post_invoice_group posts every member, including ones this page cannot see, and a
+    // season check in the browser cannot bind what the database then posts (Codex Sol HIGH,
+    // PR #895). So Post All posts only stand-alone invoices; a group posts from its page.
+    const groupA = fieldInvoice({ invoice_number: 'FA-GRP-A', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
+    const groupB = fieldInvoice({ invoice_number: 'FA-GRP-B', status: 'draft', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T16:00:00+00:00' });
+    mockFrom.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? [groupA, groupB, ROWS[6]] : []));
+    mockRpc.mockImplementation(() => {
+      const result = Promise.resolve({ data: null, error: null });
       return Object.assign(result, { throwOnError: () => result });
     });
     renderInRouter(<FieldInvoicesUnpostedPanel />);
-    await waitFor(() => expect(screen.getAllByText('FA-GRP-OLD').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('FA-GRP-A').length).toBeGreaterThan(0));
 
-    // Narrow the view to this season's dates only: FA-GRP-OLD (Sep 20) is hidden.
-    fireEvent.change(screen.getByLabelText('Trans. Date From'), { target: { value: '2026-10-01' } });
-    await waitFor(() => expect(screen.queryByText('FA-GRP-OLD')).not.toBeInTheDocument());
-    expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0);
-
+    expect(screen.getByText(/Post All leaves out 1 split group\(s\); post each from its invoice page/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
-    expect(await screen.findByText(/1 invoice\(s\) not from this season \(Season 2026\) are NOT included, nor is any split group that has one of them as a member \(1 group\(s\)\)/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 target(s)' }));
+    expect(await screen.findByText(/1 split group\(s\) are NOT included: a split group posts all of its members together/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 1 invoice(s)' }));
 
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'FA-NEW-DRAFT' });
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice_group')).toHaveLength(0);
-  });
-
-  it('Post All checks every member of a split group, including one the tray did not load', async () => {
-    // The tray's list holds only the this-season member (for example the other one is past
-    // the row limit), but the group's Season 2026 member is still waiting to post, and
-    // post_invoice_group would post it too (CodeRabbit, PR #895).
-    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
-    const groupOldNotLoaded = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'draft', season: 2026, invoice_group_id: 'grp-1', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
-    let invoiceQueries = 0;
-    mockFrom.mockImplementation((table: string) => {
-      if (table !== 'invoices') return buildInMemoryQuery([]);
-      invoiceQueries += 1;
-      // Query 1 is the tray's own list; later ones (the member check, the reload) see everything.
-      return buildInMemoryQuery(invoiceQueries === 1 ? [groupNew, ROWS[6]] : [groupNew, groupOldNotLoaded, ROWS[6]]);
-    });
-    mockRpc.mockImplementation((name: string) => {
-      const result = Promise.resolve({ data: name === 'post_invoice_group' ? { posted: 2 } : null, error: null });
-      return Object.assign(result, { throwOnError: () => result });
-    });
-    renderInRouter(<FieldInvoicesUnpostedPanel />);
-    await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
-    expect(screen.queryByText('FA-GRP-OLD')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 target(s)' }));
-
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('a member not shown here is from another season')));
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice_group')).toHaveLength(0);
-    // The stand-alone this-season draft still posts.
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'FA-NEW-DRAFT' });
-  });
-
-  it('the member check reads every page, so a member past the server response cap is still checked', async () => {
-    // 1,000 this-season members fill the first capped response; the Season 2026 member is
-    // only on the second page (CodeRabbit, PR #895: one response is capped at 1,000 rows).
-    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
-    const manyMembers = Array.from({ length: 1000 }, (_, i) => fieldInvoice({
-      invoice_number: `FA-GRP-M${String(i).padStart(4, '0')}`, status: 'draft', season: 2027,
-      invoice_group_id: 'grp-1', invoice_date: '2026-10-05', created_at: '2026-10-05T15:00:00+00:00',
-    }));
-    const oldOnPageTwo = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'draft', season: 2026, invoice_group_id: 'grp-1', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
-    // Only the member check (it selects exactly these columns) sees the 1,002 members; the
-    // tray's list and its reload after posting stay small, so the test does not render
-    // 1,000 rows and stays inside Vitest's timeout (Codex review, PR #895).
-    mockFrom.mockImplementation((table: string) => {
-      if (table !== 'invoices') return buildInMemoryQuery([]);
-      const tray = buildInMemoryQuery([groupNew, ROWS[6]]);
-      const members = buildInMemoryQuery([...manyMembers, oldOnPageTwo, groupNew, ROWS[6]], undefined, { maxRows: 1000 });
-      return {
-        select: (columns?: string, options?: { count?: string; head?: boolean }) =>
-          ((columns === 'id, invoice_group_id, season' ? members : tray).select as (c?: string, o?: unknown) => unknown)(columns, options),
-      };
-    });
-    mockRpc.mockImplementation((name: string) => {
-      const result = Promise.resolve({ data: name === 'post_invoice_group' ? { posted: 2 } : null, error: null });
-      return Object.assign(result, { throwOnError: () => result });
-    });
-    renderInRouter(<FieldInvoicesUnpostedPanel />);
-    await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
-
-    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 target(s)' }));
-
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('a member not shown here is from another season')));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice_group')).toHaveLength(0);
   });
 
@@ -243,51 +173,23 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     expect(await screen.findByRole('button', { name: 'Unpost All (1)' })).toBeEnabled();
   });
 
-  it('Unpost All leaves out a whole split group when a loaded member is from another season', async () => {
-    // unpost_invoice unposts one group member on its own, so unposting only the this-season
-    // member would leave the group half-unposted (Codex review, PR #895).
+  it('Unpost All in the default scope leaves split-group members out, even when every loaded member is this season', async () => {
+    // unpost_invoice unposts one group member on its own, so Unpost All could leave a group
+    // half-unposted (for example an older paid member this list does not load), and a season
+    // check in the browser cannot bind what the database then does (Codex review and Codex
+    // Sol, PR #895). A split group is unposted from its invoice page.
     const thisSeasonPosted = fieldInvoice({ invoice_number: 'FA-NEW-POSTED', status: 'posted', season: 2027, invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
     const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'posted', season: 2027, invoice_group_id: 'grp-u', invoice_date: '2026-10-05', created_at: '2026-10-05T15:00:00+00:00' });
-    const groupOld = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'overdue', season: 2026, invoice_group_id: 'grp-u', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
-    mockFrom.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? [...ROWS, thisSeasonPosted, groupNew, groupOld] : []));
+    mockFrom.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? [...ROWS, thisSeasonPosted, groupNew] : []));
     mockRpc.mockImplementation(() => Promise.resolve({ data: true, error: null }));
     renderInRouter(<FieldInvoicesPostedPanel />);
     await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole('button', { name: 'Unpost All (1)' }));
     // Said in the bottom bar and in the confirm box.
-    expect(await screen.findAllByText(/1 in a split group with a member from another season are left out too/)).toHaveLength(2);
+    expect(await screen.findAllByText(/1 in a split group are left out too/)).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Unpost 1' }));
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'unpost_invoice')).toHaveLength(1));
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'unpost_invoice').map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id))
-      .toEqual(['FA-NEW-POSTED']);
-  });
-
-  it('Unpost All checks every member of a split group on the server, including one the list did not load', async () => {
-    // The group's older member is paid, so the Posted list (paid rows season-windowed) does
-    // not load it, but unposting the this-season member alone would still split the group.
-    const thisSeasonPosted = fieldInvoice({ invoice_number: 'FA-NEW-POSTED', status: 'posted', season: 2027, invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
-    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'posted', season: 2027, invoice_group_id: 'grp-u', invoice_date: '2026-10-05', created_at: '2026-10-05T15:00:00+00:00' });
-    const groupOldPaid = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'paid', season: 2026, balance_cents: 0, invoice_group_id: 'grp-u', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
-    // Only the member check (it selects exactly these columns) sees the paid older member.
-    mockFrom.mockImplementation((table: string) => {
-      if (table !== 'invoices') return buildInMemoryQuery([]);
-      const list = buildInMemoryQuery([...ROWS, thisSeasonPosted, groupNew]);
-      const members = buildInMemoryQuery([...ROWS, thisSeasonPosted, groupNew, groupOldPaid]);
-      return {
-        select: (columns?: string, options?: { count?: string; head?: boolean }) =>
-          ((columns === 'id, invoice_group_id, season' ? members : list).select as (c?: string, o?: unknown) => unknown)(columns, options),
-      };
-    });
-    mockRpc.mockImplementation(() => Promise.resolve({ data: true, error: null }));
-    renderInRouter(<FieldInvoicesPostedPanel />);
-    await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
-    expect(screen.queryByText('FA-GRP-OLD')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Unpost All (2)' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Unpost 2' }));
-
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('its split group has a member from another season')));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'unpost_invoice').map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id))
       .toEqual(['FA-NEW-POSTED']);
   });

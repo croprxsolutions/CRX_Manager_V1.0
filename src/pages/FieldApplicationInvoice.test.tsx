@@ -90,6 +90,7 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
   useParams: () => mockUseParams(),
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  useNavigationType: () => 'POP',
   Link: ({ children, to, ...rest }: { children: React.ReactNode; to: string } & Record<string, unknown>) => (
     <a href={to} {...rest}>{children}</a>
   ),

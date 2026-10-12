@@ -82,12 +82,15 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   (`/invoices/field-app/new?created=<id>`, same page, typed values kept), so nothing is stored in
   the browser. Pressing **New** there starts a genuinely new, blank invoice, and Back/Forward
   between two such drafts opens the right one. Before opening an invoice named in the address,
-  the page checks it is a new field-application draft (draft or unposted) that the same user
-  created in the last day; anything else (a stale or hand-edited link) is ignored and the page
-  stays a new invoice. If that check cannot run, the page stays where it is and Save refuses
-  until a reload, so there is neither a duplicate nor an unchecked invoice; Save also waits
-  while the check runs. A Save still running when the user presses New finishes its writes but
-  no longer pulls them back to the old invoice.
+  the page checks it is still a field-application invoice (draft or unposted) that the same
+  user created, with no time limit, so a late refresh can never lead to a duplicate. A link
+  naming anything else (no such invoice, someone else's, a posted one, another kind) is
+  ignored and the page stays a new invoice; a link to the user's own unposted field invoice
+  simply opens it, like opening it from the list. If something was typed while the check ran,
+  the usual "Unsaved Changes" box asks before the page moves. If the check cannot run, the page
+  stays where it is and Save refuses until a reload, so there is neither a duplicate nor an
+  unchecked invoice; Save also waits while the check runs. A Save still running when the user
+  presses New finishes its writes but no longer pulls them back to the old invoice.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -148,7 +151,12 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   behind by New not moving the user, any UUID version accepted, and future-dated drafts
   rejected; four new tests failed against 608f5dd5d. Not changed: the redirect tests land on a
   stand-in for the invoice page; loading an existing invoice is covered by
-  `FieldApplicationInvoice.test.tsx`.
+  `FieldApplicationInvoice.test.tsx`. A fifth Luna round found the one-day limit could itself
+  cause a duplicate after a late refresh, and that the check's move skipped the leave-page
+  prompt: the time limit is gone (the check is owner, kind and unposted status), the move asks
+  as usual, and the route wrapper keeps the page for the page's own address rewrites (REPLACE)
+  while New (PUSH) and Back/Forward (POP) get a fresh page. Three new tests failed against
+  eb84edea4. Accepted: a hand-made link to the user's own unposted field invoice opens it.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 

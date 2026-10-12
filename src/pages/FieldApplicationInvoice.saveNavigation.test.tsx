@@ -62,6 +62,9 @@ const invoiceRows = new Map<string, Record<string, unknown>>();
 let invoiceCheckError: { message: string } | null = null;
 /** When true, the check never answers (a slow network), so the page is still checking. */
 let invoiceCheckHangs = false;
+/** When true, the check waits until the test calls releaseInvoiceCheck(). */
+let invoiceCheckHeld = false;
+let releaseInvoiceCheck: () => void = () => {};
 
 function ownNewDraft(id: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -90,11 +93,14 @@ function invoicesChain() {
     if (column === 'id') idFilter = value;
     return chain;
   });
-  chain.maybeSingle = vi.fn(() => (invoiceCheckHangs
-    ? new Promise(() => {})
-    : Promise.resolve(invoiceCheckError
-      ? { data: null, error: invoiceCheckError }
-      : { data: (idFilter && invoiceRows.get(idFilter)) || null, error: null })));
+  const answer = () => (invoiceCheckError
+    ? { data: null, error: invoiceCheckError }
+    : { data: (idFilter && invoiceRows.get(idFilter)) || null, error: null });
+  chain.maybeSingle = vi.fn(() => {
+    if (invoiceCheckHangs) return new Promise(() => {});
+    if (invoiceCheckHeld) return new Promise((resolve) => { releaseInvoiceCheck = () => resolve(answer()); });
+    return Promise.resolve(answer());
+  });
   return chain;
 }
 
@@ -164,6 +170,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     invoiceRows.clear();
     invoiceCheckError = null;
     invoiceCheckHangs = false;
+    invoiceCheckHeld = false;
     mockFrom.mockImplementation((table: string) => (table === 'invoices' ? invoicesChain() : emptyChain()));
   });
 
@@ -244,8 +251,6 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     ['an invoice someone else created', { created_by: 'user-2' }],
     ['an invoice that is already posted', { status: 'posted' }],
     ['a different kind of invoice', { invoice_type: 'chemical_sale' }],
-    ['a draft created more than a day ago', { created_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() }],
-    ['a draft dated in the future', { created_at: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString() }],
   ])('an address naming %s drops the id and stays a new invoice', async (_label, overrides) => {
     if (overrides) invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, overrides));
     mockSaveWithFirstBillingFailure(SECOND_ID);
@@ -258,6 +263,53 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
     expect(savedInvoiceId(0)).toBeNull();
+  });
+
+  it('a draft this user created days ago still opens: a late refresh must never lead to a duplicate', async () => {
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, {
+      status: 'unposted', created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    }));
+    const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+  });
+
+  it('typing while the check runs: opening the created invoice asks first, and Stay then Save updates it', async () => {
+    invoiceCheckHeld = true;
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID));
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    editHeaderNotes('Re-entered notes');
+    await act(async () => { releaseInvoiceCheck(); });
+    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(router.state.location.pathname).toBe(NEW_PATH);
+    expect(headerNotes().value).toBe('Re-entered notes');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect(savedInvoiceId(0)).toBe(CREATED_ID);
+  });
+
+  it('typing while the check runs: dropping a rejected id asks first, and Stay then Save creates a new invoice', async () => {
+    invoiceCheckHeld = true;
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { created_by: 'user-2' }));
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    editHeaderNotes('My own new invoice');
+    await act(async () => { releaseInvoiceCheck(); });
+    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(headerNotes().value).toBe('My own new invoice');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect(savedInvoiceId(0)).toBeNull();
+    // The new invoice's own id replaces the rejected one, on the same page.
+    await waitFor(() => expect(router.state.location.search).toBe(`?created=${SECOND_ID}`));
+    expect(headerNotes().value).toBe('My own new invoice');
   });
 
   it('if the check cannot run, the page stays put and Save refuses: no duplicate and no unchecked invoice', async () => {

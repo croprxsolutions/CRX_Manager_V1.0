@@ -508,38 +508,39 @@ export default function FieldApplicationInvoice() {
   // The address names a created invoice that THIS page's Save did not create: a refresh,
   // Back/Forward, or a link to /new?created=<id>. The typed values are gone, and saving a
   // re-typed form here would create a SECOND invoice, so open the created invoice instead —
-  // but only one that really is a new field-application draft this user created in the last
-  // day; anything else (no such invoice, someone else's, already posted) drops the id from the
-  // address and stays a new invoice. If the check cannot run, the page stays put and Save
-  // refuses until a reload: neither a duplicate nor an unchecked invoice. Until the check has
-  // settled, Save refuses; handleSave decides that from the address itself, so there is no
-  // moment before this effect runs when Save could create a duplicate.
+  // but only if it is still an unposted field-application invoice this same user created
+  // (no time limit: a late refresh must never lead to a duplicate). Anything else (no such
+  // invoice, someone else's, already posted) is rejected: the id is dropped from the address
+  // and the page stays a new invoice. Either move goes through the leave-page prompt, so
+  // anything typed while the check ran is not silently lost; if the user stays, Save follows
+  // the check's answer (update the opened invoice, or create a new one past a rejected id).
+  // If the check cannot run, the page stays put and Save refuses until a reload: neither a
+  // duplicate nor an unchecked invoice. Until the check has settled, Save refuses; handleSave
+  // decides that from the address itself, so there is no gap before this effect runs.
   const createdInvoiceCheckFailedRef = useRef(false);
+  const rejectedCreatedIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isNew || !createdIdInAddress || !profile?.id) return;
-    if (createdIdInAddress === createdInvoiceIdRef.current) return; // this page's own Save wrote it
+    // This page's own Save wrote it, or the check already rejected it.
+    if (createdIdInAddress === createdInvoiceIdRef.current || createdIdInAddress === rejectedCreatedIdRef.current) return;
     const createdId = createdIdInAddress;
     const userId = profile.id;
     let cancelled = false;
     (async () => {
-      let ownNewDraft: boolean;
+      let ownUnpostedInvoice: boolean;
       try {
         const { data, error } = await supabase
           .from('invoices')
-          .select('id, invoice_type, status, created_by, created_at')
+          .select('id, invoice_type, status, created_by')
           .eq('id', createdId)
           .is('deleted_at', null)
           .maybeSingle();
         if (error) throw error;
-        const row = data as { invoice_type: string; status: string; created_by: string; created_at: string } | null;
-        const ageMs = row ? Date.now() - new Date(row.created_at).getTime() : NaN;
-        ownNewDraft = !!row
+        const row = data as { invoice_type: string; status: string; created_by: string } | null;
+        ownUnpostedInvoice = !!row
           && row.invoice_type === 'field_application'
           && ['draft', 'unposted'].includes(row.status)
-          && row.created_by === userId
-          // Within the last day; up to an hour "ahead" allows for a slow computer clock.
-          && ageMs > -60 * 60 * 1000
-          && ageMs < 24 * 60 * 60 * 1000;
+          && row.created_by === userId;
       } catch (err) {
         if (cancelled) return;
         Sentry.captureException(err, { tags: { context: 'field_app_created_invoice_check' } });
@@ -548,9 +549,8 @@ export default function FieldApplicationInvoice() {
         return;
       }
       if (cancelled) return;
-      // Whatever was typed here belongs to a page the user already chose to leave.
-      skipUnsavedPromptRef.current = true;
-      if (!ownNewDraft) {
+      if (!ownUnpostedInvoice) {
+        rejectedCreatedIdRef.current = createdId;
         navigate({ search: '' }, { replace: true });
         return;
       }
@@ -1609,8 +1609,9 @@ export default function FieldApplicationInvoice() {
   const handleSave = async () => {
     if (!profile) return;
     // The address names a created invoice this page's own Save did not write, and the check
-    // above has not opened it yet (or could not run).
-    if (isNew && createdIdInAddress && createdIdInAddress !== createdInvoiceIdRef.current) {
+    // above has neither opened nor rejected it yet (or could not run).
+    if (isNew && createdIdInAddress && createdIdInAddress !== createdInvoiceIdRef.current
+        && createdIdInAddress !== rejectedCreatedIdRef.current) {
       toast('info', createdInvoiceCheckFailedRef.current
         ? 'Could not check the invoice your last Save created, so nothing was saved. Reload the page to try again.'
         : 'One moment — checking the invoice your last Save created.');

@@ -747,7 +747,7 @@ is wrong across October 1 would treat last season's invoices as this season's (n
 those bulk actions) or the reverse. An invoice with no season, or a later season (for example from
 an `invoice_date` typo), counts as "not this season" and is left out; a missing season is tagged
 "Season unknown". Separately, paths that rely on the `invoices.season` column default stamp it
-from the UTC date (see "other paths still stamp `invoices.season` from the UTC clock" below), so
+from the UTC date (see "other paths still stamp `invoices.season` from the UTC clock" above), so
 for about five hours on each September 30 evening (Chicago time) such a new invoice is stamped with
 next season while the browser still says this season: it shows a "Season N+1" tag and the
 season-limited bulk actions skip it until the browser date also rolls over.

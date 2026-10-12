@@ -48,6 +48,10 @@ vi.mock('../contexts/AuthContext', () => ({
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import FieldApplicationInvoice from './FieldApplicationInvoice';
+import { createdFieldAppInvoiceStorageKey } from '../lib/fieldAppCreatedInvoice';
+
+const CREATED_ID = '3f2b8c1e-5d4a-4b6f-9a1c-2e7d8f9a0b1c';
+const STORAGE_KEY = createdFieldAppInvoiceStorageKey('user-1');
 
 function emptyChain() {
   const chain: Record<string, unknown> = {};
@@ -74,10 +78,28 @@ async function renderNewInvoice() {
     ],
     { initialEntries: ['/invoices/field-app/new'] },
   );
+  let unmount = () => {};
   await act(async () => {
-    render(<RouterProvider router={router} />);
+    ({ unmount } = render(<RouterProvider router={router} />));
   });
-  return router;
+  return Object.assign(router, { unmountPage: unmount });
+}
+
+/** Billing details fail on the FIRST attempt only: the invoice is created, the form stays dirty. */
+function mockSaveWithFirstBillingFailure(invoiceId: string) {
+  let billingAttempts = 0;
+  mockRpc.mockImplementation((name: string) => {
+    if (name === 'save_field_app_invoice') {
+      return Promise.resolve({ data: { invoice_ids: [invoiceId], invoice_group_id: null }, error: null });
+    }
+    if (name === 'update_field_app_invoice_billing') {
+      billingAttempts += 1;
+      return Promise.resolve(billingAttempts === 1
+        ? { data: null, error: { message: 'network blip' } }
+        : { data: { success: true }, error: null });
+    }
+    return Promise.resolve({ data: { success: true }, error: null });
+  });
 }
 
 function saveCalls() {
@@ -92,6 +114,7 @@ function editHeaderNotes(value: string) {
 describe('FieldApplicationInvoice — first Save of a new invoice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
     mockFrom.mockImplementation(() => emptyChain());
   });
 
@@ -149,5 +172,53 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect((saveCalls()[1][1] as { p_invoice_id: string | null }).p_invoice_id).toBe('inv-A');
     await waitFor(() => expect(router.state.location.pathname).toBe('/invoices/field-app/inv-A'));
     expect(mockToast).toHaveBeenCalledWith('success', 'Invoice saved');
+  });
+
+  it('a page refresh after the invoice was created opens that invoice instead of a blank new form', async () => {
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    const first = await renderNewInvoice();
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(first.state.location.pathname).toBe('/invoices/field-app/new');
+
+    // The created id is kept for this tab before the failing billing step ran.
+    const kept = window.sessionStorage.getItem(STORAGE_KEY);
+    expect(kept).not.toBeNull();
+    expect(JSON.parse(kept as string).invoiceId).toBe(CREATED_ID);
+
+    // A real browser refresh throws the page away WITHOUT running React cleanup, so the
+    // tab's sessionStorage survives. Unmounting here does run cleanup, so put the entry
+    // back the way a refresh would have left it, then load /new again from scratch.
+    first.unmountPage();
+    window.sessionStorage.setItem(STORAGE_KEY, kept as string);
+    const reloaded = await renderNewInvoice();
+
+    await waitFor(() => expect(reloaded.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+    expect(await screen.findByText(`Saved invoice page ${CREATED_ID}`)).toBeInTheDocument();
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('already created this invoice'));
+    // Only the first Save ever created anything, and the entry is used up.
+    expect(saveCalls()).toHaveLength(1);
+    expect(window.sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('a fully successful first Save leaves nothing behind for a later new invoice', async () => {
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderNewInvoice();
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+    // Leaving /new in the app ended that draft: a new invoice started later is a new one.
+    expect(window.sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(mockToast).not.toHaveBeenCalledWith('info', expect.anything());
   });
 });

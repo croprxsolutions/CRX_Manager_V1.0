@@ -15,6 +15,11 @@ import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/in
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey } from '../lib/idempotency';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import {
+  forgetCreatedFieldAppInvoice,
+  rememberCreatedFieldAppInvoice,
+  takeCreatedFieldAppInvoice,
+} from '../lib/fieldAppCreatedInvoice';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
@@ -442,6 +447,8 @@ export default function FieldApplicationInvoice() {
   // save failure), a repeat Save must update THIS invoice — sending p_invoice_id = null
   // again would create a duplicate invoice for the same application.
   const createdInvoiceIdRef = useRef<string | null>(null);
+  // The reloaded-page check below runs once per page, never again after a Save on it.
+  const createdInvoiceCheckedRef = useRef(false);
 
   const isNew = !id;
   const transactionSeason = useMemo(() => {
@@ -500,6 +507,25 @@ export default function FieldApplicationInvoice() {
   // the prior implicit salesman_id = profile.id behaviour, now visible + editable).
   useEffect(() => {
     if (isNew && profile?.id) setConsultantId((prev) => prev || profile.id);
+  }, [isNew, profile?.id]);
+
+  // A refresh of /new after the first Save created the invoice (e.g. a later step failed
+  // and the user stayed) loses createdInvoiceIdRef, so saving the re-typed form would create
+  // a SECOND invoice. Save keeps the created id for this tab; the reloaded page opens it.
+  useEffect(() => {
+    if (!isNew || !profile?.id || createdInvoiceCheckedRef.current) return;
+    createdInvoiceCheckedRef.current = true;
+    const createdId = takeCreatedFieldAppInvoice(profile.id);
+    if (!createdId) return;
+    toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
+    navigate(`/invoices/field-app/${createdId}`, { replace: true });
+  }, [isNew, profile?.id, toast, navigate]);
+
+  // Leaving /new inside the app (any route change unmounts this page) ends that draft.
+  useEffect(() => {
+    if (!isNew || !profile?.id) return;
+    const userId = profile.id;
+    return () => forgetCreatedFieldAppInvoice(userId);
   }, [isNew, profile?.id]);
 
   // §5: load the label-rate guardrail policy once. A failed/absent read falls back to
@@ -1721,8 +1747,12 @@ export default function FieldApplicationInvoice() {
       const ids = result.invoice_ids || [];
       const groupNote = result.invoice_group_id ? ` (group of ${ids.length})` : '';
       // Record the created invoice before any later step can fail, so every repeat
-      // Save from this page updates it instead of creating a duplicate.
-      if (creating && ids[0]) createdInvoiceIdRef.current = ids[0];
+      // Save from this page (or from this page reloaded) updates it instead of creating
+      // a duplicate.
+      if (creating && ids[0]) {
+        createdInvoiceIdRef.current = ids[0];
+        rememberCreatedFieldAppInvoice(profile.id, ids[0]);
+      }
 
       // §5: the save RPC committed the invoice atomically — NOW (and only now) write the
       // block-mode override audit, linked to the real saved id. If the save had failed, we

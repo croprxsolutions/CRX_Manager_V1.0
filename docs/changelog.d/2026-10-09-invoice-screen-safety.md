@@ -75,6 +75,11 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
 - If part of the save fails (for example the billing details), the form keeps your typed values
   and the prompt still appears, as before. Choosing Stay and saving again now **updates the
   invoice that was already created** instead of creating another one.
+- If the page is **refreshed** after that first Save created the invoice (before the rest saved),
+  the refreshed page now opens the **already-created invoice** with a note to re-enter anything
+  that did not save, instead of a blank new form whose Save would create a second invoice
+  (CodeRabbit on PR #893). The browser tab remembers the created invoice's id (only the id) for
+  at most two hours; leaving the page inside the app, or closing the tab, forgets it.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -116,6 +121,11 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   alongside Deselect All; and a failed post re-selecting an invoice the reload no longer returns
   (it is dropped from the counts). Each was run against the previous commit (2e185c34b) and
   failed there.
+- Refresh fix (CodeRabbit, PR #893): `FieldApplicationInvoice.saveNavigation.test.tsx` now also
+  covers a refresh after a partly-failed first Save (opens the created invoice, no second create)
+  and a fully successful Save leaving nothing remembered; `src/lib/fieldAppCreatedInvoice.test.ts`
+  covers expiry, other users, and refusing anything that is not an invoice id. The refresh test
+  was run against the previous commit (f1b415fe3) and failed there.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 
@@ -143,11 +153,11 @@ In plain English, everything the review rounds found that this change deliberate
   database rule keeps split members in the same season.
 - **A partly-failed first save of a new field-application invoice.** If the first Save creates the
   invoice but a later step fails (for example the billing details), the page keeps a link to the
-  invoice it created and a second Save updates it. But some checks (season date guard, split
-  preview, billing key) still behave as if the invoice were new (the server still refuses a
-  filed-season change), and if the page is refreshed before saving again, that link is lost and
-  saving the re-typed form creates a second invoice (the leave-page prompt warns before the
-  refresh).
+  invoice it created and a second Save updates it (a refresh opens that invoice instead). But
+  some checks (season date guard, split preview, billing key) still behave as if the invoice were
+  new until the page moves to the saved invoice (the server still refuses a filed-season change).
+  If the browser blocks site storage, a refresh falls back to the old behaviour (a blank new form;
+  the leave-page prompt warns before the refresh).
 - **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
   field invoice has to be posted from its own page. Whether Post All should get an "include
   older seasons" option is an owner decision.

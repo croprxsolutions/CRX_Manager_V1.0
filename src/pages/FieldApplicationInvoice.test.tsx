@@ -89,6 +89,7 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
   useParams: () => mockUseParams(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
   Link: ({ children, to, ...rest }: { children: React.ReactNode; to: string } & Record<string, unknown>) => (
     <a href={to} {...rest}>{children}</a>
   ),

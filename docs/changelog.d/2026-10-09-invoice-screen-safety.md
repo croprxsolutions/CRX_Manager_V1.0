@@ -75,11 +75,12 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
 - If part of the save fails (for example the billing details), the form keeps your typed values
   and the prompt still appears, as before. Choosing Stay and saving again now **updates the
   invoice that was already created** instead of creating another one.
-- If the page is **refreshed** after that first Save created the invoice (before the rest saved),
-  the refreshed page now opens the **already-created invoice** with a note to re-enter anything
-  that did not save, instead of a blank new form whose Save would create a second invoice
-  (CodeRabbit on PR #893). The browser tab remembers the created invoice's id (only the id) for
-  at most two hours; leaving the page inside the app, or closing the tab, forgets it.
+- If the page is **refreshed** (or reached again with Back) after that first Save created the
+  invoice, it now opens the **already-created invoice** with a note to re-enter anything that did
+  not save, instead of a blank new form whose Save would create a second invoice (CodeRabbit on
+  PR #893). The first Save writes the created invoice's id into the page address
+  (`/invoices/field-app/new?created=<id>`, same page, typed values kept), so nothing is stored in
+  the browser. Pressing **New** there starts a genuinely new, blank invoice.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -121,14 +122,16 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   alongside Deselect All; and a failed post re-selecting an invoice the reload no longer returns
   (it is dropped from the counts). Each was run against the previous commit (2e185c34b) and
   failed there.
-- Refresh fix (CodeRabbit, PR #893): `FieldApplicationInvoice.saveNavigation.test.tsx` now also
-  covers a refresh after a partly-failed first Save (opens the created invoice, no second create)
-  and a fully successful Save leaving nothing remembered; `src/lib/fieldAppCreatedInvoice.test.ts`
-  covers expiry, other users, and refusing anything that is not an invoice id. The refresh test
-  was run against the previous commit (f1b415fe3) and failed there. Luna review of that fix:
-  the remembered id must survive a move to the created invoice that the leave-page prompt stops
-  (the user picks Stay), and a corrupted expiry must not count as "never expires"; both fixed,
-  and the new Stay test failed against the first version of the fix (aae0210a4).
+- Refresh fix (CodeRabbit, PR #893): `FieldApplicationInvoice.saveNavigation.test.tsx` now runs
+  the real route wrapper and also covers: the first Save writing the created id into the address
+  while keeping the typed values; a refresh of that address opening the created invoice with no
+  second create; an address whose id is not an invoice id staying a new invoice; and New pressed
+  on that address starting a genuinely new invoice. The three new behaviour tests failed against
+  the previous commit (f1b415fe3); the New test also fails with only the route-wrapper change
+  undone. A first version kept the id in the browser tab's storage instead; two Luna rounds
+  found it could be lost (a redirect stopped by the leave-page prompt, React's development
+  double-run) or outlive its draft (leaving to another site and coming back), so it was replaced
+  by the address, which has none of those problems.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 
@@ -159,8 +162,6 @@ In plain English, everything the review rounds found that this change deliberate
   invoice it created and a second Save updates it (a refresh opens that invoice instead). But
   some checks (season date guard, split preview, billing key) still behave as if the invoice were
   new until the page moves to the saved invoice (the server still refuses a filed-season change).
-  If the browser blocks site storage, a refresh falls back to the old behaviour (a blank new form;
-  the leave-page prompt warns before the refresh).
 - **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
   field invoice has to be posted from its own page. Whether Post All should get an "include
   older seasons" option is an owner decision.

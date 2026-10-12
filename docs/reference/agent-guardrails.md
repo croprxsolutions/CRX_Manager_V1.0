@@ -13,25 +13,51 @@
 > round must never be routed through `scripts/write-codex-push-proof.mjs`, which unlinks the existing proof for the
 > current HEAD at the start of a run. See `docs/manual/DECISION_LOG.md`, 2026-09-20.
 >
+> **Documentation-only exemption (Mason, 2026-10-07) — amends point (1) of the autonomous-landing block below.**
+> A pull request whose every changed file is documentation as defined in `docs/reference/sol-exempt-paths.md`
+> merges into `main` without the Sol proof. Every other point (1) requirement still applies: CodeRabbit APPROVED on
+> the exact head, every check green, the `--match-head-commit` pin, no `--auto`, the head containing its base. Both
+> `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` ask `.claude/hooks/sol-exempt-lib.mjs`, and only
+> when no valid proof was found. It reads GitHub's compare API for `baseRefOid...headRefOid`, then one GraphQL
+> lookup confirming each changed path is a plain file (mode `100644`, not a symlink, submodule or executable): added and
+> kept files at the head, deleted and edited files and old names at the base. Both go through the same budgeted `gh`. It is an allow-list: only `.md` files under seven `docs/` (not `docs/reference/`, Mason 2026-10-10)
+> folders qualify (matched exactly), minus the rule-defining documents, any nested agent-instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `AGENT.md`) and package files, which
+> are matched without regard to case. Any uncertainty means Sol is required: a failed or unexpected GitHub answer, a comparison
+> that is not exactly base..head (or does not end at the head), 250 or more files (GitHub silently stops listing at
+> 300), an empty list, a change status other than a plain edit, a rename or copy whose old name is not exempt, or an
+> unusual path spelling. The module is in the Codex guard's protected-file list and the `.claude/settings.json`
+> `ask` tier. `sol-exempt-lib.test.mjs` checks it against the readable list and requires every loosened mutant in its list to fail. A change to
+> the rule touches `.claude/`, so it always needs Sol.
+>
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
 > differ.** (1) `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` merge route now deny any merge into
 > `main` unless CodeRabbit's latest verdict (`gh pr view --json reviews`) is APPROVED on the exact `headRefOid`
 > (`coderabbitApprovedHead`), the NEWEST run of every reported check is green with `mergeStateStatus` CLEAN
 > (`newestCheckRollup` — an older failed run no longer outvotes a later green one), and a fresh `gpt-6-sol`/`high`
-> proof is bound to that head and GitHub's real base — for EVERY diff, not only risky ones. Every agent merge must
+> proof is bound to that head and GitHub's real base — for EVERY diff, not only risky ones, except a documentation-only
+> change (the block above, Mason 2026-10-07), which still needs every other gate here. Every agent merge must
 > carry `--match-head-commit <the head the gate checked>` (put it before any free-text `--body`), so GitHub refuses a
 > head that moved in between; REST and connector merges cannot carry it and are refused. `--auto` into `main` is
 > refused outright; `--admin` and `CHANGES_REQUESTED` still are. A repeated StatusContext counts its WORSE state. (2) `migration-apply-lib.mjs` applies its former
 > hands-free-only proof set (content binding, both reviewer names, fresh content-bound Sol proof) in EVERY session,
 > and refuses DESTRUCTIVE, data-overwriting and access-changing SQL for agents in every session with no agent
 > override (an agent-passed approval flag cannot prove Mason approved that exact migration; `apply-migration-file.mjs`
-> rejects `--mason-approved-destructive` as unknown). Since 2026-09-29 the one way through is Mason's Windows Hello
-> signature (`owner-approval-lib.mjs`, `owner-approval-hello.ps1`; commands `scripts/owner-approval-setup.mjs` and
-> `scripts/owner-approve-migration.mjs`). It binds the migration's sha256, the PR number and exact head, the flagged
-> categories, a 30-minute window and a nonce. It is checked LAST, after the landing gate, against the PR and head that
-> gate confirmed. Only `apply-migration-file.mjs` (the `ownerApprovalDoor` caller) honours it, and it uses the approval
-> up before transmitting. The pinned public key (`owner-approval-key.json`) must equal the key Windows Hello holds on
-> the PC. Autonomous applies are Claude-only: Codex's
+> rejects `--mason-approved-destructive` as unknown). The one way through is Mason's own approval (2026-09-29), given
+> since 2026-10-09 by chat reply instead of a Windows Hello signature so he can approve from his phone
+> (`owner-approval-lib.mjs`; request command `scripts/owner-approve-migration.mjs`; reply hook
+> `owner-approval-prompt.mjs`, wired in `prompt-router.mjs`). The request binds the migration's sha256, the PR number
+> and exact head, the flagged categories, a nonce and a 6-digit code, with a 24-hour reply deadline. Only a WHOLE
+> message of exactly `approve <code>` (a trailing `.` or `!` is accepted) turns it into an approval, valid 30 minutes
+> from the reply; the code is retired in that folder first (exclusively, before the approval is written; if it cannot be
+> retired nothing is approved), so no later request reuses it. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook
+> records the reply only when it arrives in that session (`session_id`; the session's folders are compared by their
+> canonical path, case-insensitively on Windows), and the gate refuses the approval in any
+> other applying session, so the request is built, answered and applied in one conversation. It is checked LAST,
+> after the landing gate, against the PR and head that gate confirmed. Only `apply-migration-file.mjs` (the
+> `ownerApprovalDoor` caller) honours it, and it uses the approval up before transmitting. Residual risk Mason
+> accepted: an agent that deliberately fakes the approval — writing the approval file, or running the reply hook by
+> hand with a made-up message and session id — is not stopped (the file sits in the review-proof-guarded
+> `.claude/session-state`). Autonomous applies are Claude-only: Codex's
 > `production-action-guard` blocks every live apply. The "flag absent → Mason's in-chat OK is the prose gate" rule-set in the `migration-apply-guard.mjs`
 > row below no longer exists. As its LAST check it runs `migration-landing-gate-lib.mjs`: the apply must come from a
 > clean checkout of the PR's branch (migration committed at HEAD, HEAD = the open PR's head into `main`) whose head
@@ -115,7 +141,7 @@ Runs on Codex's `*` (all-tools) PreToolUse matcher through portable POSIX and Wi
 ### UserPromptSubmit Hooks (`.claude/hooks/`)
 These run when Mason submits a prompt, BEFORE Claude reads it. They inject extra context via `additionalContext` — they don't block — so Mason's intent is preserved while Claude is forced to slow down on risky wording or nudged toward the right workflow.
 
-`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `ship-intent-reminder.mjs` and `hold-latch-prompt.mjs` on both Claude and Codex. Since 2026-10-02 (Mason) the other reminder modules below, and `autopilot-intent-reminder.mjs`, are unwired: the router does not call them, so the overnight handshake never fires.
+`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `ship-intent-reminder.mjs`, `hold-latch-prompt.mjs` and (since 2026-10-09) `owner-approval-prompt.mjs` on both Claude and Codex; the last records Mason's `approve <code>` reply for a parked migration and does nothing on any other message. Since 2026-10-02 (Mason) the other reminder modules below, and `autopilot-intent-reminder.mjs`, are unwired: the router does not call them, so the overnight handshake never fires.
 
 | Hook | What it warns on / reminds | Why |
 |------|------------------|-----|
@@ -343,7 +369,8 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    change or work around it, and no document carries a step-by-step way to switch it off (a Sol review flagged such
    steps as a written bypass path, 2026-09-27).
 4. **Adversarial review:** unchanged from the autonomous-landing entry — Luna rounds and an exact-SHA Sol proof on
-   every change — plus CodeRabbit and the Codex GitHub App on every PR automatically.
+   every change (since 2026-10-07, except a documentation-only change; see the block at the top) — plus CodeRabbit
+   and the Codex GitHub App on every PR automatically.
 5. **Codex hooks re-trusted (Mason's machine).** Codex silently skips a repository hook whose definition changed since
    it was trusted; on 2026-09-26, 17 of 24 CRX Codex hooks were skipped — every Write/Edit content guard, the three MCP
    guards, `production-action-guard`, `review-proof-guard`, `hold-latch-guard` and both routers — while Codex ran with

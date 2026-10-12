@@ -48,24 +48,30 @@ export function forgetCreatedFieldAppInvoice(userId: string): void {
 }
 
 /**
- * Read and clear the remembered invoice id. Returns null (and clears the entry) when there
- * is none, or it is malformed, expired, or belongs to another user.
+ * Read the remembered invoice id WITHOUT clearing it: it stays until the page has actually
+ * left /new (the page forgets it on unmount), so a move that the leave-page prompt stops
+ * cannot lose it. Returns null (and clears the entry) when there is none, or it is malformed,
+ * expired, or belongs to another user.
  */
-export function takeCreatedFieldAppInvoice(userId: string): string | null {
+export function readCreatedFieldAppInvoice(userId: string): string | null {
   const key = createdFieldAppInvoiceStorageKey(userId);
   try {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return null;
-    window.sessionStorage.removeItem(key);
-    if (raw.length > 1024) return null;
-    const value = JSON.parse(raw) as Partial<CreatedFieldAppInvoiceRecord>;
-    const valid = value.version === 1
+    const value = raw.length > 1024 ? null : JSON.parse(raw) as Partial<CreatedFieldAppInvoiceRecord> | null;
+    const valid = !!value
+      && value.version === 1
       && value.userId === userId
       && typeof value.invoiceId === 'string'
       && UUID_PATTERN.test(value.invoiceId)
       && typeof value.expiresAt === 'number'
+      && Number.isFinite(value.expiresAt)
       && value.expiresAt > Date.now();
-    return valid ? (value.invoiceId as string) : null;
+    if (!valid) {
+      forgetCreatedFieldAppInvoice(userId);
+      return null;
+    }
+    return value.invoiceId as string;
   } catch {
     forgetCreatedFieldAppInvoice(userId);
     return null;

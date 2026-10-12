@@ -21,10 +21,12 @@ import { createMemoryRouter, RouterProvider, useParams } from 'react-router';
 // hook and this test use, so the page runs inside ONE data router as it does in the app.
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, authState } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
+  // Mutable so a test can let the signed-in profile arrive after the page first renders.
+  authState: { profile: { id: 'user-1', role: 'admin' } as { id: string; role: string } | null },
 }));
 
 vi.mock('../lib/db', () => ({
@@ -43,7 +45,7 @@ vi.mock('../lib/db', () => ({
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin' }, role: 'admin' }),
+  useAuth: () => ({ profile: authState.profile, role: 'admin' }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
@@ -115,6 +117,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
+    authState.profile = { id: 'user-1', role: 'admin' };
     mockFrom.mockImplementation(() => emptyChain());
   });
 
@@ -199,9 +202,33 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(reloaded.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
     expect(await screen.findByText(`Saved invoice page ${CREATED_ID}`)).toBeInTheDocument();
     expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('already created this invoice'));
-    // Only the first Save ever created anything, and the entry is used up.
+    // Only the first Save ever created anything, and leaving /new forgot the entry.
     expect(saveCalls()).toHaveLength(1);
     expect(window.sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('if the leave-page prompt stops that move and the user stays, Save still updates the created invoice', async () => {
+    // The reloaded page is already dirty when the signed-in profile arrives, so the move to
+    // the created invoice is stopped by the "Unsaved Changes" prompt (Luna, PR #893).
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: 1, userId: 'user-1', invoiceId: CREATED_ID, expiresAt: Date.now() + 60_000,
+    }));
+    authState.profile = null;
+    const router = await renderNewInvoice();
+    editHeaderNotes('Spray north field');
+
+    authState.profile = { id: 'user-1', role: 'admin' };
+    editHeaderNotes('Spray north field again');
+    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(router.state.location.pathname).toBe('/invoices/field-app/new');
+    // Still remembered, so another refresh would find it too.
+    expect(window.sessionStorage.getItem(STORAGE_KEY)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect((saveCalls()[0][1] as { p_invoice_id: string | null }).p_invoice_id).toBe(CREATED_ID);
   });
 
   it('a fully successful first Save leaves nothing behind for a later new invoice', async () => {

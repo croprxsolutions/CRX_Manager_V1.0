@@ -17,8 +17,8 @@ import { generateIdempotencyKey } from '../lib/idempotency';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
   forgetCreatedFieldAppInvoice,
+  readCreatedFieldAppInvoice,
   rememberCreatedFieldAppInvoice,
-  takeCreatedFieldAppInvoice,
 } from '../lib/fieldAppCreatedInvoice';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { logActivity } from '../lib/activityLogger';
@@ -512,11 +512,15 @@ export default function FieldApplicationInvoice() {
   // A refresh of /new after the first Save created the invoice (e.g. a later step failed
   // and the user stayed) loses createdInvoiceIdRef, so saving the re-typed form would create
   // a SECOND invoice. Save keeps the created id for this tab; the reloaded page opens it.
+  // The id also goes back into createdInvoiceIdRef, and the stored copy is only forgotten once
+  // the page has left /new: if the leave-page prompt stops this move and the user stays, a
+  // Save still updates that invoice, and another refresh still finds it.
   useEffect(() => {
     if (!isNew || !profile?.id || createdInvoiceCheckedRef.current) return;
     createdInvoiceCheckedRef.current = true;
-    const createdId = takeCreatedFieldAppInvoice(profile.id);
+    const createdId = readCreatedFieldAppInvoice(profile.id);
     if (!createdId) return;
+    createdInvoiceIdRef.current = createdId;
     toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
     navigate(`/invoices/field-app/${createdId}`, { replace: true });
   }, [isNew, profile?.id, toast, navigate]);

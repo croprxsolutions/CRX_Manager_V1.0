@@ -3,7 +3,7 @@ import {
   createdFieldAppInvoiceStorageKey,
   forgetCreatedFieldAppInvoice,
   rememberCreatedFieldAppInvoice,
-  takeCreatedFieldAppInvoice,
+  readCreatedFieldAppInvoice,
 } from './fieldAppCreatedInvoice';
 
 const INVOICE_ID = '3f2b8c1e-5d4a-4b6f-9a1c-2e7d8f9a0b1c';
@@ -13,22 +13,18 @@ describe('fieldAppCreatedInvoice', () => {
   beforeEach(() => window.sessionStorage.clear());
   afterEach(() => vi.useRealTimers());
 
-  it('returns the remembered invoice once, then nothing', () => {
+  it('keeps returning the remembered invoice until it is forgotten', () => {
     rememberCreatedFieldAppInvoice('user-1', INVOICE_ID);
-    expect(takeCreatedFieldAppInvoice('user-1')).toBe(INVOICE_ID);
-    expect(takeCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-1')).toBe(INVOICE_ID);
+    expect(readCreatedFieldAppInvoice('user-1')).toBe(INVOICE_ID);
+    forgetCreatedFieldAppInvoice('user-1');
+    expect(readCreatedFieldAppInvoice('user-1')).toBeNull();
   });
 
   it('keeps each user separate', () => {
     rememberCreatedFieldAppInvoice('user-1', INVOICE_ID);
-    expect(takeCreatedFieldAppInvoice('user-2')).toBeNull();
-    expect(takeCreatedFieldAppInvoice('user-1')).toBe(INVOICE_ID);
-  });
-
-  it('forget clears the entry', () => {
-    rememberCreatedFieldAppInvoice('user-1', INVOICE_ID);
-    forgetCreatedFieldAppInvoice('user-1');
-    expect(takeCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-2')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-1')).toBe(INVOICE_ID);
   });
 
   it('ignores and clears an expired entry', () => {
@@ -36,7 +32,14 @@ describe('fieldAppCreatedInvoice', () => {
     vi.setSystemTime(new Date('2026-10-12T12:00:00Z'));
     rememberCreatedFieldAppInvoice('user-1', INVOICE_ID);
     vi.setSystemTime(new Date('2026-10-12T14:00:01Z'));
-    expect(takeCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(window.sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('treats a non-finite expiry as expired (JSON 1e999 parses to Infinity)', () => {
+    window.sessionStorage.setItem(KEY,
+      `{"version":1,"userId":"user-1","invoiceId":"${INVOICE_ID}","expiresAt":1e999}`);
+    expect(readCreatedFieldAppInvoice('user-1')).toBeNull();
     expect(window.sessionStorage.getItem(KEY)).toBeNull();
   });
 
@@ -47,7 +50,7 @@ describe('fieldAppCreatedInvoice', () => {
     window.sessionStorage.setItem(KEY, JSON.stringify({
       version: 1, userId: 'user-1', invoiceId: '../../admin', expiresAt: Date.now() + 60_000,
     }));
-    expect(takeCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-1')).toBeNull();
     expect(window.sessionStorage.getItem(KEY)).toBeNull();
   });
 
@@ -55,10 +58,11 @@ describe('fieldAppCreatedInvoice', () => {
     window.sessionStorage.setItem(KEY, JSON.stringify({
       version: 1, userId: 'user-2', invoiceId: INVOICE_ID, expiresAt: Date.now() + 60_000,
     }));
-    expect(takeCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(window.sessionStorage.getItem(KEY)).toBeNull();
 
     window.sessionStorage.setItem(KEY, '{not json');
-    expect(takeCreatedFieldAppInvoice('user-1')).toBeNull();
+    expect(readCreatedFieldAppInvoice('user-1')).toBeNull();
     expect(window.sessionStorage.getItem(KEY)).toBeNull();
   });
 });

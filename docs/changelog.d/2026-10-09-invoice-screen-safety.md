@@ -125,7 +125,10 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   covers a refresh after a partly-failed first Save (opens the created invoice, no second create)
   and a fully successful Save leaving nothing remembered; `src/lib/fieldAppCreatedInvoice.test.ts`
   covers expiry, other users, and refusing anything that is not an invoice id. The refresh test
-  was run against the previous commit (f1b415fe3) and failed there.
+  was run against the previous commit (f1b415fe3) and failed there. Luna review of that fix:
+  the remembered id must survive a move to the created invoice that the leave-page prompt stops
+  (the user picks Stay), and a corrupted expiry must not count as "never expires"; both fixed,
+  and the new Stay test failed against the first version of the fix (aae0210a4).
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 

@@ -80,7 +80,12 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   not save, instead of a blank new form whose Save would create a second invoice (CodeRabbit on
   PR #893). The first Save writes the created invoice's id into the page address
   (`/invoices/field-app/new?created=<id>`, same page, typed values kept), so nothing is stored in
-  the browser. Pressing **New** there starts a genuinely new, blank invoice.
+  the browser. Pressing **New** there starts a genuinely new, blank invoice, and Back/Forward
+  between two such drafts opens the right one. Before opening an invoice named in the address,
+  the page checks it is a new field-application draft (draft or unposted) that the same user
+  created in the last day; anything else (a stale or hand-edited link) is ignored and the page
+  stays a new invoice. If that check cannot run, the named invoice is opened anyway, because a
+  duplicate invoice is the worse outcome; Save waits while the check runs.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -131,7 +136,12 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   undone. A first version kept the id in the browser tab's storage instead; two Luna rounds
   found it could be lost (a redirect stopped by the leave-page prompt, React's development
   double-run) or outlive its draft (leaving to another site and coming back), so it was replaced
-  by the address, which has none of those problems.
+  by the address. A third Luna round on the address version found Back/Forward between two
+  drafts kept the wrong page, and any well-formed id redirected; fixed with tests for Back
+  between two drafts, five kinds of address that must be ignored, and a failed check. Those
+  seven tests failed against the previous commit (877163547). The "New" test drives the plain
+  /new navigation the top-bar and Field Invoices New buttons perform; this page has no New
+  button of its own.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 

@@ -7,9 +7,10 @@ import { createdInvoiceIdFromAddress } from '../lib/fieldAppNewInvoiceAddress';
 // including an existing invoice -> new invoice. Keep the page's async load
 // ownership checks: a discarded request must not navigate or install state.
 //
-// /new -> /new?created=<id> is the SAME draft (the first Save wrote the id into the address)
-// and keeps the page. /new?created=<id> -> plain /new (e.g. the New button pressed there) is a
-// NEW invoice: it gets a fresh page, so a Save cannot keep updating the invoice already created.
+// /new -> /new?created=<id> keeps the page: it is how the first Save writes the id into the
+// address (the page itself checks an id it did not write). Any change AWAY from a created id —
+// to plain /new (the New buttons) or to another created id (Back/Forward between two drafts) —
+// gets a fresh page, so a Save there can never update the invoice the old page created.
 export default function FieldApplicationInvoiceRoute() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -18,7 +19,7 @@ export default function FieldApplicationInvoiceRoute() {
   const [previousCreatedId, setPreviousCreatedId] = useState(createdId);
   if (createdId !== previousCreatedId) {
     setPreviousCreatedId(createdId);
-    if (previousCreatedId && !createdId) setNewPageGeneration((n) => n + 1);
+    if (previousCreatedId) setNewPageGeneration((n) => n + 1);
   }
   return <FieldApplicationInvoice key={id ?? `new-field-app-invoice-${newPageGeneration}`} />;
 }

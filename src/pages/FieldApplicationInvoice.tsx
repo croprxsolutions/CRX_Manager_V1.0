@@ -443,9 +443,6 @@ export default function FieldApplicationInvoice() {
   // save failure), a repeat Save must update THIS invoice — sending p_invoice_id = null
   // again would create a duplicate invoice for the same application.
   const createdInvoiceIdRef = useRef<string | null>(null);
-  // The address check below runs once, when the page opens; the address the first Save
-  // writes later must not send this same page away.
-  const createdInvoiceCheckedRef = useRef(false);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
 
@@ -508,20 +505,59 @@ export default function FieldApplicationInvoice() {
     if (isNew && profile?.id) setConsultantId((prev) => prev || profile.id);
   }, [isNew, profile?.id]);
 
-  // Opened as /new?created=<id> (a refresh or Back after the first Save created the invoice,
-  // e.g. when a later step failed and the user stayed): the typed values are gone, and saving
-  // a re-typed form here would create a SECOND invoice, so open the created invoice instead.
-  // Checked once, when the page opens: the address the first Save writes later must not
-  // send the same page away. The id also goes into createdInvoiceIdRef, so even a move the
-  // leave-page prompt stops leaves a Save updating that invoice.
+  // The address names a created invoice that THIS page's Save did not create: a refresh,
+  // Back/Forward, or a link to /new?created=<id>. The typed values are gone, and saving a
+  // re-typed form here would create a SECOND invoice, so open the created invoice instead —
+  // but only one that really is a new field-application draft this user created in the last
+  // day; anything else (no such invoice, someone else's, already posted) drops the id from the
+  // address and stays a new invoice. If the check itself cannot run, open the invoice anyway:
+  // a duplicate invoice is the worse outcome. Save waits while the check runs.
+  const createdInvoiceCheckPendingRef = useRef(false);
   useEffect(() => {
-    if (!isNew || createdInvoiceCheckedRef.current) return;
-    createdInvoiceCheckedRef.current = true;
-    if (!createdIdInAddress) return;
-    createdInvoiceIdRef.current = createdIdInAddress;
-    toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
-    navigate(`/invoices/field-app/${createdIdInAddress}`, { replace: true });
-  }, [isNew, createdIdInAddress, toast, navigate]);
+    if (!isNew || !createdIdInAddress || !profile?.id) return;
+    if (createdIdInAddress === createdInvoiceIdRef.current) return; // this page's own Save wrote it
+    const createdId = createdIdInAddress;
+    const userId = profile.id;
+    let cancelled = false;
+    createdInvoiceCheckPendingRef.current = true;
+    (async () => {
+      let ownNewDraft: boolean | null = null; // null = the check could not run
+      try {
+        const { data, error } = await supabase
+          .from('invoices')
+          .select('id, invoice_type, status, created_by, created_at')
+          .eq('id', createdId)
+          .is('deleted_at', null)
+          .maybeSingle();
+        if (error) throw error;
+        const row = data as { invoice_type: string; status: string; created_by: string; created_at: string } | null;
+        ownNewDraft = !!row
+          && row.invoice_type === 'field_application'
+          && ['draft', 'unposted'].includes(row.status)
+          && row.created_by === userId
+          && Date.now() - new Date(row.created_at).getTime() < 24 * 60 * 60 * 1000;
+      } catch (err) {
+        Sentry.captureException(err, { tags: { context: 'field_app_created_invoice_check' } });
+      }
+      if (cancelled) return;
+      createdInvoiceCheckPendingRef.current = false;
+      // Whatever was typed here belongs to a page the user already chose to leave.
+      skipUnsavedPromptRef.current = true;
+      if (ownNewDraft === false) {
+        navigate({ search: '' }, { replace: true });
+        return;
+      }
+      createdInvoiceIdRef.current = createdId;
+      if (ownNewDraft) {
+        toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
+      }
+      navigate(`/invoices/field-app/${createdId}`, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+      createdInvoiceCheckPendingRef.current = false;
+    };
+  }, [isNew, createdIdInAddress, profile?.id, toast, navigate]);
 
   // §5: load the label-rate guardrail policy once. A failed/absent read falls back to
   // the safe default ('warn') — we never silently switch to 'block'.
@@ -1562,6 +1598,10 @@ export default function FieldApplicationInvoice() {
   // silent data corruption). 'cannot_compare' / 'no_label_max' never gate a save.
   const handleSave = async () => {
     if (!profile) return;
+    if (createdInvoiceCheckPendingRef.current) {
+      toast('info', 'One moment — checking the invoice your last Save created.');
+      return;
+    }
     if (crossSeasonDateEdit) {
       toast('error', filedSeasonDateMessage);
       return;

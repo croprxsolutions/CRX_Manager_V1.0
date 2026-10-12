@@ -54,7 +54,19 @@ vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }
 import FieldApplicationInvoiceRoute from '../components/FieldApplicationInvoiceRoute';
 
 const CREATED_ID = '3f2b8c1e-5d4a-4b6f-9a1c-2e7d8f9a0b1c';
+const SECOND_ID = '7a9d2e4f-1b3c-4d5e-8f6a-0b1c2d3e4f5a';
 const NEW_PATH = '/invoices/field-app/new';
+
+/** Invoices the page's "is this my new draft?" check can read, by id. */
+const invoiceRows = new Map<string, Record<string, unknown>>();
+let invoiceCheckError: { message: string } | null = null;
+
+function ownNewDraft(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id, invoice_type: 'field_application', status: 'draft', created_by: 'user-1',
+    created_at: new Date().toISOString(), ...overrides,
+  };
+}
 
 function emptyChain() {
   const chain: Record<string, unknown> = {};
@@ -65,6 +77,20 @@ function emptyChain() {
   chain.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
   chain.maybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }));
   chain.then = (resolve: (v: typeof result) => unknown) => Promise.resolve(result).then(resolve);
+  return chain;
+}
+
+/** Like emptyChain, but maybeSingle answers the check with the row for the filtered id. */
+function invoicesChain() {
+  const chain = emptyChain();
+  let idFilter: string | null = null;
+  chain.eq = vi.fn((column: string, value: string) => {
+    if (column === 'id') idFilter = value;
+    return chain;
+  });
+  chain.maybeSingle = vi.fn(() => Promise.resolve(invoiceCheckError
+    ? { data: null, error: invoiceCheckError }
+    : { data: (idFilter && invoiceRows.get(idFilter)) || null, error: null }));
   return chain;
 }
 
@@ -131,7 +157,9 @@ async function createWithPartialFailureAndStay() {
 describe('FieldApplicationInvoice — first Save of a new invoice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFrom.mockImplementation(() => emptyChain());
+    invoiceRows.clear();
+    invoiceCheckError = null;
+    mockFrom.mockImplementation((table: string) => (table === 'invoices' ? invoicesChain() : emptyChain()));
   });
 
   it('navigates to the saved invoice with no false "Unsaved Changes" prompt', async () => {
@@ -184,6 +212,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
   });
 
   it('a refresh of that address opens the created invoice instead of a blank new form', async () => {
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID));
     // A browser refresh starts the app again at the address the first Save wrote.
     const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
 
@@ -205,12 +234,79 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(savedInvoiceId(0)).toBeNull();
   });
 
-  it('pressing New on /new?created=<id> starts a genuinely new invoice', async () => {
+  it.each([
+    ['no such invoice', null],
+    ['an invoice someone else created', { created_by: 'user-2' }],
+    ['an invoice that is already posted', { status: 'posted' }],
+    ['a different kind of invoice', { invoice_type: 'chemical_sale' }],
+    ['a draft created more than a day ago', { created_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() }],
+  ])('an address naming %s drops the id and stays a new invoice', async (_label, overrides) => {
+    if (overrides) invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, overrides));
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    expect(router.state.location.pathname).toBe(NEW_PATH);
+    expect(mockToast).not.toHaveBeenCalledWith('info', expect.anything());
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect(savedInvoiceId(0)).toBeNull();
+  });
+
+  it('if the check cannot run, the named invoice is opened anyway rather than risking a duplicate', async () => {
+    invoiceCheckError = { message: 'network down' };
+    const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+    expect(mockToast).not.toHaveBeenCalledWith('info', expect.stringContaining('already created'));
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('Back from a second new invoice to the first one opens the first, never saving onto the second', async () => {
+    // Two drafts in one tab, each created by a first Save whose billing step failed.
+    const created = [CREATED_ID, SECOND_ID];
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        const invoiceId = args.p_invoice_id ?? created.shift();
+        return Promise.resolve({ data: { invoice_ids: [invoiceId], invoice_group_id: null }, error: null });
+      }
+      if (name === 'update_field_app_invoice_billing') {
+        return Promise.resolve({ data: null, error: { message: 'network blip' } });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID));
+    invoiceRows.set(SECOND_ID, ownNewDraft(SECOND_ID));
+    const router = await renderAt();
+
+    await createWithPartialFailureAndStay();
+    expect(router.state.location.search).toBe(`?created=${CREATED_ID}`);
+    await act(async () => {
+      await router.navigate(NEW_PATH);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    await waitFor(() => expect(headerNotes().value).toBe(''));
+    await createWithPartialFailureAndStay();
+    expect(router.state.location.search).toBe(`?created=${SECOND_ID}`);
+    expect(savedInvoiceId(1)).toBeNull();
+
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+    expect(saveCalls()).toHaveLength(2);
+  });
+
+  it('going to the plain /new address from /new?created=<id> starts a genuinely new invoice', async () => {
     mockSaveWithFirstBillingFailure(CREATED_ID);
     const router = await renderAt();
     await createWithPartialFailureAndStay();
 
-    // The New button (top bar or Field Invoices list) navigates to the plain /new address.
+    // What the New buttons do (top bar, Field Invoices list): navigate to the plain /new
+    // address. This page has no New button of its own.
     await act(async () => {
       await router.navigate(NEW_PATH);
     });

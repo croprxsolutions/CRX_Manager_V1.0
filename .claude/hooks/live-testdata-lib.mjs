@@ -355,8 +355,12 @@ export function findNonReadFunctionCall(sqlText) {
     // `AS t(a, b)` names an alias's columns and `::numeric(10,2)` is a type;
     // neither is a call.
     if (/(?:\bas|::)\s*$/i.test(text.slice(0, m.index))) continue;
-    if (READONLY_FN_NAMES.has(name)) continue;
-    if (READONLY_FN_PREFIX_RE.test(name)) continue;
+    // The application's read-named functions live in `public`, so a get_/list_ name
+    // in any other schema (`evil.get_invoice(…)`) is not vouched for (Luna, PR #882).
+    const appSchema = !quotedCaps && (/^(?:"public"|[Pp][Uu][Bb][Ll][Ii][Cc])\s*\./.test(m[0]) ||
+      (!/^"?public"?\s*\./i.test(m[0]) && !/\.\s*$/.test(before)));
+    if (appSchema && READONLY_FN_NAMES.has(name)) continue;
+    if (appSchema && READONLY_FN_PREFIX_RE.test(name)) continue;
     // pg_catalog/information_schema internals are reads
     if (!otherSchema && (name.startsWith("pg_stat") || name.startsWith("pg_ls") || name.startsWith("information_schema"))) continue;
     return name;

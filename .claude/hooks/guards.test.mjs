@@ -129,6 +129,10 @@ ok(!classifySql("SELECT count(*) FROM orders -- cancel_order(42) would be wrong 
   !classifySql("SELECT /* get rid of delete_all() */ count(*) FROM orders").block &&
   !classifySql("SELECT pg_catalog./**/pg_get_triggerdef(t.oid), '--' AS x, '/*' AS y FROM pg_trigger t").block,
   "comment prose is not a call, and comment-like text inside a string stays data");
+ok(["SELECT evil.get_invoice(42)", 'SELECT "PUBLIC".get_invoice(42)', 'SELECT "GET_INVOICE"(42)', "SELECT x$public.list_orders(1)"]
+  .every((sql) => classifySql(sql).block), "a read-named function outside public is not vouched for (Luna, PR #882)");
+ok(["SELECT get_invoice(42)", "SELECT public.get_invoice(42)", 'SELECT "public".get_invoice(42)', "SELECT PUBLIC.list_orders(1)"]
+  .every((sql) => !classifySql(sql).block), "a read-named function in public is still a read");
 ok(["SELECT AUTH.uid()", "SELECT auth.UID()", "SELECT PG_CATALOG.pg_get_triggerdef(1)",
   'SELECT "count"(*) FROM orders', "SELECT COUNT(*) FROM orders"]
   .every((sql) => !classifySql(sql).block), "an unquoted name folds to lower case and is still a read");

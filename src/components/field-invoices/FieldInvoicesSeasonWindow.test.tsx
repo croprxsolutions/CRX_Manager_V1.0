@@ -146,6 +146,36 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice_group')).toHaveLength(0);
   });
 
+  it('Post All checks every member of a split group, including one the tray did not load', async () => {
+    // The tray's list holds only the this-season member (for example the other one is past
+    // the row limit), but the group's Season 2026 member is still waiting to post, and
+    // post_invoice_group would post it too (CodeRabbit, PR #895).
+    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
+    const groupOldNotLoaded = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'draft', season: 2026, invoice_group_id: 'grp-1', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
+    let invoiceQueries = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'invoices') return buildInMemoryQuery([]);
+      invoiceQueries += 1;
+      // Query 1 is the tray's own list; later ones (the member check, the reload) see everything.
+      return buildInMemoryQuery(invoiceQueries === 1 ? [groupNew, ROWS[6]] : [groupNew, groupOldNotLoaded, ROWS[6]]);
+    });
+    mockRpc.mockImplementation((name: string) => {
+      const result = Promise.resolve({ data: name === 'post_invoice_group' ? { posted: 2 } : null, error: null });
+      return Object.assign(result, { throwOnError: () => result });
+    });
+    renderInRouter(<FieldInvoicesUnpostedPanel />);
+    await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
+    expect(screen.queryByText('FA-GRP-OLD')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 target(s)' }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('a member not shown here is from another season')));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice_group')).toHaveLength(0);
+    // The stand-alone this-season draft still posts.
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'FA-NEW-DRAFT' });
+  });
+
   it('Posted tab keeps prior-season overdue invoices but season-windows paid ones', async () => {
     renderInRouter(<FieldInvoicesPostedPanel />);
 

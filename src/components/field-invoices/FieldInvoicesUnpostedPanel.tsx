@@ -430,7 +430,29 @@ export default function FieldInvoicesUnpostedPanel() {
       action: async () => {
         let posted = 0;
         const failures: string[] = [];
+        // post_invoice_group posts EVERY draft/unposted member of a group, including one this
+        // tray did not load (e.g. past the row limit), so check the season of all of them
+        // before posting (CodeRabbit, PR #895). A group with an other-season member is left out.
+        const otherSeasonGroupIds = new Set<string>();
+        if (groupTargets.length > 0) {
+          const { data: memberRows, error: memberError } = await supabase
+            .from('invoices')
+            .select('invoice_group_id, season')
+            .in('invoice_group_id', groupTargets.map((group) => group.group_id))
+            .in('status', ['draft', 'unposted'])
+            .is('deleted_at', null);
+          if (memberError) {
+            throw new Error('Could not check the split groups’ members, so nothing was posted. Please try again.');
+          }
+          for (const member of (memberRows ?? []) as Array<Pick<UnpostedFieldInvoiceRow, 'invoice_group_id' | 'season'>>) {
+            if (member.invoice_group_id && !isCurrentSeason(member.season)) otherSeasonGroupIds.add(member.invoice_group_id);
+          }
+        }
         for (const group of groupTargets) {
+          if (otherSeasonGroupIds.has(group.group_id)) {
+            failures.push(`${group.label}: a member not shown here is from another season — post it from its own invoice page`);
+            continue;
+          }
           const keyId = `grp:${group.group_id}`;
           if (!postKeysRef.current[keyId]) {
             postKeysRef.current[keyId] = generateIdempotencyKey('post_invoice_group', `${profile.id}:${group.group_id}`);

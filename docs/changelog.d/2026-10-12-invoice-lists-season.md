@@ -31,7 +31,11 @@ below).
     unposted invoices are listed (with their season tag) and counted in the totals, but Post All
     leaves them out and its confirm says how many; post each one from its own invoice page. A
     split group is left out if **any** of its members is from another season, including a member
-    hidden by the current filters (the group post would post it too).
+    hidden by the current filters (the group post would post it too). Just before posting,
+    Post All also reads every draft or unposted member of each group from the database, so a
+    member the tray never loaded (for example past its row limit) is checked too; such a group
+    is left out and named in the result (CodeRabbit, PR #895; the new tray test failed
+    without this check).
   - **Unpost All** on the Posted tab, in the default "This Season + older unpaid" scope, still
     reverses only **this season's** posted invoices, as it did before. Older unpaid invoices are
     listed but left out (the confirm and the footer say how many); to unpost one, choose its
@@ -127,8 +131,11 @@ In plain English, everything the review rounds found that this change deliberate
   time of the review) are hidden from it.
 - **Split-group season check looks at the selected rows.** On the Chemical Sales list, batch Post
   checks the season of the selected rows only, while posting a split group posts every member
-  (including one from another season). Theoretical today: there are no live split groups, and a
-  database rule keeps split members in the same season.
+  (including one from another season). Theoretical today: live has no split group with a draft
+  or unposted member (read-only check, 2026-10-12). Correction: no database rule keeps a group's
+  members in one season (a live check found only a rule that a split invoice's season cannot be
+  changed later); members are created together, so they normally share one. The Field Invoices
+  tray's Post All now checks every member of a group before posting (below).
 - **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
   field invoice has to be posted from its own page. Whether Post All should get an "include
   older seasons" option is an owner decision.

@@ -69,6 +69,12 @@ leave these open:
   cannot be posted; void it and re-create the invoice from the delivery. If a scheduled delivery's
   quantity is lowered after its up-front invoice was drafted, the draft stays over until the office
   lowers that line on the invoice (lowering is always allowed).
+- **Voiding a delivery whose invoice is already posted leaves that invoice active** (pre-existing;
+  raised by Codex on PR #889, 2026-10-12, and deferred). `void_delivery` cancels only the delivery's
+  draft invoices and shows "posted invoices linked to this order require manual review"; the office
+  then issues a credit memo. The delivery cap does not block the void (voids stay allowed, per the
+  2026-10-07 decision above, and a paid-then-credited invoice stays active), and the integrity
+  report's delivery-invoice quantity check flags any such invoice.
 - **An invoice made from scratch (no order, no delivery) can name any product and quantity**
   (pre-existing; found in the PR #889 security review, 2026-10-10). The New Invoice page creates
   `misc_charge` invoices with no order link, so neither the delivery cap nor the order/delivery
@@ -90,6 +96,33 @@ leave these open:
   ever genuinely needs undoing, do it through a reviewed migration.
 - **The never-posted draft CS-2026-0055** (ORD-2026-0186's May delivery DEL-00074) is left as is; its
   order's other delivery was recorded as billed in Chem Man.
+
+## OPEN 2026-10-09 — the regular invoice editor posts the old saved amounts when Post is pressed with unsaved edits
+
+**What it is.** On the regular invoice editor (`src/pages/InvoiceDetail.tsx`: chemical sales, misc
+charges, job/blend field invoices) the **Post** button stays clickable while there are unsaved edits on
+screen. `post_invoice` / `post_invoice_group` post what is SAVED, so the invoice posts with the old
+saved amounts, and the page then reloads, dropping the edits. The pre-Post checks run on the on-screen
+copy, not on what is posted: the credit-limit warning (`handlePost`) uses the on-screen customer and
+line total, and for a single invoice the restricted-use (RUP) license warning (`openPostConfirm`) uses
+the on-screen lines. (A split group's RUP check already reads the saved siblings.) The editor also
+has no leave-page warning, so a sidebar link, Back, or closing the tab drops unsaved edits silently.
+Found by the 2026-10-08 overnight bug hunt.
+
+**Why it is still open.** PR #892 first carried an app-side fix (Post greyed out while there are
+unsaved edits, plus a re-read of the saved invoice before the Post confirm). The final Codex Sol review
+of that PR (2026-10-09) raised a HIGH: a browser-side re-check cannot bind what is posted, because
+another save can land between the re-check and `post_invoice`, which takes only the invoice ID. That
+fix was taken out of PR #892, so the editor's Post behaves exactly as before.
+
+**Planned fix (not built).** To be built in the upcoming "invoicing admin-only" change, in two parts
+that are both required, because neither alone covers the bug:
+1. **In the editor:** Post stays disabled while the form has unsaved edits (the version check below
+   cannot see edits that exist only in the browser), and the credit-limit and restricted-use
+   warnings are computed from the saved invoice, not the on-screen copy.
+2. **In the database:** a server-side posting version check. The editor sends the version of the
+   saved invoice it showed, and `post_invoice` / `post_invoice_group` refuse, inside the same
+   transaction, when the saved invoice (or a group member) no longer matches.
 
 ## RESOLVED 2026-10-02 (opened 2026-09-12) — filed-season date-edit guard deployed: `20260914101000`..`20260914101300` applied live
 
@@ -280,6 +313,9 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   as current on one and 30–59 on the other. (2) `invoice_date` has no future-date bound in the UI or on the
   server, so a typo like 2206 is accepted. (3) Three filters cut the day at UTC midnight rather than Chicago:
   `Invoices.tsx` season filter, `TeamBoard.tsx` date filter, and the `CustomerDetail.tsx` 90-day window.
+  (Since 2026-10-09 the `Invoices.tsx` season filter applies only to closed invoices — paid, voided,
+  cancelled; open ones show from every season, see `src/lib/invoiceSeasonWindow.ts` — so the UTC cut can
+  only move a closed invoice on or off the list.)
   (Source: `docs/archive/2026-spring/2026-05-25-14-domain-review-supplement.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-spring/2026-05-25-14-domain-review-supplement.md`).)
 - **List-page row caps (scale limit).** `DataTable` has no pagination, so most list pages load a fixed
   number of rows and filter in the browser.
@@ -756,9 +792,25 @@ cannot see that anything was skipped.
 
 **The cosmetic ones** — report/dialog defaults the user can change in the UI:
 `ARaging.tsx:80`, `CropPrograms.tsx:55`, `FieldProfitability.tsx:62`, `YearEndSummaryDialog.tsx:26`,
-`ReportShell.tsx:20-29`, `FieldInvoices.tsx:44`, `ApplicationRecords.tsx:36`, `Reports.tsx:118,122`,
+`ReportShell.tsx:20-29`, `ApplicationRecords.tsx:36`, `Reports.tsx:118,122`,
 `SalesReports.tsx:29,33,100`. `AccountsReceivable.tsx:45` and `CustomerContextCard.tsx:46` similarly
 pass a **UTC** `toISOString().slice(0,10)` as an as-of date.
+
+**Not user-changeable, but low impact:** `invoiceSeasonWindow.ts` (the invoice lists' season
+window; replaced `FieldInvoices.tsx:44` on 2026-10-09). These lists have no season control, but
+the window applies to CLOSED invoices only (paid, voided, cancelled); open invoices are never
+season-windowed, so for the list itself the browser-clock season can only move a closed invoice on
+or off a list. The same browser-clock season also decides which open invoices count as "this
+season": the "Season N" tag, and which invoices the season-limited bulk actions skip (field Drafts
+Post All, Posted Unpost All in its default scope, Chemical Sales Select All). A browser clock that
+is wrong across October 1 would treat last season's invoices as this season's (no tag, included in
+those bulk actions) or the reverse. An invoice with no season, or a later season (for example from
+an `invoice_date` typo), counts as "not this season" and is left out; a missing season is tagged
+"Season unknown". Separately, paths that rely on the `invoices.season` column default stamp it
+from the UTC date (see "other paths still stamp `invoices.season` from the UTC clock" above), so
+for about five hours on each September 30 evening (Chicago time) such a new invoice is stamped with
+next season while the browser still says this season: it shows a "Season N+1" tag and the
+season-limited bulk actions skip it until the browser date also rolls over.
 
 `FieldApplicationInvoice.tsx:533` (line as of 2026-09-26) is **fine** — it inherits `transactionDate`, which is now the
 Chicago business date.

@@ -7,7 +7,8 @@
  */
 export const CREATED_INVOICE_PARAM = 'created';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Any UUID layout (any version), so a valid invoice id is never mistaken for "no id".
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The created invoice's id from the address, or null when absent or not an invoice id. */
 export function createdInvoiceIdFromAddress(searchParams: URLSearchParams): string | null {

@@ -60,6 +60,8 @@ const NEW_PATH = '/invoices/field-app/new';
 /** Invoices the page's "is this my new draft?" check can read, by id. */
 const invoiceRows = new Map<string, Record<string, unknown>>();
 let invoiceCheckError: { message: string } | null = null;
+/** When true, the check never answers (a slow network), so the page is still checking. */
+let invoiceCheckHangs = false;
 
 function ownNewDraft(id: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -88,9 +90,11 @@ function invoicesChain() {
     if (column === 'id') idFilter = value;
     return chain;
   });
-  chain.maybeSingle = vi.fn(() => Promise.resolve(invoiceCheckError
-    ? { data: null, error: invoiceCheckError }
-    : { data: (idFilter && invoiceRows.get(idFilter)) || null, error: null }));
+  chain.maybeSingle = vi.fn(() => (invoiceCheckHangs
+    ? new Promise(() => {})
+    : Promise.resolve(invoiceCheckError
+      ? { data: null, error: invoiceCheckError }
+      : { data: (idFilter && invoiceRows.get(idFilter)) || null, error: null })));
   return chain;
 }
 
@@ -159,6 +163,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     vi.clearAllMocks();
     invoiceRows.clear();
     invoiceCheckError = null;
+    invoiceCheckHangs = false;
     mockFrom.mockImplementation((table: string) => (table === 'invoices' ? invoicesChain() : emptyChain()));
   });
 
@@ -240,6 +245,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     ['an invoice that is already posted', { status: 'posted' }],
     ['a different kind of invoice', { invoice_type: 'chemical_sale' }],
     ['a draft created more than a day ago', { created_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() }],
+    ['a draft dated in the future', { created_at: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString() }],
   ])('an address naming %s drops the id and stays a new invoice', async (_label, overrides) => {
     if (overrides) invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, overrides));
     mockSaveWithFirstBillingFailure(SECOND_ID);
@@ -254,13 +260,72 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(savedInvoiceId(0)).toBeNull();
   });
 
-  it('if the check cannot run, the named invoice is opened anyway rather than risking a duplicate', async () => {
+  it('if the check cannot run, the page stays put and Save refuses: no duplicate and no unchecked invoice', async () => {
     invoiceCheckError = { message: 'network down' };
+    mockSaveWithFirstBillingFailure(SECOND_ID);
     const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
 
-    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
-    expect(mockToast).not.toHaveBeenCalledWith('info', expect.stringContaining('already created'));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Could not check')));
+    expect(router.state.location.pathname).toBe(NEW_PATH);
+    expect(router.state.location.search).toBe(`?created=${CREATED_ID}`);
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('nothing was saved'));
     expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('Save refuses while the check is still running', async () => {
+    invoiceCheckHangs = true;
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('One moment'));
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('accepts an invoice id of any UUID version', async () => {
+    const v7Id = '01927a3b-4c5d-7e6f-8a9b-0c1d2e3f4a5b';
+    invoiceRows.set(v7Id, ownNewDraft(v7Id));
+    const router = await renderAt(`${NEW_PATH}?created=${v7Id}`);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${v7Id}`));
+  });
+
+  it('a Save still running when the user presses New does not pull them back to the old invoice', async () => {
+    // The invoice is created and its id written into the address; the billing step is
+    // still running when the user presses New and leaves the dirty form.
+    let finishBilling: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      if (name === 'update_field_app_invoice_billing') {
+        return new Promise((resolve) => { finishBilling = resolve; });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(router.state.location.search).toBe(`?created=${CREATED_ID}`));
+    await waitFor(() => expect(mockRpc.mock.calls.some(([n]) => n === 'update_field_app_invoice_billing')).toBe(true));
+
+    await act(async () => {
+      await router.navigate(NEW_PATH);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    await act(async () => {
+      finishBilling({ data: { success: true }, error: null });
+    });
+
+    // The old page's Save finished its writes but left the user on the new, blank page.
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice created'));
+    expect(router.state.location.pathname).toBe(NEW_PATH);
+    expect(router.state.location.search).toBe('');
+    expect(headerNotes().value).toBe('');
   });
 
   it('Back from a second new invoice to the first one opens the first, never saving onto the second', async () => {

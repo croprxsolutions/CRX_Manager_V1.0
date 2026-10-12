@@ -510,18 +510,19 @@ export default function FieldApplicationInvoice() {
   // re-typed form here would create a SECOND invoice, so open the created invoice instead —
   // but only one that really is a new field-application draft this user created in the last
   // day; anything else (no such invoice, someone else's, already posted) drops the id from the
-  // address and stays a new invoice. If the check itself cannot run, open the invoice anyway:
-  // a duplicate invoice is the worse outcome. Save waits while the check runs.
-  const createdInvoiceCheckPendingRef = useRef(false);
+  // address and stays a new invoice. If the check cannot run, the page stays put and Save
+  // refuses until a reload: neither a duplicate nor an unchecked invoice. Until the check has
+  // settled, Save refuses; handleSave decides that from the address itself, so there is no
+  // moment before this effect runs when Save could create a duplicate.
+  const createdInvoiceCheckFailedRef = useRef(false);
   useEffect(() => {
     if (!isNew || !createdIdInAddress || !profile?.id) return;
     if (createdIdInAddress === createdInvoiceIdRef.current) return; // this page's own Save wrote it
     const createdId = createdIdInAddress;
     const userId = profile.id;
     let cancelled = false;
-    createdInvoiceCheckPendingRef.current = true;
     (async () => {
-      let ownNewDraft: boolean | null = null; // null = the check could not run
+      let ownNewDraft: boolean;
       try {
         const { data, error } = await supabase
           .from('invoices')
@@ -531,33 +532,42 @@ export default function FieldApplicationInvoice() {
           .maybeSingle();
         if (error) throw error;
         const row = data as { invoice_type: string; status: string; created_by: string; created_at: string } | null;
+        const ageMs = row ? Date.now() - new Date(row.created_at).getTime() : NaN;
         ownNewDraft = !!row
           && row.invoice_type === 'field_application'
           && ['draft', 'unposted'].includes(row.status)
           && row.created_by === userId
-          && Date.now() - new Date(row.created_at).getTime() < 24 * 60 * 60 * 1000;
+          // Within the last day; up to an hour "ahead" allows for a slow computer clock.
+          && ageMs > -60 * 60 * 1000
+          && ageMs < 24 * 60 * 60 * 1000;
       } catch (err) {
+        if (cancelled) return;
         Sentry.captureException(err, { tags: { context: 'field_app_created_invoice_check' } });
+        createdInvoiceCheckFailedRef.current = true;
+        toast('error', 'Could not check the invoice your last Save created. Reload the page to try again; nothing will be saved until then.');
+        return;
       }
       if (cancelled) return;
-      createdInvoiceCheckPendingRef.current = false;
       // Whatever was typed here belongs to a page the user already chose to leave.
       skipUnsavedPromptRef.current = true;
-      if (ownNewDraft === false) {
+      if (!ownNewDraft) {
         navigate({ search: '' }, { replace: true });
         return;
       }
       createdInvoiceIdRef.current = createdId;
-      if (ownNewDraft) {
-        toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
-      }
+      toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
       navigate(`/invoices/field-app/${createdId}`, { replace: true });
     })();
-    return () => {
-      cancelled = true;
-      createdInvoiceCheckPendingRef.current = false;
-    };
+    return () => { cancelled = true; };
   }, [isNew, createdIdInAddress, profile?.id, toast, navigate]);
+
+  // False once this page has been left (unmounted). A Save still running then finishes its
+  // writes but must not move the user, who is already on another page (e.g. pressed New).
+  const pageActiveRef = useRef(true);
+  useEffect(() => {
+    pageActiveRef.current = true;
+    return () => { pageActiveRef.current = false; };
+  }, []);
 
   // §5: load the label-rate guardrail policy once. A failed/absent read falls back to
   // the safe default ('warn') — we never silently switch to 'block'.
@@ -1598,8 +1608,12 @@ export default function FieldApplicationInvoice() {
   // silent data corruption). 'cannot_compare' / 'no_label_max' never gate a save.
   const handleSave = async () => {
     if (!profile) return;
-    if (createdInvoiceCheckPendingRef.current) {
-      toast('info', 'One moment — checking the invoice your last Save created.');
+    // The address names a created invoice this page's own Save did not write, and the check
+    // above has not opened it yet (or could not run).
+    if (isNew && createdIdInAddress && createdIdInAddress !== createdInvoiceIdRef.current) {
+      toast('info', createdInvoiceCheckFailedRef.current
+        ? 'Could not check the invoice your last Save created, so nothing was saved. Reload the page to try again.'
+        : 'One moment — checking the invoice your last Save created.');
       return;
     }
     if (crossSeasonDateEdit) {
@@ -1788,9 +1802,11 @@ export default function FieldApplicationInvoice() {
         createdInvoiceIdRef.current = ids[0];
         // The id goes into the address too (same page, typed values kept), so a refresh or
         // Back of this page opens the created invoice. The form is still dirty here, so let
-        // this one move past the leave-page guard.
-        skipUnsavedPromptRef.current = true;
-        navigate({ search: `?${CREATED_INVOICE_PARAM}=${ids[0]}` }, { replace: true });
+        // this one move past the leave-page guard. Not once the page has been left.
+        if (pageActiveRef.current) {
+          skipUnsavedPromptRef.current = true;
+          navigate({ search: `?${CREATED_INVOICE_PARAM}=${ids[0]}` }, { replace: true });
+        }
       }
 
       // §5: the save RPC committed the invoice atomically — NOW (and only now) write the
@@ -1938,6 +1954,10 @@ export default function FieldApplicationInvoice() {
           ', but the billing details (PO / terms / due date / notes / discount) did NOT persist. Re-enter and save again.'
         );
       }
+
+      // The page was left while this Save ran (e.g. New was pressed): the writes are done,
+      // and the user is already elsewhere, so do not move them back to this invoice.
+      if (!pageActiveRef.current) return;
 
       // Still on /invoices/field-app/new: move to the saved invoice's own page.
       const savedInvoiceId = ids[0] ?? createdInvoiceIdRef.current;

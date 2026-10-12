@@ -84,8 +84,10 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   between two such drafts opens the right one. Before opening an invoice named in the address,
   the page checks it is a new field-application draft (draft or unposted) that the same user
   created in the last day; anything else (a stale or hand-edited link) is ignored and the page
-  stays a new invoice. If that check cannot run, the named invoice is opened anyway, because a
-  duplicate invoice is the worse outcome; Save waits while the check runs.
+  stays a new invoice. If that check cannot run, the page stays where it is and Save refuses
+  until a reload, so there is neither a duplicate nor an unchecked invoice; Save also waits
+  while the check runs. A Save still running when the user presses New finishes its writes but
+  no longer pulls them back to the old invoice.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -141,7 +143,12 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   between two drafts, five kinds of address that must be ignored, and a failed check. Those
   seven tests failed against the previous commit (877163547). The "New" test drives the plain
   /new navigation the top-bar and Field Invoices New buttons perform; this page has no New
-  button of its own.
+  button of its own. A fourth Luna round (no BLOCKER/HIGH) led to: the failed check refusing
+  Save instead of opening the invoice, Save's wait decided from the address itself, a Save left
+  behind by New not moving the user, any UUID version accepted, and future-dated drafts
+  rejected; four new tests failed against 608f5dd5d. Not changed: the redirect tests land on a
+  stand-in for the invoice page; loading an existing invoice is covered by
+  `FieldApplicationInvoice.test.tsx`.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 

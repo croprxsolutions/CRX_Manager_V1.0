@@ -70,6 +70,8 @@ export interface FieldInvoiceListRow {
   /** Season the invoice is filed in (Oct 1–Sep 30, named by end year). The lists show
    * open invoices from every season, so a prior-season row is labelled with this. */
   season: number | null;
+  /** The split group this invoice belongs to (null when it stands alone). */
+  invoice_group_id: string | null;
   /** Per-line split billing (flag-gated, additive): server-computed send suppression for
    * a fully-$0 split child. Optional — not selected by today's list query (the column is
    * not live yet); the email-suppression gate keys on it once the migration lands. */
@@ -186,6 +188,7 @@ export function mapFieldInvoiceRow(raw: RawFieldInvoiceRow): FieldInvoiceListRow
     balance_cents: raw.balance_cents,
     invoice_date: raw.invoice_date,
     season: raw.season ?? null,
+    invoice_group_id: raw.invoice_group_id ?? null,
     // Forward the server-computed send suppression flag so the "don't email a $0 split
     // child" gate can actually fire (Codex P2 #10). Undefined before the column is live
     // (LIST_SELECT uses `*`), which the gate reads as "not suppressed" — current behavior.

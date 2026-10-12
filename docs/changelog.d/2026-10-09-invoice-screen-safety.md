@@ -1,71 +1,11 @@
-## 2026-10-09 - Invoice screens: last season's open invoices are back, and no duplicate field-application invoices
+## 2026-10-09 - New field-application invoices: no false "Unsaved Changes" box, no duplicate invoice
 
-Two fixes to the invoice screens. Both are app-only; no database change.
+App-only; no database change. Delivered as PR #893, which replaced PR #892 with the same code
+(CodeRabbit kept a stale "changes requested" on #892). The invoice-list half of the original
+change (last season's open invoices back on the lists) shipped separately in PR #895; see
+`2026-10-12-invoice-lists-season.md`.
 
-Delivered as PR #893, which replaces PR #892 with the same code. CodeRabbit kept a stale "changes
-requested" on #892 after the requested doc fix landed, and would not re-review a commit it had
-already reviewed.
-
-### 1. Last season's open invoices show again on the invoice lists
-
-**What staff will notice:** since October 1, the Chemical Sales invoice list and the Field
-Invoices tabs (Drafts, Posted, All Invoices, and the tab counts) were empty of last season's
-work. Every invoice from before October 1 that was still a draft, unposted, posted-but-unpaid or
-overdue had disappeared. They are back on the lists. The bulk actions (Post All, Unpost All,
-Select All) still act on this season's invoices only; an older one is handled one at a time (see
-below).
-
-- An **open** invoice (draft, unposted, posted, overdue) now shows on these lists whatever
-  season it belongs to. A small **"Season 2026"** tag next to its date marks an invoice from an
-  earlier season.
-- A **closed** invoice (paid, voided, cancelled) still shows only for the current season, as
-  before.
-- The server posting step (`post_invoice` / `post_invoice_group`) does **not** check the
-  invoice's season. It **does** refuse an invoice dated in a closed accounting period
-  (`check_period_open`, run inside `_post_invoice_impl_20260714` and, for every group member,
-  `_post_invoice_group_customer_scope_impl`; live read of the function bodies, 2026-10-09). All
-  9 live accounting periods are open today, so nothing is refused yet. Because nothing stops a
-  last-season invoice posting into its own invoice-date month (for example August), the bulk
-  actions leave other-season invoices out by default:
-  - **Post All** on the Drafts tab posts only **this season's** invoices. Last season's
-    unposted invoices are listed (with their season tag) and counted in the totals, but Post All
-    leaves them out and its confirm says how many; post each one from its own invoice page. A
-    split group is left out if **any** of its members is from another season, including a member
-    hidden by the current filters (the group post would post it too).
-  - **Unpost All** on the Posted tab, in the default "This Season + older unpaid" scope, still
-    reverses only **this season's** posted invoices, as it did before. Older unpaid invoices are
-    listed but left out (the confirm and the footer say how many); to unpost one, choose its
-    month batch in Scope. Month batches from an earlier season are marked "unpaid only", because
-    paid invoices from that season are not on this list. The "spans more than one month-end
-    batch" warning now looks at what Unpost All would change, not at every row shown.
-  - On the Chemical Sales list, **Select All** picks only this season's invoices, so one Select
-    All + Post / Void / Delete cannot reach last season's work. An older invoice can still be
-    ticked by hand (it shows a "Season N" tag); if one is selected, the Post confirm says how
-    many are not from this season. The button goes by **which** invoices are ticked, not how
-    many: it reads **Select All** until every this-season invoice in view is ticked, then
-    **Deselect All** (which clears everything, including hand-ticked older ones). When every
-    invoice in view is from an older season, Select All is greyed out instead of silently doing
-    nothing.
-  - The Chemical Sales bulk buttons (Post / Void / Print / Delete and their counts) only ever act on ticked invoices that are on screen right now: a ticked invoice that a filter or the search box hides, or that the list no longer loads, is dropped from the selection, **Select All** replaces the selection with exactly this season's invoices in view (it no longer keeps rows ticked earlier), and **Clear selection** shows whenever anything on screen is ticked.
-  - An invoice with no season, or a later season, counts as "not this season" for these actions.
-    An invoice with no season shows a **"Season unknown"** tag, so it is never an untagged row
-    that the bulk actions quietly skip. (The live `invoices.season` column cannot be empty today;
-    this only matters if that ever changes.)
-- The Posted tab's **Print Invoice Report** PDF now names its scope in the subtitle (for example
-  "This season + older seasons' unpaid invoices", or "June 2026 batch — unpaid invoices only"),
-  so a printed total says what it covers.
-- The Chemical Sales **Posted Total** and **Outstanding** cards now count overdue invoices too
-  (an overdue invoice is a posted invoice past its due date; before, the two live overdue
-  invoices were listed but left out of both totals). A note under the cards says older open
-  invoices are included.
-- The Posted tab's scope menu now reads "This Season + older unpaid", and the All Invoices tab
-  says it also shows older unposted or unpaid invoices.
-
-Live check (read-only, 2026-10-09): 12 open invoices exist, all from before October 1
-(11 chemical sale, 1 unposted field invoice). The old list filters showed **0** of them; the new
-filters show **all 12**. The one paid invoice from last season stays hidden, as intended.
-
-### 2. Saving a new field-application invoice no longer shows a false "Unsaved Changes" box
+### Saving a new field-application invoice
 
 **What staff will notice:** after the first Save of a new field-application invoice, the page now
 goes straight to the saved invoice. Before, an "Unsaved Changes" box appeared even though the save
@@ -95,17 +35,17 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   then refreshed, saving again no longer creates a second invoice (CodeRabbit on PR #893, second
   review). Just before the first Save sends its create, the page writes a draft tag into its
   address (`?draft=<tag>`); the create's repeat-protection key is built from that tag and the
-  user, so a Save from the refreshed page sends the same key and the database answers with the
-  invoice it already created. New starts a new draft with a new tag.
-- That stored answer only lasts 24 hours, and it repeats the FIRST submission, not what was
-  re-typed after the refresh (Codex review on PR #893: P1 and P2; the 24-hour expiry was
-  confirmed read-only on the live database, 2026-10-12). So a page reopened at a draft address
-  no longer saves blind. It first looks for field-application invoices this user created since
-  the draft started (the draft tag now carries its start time; the search allows an hour for a
-  computer clock running fast). If there are any, a box at the top lists them with links, and
-  Save waits until the user opens one or presses **Start a new invoice instead** (which starts a
-  new draft, keeping what was typed). If there are none, Save goes ahead with the same draft. If
-  the search cannot run, Save refuses until a reload.
+  user. New starts a new draft with a new tag.
+- The database keeps the answer for that key only 24 hours, and it repeats the FIRST
+  submission, not what was re-typed after the refresh (Codex review on PR #893: P1 and P2; the
+  24-hour expiry was confirmed read-only on the live database, 2026-10-12). So a page reopened at
+  a draft address no longer saves blind. It first looks for field-application invoices this user
+  created since the draft started (the draft tag carries its start time; the search allows an
+  hour for a computer clock running fast). If there are any, a box at the top lists them with
+  links, and Save waits until the user opens one or presses **Start a new invoice instead**
+  (which starts a new draft, keeping what was typed). If there are none, Save goes ahead with the
+  same draft, so a create still on its way is answered rather than doubled. If the search cannot
+  run, Save refuses until a reload.
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -119,109 +59,40 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
 
 ### Proof
 
-- New component tests, each run first against the unfixed code (where they failed for the
-  reason described above) and then against the fix (where they pass):
-  `src/pages/Invoices.seasonWindow.test.tsx`,
-  `src/components/field-invoices/FieldInvoicesSeasonWindow.test.tsx`,
-  `src/pages/FieldApplicationInvoice.saveNavigation.test.tsx` (real router and real leave-page
-  guard). The list tests apply the pages' real filters to an in-memory set of invoices, so they
-  show which rows the queries actually return.
-- The new list filter was sent to the live API read-only with the public key. It got past the
-  filter parser (it stopped at the permission check), while a deliberately broken filter was
-  rejected by the parser. So the filter syntax is valid on the real server.
-- Review round 1 added tests for: the Post All earlier-season notice, Unpost All's this-season
-  default, and overdue invoices in the Chemical Sales cards.
-- Review round 2 added tests for: Post All leaving last season's invoices out and posting only
-  this season's; Post All skipping a split group whose last-season member is hidden by a date
-  filter; Chemical Sales Select All picking only this season (and the Post confirm naming a
-  hand-ticked older invoice); plus unit tests for the season filter and the season labels. The
-  Select All test was run against the round-1 code and failed there.
-- Final fix round added tests for: Select All with an older invoice ticked by hand (now: selects
-  exactly this season's invoices in view, see the selection fix below), Deselect All clearing a mix of this-season and older invoices,
-  Clear selection, Select All greyed out when only older or unknown-season invoices are in view,
-  and the "Season unknown" tag. Each was run against the round-2 code and failed there.
-- Selection fix (after the final review) added tests for: a row ticked and then hidden by a
-  filter not being carried into Select All + Post; a selection left under a filter with no
-  selectable rows being dropped (no Print / Post button acting on it); the same for a row hidden
-  by the search box; Clear selection shown
-  alongside Deselect All; and a failed post re-selecting an invoice the reload no longer returns
-  (it is dropped from the counts). Each was run against the previous commit (2e185c34b) and
-  failed there.
-- Refresh fix (CodeRabbit, PR #893): `FieldApplicationInvoice.saveNavigation.test.tsx` now runs
-  the real route wrapper and also covers: the first Save writing the created id into the address
-  while keeping the typed values; a refresh of that address opening the created invoice with no
-  second create; an address whose id is not an invoice id staying a new invoice; and New pressed
-  on that address starting a genuinely new invoice. The three new behaviour tests failed against
-  the previous commit (f1b415fe3); the New test also fails with only the route-wrapper change
-  undone. A first version kept the id in the browser tab's storage instead; two Luna rounds
-  found it could be lost (a redirect stopped by the leave-page prompt, React's development
-  double-run) or outlive its draft (leaving to another site and coming back), so it was replaced
-  by the address. A third Luna round on the address version found Back/Forward between two
-  drafts kept the wrong page, and any well-formed id redirected; fixed with tests for Back
-  between two drafts, five kinds of address that must be ignored, and a failed check. Those
-  seven tests failed against the previous commit (877163547). The "New" test drives the plain
-  /new navigation the top-bar and Field Invoices New buttons perform; this page has no New
-  button of its own. A fourth Luna round (no BLOCKER/HIGH) led to: the failed check refusing
-  Save instead of opening the invoice, Save's wait decided from the address itself, a Save left
-  behind by New not moving the user, any UUID version accepted, and future-dated drafts
-  rejected; four new tests failed against 608f5dd5d. Not changed: the redirect tests land on a
-  stand-in for the invoice page; loading an existing invoice is covered by
-  `FieldApplicationInvoice.test.tsx`. A fifth Luna round found the one-day limit could itself
-  cause a duplicate after a late refresh, and that the check's move skipped the leave-page
-  prompt: the time limit is gone (the check is owner, kind and unposted status), the move asks
-  as usual, and the route wrapper keeps the page for the page's own address rewrites (REPLACE)
-  while New (PUSH) and Back/Forward (POP) get a fresh page. Three new tests failed against
-  eb84edea4. Accepted: a hand-made link to the user's own unposted field invoice opens it.
-  A sixth Luna round: New pressed while the first Save was still creating the invoice kept the
-  same page; the route wrapper now gives a fresh page on every New (PUSH) or Back/Forward (POP)
-  arrival and keeps it only for the page's own REPLACE address rewrites (new test failed with the
-  previous wrapper). Two items are recorded below as known gaps, not fixed here.
-  CodeRabbit's second review (head eb1200120): a lost create reply followed by a refresh could
-  still duplicate. Fixed with the draft tag; three new tests (draft written before the create is
-  sent and used for its key; a refresh at the draft address reusing the key; New giving a new
-  key) failed against eb1200120. The invoice-list half of this PR moved to its own PR (#895) on
-  2026-10-12 so it is not held up by this page. Luna round 8 (no BLOCKER/HIGH): a rejected
-  address now also drops its draft tag (new test failed against fb788f29d), and the "page was
-  left" flag is cleared in the same commit that removes the page (a layout effect). Not
-  changed: the lost-reply test proves the page re-sends the same key; the database's replay of
-  a stored answer for a repeated key is existing `save_field_app_invoice` behaviour.
+- `src/pages/FieldApplicationInvoice.saveNavigation.test.tsx` runs the real router, the real
+  route wrapper and the real leave-page guard (only the database, sign-in and toasts are
+  mocked). Each new test was run first against the code before its fix, where it failed.
+- Refresh fix (CodeRabbit, PR #893): tests cover the first Save writing the created id into the
+  address while keeping the typed values; a refresh of that address opening the created invoice
+  with no second create; an address whose id is not an invoice id staying a new invoice; and New
+  pressed on that address starting a genuinely new invoice. They failed against f1b415fe3. A
+  first version kept the id in the browser tab's storage instead; two Luna rounds found it could
+  be lost or outlive its draft, so it was replaced by the address.
+- Luna rounds 3 to 8 (rounds 4, 7 and 8 had no BLOCKER/HIGH) added tests for Back between two
+  drafts, five kinds of address that must be ignored, a failed check refusing Save, Save waiting
+  while the check runs, a Save left behind by New not moving the user, any UUID version
+  accepted, the check's move asking before leaving, the route wrapper giving a fresh page on New
+  (PUSH) and Back/Forward (POP) while keeping it for the page's own REPLACE rewrites, and a
+  rejected address dropping its draft tag. Each failed against the commit before its fix
+  (877163547, 608f5dd5d, eb84edea4, fb788f29d).
+- CodeRabbit's second review (head eb1200120): three tests for the draft tag (written before the
+  create is sent and used for its key; a refresh at the draft address reusing the key; New
+  giving a new key) failed against eb1200120.
 - Codex review of 585b34f74 (P1: the stored answer expires after 24 hours; P2: a replay keeps
-  the first submission): fixed with the reopened-draft check above. Three new page tests (an
-  invoice created two days earlier is listed and Save waits, then "Start a new invoice instead"
-  creates under a new draft; Save refuses when the check cannot run; a new draft tag carries
-  its start time) failed against 585b34f74; new unit tests cover the draft tag's time.
-- After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
-  fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
+  the first submission): three new page tests (an invoice created two days earlier is listed and
+  Save waits, then "Start a new invoice instead" creates under a new draft; Save refuses when the
+  check cannot run; a new draft tag carries its start time) failed against 585b34f74; unit tests
+  in `src/lib/fieldAppNewInvoiceAddress.test.ts` cover the draft tag's time.
+- After merging main (with #895) on 2026-10-12: typecheck, lint and the full Vitest suite pass.
 
 ### Known gaps and deferred items (not fixed in this change)
 
 - **A reopened draft whose first create was still running.** If the page is refreshed while the
   first create is still on its way, the reopened page's search can finish before that create
-  is saved and find nothing. A Save then sends the same draft key: inside 24 hours the
-  database answers with the first create (no duplicate, but the first submission's values, not
-  what was re-typed; the page then opens that invoice). The real fix is a database link from an
-  invoice to its draft, which needs a migration.
-
-In plain English, everything the review rounds found that this change deliberately does not fix:
-
-- **"This season" comes from the computer's clock.** Which invoices get a season tag and which ones
-  the bulk actions (Post All, Unpost All, Select All) leave out depends on the date on the
-  person's computer, not the server. A wrong computer date around October 1 would treat last
-  season's invoices as this season's, or the reverse. Also, invoices created through paths that
-  use the database's default season are stamped from UTC time, so for about five hours on each
-  September 30 evening a new invoice is stamped "next season" and the bulk actions skip it until
-  midnight Chicago time.
-- **Lists still stop at 2,000 rows, newest first.** The lists now include older open invoices, so
-  if a list ever reaches its 2,000-row cap, the oldest still-open invoices are the first to be cut
-  off — the original bug again, for exactly those rows. A message appears when the cap is hit.
-  Not reachable at today's volume.
-- **The Orders list is still limited to this season.** `src/pages/Orders.tsx` uses the same
-  current-season-only filter the invoice lists used to, so last season's open orders (20 at the
-  time of the review) are hidden from it.
-- **Split-group season check looks at the selected rows.** On the Chemical Sales list, batch Post
-  checks the season of the selected rows only, while posting a split group posts every member
-  (including one from another season). Theoretical today: there are no live split groups, and a
-  database rule keeps split members in the same season.
+  is saved and find nothing. A Save then sends the same draft key: inside 24 hours the database
+  answers with the first create (no duplicate, but the first submission's values, not what was
+  re-typed; the page then opens that invoice). The real fix is a database link from an invoice
+  to its draft, which needs a migration.
 - **A partly-failed first save of a new field-application invoice.** If the first Save creates the
   invoice but a later step fails (for example the billing details), the page keeps a link to the
   invoice it created and a second Save updates it (a refresh opens that invoice instead). But
@@ -229,10 +100,9 @@ In plain English, everything the review rounds found that this change deliberate
   new until the page moves to the saved invoice (the server still refuses a filed-season change).
 - **Leaving while the first Save is still running, then re-typing it.** If someone presses Save
   on a new field-application invoice, leaves for another page before it finishes, and later
-  types the same application into a fresh New page, that Save creates a second invoice — as it
-  does on main today. The first Save's "Invoice created" message still appears. A screen cannot
-  tell a re-typed application from a new one; the real guard would be a database rule (for
-  example one draft invoice per field application), which is not part of this change.
+  types the same application into a fresh New page, that Save creates a second invoice, as it
+  does on main today. A screen cannot tell a re-typed application from a new one; the real guard
+  would be a database rule (for example one draft invoice per field application).
 - **New pressed during a Save can be dropped.** If someone presses New while a new invoice's
   first Save is running and the Save finishes while the "Unsaved Changes" box is still open,
   the New press can be lost and the page goes on to the saved invoice. Nothing is duplicated
@@ -240,18 +110,8 @@ In plain English, everything the review rounds found that this change deliberate
 - **A different sign-in while the page stays open is not re-checked by the page.** Signing out
   sends the browser to the login page, which closes this page; the database decides who may
   edit an invoice either way.
-- **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
-  field invoice has to be posted from its own page. Whether Post All should get an "include
-  older seasons" option is an owner decision.
 
 ### Not verified here
 
-- Not clicked through in a signed-in browser against live data. Before shipping: the Invoices
-  list showing the 2 overdue and the drafts; the Drafts tab showing last season's unposted field invoice
-  and the Post All confirm saying it is left out; that invoice posting from its own invoice page; a
-  new field-app Save landing on the saved invoice.
-- The list-test helper returns whole rows whatever columns a query selects, so it would not
-  notice a list that stopped selecting `season`. (Deferred product gaps are listed in "Known gaps
-  and deferred items" above.)
-- Owner decision (not made here): whether the server should also refuse posting an invoice into
-  a **season** other than its own (it already refuses a closed accounting period).
+- Not clicked through in a signed-in browser against live data: a new field-app Save landing on
+  the saved invoice, and a refresh at a draft address showing the list of recent invoices.

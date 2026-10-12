@@ -55,6 +55,7 @@ import {
 // unpost_invoice RPC exists yet) — the button is present for parity but inert.
 
 const QUERY_LIMIT = 2000;
+// One page of the Unpost All split-group member check; at or below the server’s response cap.
 
 // Same one-round-trip select as the Unposted list: invoice + customer + linked
 // job number + engine-built per-location rows + line items (chemicals).
@@ -397,11 +398,23 @@ export default function FieldInvoicesPostedPanel() {
     [visible],
   );
   // A row with no season counts as not this season (unknown), so it is left out too.
-  const candidates = useMemo(
-    () => (scope.kind === 'season' ? unpostable.filter((r) => isCurrentSeason(r.season)) : unpostable),
-    [unpostable, scope.kind],
-  );
-  const skippedOlderSeasonCount = unpostable.length - candidates.length;
+  // Split-group members are left out in EVERY scope: unpost_invoice unposts one member on its
+  // own, so Unpost All could leave a group partly unposted (for example beside a paid member),
+  // and a check in the browser cannot bind what the database then does (Codex review and
+  // Codex Sol, PR #895). A split group is unposted from its invoice page.
+  const candidatePlan = useMemo(() => {
+    const inScope = scope.kind === 'season' ? unpostable.filter((r) => isCurrentSeason(r.season)) : unpostable;
+    const candidates = inScope.filter((r) => !r.invoice_group_id);
+    return {
+      candidates,
+      skippedOlderSeasonCount: unpostable.length - inScope.length,
+      skippedGroupMemberCount: inScope.length - candidates.length,
+    };
+  }, [unpostable, scope.kind]);
+  const { candidates, skippedOlderSeasonCount, skippedGroupMemberCount } = candidatePlan;
+  const skippedGroupNote = skippedGroupMemberCount > 0
+    ? ` ${skippedGroupMemberCount} in a split group are left out too; unpost a split group from its invoice page.`
+    : '';
   // Unpost All's targets cross more than one month-end batch: it would touch multiple
   // batch totals (each must be re-reconciled / reprinted). Based on what Unpost All
   // would actually change, not on every row shown.
@@ -775,6 +788,7 @@ export default function FieldInvoicesPostedPanel() {
             {skippedOlderSeasonCount > 0
               ? ` Unpost All applies to this season's ${candidates.length} only; ${skippedOlderSeasonCount} from another season are left out.`
               : ' Unpost All applies to the unpaid ones.'}
+            {skippedGroupNote}
           </p>
           <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
             <Button variant="secondary" size="sm" icon={<Printer className="w-4 h-4" />} onClick={() => printAll('current')} loading={busy} disabled={visible.length === 0}>
@@ -818,7 +832,8 @@ export default function FieldInvoicesPostedPanel() {
           (skippedOlderSeasonCount > 0
             ? ` ${skippedOlderSeasonCount} unpaid invoice(s) in view not from this season are NOT included; ` +
               `choose that month batch in Scope to unpost them.`
-            : '')
+            : '') +
+          skippedGroupNote
         }
         confirmLabel={`Unpost ${candidates.length}`}
         variant="warning"

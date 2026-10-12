@@ -50,7 +50,10 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   after 8 seconds; the page waits two minutes from the first Save, and says so if Save is pressed
   sooner). Nothing found then means the earlier Save saved nothing, so the same draft key holds
   no stored answer and the create saves what is on screen (Codex Sol on PR #893). Deleted
-  invoices count in the search too. If the search cannot run, Save refuses.
+  invoices count in the search too. If the search cannot run, Save refuses. **Start a new invoice
+  instead** follows the same rule: it waits out the two minutes, searches again, and if an
+  invoice appeared that was not in the list it shows the new list and asks once more (Codex Sol on
+  PR #893: an unrelated invoice in the list must not let a second create race the first).
 - If the billing details step fails after the invoice was created and the user changes a
   billing value (discount, PO, terms, notes) before saving again, the retry now uses a new
   repeat-protection key, so the change is written instead of the server answering with its first
@@ -101,6 +104,9 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
 - Codex Sol on cd9a1f46b (HIGH: after Stay, Save updated the address's invoice from a partly
   re-typed form): the test that expected that update now expects Save to wait with a link to the
   invoice; it failed against cd9a1f46b.
+- Codex Sol on 06622fe1f (HIGH: "Start a new invoice instead" skipped the two-minute wait): two
+  new tests (the button waits while the first create may be running; it searches again and shows
+  an invoice that appeared since) failed against 06622fe1f.
 - After merging main (with #895) on 2026-10-12: typecheck, lint and the full Vitest suite pass.
 
 ### Known gaps and deferred items (not fixed in this change)

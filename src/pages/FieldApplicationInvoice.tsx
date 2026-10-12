@@ -176,6 +176,13 @@ type LostCreateCheck =
 // statement_timeout, read live 2026-10-12); the rest is slack for the network.
 const LOST_CREATE_IN_FLIGHT_MS = 2 * 60 * 1000;
 
+/** True while the create a draft's first Save sent may still be running (a token without its
+ * time, or one from a clock far ahead, is treated as long finished). */
+function lostCreateMayBeRunning(draft: string, now: number = Date.now()): boolean {
+  const startedAt = draftTokenStartedAt(draft);
+  return startedAt !== null && now < startedAt + LOST_CREATE_IN_FLIGHT_MS && startedAt < now + LOST_CREATE_IN_FLIGHT_MS;
+}
+
 /**
  * Field-application invoices this user created since a draft started (an hour of slack for a
  * computer clock running ahead of the server; a token without its time looks back 30 days).
@@ -668,8 +675,32 @@ export default function FieldApplicationInvoice() {
   }, [profile?.id, toast]);
 
   // "None of these": drop the draft (the next Save mints a new one, so its create is not
-  // answered with the old draft's stored reply). Same page, typed values kept.
-  const startFreshDraft = () => {
+  // answered with the old draft's stored reply). Same page, typed values kept. Not while the
+  // draft's first create may still be running, and not before a fresh search: an unrelated
+  // invoice in the list must not let a second create race the first (Codex Sol, PR #893).
+  const startFreshDraft = async () => {
+    const draft = lostCreateDraftRef.current;
+    if (draft && profile?.id) {
+      if (lostCreateMayBeRunning(draft)) {
+        toast('info', 'Your last Save on this page may still be finishing. Wait a minute, then try again.');
+        return;
+      }
+      let invoices: LostCreateCandidate[];
+      try {
+        invoices = await findLostCreates(draft, profile.id);
+      } catch (err) {
+        Sentry.captureException(err, { tags: { context: 'field_app_lost_create_check' } });
+        toast('error', 'Could not check for the invoice your last Save may have created. Please try again.');
+        return;
+      }
+      if (lostCreateDraftRef.current !== draft) return;
+      const shown = new Set(lostCreateCheck.state === 'found' ? lostCreateCheck.invoices.map((inv) => inv.id) : []);
+      if (invoices.some((inv) => !shown.has(inv.id))) {
+        setLostCreateCheck({ state: 'found', invoices });
+        toast('info', 'The list changed. Check it again before starting a new invoice.');
+        return;
+      }
+    }
     lostCreateDraftRef.current = null;
     draftTokenRef.current = null;
     setLostCreateCheck({ state: 'none' });
@@ -1751,9 +1782,7 @@ export default function FieldApplicationInvoice() {
     // answer to replay and the create below saves what is on screen (Codex Sol, PR #893).
     if (isNew && !createdInvoiceIdRef.current && lostCreateDraftRef.current) {
       const draft = lostCreateDraftRef.current;
-      const startedAt = draftTokenStartedAt(draft);
-      const now = Date.now();
-      if (startedAt !== null && now < startedAt + LOST_CREATE_IN_FLIGHT_MS && startedAt < now + LOST_CREATE_IN_FLIGHT_MS) {
+      if (lostCreateMayBeRunning(draft)) {
         toast('info', 'Your last Save on this page may still be finishing. Wait a minute, then press Save again.');
         return;
       }

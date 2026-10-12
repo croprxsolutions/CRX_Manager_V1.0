@@ -363,6 +363,43 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(saveCalls()).toHaveLength(0);
   });
 
+  it('"Start a new invoice instead" waits while the first create may still be running', async () => {
+    // An unrelated recent invoice is listed while the first create is still on its way; starting
+    // a new draft now would let a second create race the first (Codex Sol, PR #893).
+    lostCreateRows = [{ id: SECOND_ID, invoice_number: 'FA-0999', status: 'draft', created_at: new Date().toISOString(), deleted_at: null }];
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    const DRAFT = mintDraftToken(Date.now() - 10_000);
+    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
+    expect(await screen.findByRole('link', { name: 'FA-0999' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may still be finishing')));
+    expect(screen.getByRole('link', { name: 'FA-0999' })).toBeInTheDocument();
+    expect(addressParam(router, 'draft')).toBe(DRAFT);
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('"Start a new invoice instead" searches again and shows an invoice that appeared since', async () => {
+    const old = { id: SECOND_ID, invoice_number: 'FA-0999', status: 'draft', created_at: new Date().toISOString(), deleted_at: null };
+    lostCreateRows = [old];
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    const DRAFT = mintDraftToken(Date.now() - 10 * 60 * 1000);
+    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
+    expect(await screen.findByRole('link', { name: 'FA-0999' })).toBeInTheDocument();
+
+    // The first create was saved after the page's search.
+    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1003', status: 'draft', created_at: new Date().toISOString(), deleted_at: null }, old];
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
+    expect(await screen.findByRole('link', { name: 'FA-1003' })).toBeInTheDocument();
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('The list changed'));
+    expect(addressParam(router, 'draft')).toBe(DRAFT);
+
+    // Pressed again with the same list: the user has seen it, so a new draft starts.
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'FA-1003' })).not.toBeInTheDocument());
+    expect(addressParam(router, 'draft')).toBeNull();
+  });
+
   it('a billing retry with changed values uses a new key; an unchanged retry reuses it', async () => {
     // The billing RPC answers a repeated key with its first result without applying anything,
     // so a changed retry under the old key would report success with the old values (Codex

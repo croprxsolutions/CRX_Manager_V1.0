@@ -153,6 +153,7 @@ interface LostCreateCandidate {
   invoice_number: string | null;
   status: string;
   created_at: string;
+  deleted_at: string | null;
 }
 
 type LostCreateCheck =
@@ -160,6 +161,30 @@ type LostCreateCheck =
   | { state: 'checking' }
   | { state: 'failed' }
   | { state: 'found'; invoices: LostCreateCandidate[] };
+
+// A create sent before the page was reopened has finished (saved or rolled back) well within
+// this window: the database stops any signed-in statement after 8 seconds (authenticated
+// statement_timeout, read live 2026-10-12); the rest is slack for the network.
+const LOST_CREATE_IN_FLIGHT_MS = 2 * 60 * 1000;
+
+/**
+ * Field-application invoices this user created since a draft started (an hour of slack for a
+ * computer clock running ahead of the server; a token without its time looks back 30 days).
+ * Deleted ones count too: the create's stored answer would still name them.
+ */
+async function findLostCreates(draft: string, userId: string): Promise<LostCreateCandidate[]> {
+  const startedAt = draftTokenStartedAt(draft) ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('id, invoice_number, status, created_at, deleted_at')
+    .eq('invoice_type', 'field_application')
+    .eq('created_by', userId)
+    .gte('created_at', new Date(startedAt - 60 * 60 * 1000).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  return (data ?? []) as LostCreateCandidate[];
+}
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'locations', label: 'Locations', icon: <MapPin className="w-4 h-4" /> },
@@ -200,8 +225,10 @@ export default function FieldApplicationInvoice() {
   // #33: per-invoice key cache for the billing-details RPC (PO/terms/due/footer/memo
   // + per-invoice Discount Earned). Keyed by the editor's invoice id (or '__new__'
   // before the first save) so a retry after a timeout reuses the SAME idempotency key
-  // and the server dedup never double-applies.
-  const billingKeysRef = useRef<Record<string, string>>({});
+  // and the server dedup never double-applies. The key is bound to the values it sent: the
+  // server answers a repeated key with its first result without applying anything, so a
+  // retry with CHANGED billing values gets a new key (Codex Sol, PR #893).
+  const billingKeysRef = useRef<Record<string, { key: string; fingerprint: string }>>({});
   const postIdem = useIdempotencyKey('post_invoice_group', profile?.id || '');
   // Keep receipt ownership scoped by invoice id even though the route wrapper now
   // remounts per record. Reset only after assertRpcResult confirms success.
@@ -599,31 +626,17 @@ export default function FieldApplicationInvoice() {
     return () => { cancelled = true; };
   }, [isNew, createdIdInAddress, profile?.id, toast, navigate]);
 
-  // The lost-create check above. A token minted before this change carries no time, so it
-  // looks back 30 days; an hour of slack covers a computer clock running ahead of the server.
+  // The lost-create check above, run when the page opens. handleSave runs it again right
+  // before the create (an earlier create may still have been running at this point).
   useEffect(() => {
     const draft = lostCreateDraftRef.current;
     if (!draft || !profile?.id) return;
     const userId = profile.id;
-    const startedAt = draftTokenStartedAt(draft) ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const since = new Date(startedAt - 60 * 60 * 1000).toISOString();
     let cancelled = false;
     (async () => {
       try {
-        const { data, error } = await supabase
-          .from('invoices')
-          .select('id, invoice_number, status, created_at')
-          .eq('invoice_type', 'field_application')
-          .eq('created_by', userId)
-          .is('deleted_at', null)
-          .gte('created_at', since)
-          .order('created_at', { ascending: false })
-          .limit(20);
-        if (error) throw error;
+        const invoices = await findLostCreates(draft, userId);
         if (cancelled) return;
-        const invoices = (data ?? []) as LostCreateCandidate[];
-        // None found: no earlier create committed, so this draft's key stays (a create still
-        // in flight when the page reloaded is then answered by its stored reply, not doubled).
         setLostCreateCheck(invoices.length > 0 ? { state: 'found', invoices } : { state: 'none' });
       } catch (err) {
         if (cancelled) return;
@@ -1713,6 +1726,33 @@ export default function FieldApplicationInvoice() {
           : 'Your last Save on this page may already have created this invoice. Open it from the list at the top, or choose “Start a new invoice instead”.');
       return;
     }
+    // A reopened draft whose search found nothing. The create sent before the reload may have
+    // still been running then; once it has certainly finished, search again right before this
+    // create. Nothing found then means it saved nothing, so this draft's key holds no stored
+    // answer to replay and the create below saves what is on screen (Codex Sol, PR #893).
+    if (isNew && !createdInvoiceIdRef.current && lostCreateDraftRef.current) {
+      const draft = lostCreateDraftRef.current;
+      const startedAt = draftTokenStartedAt(draft);
+      const now = Date.now();
+      if (startedAt !== null && now < startedAt + LOST_CREATE_IN_FLIGHT_MS && startedAt < now + LOST_CREATE_IN_FLIGHT_MS) {
+        toast('info', 'Your last Save on this page may still be finishing. Wait a minute, then press Save again.');
+        return;
+      }
+      let invoices: LostCreateCandidate[];
+      try {
+        invoices = await findLostCreates(draft, profile.id);
+      } catch (err) {
+        Sentry.captureException(err, { tags: { context: 'field_app_lost_create_check' } });
+        toast('error', 'Could not check whether your last Save on this page created the invoice, so nothing was saved. Please try again.');
+        return;
+      }
+      if (lostCreateDraftRef.current !== draft) return;
+      if (invoices.length > 0) {
+        setLostCreateCheck({ state: 'found', invoices });
+        toast('info', 'Your last Save on this page already created an invoice. Open it from the list at the top, or choose “Start a new invoice instead”.');
+        return;
+      }
+    }
     if (crossSeasonDateEdit) {
       toast('error', filedSeasonDateMessage);
       return;
@@ -2012,10 +2052,7 @@ export default function FieldApplicationInvoice() {
           const cents = Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : 0;
           discounts[invId] = { amount_cents: cents, date: (entry?.date || null) };
         }
-        const billingKey =
-          billingKeysRef.current[id || '__new__'] ||
-          (billingKeysRef.current[id || '__new__'] = generateIdempotencyKey('update_field_app_invoice_billing', profile.id));
-        const billingResult = await supabase.rpc('update_field_app_invoice_billing', {
+        const billingArgs = {
           p_invoice_ids: ids,
           // Omit (undefined) when blank → the RPC's NULL default clears the column,
           // matching the Applied-Info "blank intentionally clears" behavior.
@@ -2029,6 +2066,16 @@ export default function FieldApplicationInvoice() {
           p_internal_notes: internalMemo || undefined,
           p_discounts: discounts,
           p_performed_by: profile.id,
+        };
+        const billingKeyId = id || '__new__';
+        const billingFingerprint = JSON.stringify(billingArgs);
+        const cachedBillingKey = billingKeysRef.current[billingKeyId];
+        const billingKey = cachedBillingKey?.fingerprint === billingFingerprint
+          ? cachedBillingKey.key
+          : generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
+        billingKeysRef.current[billingKeyId] = { key: billingKey, fingerprint: billingFingerprint };
+        const billingResult = await supabase.rpc('update_field_app_invoice_billing', {
+          ...billingArgs,
           p_idempotency_key: billingKey,
         });
         if (billingResult.error) {
@@ -2796,7 +2843,7 @@ export default function FieldApplicationInvoice() {
                   <Link className="font-medium underline" to={`/invoices/field-app/${inv.id}`}>
                     {inv.invoice_number || inv.id.slice(0, 8)}
                   </Link>
-                  {` (${inv.status}, created ${new Date(inv.created_at).toLocaleString()})`}
+                  {` (${inv.deleted_at ? 'deleted' : inv.status}, created ${new Date(inv.created_at).toLocaleString()})`}
                 </li>
               ))}
             </ul>

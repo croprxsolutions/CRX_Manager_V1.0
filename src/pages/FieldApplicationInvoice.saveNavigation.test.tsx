@@ -91,7 +91,7 @@ let lostCreateRows: Array<Record<string, unknown>> = [];
 let lostCreateError: { message: string } | null = null;
 /** The created_at lower bound the reopened-draft check asked for, if it ran. */
 let lostCreateSince: string | null = null;
-const LOST_CREATE_SELECT = 'id, invoice_number, status, created_at';
+const LOST_CREATE_SELECT = 'id, invoice_number, status, created_at, deleted_at';
 
 /**
  * Like emptyChain, but maybeSingle answers the created-id check with the row for the filtered
@@ -300,7 +300,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     // (Codex review, PR #893).
     const startedAt = Date.now() - 2 * 24 * 60 * 60 * 1000;
     const DRAFT = mintDraftToken(startedAt);
-    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1001', status: 'draft', created_at: new Date(startedAt + 5000).toISOString() }];
+    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1001', status: 'draft', created_at: new Date(startedAt + 5000).toISOString(), deleted_at: null }];
     mockSaveWithFirstBillingFailure(SECOND_ID);
     const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
 
@@ -333,6 +333,71 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('nothing was saved'));
     expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('a reopened draft waits while its earlier create may still be running', async () => {
+    // The page was reloaded seconds after the first Save sent its create: the search can run
+    // before that create is saved, and a create with the same key would then replay the FIRST
+    // submission instead of what is typed now (Codex Sol, PR #893).
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    await renderAt(`${NEW_PATH}?draft=${mintDraftToken(Date.now() - 10_000)}`);
+    await waitFor(() => expect(lostCreateSince).not.toBeNull());
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may still be finishing')));
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('a reopened draft searches again right before saving, and an invoice found then stops the create', async () => {
+    // Nothing yet when the page opened; the earlier create was saved after that search.
+    mockSaveWithFirstBillingFailure(SECOND_ID);
+    await renderAt(`${NEW_PATH}?draft=${mintDraftToken(Date.now() - 10 * 60 * 1000)}`);
+    await waitFor(() => expect(lostCreateSince).not.toBeNull());
+    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1002', status: 'draft', created_at: new Date().toISOString(), deleted_at: null }];
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    expect(await screen.findByRole('link', { name: 'FA-1002' })).toBeInTheDocument();
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('already created an invoice'));
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('a billing retry with changed values uses a new key; an unchanged retry reuses it', async () => {
+    // The billing RPC answers a repeated key with its first result without applying anything,
+    // so a changed retry under the old key would report success with the old values (Codex
+    // Sol, PR #893).
+    let billingAttempts = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      if (name === 'update_field_app_invoice_billing') {
+        billingAttempts += 1;
+        return Promise.resolve(billingAttempts <= 2
+          ? { data: null, error: { message: 'network blip' } }
+          : { data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    await renderAt();
+    await createWithPartialFailureAndStay();
+    const billingKeys = () => mockRpc.mock.calls
+      .filter(([n]) => n === 'update_field_app_invoice_billing')
+      .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+
+    // Same values again: the same key, so a first attempt that did land is not applied twice.
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(billingKeys()).toHaveLength(2));
+    expect(billingKeys()[1]).toBe(billingKeys()[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+
+    // Changed values: a new key, so the server applies them.
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(billingKeys()).toHaveLength(3));
+    expect(billingKeys()[2]).not.toBe(billingKeys()[0]);
   });
 
   it('a new draft tag carries the time it started', async () => {

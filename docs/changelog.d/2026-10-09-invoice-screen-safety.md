@@ -43,9 +43,17 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   created since the draft started (the draft tag carries its start time; the search allows an
   hour for a computer clock running fast). If there are any, a box at the top lists them with
   links, and Save waits until the user opens one or presses **Start a new invoice instead**
-  (which starts a new draft, keeping what was typed). If there are none, Save goes ahead with the
-  same draft, so a create still on its way is answered rather than doubled. If the search cannot
-  run, Save refuses until a reload.
+  (which starts a new draft, keeping what was typed). The search runs again right before the
+  create, once the earlier create has certainly finished (the database stops a signed-in request
+  after 8 seconds; the page waits two minutes from the first Save, and says so if Save is pressed
+  sooner). Nothing found then means the earlier Save saved nothing, so the same draft key holds
+  no stored answer and the create saves what is on screen (Codex Sol on PR #893). Deleted
+  invoices count in the search too. If the search cannot run, Save refuses.
+- If the billing details step fails after the invoice was created and the user changes a
+  billing value (discount, PO, terms, notes) before saving again, the retry now uses a new
+  repeat-protection key, so the change is written instead of the server answering with its first
+  result. An unchanged retry keeps the same key, so a first attempt that did land is not applied
+  twice (Codex Sol on PR #893).
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -83,16 +91,15 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   Save waits, then "Start a new invoice instead" creates under a new draft; Save refuses when the
   check cannot run; a new draft tag carries its start time) failed against 585b34f74; unit tests
   in `src/lib/fieldAppNewInvoiceAddress.test.ts` cover the draft tag's time.
+- Codex Sol on d5e4568d9 (HIGH: a billing retry with changed values replayed the first result;
+  HIGH: a reload while the first create was still running could replay the first submission):
+  three new tests (a billing retry with changed values gets a new key and an unchanged one keeps
+  it; Save waits while the earlier create may still be running; an invoice found by the search
+  right before saving stops the create) failed against d5e4568d9.
 - After merging main (with #895) on 2026-10-12: typecheck, lint and the full Vitest suite pass.
 
 ### Known gaps and deferred items (not fixed in this change)
 
-- **A reopened draft whose first create was still running.** If the page is refreshed while the
-  first create is still on its way, the reopened page's search can finish before that create
-  is saved and find nothing. A Save then sends the same draft key: inside 24 hours the database
-  answers with the first create (no duplicate, but the first submission's values, not what was
-  re-typed; the page then opens that invoice). The real fix is a database link from an invoice
-  to its draft, which needs a migration.
 - **A partly-failed first save of a new field-application invoice.** If the first Save creates the
   invoice but a later step fails (for example the billing details), the page keeps a link to the
   invoice it created and a second Save updates it (a refresh opens that invoice instead). But

@@ -322,9 +322,12 @@ const SQL_KEYWORD_FNS = new Set([
 
 // An unquoted identifier folds to lower case and a quoted one keeps its case, so
 // `AUTH.uid()` is auth.uid() but `"AUTH".uid()` is another schema (Luna, PR #882).
-// PostgreSQL identifiers may contain `$`, so `x$auth` is a different schema too.
+// An identifier character is what PostgreSQL's own scanner accepts: ASCII letters,
+// digits, `_`, `$` and every non-ASCII character. So `x$auth` and `éauth` are other
+// schemas too (Luna, PR #882).
+const IDENT_CHAR = "\\w$\\u0080-\\uffff";
 const caseless = (word) => word.replace(/[a-z]/g, (c) => `[${c}${c.toUpperCase()}]`);
-const schemaBefore = (word) => new RegExp(`(?:^|[^\\w$."])(?:${caseless(word)}|"${word}")\\s*\\.\\s*$`);
+const schemaBefore = (word) => new RegExp(`(?:^|[^${IDENT_CHAR}."])(?:${caseless(word)}|"${word}")\\s*\\.\\s*$`);
 const AUTH_SCHEMA_BEFORE_RE = schemaBefore("auth");
 const PG_CATALOG_BEFORE_RE = schemaBefore("pg_catalog");
 
@@ -334,9 +337,10 @@ export function findNonReadFunctionCall(sqlText) {
   // and comment prose such as `-- cancel_order(42)` is not a call.
   const text = stripCommentsQuoteAware(String(sqlText || ""));
   if (!/\bselect\b/i.test(text)) return null;
-  // A name starts after any identifier character, `$` included: `my$count(…)` is
-  // one function named my$count, not the built-in count (Luna, PR #882).
-  const re = /(?<![\w$])(?:"?public"?\s*\.\s*)?"?([a-z_][a-z0-9_$]*)"?\s*\(/gi;
+  // A name starts after any identifier character, `$` and non-ASCII included:
+  // `my$count(…)` and `écount(…)` are application functions, not the built-in count
+  // (Luna, PR #882).
+  const re = /(?<![\w$\u0080-￿])(?:"?public"?\s*\.\s*)?"?([a-z_\u0080-￿][a-z0-9_$\u0080-￿]*)"?\s*\(/gi;
   let m;
   while ((m = re.exec(text)) !== null) {
     const name = m[1].toLowerCase();

@@ -133,6 +133,9 @@ ok(["SELECT evil.get_invoice(42)", 'SELECT "PUBLIC".get_invoice(42)', 'SELECT "G
   .every((sql) => classifySql(sql).block), "a read-named function outside public is not vouched for (Luna, PR #882)");
 ok(["SELECT get_invoice(42)", "SELECT public.get_invoice(42)", 'SELECT "public".get_invoice(42)', "SELECT PUBLIC.list_orders(1)"]
   .every((sql) => !classifySql(sql).block), "a read-named function in public is still a read");
+ok(['SELECT "éauth".uid()', "SELECT éauth.uid()", "SELECT éget_invoice(42)", "SELECT écount(1)",
+  "SELECT xpg_catalogé.pg_get_triggerdef(1)", "SELECT é.pg_get_triggerdef(1)"]
+  .every((sql) => classifySql(sql).block), "a non-ASCII character is part of a PostgreSQL identifier (Luna, PR #882)");
 ok(["SELECT AUTH.uid()", "SELECT auth.UID()", "SELECT PG_CATALOG.pg_get_triggerdef(1)",
   'SELECT "count"(*) FROM orders', "SELECT COUNT(*) FROM orders"]
   .every((sql) => !classifySql(sql).block), "an unquoted name folds to lower case and is still a read");

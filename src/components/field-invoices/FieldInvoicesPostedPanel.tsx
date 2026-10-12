@@ -55,6 +55,8 @@ import {
 // unpost_invoice RPC exists yet) — the button is present for parity but inert.
 
 const QUERY_LIMIT = 2000;
+// One page of the Unpost All split-group member check; at or below the server’s response cap.
+const GROUP_MEMBER_PAGE_SIZE = 1000;
 
 // Same one-round-trip select as the Unposted list: invoice + customer + linked
 // job number + engine-built per-location rows + line items (chemicals).
@@ -397,11 +399,27 @@ export default function FieldInvoicesPostedPanel() {
     [visible],
   );
   // A row with no season counts as not this season (unknown), so it is left out too.
-  const candidates = useMemo(
-    () => (scope.kind === 'season' ? unpostable.filter((r) => isCurrentSeason(r.season)) : unpostable),
-    [unpostable, scope.kind],
-  );
-  const skippedOlderSeasonCount = unpostable.length - candidates.length;
+  // unpost_invoice unposts one member of a split group on its own, so leaving out only a
+  // group's other-season member would leave the group half-unposted. In this scope a group
+  // is left out whole when any loaded member is from another season; runUnpostAll checks
+  // every member on the server before unposting (Codex review, PR #895).
+  const candidatePlan = useMemo(() => {
+    if (scope.kind !== 'season') return { candidates: unpostable, skippedOlderSeasonCount: 0, skippedGroupMemberCount: 0 };
+    const otherSeasonGroupIds = new Set(
+      rows.filter((r) => r.invoice_group_id && !isCurrentSeason(r.season)).map((r) => r.invoice_group_id as string),
+    );
+    const thisSeason = unpostable.filter((r) => isCurrentSeason(r.season));
+    const candidates = thisSeason.filter((r) => !(r.invoice_group_id && otherSeasonGroupIds.has(r.invoice_group_id)));
+    return {
+      candidates,
+      skippedOlderSeasonCount: unpostable.length - thisSeason.length,
+      skippedGroupMemberCount: thisSeason.length - candidates.length,
+    };
+  }, [rows, unpostable, scope.kind]);
+  const { candidates, skippedOlderSeasonCount, skippedGroupMemberCount } = candidatePlan;
+  const skippedGroupNote = skippedGroupMemberCount > 0
+    ? ` ${skippedGroupMemberCount} in a split group with a member from another season are left out too; unpost them from the invoice page.`
+    : '';
   // Unpost All's targets cross more than one month-end batch: it would touch multiple
   // batch totals (each must be re-reconciled / reprinted). Based on what Unpost All
   // would actually change, not on every row shown.
@@ -425,7 +443,38 @@ export default function FieldInvoicesPostedPanel() {
     let ok = 0;
     const failures: string[] = [];
     try {
+      // A member this list did not load (an older paid one, or one past the row limit) can
+      // still be from another season, so read every member of each candidate group first,
+      // page by page (one response is capped at 1,000 rows).
+      const otherSeasonGroupIds = new Set<string>();
+      const groupIds = [...new Set(candidates.map((r) => r.invoice_group_id).filter((g): g is string => !!g))];
+      if (scope.kind === 'season' && groupIds.length > 0) {
+        for (let from = 0; ; from += GROUP_MEMBER_PAGE_SIZE) {
+          const { data: memberRows, error: memberError } = await supabase
+            .from('invoices')
+            .select('id, invoice_group_id, season')
+            .in('invoice_group_id', groupIds)
+            .in('status', ['posted', 'overdue', 'paid'])
+            .is('deleted_at', null)
+            .order('id')
+            .range(from, from + GROUP_MEMBER_PAGE_SIZE - 1);
+          if (memberError) {
+            Sentry.captureException(memberError, { tags: { page: 'field-invoices-posted', step: 'unpost_all_group_check' } });
+            toast('error', 'Could not check the split groups’ members, so nothing was unposted. Please try again.');
+            return;
+          }
+          const page = (memberRows ?? []) as Array<{ invoice_group_id: string | null; season: number | null }>;
+          for (const member of page) {
+            if (member.invoice_group_id && !isCurrentSeason(member.season)) otherSeasonGroupIds.add(member.invoice_group_id);
+          }
+          if (page.length < GROUP_MEMBER_PAGE_SIZE) break;
+        }
+      }
       for (const row of candidates) {
+        if (row.invoice_group_id && otherSeasonGroupIds.has(row.invoice_group_id)) {
+          failures.push(`${row.invoice_number}: its split group has a member from another season — unpost it from its own invoice page`);
+          continue;
+        }
         // Reuse a cached per-invoice key on retry so the server dedup matches.
         if (!unpostKeysRef.current[row.id]) {
           unpostKeysRef.current[row.id] = generateIdempotencyKey('unpost_invoice', `${profile.id}:${row.id}`);
@@ -772,8 +821,8 @@ export default function FieldInvoicesPostedPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-secondary">
             Print actions apply to all {totals.count} invoice(s) currently shown.
-            {skippedOlderSeasonCount > 0
-              ? ` Unpost All applies to this season's ${candidates.length} only; ${skippedOlderSeasonCount} from another season are left out.`
+            {skippedOlderSeasonCount > 0 || skippedGroupMemberCount > 0
+              ? ` Unpost All applies to this season's ${candidates.length} only; ${skippedOlderSeasonCount} from another season are left out.${skippedGroupNote}`
               : ' Unpost All applies to the unpaid ones.'}
           </p>
           <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
@@ -818,7 +867,8 @@ export default function FieldInvoicesPostedPanel() {
           (skippedOlderSeasonCount > 0
             ? ` ${skippedOlderSeasonCount} unpaid invoice(s) in view not from this season are NOT included; ` +
               `choose that month batch in Scope to unpost them.`
-            : '')
+            : '') +
+          skippedGroupNote
         }
         confirmLabel={`Unpost ${candidates.length}`}
         variant="warning"

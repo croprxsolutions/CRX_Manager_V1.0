@@ -197,6 +197,10 @@ In plain English, everything the review rounds found that this change deliberate
   does on main today. The first Save's "Invoice created" message still appears. A screen cannot
   tell a re-typed application from a new one; the real guard would be a database rule (for
   example one draft invoice per field application), which is not part of this change.
+- **New pressed during a Save can be dropped.** If someone presses New while a new invoice's
+  first Save is running and the Save finishes while the "Unsaved Changes" box is still open,
+  the New press can be lost and the page goes on to the saved invoice. Nothing is duplicated
+  or lost; press New again. (Luna round 7, MED, accepted.)
 - **A different sign-in while the page stays open is not re-checked by the page.** Signing out
   sends the browser to the login page, which closes this page; the database decides who may
   edit an invoice either way.

@@ -316,6 +316,20 @@ try {
     "an approval that cannot be put in place is reported as not recorded");
   ok(!readdirSync(dir).some((n) => n.includes(".tmp-")), "a failed atomic write leaves no temporary file");
   ok(existsSync(path.join(dir, requestFileName("999003"))), "a failed write leaves the request pending");
+  // The code is retired BEFORE the approval is written (Luna LOW round 4, CodeRabbit):
+  // a failed write leaves it retired, so the same reply cannot be tried again.
+  ok(existsSync(path.join(dir, usedCodeMarkerName("999003"))), "the code is retired even when the approval could not be saved");
+  refuses(rec({ code: "999003", dirs: [dir], reply: "approve 999003", now: APPROVED }), "already used",
+    "after a failed save the old code is refused; a fresh code is needed");
+  // If the code cannot be retired, nothing is approved.
+  mkdirSync(path.join(tmp, "c", ".claude", "session-state"), { recursive: true });
+  const cdir = path.join(tmp, "c", ".claude", "session-state");
+  writeApprovalRequest(cdir, buildApprovalPayload({ ...base, migration: "20260914101600_noretire", code: "131313" }));
+  mkdirSync(path.join(cdir, usedCodeMarkerName("131313"))); // an existing marker the exclusive create cannot replace
+  refuses(rec({ code: "131313", dirs: [cdir], reply: "approve 131313", now: APPROVED }), "already used",
+    "a code whose retirement marker already exists is refused");
+  ok(!existsSync(path.join(cdir, approvalFileName(safeMigrationName("20260914101600_noretire")))),
+    "no approval is written when the code cannot be retired");
   ok(rec({ code: "999001", dirs: [dir], reply: "x", now: APPROVED }).ok === false, "(control) an unknown code is still refused");
 
   // Used markers: the apply's single-use claim.

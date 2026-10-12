@@ -251,6 +251,18 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, now = Date.n
   if (!Number.isFinite(deadline) || now > deadline) return no(`the request for code ${code} expired at ${p.expiresAt}`);
   const approval = { payload: payloadText, approvedAt: new Date(now).toISOString(), via: OWNER_APPROVAL_VIA, reply: clip(String(reply ?? "").trim(), 40) };
   const out = path.join(dir, selftest ? selfTestResultName(code) : approvalFileName(safeMigrationName(p.migration)));
+  // Retire the code FIRST, exclusively: if it cannot be retired, nothing is
+  // approved, so a code is never live without its retirement on disk. If the
+  // approval write below then fails, the code stays retired and Mason is asked
+  // for a fresh one — the safe direction (Luna LOW round 4, CodeRabbit, PR #894).
+  try {
+    writeFileSync(path.join(dir, usedCodeMarkerName(code)),
+      `${JSON.stringify({ code, usedAt: approval.approvedAt }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  } catch (e) {
+    return no(e?.code === "EEXIST"
+      ? `the code ${code} was already used; ask for a fresh one`
+      : `the code ${code} could not be retired (${errText(e)}), so nothing was approved`);
+  }
   // Write beside the target, then rename into place: the apply gate never reads a
   // half-written approval, and replacing an earlier one is atomic (CodeRabbit, PR #894).
   const tmp = `${out}.tmp-${process.pid}-${now}`;
@@ -265,10 +277,6 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, now = Date.n
   // the request afterwards (a Windows file lock) still reports success; saying
   // "nothing was approved" would misstate what the apply gate will accept (Codex
   // P2, PR #894). A leftover request can only be re-approved by another reply.
-  // Retire the code. Best effort: if this marker cannot be written, a later request
-  // drawing the same code is the one-in-a-million case this marker exists to remove.
-  try { writeFileSync(path.join(dir, usedCodeMarkerName(code)), `${JSON.stringify({ code, usedAt: approval.approvedAt }, null, 2)}\n`, "utf8"); }
-  catch { /* see above */ }
   let requestLeft = false;
   try { removeRequest(file); } catch { requestLeft = true; }
   return { ok: true, kind: selftest ? "selftest" : "migration", payload: p, file: out, requestLeft };

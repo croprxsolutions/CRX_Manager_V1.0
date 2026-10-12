@@ -13,7 +13,10 @@ less." He was told the trade-off below and replied "go - i accept the trade off"
   reply. `--selftest` builds a request that approves nothing, to prove the reply path.
 - `.claude/hooks/owner-approval-prompt.mjs` (new, wired in `prompt-router.mjs`): when Mason's WHOLE
   message is `approve <code>` (a trailing `.` or `!` is accepted, since phones add punctuation), the
-  pending request with that code becomes an approval file stamped with the reply time. Requests are
+  pending request with that code becomes an approval file stamped with the reply time. The code is
+  retired exclusively BEFORE the approval is written, so if it cannot be retired nothing is approved,
+  and a failed approval write leaves it retired (a fresh code is needed) (Luna LOW, CodeRabbit).
+  Messages say an approval was recorded from the reply, not that Mason provably sent it. Requests are
   looked up ONLY in the folders of the session Mason replies in (Codex P1 on this PR), and the reply
   counts only when its `session_id` is the session that built the request, since two sessions can
   share one checkout (Luna HIGH, round 2). If the approval is saved
@@ -52,7 +55,7 @@ with his permissions, and only Windows Hello could rule that out. The file sits 
 `.claude/session-state`, which the review-proof guard protects like every other proof.
 
 **Proof observed.**
-- `owner-approval-lib.test.mjs`: 147 assertions. They include every verifier refusal, 21 messages
+- `owner-approval-lib.test.mjs`: 151 assertions. They include every verifier refusal, 21 messages
   that must not count as a reply (peer, quoted, code, longer sentences, wrong length), replies
   from another session or folder, a retired code, and the atomic write (replace, failure, no
   temporary file left). The reply hook also runs as a real process, alone and through

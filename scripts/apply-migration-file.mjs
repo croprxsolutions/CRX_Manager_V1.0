@@ -347,14 +347,14 @@ if (verdict?.decision !== "allow") {
 console.log("APPLY GATE PASSED — ordering, autopilot state, destructive-content, reviewer proof and Codex gate all satisfied.");
 const ownerApproval = verdict.ownerApproval || null;
 if (ownerApproval) {
-  console.log(`OWNER APPROVAL: Mason approved this exact file, pull request and head by chat reply (valid until ${ownerApproval.expiresAt}; one use).`);
+  console.log(`OWNER APPROVAL: an approval recorded from an \`approve <code>\` reply in this session covers this exact file, pull request and head (valid until ${ownerApproval.expiresAt}; one use).`);
 }
 
 if (!confirm) {
   console.log("");
   console.log("DRY RUN — nothing was transmitted. Re-run with --confirm to apply for real.");
   console.log(ownerApproval
-    ? "Gate passed with Mason's chat-reply approval. --confirm uses it up; it expires 30 minutes after he replied."
+    ? "Gate passed with the recorded chat-reply approval. --confirm uses it up; it expires 30 minutes after the reply."
     : "Gate passed. Under Mason's 2026-09-26 landing rule this non-destructive migration, whose PR's final Sol and CodeRabbit reviews are clean, may now be applied with --confirm.");
   process.exit(0);
 }

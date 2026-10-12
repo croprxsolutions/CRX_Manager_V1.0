@@ -176,6 +176,37 @@ describe('Field Invoices tabs — season window after the Oct 1 rollover', () =>
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'FA-NEW-DRAFT' });
   });
 
+  it('the member check reads every page, so a member past the server response cap is still checked', async () => {
+    // 1,000 this-season members fill the first capped response; the Season 2026 member is
+    // only on the second page (CodeRabbit, PR #895: one response is capped at 1,000 rows).
+    const groupNew = fieldInvoice({ invoice_number: 'FA-GRP-NEW', status: 'unposted', season: 2027, invoice_group_id: 'grp-1', invoice_date: '2026-10-04', created_at: '2026-10-04T15:00:00+00:00' });
+    const manyMembers = Array.from({ length: 1000 }, (_, i) => fieldInvoice({
+      invoice_number: `FA-GRP-M${String(i).padStart(4, '0')}`, status: 'draft', season: 2027,
+      invoice_group_id: 'grp-1', invoice_date: '2026-10-05', created_at: '2026-10-05T15:00:00+00:00',
+    }));
+    const oldOnPageTwo = fieldInvoice({ invoice_number: 'FA-GRP-OLD', status: 'draft', season: 2026, invoice_group_id: 'grp-1', invoice_date: '2026-09-20', created_at: '2026-09-20T15:00:00+00:00' });
+    let invoiceQueries = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'invoices') return buildInMemoryQuery([]);
+      invoiceQueries += 1;
+      return invoiceQueries === 1
+        ? buildInMemoryQuery([groupNew, ROWS[6]])
+        : buildInMemoryQuery([...manyMembers, oldOnPageTwo, groupNew, ROWS[6]], undefined, { maxRows: 1000 });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      const result = Promise.resolve({ data: name === 'post_invoice_group' ? { posted: 2 } : null, error: null });
+      return Object.assign(result, { throwOnError: () => result });
+    });
+    renderInRouter(<FieldInvoicesUnpostedPanel />);
+    await waitFor(() => expect(screen.getAllByText('FA-GRP-NEW').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: /Post All/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 target(s)' }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('a member not shown here is from another season')));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice_group')).toHaveLength(0);
+  });
+
   it('Posted tab keeps prior-season overdue invoices but season-windows paid ones', async () => {
     renderInRouter(<FieldInvoicesPostedPanel />);
 

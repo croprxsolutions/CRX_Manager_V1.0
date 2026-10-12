@@ -35,7 +35,10 @@ below).
     Post All also reads every draft or unposted member of each group from the database, so a
     member the tray never loaded (for example past its row limit) is checked too; such a group
     is left out and named in the result (CodeRabbit, PR #895; the new tray test failed
-    without this check).
+    without this check). The check reads every page of members, since one database response
+    is capped at 1,000 rows (a test models the cap and failed without paging). A member saved
+    into the group after this check but before the database posts the group is not caught: only
+    a season check inside the database's posting step could close that (see "Known gaps").
   - **Unpost All** on the Posted tab, in the default "This Season + older unpaid" scope, still
     reverses only **this season's** posted invoices, as it did before. Older unpaid invoices are
     listed but left out (the confirm and the footer say how many); to unpost one, choose its
@@ -136,6 +139,13 @@ In plain English, everything the review rounds found that this change deliberate
   members in one season (a live check found only a rule that a split invoice's season cannot be
   changed later); members are created together, so they normally share one. The Field Invoices
   tray's Post All now checks every member of a group before posting (below).
+- **The season rule for bulk posting lives in the screens, not the database.** Post All /
+  Select All leave other-season invoices out, but `post_invoice` and `post_invoice_group` do not
+  check the season. So an invoice or split-group member that changes (or is added) between the
+  screen's check and the database's posting step can still post into its own season. Closing
+  that needs a season check inside the posting step, which is the open owner decision below; it
+  would ship with the admin-only invoicing database change, not in this screen fix (CodeRabbit,
+  PR #895, accepted here).
 - **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
   field invoice has to be posted from its own page. Whether Post All should get an "include
   older seasons" option is an owner decision.

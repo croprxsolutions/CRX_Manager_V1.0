@@ -45,6 +45,8 @@ import {
 // /field-invoices. Money is integer cents end-to-end (display via formatCents).
 
 const QUERY_LIMIT = 2000;
+// One page of the Post All split-group member check; at or below the server's response cap.
+const GROUP_MEMBER_PAGE_SIZE = 1000;
 
 type UnpostedFieldInvoiceRow = FieldInvoiceListRow & {
   invoice_group_id: string | null;
@@ -433,19 +435,28 @@ export default function FieldInvoicesUnpostedPanel() {
         // post_invoice_group posts EVERY draft/unposted member of a group, including one this
         // tray did not load (e.g. past the row limit), so check the season of all of them
         // before posting (CodeRabbit, PR #895). A group with an other-season member is left out.
+        // Read page by page: one response is capped (1,000 rows by default), and a member
+        // missing from a capped response would be posted unchecked.
         const otherSeasonGroupIds = new Set<string>();
         if (groupTargets.length > 0) {
-          const { data: memberRows, error: memberError } = await supabase
-            .from('invoices')
-            .select('invoice_group_id, season')
-            .in('invoice_group_id', groupTargets.map((group) => group.group_id))
-            .in('status', ['draft', 'unposted'])
-            .is('deleted_at', null);
-          if (memberError) {
-            throw new Error('Could not check the split groups’ members, so nothing was posted. Please try again.');
-          }
-          for (const member of (memberRows ?? []) as Array<Pick<UnpostedFieldInvoiceRow, 'invoice_group_id' | 'season'>>) {
-            if (member.invoice_group_id && !isCurrentSeason(member.season)) otherSeasonGroupIds.add(member.invoice_group_id);
+          const groupIds = groupTargets.map((group) => group.group_id);
+          for (let from = 0; ; from += GROUP_MEMBER_PAGE_SIZE) {
+            const { data: memberRows, error: memberError } = await supabase
+              .from('invoices')
+              .select('id, invoice_group_id, season')
+              .in('invoice_group_id', groupIds)
+              .in('status', ['draft', 'unposted'])
+              .is('deleted_at', null)
+              .order('id')
+              .range(from, from + GROUP_MEMBER_PAGE_SIZE - 1);
+            if (memberError) {
+              throw new Error('Could not check the split groups’ members, so nothing was posted. Please try again.');
+            }
+            const page = (memberRows ?? []) as Array<Pick<UnpostedFieldInvoiceRow, 'invoice_group_id' | 'season'>>;
+            for (const member of page) {
+              if (member.invoice_group_id && !isCurrentSeason(member.season)) otherSeasonGroupIds.add(member.invoice_group_id);
+            }
+            if (page.length < GROUP_MEMBER_PAGE_SIZE) break;
           }
         }
         for (const group of groupTargets) {

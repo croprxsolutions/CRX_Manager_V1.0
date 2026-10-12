@@ -66,6 +66,8 @@ with his permissions, and only Windows Hello could rule that out. The file sits 
   reply approval passes the apply script's door. The MCP door still refuses, and an approval never
   skips the reviewer proof or the landing gate. An approval more than 30 minutes after the reply is
   refused, as is one used in a session other than the one that built it.
-- `npm run test:correction-guards` exits 0.
+- `npm run test:correction-guards`, `npm run test:agent-workflows` and `npm run agent-health` exit 0
+  (agent-health first failed only on `core.hooksPath` pointing at the primary checkout's `.husky`;
+  the repository's own `install-git-hooks.mjs`, run by `npm ci`, set it back to `.husky`).
 
 **Not verified here.** Nothing was applied to the live database.

@@ -345,6 +345,35 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${v7Id}`));
   });
 
+  it('New pressed while the first Save is still creating the invoice gives a fresh page the old Save cannot steer', async () => {
+    let finishCreate: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        return new Promise((resolve) => { finishCreate = resolve; });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+
+    // Still on plain /new (no id in the address yet): New is pressed and the user leaves.
+    await act(async () => {
+      await router.navigate(NEW_PATH);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    await waitFor(() => expect(headerNotes().value).toBe(''));
+    await act(async () => {
+      finishCreate({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+    });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice created'));
+    expect(router.state.location.pathname).toBe(NEW_PATH);
+    expect(router.state.location.search).toBe('');
+    expect(headerNotes().value).toBe('');
+  });
+
   it('a Save still running when the user presses New does not pull them back to the old invoice', async () => {
     // The invoice is created and its id written into the address; the billing step is
     // still running when the user presses New and leaves the dirty form.

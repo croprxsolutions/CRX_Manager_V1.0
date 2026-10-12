@@ -157,6 +157,10 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   as usual, and the route wrapper keeps the page for the page's own address rewrites (REPLACE)
   while New (PUSH) and Back/Forward (POP) get a fresh page. Three new tests failed against
   eb84edea4. Accepted: a hand-made link to the user's own unposted field invoice opens it.
+  A sixth Luna round: New pressed while the first Save was still creating the invoice kept the
+  same page; the route wrapper now gives a fresh page on every New (PUSH) or Back/Forward (POP)
+  arrival and keeps it only for the page's own REPLACE address rewrites (new test failed with the
+  previous wrapper). Two items are recorded below as known gaps, not fixed here.
 - After the split (the invoice-editor Post changes taken out), typecheck, lint, the fix-1 and
   fix-2 test files, the full Vitest suite, the production build and the doc-drift check pass.
 
@@ -187,6 +191,15 @@ In plain English, everything the review rounds found that this change deliberate
   invoice it created and a second Save updates it (a refresh opens that invoice instead). But
   some checks (season date guard, split preview, billing key) still behave as if the invoice were
   new until the page moves to the saved invoice (the server still refuses a filed-season change).
+- **Leaving while the first Save is still running, then re-typing it.** If someone presses Save
+  on a new field-application invoice, leaves for another page before it finishes, and later
+  types the same application into a fresh New page, that Save creates a second invoice — as it
+  does on main today. The first Save's "Invoice created" message still appears. A screen cannot
+  tell a re-typed application from a new one; the real guard would be a database rule (for
+  example one draft invoice per field application), which is not part of this change.
+- **A different sign-in while the page stays open is not re-checked by the page.** Signing out
+  sends the browser to the login page, which closes this page; the database decides who may
+  edit an invoice either way.
 - **Post All on the Drafts tab never includes older-season invoices.** Last season's unposted
   field invoice has to be posted from its own page. Whether Post All should get an "include
   older seasons" option is an owner decision.

@@ -27,7 +27,9 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   naming anything else (no such invoice, someone else's, a posted one, another kind) is
   ignored and the page stays a new invoice; a link to the user's own unposted field invoice
   simply opens it, like opening it from the list. If something was typed while the check ran,
-  the usual "Unsaved Changes" box asks before the page moves. If the check cannot run, the page
+  the usual "Unsaved Changes" box asks before the page moves; if the user stays, the page never
+  saves over that invoice (its form was not loaded here, and a save replaces the invoice's lines):
+  Save waits and a box at the top links to it (Codex Sol on PR #893). If the check cannot run, the page
   stays where it is and Save refuses until a reload, so there is neither a duplicate nor an
   unchecked invoice; Save also waits while the check runs. A Save still running when the user
   presses New finishes its writes but no longer pulls them back to the old invoice.
@@ -96,6 +98,9 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   three new tests (a billing retry with changed values gets a new key and an unchanged one keeps
   it; Save waits while the earlier create may still be running; an invoice found by the search
   right before saving stops the create) failed against d5e4568d9.
+- Codex Sol on cd9a1f46b (HIGH: after Stay, Save updated the address's invoice from a partly
+  re-typed form): the test that expected that update now expects Save to wait with a link to the
+  invoice; it failed against cd9a1f46b.
 - After merging main (with #895) on 2026-10-12: typecheck, lint and the full Vitest suite pass.
 
 ### Known gaps and deferred items (not fixed in this change)

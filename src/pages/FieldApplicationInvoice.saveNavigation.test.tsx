@@ -509,9 +509,12 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
   });
 
-  it('typing while the check runs: opening the created invoice asks first, and Stay then Save updates it', async () => {
+  it('typing while the check runs: opening the created invoice asks first, and after Stay the page never saves over it', async () => {
+    // The form here was not loaded from that invoice, and an update replaces its lines, so a
+    // partly re-typed form must not be saved onto it (Codex Sol, PR #893). Save waits and the
+    // notice links to the invoice.
     invoiceCheckHeld = true;
-    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID));
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { invoice_number: 'FA-2001' }));
     mockSaveWithFirstBillingFailure(SECOND_ID);
     const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
 
@@ -521,10 +524,11 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe(NEW_PATH);
     expect(headerNotes().value).toBe('Re-entered notes');
+    expect(screen.getByRole('link', { name: 'FA-2001' })).toHaveAttribute('href', `/invoices/field-app/${CREATED_ID}`);
 
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    expect(savedInvoiceId(0)).toBe(CREATED_ID);
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may already have created this invoice'));
+    expect(saveCalls()).toHaveLength(0);
   });
 
   it('typing while the check runs: dropping a rejected id asks first, and Stay then Save creates a new invoice', async () => {

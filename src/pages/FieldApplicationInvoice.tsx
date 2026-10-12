@@ -156,6 +156,15 @@ interface LostCreateCandidate {
   deleted_at: string | null;
 }
 
+/** What the created-invoice check reads about the invoice named in the address. */
+interface CreatedInvoiceCheckRow {
+  invoice_number: string | null;
+  invoice_type: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
 type LostCreateCheck =
   | { state: 'none' }
   | { state: 'checking' }
@@ -580,24 +589,30 @@ export default function FieldApplicationInvoice() {
   // decides that from the address itself, so there is no gap before this effect runs.
   const createdInvoiceCheckFailedRef = useRef(false);
   const rejectedCreatedIdRef = useRef<string | null>(null);
+  // The address's created invoice passed the check. This page never saves onto it: its form
+  // was not loaded here, and an update replaces the invoice's lines, so a partly re-typed form
+  // would overwrite it (Codex Sol, PR #893). The page opens it; a user who stays sees a link.
+  const acceptedCreatedIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isNew || !createdIdInAddress || !profile?.id) return;
     // This page's own Save wrote it, or the check already rejected it.
-    if (createdIdInAddress === createdInvoiceIdRef.current || createdIdInAddress === rejectedCreatedIdRef.current) return;
+    if (createdIdInAddress === createdInvoiceIdRef.current || createdIdInAddress === rejectedCreatedIdRef.current
+      || createdIdInAddress === acceptedCreatedIdRef.current) return;
     const createdId = createdIdInAddress;
     const userId = profile.id;
     let cancelled = false;
     (async () => {
       let ownUnpostedInvoice: boolean;
+      let row: CreatedInvoiceCheckRow | null;
       try {
         const { data, error } = await supabase
           .from('invoices')
-          .select('id, invoice_type, status, created_by')
+          .select('id, invoice_number, invoice_type, status, created_by, created_at')
           .eq('id', createdId)
           .is('deleted_at', null)
           .maybeSingle();
         if (error) throw error;
-        const row = data as { invoice_type: string; status: string; created_by: string } | null;
+        row = data as CreatedInvoiceCheckRow | null;
         ownUnpostedInvoice = !!row
           && row.invoice_type === 'field_application'
           && ['draft', 'unposted'].includes(row.status)
@@ -619,8 +634,12 @@ export default function FieldApplicationInvoice() {
         navigate({ search: '' }, { replace: true });
         return;
       }
-      createdInvoiceIdRef.current = createdId;
-      toast('info', 'Your last Save already created this invoice, so it is open here. Re-enter anything that did not save, then Save to update it.');
+      acceptedCreatedIdRef.current = createdId;
+      setLostCreateCheck({
+        state: 'found',
+        invoices: [{ id: createdId, invoice_number: row?.invoice_number ?? null, status: row?.status ?? 'draft', created_at: row?.created_at ?? new Date().toISOString(), deleted_at: null }],
+      });
+      toast('info', 'Your last Save already created this invoice, so it is opening. Re-enter anything that did not save there.');
       navigate(`/invoices/field-app/${createdId}`, { replace: true });
     })();
     return () => { cancelled = true; };
@@ -1710,7 +1729,7 @@ export default function FieldApplicationInvoice() {
     // The address names a created invoice this page's own Save did not write, and the check
     // above has neither opened nor rejected it yet (or could not run).
     if (isNew && createdIdInAddress && createdIdInAddress !== createdInvoiceIdRef.current
-        && createdIdInAddress !== rejectedCreatedIdRef.current) {
+        && createdIdInAddress !== rejectedCreatedIdRef.current && createdIdInAddress !== acceptedCreatedIdRef.current) {
       toast('info', createdInvoiceCheckFailedRef.current
         ? 'Could not check the invoice your last Save created, so nothing was saved. Reload the page to try again.'
         : 'One moment — checking the invoice your last Save created.');
@@ -2833,9 +2852,9 @@ export default function FieldApplicationInvoice() {
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-sm text-amber-800 space-y-2">
             <p>
-              Your last Save on this page may already have created this invoice (the page was
-              reloaded before the answer came back). Field-application invoices you created since
-              this draft started:
+              Your last Save on this page already created, or may have created, this invoice (the
+              page was reloaded). This page will not save over it. Field-application invoices you
+              created since this draft started:
             </p>
             <ul className="list-disc pl-5">
               {lostCreateCheck.invoices.map((inv) => (

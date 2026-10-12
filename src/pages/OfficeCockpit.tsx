@@ -692,7 +692,7 @@ export default function OfficeCockpit() {
     let morningSummaryValidationError: Error | null = null;
     let programCompletionValidationError: Error | null = null;
     let programCompletionPct: number | null = null;
-    if (!programCompletionRes.error && programCompletionRes.data) {
+    if (!programCompletionRes.error) {
       try {
         const programs = assertRpcResult<Array<{ completion_pct: number | string }>>(
           programCompletionRes.data,
@@ -712,7 +712,7 @@ export default function OfficeCockpit() {
     }
     let nextMorningSummary = emptyMorningSummary;
     let nextMorningSummaryLoadOk = false;
-    if (!morningSummaryRes.error && morningSummaryRes.data) {
+    if (!morningSummaryRes.error) {
       try {
         const summary = assertRpcResult<MorningSummaryRpc>(
           morningSummaryRes.data,
@@ -927,7 +927,7 @@ export default function OfficeCockpit() {
       plannedBookingAttention,
       plannedBookingAttentionLoadOk,
       watchdogLoadOk,
-      allChecksLoadOk: errors.length === 0,
+      allChecksLoadOk: errors.length === 0 && nextMorningSummaryLoadOk,
     });
     setMorningSummary(nextMorningSummary);
     setMorningSummaryLoadOk(nextMorningSummaryLoadOk);

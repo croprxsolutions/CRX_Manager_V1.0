@@ -428,23 +428,19 @@ export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
  * Nor does a message that only cites an old reference, says "Do not reply: I
  * approve", or puts the summary's words inside other prose (Luna BLOCKER round 4;
  * Codex P1 and CodeRabbit, PR #900).
- * Only markdown around the words may differ: **bold** or __bold__ pairs, `code`
- * marks, a code fence, a leading bullet or quote mark. So may curly quotes,
- * spacing, blank lines and where lines wrap. A lone underscore or asterisk, and
- * letter case, are part of the words (drop_a_b is not drop_ab; Codex P1 and
- * CodeRabbit, PR #900). Text in an HTML comment is not displayed, so it is ignored.
+ * The words are compared exactly as the script printed them: only spacing,
+ * blank lines, where lines wrap, and a code fence around the whole summary may
+ * differ. No markdown is interpreted, so no character in a name, fingerprint or
+ * reason can be dropped or reinterpreted (drop_a_b is never drop_ab or
+ * drop_a__b__; Codex P1 and CodeRabbit, PR #900). The agent copies the summary
+ * as printed; anything else (bold, code marks, quote marks, an HTML comment)
+ * means it does not count, and he is asked again.
  */
 export function requestShownIn(text, p) {
   if (!/^\d{6}$/.test(String(p?.code ?? ""))) return false;
-  const loose = (t) => String(t).replace(/[‘’]/g, "'").replace(/[“”]/g, "\"")
-    .replace(/\s+/g, " ").trim();
-  // Markdown is removed from what was displayed only, never from the summary itself.
-  const unmark = (l) => (/^\s*```[\w-]*\s*$/.test(l) ? ""
-    : l.replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1").replace(/`([^`]*)`/g, "$1"));
-  const displayed = String(text ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "").split(/\r?\n/)
-    .map((l) => loose(unmark(l)).replace(/^(?:[-+•*]\s+|>\s?)+/, "")).filter(Boolean);
-  const summary = ownerApprovalSummary(p).map((l) => loose(l.replace(/^- /, ""))).filter(Boolean);
-  return summary.length > 0 && displayed.join(" ") === summary.join(" ");
+  const words = (lines) => lines.filter((l) => !/^\s*```[\w-]*\s*$/.test(l)).join(" ").replace(/\s+/g, " ").trim();
+  const summary = words(ownerApprovalSummary(p));
+  return summary !== "" && words(String(text ?? "").split(/\r?\n/)) === summary;
 }
 
 /**

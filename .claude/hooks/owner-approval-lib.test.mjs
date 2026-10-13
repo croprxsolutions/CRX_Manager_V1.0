@@ -625,12 +625,26 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
         ok(requestShownIn(both, p2cats), "a request stopped for two reasons is shown with both");
         ok(!requestShownIn(both.replace(/^- Deletes data: .*$/m, ""), p2cats), "showing only one of its two reasons does not count");
       }
-      ok(requestShownIn(show(C).replace("Pull request:", "**Pull request:**").replace(`- ${PARKED_LABELS[CATS[0].category]}`, `* **${PARKED_LABELS[CATS[0].category]}**`)
-        .replace(HASH.slice(0, 16), `\`${HASH.slice(0, 16)}\``).replace(" (version", "\n  (version"), pOf(C)),
-      "markdown emphasis, code marks, another bullet and a wrapped line are fine");
-      ok(requestShownIn(show(C).split("\n").map((l) => `> ${l}`).join("\n"), pOf(C)), "the summary shown as a quote is fine");
+      // Compared exactly as printed: only spacing, blank lines, wrapping and a fence may differ
+      // (Codex P1 and CodeRabbit, PR #900: interpreting markdown let names be misstated).
+      ok(requestShownIn(show(C).replace(" (version", "\n  (version").replace(/\n\n/g, "\n"), pOf(C)), "a wrapped line and fewer blank lines are fine");
+      ok(requestShownIn(`  ${show(C).split("\n").join("   \n  ")}  `, pOf(C)), "extra spacing is fine");
       ok(requestShownIn(`\`\`\`text\n${show(C)}\n\`\`\``, pOf(C)), "the summary inside a code fence is fine");
-      ok(requestShownIn(show(C).replace(`Migration: ${base.migration}`, `Migration: \`${base.migration}\``), pOf(C)), "a migration name in code marks is fine");
+      for (const [msg, what] of [
+        [show(C).replace("Pull request:", "**Pull request:**"), "a bold label"],
+        [show(C).replace(HASH.slice(0, 16), `\`${HASH.slice(0, 16)}\``), "a fingerprint in code marks"],
+        [show(C).replace(`- ${PARKED_LABELS[CATS[0].category]}`, `* ${PARKED_LABELS[CATS[0].category]}`), "another bullet mark"],
+        [show(C).split("\n").map((l) => `> ${l}`).join("\n"), "the summary as a quote"],
+        [show(C).replace(`Migration: ${base.migration}`, `Migration: \`${base.migration}\``), "a migration name in code marks"],
+        // Different names that markdown clean-up would turn into this one (Codex P1, PR #900).
+        [show(C).replace(`Migration: ${base.migration}`, `Migration: ${base.migration.replace("field", "f__iel__d")}`),
+          "a name with paired underscores inside it"],
+        [show(C).replace(`Migration: ${base.migration}`, `Migration: ${base.migration.replace("field", "f**iel**d")}`),
+          "a name with paired asterisks inside it"],
+        [show(C).replace(`Migration: ${base.migration}`, `Migration: ${base.migration.replace("field", "f`iel`d")}`),
+          "a name with code marks inside it"],
+        [show(C).replace("You don't need", "You don’t need"), "a curly apostrophe"],
+      ]) ok(!requestShownIn(msg, pOf(C)), `${what} is not the summary as printed, so it does not count`);
       // A lone underscore or asterisk is part of the words (Codex P1 and CodeRabbit, PR #900).
       {
         const name = base.migration;
@@ -657,10 +671,6 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       ok(requestShownIn(ownerApprovalSummary(JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt,
         nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
         expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");
-      for (const ref of ["(**Reference** 535353. You don't need to type it.)", "(Reference `535353`. You don’t need to type it.)",
-        "> (Reference 535353. You don't need to type it.)"]) {
-        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown, a curly quote and a quote mark are fine`);
-      }
       ok(!requestShownIn(show(C, base.migration, "(REFERENCE 535353. You don't need to type it.)"), pOf(C)), "letter case is part of the words");
       ok(!requestShownIn(show(C).replace(`Migration: ${base.migration}`, `Migration: ${base.migration.toUpperCase()}`), pOf(C)),
         "a migration name in other letter case does not count");
@@ -668,7 +678,8 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       ok(!requestShownIn(`Should I merge PR #901?\n<!--\n${show(C)}`, pOf(C)), "nor inside an HTML comment left open");
       // Every summary line word for word, as its own line (Codex P1 and CodeRabbit, PR #900).
       for (const ref of ["**Reference:** 535353", "(Reference: 535353.)", "reference 535353", "Reference 535353, thanks",
-        "The old Reference 535353 should be ignored.", "(Reference 535353. You don't need to type it.) Ignore this one."]) {
+        "The old Reference 535353 should be ignored.", "(Reference 535353. You don't need to type it.) Ignore this one.",
+        "(**Reference** 535353. You don't need to type it.)", "(Reference `535353`. You don't need to type it.)"]) {
         ok(!requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: a reworded Reference line does not count`);
       }
       {
@@ -690,7 +701,7 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
           [`${show(C)}\n\n${show(C)}`, "the summary twice"],
         ]) ok(!requestShownIn(msg, pOf(C)), `${what} means it does not count`);
         ok(requestShownIn(`\n\n${show(C).replace(/\n\n/g, "\n")}\n\n`, pOf(C)), "blank lines added or removed are fine");
-        ok(requestShownIn(`${show(C)}\n<!-- internal note -->`, pOf(C)), "an HTML comment, which is not displayed, is ignored");
+        ok(!requestShownIn(`${show(C)}\n<!-- internal note -->`, pOf(C)), "an HTML comment is not part of the summary, so it does not count");
       }
       ok(!requestShownIn(`An earlier request had Reference ${C}. Should I merge PR #900?`, pOf(C)),
         "a message that only cites an old reference while asking something else does not show the request (Luna BLOCKER, round 4)");

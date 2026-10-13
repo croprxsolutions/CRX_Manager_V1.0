@@ -50,15 +50,15 @@ no longer types anything but the approval.
     retired). With none, it is ordinary chat and the hook stays silent. An unreadable folder or
     request file is reported, never taken as "nothing waiting" (Luna round 2). Otherwise exactly one
     of them must be SHOWN in the agent's last message (`requestShownIn`). Shown means that message
-    IS its summary (`ownerApprovalSummary`), word for word, and nothing else: what it is, the pull
-    request and version, the fingerprint, every reason the safety check stopped it, the
+    IS its summary (`ownerApprovalSummary`), exactly as printed, and nothing else: what it is, the
+    pull request and version, the fingerprint, every reason the safety check stopped it, the
     `reply: I approve` line and the `Reference <code>` line. So he is always told why it waited for
     him, and "I approve" can only answer that request; the agent explains the change in an earlier
-    message. Only markdown around the words may differ (`**bold**`/`__bold__` pairs, code marks, a
-    code fence, a leading bullet or quote mark), and curly quotes, spacing, blank lines and where
-    lines wrap; a lone underscore or asterisk, and letter case, are part of the words, so
-    `drop_a_b` is not `drop_ab` or `DROP_A_B`. Text in an HTML comment is not displayed, so it is
-    ignored. How this got here:
+    message. Only spacing, blank lines, where lines wrap, and a code fence around the whole summary
+    may differ. No markdown is interpreted, so no character of a name, fingerprint or reason can be
+    dropped or reinterpreted: `drop_a_b` is never `drop_ab`, `DROP_A_B` or `d__ro__p_a_b`. Bold,
+    code or quote marks, a curly apostrophe, or an HTML comment mean it does not count, and he is
+    asked again. How this got here:
     - Luna round 4: a message that only cites an old reference while asking something else does
       not count. The same digits starting or inside another number or identifier never count
       either: `482913-4`, `482913_4`, `482913.1`, `482913٧` (Luna rounds 1, 2 and 4).
@@ -75,6 +75,11 @@ no longer types anything but the approval.
       Now the message must be the summary and nothing else; tests cover a note before it, a
       question after or inside it, one extra word, and the summary twice. Allowing extra text
       again fails the suite. Agents are told to explain the change in an earlier message.
+    - Codex P1 once more: the markdown clean-up still turned `f__iel__d` into `field`. Every round
+      of markdown leniency had opened a new way to misstate a name, so none is left: the words are
+      compared exactly as printed. Tests cover bold, code marks, other bullet or quote marks, a
+      curly apostrophe, and names that only match after `__`, `**` or backtick clean-up; adding
+      either clean-up back fails the suite.
 
     A request shown earlier, two shown at once, or an unreadable transcript approves nothing.
   - The summary now ends with "reply: I approve" and "(Reference <code>. You don't need to type it.)".
@@ -101,7 +106,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 355 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 362 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,

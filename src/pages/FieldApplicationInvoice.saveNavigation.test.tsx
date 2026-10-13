@@ -354,6 +354,70 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
   });
 
+  it('values A, then B, then A again, all under one unanswered key: the last retry still writes A', async () => {
+    // B may be what committed under the key, so matching the FIRST attempt's values proves
+    // nothing (Luna, PR #893).
+    let saves = 0;
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        saves += 1;
+        if (saves <= 2) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        return Promise.resolve({ data: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    await renderAt();
+    const saveOnce = async (calls: number) => {
+      fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+      await waitFor(() => expect(saveCalls().length).toBeGreaterThanOrEqual(calls));
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled());
+    };
+    editHeaderNotes('A');
+    await saveOnce(1);
+    editHeaderNotes('B');
+    await saveOnce(2);
+    editHeaderNotes('A');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(4));
+    expect(saveKey(2)).toBe(saveKey(0));
+    expect(savedInvoiceId(3)).toBe(CREATED_ID);
+    expect((saveCalls()[3][1] as { p_invoice: { header_notes: string } }).p_invoice.header_notes).toBe('A');
+  });
+
+  it('billing values A, then B, then A again under one unanswered key: the last retry still writes A', async () => {
+    // B may be what committed under the billing key (Luna, PR #893).
+    let billingAttempts = 0;
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        return Promise.resolve({ data: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      if (name === 'update_field_app_invoice_billing') {
+        billingAttempts += 1;
+        return Promise.resolve(billingAttempts <= 2
+          ? { data: null, error: { message: 'network blip' } }
+          : { data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    await renderAt();
+    await createWithPartialFailureAndStay();
+    const billingCalls = () => mockRpc.mock.calls.filter(([n]) => n === 'update_field_app_invoice_billing')
+      .map(([, args]) => args as { p_idempotency_key: string; p_header_notes: string });
+
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(billingCalls()).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled());
+
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(billingCalls()).toHaveLength(4));
+    expect(billingCalls()[2].p_idempotency_key).toBe(billingCalls()[0].p_idempotency_key);
+    expect(billingCalls()[3].p_idempotency_key).not.toBe(billingCalls()[0].p_idempotency_key);
+    expect(billingCalls()[3].p_header_notes).toBe('Spray north field');
+  });
+
   it('a create the server refused, retried with changed values, is saved once with no follow-up write', async () => {
     // A refusal (an error with a code, e.g. a closed accounting period) rolled back and stored
     // nothing under the key, so the retry is a fresh save, not a replay: a follow-up would save

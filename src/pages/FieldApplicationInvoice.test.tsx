@@ -498,8 +498,15 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     fireEvent.click(screen.getByRole('button', { name: /^Preview$/i }));
     fireEvent.change(await screen.findByTitle(/Early-pay discount earned/i), { target: { value: '1e2' } });
 
+    const fromCallsBefore = mockFrom.mock.calls.length;
+    const rpcCallsBefore = mockRpc.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${button}$`) }));
     expect(mockToast).toHaveBeenCalledWith('error', 'Discount Earned must be a plain dollar amount such as 25.00, with no more than two decimal places.');
+    // Nothing was built or sent: no read of the customer's email, no send, no PDF download.
+    await act(async () => { await Promise.resolve(); });
+    expect(mockFrom.mock.calls.length).toBe(fromCallsBefore);
+    expect(mockRpc.mock.calls.length).toBe(rpcCallsBefore);
+    expect(screen.getByRole('button', { name: new RegExp(`^${button}$`) })).not.toBeDisabled();
   });
 
   // The transaction date decides the SEASON, and the season selects the

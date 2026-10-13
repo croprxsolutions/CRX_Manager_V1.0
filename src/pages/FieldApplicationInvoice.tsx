@@ -172,6 +172,35 @@ function isDefinitiveRpcError(error: { code?: string | null } | null | undefined
   return !!error?.code;
 }
 
+/** Every set of values sent under one idempotency key whose answer has not arrived. */
+interface UnansweredKey {
+  key: string;
+  fingerprints: string[];
+}
+
+/**
+ * Record one more send under `key`. The server keeps whichever send under a key committed
+ * first and answers every later one with that result, so when ANY earlier send under it carried
+ * different values, this answer may not be these values (Luna, PR #893).
+ */
+function recordSend(entry: UnansweredKey | null | undefined, key: string, fingerprint: string) {
+  if (!entry || entry.key !== key) {
+    return { entry: { key, fingerprints: [fingerprint] }, mayReplayOtherValues: false };
+  }
+  return {
+    entry: { key, fingerprints: [...entry.fingerprints, fingerprint] },
+    mayReplayOtherValues: entry.fingerprints.some((sent) => sent !== fingerprint),
+  };
+}
+
+/** The server refused one send (it stored nothing), so it no longer counts. Null when none is left. */
+function forgetRefusedSend(entry: UnansweredKey | null | undefined, fingerprint: string): UnansweredKey | null {
+  if (!entry) return null;
+  const at = entry.fingerprints.lastIndexOf(fingerprint);
+  const fingerprints = at < 0 ? entry.fingerprints : [...entry.fingerprints.slice(0, at), ...entry.fingerprints.slice(at + 1)];
+  return fingerprints.length > 0 ? { key: entry.key, fingerprints } : null;
+}
+
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'locations', label: 'Locations', icon: <MapPin className="w-4 h-4" /> },
   { key: 'chemicals', label: 'Chemicals/Charges', icon: <FlaskConical className="w-4 h-4" /> },
@@ -215,7 +244,7 @@ export default function FieldApplicationInvoice() {
   // first result without applying anything, so when a retry's values CHANGED it is followed
   // by one more write under a new key (Codex Sol and CodeRabbit, PR #893; see the billing
   // step in performSave).
-  const billingKeysRef = useRef<Record<string, { key: string; fingerprint: string }>>({});
+  const billingKeysRef = useRef<Record<string, UnansweredKey>>({});
   const postIdem = useIdempotencyKey('post_invoice_group', profile?.id || '');
   // Keep receipt ownership scoped by invoice id even though the route wrapper now
   // remounts per record. Reset only after assertRpcResult confirms success.
@@ -613,10 +642,11 @@ export default function FieldApplicationInvoice() {
   // True from the moment a Save starts until it has finished, set before anything awaits, so
   // a double click or a queued handler can never send a second save alongside the first.
   const saveInFlightRef = useRef(false);
-  // The key and values of the last save_field_app_invoice call whose answer did not arrive. The
-  // server answers a repeated key with its FIRST result without reading the new values, so a
-  // retry with changed values must not rely on that key alone (Luna, PR #893).
-  const unansweredSaveRef = useRef<{ key: string; fingerprint: string } | null>(null);
+  // The key, and every set of values sent under it, of save_field_app_invoice calls whose answer
+  // did not arrive. The server answers a repeated key with its first committed result without
+  // reading the new values, so a retry with changed values must not rely on that key alone
+  // (Luna, PR #893).
+  const unansweredSaveRef = useRef<UnansweredKey | null>(null);
 
   // False once this page has been left (unmounted). A Save still running then finishes its
   // writes but must not move the user, who is already on another page (e.g. pressed New).
@@ -1860,8 +1890,9 @@ export default function FieldApplicationInvoice() {
       // save, its answer may be the first attempt's result with the OLD values: the current
       // ones are written over it right after, under a new key.
       const key = saveIdem.getKey();
-      const retryMayReplayOldValues = unanswered?.key === key && unanswered.fingerprint !== fingerprint;
-      if (unanswered?.key !== key) unansweredSaveRef.current = { key, fingerprint };
+      const send = recordSend(unanswered, key, fingerprint);
+      unansweredSaveRef.current = send.entry;
+      const retryMayReplayOldValues = send.mayReplayOtherValues;
       const { data, error } = await supabase.rpc('save_field_app_invoice', {
         // save_field_app_invoice accepts NULL p_invoice_id to create a new
         // invoice (live signature is nullable; generated type narrows to string).
@@ -1873,7 +1904,7 @@ export default function FieldApplicationInvoice() {
       if (error) {
         // The server refused it (rolled back, no receipt): a retry under this key is a fresh
         // save, not a replay, so it needs no follow-up write (Codex review, PR #893).
-        if (isDefinitiveRpcError(error)) unansweredSaveRef.current = null;
+        if (isDefinitiveRpcError(error)) unansweredSaveRef.current = forgetRefusedSend(unansweredSaveRef.current, fingerprint);
         throw error;
       }
       let result = assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');
@@ -1895,14 +1926,14 @@ export default function FieldApplicationInvoice() {
       const replayedInvoiceId = targetInvoiceId || ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
         const followUpKey = saveIdem.getKey();
-        unansweredSaveRef.current = { key: followUpKey, fingerprint };
+        unansweredSaveRef.current = { key: followUpKey, fingerprints: [fingerprint] };
         const followUp = await supabase.rpc('save_field_app_invoice', {
           p_invoice_id: replayedInvoiceId,
           ...saveArgs,
           p_idempotency_key: followUpKey,
         });
         if (followUp.error) {
-          if (isDefinitiveRpcError(followUp.error)) unansweredSaveRef.current = null;
+          if (isDefinitiveRpcError(followUp.error)) unansweredSaveRef.current = forgetRefusedSend(unansweredSaveRef.current, fingerprint);
           throw followUp.error;
         }
         result = assertRpcResult<FieldAppInvoiceResult>(followUp.data, 'save_field_app_invoice');
@@ -2048,8 +2079,9 @@ export default function FieldApplicationInvoice() {
           const unansweredBilling = billingKeysRef.current[billingKeyId];
           const billingKey = unansweredBilling?.key
             ?? generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
-          const billingMayReplayOldValues = !!unansweredBilling && unansweredBilling.fingerprint !== billingFingerprint;
-          if (!unansweredBilling) billingKeysRef.current[billingKeyId] = { key: billingKey, fingerprint: billingFingerprint };
+          const billingSend = recordSend(unansweredBilling, billingKey, billingFingerprint);
+          billingKeysRef.current[billingKeyId] = billingSend.entry;
+          const billingMayReplayOldValues = billingSend.mayReplayOtherValues;
           const writeBilling = async (key: string) => {
             const billingResult = await supabase.rpc('update_field_app_invoice_billing', {
               ...billingArgs,
@@ -2062,7 +2094,11 @@ export default function FieldApplicationInvoice() {
               });
               // Refused by the server: nothing was stored under this key, so the next retry is a
               // fresh write and needs no follow-up.
-              if (isDefinitiveRpcError(billingResult.error)) delete billingKeysRef.current[billingKeyId];
+              if (isDefinitiveRpcError(billingResult.error)) {
+                const remaining = forgetRefusedSend(billingKeysRef.current[billingKeyId], billingFingerprint);
+                if (remaining) billingKeysRef.current[billingKeyId] = remaining;
+                else delete billingKeysRef.current[billingKeyId];
+              }
               return false;
             }
             assertRpcResult(billingResult.data, 'update_field_app_invoice_billing');
@@ -2071,7 +2107,7 @@ export default function FieldApplicationInvoice() {
           billingOk = await writeBilling(billingKey);
           if (billingOk && billingMayReplayOldValues) {
             const followUpKey = generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
-            billingKeysRef.current[billingKeyId] = { key: followUpKey, fingerprint: billingFingerprint };
+            billingKeysRef.current[billingKeyId] = { key: followUpKey, fingerprints: [billingFingerprint] };
             billingOk = await writeBilling(followUpKey);
           }
           // Clear the per-id key only on success so a retry after a failure reuses it.

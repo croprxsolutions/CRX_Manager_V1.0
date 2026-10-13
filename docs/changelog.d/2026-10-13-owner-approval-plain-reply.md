@@ -56,8 +56,9 @@ no longer types anything but the approval.
     - its migration's name (or the self-test line);
     - for a migration, the summary's `Migration`, `Pull request` and `File fingerprint` lines and
       every reason the safety check stopped it, taken from `ownerApprovalSummary` itself, so he is
-      always told why it waited for him (Codex P1 on the PR). Markdown emphasis, code marks,
-      bullets, spacing and letter case may differ.
+      always told why it waited for him (Codex P1 on the PR). Each must be a whole displayed line,
+      never words inside other prose (CodeRabbit); markdown emphasis, code marks, a leading bullet
+      or quote mark, spacing, letter case and a line wrapped onto the next may differ.
 
     A message that only cites an old reference while asking something else does not count. The same
     digits starting or inside another number or identifier never count, in any script: `482913-4`,
@@ -87,7 +88,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 322 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 326 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,

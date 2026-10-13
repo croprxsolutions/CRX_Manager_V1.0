@@ -441,12 +441,21 @@ export function requestShownIn(text, p) {
     : typeof p.migration === "string" && p.migration !== "" && s.includes(p.migration);
   if (!(reference.test(s) && reply.test(s) && what)) return false;
   if (p.purpose === OWNER_SELFTEST_PURPOSE) return true;
-  // Taken from the summary itself, so the two cannot drift apart.
+  // Taken from the summary itself, so the two cannot drift apart. Each must be a
+  // whole displayed line, never words inside other prose (CodeRabbit, PR #900); a
+  // bullet or quote mark may lead it, and a line wrapped onto the next is joined back.
   const loose = (t) => String(t).replace(/[*_`]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
-  const told = loose(s);
+  const lines = s.split(/\r?\n/).map((l) => loose(l).replace(/^(?:[-+•>]\s*)+/, ""));
   const mustShow = ownerApprovalSummary(p).filter((l) => /^(?:Migration|Pull request|File fingerprint): |^- /.test(l))
     .map((l) => loose(l.replace(/^- /, "")));
-  return mustShow.length >= 4 && mustShow.every((l) => told.includes(l));
+  const shownAsLine = (want) => lines.some((line, start) => {
+    let joined = line;
+    for (let end = start + 1; joined && joined.length < want.length && end < lines.length && lines[end]; end++) {
+      joined = `${joined} ${lines[end]}`;
+    }
+    return joined === want;
+  });
+  return mustShow.length >= 4 && mustShow.every(shownAsLine);
 }
 
 /**

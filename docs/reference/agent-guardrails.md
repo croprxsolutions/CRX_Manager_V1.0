@@ -54,7 +54,8 @@
 > digits starting or inside another number or identifier, in any script), the `reply: I approve` line, and its
 > migration's name (or the self-test line), so a message that only cites an old reference does not count; for a
 > migration also the summary's Pull request and File fingerprint lines and every reason the safety check stopped it,
-> so he is always told why it waited for him (markdown, spacing and case may differ). That
+> so he is always told why it waited for him, each as a whole displayed line (markdown, a leading bullet or quote
+> mark, spacing, case and wrapping may differ). That
 > message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;
 > only the bookkeeping records Claude Code writes after every turn are skipped, so any other entry after it, such as a

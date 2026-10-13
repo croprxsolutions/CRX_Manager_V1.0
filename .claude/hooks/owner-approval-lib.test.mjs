@@ -628,6 +628,13 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       ok(requestShownIn(show(C).replace("Pull request:", "**Pull request:**").replace(`- ${PARKED_LABELS[CATS[0].category]}`, `* **${PARKED_LABELS[CATS[0].category]}**`)
         .replace(HASH.slice(0, 16), `\`${HASH.slice(0, 16)}\``).replace(" (version", "\n  (version"), pOf(C)),
       "markdown emphasis, code marks, another bullet and a wrapped line are fine");
+      ok(requestShownIn(show(C).split("\n").map((l) => `> ${l}`).join("\n"), pOf(C)), "the summary shown as a quote is fine");
+      // Each must be a whole displayed line, never words inside other prose (CodeRabbit, PR #900).
+      ok(!requestShownIn(show(C).replace(prLine, `As noted, ${prLine} is ready.`), pOf(C)),
+        "the pull request line inside a sentence does not count as shown");
+      ok(!requestShownIn(show(C).replace(risk, `Earlier it said ${risk.slice(2)}, but that is fixed.`), pOf(C)),
+        "a reason inside a sentence does not count as shown");
+      ok(!requestShownIn(show(C).replace(printLine, `${printLine} (old)`), pOf(C)), "a line with more words after it does not count as shown");
       ok(requestShownIn(ownerApprovalSummary(JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt,
         nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
         expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");

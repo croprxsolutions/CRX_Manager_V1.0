@@ -13,7 +13,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 **Decision (Mason, in chat, 2026-10-13).** First "reps should be able to make invoices or email customers that arnt theirs" (session "App scalability assessment"), then, in the session that built the change: reps "can see all and edit all" customers; "Everything customer-related" opens (addresses, contacts, documents, facts, interactions and their transcripts, external identities); statements and year-end summaries open; reps invoice under their **own name only** (admins may name anyone); **only an admin** changes which rep a customer is assigned to; and on a customer not assigned to them a rep cannot change its **default commission split** (admin or the customer's own rep only).
 **Why.** Reps sell and bill across the whole customer base: 146 of 154 live customers have no assigned rep, so the old "assigned customers only" rule blocked almost all rep invoicing and emailing.
 **What this supersedes:** the 2026-10-06 entry below ("reps bill only their own customers"), and the 2026-10-09 admin-only invoicing plan (PR #902, closed unmerged; its `20261013160000` was never applied). Rep scoping is formally dropped.
-**What this forbids/implies:** `20261013220000_reps_work_any_customer.sql` removes every assigned-rep access test on the invoice, customer and customer-record paths and adds `customers_guard_rep_edit_20261013` for the two exceptions; the `customer-document-files` Edge Function opens documents the same way. Still narrower: `SALESMAN_SCOPE_DENIED` (own name), `REP_CANNOT_REASSIGN`, `REP_MUST_SELF_ASSIGN` (a rep's new customer is theirs), `COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`; every admin-only action (void, unpost, credit memos, write-offs, prepay apply, reassignment) is unchanged; a rep still reads only the invoices they created or are the salesperson on. The order-invoice RPCs' salesperson check (a rep naming another salesperson) is the follow-up change. Commissions are unaffected (they come from orders and jobs, not from who typed the invoice). Source: `docs/changelog.d/2026-10-13-reps-work-any-customer.md`.
+**What this forbids/implies:** `20261013220000_reps_work_any_customer.sql` removes every assigned-rep access test on the invoice, customer and customer-record paths and adds `customers_guard_rep_edit_20261013`; the `customer-document-files` Edge Function opens documents the same way. Still narrower: `SALESMAN_SCOPE_DENIED` (own name), `INVOICE_SCOPE_DENIED` / `SPLIT_SET_NOT_OWNED` (a rep changes or posts only an existing invoice they created or are the salesperson on, so "own name" also covers other people's drafts; agent's reading of the rule, added after review), `REP_CANNOT_REASSIGN`, `REP_MUST_SELF_ASSIGN` (a rep's new customer is theirs), `COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`, and two money safeguards the wider edit access needed: a rep cannot deactivate a customer with posted or overdue invoices (`CUSTOMER_HAS_OPEN_INVOICES`) or edit a prepay balance directly (`PREPAY_BALANCE_SERVER_ONLY`). "Statements" means the 90-day ledger on a customer's page; printable and emailed statements (AR Aging) stay admin-only. Every admin-only action (void, unpost, credit memos, write-offs, prepay apply, reassignment) is unchanged; a rep still reads only the invoices they created or are the salesperson on. The order-invoice RPCs' salesperson check (a rep naming another salesperson) is the follow-up change. Commissions are unaffected (they come from orders and jobs, not from who typed the invoice). Source: `docs/changelog.d/2026-10-13-reps-work-any-customer.md`.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 
@@ -3515,6 +3515,8 @@ verdict on the exact head. Automatic reviews were turned off on 2026-08-28 (froz
 
 ## 2026-07-17 — SETTLED: save_customer edits are assigned-rep-or-admin only (no office-manager carve-out)
 
+**Superseded 2026-10-13** by "Sales reps work with ANY customer" (Mason): any active rep edits any customer; reassignment stays admin-only (`REP_CANNOT_REASSIGN`), a new customer stays self-assigned (`REP_MUST_SELF_ASSIGN`), and the commission split stays admin-or-assigned-rep. Kept below as history.
+
 **Decision (Mason, 2026-07-17, relayed from the CRM loop session):** customer master-record
 edits through the `save_customer` SECDEF RPC are RESTRICTED to admins (any customer) and the
 assigned sales rep (`customers.assigned_sales_rep = auth.uid()` only). No office-manager
@@ -3535,6 +3537,7 @@ in-chat OK; post-apply live probe confirmed a rep is denied editing a non-assign
 **Decisions (Mason, in-chat, 2026-07-17 morning):**
 1. **save_customer authorization:** restrict edits to the assigned sales rep + admins. No
    office-manager carve-out. (Relayed to the fix session working the pre-existing gap.)
+   **Superseded 2026-10-13:** any active rep edits any customer (see the 2026-10-13 entry).
 2. **Grower crops:** crops are SELECTED and assigned per customer (a controlled list on the
    customer record) — NOT derived from field crop-history. Supersedes the parked
    "crop source of truth" question. Shipping as `customers.crops text[]` + UI chips + call-list filter.
@@ -3546,6 +3549,8 @@ in-chat OK; post-apply live probe confirmed a rep is denied editing a non-assign
    semantics = occurred_at + 15 months.
 
 ## 2026-07-17 — SETTLED: CRM read-aggregates are assignment-scoped (wider than row-level invoice RLS)
+
+**Superseded 2026-10-13** by "Sales reps work with ANY customer" (Mason): the per-customer readers (statement, year-end, prep card, lapsed products, purchase summary) open to every active rep for every customer. The call lists and `get_rep_customer_purchase_flags` stay assignment-based, as a rep's own work queue rather than an access gate. Kept below as history.
 
 **Decision (loop orchestration under Mason's pre-authorized run; pattern inherited from
 `get_customer_statement`):** the CRM purchase-intelligence and call-list SECDEF RPCs scope by

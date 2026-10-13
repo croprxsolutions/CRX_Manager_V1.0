@@ -185,7 +185,7 @@ function candidatePins() {
   const sql = lf(CANDIDATE);
   const fns = [...sql.matchAll(/\('(public\.[^']+\))', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2]]);
   const pols = [...sql.matchAll(/\('([a-z_]+)', '([a-z_]+)', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2], m[3]]);
-  assert.equal(fns.length, 18, 'the candidate pins 18 function bodies');
+  assert.equal(fns.length, 20, 'the candidate pins 20 function bodies');
   assert.equal(pols.length, 20, 'the candidate pins 20 policies');
   return { fns, pols };
 }
@@ -296,13 +296,21 @@ const adminPosted = (customer, label, extra = '') => `${adminDraft(customer, lab
 const splitJob = `INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, total_acres, created_by)
     VALUES ('${SPLIT_JOB}', 'PROVER-RAC-SPLITJOB', '${C1}', 'completed', ${TODAY}, 100, '${U.ADMIN}');
   INSERT INTO public.job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES ('${SPLIT_JOB}', '${F_SHARED}', 100, 0);`;
-const splitCall = (uid, key) => `public.save_field_app_split_invoice(NULL, '${SPLIT_JOB}', jsonb_build_object('invoice_date', (${TODAY})::text),
+const splitCall = (uid, key, salesman = null) => `public.save_field_app_split_invoice(NULL, '${SPLIT_JOB}', jsonb_build_object('invoice_date', (${TODAY})::text${salesman ? `, 'salesman_id', '${salesman}'` : ''}),
     jsonb_build_array(jsonb_build_object('field_id', '${F_SHARED}', 'applied_acres', 100)),
     jsonb_build_array(jsonb_build_object('line_kind', 'service', 'application_service_id', '${SVC}', 'description', '[PROVER] Svc', 'source_acres', 100, 'manual_override', true, 'source_unit_price_cents', 100)),
     '${uid}', NULL, '${key}')`;
 const adminGroup = `${splitJob}
   ${claims(U.ADMIN)}
   SELECT set_config('prover.group', (${splitCall(U.ADMIN, 'prover-rac-fas-admin')})->>'invoice_group_id', true);`;
+// The same group with Rep B named as its salesperson by the admin.
+const adminGroupForRepB = `${splitJob}
+  ${claims(U.ADMIN)}
+  SELECT set_config('prover.group', (${splitCall(U.ADMIN, 'prover-rac-fas-admin-b', U.REP_B)})->>'invoice_group_id', true);`;
+// A SECURITY DEFINER stand-in for the server's prepay functions (created inside the rolled-back probe).
+const serverPrepayFn = `CREATE FUNCTION public.prover_rac_bump_prepay(p_customer uuid) RETURNS bigint LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
+    AS $fn$ UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 100 WHERE id = p_customer RETURNING prepay_balance_cents $fn$;
+  GRANT EXECUTE ON FUNCTION public.prover_rac_bump_prepay(uuid) TO authenticated;`;
 const customerPayload = (customer, extra) => `jsonb_build_object('farm_name', (SELECT farm_name FROM public.customers WHERE id = '${customer}'),
     'assigned_sales_rep', (SELECT assigned_sales_rep FROM public.customers WHERE id = '${customer}'),
     'row_version_expected', (SELECT row_version FROM public.customers WHERE id = '${customer}'),
@@ -340,6 +348,11 @@ const CASES = [
   ['rep saves invoice for unassigned customer', U.REP, `(SELECT status || ':' || salesman_id FROM public.invoices WHERE id = current_setting('prover.mine')::uuid)`,
     { pre: `PERFORM set_config('prover.mine', (${misc(C4, 'rep4', `, 'salesman_id', '${U.REP}'`)})::text, true);` }, /CUSTOMER_SCOPE_DENIED/, new RegExp(`^ok\\|draft:${U.REP}$`)],
   ['rep saves invoice for another rep\'s customer', U.REP, `${misc(C3, 'rep3')} IS NOT NULL`, {}, /CUSTOMER_SCOPE_DENIED/, /^ok\|true$/],
+  // Another salesperson's existing invoice: refused after. Before, it was refused on another rep's
+  // customer and ALLOWED on the rep's own customer (the assigned-customer rule was the only gate).
+  ['rep posts another rep\'s draft on that rep\'s customer', U.REP, `public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-xpost') IS NULL`, { fixture: adminDraft(C3, 'x3', `, 'salesman_id', '${U.REP_B}'`) }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
+  ['rep posts another rep\'s draft on the rep\'s own customer', U.REP, `public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-xpost1') IS NULL`, { fixture: adminDraft(C1, 'x1', `, 'salesman_id', '${U.REP_B}'`) }, /^ok\|/, /INVOICE_SCOPE_DENIED/],
+  ['rep edits another rep\'s draft', U.REP, `public.save_invoice(jsonb_build_object('id', current_setting('prover.inv'), 'customer_id', '${C4}', 'invoice_type', 'misc_charge', 'status', 'draft', 'invoice_date', ${TODAY}, 'salesman_id', '${U.REP}', 'header_notes', '[PROVER] takeover'), jsonb_build_array(jsonb_build_object('description', '[PROVER] fee', 'quantity', 1, 'unit_price_cents', 1500, 'extended_cents', 1500)), 'prover-rac-takeover') IS NOT NULL`, { fixture: adminDraft(C4, 'x4', `, 'salesman_id', '${U.REP_B}'`) }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
   ['rep names another salesperson', U.REP, `${misc(C1, 'repname', `, 'salesman_id', '${U.REP_B}'`)} IS NOT NULL`, {}, /SALESMAN_SCOPE_DENIED/, /SALESMAN_SCOPE_DENIED/],
   ['rep posts admin draft for unassigned customer', U.REP, `(SELECT status FROM public.invoices WHERE id = current_setting('prover.inv')::uuid)`,
     { fixture: adminDraft(C4, 'p4', `, 'salesman_id', '${U.REP}'`), pre: `PERFORM public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-reppost');` },
@@ -351,7 +364,8 @@ const CASES = [
   ['admin saves and posts for unassigned customer', U.ADMIN, `(SELECT status FROM public.invoices WHERE id = current_setting('prover.inv')::uuid)`, { fixture: adminPosted(C4, 'a4') }, 'same', 'same'],
   ['driver saves invoice', U.DRIVER, `${misc(C1, 'drv')} IS NOT NULL`, {}, /INSUFFICIENT_ROLE/, 'same'],
   ['deactivated rep saves invoice', U.REP_OFF, `${misc(C1, 'off')} IS NOT NULL`, {}, /INSUFFICIENT_ROLE/, 'same'],
-  ['rep B posts invoice group of rep\'s customers', U.REP_B, `public.post_invoice_group(current_setting('prover.group')::uuid, '${U.REP_B}', 'prover-rac-gp-b') IS NOT NULL`, { fixture: adminGroup }, /CUSTOMER_SCOPE_DENIED/, /^ok\|true$/],
+  ['rep B posts an invoice group of rep\'s customers named for rep B', U.REP_B, `public.post_invoice_group(current_setting('prover.group')::uuid, '${U.REP_B}', 'prover-rac-gp-b') IS NOT NULL`, { fixture: adminGroupForRepB }, /CUSTOMER_SCOPE_DENIED/, /^ok\|true$/],
+  ['rep B posts an admin\'s invoice group', U.REP_B, `public.post_invoice_group(current_setting('prover.group')::uuid, '${U.REP_B}', 'prover-rac-gp-b2') IS NOT NULL`, { fixture: adminGroup }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
   ['admin posts invoice group', U.ADMIN, `public.post_invoice_group(current_setting('prover.group')::uuid, '${U.ADMIN}', 'prover-rac-gp-a') IS NOT NULL`, { fixture: adminGroup }, 'same', 'same'],
   ['rep B split-bills rep\'s customers', U.REP_B, `(${splitCall(U.REP_B, 'prover-rac-fas-b')})->>'invoice_group_id' IS NOT NULL`, { fixture: splitJob }, /SPLIT_(CUSTOMER|JOB)_NOT_ASSIGNED/, /^ok\|true$/],
   ['admin split-bills', U.ADMIN, `(${splitCall(U.ADMIN, 'prover-rac-fas-a')})->>'invoice_group_id' IS NOT NULL`, { fixture: splitJob }, 'same', 'same'],
@@ -383,6 +397,14 @@ const CASES = [
   ['rep direct-changes another rep\'s split', U.REP, `UPDATE public.customers SET default_commission_split = jsonb_build_object('splits', jsonb_build_array(jsonb_build_object('recipient_user_id', '${U.REP}', 'percentage', 100))) WHERE id = '${C3}'`, { statement: true }, RLS_HIDDEN, /COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP/],
   ['rep direct-changes own split', U.REP, `UPDATE public.customers SET default_commission_split = jsonb_build_object('splits', jsonb_build_array(jsonb_build_object('recipient_user_id', '${U.REP_B}', 'percentage', 100))) WHERE id = '${C1}'`, { statement: true }, /^ok\|1$/, 'same'],
   ['admin direct-reassigns', U.ADMIN, `UPDATE public.customers SET assigned_sales_rep = '${U.REP_B}' WHERE id = '${C4}'`, { statement: true }, 'same', 'same'],
+  ['rep deactivates a customer with an open invoice', U.REP, `UPDATE public.customers SET is_active = false WHERE id = '${C3}'`, { statement: true, fixture: adminPosted(C3, 'open3') }, RLS_HIDDEN, /CUSTOMER_HAS_OPEN_INVOICES/],
+  ['rep deactivates own customer with an open invoice', U.REP, `UPDATE public.customers SET is_active = false WHERE id = '${C1}'`, { statement: true, fixture: adminPosted(C1, 'open1') }, /^ok\|1$/, /CUSTOMER_HAS_OPEN_INVOICES/],
+  ['rep deactivates a customer with no open invoice', U.REP, `UPDATE public.customers SET is_active = false WHERE id = '${C4}'`, { statement: true }, RLS_HIDDEN, /^ok\|1$/],
+  ['admin deactivates a customer with an open invoice', U.ADMIN, `UPDATE public.customers SET is_active = false WHERE id = '${C3}'`, { statement: true, fixture: adminPosted(C3, 'open3a') }, 'same', 'same'],
+  ['rep edits a prepay balance directly', U.REP, `UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 100 WHERE id = '${C1}'`, { statement: true }, /^ok\|1$/, /PREPAY_BALANCE_SERVER_ONLY/],
+  ['rep changes a prepay balance through a server function', U.REP, `public.prover_rac_bump_prepay('${C1}')`, { fixture: serverPrepayFn }, /^ok\|100$/, 'same'],
+  ['admin edits a prepay balance directly', U.ADMIN, `UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 100 WHERE id = '${C4}'`, { statement: true }, 'same', 'same'],
+  ['rep clears an unset split on another rep\'s customer', U.REP, `UPDATE public.customers SET default_commission_split = 'null'::jsonb WHERE id = '${C4}'`, { statement: true }, RLS_HIDDEN, /^ok\|1$/],
   ['driver direct-updates a customer', U.DRIVER, `UPDATE public.customers SET notes = 'x' WHERE id = '${C1}'`, { statement: true }, RLS_HIDDEN, 'same'],
 
   // Customer-related records.

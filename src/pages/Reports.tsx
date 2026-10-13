@@ -543,7 +543,9 @@ export default function Reports() {
       if (yeBatchMode) {
         // Batch: page through every recognized invoice so the API row cap cannot
         // silently omit customers as the season grows.
-        // Reps get every customer's summary too (Mason, 2026-10-13: reps work with any customer).
+        // No "assigned to you" filter since 2026-10-13 (reps work with any customer). A rep's batch
+        // still covers the customers on invoices they can read (created or salesperson on); any
+        // other customer's summary opens from the single-customer mode.
         const uniqueIds = await getRecognizedInvoiceCustomerIds(season);
         if (uniqueIds.length === 0) {
           toast('info', `No customers have invoices for season ${season}`);

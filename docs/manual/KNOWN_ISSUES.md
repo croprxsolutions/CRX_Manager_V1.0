@@ -427,6 +427,20 @@ Each of these was recorded inside an entry that is otherwise fixed or closed and
 archive. They are listed here so the open part of this file shows them. None was re-measured on
 2026-09-26 unless it says so.
 
+- **Follow-ups left by the reps-work-any-customer change (`20261013220000`, 2026-10-13; review
+  findings, read from code, not exercised live).**
+  - **Job commission splits.** `jobs_update` is `is_admin() OR is_sales_rep()` and nothing guards
+    `jobs.commission_split`, so any active rep can change the split on any job (pre-existing; the
+    2026-10-13 rule protects only `customers.default_commission_split`). Confirm with Mason whether
+    job splits should follow the same admin-or-assigned-rep rule.
+  - **Year-end batch for reps.** Reports' batch mode finds customers through the invoices the rep
+    can read (created or salesperson on), so a rep's batch skips customers billed only by others;
+    the single-customer year-end works for any customer.
+  - **`customer-document-files` deploy.** The repo code opens documents to every rep; until that
+    function is redeployed (Mason's OK required), reps see other customers' document rows but the
+    live function still refuses their uploads and downloads. Deploy right after the migration
+    applies, never before it.
+
 - **Order-invoice RPCs let a rep name another salesperson (found 2026-10-06 while fixing
   CRX-LIFE-001; pre-existing; read from the live catalog, not exercised live).** **Updated
   2026-10-13 (Mason: reps work with ANY customer, `DECISION_LOG.md`):** the customer-scope half
@@ -436,21 +450,19 @@ archive. They are listed here so the open part of this file shows them. None was
   bill only under their own name, admins unrestricted). Original record, in
   `create_invoice_from_order` and `create_split_invoices_from_order`, whose only gate is
   `is_admin() OR is_sales_rep()`:
-  - **Customer scope (intended since 2026-10-13).** They never check that the order's customer is assigned to the calling rep,
-    so any active rep holding an order's id can create a draft invoice on another rep's customer
-    and then read it (`created_by` = the rep). `save_invoice` refuses the same case
-    (`CUSTOMER_SCOPE_DENIED`); the CRX-LIFE-001 container run showed a rep invoicing an unassigned
-    customer's order.
+  - **Customer scope (intended since 2026-10-13, not a gap).** They never check that the order's
+    customer is assigned to the calling rep, so any active rep can invoice any customer's order;
+    that is now the rule everywhere (`save_invoice` no longer refuses it either). Do not add a
+    customer-assignment check back.
   - **Salesperson.** They store `COALESCE(p_salesman_id, orders.salesman_id)` as the invoice's
     `salesman_id` with no check that a rep may only name themselves. `invoices.salesman_id` is a
     read-access key (the `invoices` SELECT policy and the policies on its line, share and
     field-billing child tables, plus `get_customer_balance_listing` and `get_field_profitability`),
     so naming another profile grants that profile read access to the invoice. Sales reports and
     commissions read `orders.salesman_id`, not this column. The app sends the signed-in profile's id.
-  **Mason, 2026-10-06: the next change after CRX-LIFE-001** (`DECISION_LOG.md`). Intended rule:
-  reps bill only their own customers and only under their own name; admins unrestricted. Fix in a
-  separate reviewed migration: refuse a non-admin caller whose customer is not assigned to them or
-  whose non-null `p_salesman_id` differs from `auth.uid()`, minding `complete_delivery`'s call into
+  **Next change (Mason, 2026-10-06, narrowed 2026-10-13).** Intended rule: reps bill any customer,
+  but only under their own name; admins unrestricted. Fix in a separate reviewed migration: refuse
+  a non-admin caller whose non-null `p_salesman_id` differs from `auth.uid()`, minding `complete_delivery`'s call into
   the split RPC. That change re-emits the split wrapper, so it also adds the CRX-LIFE-001 type
   allow-list there, before any claim or insert: today a refused `field_application` split on an
   allocated order fails on the table CHECK only after its first INSERT has drawn an invoice number

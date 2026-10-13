@@ -12,13 +12,24 @@ see only their assigned customers and refused save, post and group post for any 
 
 **Database** (`supabase/migrations/20261013220000_reps_work_any_customer.sql`, permissions widening; applies
 only with Mason's owner-approval reply):
-- 18 functions re-created from their verbatim live bodies with only the assigned-rep tests removed (the
-  header lists every hunk); 20 policies lose their assigned-rep condition, every other condition kept.
-- Still refused: a rep naming another salesperson (`SALESMAN_SCOPE_DENIED`); a rep creating a customer not
-  assigned to themselves (`REP_MUST_SELF_ASSIGN`); a rep reassigning a customer (`REP_CANNOT_REASSIGN`, now
-  compared with the stored rep, since the edit page always sends it back); a rep changing the default
-  commission split of a customer not assigned to them (`COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`). The last
-  two are also enforced on the direct-table path by the new trigger `customers_guard_rep_edit_20261013`.
+- 20 functions re-created from their verbatim live bodies (headers checked byte-identical to live) with only
+  the assigned-rep tests removed or narrowed (the header lists every hunk, including the dispatch board and
+  dispatched list, which now show reps every customer's name); 19 policies lose their assigned-rep
+  condition, every other condition kept (20 pinned: `customers_insert` is pinned unchanged).
+- Still refused: a rep naming another salesperson (`SALESMAN_SCOPE_DENIED`); a rep changing or posting an
+  EXISTING invoice or split set they did not create and are not the salesperson on (`INVOICE_SCOPE_DENIED`,
+  `SPLIT_SET_NOT_OWNED`; added after review, since the old assigned-customer rule was the only gate on
+  someone else's draft); a rep creating a customer not assigned to themselves (`REP_MUST_SELF_ASSIGN`); a rep
+  reassigning a customer (`REP_CANNOT_REASSIGN`, compared with the stored rep, since the edit page always
+  sends it back, and only on a current page, so a stale page still gets the reload prompt); a rep changing
+  the default commission split of a customer not assigned to them (`COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`);
+  a rep deactivating a customer with posted or overdue invoices (`CUSTOMER_HAS_OPEN_INVOICES`; the
+  Customers page checked this only in React); and a rep editing a prepay balance by a direct table UPDATE
+  (`PREPAY_BALANCE_SERVER_ONLY`; the prepay and payment functions still work). The last four are enforced
+  on every path by the new trigger `customers_guard_rep_edit_20261013`, which runs with the caller's rights,
+  plus the definer-rights reader `_customer_has_open_invoice_20261013`.
+- "Statements" means the 90-day ledger on a customer's page (`get_customer_statement`); printable and
+  emailed statements (AR Aging, `get_detailed_statement_data`) stay admin-only.
 - Unchanged: every admin-only action, drivers, applicators and other roles, `invoices_select` (a rep reads
   the invoices they created or are the salesperson on), the balance listing's invoice-level filter, the
   reps' own call lists and "my customers" flags, quick deliveries, and the order-invoice RPCs.
@@ -31,11 +42,15 @@ reps only their assigned customers). Needs a deploy, which waits for Mason's exp
 **Screens:** the year-end report's batch mode no longer skips "customers not assigned to you" (the unused
 assigned-customer helper is removed); the Misc Charge invoice screen now loads each customer's email and
 billing address, so Email works there and the printed invoice shows the address (both were broken for
-admins too); two new error messages (`REP_CANNOT_REASSIGN`, `COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`).
+admins too); the Documents tab offers Remove to every rep; the customer page shows the default commission
+split read-only to a rep on a customer not assigned to them, and its save errors now go through
+`sanitizeError` (they showed raw database text); five new error messages (`REP_CANNOT_REASSIGN`,
+`COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`, `INVOICE_SCOPE_DENIED`, `CUSTOMER_HAS_OPEN_INVOICES`,
+`PREPAY_BALANCE_SERVER_ONLY`).
 
 **Proof:** `node scripts/smoke/prove-reps-work-any-customer-real-schema.mjs` builds the production schema
-baseline in a disposable PostgreSQL 17 container, replays every migration, checks the 18 bodies and 20
-policies match live, then runs 51 calls as an admin, two reps, a driver, an applicator and a deactivated
+baseline in a disposable PostgreSQL 17 container, replays every migration, checks the 20 bodies and 20
+policies match live, then runs 63 calls as an admin, two reps, a driver, an applicator and a deactivated
 rep BEFORE and AFTER the candidate: reps are refused before and allowed after; the narrower rules still
 refuse after; every admin and other-role result is identical before and after; a drifted body aborts the
 preflight; a second apply is refused; and with the guard trigger dropped the rep's direct reassignment

@@ -2,21 +2,27 @@
 -- docs/reference/migration-history.md.
 --
 -- WHAT: sales reps work with ANY customer, not only the customers assigned to them.
---   * Invoicing: a rep saves, posts and emails invoices (single, field-application split and
---     invoice groups) for any customer. A rep still invoices only under their OWN name
---     (SALESMAN_SCOPE_DENIED and the split writer's forced-self salesman stay); admins may name
---     anyone.
+--   * Invoicing: a rep creates, saves, posts and emails invoices (single, field-application split
+--     and invoice groups) for any customer, under their OWN name only (SALESMAN_SCOPE_DENIED and
+--     the split writer's forced-self salesman stay; admins may name anyone). An EXISTING invoice
+--     or split set a rep edits or posts must be one they created or are the salesperson on (the
+--     same rows invoices_select already shows them): INVOICE_SCOPE_DENIED / SPLIT_SET_NOT_OWNED.
 --   * Customers: a rep reads and edits every customer and every customer-related record:
 --     addresses, contacts, documents, facts, interactions and their transcripts, and external
---     identities.
---   * Exceptions that stay narrower: only an ADMIN changes who a customer is assigned to
---     (REP_CANNOT_REASSIGN; a rep still creates customers assigned to themselves,
---     REP_MUST_SELF_ASSIGN), and only an ADMIN or the customer's OWN assigned rep changes the
---     customer's default commission split (COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP).
---   * Reports: get_customer_statement and get_customer_year_end_summary open to reps for any
---     customer; the purchase-intelligence readers (prep card, lapsed products, purchase summary)
---     too. get_customer_balance_listing lists any customer, but still counts only invoices the rep
---     created or is the salesperson on (unchanged invoice-level filter, same as invoices_select).
+--     identities; the dispatch board and dispatched list show reps every customer's name.
+--   * What stays narrower for a rep (trigger customers_guard_rep_edit_20261013, every path):
+--     only an ADMIN changes who a customer is assigned to (REP_CANNOT_REASSIGN; a rep still
+--     creates customers assigned to themselves, REP_MUST_SELF_ASSIGN); only an ADMIN or the
+--     customer's OWN assigned rep changes its default commission split
+--     (COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP); a customer with a posted or overdue invoice is not
+--     deactivated (CUSTOMER_HAS_OPEN_INVOICES); and prepay_balance_cents changes only through the
+--     server's prepay and payment functions, never a direct browser UPDATE
+--     (PREPAY_BALANCE_SERVER_ONLY).
+--   * Reports: get_customer_statement (the 90-day activity ledger on a customer's page) and
+--     get_customer_year_end_summary open to reps for any customer; so do the purchase-intelligence
+--     readers (prep card, lapsed products, purchase summary). get_customer_balance_listing lists
+--     any customer but still counts only invoices the rep created or is the salesperson on. The
+--     printable / emailed statements (get_detailed_statement_data, AR Aging) stay admin-only.
 --
 -- WHY (Mason, 2026-10-13, in chat, this session): "reps should be able to make invoices or email
 --   customers that arnt theirs" (session 9ff9e3), then in this session: reps "can see all and edit
@@ -27,27 +33,36 @@
 --   This WIDENS permissions, so it is applied only with Mason's explicit owner approval.
 --
 -- NOT CHANGED: every admin-only action (void, unpost, credit memos, write-offs, prepay apply,
---   assign_customers_sales_rep); drivers, applicators and every other role (their policy legs are
---   copied verbatim); invoices_select (a rep still reads the invoices they created or are the
---   salesperson on); the reps' own work lists (call lists, get_rep_customer_purchase_flags) and
---   notification sweeps, which use assigned_sales_rep to mean "my book", not as an access gate;
---   create_quick_delivery's replay-only DELIVERY_SCOPE_DENIED; the order-invoice RPCs (their
---   salesperson gap is a separate follow-up). Nothing in any data row changes.
+--   assign_customers_sales_rep) and everything an admin can do; drivers, applicators and every
+--   other role (their policy legs are copied verbatim); invoices_select (a rep still reads the
+--   invoices they created or are the salesperson on); the reps' own work lists (call lists,
+--   get_rep_customer_purchase_flags) and notification sweeps, which use assigned_sales_rep to mean
+--   "my book", not as an access gate; create_quick_delivery's replay-only DELIVERY_SCOPE_DENIED;
+--   the order-invoice RPCs (their salesperson gap is a separate follow-up); jobs.commission_split
+--   (any active rep can already edit it; a separate follow-up). No table or column grant changes:
+--   authenticated still holds no INSERT or UPDATE on customer_addresses, so its two widened
+--   policies matter only once a grant exists (save_customer writes addresses). No data row changes.
 --
 -- HOW:
---  0  Preflight: the 18 function bodies and 20 policies this file replaces must match their live
---     md5 of 2026-10-13, each function must have no overload, and 20261010120000 must be applied.
---  1  CREATE OR REPLACE of 18 functions, each the verbatim live body with ONLY these hunks:
+--  0  Preflight: the 20 function bodies and 20 policies (the 19 this file changes, plus the unchanged
+--     customers_insert) must match their live
+--     md5 of 2026-10-13, each function must have no overload, 20261010120000 must be applied, and
+--     the trigger must not exist yet. The owner, grants and security of every replaced function
+--     are recorded for the postflight.
+--  1  CREATE OR REPLACE of 20 functions, each the verbatim live body with ONLY these hunks:
 --       _save_invoice_split_provenance_impl_20260719 (save_invoice): the three CUSTOMER_SCOPE_DENIED
---         tests are removed; SALESMAN_SCOPE_DENIED stays.
+--         tests are removed; SALESMAN_SCOPE_DENIED stays; a rep editing or replaying an EXISTING
+--         invoice must have created it or be its salesperson (INVOICE_SCOPE_DENIED).
 --       _save_invoice_below_cost_impl_20260810 (save_invoice wrapper): the two replay-branch
---         CUSTOMER_SCOPE_DENIED tests are removed (a mismatched replay now always reports
---         IDEMPOTENCY_INTENT_MISMATCH).
+--         CUSTOMER_SCOPE_DENIED tests become the same created-by-or-salesperson test, so a
+--         mismatched receipt's invoice id is reported only to a rep who may see that invoice.
 --       _post_invoice_public_impl_20260718 (post_invoice) and post_invoice_group: the
---         CUSTOMER_SCOPE_DENIED test is removed; the row locks before it stay.
---       _save_field_app_split_invoice_impl: SPLIT_SET_NOT_OWNED is removed; the member and source
---         job tests keep refusing a non-admin only a member that is not a customer row and a job
---         with no customer (SPLIT_CUSTOMER_NOT_ASSIGNED / SPLIT_JOB_NOT_ASSIGNED keep their codes).
+--         CUSTOMER_SCOPE_DENIED test becomes INVOICE_SCOPE_DENIED (every invoice posted must be one
+--         the rep created or is the salesperson on); the row locks before it stay.
+--       _save_field_app_split_invoice_impl: SPLIT_SET_NOT_OWNED now means "an existing child is not
+--         an invoice the rep created or is the salesperson on"; the member and source-job tests
+--         keep refusing a non-admin only a member that is not a customer row and a job with no
+--         customer (SPLIT_CUSTOMER_NOT_ASSIGNED / SPLIT_JOB_NOT_ASSIGNED keep their codes).
 --       resolve_line_split_vector: RESOLVER_NOT_AUTHORIZED (the direct-call assigned-rep test) is
 --         removed; the active admin/sales_rep gate stays.
 --       get_customer_statement, get_customer_year_end_summary: CUSTOMER_SCOPE_DENIED removed; the
@@ -56,12 +71,16 @@
 --         invoice-level created_by/salesman_id filters stay.
 --       save_customer: NOT_CUSTOMER_OWNER (twice) removed; REP_CANNOT_REASSIGN now compares the
 --         payload with the STORED assigned_sales_rep under FOR UPDATE (the edit page always sends
---         the loaded value back) and a missing customer is CUSTOMER_NOT_FOUND for a rep too.
+--         the loaded value back), and only when the page's row_version is current (a stale page
+--         gets the existing CUSTOMER_STALE_WRITE reload instead); a missing customer is
+--         CUSTOMER_NOT_FOUND for a rep too.
 --       soft_delete_customer_document, log_customer_fact, review_customer_fact,
 --         supersede_customer_fact, log_customer_interaction, get_customer_prep_card,
 --         get_customer_lapsed_products, get_customer_purchase_summary: the
 --         "c.assigned_sales_rep = auth.uid()/v_actor" clause is removed (each still requires the
 --         customer row to exist and the caller to be an active admin or sales rep).
+--       get_dispatch_board_jobs, get_dispatched_list: a sales rep sees every customer's name (the
+--         "is_sales_rep() AND assigned" leg becomes is_sales_rep()).
 --  2  ALTER POLICY (names, commands and roles unchanged) on customers (select, update),
 --     customer_addresses (insert, update), customer_contacts (select, insert, update),
 --     customer_documents (rep select, insert, update), customer_facts (rep select, insert),
@@ -69,20 +88,23 @@
 --     external_identities (select, insert, update): the assigned-rep condition is removed; every
 --     other condition (provenance, uploaded_by, created_by, verified_at, deleted_at, the driver
 --     and applicator legs) is kept word for word. customers_insert is pinned and NOT changed.
---  3  Trigger customers_guard_rep_edit_20261013 (BEFORE UPDATE OF assigned_sales_rep,
---     default_commission_split ON customers), for the direct-table path the wider
---     customers_update policy opens: an active sales rep (who is not an admin) cannot change
---     assigned_sales_rep, and cannot change default_commission_split on a customer not assigned
---     to them. The split is compared after canonical recipient stamping on both sides
---     (commission_split_with_recipient_ids), so re-saving an unchanged split never trips it.
+--  3  _customer_has_open_invoice_20261013(uuid) (definer-rights boolean read, authenticated only)
+--     and trigger customers_guard_rep_edit_20261013 (BEFORE UPDATE OF assigned_sales_rep,
+--     default_commission_split, is_active, prepay_balance_cents ON customers; SECURITY INVOKER so
+--     current_user tells a direct browser UPDATE from a server function) enforce the four rules
+--     listed under "What stays narrower" for an active sales rep who is not an admin. The split is
+--     compared after canonical recipient stamping on both sides, so re-saving an unchanged split
+--     never trips it.
 --  4  Postflight: no replaced function or policy still tests assigned_sales_rep (save_customer's
---     reassignment test and customers_insert excepted), every replaced function kept its ACL,
---     SECURITY DEFINER and search_path, and the trigger is installed.
+--     reassignment test and customers_insert excepted), every replaced function kept its owner,
+--     grants, SECURITY DEFINER and search_path, and the trigger, its function and the open-invoice
+--     reader are installed with the intended security, grants and column list.
 --
--- ROLLBACK: re-apply the 18 live bodies and 20 policy expressions recorded in git at
---   origin/main 6384e62f7 (the md5 pins above identify them), then
---   DROP TRIGGER customers_guard_rep_edit_20261013 ON public.customers and
---   DROP FUNCTION public.guard_customer_rep_edit_20261013().
+-- ROLLBACK: re-apply the 20 live bodies and 19 policy expressions recorded in git at
+--   origin/main 6384e62f7 (the md5 pins below identify them), then
+--   DROP TRIGGER customers_guard_rep_edit_20261013 ON public.customers,
+--   DROP FUNCTION public.guard_customer_rep_edit_20261013() and
+--   DROP FUNCTION public._customer_has_open_invoice_20261013(uuid).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -118,7 +140,9 @@ BEGIN
     ('public.log_customer_interaction(uuid,text,text,timestamp with time zone,text,uuid,integer,text,text,text,uuid,date,text)', '39401baee9fd14578b2f8d520fed0694'),
     ('public.get_customer_prep_card(uuid)', '2a37df4d6375f9a872ac657e5349a6c7'),
     ('public.get_customer_lapsed_products(uuid)', '66c740d1a3525b73374c009621020cbc'),
-    ('public.get_customer_purchase_summary(uuid,text)', '9bc8d13cf2e39ce0ac6cb7c8c51d56d3')
+    ('public.get_customer_purchase_summary(uuid,text)', '9bc8d13cf2e39ce0ac6cb7c8c51d56d3'),
+    ('public.get_dispatch_board_jobs(uuid,text,date,date)', '5e327097ff2b0a080bfaf41252b3e04f'),
+    ('public.get_dispatched_list(uuid,uuid)', 'd62626cd053875d2a20317ac3dd67b5c')
   ) AS t(signature, pin) LOOP
     SELECT md5(replace(p.prosrc, chr(13), '')) INTO v_md5
       FROM pg_proc p WHERE p.oid = to_regprocedure(v_pin.signature);
@@ -170,7 +194,8 @@ END
 $preflight$;
 
 -- Owner, grants and security of every function replaced below, for the postflight comparison.
-CREATE TEMP TABLE reps_any_customer_security_20261013 AS
+-- ON COMMIT DROP: the table vanishes with this transaction; the file never drops anything itself.
+CREATE TEMP TABLE reps_any_customer_security_20261013 ON COMMIT DROP AS
   SELECT p.oid AS fn, p.proowner AS owner, p.proacl::text AS acl, p.prosecdef AS secdef, p.proconfig AS config
     FROM pg_proc p
    WHERE p.oid IN (
@@ -191,7 +216,9 @@ CREATE TEMP TABLE reps_any_customer_security_20261013 AS
      to_regprocedure('public.log_customer_interaction(uuid,text,text,timestamp with time zone,text,uuid,integer,text,text,text,uuid,date,text)'),
      to_regprocedure('public.get_customer_prep_card(uuid)'),
      to_regprocedure('public.get_customer_lapsed_products(uuid)'),
-     to_regprocedure('public.get_customer_purchase_summary(uuid,text)')
+     to_regprocedure('public.get_customer_purchase_summary(uuid,text)'),
+     to_regprocedure('public.get_dispatch_board_jobs(uuid,text,date,date)'),
+     to_regprocedure('public.get_dispatched_list(uuid,uuid)')
    );
 
 -- ---------------------------------------------------------------------------------------------
@@ -216,6 +243,8 @@ DECLARE
   v_cached jsonb;
   v_cached_invoice_id uuid;
   v_cached_customer_id uuid;
+  v_owner_created_by uuid;
+  v_owner_salesman_id uuid;
 BEGIN
   IF v_actor IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
@@ -245,8 +274,8 @@ BEGIN
         RAISE EXCEPTION 'IDEMPOTENCY_PAYLOAD_CONFLICT';
       END IF;
 
-      SELECT customer_id
-        INTO v_cached_customer_id
+      SELECT customer_id, created_by, salesman_id
+        INTO v_cached_customer_id, v_owner_created_by, v_owner_salesman_id
         FROM public.invoices
        WHERE id = v_cached_invoice_id
        FOR UPDATE;
@@ -257,14 +286,20 @@ BEGIN
          AND v_requested_customer_id IS DISTINCT FROM v_cached_customer_id THEN
         RAISE EXCEPTION 'IDEMPOTENCY_PAYLOAD_CONFLICT';
       END IF;
-      -- Any customer (Mason, 2026-10-13): no assigned-rep check (20261013220000).
+      -- Any customer (Mason, 2026-10-13): no assigned-rep check (20261013220000). A rep
+      -- replays only an invoice they created or are the salesperson on.
+      IF v_actor_role = 'sales_rep'
+         AND v_owner_created_by IS DISTINCT FROM v_actor
+         AND v_owner_salesman_id IS DISTINCT FROM v_actor THEN
+        RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
+      END IF;
       RETURN v_cached_invoice_id;
     END IF;
   END IF;
 
   IF v_invoice_id IS NOT NULL THEN
-    SELECT customer_id
-      INTO v_existing_customer_id
+    SELECT customer_id, created_by, salesman_id
+      INTO v_existing_customer_id, v_owner_created_by, v_owner_salesman_id
       FROM public.invoices
      WHERE id = v_invoice_id
      FOR UPDATE;
@@ -282,8 +317,15 @@ BEGIN
   END IF;
 
   -- Reps save invoices for ANY customer (Mason, 2026-10-13; 20261013220000
-  -- removed the two assigned-rep checks here), but only under their own name.
+  -- removed the two assigned-rep checks here), but only under their own name, and
+  -- edit only an existing invoice they created or are the salesperson on (the same
+  -- rows invoices_select shows them).
   IF v_actor_role = 'sales_rep' THEN
+    IF v_invoice_id IS NOT NULL
+       AND v_owner_created_by IS DISTINCT FROM v_actor
+       AND v_owner_salesman_id IS DISTINCT FROM v_actor THEN
+      RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
+    END IF;
     IF v_requested_salesman_id IS NOT NULL
        AND v_requested_salesman_id IS DISTINCT FROM v_actor THEN
       RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';
@@ -312,6 +354,8 @@ DECLARE
   v_invoice_id uuid;
   v_cached_invoice_id uuid;
   v_cached_customer_id uuid;
+  v_cached_created_by uuid;
+  v_cached_salesman_id uuid;
 BEGIN
   IF v_actor IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
@@ -366,13 +410,21 @@ BEGIN
       IF v_cached_invoice_id IS NULL THEN
         RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
       END IF;
-      SELECT customer_id INTO v_cached_customer_id
+      SELECT customer_id, created_by, salesman_id
+        INTO v_cached_customer_id, v_cached_created_by, v_cached_salesman_id
         FROM public.invoices
        WHERE id = v_cached_invoice_id;
       IF NOT FOUND THEN
         RAISE EXCEPTION 'INVOICE_NOT_FOUND';
       END IF;
-      -- Any customer (Mason, 2026-10-13): no assigned-rep check (20261013220000).
+      -- Any customer (Mason, 2026-10-13; 20261013220000 removed the assigned-rep
+      -- check), but a rep sees the receipt only for an invoice they created or are
+      -- the salesperson on.
+      IF v_actor_role = 'sales_rep'
+         AND v_cached_created_by IS DISTINCT FROM v_actor
+         AND v_cached_salesman_id IS DISTINCT FROM v_actor THEN
+        RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
+      END IF;
       RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH'
         USING ERRCODE = '22023',
               DETAIL = jsonb_build_object(
@@ -388,13 +440,21 @@ BEGIN
       IF v_cached_invoice_id IS NULL THEN
         RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
       END IF;
-      SELECT customer_id INTO v_cached_customer_id
+      SELECT customer_id, created_by, salesman_id
+        INTO v_cached_customer_id, v_cached_created_by, v_cached_salesman_id
         FROM public.invoices
        WHERE id = v_cached_invoice_id;
       IF NOT FOUND THEN
         RAISE EXCEPTION 'INVOICE_NOT_FOUND';
       END IF;
-      -- Any customer (Mason, 2026-10-13): no assigned-rep check (20261013220000).
+      -- Any customer (Mason, 2026-10-13; 20261013220000 removed the assigned-rep
+      -- check), but a rep sees the receipt only for an invoice they created or are
+      -- the salesperson on.
+      IF v_actor_role = 'sales_rep'
+         AND v_cached_created_by IS DISTINCT FROM v_actor
+         AND v_cached_salesman_id IS DISTINCT FROM v_actor THEN
+        RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
+      END IF;
       RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH'
         USING ERRCODE = '22023',
               DETAIL = jsonb_build_object(
@@ -434,6 +494,8 @@ DECLARE
   v_actor uuid := auth.uid();
   v_actor_role text;
   v_customer_id uuid;
+  v_created_by uuid;
+  v_salesman_id uuid;
   v_cached jsonb;
   v_cached_invoice_id uuid;
 BEGIN
@@ -459,16 +521,22 @@ BEGIN
     END IF;
   END IF;
 
-  SELECT customer_id
-    INTO v_customer_id
+  SELECT customer_id, created_by, salesman_id
+    INTO v_customer_id, v_created_by, v_salesman_id
     FROM public.invoices
    WHERE id = p_invoice_id
      AND deleted_at IS NULL
    FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'INVOICE_NOT_FOUND'; END IF;
 
-  -- Reps post invoices for ANY customer (Mason, 2026-10-13); the assigned-rep
-  -- check that stood here is removed by 20261013220000.
+  -- Reps post invoices for ANY customer (Mason, 2026-10-13; 20261013220000 removed
+  -- the assigned-rep check), but only an invoice they created or are the
+  -- salesperson on (the rows invoices_select shows them).
+  IF v_actor_role = 'sales_rep'
+     AND v_created_by IS DISTINCT FROM v_actor
+     AND v_salesman_id IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
+  END IF;
 
   PERFORM public._post_invoice_customer_scope_impl(
     p_invoice_id,
@@ -531,8 +599,20 @@ BEGIN
     RAISE EXCEPTION 'No invoices found in group %', p_invoice_group_id;
   END IF;
 
-  -- Reps post invoice groups for ANY customer (Mason, 2026-10-13); the
-  -- assigned-rep check that stood here is removed by 20261013220000.
+  -- Reps post invoice groups for ANY customer (Mason, 2026-10-13; 20261013220000
+  -- removed the assigned-rep check), but only when they created, or are the
+  -- salesperson on, every invoice in the group.
+  IF v_actor_role = 'sales_rep'
+     AND EXISTS (
+       SELECT 1
+         FROM public.invoices invoice_row
+        WHERE invoice_row.invoice_group_id = p_invoice_group_id
+          AND invoice_row.deleted_at IS NULL
+          AND invoice_row.created_by IS DISTINCT FROM v_actor
+          AND invoice_row.salesman_id IS DISTINCT FROM v_actor
+     ) THEN
+    RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
+  END IF;
 
   RETURN public._post_invoice_group_customer_scope_impl(
     p_invoice_group_id,
@@ -814,8 +894,18 @@ BEGIN
         v_set_source_job, p_source_job_id USING ERRCODE = 'invalid_parameter_value';
     END IF;
 
-    -- Ownership on re-save: removed 2026-10-13 (20261013220000). Reps may re-save a
-    -- split set for ANY customer (Mason, 2026-10-13).
+    -- Ownership on re-save (Codex P1 #4; narrowed 2026-10-13 by 20261013220000): reps may
+    -- re-save a split set for ANY customer (Mason, 2026-10-13), but only when every EXISTING
+    -- child is an invoice they created or are the salesperson on (before any delete/insert).
+    IF NOT is_admin() AND EXISTS (
+      SELECT 1 FROM invoices i
+      WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL
+        AND i.created_by IS DISTINCT FROM v_actor
+        AND i.salesman_id IS DISTINCT FROM v_actor
+    ) THEN
+      RAISE EXCEPTION 'SPLIT_SET_NOT_OWNED: not authorized to modify this billing set'
+        USING ERRCODE = 'insufficient_privilege';
+    END IF;
 
     -- Only EDITABLE children are cleared for the rebuild. A voided/cancelled child keeps its
     -- invoice_items/invoice_shares as the printed audit record of what was billed then reversed
@@ -2266,6 +2356,7 @@ DECLARE
   v_expected_row_version bigint;
   v_request_fingerprint text;
   v_stored_sales_rep uuid;
+  v_stored_row_version bigint;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -2308,8 +2399,10 @@ BEGIN
       -- customer/address DML so a concurrent reassignment can't slip between
       -- this check and the UPDATE. The commission split rule (admin or the
       -- customer's own rep) is enforced by customers_guard_rep_edit_20261013.
-      SELECT assigned_sales_rep
-        INTO v_stored_sales_rep
+      -- A page loaded before the row changed is left to the CUSTOMER_STALE_WRITE
+      -- check below (reload dialog) instead of reading as a reassignment.
+      SELECT assigned_sales_rep, row_version
+        INTO v_stored_sales_rep, v_stored_row_version
         FROM customers
        WHERE id = p_customer_id
        FOR UPDATE;
@@ -2317,7 +2410,8 @@ BEGIN
         RAISE EXCEPTION 'CUSTOMER_NOT_FOUND';
       END IF;
       IF p_customer_payload ? 'assigned_sales_rep'
-         AND (p_customer_payload->>'assigned_sales_rep')::uuid IS DISTINCT FROM v_stored_sales_rep THEN
+         AND (p_customer_payload->>'assigned_sales_rep')::uuid IS DISTINCT FROM v_stored_sales_rep
+         AND (p_customer_payload->>'row_version_expected') IS NOT DISTINCT FROM v_stored_row_version::text THEN
         RAISE EXCEPTION 'REP_CANNOT_REASSIGN';
       END IF;
     END IF;
@@ -3388,6 +3482,256 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.get_dispatch_board_jobs(p_applicator_id uuid, p_status text DEFAULT NULL::text, p_start_date date DEFAULT NULL::date, p_end_date date DEFAULT NULL::date)
+ RETURNS SETOF jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  -- A dispatch row is VISIBLE to the caller (mirrors job_location_dispatches_select):
+  --   admin/sales see all; the job's whole-job applicator sees every row on their job;
+  --   otherwise a field user sees a row where they are the assignee or an active member
+  --   of the assigned active crew.
+  WITH matched AS (
+    SELECT j.*
+      FROM public.jobs j
+     WHERE j.deleted_at IS NULL
+       AND p_applicator_id IS NOT NULL
+       AND (p_status IS NULL OR j.status = p_status)
+       AND (p_start_date IS NULL OR j.job_date >= p_start_date)
+       AND (p_end_date IS NULL OR j.job_date <= p_end_date)
+       AND (
+         -- (a) a CURRENT per-location dispatch to this applicator the CALLER can see
+         EXISTS (
+           SELECT 1 FROM public.job_location_dispatches d
+            WHERE d.job_id = j.id
+              AND d.dispatch_status = 'dispatched'
+              AND d.applicator_id = p_applicator_id
+              AND (
+                is_admin()
+                OR is_sales_rep()
+                OR (is_applicator() AND j.applicator_id = (select auth.uid()))
+                OR d.applicator_id = (select auth.uid())
+              )
+         )
+         OR (
+           -- (b) whole-job applicator = this one AND the job has NO per-location dispatch
+           j.applicator_id = p_applicator_id
+           AND NOT EXISTS (
+             SELECT 1 FROM public.job_location_dispatches d2
+              WHERE d2.job_id = j.id
+                AND d2.dispatch_status = 'dispatched'
+           )
+         )
+       )
+       -- VISIBILITY GATE — the live jobs SELECT predicate. Never return a hidden job.
+       AND (
+         is_admin()
+         OR is_sales_rep()
+         OR (is_applicator() AND j.applicator_id = (select auth.uid()))
+         OR public._is_dispatched_to_me(j.id)
+       )
+     ORDER BY j.job_date DESC NULLS LAST
+     LIMIT 500
+  )
+  SELECT
+    to_jsonb(m)
+    || jsonb_build_object(
+         -- CUSTOMER NAME — RLS-equivalent (Codex re-review-3 P2): this function is
+         -- SECURITY DEFINER, so a raw `customers` read would bypass customers_select and
+         -- could leak a farm_name the caller can't otherwise see (a sales_rep is limited
+         -- to assigned customers; an applicator/driver to a time-windowed set). Return the
+         -- name ONLY when the caller would pass customers_select OR
+         -- customers_select_location_dispatchee for THIS job's customer; else farm_name
+         -- is null (the board renders 'Unknown', exactly as the unfiltered RLS embed would).
+         'customer',
+         (SELECT jsonb_build_object(
+                   'farm_name',
+                   CASE WHEN (
+                     is_admin()
+                     OR is_sales_rep()  -- any customer since 20261013220000 (Mason, 2026-10-13)
+                     OR (is_driver() AND EXISTS (
+                           SELECT 1 FROM public.deliveries d
+                            WHERE d.customer_id = c.id
+                              AND d.assigned_driver = (select auth.uid())
+                              AND d.scheduled_date >= (CURRENT_DATE - interval '1 day')))
+                     OR (is_applicator() AND EXISTS (
+                           SELECT 1 FROM public.jobs j2
+                            WHERE j2.customer_id = c.id
+                              AND j2.applicator_id = (select auth.uid())
+                              AND j2.job_date >= (CURRENT_DATE - interval '7 days')))
+                     OR EXISTS (
+                           SELECT 1 FROM public.jobs j3
+                            WHERE j3.customer_id = c.id
+                              AND public._is_dispatched_to_me(j3.id))
+                   ) THEN c.farm_name ELSE NULL END)
+            FROM public.customers c WHERE c.id = m.customer_id),
+         -- JOB_FIELDS — job_fields_select is satisfied for every job that passed this
+         -- function's visibility gate (admin/sales_rep/whole-job applicator/_is_dispatched_to_me
+         -- are exactly its conditions), so listing the rows leaks nothing. field_name is
+         -- gated to the fields_select predicate (admin/sales_rep/applicator) so a dispatched
+         -- crew member whose role is NOT applicator doesn't get a field name they couldn't
+         -- read under RLS (null → the board falls back to 'Field'). (Codex re-review-3 P2.)
+         'job_fields',
+         coalesce((
+           SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'id', jf.id,
+                      'field_id', jf.field_id,
+                      'acres_to_treat', jf.acres_to_treat,
+                      'sort_order', jf.sort_order,
+                      'field', jsonb_build_object(
+                        'id', f.id,
+                        'field_name', CASE WHEN (is_admin() OR is_sales_rep() OR is_applicator())
+                                           THEN f.field_name ELSE NULL END)
+                    ) ORDER BY jf.sort_order
+                  )
+             FROM public.job_fields jf
+             JOIN public.fields f ON f.id = jf.field_id
+            WHERE jf.job_id = m.id
+         ), '[]'::jsonb),
+         -- per-location dispatch rows the CALLER can see, for client-side label aggregation
+         '_dispatches',
+         coalesce((
+           SELECT jsonb_agg(jsonb_build_object('applicator_id', d.applicator_id, 'crew_id', d.crew_id))
+             FROM public.job_location_dispatches d
+            WHERE d.job_id = m.id
+              AND d.dispatch_status = 'dispatched'
+              AND (
+                is_admin()
+                OR is_sales_rep()
+                OR (is_applicator() AND m.applicator_id = (select auth.uid()))
+                OR d.applicator_id = (select auth.uid())
+                OR (
+                  d.crew_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM public.ground_crew_members gcm
+                      JOIN public.ground_crews gc ON gc.id = gcm.crew_id
+                     WHERE gcm.crew_id = d.crew_id
+                       AND gcm.profile_id = (select auth.uid())
+                       AND gcm.is_active
+                       AND gc.is_active
+                  )
+                )
+              )
+         ), '[]'::jsonb)
+       )
+    FROM matched m;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_dispatched_list(p_applicator_id uuid DEFAULT NULL::uuid, p_crew_id uuid DEFAULT NULL::uuid)
+ RETURNS SETOF jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT jsonb_build_object(
+    'dispatch_id',     d.id,
+    'job_field_id',    d.job_field_id,
+    'job_id',          d.job_id,
+    'job_number',      j.job_number,
+    'job_status',      j.status,
+    -- U12 addition: the job's scheduled date, so the FieldView card shows it
+    -- and can sort Today-first / group a Done section without an extra fetch.
+    'job_date',        j.job_date,
+    -- U12 addition (Codex R1 P1): the underlying fields.id, so the FieldView
+    -- completion form can send per-field applied acres keyed by the REAL field id
+    -- (job_field_id is the join-row id — application_record_fields.field_id
+    -- references fields.id, so the client needs this to build 'field_acres').
+    -- Gated to the same role set as field_name (RLS R2 M3): the only consumer
+    -- (the completion form) requires is_applicator() anyway, and a dispatched
+    -- non-applicator crew member shouldn't get a dereferenceable fields.id when
+    -- field_name is deliberately withheld from them.
+    'field_id',        CASE WHEN (is_admin() OR is_sales_rep() OR is_applicator())
+                            THEN jf.field_id ELSE NULL END,
+    'dispatch_status', d.dispatch_status,
+    'dispatched_at',   d.dispatched_at,
+    'assignee_kind',   CASE WHEN d.applicator_id IS NOT NULL THEN 'applicator' ELSE 'crew' END,
+    'applicator_id',   d.applicator_id,
+    'crew_id',         d.crew_id,
+    -- assignee NAME resolved server-side. field_name gated to the fields_select roles
+    -- (admin/sales_rep/applicator) so a dispatched crew member whose role is not
+    -- applicator never receives a field name they couldn't read under RLS (null ->
+    -- the client falls back to 'Field'). Customer name gated likewise.
+    'assignee_name',   CASE WHEN d.applicator_id IS NOT NULL
+                            THEN (SELECT p.full_name FROM profiles p WHERE p.id = d.applicator_id)
+                            ELSE (SELECT g.name FROM ground_crews g WHERE g.id = d.crew_id) END,
+    'field_name',      CASE WHEN (is_admin() OR is_sales_rep() OR is_applicator())
+                            THEN (SELECT f.field_name FROM fields f WHERE f.id = jf.field_id)
+                            ELSE NULL END,
+    'customer_name',   CASE WHEN (
+                              is_admin()
+                              OR is_sales_rep()  -- any customer since 20261013220000 (Mason, 2026-10-13)
+                              OR (is_applicator() AND EXISTS (
+                                    SELECT 1 FROM public.jobs j2
+                                     WHERE j2.customer_id = c.id
+                                       AND j2.applicator_id = (select auth.uid())
+                                       AND j2.job_date >= (CURRENT_DATE - interval '7 days')))
+                              OR EXISTS (
+                                    SELECT 1 FROM public.jobs j3
+                                     WHERE j3.customer_id = c.id
+                                       AND public._is_dispatched_to_me(j3.id))
+                            ) THEN c.farm_name ELSE NULL END,
+    'location_acres',  jf.acres_to_treat,
+    'job_applied_acres', j.applied_acres,
+    'job_total_acres',   j.total_acres
+  )
+    FROM public.job_location_dispatches d
+    JOIN public.jobs j        ON j.id = d.job_id AND j.deleted_at IS NULL
+    JOIN public.job_fields jf ON jf.id = d.job_field_id
+    JOIN public.customers c   ON c.id = j.customer_id
+   WHERE (
+       d.dispatch_status = 'dispatched'
+       -- A1: also return RECENTLY-completed dispatch rows (the job-terminal trigger
+       -- flips rows to 'completed' when the job completes) so a just-finished job
+       -- moves to the FieldView "Done" section instead of vanishing. 7-day window
+       -- bounds the tail; 'cancelled' rows stay EXCLUDED — an undispatched
+       -- applicator must not keep seeing the job (undispatch_job_locations also
+       -- writes 'cancelled').
+       OR (d.dispatch_status = 'completed' AND d.updated_at >= now() - interval '7 days')
+     )
+     AND (p_applicator_id IS NULL OR d.applicator_id = p_applicator_id)
+     AND (p_crew_id IS NULL OR d.crew_id = p_crew_id)
+     -- VISIBILITY GATE — mirrors job_location_dispatches_select, with ONE deliberate
+     -- A1 relaxation: the table policy's assignee/crew branches require
+     -- dispatch_status='dispatched', but this gate intentionally does NOT — otherwise
+     -- a per-location assignee's just-completed rows would never reach their Done
+     -- section (the whole point of the 7-day completed tail). The rows are still
+     -- bounded to the caller's OWN dispatches (or their active crew's) — data they
+     -- could already read while the row was 'dispatched'. is_admin()/is_sales_rep()/
+     -- is_applicator() each re-check profiles.is_active internally, BUT the bare
+     -- `applicator_id = auth.uid()` and crew-member branches must ALSO re-check is_active
+     -- — this is a SECURITY DEFINER read that bypasses RLS, so without the re-check a
+     -- DEACTIVATED user with a still-valid token would keep seeing their dispatch rows
+     -- (the #36 policy includes this active-profile guard for exactly this reason —
+     -- Codex #37 P1).
+     AND (
+       is_admin()
+       OR is_sales_rep()
+       OR (is_applicator() AND j.applicator_id = (select auth.uid()))
+       OR (
+         d.applicator_id = (select auth.uid())
+         AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = (select auth.uid()) AND p.is_active)
+       )
+       OR (
+         d.crew_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = (select auth.uid()) AND p.is_active)
+         AND EXISTS (
+           SELECT 1 FROM public.ground_crew_members gcm
+             JOIN public.ground_crews gc ON gc.id = gcm.crew_id
+            WHERE gcm.crew_id = d.crew_id
+              AND gcm.profile_id = (select auth.uid())
+              AND gcm.is_active
+              AND gc.is_active
+         )
+       )
+     )
+   -- d.id is the UNIQUE tiebreaker that makes this a TOTAL order — without it two
+   -- same-job/same-transaction rows (equal dispatched_at) can be skipped/duplicated
+   -- across a .range() page boundary (Codex #37 follow-up LOW).
+   ORDER BY j.job_number, d.dispatched_at DESC, d.id;
+$function$;
+
 -- ---------------------------------------------------------------------------------------------
 -- 2. POLICIES. Only the assigned-rep condition is removed; names, commands and roles stay, and
 --    every other condition is copied from the live expression (2026-10-13).
@@ -3494,11 +3838,41 @@ ALTER POLICY external_identities_update ON public.external_identities
   WITH CHECK (is_admin() OR (is_sales_rep() AND verified_at IS NULL AND verified_by IS NULL));
 
 -- ---------------------------------------------------------------------------------------------
--- 3. Reassignment and commission split stay narrower for reps on the direct-table path that the
---    wider customers_update policy opens (save_customer runs as its owner, so the trigger also
---    covers it; its own REP_CANNOT_REASSIGN test answers first). Fires only when one of the two
---    columns is in the UPDATE's SET list. Admins, service-side callers with no auth.uid() and
---    every non-rep role pass through untouched.
+-- 3. What stays narrower for an active sales rep (who is not an admin) on a customer row, on
+--    every path that reaches customers (save_customer runs as its owner, so the trigger covers
+--    it too; its own REP_CANNOT_REASSIGN test answers first):
+--      a. assigned_sales_rep never changes (REP_CANNOT_REASSIGN);
+--      b. default_commission_split changes only on a customer assigned to the rep
+--         (COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP);
+--      c. a customer with an open (posted or overdue) invoice is not deactivated
+--         (CUSTOMER_HAS_OPEN_INVOICES; the Customers page checked this only in React, against the
+--         invoices the rep can read);
+--      d. prepay_balance_cents changes only through the server's prepay and payment functions,
+--         never by a direct table UPDATE from the browser (PREPAY_BALANCE_SERVER_ONLY). Those
+--         functions are SECURITY DEFINER, so inside them current_user is their owner; a direct
+--         PostgREST UPDATE runs as authenticated. This trigger function is deliberately NOT
+--         SECURITY DEFINER, so current_user still names the caller's role here.
+--    Admins, service-side callers with no auth.uid() and every non-rep role pass through untouched.
+--    _customer_has_open_invoice_20261013 is the definer-rights read behind (c): under the rep's
+--    own rights invoices_select would hide other reps' and admins' invoices.
+CREATE OR REPLACE FUNCTION public._customer_has_open_invoice_20261013(p_customer_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $open$
+  SELECT (public.is_admin() OR public.is_sales_rep())
+     AND EXISTS (
+       SELECT 1 FROM public.invoices i
+        WHERE i.customer_id = p_customer_id
+          AND i.status IN ('posted', 'overdue')
+          AND i.deleted_at IS NULL
+     );
+$open$;
+REVOKE ALL ON FUNCTION public._customer_has_open_invoice_20261013(uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public._customer_has_open_invoice_20261013(uuid) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.guard_customer_rep_edit_20261013()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -3513,11 +3887,20 @@ BEGIN
   END IF;
   -- Compared after canonical recipient stamping on both sides, so a rep re-saving a split they
   -- did not change (with or without stamped recipient ids) is never refused.
-  IF NEW.default_commission_split IS DISTINCT FROM OLD.default_commission_split
+  -- SQL NULL and JSON null both mean "no split".
+  IF COALESCE(NEW.default_commission_split, 'null'::jsonb) IS DISTINCT FROM COALESCE(OLD.default_commission_split, 'null'::jsonb)
      AND OLD.assigned_sales_rep IS DISTINCT FROM (SELECT auth.uid())
-     AND public.commission_split_with_recipient_ids(NEW.default_commission_split)
-         IS DISTINCT FROM public.commission_split_with_recipient_ids(OLD.default_commission_split) THEN
+     AND COALESCE(public.commission_split_with_recipient_ids(NEW.default_commission_split), 'null'::jsonb)
+         IS DISTINCT FROM COALESCE(public.commission_split_with_recipient_ids(OLD.default_commission_split), 'null'::jsonb) THEN
     RAISE EXCEPTION 'COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP: only an admin or this customer''s assigned sales rep can change its default commission split';
+  END IF;
+  IF OLD.is_active IS TRUE AND NEW.is_active IS NOT TRUE
+     AND public._customer_has_open_invoice_20261013(OLD.id) THEN
+    RAISE EXCEPTION 'CUSTOMER_HAS_OPEN_INVOICES: this customer has posted or overdue invoices; resolve them before deactivating it';
+  END IF;
+  IF NEW.prepay_balance_cents IS DISTINCT FROM OLD.prepay_balance_cents
+     AND current_user = 'authenticated' THEN
+    RAISE EXCEPTION 'PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments';
   END IF;
   RETURN NEW;
 END;
@@ -3525,7 +3908,8 @@ $guard$;
 REVOKE ALL ON FUNCTION public.guard_customer_rep_edit_20261013() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER customers_guard_rep_edit_20261013
-  BEFORE UPDATE OF assigned_sales_rep, default_commission_split ON public.customers
+  BEFORE UPDATE OF assigned_sales_rep, default_commission_split, is_active, prepay_balance_cents
+  ON public.customers
   FOR EACH ROW EXECUTE FUNCTION public.guard_customer_rep_edit_20261013();
 
 -- ---------------------------------------------------------------------------------------------
@@ -3553,24 +3937,32 @@ BEGIN
     'public.log_customer_interaction(uuid,text,text,timestamp with time zone,text,uuid,integer,text,text,text,uuid,date,text)',
     'public.get_customer_prep_card(uuid)',
     'public.get_customer_lapsed_products(uuid)',
-    'public.get_customer_purchase_summary(uuid,text)'
+    'public.get_customer_purchase_summary(uuid,text)',
+    'public.get_dispatch_board_jobs(uuid,text,date,date)',
+    'public.get_dispatched_list(uuid,uuid)'
   ] LOOP
     SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig);
     IF v_src IS NULL THEN
       RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: % is missing', v_sig;
     END IF;
-    IF v_src ~ 'assigned_sales_rep\s*(=|IS DISTINCT FROM)' THEN
-      RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: % still tests assigned_sales_rep', v_sig;
+    IF v_src ~* 'assigned_sales_rep' THEN
+      RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: % still names assigned_sales_rep', v_sig;
     END IF;
   END LOOP;
   IF (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.save_customer(uuid,jsonb,jsonb,uuid,text)'))
      ~ 'NOT_CUSTOMER_OWNER' THEN
     RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: save_customer still raises NOT_CUSTOMER_OWNER';
   END IF;
+  IF (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.save_customer(uuid,jsonb,jsonb,uuid,text)'))
+       !~ 'REP_CANNOT_REASSIGN'
+     OR (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.save_customer(uuid,jsonb,jsonb,uuid,text)'))
+       !~ 'REP_MUST_SELF_ASSIGN' THEN
+    RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: save_customer lost REP_CANNOT_REASSIGN or REP_MUST_SELF_ASSIGN';
+  END IF;
 
   -- Every replaced function keeps the owner, grants, SECURITY DEFINER and search_path recorded by
   -- the preflight.
-  IF (SELECT count(*) FROM pg_temp.reps_any_customer_security_20261013) <> 18 OR EXISTS (
+  IF (SELECT count(*) FROM pg_temp.reps_any_customer_security_20261013) <> 20 OR EXISTS (
     SELECT 1 FROM pg_temp.reps_any_customer_security_20261013 b
       LEFT JOIN pg_proc p ON p.oid = b.fn
      WHERE p.oid IS NULL
@@ -3621,7 +4013,32 @@ BEGIN
      OR has_function_privilege('anon', 'public.guard_customer_rep_edit_20261013()', 'EXECUTE') THEN
     RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: the guard trigger function is executable by an API role';
   END IF;
+  -- The guard must run with the CALLER's rights (its prepay rule reads current_user) and a pinned
+  -- search_path; the open-invoice reader must be definer-rights, executable by authenticated only.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+     WHERE oid = 'public.guard_customer_rep_edit_20261013()'::regprocedure
+       AND NOT prosecdef AND proconfig = ARRAY['search_path=public, pg_temp']
+  ) THEN
+    RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: the guard trigger function must be SECURITY INVOKER with search_path public, pg_temp';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+     WHERE oid = 'public._customer_has_open_invoice_20261013(uuid)'::regprocedure
+       AND prosecdef AND proconfig = ARRAY['search_path=public, pg_temp']
+  ) OR NOT has_function_privilege('authenticated', 'public._customer_has_open_invoice_20261013(uuid)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._customer_has_open_invoice_20261013(uuid)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._customer_has_open_invoice_20261013(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: _customer_has_open_invoice_20261013 security or grants are wrong';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+     WHERE t.tgrelid = 'public.customers'::regclass AND t.tgname = 'customers_guard_rep_edit_20261013'
+       AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM unnest(t.tgattr) k JOIN pg_attribute a
+              ON a.attrelid = t.tgrelid AND a.attnum = k)
+           = ARRAY['assigned_sales_rep', 'default_commission_split', 'is_active', 'prepay_balance_cents']
+  ) THEN
+    RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: customers_guard_rep_edit_20261013 does not watch the four guarded columns';
+  END IF;
 END
 $postflight$;
-
-DROP TABLE pg_temp.reps_any_customer_security_20261013;

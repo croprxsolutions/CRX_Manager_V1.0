@@ -8,8 +8,9 @@ no longer types anything but the approval.
 **What changed.**
 - `.claude/hooks/owner-approval-lib.mjs`:
   - `isPlainApprovalReply` accepts a WHOLE message of `I approve`, `approve`, `approved`, `yes I
-    approve` or `I approve it`, case-insensitive, with a trailing `.`/`!`. A bare "yes", "go", "ok", a
-    question, a negation, a longer sentence, a quote, inline code, or a peer/task envelope never matches.
+    approve` or `I approve it`, case-insensitive, with a trailing `.`/`!`, and no other form (so not
+    "yes approved" or "approve this"; CodeRabbit). A bare "yes", "go", "ok", a question, a negation,
+    a longer sentence, a quote, inline code, or a peer/task envelope never matches.
   - `lastAgentMessageText` reads the session transcript the hook receives (`transcript_path`, last
     32 MB) and returns the text of the agent's FINAL main-thread message before Mason's reply. Claude
     Code stores one message as several entries sharing a message id, so these are grouped.
@@ -110,7 +111,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 362 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 367 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
@@ -151,8 +152,11 @@ no longer types anything but the approval.
   That round reached `ship.md`'s three-round cap, so the work stopped and Mason chose: "fix and
   ship" (2026-10-13). All five are fixed with tests. Breaking the new "request shown" rule makes the
   suite fail. No further Luna round was run, by his choice; CodeRabbit and Sol review the final head.
-- One unexplained crash of the test suite in 34 runs (33 passed). Its output was lost to a piped
-  command, so the cause is not known.
+- The rare test-suite crash (1 in 34 runs earlier) was caught with its output on a 40-run loop
+  (1 failed): the end-to-end test stamped a request's issue and expiry times with two clock
+  readings, so a millisecond tick made the window 24 h + 1 ms, which the apply rightly refuses.
+  The script itself uses one reading. The test now does too, and 60 runs in a row passed
+  (CodeRabbit asked for the cause).
 - The transcript reader was also run against this session's real transcript, cut at Mason's own
   "Approve 301239". It returned exactly the agent's preceding message, both before and after his
   message was written.

@@ -199,9 +199,10 @@ export function approvalCodeFromReply(prompt) {
 }
 
 // The plain reply (Mason, 2026-10-13): "I approve", "approve", "approved",
-// "yes I approve", "I approve it", again only as the WHOLE message. A bare "yes"
-// or "go" is not one: he says those about everything.
-const PLAIN_REPLY_RE = /^\s*(?:yes\s*[,.!]?\s+)?(?:i\s+)?approved?(?:\s+(?:it|this|that))?\s*[.!]*\s*$/i;
+// "yes I approve", "I approve it", again only as the WHOLE message, and only those
+// forms (CodeRabbit, PR #900). A bare "yes" or "go" is not one: he says those
+// about everything.
+const PLAIN_REPLY_RE = /^\s*(?:i\s+approve(?:\s+it)?|approve|approved|yes\s*[,.!]?\s+i\s+approve)\s*[.!]*\s*$/i;
 
 /** True when the whole message is a plain approval with no code. */
 export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(prompt ?? ""));

@@ -49,7 +49,8 @@
 > and exact head, the flagged categories, a nonce and a 6-digit code (shown to Mason as a reference number), with a
 > 24-hour reply deadline. Only a WHOLE message turns it into an approval, valid 30 minutes from the reply: since
 > 2026-10-13 (Mason: "I just want to say I approve") a plain `I approve` (also `approve`, `approved`, `yes I
-> approve`, trailing `.`/`!` accepted; never a bare "yes" or "go"), which counts only when exactly one live request of
+> approve`, `I approve it`, trailing `.`/`!` accepted, and no other form such as "approve this" or "yes approved"; never a
+> bare "yes" or "go"), which counts only when exactly one live request of
 > that session is SHOWN by the agent's LAST message before the reply: that message is its summary, exactly as printed,
 > and nothing else (what it is, the pull request and version, the fingerprint, every reason the safety check stopped it,
 > the `reply: I approve` line and the `Reference <code>` line; the agent explains the change before running the script,

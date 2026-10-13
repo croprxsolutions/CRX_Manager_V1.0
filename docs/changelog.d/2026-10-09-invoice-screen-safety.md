@@ -40,9 +40,11 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   key so the current values are applied (Luna on PR #893). Before, the database could answer
   the retry with the first attempt's result while the later steps saved the new billing and
   applied info, leaving a mix.
-- The Discount Earned amount is read in exact cents; more than two decimal places is refused
-  with the usual money message before anything is saved (it was rounded with binary floating
-  point, so `$1.005` became `$1.00`; Luna on PR #893).
+- The Discount Earned amount is read in exact cents. Anything that is not a plain dollar amount
+  with at most two decimal places (`1.005`, `1e2`, `abc`) is refused with a message before
+  anything is saved. It was rounded with binary floating point, so `$1.005` became `$1.00`
+  (Luna on PR #893), and a first fix read `1e2` as $0 instead of refusing it (Codex P2 on
+  PR #893). Blank, zero or negative still means no discount, as before.
 - If the page cannot tell which customer each saved invoice belongs to, it no longer writes the
   billing details with zero discounts while reporting success: it says the billing details did
   not save and keeps the form unsaved (Codex Sol 6.1 on PR #893; an invoice coming back with a

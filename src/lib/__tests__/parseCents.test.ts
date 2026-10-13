@@ -166,11 +166,11 @@ describe('parseDollarsToCentsSigned (negative-capable variant)', () => {
 
 describe('parseDiscountEarnedCents', () => {
   it.each([
-    ['25.00', 2500], ['4.35', 435], ['1.01', 101], ['', 0], ['0', 0], ['-5', 0], ['abc', 0], ['1e5', 0],
-  ])('%s is %i cents (blank, negative or unreadable is no discount)', (input, cents) => {
+    ['25.00', 2500], ['4.35', 435], ['1.01', 101], ['', 0], ['  ', 0], ['0', 0], ['-5', 0], [' 7.5 ', 750],
+  ])('%s is %i cents (blank or negative is no discount)', (input, cents) => {
     expect(parseDiscountEarnedCents(input as string)).toBe(cents);
   });
-  it('refuses more than two decimal places instead of rounding', () => {
-    expect(parseDiscountEarnedCents('1.005')).toBeNull();
+  it.each(['1.005', '1e2', '1E2', 'abc', '$25', '1,000', '12-34'])('refuses %s instead of reading it as some other amount', (input) => {
+    expect(parseDiscountEarnedCents(input)).toBeNull();
   });
 });

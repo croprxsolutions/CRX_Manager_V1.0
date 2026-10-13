@@ -20,7 +20,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import { formatCents as fmt } from '../lib/money';
-import { MONEY_PRECISION_MESSAGE, parseDiscountEarnedCents } from '../lib/parseCents';
+import { DISCOUNT_EARNED_INPUT_MESSAGE, parseDiscountEarnedCents } from '../lib/parseCents';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { billableAcres, acreDivergence, appliedMatchesSystem } from '../lib/fieldGeometry';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
@@ -1778,7 +1778,7 @@ export default function FieldApplicationInvoice() {
       return;
     }
     if (Object.values(discountByCustomer).some((entry) => parseDiscountEarnedCents(entry.dollars) === null)) {
-      toast('error', `Discount Earned: ${MONEY_PRECISION_MESSAGE}`);
+      toast('error', DISCOUNT_EARNED_INPUT_MESSAGE);
       return;
     }
     // The invoice this save writes to: the routed one, or the one an earlier Save on this

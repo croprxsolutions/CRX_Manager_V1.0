@@ -441,6 +441,7 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
 
   it.each([
     ['1.005', null],
+    ['1e2', null],
     ['1.01', 101],
     ['-5', 0],
   ])('a typed discount of %s is sent in exact cents, or refused before anything is saved', async (typed, cents) => {
@@ -457,7 +458,7 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     if (cents === null) {
-      expect(mockToast).toHaveBeenCalledWith('error', 'Discount Earned: Enter an amount with no more than two decimal places.');
+      expect(mockToast).toHaveBeenCalledWith('error', 'Discount Earned must be a plain dollar amount such as 25.00, with no more than two decimal places.');
       expect(mockRpc.mock.calls.some((c) => c[0] === 'save_field_app_invoice')).toBe(false);
       return;
     }

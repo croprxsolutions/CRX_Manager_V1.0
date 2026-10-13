@@ -30,6 +30,19 @@ no longer types anything but the approval.
     - Tool output, subagent text and Claude Code's own `isMeta` entries do not count.
     - His current message is skipped whether or not it has been written yet. When it is written, it
       must be those words alone: "I approve" sent with a picture or file refuses (Codex P1 on the PR).
+  - His reply must be his words alone in every case (Codex P1, raised twice on the PR). Claude Code
+    normally writes his message just AFTER the hook runs (measured on a real transcript), and the
+    hook's input holds only his words, so:
+    - `replyMark` (at the reply, for both `I approve` and `approve <code>`) records the transcript's
+      size, or that his message is already the last one written, which is then checked at once.
+      `recordReplyApproval` stores it in the approval; without it nothing is recorded.
+    - `assertReplyAlone` (at the apply, the last check in `verifyOwnerApproval`) reads from that
+      point: the first message there must be his reply, his words alone. If the agent's answer comes
+      first, his reply must have been written and checked already. A picture or file, another
+      message, a damaged or unfinished line, a missing or shorter transcript, or a malformed mark
+      refuses the apply.
+    - A whole `<system-reminder>` block Claude Code puts in front of his words is not his words. In
+      all 57 multi-block messages on this machine such a block came first and whole.
     - It throws, so nothing is approved, when the transcript is unreadable, when any damaged or
       half-written line lies in what is scanned, when an assistant entry has no message id, or when
       the message's start is not in the part read (Luna rounds 1-2).
@@ -65,16 +78,20 @@ no longer types anything but the approval.
 - Unchanged from 2026-10-09: an agent that deliberately fakes the approval is not stopped.
 - New and small: if an agent shows a request and also asks something else in the same message,
   "I approve" approves the request. The scripts tell agents never to bundle.
-- New and small: Claude Code runs the hook before it writes Mason's message to the transcript
-  (measured on a real session transcript, 2026-10-13), and the hook reads only the typed words from
-  its input. So a picture or file sent with "I approve" is refused only when the message is already
-  written; otherwise the approval still binds to the one request the agent showed just before.
+- New and small: the attachment check relies on Claude Code saving a picture or file in the same
+  transcript entry as his words (or saving the picture without the words, which also refuses). That
+  is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 274 assertions (151 before). They cover:
+- `owner-approval-lib.test.mjs`: 313 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+  (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
     an image-only message, "I approve" sent with a picture or file, damaged and half-written lines, a turn longer than the part read, a missing file;
+  - reading his reply back at the apply: written after the hook or before it, as a text block, after
+    a reminder block, with a picture or file, image only, another message first, never written,
+    damaged or cut by the read, sent twice, and malformed marks; through the apply gate itself, an
+    approval whose reply came with a picture is refused;
   - the reference label: digits inside another number or identifier, or without the label, do not count;
   - which request is chosen;
   - the hook as a real process through `prompt-router.mjs`, including "I approve" answering another
@@ -112,3 +129,10 @@ no longer types anything but the approval.
 - The transcript reader was also run against this session's real transcript, cut at Mason's own
   "Approve 301239". It returned exactly the agent's preceding message, both before and after his
   message was written.
+- The read-back was replayed on a real session transcript (2026-10-13) with one of Mason's own
+  replies, cut at every point the hook could have run between the agent's message and his: each
+  was marked and read back fine. The same reply with a picture added was refused.
+- After the first attachment fix, the Codex connector raised the same P1 again: that fix only
+  covered a message already written. The read-back above is the full fix. Breaking the apply-time
+  check, the attachment check, the "agent answered first" rule or the reminder-block rule makes the
+  suites fail.

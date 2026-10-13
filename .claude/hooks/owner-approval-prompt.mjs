@@ -16,7 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import {
-  approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordReplyApproval, resolvePlainReply,
+  approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordReplyApproval, replyMark, resolvePlainReply,
 } from "./owner-approval-lib.mjs";
 
 function emit(extra) {
@@ -50,7 +50,13 @@ try {
     });
     if (which.ok) code = which.code;
   }
-  if (code) result = recordReplyApproval({ code, dirs, reply, sessionId: payload?.session_id });
+  // readMark: where his reply lands in the transcript. The apply reads it back there
+  // and refuses if a picture or file came with it (Codex P1, PR #900).
+  if (code) {
+    result = recordReplyApproval({
+      code, dirs, reply, sessionId: payload?.session_id, readMark: () => replyMark(payload?.transcript_path, reply),
+    });
+  }
 } catch (error) {
   result = { ok: false, reason: `the approval hook failed (${error?.message || error})` };
 }

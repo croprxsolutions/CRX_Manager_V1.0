@@ -59,8 +59,12 @@
 > message of Mason's (image-only included), injected text like a Stop hook's feedback, a notification, a queued
 > message waiting to be delivered, a compaction, an error or synthetic message, or an unknown record type, means
 > nothing counts; tool output and subagent text
-> never count). His reply itself, when it is already written there, must be those words alone: one sent with a picture
-> or file approves nothing. An unreadable transcript or approval folder, a damaged or half-written line in what is scanned, an assistant
+> never count). His reply itself must be those words alone: one sent with a picture or file approves nothing. Claude
+> Code normally writes his message just after the hook runs, so the hook records where it will land (`replyMark`: the
+> transcript's size, or that it is already written and was checked then), and the apply reads it back there
+> (`assertReplyAlone`, the last check in `verifyOwnerApproval`): the first message after that point must be his reply,
+> its words alone apart from a whole `<system-reminder>` block Claude Code puts in front, or the apply is refused. This
+> holds for `approve <code>` too. An unreadable transcript or approval folder, a damaged or half-written line in what is scanned, an assistant
 > entry without a message id, or a message whose start is not in the 32 MB tail read approves nothing. With no request waiting in the session the hook stays silent, so an
 > "I approve" about anything else does nothing. `approve <code>` still works. The code is retired in that folder first (exclusively, before the approval is written; if it cannot be
 > retired nothing is approved), so no later request reuses it. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook

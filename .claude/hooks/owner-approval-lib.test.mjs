@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,7 @@ import {
   approvalFileName,
   assertApprovalStillValid,
   assertOwnerTrustFilesReviewed,
+  assertReplyAlone,
   buildApprovalPayload,
   buildSelfTestPayload,
   findOwnerApprovals,
@@ -38,6 +39,7 @@ import {
   readUsedNonces,
   recordReplyApproval,
   recordUsedApproval,
+  replyMark,
   requestFileName,
   requestShownIn,
   resolvePlainReply,
@@ -96,7 +98,11 @@ const approve = (over = {}, approval = {}) => ({
   reply: `approve ${base.code}`,
   ...approval,
 });
-const check = (approval, over = {}) => verifyOwnerApproval({ approval, expect, appliedNames: [], usedNonces: new Set(), now: NOW, ...over });
+// Reading his reply back from a transcript is tested on its own below
+// (assertReplyAlone); these checks stand in a pass for it unless a case says otherwise.
+const check = (approval, over = {}) => verifyOwnerApproval({
+  approval, expect, appliedNames: [], usedNonces: new Set(), now: NOW, checkReply: () => {}, ...over,
+});
 
 // ── BASELINE: a genuine approval verifies, or every refusal below proves nothing.
 {
@@ -104,6 +110,13 @@ const check = (approval, over = {}) => verifyOwnerApproval({ approval, expect, a
   ok(v.ok === true, `a genuine approval verifies: ${v.reason}`);
   ok(v.payload.nonce === base.nonce, "the verified payload is returned");
   ok(v.expiresAt === new Date(APPROVED + OWNER_APPROVAL_MAX_AGE_MS).toISOString(), "it expires 30 minutes after Mason replied");
+  let seen = "unset";
+  ok(check(approve({}, { replyMark: { from: 7 } }), { checkReply: (m) => { seen = m; } }).ok && seen?.from === 7,
+    "the apply checks the reply the approval points at");
+  refuses(check(approve(), { checkReply: () => { throw new Error("his reply carried a picture or file"); } }), "picture or file",
+    "an approval whose reply was not the words alone is refused (Codex P1, PR #900)");
+  refuses(check(approve(), { checkReply: undefined }), "does not say where his reply is",
+    "by default an approval that does not say where his reply is is refused");
 }
 
 // ── Shape and kind.
@@ -229,7 +242,8 @@ refuses(check(approve({ nonce: "../x" })), "no usable one-time code", "a nonce t
 
 // ── Request → reply → approval, on disk. `rec` is Mason replying in the session
 // that built the requests (SID) unless a case says otherwise.
-const rec = (args) => recordReplyApproval({ sessionId: SID, ...args });
+const MARK = { transcript: "transcript.jsonl", from: 0, written: false, words: "approve" };
+const rec = (args) => recordReplyApproval({ sessionId: SID, readMark: () => MARK, ...args });
 const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-owner-approval-"));
 try {
   const dir = path.join(tmp, "a", ".claude", "session-state");
@@ -251,6 +265,12 @@ try {
   refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED, sessionId: undefined }), "no usable session id",
     "a reply with no session id records nothing");
   ok(existsSync(reqFile), "a reply from the wrong conversation leaves the request in place");
+  refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED, readMark: () => { throw new Error("no transcript"); } }),
+    "could not be read", "a reply whose place in the conversation cannot be read records nothing");
+  refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED, readMark: () => undefined }), "is unknown",
+    "a reply with no place in the conversation records nothing");
+  ok(existsSync(reqFile) && !existsSync(path.join(dir, usedCodeMarkerName(base.code))),
+    "a reply refused for that leaves the request in place and its code unretired");
 
   const r = rec({ code: base.code, dirs: [other, dir, dir], reply: "Approve 482913.", now: APPROVED });
   ok(r.ok && r.kind === "migration" && r.requestLeft === false, `Mason's reply records an approval: ${r.reason}`);
@@ -260,6 +280,7 @@ try {
   const saved = JSON.parse(readFileSync(r.file, "utf8"));
   ok(saved.via === OWNER_APPROVAL_VIA && saved.approvedAt === new Date(APPROVED).toISOString() && saved.reply === "Approve 482913.",
     "the approval records how and when Mason replied");
+  ok(JSON.stringify(saved.replyMark) === JSON.stringify(MARK), "the approval records where his reply is in the conversation");
   ok(check(saved).ok, "the recorded approval verifies at the apply");
   refuses(rec({ code: base.code, dirs: [dir], reply: "approve 482913", now: APPROVED }), "no pending approval request",
     "the same reply twice records nothing more");
@@ -503,6 +524,78 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     assert.throws(() => lastAgentMessageText(path.join(tdir, "missing.jsonl"), "I approve"), "a missing transcript throws"); pass++;
     assert.throws(() => lastAgentMessageText(undefined, "I approve"), /no transcript/, "no transcript path throws"); pass++;
 
+    // Where his reply lands, and reading it back at the apply (Codex P1 twice, PR #900).
+    {
+      let k = 0;
+      const IMG = { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } };
+      const DOC = { type: "document", source: { type: "base64", media_type: "application/pdf", data: "AA==" } };
+      const WORDS = { type: "text", text: "I approve" };
+      // Mason replies: the hook marks the transcript as it is then; Claude Code writes the rest after.
+      const replied = (before, after, words = "I approve") => {
+        const f = path.join(tdir, `r${k++}.jsonl`);
+        writeFileSync(f, `${before.join("\n")}\n`);
+        const mark = replyMark(f, words);
+        if (after.length) appendFileSync(f, `${after.join("\n")}\n`);
+        return { mark, readBack: (opts) => assertReplyAlone(mark, opts) };
+      };
+      const BEFORE = [masonSaid("fix it"), agentSaid(SHOWN)];
+      // What Claude Code writes around his message, in the order a real transcript has it (2026-10-13).
+      const AROUND = [JSON.stringify({ type: "queue-operation", operation: "enqueue", content: "I approve" }),
+        JSON.stringify({ type: "queue-operation", operation: "dequeue" }),
+        JSON.stringify({ type: "attachment", attachment: { type: "hook_additional_context" } })];
+      const fine = (r, what) => { assert.doesNotThrow(() => r.readBack(), what); pass++; };
+      const refusedWith = (r, re, what) => { assert.throws(() => r.readBack(), re, what); pass++; };
+      {
+        const r = replied(BEFORE, [...AROUND, masonSaid("I approve"), agentSaid("Applying.")]);
+        ok(r.mark.written === false && r.mark.words === "I approve" && r.mark.from > 0 && path.isAbsolute(r.mark.transcript),
+          "the hook marks where his reply will land when it is not written yet");
+        fine(r, "his reply written after the hook, as the words alone, reads back fine");
+      }
+      fine(replied(BEFORE, [...AROUND, T("user", [WORDS]), agentSaid("Applying.")]), "his reply as a text block reads back fine");
+      fine(replied(BEFORE, [...AROUND, T("user", [{ type: "text", text: "<system-reminder>\nA background task finished.\n</system-reminder>" }, WORDS]),
+        agentSaid("Applying.")]), "a reminder block Claude Code puts in front of his words is not his words");
+      fine(replied(BEFORE, [JSON.stringify({ type: "system", subtype: "informational" }), A([{ type: "text", text: "sub" }], "s9", { isSidechain: true }),
+        masonSaid("I approve"), agentSaid("Applying.")]), "other records and a subagent's entries before his reply are passed over");
+      refusedWith(replied(BEFORE, [...AROUND, T("user", [WORDS, IMG]), agentSaid("Applying.")]), /picture or file/,
+        "\"I approve\" sent with a picture, written after the hook, is refused at the apply (Codex P1, PR #900)");
+      refusedWith(replied(BEFORE, [...AROUND, T("user", [WORDS, DOC]), agentSaid("Applying.")]), /picture or file/,
+        "\"I approve\" sent with a file is refused at the apply");
+      refusedWith(replied(BEFORE, [...AROUND, T("user", [IMG]), agentSaid("Applying.")]), /not his reply/,
+        "a picture saved without his words (as the desktop app has saved some) is refused");
+      refusedWith(replied(BEFORE, [...AROUND, masonSaid("wait, not that one"), agentSaid("OK.")]), /not his reply/,
+        "a different message where his reply should be is refused");
+      refusedWith(replied(BEFORE, [...AROUND, agentSaid("Applying.")]), /not where the approval says/,
+        "the agent's answer with no reply of his before it is refused");
+      refusedWith(replied(BEFORE, []), /not in the transcript/, "a reply never written is refused");
+      refusedWith(replied(BEFORE, ["{\"type\":\"user\",\"message\":{\"content\":\"I app"]), /damaged or unfinished/,
+        "a damaged or half-written line where his reply should be is refused");
+      {
+        const r = replied(BEFORE, [...AROUND, masonSaid("I approve"), agentSaid("x".repeat(2000))]);
+        assert.throws(() => r.readBack({ maxBytes: 40 }), /damaged or unfinished/, "a line cut by the read window is refused, never skipped"); pass++;
+      }
+      // His reply already written when the hook ran: checked then, and passed at the apply.
+      {
+        const r = replied([...BEFORE, masonSaid("I approve")], [...AROUND, agentSaid("Applying.")]);
+        ok(r.mark.written === true, "a reply already written when the hook runs is marked as written");
+        fine(r, "a reply already written and checked reads back fine");
+      }
+      assert.throws(() => replied([...BEFORE, T("user", [WORDS, IMG])], []), /picture or file/,
+        "a reply already written with a picture is refused when he sends it"); pass++;
+      refusedWith(replied([...BEFORE, masonSaid("I approve")], [...AROUND, T("user", [WORDS, IMG]), agentSaid("Applying.")]), /picture or file/,
+        "sending it twice: an earlier identical reply does not excuse a later one sent with a picture");
+      assert.throws(() => replied([...BEFORE, "{\"type\":\"user\",\"message\":{\"content\":\"I app"], []), /damaged/,
+        "a damaged last line when he replies refuses"); pass++;
+      assert.throws(() => replyMark(undefined, "I approve"), /no transcript/, "no transcript when he replies refuses"); pass++;
+      {
+        const r = replied(BEFORE, [...AROUND, masonSaid("I approve"), agentSaid("Applying.")]);
+        for (const bad of [undefined, null, {}, { ...r.mark, from: -1 }, { ...r.mark, from: 1.5 }, { ...r.mark, written: "yes" }, { ...r.mark, words: "" }]) {
+          assert.throws(() => assertReplyAlone(bad), /does not say where/, `a malformed mark ${JSON.stringify(bad)} is refused`); pass++;
+        }
+        assert.throws(() => assertReplyAlone({ ...r.mark, from: r.mark.from + 1e6 }), /shorter/, "a transcript shorter than at his reply is refused"); pass++;
+        assert.throws(() => assertReplyAlone({ ...r.mark, transcript: path.join(tdir, "gone.jsonl") }), "a missing transcript is refused"); pass++;
+      }
+    }
+
     // Which request "I approve" is for.
     const sdir = path.join(tdir, "s", ".claude", "session-state");
     const resolve = (shown, over = {}) => resolvePlainReply({ dirs: [sdir], sessionId: SID, readShown: () => shown, now: APPROVED, ...over });
@@ -598,18 +691,26 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     ok(run("prompt-router.mjs", "approve 482913", OTHER_SID).includes("different conversation") &&
       existsSync(path.join(dir, requestFileName("482913"))), "the exact reply in another session sharing the folder records nothing");
 
-    const said = run("prompt-router.mjs", "approve 482913");
+    // A transcript as Claude Code writes it; `later` is what it writes after the hook runs.
+    const transcript = path.join(root, "transcript.jsonl");
+    const tx = (lines) => { writeFileSync(transcript, `${lines.join("\n")}\n`); return { transcript_path: transcript }; };
+    const later = (lines) => appendFileSync(transcript, `${lines.join("\n")}\n`);
+    const shown1 = ownerApprovalSummary(JSON.parse(buildApprovalPayload(live))).join("\n");
+    ok(run("prompt-router.mjs", "approve 482913").includes("could not be read") && existsSync(path.join(dir, requestFileName("482913"))),
+      "a reply with no transcript to mark records nothing (fail closed)");
+    const said = run("prompt-router.mjs", "approve 482913", SID, tx([masonSaid("fix it"), agentSaid(shown1)]));
     ok(said.includes("OWNER APPROVAL RECORDED") && said.includes(base.migration) && said.includes("#843"),
       `Mason's reply through prompt-router records the approval and tells the agent: ${said}`);
     const file = path.join(dir, approvalFileName(safeMigrationName(base.migration)));
     ok(existsSync(file) && !existsSync(path.join(dir, requestFileName("482913"))), "the approval file replaces the request");
-    const v = verifyOwnerApproval({ approval: JSON.parse(readFileSync(file, "utf8")), expect, appliedNames: [], usedNonces: new Set() });
-    ok(v.ok, `the hook's approval verifies at the apply: ${v.reason}`);
+    const verifyHooks = (f, exp = expect) => verifyOwnerApproval({ approval: JSON.parse(readFileSync(f, "utf8")), expect: exp, appliedNames: [], usedNonces: new Set() });
+    refuses(verifyHooks(file), "not in the transcript", "before his reply is written, the apply cannot confirm it and refuses");
+    later([masonSaid("approve 482913"), agentSaid("Applying.")]);
+    const v = verifyHooks(file);
+    ok(v.ok, `the hook's approval verifies at the apply, reading his reply back from the transcript: ${v.reason}`);
     ok(!readdirSync(dir).some((n) => n.startsWith("owner-approval-request-")), "no request is left pending");
 
-    // The plain reply, end to end, with a transcript as Claude Code writes it.
-    const transcript = path.join(root, "transcript.jsonl");
-    const tx = (lines) => { writeFileSync(transcript, `${lines.join("\n")}\n`); return { transcript_path: transcript }; };
+    // The plain reply, end to end.
     ok(run("prompt-router.mjs", "I approve", SID, tx([masonSaid("ship it"), agentSaid("Merged.")])) === "",
       "\"I approve\" with no request waiting is ordinary chat: the hook says nothing");
     const p2 = { ...live, migration: "20260914101800_plain", code: "515151", nonce: "abcdefabcdefabcdefabcdefabcdef01" };
@@ -630,10 +731,22 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     ok(plainSaid.includes("OWNER APPROVAL RECORDED") && plainSaid.includes(p2.migration) && plainSaid.includes("\"I approve.\""),
       `"I approve" right after the request records the approval: ${plainSaid}`);
     const f2 = path.join(dir, approvalFileName(safeMigrationName(p2.migration)));
-    const v2 = verifyOwnerApproval({ approval: JSON.parse(readFileSync(f2, "utf8")), expect: { ...expect, migration: p2.migration }, appliedNames: [], usedNonces: new Set() });
+    later([agentSaid("Applying.")]);
+    const v2 = verifyHooks(f2, { ...expect, migration: p2.migration });
     ok(v2.ok, `the plain reply's approval verifies at the apply: ${v2.reason}`);
     ok(run("prompt-router.mjs", "I approve", SID, tx([masonSaid("fix it"), agentSaid(shown2)])) === "",
       "the same \"I approve\" again approves nothing more (nothing is waiting)");
+    // The usual order: Claude Code writes his message just after the hook runs, so
+    // a picture sent with it is caught when the apply reads it back (Codex P1, PR #900).
+    const p3 = { ...live, migration: "20260914101900_pictured", code: "525252", nonce: "abcdefabcdefabcdefabcdefabcdef02" };
+    writeApprovalRequest(dir, buildApprovalPayload(p3));
+    const shown3 = ownerApprovalSummary(JSON.parse(buildApprovalPayload(p3))).join("\n");
+    ok(run("prompt-router.mjs", "I approve", SID, tx([masonSaid("fix it"), agentSaid(shown3)])).includes("OWNER APPROVAL RECORDED"),
+      "\"I approve\" not yet written when the hook runs is recorded");
+    later([T("user", [{ type: "text", text: "I approve" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } }]),
+      agentSaid("Applying.")]);
+    refuses(verifyHooks(path.join(dir, approvalFileName(safeMigrationName(p3.migration))), { ...expect, migration: p3.migration }), "picture or file",
+      "once written, \"I approve\" sent with a picture is refused at the apply");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

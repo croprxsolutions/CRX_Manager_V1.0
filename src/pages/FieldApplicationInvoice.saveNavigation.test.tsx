@@ -320,6 +320,88 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
   });
 
+  it('a create retried with changed values after no answer writes the current values onto the invoice it returns', async () => {
+    // The first create may have landed with its reply lost. The retry keeps the key (a new one
+    // could create a second invoice), so its answer can be that invoice with the OLD values; the
+    // page then writes the current values over it (Luna, PR #893).
+    let createCalls = 0;
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        createCalls += 1;
+        if (createCalls === 1) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        return Promise.resolve({ data: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
+
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(3));
+    expect(savedInvoiceId(1)).toBeNull();
+    expect(saveKey(1)).toBe(saveKey(0));
+    expect(savedInvoiceId(2)).toBe(CREATED_ID);
+    expect(saveKey(2)).not.toBe(saveKey(0));
+    expect((saveCalls()[2][1] as { p_invoice: { header_notes: string } }).p_invoice.header_notes).toBe('Spray south field instead');
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+  });
+
+  it('a create retried with the same values after no answer is sent once more with the same key, and nothing else', async () => {
+    let createCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        createCalls += 1;
+        if (createCalls === 1) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice created'));
+    expect(saveCalls()).toHaveLength(2);
+    expect(saveKey(1)).toBe(saveKey(0));
+  });
+
+  it('an update retried with changed values after no answer gets a new key; an unchanged retry keeps it', async () => {
+    // An update replaces the invoice's contents, so the newer values must be applied rather
+    // than answered with the first attempt's stored result (Luna, PR #893).
+    let saves = 0;
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        saves += 1;
+        if (saves === 2 || saves === 3) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        return Promise.resolve({ data: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      if (name === 'update_field_app_invoice_billing') return Promise.resolve({ data: null, error: { message: 'network blip' } });
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    await renderAt();
+    await createWithPartialFailureAndStay();
+
+    // Update #1: no answer. Update #2, same values: same key.
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(3));
+    expect(saveKey(2)).toBe(saveKey(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled());
+
+    // Changed values: a new key.
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(4));
+    expect(savedInvoiceId(3)).toBe(CREATED_ID);
+    expect(saveKey(3)).not.toBe(saveKey(1));
+  });
+
   it('two Save clicks before the page re-renders send one create', async () => {
     mockSaveWithFirstBillingFailure(CREATED_ID);
     await renderAt();

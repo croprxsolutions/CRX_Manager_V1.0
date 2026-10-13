@@ -42,6 +42,17 @@ export function parseDollarsToCents(input: string): number | null {
 export const MONEY_PRECISION_MESSAGE = 'Enter an amount with no more than two decimal places.';
 
 /**
+ * A typed field-application Discount Earned in whole cents. Blank, zero, negative or
+ * unreadable input means "no discount" (0), as before; more than two decimal places is
+ * REFUSED (null) like every other money input. Replaces a binary-float parse that could
+ * turn "$1.005" into 100 cents (Luna, PR #893).
+ */
+export function parseDiscountEarnedCents(input: string): number | null {
+  const cents = parseDollarsToCentsSigned(input);
+  return cents === null ? null : Math.max(0, cents);
+}
+
+/**
  * Validate a form-entered dollar amount before parsing it into cents.
  *
  * A SHAPE + MAGNITUDE guard, complementary to (not a substitute for) the

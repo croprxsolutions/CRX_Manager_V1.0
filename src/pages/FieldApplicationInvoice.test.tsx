@@ -439,6 +439,36 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     });
   });
 
+  it.each([
+    ['1.005', null],
+    ['1.01', 101],
+    ['-5', 0],
+  ])('a typed discount of %s is sent in exact cents, or refused before anything is saved', async (typed, cents) => {
+    // A binary-float parse turned "$1.005" into 100 cents (Luna, PR #893); more than two
+    // decimal places is now refused like every other money input.
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    await waitFor(() =>
+      expect(mockRpc.mock.calls.some((c) => c[0] === 'derive_customer_shares_from_fields')).toBe(true),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Preview$/i }));
+    fireEvent.change(await screen.findByTitle(/Early-pay discount earned/i), { target: { value: typed } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    if (cents === null) {
+      expect(mockToast).toHaveBeenCalledWith('error', 'Discount Earned: Enter an amount with no more than two decimal places.');
+      expect(mockRpc.mock.calls.some((c) => c[0] === 'save_field_app_invoice')).toBe(false);
+      return;
+    }
+    await waitFor(() => {
+      const billingCall = mockRpc.mock.calls.find((c) => c[0] === 'update_field_app_invoice_billing');
+      expect(billingCall).toBeDefined();
+      const discounts = (billingCall![1] as { p_discounts: Record<string, { amount_cents: number }> }).p_discounts;
+      expect(discounts['new-inv-1'].amount_cents).toBe(cents);
+    });
+  });
+
   // The transaction date decides the SEASON, and the season selects the
   // customer_application_rates row — so it changes the PRICE exactly as much as locations,
   // chemicals and the service selector do, all of which already invalidate the preview.

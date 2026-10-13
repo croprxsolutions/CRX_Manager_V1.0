@@ -34,9 +34,19 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
 - If the billing details step fails and the user changes a billing value before saving again,
   the retry uses a new repeat-protection key, so the change is written instead of the server
   answering with its first result; an unchanged retry keeps the key (Codex Sol on PR #893).
+- A Save that got no answer and is retried with **changed** values no longer keeps the old
+  values on the invoice: a retried create keeps its key (so it never creates a second invoice)
+  and then writes the current values onto the invoice it returns; a retried update gets a new
+  key so the current values are applied (Luna on PR #893). Before, the database could answer
+  the retry with the first attempt's result while the later steps saved the new billing and
+  applied info, leaving a mix.
+- The Discount Earned amount is read in exact cents; more than two decimal places is refused
+  with the usual money message before anything is saved (it was rounded with binary floating
+  point, so `$1.005` became `$1.00`; Luna on PR #893).
 - If the page cannot tell which customer each saved invoice belongs to, it no longer writes the
   billing details with zero discounts while reporting success: it says the billing details did
-  not save and keeps the form unsaved (Codex Sol 6.1 on PR #893).
+  not save and keeps the form unsaved (Codex Sol 6.1 on PR #893; an invoice coming back with a
+  blank customer counts too, Luna on PR #893).
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
 
@@ -68,9 +78,14 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   unposted, posted, cancelled, created days ago, any UUID version); four kinds of address that
   must wait for "Start a new invoice instead"; typing while the check runs; a failed or running
   check refusing Save; New and Back/Forward; a Save left behind by New; two quick Save clicks; the
-  billing key; and the billing customer lookup failing or coming back short.
-- The four 2026-10-13 fixes (posted opens, unopenable address waits, two clicks send one save,
-  billing lookup refuses) were each broken on purpose and their tests failed, then restored.
+  billing key; the billing customer lookup failing, coming back short or with a blank customer;
+  a create or update retried with changed or unchanged values after no answer. The Discount
+  Earned amount is tested in `src/pages/FieldApplicationInvoice.test.tsx` (exact cents, refused
+  at three decimals) and `src/lib/__tests__/parseCents.test.ts`.
+- The 2026-10-13 fixes (posted opens, unopenable address waits, two clicks send one save,
+  billing lookup refuses, blank customer refuses, changed-value create and update retries,
+  over-precise discount refused) were each broken on purpose and their tests failed, then
+  restored.
 - Earlier rounds (Luna 3 to 8, CodeRabbit, Codex Sol) each added tests that failed against the
   commit before their fix.
 
@@ -81,12 +96,6 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   the address has no created id, the typed form is gone, and saving the re-typed form creates a
   second invoice. Planned fix: the permanent create-request record above (Codex Sol 6.1 design,
   2026-10-12).
-- **A retry after an unknown outcome, with changed values, on the same page.** If a Save gets no
-  answer and the user changes the locations or chemicals before pressing Save again, the
-  database may answer with the first attempt's result (same repeat-protection key), and the new
-  values in those fields are not applied, while the later steps save the current billing and
-  applied info. This is how main behaves today; the planned create-request record covers it for
-  new invoices.
 - **The billing key is protected by the screen only.** The server does not check that a reused
   key carries the same values, and a delayed older billing write could still land after a newer
   one.

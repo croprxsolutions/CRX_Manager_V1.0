@@ -20,6 +20,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import { formatCents as fmt } from '../lib/money';
+import { MONEY_PRECISION_MESSAGE, parseDiscountEarnedCents } from '../lib/parseCents';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { billableAcres, acreDivergence, appliedMatchesSystem } from '../lib/fieldGeometry';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
@@ -593,6 +594,10 @@ export default function FieldApplicationInvoice() {
   // True from the moment a Save starts until it has finished, set before anything awaits, so
   // a double click or a queued handler can never send a second save alongside the first.
   const saveInFlightRef = useRef(false);
+  // The key and values of the last save_field_app_invoice call whose answer did not arrive. The
+  // server answers a repeated key with its FIRST result without reading the new values, so a
+  // retry with changed values must not rely on that key alone (Luna, PR #893).
+  const unansweredSaveRef = useRef<{ key: string; fingerprint: string } | null>(null);
 
   // False once this page has been left (unmounted). A Save still running then finishes its
   // writes but must not move the user, who is already on another page (e.g. pressed New).
@@ -884,8 +889,8 @@ export default function FieldApplicationInvoice() {
   // Used to print the THIS-invoice Discount Earned line on the PDF.
   const discountCentsForCustomer = useCallback((custId: string | null): number => {
     if (!custId) return 0;
-    const dollars = parseFloat(discountByCustomer[custId]?.dollars ?? '');
-    return Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : 0;
+    // Display only (the PDF line): Save refuses an over-precise amount by name before any write.
+    return parseDiscountEarnedCents(discountByCustomer[custId]?.dollars ?? '') ?? 0;
   }, [discountByCustomer]);
 
   // #33: editor edit handler — writes the per-customer draft DIRECTLY (no invoice id
@@ -1772,6 +1777,10 @@ export default function FieldApplicationInvoice() {
       toast('error', 'Enter a valid diluent / carrier-water rate (a number 0 or greater, gal/acre), or leave it blank.');
       return;
     }
+    if (Object.values(discountByCustomer).some((entry) => parseDiscountEarnedCents(entry.dollars) === null)) {
+      toast('error', `Discount Earned: ${MONEY_PRECISION_MESSAGE}`);
+      return;
+    }
     // The invoice this save writes to: the routed one, or the one an earlier Save on this
     // still-/new page already created. Only when neither exists does the save CREATE.
     const targetInvoiceId = id || createdInvoiceIdRef.current;
@@ -1780,11 +1789,7 @@ export default function FieldApplicationInvoice() {
     saveInFlightRef.current = true;
     setSaving(true);
     try {
-      const key = saveIdem.getKey();
-      const { data, error } = await supabase.rpc('save_field_app_invoice', {
-        // save_field_app_invoice accepts NULL p_invoice_id to create a new
-        // invoice (live signature is nullable; generated type narrows to string).
-        p_invoice_id: (targetInvoiceId || null) as string,
+      const saveArgs = {
         p_invoice: {
           invoice_number: invoiceNumber || null,
           invoice_date: transactionDate,
@@ -1828,14 +1833,31 @@ export default function FieldApplicationInvoice() {
         })),
         p_performed_by: profile.id,
         p_application_service_id: (appServiceId || null) as string,
+      };
+      const fingerprint = JSON.stringify(saveArgs);
+      const unanswered = unansweredSaveRef.current;
+      // An update with changed values gets a new key: it replaces the invoice's contents, so
+      // applying the newer values is right whether or not the unanswered one landed.
+      if (!creating && unanswered && unanswered.fingerprint !== fingerprint) saveIdem.resetKey();
+      const key = saveIdem.getKey();
+      // A create keeps its key (a new one could create a second invoice), so if the values
+      // changed since the unanswered create, its answer may be that create's invoice with the
+      // OLD values: those are written over it with the current ones right after.
+      const createMayReplayOldValues = creating && unanswered?.key === key && unanswered.fingerprint !== fingerprint;
+      if (unanswered?.key !== key) unansweredSaveRef.current = { key, fingerprint };
+      const { data, error } = await supabase.rpc('save_field_app_invoice', {
+        // save_field_app_invoice accepts NULL p_invoice_id to create a new
+        // invoice (live signature is nullable; generated type narrows to string).
+        p_invoice_id: (targetInvoiceId || null) as string,
+        ...saveArgs,
         p_idempotency_key: key,
       });
 
       if (error) throw error;
-      const result = assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');
+      let result = assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');
       saveIdem.resetKey();
-      const ids = result.invoice_ids || [];
-      const groupNote = result.invoice_group_id ? ` (group of ${ids.length})` : '';
+      unansweredSaveRef.current = null;
+      let ids = result.invoice_ids || [];
       // Record the created invoice before any later step can fail, so every repeat
       // Save from this page updates it instead of creating a duplicate.
       if (creating && ids[0]) {
@@ -1848,6 +1870,21 @@ export default function FieldApplicationInvoice() {
           navigate({ search: createdInvoiceAddressSearch(ids[0]) }, { replace: true });
         }
       }
+      if (createMayReplayOldValues && ids[0]) {
+        const followUpKey = saveIdem.getKey();
+        unansweredSaveRef.current = { key: followUpKey, fingerprint };
+        const followUp = await supabase.rpc('save_field_app_invoice', {
+          p_invoice_id: ids[0],
+          ...saveArgs,
+          p_idempotency_key: followUpKey,
+        });
+        if (followUp.error) throw followUp.error;
+        result = assertRpcResult<FieldAppInvoiceResult>(followUp.data, 'save_field_app_invoice');
+        saveIdem.resetKey();
+        unansweredSaveRef.current = null;
+        ids = result.invoice_ids || [];
+      }
+      const groupNote = result.invoice_group_id ? ` (group of ${ids.length})` : '';
 
       // §5: the save RPC committed the invoice atomically — NOW (and only now) write the
       // block-mode override audit, linked to the real saved id. If the save had failed, we
@@ -1951,8 +1988,12 @@ export default function FieldApplicationInvoice() {
         for (const invId of ids) {
           const custId = customerByInvoiceId.get(invId);
           const entry = custId ? discountByCustomer[custId] : undefined;
-          const dollars = entry ? parseFloat(entry.dollars) : NaN;
-          const cents = Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : 0;
+          const cents = entry ? parseDiscountEarnedCents(entry.dollars) : 0;
+          // Refused before the save started; never sent as a zero if it got here anyway.
+          if (cents === null) {
+            billingOk = false;
+            continue;
+          }
           discounts[invId] = { amount_cents: cents, date: (entry?.date || null) };
         }
         const billingArgs = {

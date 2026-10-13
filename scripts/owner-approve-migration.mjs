@@ -6,10 +6,13 @@
 // access what is refused by .claude/hooks/migration-apply-lib.mjs until Mason
 // approves it. This script builds the REQUEST he approves — computed here from the
 // file itself, never from text an agent supplies — saves it in this checkout's
-// .claude/session-state/, and prints the plain-English summary and a 6-digit code.
-// Show him the summary and ask him to reply exactly `approve <code>`. His reply is
-// recorded by .claude/hooks/owner-approval-prompt.mjs and is good for ONE install
-// of this exact file, from this exact pull-request head, for 30 minutes.
+// .claude/session-state/, and prints the plain-English summary, which ends with a
+// 6-digit reference number. Show him the summary and ask him to reply `I approve`
+// (Mason, 2026-10-13). A plain `I approve` counts only when your message just before
+// it showed the reference number, so if you talk about anything else first, show
+// the request again. (`approve <code>` also works.) His reply is recorded by
+// .claude/hooks/owner-approval-prompt.mjs and is good for ONE install of this exact
+// file, from this exact pull-request head, for 30 minutes.
 //
 // Never send the reply yourself, in any session: only a message Mason sends counts.
 //
@@ -79,7 +82,7 @@ if (argv.length === 1 && argv[0] === "--selftest") {
   }));
   console.log("Show Mason this, word for word:\n");
   for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
-  console.log(`\nWhen he replies "approve ${code}", the approval hook confirms in the next turn that the reply path works.`);
+  console.log(`\nWhen he replies "I approve" right after you show this (reference ${code}), the approval hook confirms in the next turn that the reply path works.`);
   process.exit(0);
 }
 
@@ -167,5 +170,7 @@ console.log(`Approval request saved for ${migName} (PR #${pr.number}, head ${hea
 for (const c of categories) console.log(`  - ${PARKED_LABELS[c.category]}`);
 console.log("\nShow Mason this, word for word, with a one-line plain-English note on what the change does:\n");
 for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
-console.log(`\nThen wait for HIS reply "approve ${code}" in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
+console.log(`\nThen wait for HIS reply "I approve" in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
+console.log(`A plain "I approve" only counts right after a message of yours that shows the reference ${code}; if you say anything else first, show the request again.`);
+console.log(`Ask him nothing else in that message, so "I approve" can only mean this change.`);
 console.log(`After that: node scripts/apply-migration-file.mjs ${rel} (dry run), then again with --confirm, within 30 minutes.`);

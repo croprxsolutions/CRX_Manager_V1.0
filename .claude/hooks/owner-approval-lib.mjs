@@ -14,11 +14,17 @@
 //      pull request and its exact head, what the safety check flagged, the Claude
 //      Code session it was built in, and a 6-digit code. It is saved beside the
 //      checkout's other proofs.
-//   2. The agent shows Mason the plain-English summary and the exact reply.
-//   3. He replies `approve <code>` from anywhere, in THAT conversation.
+//   2. The agent shows Mason the plain-English summary, which ends with the code
+//      as a reference number.
+//   3. He replies `I approve` from anywhere, in THAT conversation, as his next
+//      message (Mason, 2026-10-13: "I just want to say I approve and that's good
+//      enough"). `approve <code>` still works and names the request outright.
 //      owner-approval-prompt.mjs, which Claude Code runs as a UserPromptSubmit hook
 //      on each message sent into a session, turns the request into an APPROVAL good
-//      for 30 minutes only when the reply arrives in the session that built it.
+//      for 30 minutes only when the reply arrives in the session that built it. A
+//      plain `I approve` counts only when the agent's message just before it showed
+//      that request's reference number, so an "I approve" about something else
+//      never approves a request still waiting from earlier.
 //   4. scripts/apply-migration-file.mjs checks it LAST, after the reviewer proofs,
 //      the Sol proof and the landing gate, refuses it in any other session, and
 //      uses it up once.
@@ -40,7 +46,9 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomInt } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
@@ -115,7 +123,8 @@ export function ownerApprovalSummary(p) {
       "This is a TEST of approving by chat reply.",
       "It approves nothing and changes nothing.",
       "",
-      `To answer it, reply exactly: approve ${p.code}`,
+      "To answer it, reply: I approve",
+      `(Reference ${p.code}. You don't need to type it.)`,
     ];
   }
   return [
@@ -128,9 +137,10 @@ export function ownerApprovalSummary(p) {
     "The safety check stopped it for you because it:",
     ...(p.categories || []).map((c) => `- ${PARKED_LABELS[c.category] || c.category}: ${c.reason}`),
     "",
-    `To approve, reply exactly: approve ${p.code} (before ${centralTime(p.expiresAt)}).`,
+    `To approve, reply: I approve (before ${centralTime(p.expiresAt)}).`,
     "It then works once, for 30 minutes, only for this exact file and version.",
     "Every other safety check still has to pass before it runs.",
+    `(Reference ${p.code}. You don't need to type it.)`,
   ];
 }
 
@@ -186,6 +196,110 @@ const REPLY_RE = /^\s*approve\s+(\d{6})\s*[.!]?\s*$/i;
 export function approvalCodeFromReply(prompt) {
   const m = REPLY_RE.exec(String(prompt ?? ""));
   return m ? m[1] : null;
+}
+
+// The plain reply (Mason, 2026-10-13): "I approve", "approve", "approved",
+// "yes I approve", "I approve it", again only as the WHOLE message. A bare "yes"
+// or "go" is not one: he says those about everything.
+const PLAIN_REPLY_RE = /^\s*(?:yes\s*[,.!]?\s+)?(?:i\s+)?approved?(?:\s+(?:it|this|that))?\s*[.!]*\s*$/i;
+
+/** True when the whole message is a plain approval with no code. */
+export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(prompt ?? ""));
+
+const textOf = (content) => (typeof content === "string" ? content
+  : Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join("\n") : "");
+// A message Mason sent: a main-thread user entry carrying text. Tool results carry
+// none, and isMeta entries are text Claude Code adds itself.
+const isOwnerMessage = (e) => e?.type === "user" && !e.isSidechain && !e.isMeta && textOf(e.message?.content) !== "";
+
+/**
+ * What the agent showed Mason in its last turn: the text of every main-thread
+ * assistant message after the message he sent before this one, read from the
+ * session transcript Claude Code hands the hook. His current message may or may
+ * not be written yet; when it is, it is skipped. Only the transcript's tail is
+ * read; a turn longer than that yields only its end, which can only refuse more.
+ * Throws when the transcript cannot be read, so a plain reply then approves nothing.
+ */
+export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 8 * 1024 * 1024 } = {}) {
+  if (typeof transcriptPath !== "string" || !transcriptPath) throw new Error("the message carried no transcript");
+  const fd = openSync(transcriptPath, "r");
+  let raw;
+  try {
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - maxBytes);
+    const buf = Buffer.alloc(size - start);
+    let got = 0;
+    while (got < buf.length) {
+      const n = readSync(fd, buf, got, buf.length - got, start + got);
+      if (n <= 0) break;
+      got += n;
+    }
+    raw = buf.subarray(0, got).toString("utf8");
+    if (start > 0) raw = raw.slice(raw.indexOf("\n") + 1); // drop the partial first line
+  } finally {
+    closeSync(fd);
+  }
+  const entries = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try { entries.push(JSON.parse(line)); } catch { /* a line still being written */ }
+  }
+  const said = [];
+  let sawAgent = false;
+  let skippedCurrent = false;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (isOwnerMessage(e)) {
+      if (!sawAgent && !skippedCurrent && textOf(e.message.content).trim() === String(currentPrompt ?? "").trim()) {
+        skippedCurrent = true;
+        continue;
+      }
+      break;
+    }
+    if (e?.type === "assistant" && !e.isSidechain) {
+      sawAgent = true;
+      const t = textOf(e.message?.content);
+      if (t) said.unshift(t);
+    }
+  }
+  return said.join("\n");
+}
+
+/**
+ * Which request a plain `I approve` is for. The live requests this session built
+ * (pending, unexpired, code not retired) are matched against the agent's last turn:
+ * exactly one of them must have its reference number there.
+ *
+ * @param {object} args
+ * @param {string[]} args.dirs  this session's session-state folders (ownerRequestDirs)
+ * @param {string} args.sessionId
+ * @param {() => string} args.readShown  the agent's last turn (lastAgentTurnText); may throw
+ * @returns {{silent: true}|{ok: false, reason: string}|{ok: true, code: string}}
+ *   silent: nothing is waiting in this conversation, so the message is ordinary chat.
+ */
+export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now() }) {
+  if (!usableSessionId(sessionId)) return { silent: true };
+  const live = new Set();
+  for (const dir of new Set(dirs || [])) {
+    let names;
+    try { names = readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      const m = /^owner-approval-request-(\d{6})\.json$/.exec(name);
+      if (!m || existsSync(path.join(dir, usedCodeMarkerName(m[1])))) continue;
+      let p;
+      try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); } catch { continue; }
+      const deadline = Date.parse(p?.expiresAt);
+      if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.add(m[1]);
+    }
+  }
+  if (!live.size) return { silent: true };
+  let shownText;
+  try { shownText = String(readShown() ?? ""); }
+  catch (e) { return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` }; }
+  const shown = [...live].filter((c) => new RegExp(`(?<!\\d)${c}(?!\\d)`).test(shownText));
+  if (!shown.length) return { ok: false, reason: "the agent's message just before it did not show the approval request (its reference number), so it may have been about something else" };
+  if (shown.length > 1) return { ok: false, reason: `the agent's last message showed ${shown.length} requests (${shown.join(", ")}), so it is ambiguous` };
+  return { ok: true, code: shown[0] };
 }
 
 /**

@@ -1,6 +1,6 @@
 # Decision Log
 
-Last verified: 2026-10-13 (direction-and-goals entry added: four phases to a senior-developer handoff, reps invoice any customer under their own name; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (two entries added: reps invoice any customer under their own name, superseding the 2026-10-06 rep-scoping entry; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
@@ -8,16 +8,18 @@ settled calls. Newest first, roughly — a few entries from the same week sit sl
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 
-## 2026-10-13 — Direction: build every goal, clean up, hand off to a senior developer, then roll out; reps invoice any customer
+## 2026-10-13 — Sales reps invoice and email any customer, under their own name only
 
-**Decision (Mason, in chat, 2026-10-13, answering the scalability review).** CRX Manager is to carry a $10 million-a-year business. Before it does, the work runs in four phases. (A) Finish every goal in `docs/plans/2026-10-13-direction-and-goals.md`, including a QuickBooks **Desktop** sync and online card/ACH payments. (B) Clean up docs, files, branches and open issues. (C) Hand off to an outside senior software developer, who reviews the system independently. (D) Roll out, with Chem Man retired for billing by spring 2027. Mason's other decisions the same day:
-- **Sales reps may create, post and email invoices for ANY customer, under their own name only** (admins can reassign the salesperson). This reverses the 2026-10-09 admin-only invoicing plan; PR #902 was closed unmerged and its migration was never applied.
-- Upgrade Supabase to the Pro plan with point-in-time recovery.
-- Make delivery, receiving and team-note photos private.
-- Keep all AI tooling at handoff, documented in a plain guide.
+**Decision (Mason, in chat).** A sales rep may create, post and email invoices for any customer, but only as themselves; admins may reassign the salesperson.
+**Supersedes** the 2026-10-06 entry "CRX-LIFE-001 lands as scoped; rep scoping of the order-invoice RPCs is the next change" (reps bill only their own customers) and the 2026-10-09 admin-only invoicing plan (PR #902, closed unmerged; its migration was never applied).
+**Why.** Reps sell across the whole customer base, and 146 of 150 customers have no assigned rep.
+**What this forbids/implies:** never propose admin-only or own-customer-only invoicing again; a rep invoicing or emailing another rep's customer is intended. The change loosens permissions, so its migration still needs Mason's approval reply. Source: `docs/plans/2026-10-13-direction-and-goals.md` (Goal 2).
 
-**Why.** The review found a strong foundation that needs no rewrite but is not ready for $10M: security holes, billing-correctness gaps, row limits, a thin safety net, and no accounting link. An outside expert checks the system before real money depends on it, because Mason cannot review code himself.
-**What this forbids/implies:** do not propose admin-only invoicing or limiting reps to their own customers again; a rep invoicing or emailing another rep's customer is intended, not a defect. Granting reps invoice access is still a permissions change, so its migration needs Mason's approval reply. The goals doc sets priorities but authorizes no build by itself; open questions (QuickBooks Desktop vs Online, the stock-shortage policy, the payment processor, the developer's start date) are listed there.
+## 2026-10-13 — Direction: build, clean up, senior-developer handoff, then roll out
+
+**Decision (Mason, in chat, answering the scalability review).** Finish Goals 1–7 of `docs/plans/2026-10-13-direction-and-goals.md` (including a QuickBooks Desktop sync and online card/ACH payments), clean up, hand off to an outside senior developer for independent review, then roll out, with Chem Man retired for billing by spring 2027.
+**Why.** The review found a sound foundation but real gaps, and an outside expert should check the system before real money depends on it.
+**What this forbids/implies:** the same day Mason also chose a Supabase Pro upgrade with point-in-time recovery, private photos, and keeping all AI tooling (documented) at handoff. The goals doc sets priorities only and authorizes no build; open questions are listed there.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 

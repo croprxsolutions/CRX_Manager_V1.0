@@ -18,7 +18,7 @@ That means every quote, order, delivery, invoice and payment for the season live
 
 | Phase | What happens | Done when |
 |---|---|---|
-| **A. Build** | Finish Goals 1–8 below, including the QuickBooks and payment integrations. | Every goal's "done" test passes live. |
+| **A. Build** | Finish Goals 1–7 below, including the QuickBooks and payment integrations, while tracking Goal 8. | Goals 1–7 each pass their "done" test live. Goal 8 is an ongoing target, not a gate. |
 | **B. Clean up** | Goal 9: docs, files, branches, open issues and the AI tooling all tidied and explained. | A newcomer can find, run and understand everything. |
 | **C. Hand off** | Goal 10: an outside **senior software developer** gets the handoff pack, sets the system up, and reviews it independently. | The developer signs off, or their must-fix list is done. |
 | **D. Roll out** | The whole business runs on CRX, and Chem Man is retired for billing. | Spring 2027 season billed entirely in CRX. |
@@ -69,13 +69,18 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - Photos require sign-in (decided, 5d).
 - Drivers and applicators can't read product cost or margin; applicators only see fields for their assigned jobs.
 
-**Done when:** a driver account, tested live, gets "permission denied" for each item above.
+**Done when:** separate live checks, one per rule and role, all pass:
+- an admin can pull the register, and a sales rep, driver and applicator are each refused;
+- a signed-out visitor is refused a photo link, and a signed-in staff member can still open it;
+- a driver and an applicator are each refused cost and margin data;
+- an applicator sees fields for their assigned jobs and is refused other fields.
 
 #### Goal 2: Reps invoice any customer, under their own name (days). IN PROGRESS 2026-10-13, "Invoice work continuation" session
 - Remove the "must be your own customer" check from saving and posting manual invoices and invoice groups.
 - Stop reps naming another salesperson.
+- Let reps find any customer when invoicing. Today a rep can only see customers assigned to them (the `customers_select` access rule, confirmed live 2026-10-13). Add an invoice-safe customer search that returns just what an invoice needs (name, billing contact), rather than opening every customer field to reps.
 
-**Done when:** a rep account, live, saves and posts an invoice for a customer with no assigned rep, and is refused when naming someone else as salesperson.
+**Done when:** a rep account, live, finds a customer with no assigned rep in the invoice customer search, saves and posts an invoice for them, and is refused when naming someone else as salesperson.
 
 #### Goal 3: Billing you can trust (about 2–4 weeks)
 - Post uses what's on screen, or refuses until it's saved.
@@ -91,12 +96,15 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - Pickers become search boxes.
 - List pages get real paging and search.
 
-**Done when:** with test data past the limits (for example 5,000 invoices), every report total matches a direct database count.
+**Done when:** with test data past the old limits (for example 5,000 invoices):
+- every report total and integrity check matches a direct database count;
+- picker search finds records beyond the old limits;
+- list paging and search reach every record.
 
 #### Goal 5: Proof of delivery works offline (about 1 week)
 - Signature, photos and receipt sync when the device reconnects.
 
-**Done when:** a delivery completed in airplane mode shows its signature after reconnecting.
+**Done when:** a delivery completed in airplane mode shows its signature, photos and receipt after reconnecting.
 
 #### Goal 6: A real safety net (about 2–3 weeks, plus Mason's billing click)
 - Supabase Pro plus point-in-time recovery (decided, 5a).
@@ -115,7 +123,7 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 
 **Done when:** a full test month of invoices and payments lands in QuickBooks Desktop matching CRX to the cent, a real card or ACH payment settles end to end, and the cut-over plan is written.
 
-#### Goal 8: Spend on product, not process (ongoing)
+#### Goal 8: Spend on product, not process (ongoing; reviewed monthly through handoff, not a Phase A gate)
 - Keep the freeze on new safety guards.
 - Track product changes merged vs. tooling changes merged each month. **Target: at least 3 to 1.**
 

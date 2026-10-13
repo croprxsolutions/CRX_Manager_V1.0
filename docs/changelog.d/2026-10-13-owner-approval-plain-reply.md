@@ -50,10 +50,14 @@ no longer types anything but the approval.
     retired). With none, it is ordinary chat and the hook stays silent. An unreadable folder or
     request file is reported, never taken as "nothing waiting" (Luna round 2). Otherwise exactly one
     of them must be SHOWN in the agent's last message (`requestShownIn`, Luna round 4). Shown means
-    all three of:
+    all of:
     - its `Reference <code>` line (markdown allowed between);
     - the `reply: I approve` line;
-    - its migration's name (or the self-test line).
+    - its migration's name (or the self-test line);
+    - for a migration, the summary's `Migration`, `Pull request` and `File fingerprint` lines and
+      every reason the safety check stopped it, taken from `ownerApprovalSummary` itself, so he is
+      always told why it waited for him (Codex P1 on the PR). Markdown emphasis, code marks,
+      bullets, spacing and letter case may differ.
 
     A message that only cites an old reference while asking something else does not count. The same
     digits starting or inside another number or identifier never count, in any script: `482913-4`,
@@ -83,7 +87,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 313 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 322 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
@@ -136,3 +140,7 @@ no longer types anything but the approval.
   covered a message already written. The read-back above is the full fix. Breaking the apply-time
   check, the attachment check, the "agent answered first" rule or the reminder-block rule makes the
   suites fail.
+- On the next head the Codex connector found that a message showing only the migration name, the
+  reply line and the reference counted as "shown", without the reasons it was stopped. It now needs
+  the Pull request and File fingerprint lines and every reason too, with tests for each missing or
+  softened line, two reasons, and markdown; skipping that check makes the suite fail.

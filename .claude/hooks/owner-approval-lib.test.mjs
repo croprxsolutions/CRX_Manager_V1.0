@@ -21,6 +21,7 @@ import {
   OWNER_REQUEST_MAX_AGE_MS,
   OWNER_TRUST_FILES,
   OWNER_TRUST_ROOT,
+  PARKED_LABELS,
   approvalCodeFromReply,
   approvalFileName,
   assertApprovalStillValid,
@@ -603,12 +604,30 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     const SECOND = "20260914101700_second";
     const pOf = (code, migration = base.migration) => JSON.parse(buildApprovalPayload({ ...base, code, migration }));
     const show = (code, migration = base.migration, ref = `(Reference ${code}. You don't need to type it.)`) =>
-      `Approve this ONE change to the live CRX Manager database:\n\nMigration: ${migration}\n\n` +
-      `To approve, reply: I approve (before Oct 10, 2026, 9:00 AM Central).\n${ref}`;
+      [...ownerApprovalSummary(pOf(code, migration)).slice(0, -1), ref].join("\n");
     {
       const C = "535353";
       ok(requestShownIn(ownerApprovalSummary(pOf(C)).join("\n"), pOf(C)), "the summary the script prints shows its request");
       ok(requestShownIn(show(C), pOf(C)), "a summary with the migration, the reply and the Reference line shows its request");
+      // What it is bound to and why it waited for him must be shown too (Codex P1, PR #900).
+      const risk = `- ${PARKED_LABELS[CATS[0].category]}: ${CATS[0].reason}`;
+      const prLine = `Pull request: #843 (version ${HEAD.slice(0, 12)})`;
+      const printLine = `File fingerprint: ${HASH.slice(0, 16)}`;
+      ok(show(C).includes(risk) && show(C).includes(prLine) && show(C).includes(printLine), "the test summary carries the lines below");
+      ok(!requestShownIn(show(C).replace(risk, ""), pOf(C)), "without the reason the safety check stopped it, the request is not shown");
+      ok(!requestShownIn(show(C).replace(CATS[0].reason, "adds a comment"), pOf(C)), "with that reason softened, the request is not shown");
+      ok(!requestShownIn(show(C).replace(prLine, ""), pOf(C)), "without the pull request and version, the request is not shown");
+      ok(!requestShownIn(show(C).replace(HEAD.slice(0, 12), "f".repeat(12)), pOf(C)), "with another version, the request is not shown");
+      ok(!requestShownIn(show(C).replace(printLine, ""), pOf(C)), "without the file fingerprint, the request is not shown");
+      {
+        const p2cats = JSON.parse(buildApprovalPayload({ ...base, code: C, categories: [...CATS, { category: "deletes-data", reason: "a DELETE FROM public.invoices" }] }));
+        const both = ownerApprovalSummary(p2cats).join("\n");
+        ok(requestShownIn(both, p2cats), "a request stopped for two reasons is shown with both");
+        ok(!requestShownIn(both.replace(/^- Deletes data: .*$/m, ""), p2cats), "showing only one of its two reasons does not count");
+      }
+      ok(requestShownIn(show(C).replace("Pull request:", "**Pull request:**").replace(`- ${PARKED_LABELS[CATS[0].category]}`, `* **${PARKED_LABELS[CATS[0].category]}**`)
+        .replace(HASH.slice(0, 16), `\`${HASH.slice(0, 16)}\``).replace(" (version", "\n  (version"), pOf(C)),
+      "markdown emphasis, code marks, another bullet and a wrapped line are fine");
       ok(requestShownIn(ownerApprovalSummary(JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt,
         nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
         expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");

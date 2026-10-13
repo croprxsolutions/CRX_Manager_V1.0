@@ -171,6 +171,6 @@ for (const c of categories) console.log(`  - ${PARKED_LABELS[c.category]}`);
 console.log("\nShow Mason this, word for word, with a one-line plain-English note on what the change does:\n");
 for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
 console.log(`\nThen wait for HIS reply "I approve" in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
-console.log(`A plain "I approve" only counts when your LAST message before it shows this summary word for word (its Migration, reply and "Reference ${code}" lines): end your turn with that message, and if you say anything else first, show the request again.`);
+console.log(`A plain "I approve" only counts when your LAST message before it shows this summary word for word (its Migration, Pull request, File fingerprint, every reason it was stopped, reply and "Reference ${code}" lines): end your turn with that message, and if you say anything else first, show the request again.`);
 console.log(`Ask him nothing else in that message, so "I approve" can only mean this change.`);
 console.log(`After that: node scripts/apply-migration-file.mjs ${rel} (dry run), then again with --confirm, within 30 minutes.`);

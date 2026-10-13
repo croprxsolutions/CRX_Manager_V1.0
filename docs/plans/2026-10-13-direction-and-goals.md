@@ -88,13 +88,14 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 
 #### Goal 3: Billing you can trust (about 2–4 weeks)
 - Post uses what's on screen, or refuses until it's saved. The database enforces this, not just the screen: `post_invoice` and `post_invoice_group` check the invoice version the screen loaded and refuse if it changed. That way a save from a second tab or another user can't be posted unseen (see `KNOWN_ISSUES.md`).
-- Voiding a delivery credits or flags its posted invoice.
+- Voiding a delivery must leave nothing collectible for goods that came back. Its posted invoice gets an automatic credit, or the void is refused until an admin credits it. A warning message alone (today's behavior) does not count.
 - Cap whole-order invoices at what was ordered or delivered.
 - Orderless invoices (made from scratch, no order or delivery) follow the rule Mason picks in question 6e.
 - Blend-ticket pricing picks the right quoted price.
-- A return on a Chem Man-billed delivery can't create a CRX credit.
+- Returns against a Chem Man-billed delivery **stay allowed**, with the credit handled in Chem Man or the books (Mason, 2026-10-07; see `KNOWN_ISSUES.md`). Not changed here. The issue goes away at the Chem Man cut-over (Goal 7).
 
-**Done when:** each case is run against a real database copy and refuses or corrects as described. That includes these two cases:
+**Done when:** each case is run against a real database copy and refuses or corrects as described. That includes these cases:
+- after a delivery with a posted invoice is voided, that invoice is no longer collectible;
 - an invoice saved in a second tab after the first screen loaded is refused at Post;
 - an orderless invoice that breaks the 6e rule is refused.
 
@@ -119,7 +120,7 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - Photos and uploads included in the backup.
 - A staging copy of the system, with the browser tests back on in CI. The developer will need this too.
 
-**Done when:** a restore drill succeeds and is logged, and CI runs the browser tests against staging. The drill must restore the database and also files from each protected upload bucket, and the restored photos and uploads must open. Today's backup copies database tables only, not stored files.
+**Done when:** a restore drill succeeds and is logged, and CI runs the browser tests against staging. The drill must restore the database and also files from each protected upload bucket, and the restored photos and uploads must open. Today's backup copies database tables only, not stored files. A live check also confirms the project is on the Pro plan with point-in-time recovery on. One rewind-to-a-time recovery must be practiced on a throwaway copy.
 
 #### Goal 7: CRX becomes the system of record (about 6–10 weeks)
 - **QuickBooks Desktop sync.** Invoices, payments and credits flow from CRX into QuickBooks Desktop, and each night's totals reconcile.
@@ -128,7 +129,10 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - **Online card and ACH payments.** A payment is marked received only when the processor confirms the money arrived.
 - **Chem Man retirement plan.** Decide what history moves into CRX, what stays read-only, and the cut-over date.
 
-**Done when:** a full test month of invoices and payments lands in QuickBooks Desktop matching CRX to the cent, a real card or ACH payment settles end to end, and the cut-over plan is written.
+**Done when:**
+- a full test month of invoices, payments **and credits** lands in QuickBooks Desktop matching CRX to the cent;
+- a real **card** payment and a real **ACH** payment each settle end to end;
+- the cut-over plan is written.
 
 #### Goal 8: Spend on product, not process (ongoing; reviewed monthly through handoff, not a Phase A gate)
 - Keep the freeze on new safety guards.
@@ -151,7 +155,13 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
   - how a human developer works alongside it;
   - how to switch each piece off safely if they choose.
 
-**Done when:** a newcomer can go from a clean checkout to a running app and passing tests by following the docs alone.
+**Done when** all of these hold:
+- a newcomer can go from a clean checkout to a running app and passing tests by following the docs alone;
+- no migration is parked;
+- every open known issue is either fixed or marked as an accepted risk with a reason;
+- no finished branches or worktrees remain;
+- every stale plan is marked superseded;
+- the AI tooling guide exists.
 
 ### Phase C: Hand off
 

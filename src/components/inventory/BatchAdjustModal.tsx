@@ -165,9 +165,14 @@ export default function BatchAdjustModal({ open, onClose, items, userId, onSucce
   });
   const frozen = batchIntent.isIntentResolved ? null : batchIntent.unresolvedIntent;
 
+  // A batch this dialog is sending right now is in flight, not frozen. React 19
+  // may commit the intent it begins only after handleSubmit has already cleared
+  // this flag and resolved the batch, so recording it here mid-send would mark
+  // this dialog's own finished batch as "finished elsewhere". Once saving ends,
+  // a batch that is still unresolved is recorded as seen.
   useEffect(() => {
-    if (open && batchIntent.unresolvedIntent) setSawFrozenBatch(true);
-  }, [open, batchIntent.unresolvedIntent]);
+    if (open && !saving && batchIntent.unresolvedIntent) setSawFrozenBatch(true);
+  }, [open, saving, batchIntent.unresolvedIntent]);
 
   // This open dialog showed a frozen batch, and it is no longer frozen, and this
   // dialog did not resolve it: another tab or window retried and finished it.

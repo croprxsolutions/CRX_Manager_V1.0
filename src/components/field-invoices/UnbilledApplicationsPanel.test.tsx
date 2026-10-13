@@ -83,7 +83,11 @@ function queryResult(data: unknown[], error: unknown = null) {
   for (const method of ['select', 'eq', 'is', 'order']) {
     chain[method] = vi.fn(() => chain);
   }
-  chain.limit = vi.fn(() => Promise.resolve({ data, error }));
+  // Resolve on a later task, like a real network read. React 19 merges a
+  // loading true→false pair that settles within microtasks into one render, so
+  // an instant mock would skip the loading boundary that remounts each row
+  // action with a fresh idempotency key after reconciliation.
+  chain.limit = vi.fn(() => new Promise((resolve) => { setTimeout(() => resolve({ data, error }), 0); }));
   return chain;
 }
 

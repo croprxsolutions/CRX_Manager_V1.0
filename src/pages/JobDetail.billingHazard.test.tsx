@@ -1059,7 +1059,14 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
       quantity: 6.25, unit: 'Lb', rate_per_acre: 1, rate_unit: 'oz/ac',
     });
     await screen.findAllByRole('button', { name: /save/i }, { timeout: 15000 });
-    expect(screen.queryByText(/This line cannot be saved/i)).toBeNull();
+    // The line is on the grid, so the absence below is not just an empty grid.
+    expect(screen.getAllByDisplayValue('6.25').length).toBeGreaterThan(0);
+    // Until the by-id lookup returns the inactive product's DRY form, the line is
+    // fail-closed exactly like any unknown form; React 19 can render that interim
+    // state first. The bug this pins is a block that never clears.
+    await waitFor(() => {
+      expect(screen.queryByText(/This line cannot be saved/i)).toBeNull();
+    }, { timeout: 5000 });
   }, 30000);
 });
 

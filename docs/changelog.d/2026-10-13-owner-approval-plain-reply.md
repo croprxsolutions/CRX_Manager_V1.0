@@ -14,8 +14,15 @@ no longer types anything but the approval.
     32 MB) and returns the text of the agent's FINAL main-thread message before Mason's reply. Claude
     Code stores one message as several entries sharing a message id, so these are grouped.
     - A request shown earlier in the same turn, before a later question, does not count (Luna round 2).
-    - Any message after the agent's makes the result empty. That covers one of Mason's, image-only
-      included, and a notification.
+    - Only the bookkeeping records Claude Code writes after every turn are skipped. That list was
+      measured on a real session transcript: `system`/`stop_hook_summary`, `last-prompt`,
+      `custom-title`, `agent-name`, `atis-latch`, `pr-link`, `bridge-session`, `queue-operation`,
+      `attachment`, `file-history-*` and `summary`.
+    - Any other entry after the agent's message makes the result empty (Luna round 3). That covers a
+      message of Mason's (image-only included), injected text such as a Stop hook's feedback, a
+      notification, a compaction, an error or synthetic message, and an unknown record type.
+    - Only messages the model wrote count; `isMeta`, API-error and `<synthetic>` assistant entries
+      never do (Luna round 3).
     - Tool output, subagent text and Claude Code's own `isMeta` entries do not count.
     - His current message is skipped whether or not it has been written yet.
     - It throws, so nothing is approved, when the transcript is unreadable, when any damaged or
@@ -49,7 +56,7 @@ no longer types anything but the approval.
   "I approve" approves the request. The scripts tell agents never to bundle.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 245 assertions (151 before). They cover:
+- `owner-approval-lib.test.mjs`: 252 assertions (151 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
     an image-only message, damaged and half-written lines, a turn longer than the part read, a missing file;
@@ -70,6 +77,11 @@ no longer types anything but the approval.
   - Refuted: an earlier identical "I approve" with nothing between it and the request. Both
     messages answer that same request, so approving matches his intent either way. A test records
     this behavior.
+- Luna round 3 found 1 BLOCKER and 1 HIGH (skipped notification or unknown entries; metadata or
+  synthetic assistant entries). Both fixed with the bookkeeping allow-list and the model-written
+  check, each with tests.
+- When a plain reply is refused, the hook tells the agent to fall back to `approve <reference>` if
+  re-showing does not help, so Mason is never stuck.
 - The transcript reader was also run against this session's real transcript, cut at Mason's own
   "Approve 301239". It returned exactly the agent's preceding message, both before and after his
   message was written.

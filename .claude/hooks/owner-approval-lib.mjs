@@ -208,12 +208,23 @@ export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(promp
 
 const textOf = (content) => (typeof content === "string" ? content
   : Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join("\n") : "");
-// A message Mason sent: any main-thread user entry that is not purely tool
-// results and not text Claude Code adds itself (isMeta). An image-only message
-// counts too, so the scan never reaches past it (Luna BLOCKER, round 1).
-const isOwnerMessage = (e) => e?.type === "user" && !e.isSidechain && !e.isMeta &&
-  (typeof e.message?.content === "string" ||
-    (Array.isArray(e.message?.content) && e.message.content.some((b) => b?.type !== "tool_result")));
+// The bookkeeping records Claude Code writes after every turn and around each
+// message (measured on a real session transcript, 2026-10-13). Nothing in them is
+// shown to Mason as something to answer. Any OTHER entry between the agent's
+// message and his reply (a message of his, image-only included; text Claude Code
+// injects such as a Stop hook's feedback; a notification; a compaction; an error
+// or synthetic message; a record type not listed here) ends the scan, so "I
+// approve" is never carried past it (Luna rounds 1 and 3).
+const BOOKKEEPING_TYPES = new Set([
+  "attachment", "queue-operation", "last-prompt", "custom-title", "agent-name", "atis-latch", "pr-link",
+  "bridge-session", "file-history-snapshot", "file-history-delta", "summary",
+]);
+const isBookkeeping = (e) => BOOKKEEPING_TYPES.has(e?.type) || (e?.type === "system" && e.subtype === "stop_hook_summary");
+const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&
+  e.message.content.every((b) => b?.type === "tool_result");
+// A message the model wrote, not one Claude Code made up (an API error, an
+// interruption notice) or marked as metadata (Luna HIGH, round 3).
+const isAgentMessage = (e) => e?.type === "assistant" && !e.isMeta && !e.isApiErrorMessage && e.message?.model !== "<synthetic>";
 const DAMAGED = Symbol("damaged transcript line");
 
 /**
@@ -262,32 +273,37 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     if (e === DAMAGED) throw new Error("a damaged transcript line lies in what had to be read");
-    if (isOwnerMessage(e)) {
-      if (!sawAgent && !skippedCurrent && textOf(e.message.content).trim() === String(currentPrompt ?? "").trim()) {
-        skippedCurrent = true;
-        continue;
-      }
-      found = true; // a message after the agent's text, or the one before it: either way the scan ends
-      break;
-    }
-    if (e?.type === "user") { // a tool result
+    if (isBookkeeping(e) || e?.isSidechain) continue; // a subagent's entries are not the conversation with Mason
+    if (isToolResult(e)) {
       if (said.length) { found = true; break; }
       continue;
     }
-    if (e?.type !== "assistant" || e.isSidechain) continue;
-    sawAgent = true;
-    const t = textOf(e.message?.content);
-    if (!said.length) {
-      if (!t) continue;
-      said.unshift(t);
-      messageId = e.message?.id;
-      // Claude Code gives every assistant message an id; without one, where the
-      // message starts cannot be told, so nothing is concluded.
-      if (!messageId) throw new Error("the agent's last message carries no message id");
+    if (isAgentMessage(e)) {
+      sawAgent = true;
+      const t = textOf(e.message?.content);
+      if (!said.length) {
+        if (!t) continue;
+        said.unshift(t);
+        messageId = e.message?.id;
+        // Claude Code gives every assistant message an id; without one, where the
+        // message starts cannot be told, so nothing is concluded.
+        if (!messageId) throw new Error("the agent's last message carries no message id");
+        continue;
+      }
+      if (e.message?.id !== messageId) { found = true; break; }
+      if (t) said.unshift(t);
       continue;
     }
-    if (e.message?.id !== messageId) { found = true; break; }
-    if (t) said.unshift(t);
+    // Mason's current message, when it is already written, is the one entry skipped.
+    if (!sawAgent && !skippedCurrent && e?.type === "user" && !e.isMeta &&
+      textOf(e.message?.content).trim() === String(currentPrompt ?? "").trim()) {
+      skippedCurrent = true;
+      continue;
+    }
+    // Anything else ends the scan: after the agent's message it means nothing it
+    // said counts; before it, it is where that message begins.
+    found = true;
+    break;
   }
   // Running off the start of what was read proves nothing: the message, or a
   // message of Mason's after it, could lie before it (Luna HIGH, rounds 1-2).

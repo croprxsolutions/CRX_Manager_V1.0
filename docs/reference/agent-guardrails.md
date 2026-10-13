@@ -52,9 +52,11 @@
 > approve`, trailing `.`/`!` accepted; never a bare "yes" or "go"), which counts only when exactly one live request of
 > that session has its reference number, labelled `Reference` (never the same digits starting or inside another
 > number or identifier), in the agent's LAST message before the reply, read from the session transcript the hook is
-> given (`transcript_path`: the final main-thread assistant message, its entries grouped by message id; empty when any
-> message of Mason's, image-only included, or a notification came after it; tool output and subagent text never
-> count). An unreadable transcript or approval folder, a damaged or half-written line in what is scanned, an assistant
+> given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;
+> only the bookkeeping records Claude Code writes after every turn are skipped, so any other entry after it, such as a
+> message of Mason's (image-only included), injected text like a Stop hook's feedback, a notification, a compaction,
+> an error or synthetic message, or an unknown record type, means nothing counts; tool output and subagent text
+> never count). An unreadable transcript or approval folder, a damaged or half-written line in what is scanned, an assistant
 > entry without a message id, or a message whose start is not in the 32 MB tail read approves nothing. With no request waiting in the session the hook stays silent, so an
 > "I approve" about anything else does nothing. `approve <code>` still works. The code is retired in that folder first (exclusively, before the approval is written; if it cannot be
 > retired nothing is approved), so no later request reuses it. The request records the Claude Code session that built it (`CLAUDE_CODE_SESSION_ID`); the hook

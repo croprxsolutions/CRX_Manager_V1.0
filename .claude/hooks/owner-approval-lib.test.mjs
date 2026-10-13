@@ -423,8 +423,30 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "a subagent's text is not something the agent showed Mason");
     ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), A([{ type: "text", text: "sub" }], "s2", { isSidechain: true })])),
       "a subagent's text after the agent's message is not a message to Mason either");
-    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", "<system note>", { isMeta: true })])),
-      "text Claude Code adds itself is not a message after the agent's");
+    // The records Claude Code writes after every turn, in the order a real transcript has them.
+    const AFTER_TURN = [JSON.stringify({ type: "system", subtype: "stop_hook_summary", level: "suggestion" }),
+      ...["last-prompt", "custom-title", "agent-name", "atis-latch", "pr-link", "bridge-session", "queue-operation", "queue-operation"]
+        .map((type) => JSON.stringify({ type }))];
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), ...AFTER_TURN, masonSaid("I approve"),
+      JSON.stringify({ type: "attachment" }), JSON.stringify({ type: "file-history-snapshot" })])),
+      "the bookkeeping Claude Code writes after every turn does not hide the agent's message");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", "Stop hook feedback: wrap up", { isMeta: true }), ...AFTER_TURN])),
+      "text Claude Code injects after the agent's message (a Stop hook's feedback) ends the scan");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "compact_boundary" })])),
+      "a compaction after the agent's message ends the scan");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "informational", content: "Should I merge?" })])),
+      "a system notice of any other kind after the agent's message ends the scan (Luna BLOCKER, round 3)");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "some-future-record" })])),
+      "a record type Claude Code may add later ends the scan rather than being skipped");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "assistant", isApiErrorMessage: true,
+      message: { id: "e1", model: "<synthetic>", content: [{ type: "text", text: "API Error" }] } })])),
+      "an error message Claude Code made up after the agent's message ends the scan");
+    ok(!has(last([masonSaid("fix it"), agentSaid("PR #900 is ready to merge."), JSON.stringify({ type: "assistant", isMeta: true,
+      message: { id: "x1", content: [{ type: "text", text: SHOWN }] } })])),
+      "an assistant entry marked as metadata is never what the agent showed (Luna HIGH, round 3)");
+    ok(!has(last([masonSaid("fix it"), agentSaid("PR #900 is ready to merge."), JSON.stringify({ type: "assistant",
+      message: { id: "x2", model: "<synthetic>", content: [{ type: "text", text: SHOWN }] } })])),
+      "a synthetic assistant entry is never what the agent showed");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("<task-notification>done</task-notification>"), agentSaid("The review finished.")])),
       "a notification the agent answered with something else moves the last message on");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), agentSaid("Recorded."), masonSaid("I approve")])),

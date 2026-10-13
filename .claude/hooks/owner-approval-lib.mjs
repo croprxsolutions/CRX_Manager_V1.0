@@ -419,19 +419,20 @@ export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
 }
 
 /**
- * True when the text SHOWS this request rather than merely mentioning it: EVERY
- * line of its summary (ownerApprovalSummary) is there as a whole displayed line,
- * word for word. So he is always shown what it is, the pull request and version,
- * the fingerprint, every reason the safety check stopped it, the reply it asks
- * for and its Reference line. A message that only cites an old reference, or
- * says "Do not reply: I approve", or puts any of those words inside other prose,
- * does not count (Luna BLOCKER round 4; Codex P1 and CodeRabbit, PR #900).
+ * True when the text IS this request's summary (ownerApprovalSummary), word for
+ * word, and nothing else. So he is always shown what it is, the pull request and
+ * version, the fingerprint, every reason the safety check stopped it, the reply
+ * it asks for and its Reference line, and "I approve" can only answer that: a
+ * question, a note or anything else in the same message means it does not count
+ * (CodeRabbit, PR #900); the agent explains the change in an earlier message.
+ * Nor does a message that only cites an old reference, says "Do not reply: I
+ * approve", or puts the summary's words inside other prose (Luna BLOCKER round 4;
+ * Codex P1 and CodeRabbit, PR #900).
  * Only markdown around the words may differ: **bold** or __bold__ pairs, `code`
- * marks, a code fence, a leading bullet or quote mark. So may curly quotes and
- * spacing, and a line wrapped onto the next is joined back. A lone underscore or
- * asterisk, and letter case, are part of the words (drop_a_b is not drop_ab;
- * Codex P1 and CodeRabbit, PR #900). Text in an HTML comment is not displayed, so
- * it never counts. Other text may come before, between or after.
+ * marks, a code fence, a leading bullet or quote mark. So may curly quotes,
+ * spacing, blank lines and where lines wrap. A lone underscore or asterisk, and
+ * letter case, are part of the words (drop_a_b is not drop_ab; Codex P1 and
+ * CodeRabbit, PR #900). Text in an HTML comment is not displayed, so it is ignored.
  */
 export function requestShownIn(text, p) {
   if (!/^\d{6}$/.test(String(p?.code ?? ""))) return false;
@@ -440,17 +441,10 @@ export function requestShownIn(text, p) {
   // Markdown is removed from what was displayed only, never from the summary itself.
   const unmark = (l) => (/^\s*```[\w-]*\s*$/.test(l) ? ""
     : l.replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1").replace(/`([^`]*)`/g, "$1"));
-  const displayed = String(text ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "");
-  const lines = displayed.split(/\r?\n/).map((l) => loose(unmark(l)).replace(/^(?:[-+•*]\s+|>\s?)+/, ""));
-  const mustShow = ownerApprovalSummary(p).map((l) => loose(l.replace(/^- /, ""))).filter(Boolean);
-  const shownAsLine = (want) => lines.some((line, start) => {
-    let joined = line;
-    for (let end = start + 1; joined && joined.length < want.length && end < lines.length && lines[end]; end++) {
-      joined = `${joined} ${lines[end]}`;
-    }
-    return joined === want;
-  });
-  return mustShow.length > 0 && mustShow.every(shownAsLine);
+  const displayed = String(text ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "").split(/\r?\n/)
+    .map((l) => loose(unmark(l)).replace(/^(?:[-+•*]\s+|>\s?)+/, "")).filter(Boolean);
+  const summary = ownerApprovalSummary(p).map((l) => loose(l.replace(/^- /, ""))).filter(Boolean);
+  return summary.length > 0 && displayed.join(" ") === summary.join(" ");
 }
 
 /**
@@ -491,7 +485,9 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
   try { shownText = String(readShown() ?? ""); }
   catch (e) { return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` }; }
   const shown = [...live].filter(([, p]) => requestShownIn(shownText, p)).map(([c]) => c);
-  if (!shown.length) return { ok: false, reason: "the agent's message just before it did not show the approval request (its summary with the Reference line), so it may have been about something else" };
+  if (!shown.length) {
+    return { ok: false, reason: "the agent's message just before it did not show the approval request's summary alone (word for word, nothing else), so it may have been about something else" };
+  }
   if (shown.length > 1) return { ok: false, reason: `the agent's last message showed ${shown.length} requests (${shown.join(", ")}), so it is ambiguous` };
   return { ok: true, code: shown[0] };
 }

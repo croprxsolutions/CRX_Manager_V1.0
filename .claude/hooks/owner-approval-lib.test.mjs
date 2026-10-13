@@ -658,8 +658,8 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
         nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
         expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");
       for (const ref of ["(**Reference** 535353. You don't need to type it.)", "(Reference `535353`. You don’t need to type it.)",
-        "> (Reference 535353. You don't need to type it.)", "(Reference 535353. You don't need to type it.)\nThanks"]) {
-        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown, a curly quote, a quote mark and a following line are fine`);
+        "> (Reference 535353. You don't need to type it.)"]) {
+        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown, a curly quote and a quote mark are fine`);
       }
       ok(!requestShownIn(show(C, base.migration, "(REFERENCE 535353. You don't need to type it.)"), pOf(C)), "letter case is part of the words");
       ok(!requestShownIn(show(C).replace(`Migration: ${base.migration}`, `Migration: ${base.migration.toUpperCase()}`), pOf(C)),
@@ -680,8 +680,17 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
           "every line but those two, kept exactly, while asking about something else, does not count (Codex P1, PR #900)");
         ok(!requestShownIn(show(C).replace("The safety check stopped it for you because it:", ""), pOf(C)),
           "a summary missing any of its lines does not count");
-        ok(requestShownIn(`Here is what it does: it opens invoices to the public.\n\n${show(C)}\n\nAsk me anything.`, pOf(C)),
-          "text before and after the summary is fine");
+        // The message must be the summary and nothing else (CodeRabbit, PR #900).
+        for (const [msg, what] of [
+          [`Here is what it does: it opens invoices to the public.\n\n${show(C)}`, "a note before the summary"],
+          [`${show(C)}\n\nAlso, should I merge PR #901?`, "a question after the summary"],
+          [`${show(C)}\nThanks`, "one word after the summary"],
+          [show(C).replace("Every other safety check still has to pass before it runs.",
+            "Every other safety check still has to pass before it runs.\nShould I also merge PR #901?"), "a question inside the summary"],
+          [`${show(C)}\n\n${show(C)}`, "the summary twice"],
+        ]) ok(!requestShownIn(msg, pOf(C)), `${what} means it does not count`);
+        ok(requestShownIn(`\n\n${show(C).replace(/\n\n/g, "\n")}\n\n`, pOf(C)), "blank lines added or removed are fine");
+        ok(requestShownIn(`${show(C)}\n<!-- internal note -->`, pOf(C)), "an HTML comment, which is not displayed, is ignored");
       }
       ok(!requestShownIn(`An earlier request had Reference ${C}. Should I merge PR #900?`, pOf(C)),
         "a message that only cites an old reference while asking something else does not show the request (Luna BLOCKER, round 4)");
@@ -710,7 +719,9 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     const one = resolve(show("535353"));
     ok(one.ok && one.code === "535353", `the request shown just before is the one approved: ${one.reason}`);
     writeApprovalRequest(sdir, buildApprovalPayload({ ...base, migration: SECOND, code: "646464" }));
-    refuses(resolve(`${show("535353")}\n\n${show("646464", SECOND)}`), "ambiguous", "two requests shown at once approve neither");
+    refuses(resolve(`${show("535353")}\n\n${show("646464", SECOND)}`), "summary alone", "two requests shown at once approve neither");
+    refuses(resolve(`${show("535353")}\nAnd should I merge #901?`), "summary alone",
+      "a request shown with a question after it approves nothing (CodeRabbit, PR #900)");
     const second = resolve(show("646464", SECOND));
     ok(second.ok && second.code === "646464", "with two waiting, the one shown just before is chosen");
     const r = rec({ code: second.code, dirs: [sdir], reply: "I approve", now: APPROVED });

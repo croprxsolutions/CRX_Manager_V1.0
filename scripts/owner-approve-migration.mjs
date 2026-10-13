@@ -82,7 +82,7 @@ if (argv.length === 1 && argv[0] === "--selftest") {
   }));
   console.log("Show Mason this, word for word:\n");
   for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
-  console.log(`\nMake this, every line word for word and each on its own line through its Reference ${code} line, the last message of your turn. When he replies "I approve", the approval hook confirms in the next turn that the reply path works.`);
+  console.log(`\nMake this, word for word and with nothing else in that message, the last message of your turn; say anything else in an earlier message. When he replies "I approve", the approval hook confirms in the next turn that the reply path works.`);
   process.exit(0);
 }
 
@@ -168,9 +168,8 @@ const { code, payload } = saveRequest((c) => buildApprovalPayload({
 
 console.log(`Approval request saved for ${migName} (PR #${pr.number}, head ${head.slice(0, 12)}):`);
 for (const c of categories) console.log(`  - ${PARKED_LABELS[c.category]}`);
-console.log("\nShow Mason this, word for word, with a one-line plain-English note on what the change does:\n");
+console.log("\nFirst tell Mason in plain English what the change does, in a message of its own. Then show him this, word for word:\n");
 for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
 console.log(`\nThen wait for HIS reply "I approve" in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
-console.log(`A plain "I approve" only counts when your LAST message before it shows EVERY line of this summary, word for word, each on its own line (through its "Reference ${code}" line): end your turn with that message, and if you say anything else first, show the request again.`);
-console.log(`Ask him nothing else in that message, so "I approve" can only mean this change.`);
+console.log(`A plain "I approve" only counts when your LAST message before it is this summary, word for word, and NOTHING else (no note, no question): end your turn with that message, and if you say anything else after it, show the request again.`);
 console.log(`After that: node scripts/apply-migration-file.mjs ${rel} (dry run), then again with --confirm, within 30 minutes.`);

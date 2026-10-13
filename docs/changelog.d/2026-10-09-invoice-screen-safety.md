@@ -107,6 +107,11 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   the address has no created id, the typed form is gone, and saving the re-typed form creates a
   second invoice. Planned fix: the permanent create-request record above (Codex Sol 6.1 design,
   2026-10-12).
+- **A changed retry after a lost reply can write twice.** The page cannot tell whether the
+  server's answer was a replay of an earlier attempt or a fresh save, so it always follows up
+  with the current values; when the earlier attempt never arrived, the follow-up repeats a save
+  that already applied them (one extra "updated" activity entry, same final values). The planned
+  create-request record will say whether the payload was applied (Luna round 8, MED, accepted).
 - **The server does not check that a reused key carries the same values** (save or billing);
   the screen handles a changed retry as above. A write from a different page or tab is not
   ordered against this one.

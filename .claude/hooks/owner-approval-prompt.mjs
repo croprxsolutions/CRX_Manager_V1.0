@@ -65,8 +65,8 @@ if (!result && which?.silent) emit();
 if (!result) {
   emit([
     `OWNER APPROVAL NOT RECORDED — Mason replied "${said}", but ${which?.reason || "no request was found"}. Nothing was approved.`,
-    "If he meant to approve the waiting database change, show him its request again (the whole summary word for word: its " +
-      "Migration, Pull request, File fingerprint, every reason it was stopped, reply and Reference lines) as the last message of your turn and ask him to reply I approve. If it is refused again, ask him " +
+    "If he meant to approve the waiting database change, show him its request again (every line of the summary, word for word, " +
+      "each on its own line) as the last message of your turn and ask him to reply I approve. If it is refused again, ask him " +
       "to reply approve followed by the reference number instead, which names the request outright. Do not take this " +
       "message as his approval of anything else without checking what he meant.",
   ].join("\n"));

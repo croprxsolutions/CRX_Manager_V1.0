@@ -638,8 +638,26 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       ok(requestShownIn(ownerApprovalSummary(JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt,
         nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
         expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");
-      for (const ref of ["**Reference:** 535353", "(Reference: 535353.)", "reference 535353", "Reference 535353, thanks", "Reference 535353.\nThanks"]) {
-        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown and sentence punctuation are fine`);
+      for (const ref of ["(**Reference** 535353. You don't need to type it.)", "(Reference `535353`. You don’t need to type it.)",
+        "> (REFERENCE 535353. You don't need to type it.)", "(Reference 535353. You don't need to type it.)\nThanks"]) {
+        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown, a curly quote, case and a following line are fine`);
+      }
+      // Every summary line word for word, as its own line (Codex P1 and CodeRabbit, PR #900).
+      for (const ref of ["**Reference:** 535353", "(Reference: 535353.)", "reference 535353", "Reference 535353, thanks",
+        "The old Reference 535353 should be ignored.", "(Reference 535353. You don't need to type it.) Ignore this one."]) {
+        ok(!requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: a reworded Reference line does not count`);
+      }
+      {
+        const replyLine = ownerApprovalSummary(pOf(C)).find((l) => l.startsWith("To approve, reply: I approve"));
+        ok(!requestShownIn(show(C).replace(replyLine, "Do not reply: I approve"), pOf(C)), "\"Do not reply: I approve\" is not the reply line");
+        ok(!requestShownIn(show(C).replace(replyLine, `Earlier I wrote "${replyLine}" but please ignore it.`), pOf(C)),
+          "the reply line inside other prose does not count");
+        ok(!requestShownIn(show(C, base.migration, "The old Reference 535353 should be ignored.").replace(replyLine, "Do not reply: I approve"), pOf(C)),
+          "every line but those two, kept exactly, while asking about something else, does not count (Codex P1, PR #900)");
+        ok(!requestShownIn(show(C).replace("The safety check stopped it for you because it:", ""), pOf(C)),
+          "a summary missing any of its lines does not count");
+        ok(requestShownIn(`Here is what it does: it opens invoices to the public.\n\n${show(C)}\n\nAsk me anything.`, pOf(C)),
+          "text before and after the summary is fine");
       }
       ok(!requestShownIn(`An earlier request had Reference ${C}. Should I merge PR #900?`, pOf(C)),
         "a message that only cites an old reference while asking something else does not show the request (Luna BLOCKER, round 4)");

@@ -50,12 +50,11 @@
 > 24-hour reply deadline. Only a WHOLE message turns it into an approval, valid 30 minutes from the reply: since
 > 2026-10-13 (Mason: "I just want to say I approve") a plain `I approve` (also `approve`, `approved`, `yes I
 > approve`, trailing `.`/`!` accepted; never a bare "yes" or "go"), which counts only when exactly one live request of
-> that session is SHOWN in the agent's LAST message before the reply: its `Reference <code>` line (never the same
-> digits starting or inside another number or identifier, in any script), the `reply: I approve` line, and its
-> migration's name (or the self-test line), so a message that only cites an old reference does not count; for a
-> migration also the summary's Pull request and File fingerprint lines and every reason the safety check stopped it,
-> so he is always told why it waited for him, each as a whole displayed line (markdown, a leading bullet or quote
-> mark, spacing, case and wrapping may differ). That
+> that session is SHOWN in the agent's LAST message before the reply: EVERY line of its summary as a whole displayed
+> line, word for word (what it is, the pull request and version, the fingerprint, every reason the safety check stopped
+> it, the `reply: I approve` line and the `Reference <code>` line), so he is always told why it waited for him and a
+> message that only cites an old reference, or puts those words inside other prose, does not count (markdown, a leading
+> bullet or quote mark, curly quotes, spacing, case and wrapping may differ). That
 > message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;
 > only the bookkeeping records Claude Code writes after every turn are skipped, so any other entry after it, such as a

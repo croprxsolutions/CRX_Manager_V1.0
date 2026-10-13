@@ -419,35 +419,23 @@ export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
 }
 
 /**
- * True when the text SHOWS this request rather than merely mentioning it: its
- * Reference line, the reply it asks for, and what it is for (the migration's name,
- * or that it is the test). A message that only cites an old reference number
- * while asking something else does not count (Luna BLOCKER, round 4).
- * The reference is never the same six digits starting or inside another number
- * or identifier, in any script: 482913-4, 482913_4, 482913.1, 482913٧ (Luna
- * rounds 1, 2 and 4). Markdown may sit between a label and its value.
- * For a migration, the summary's Migration, Pull request and File fingerprint
- * lines and every reason the safety check stopped it must be shown too, so he
- * never approves without being told why it waited for him (Codex P1, PR #900).
- * Markdown emphasis, code marks, spacing and letter case may differ there.
+ * True when the text SHOWS this request rather than merely mentioning it: EVERY
+ * line of its summary (ownerApprovalSummary) is there as a whole displayed line,
+ * word for word. So he is always shown what it is, the pull request and version,
+ * the fingerprint, every reason the safety check stopped it, the reply it asks
+ * for and its Reference line. A message that only cites an old reference, or
+ * says "Do not reply: I approve", or puts any of those words inside other prose,
+ * does not count (Luna BLOCKER round 4; Codex P1 and CodeRabbit, PR #900).
+ * Markdown emphasis and code marks, a leading bullet or quote mark, curly
+ * quotes, spacing and letter case may differ, and a line wrapped onto the next
+ * is joined back. Other text may come before, between or after the lines.
  */
 export function requestShownIn(text, p) {
-  const s = String(text ?? "");
-  const code = String(p?.code ?? "");
-  if (!/^\d{6}$/.test(code)) return false;
-  const reference = new RegExp(`\\breference\\b[^\\p{L}\\p{N}\\n]{0,6}${code}(?![\\p{L}\\p{N}_]|[-.,/:][\\p{L}\\p{N}])`, "iu");
-  const reply = /\breply:[^\p{L}\p{N}\n]{0,6}I approve\b/iu;
-  const what = p.purpose === OWNER_SELFTEST_PURPOSE ? s.includes("This is a TEST of approving by chat reply")
-    : typeof p.migration === "string" && p.migration !== "" && s.includes(p.migration);
-  if (!(reference.test(s) && reply.test(s) && what)) return false;
-  if (p.purpose === OWNER_SELFTEST_PURPOSE) return true;
-  // Taken from the summary itself, so the two cannot drift apart. Each must be a
-  // whole displayed line, never words inside other prose (CodeRabbit, PR #900); a
-  // bullet or quote mark may lead it, and a line wrapped onto the next is joined back.
-  const loose = (t) => String(t).replace(/[*_`]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
-  const lines = s.split(/\r?\n/).map((l) => loose(l).replace(/^(?:[-+•>]\s*)+/, ""));
-  const mustShow = ownerApprovalSummary(p).filter((l) => /^(?:Migration|Pull request|File fingerprint): |^- /.test(l))
-    .map((l) => loose(l.replace(/^- /, "")));
+  if (!/^\d{6}$/.test(String(p?.code ?? ""))) return false;
+  const loose = (t) => String(t).replace(/[‘’]/g, "'").replace(/[“”]/g, "\"").replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ").trim().toLowerCase();
+  const lines = String(text ?? "").split(/\r?\n/).map((l) => loose(l).replace(/^(?:[-+•>]\s*)+/, ""));
+  const mustShow = ownerApprovalSummary(p).map((l) => loose(l.replace(/^- /, ""))).filter(Boolean);
   const shownAsLine = (want) => lines.some((line, start) => {
     let joined = line;
     for (let end = start + 1; joined && joined.length < want.length && end < lines.length && lines[end]; end++) {
@@ -455,7 +443,7 @@ export function requestShownIn(text, p) {
     }
     return joined === want;
   });
-  return mustShow.length >= 4 && mustShow.every(shownAsLine);
+  return mustShow.length > 0 && mustShow.every(shownAsLine);
 }
 
 /**

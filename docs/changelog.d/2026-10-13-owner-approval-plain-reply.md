@@ -49,21 +49,22 @@ no longer types anything but the approval.
   - `resolvePlainReply` finds the live requests this session built (pending, unexpired, code not
     retired). With none, it is ordinary chat and the hook stays silent. An unreadable folder or
     request file is reported, never taken as "nothing waiting" (Luna round 2). Otherwise exactly one
-    of them must be SHOWN in the agent's last message (`requestShownIn`, Luna round 4). Shown means
-    all of:
-    - its `Reference <code>` line (markdown allowed between);
-    - the `reply: I approve` line;
-    - its migration's name (or the self-test line);
-    - for a migration, the summary's `Migration`, `Pull request` and `File fingerprint` lines and
-      every reason the safety check stopped it, taken from `ownerApprovalSummary` itself, so he is
-      always told why it waited for him (Codex P1 on the PR). Each must be a whole displayed line,
-      never words inside other prose (CodeRabbit); markdown emphasis, code marks, a leading bullet
-      or quote mark, spacing, letter case and a line wrapped onto the next may differ.
+    of them must be SHOWN in the agent's last message (`requestShownIn`). Shown means EVERY line
+    of its summary (`ownerApprovalSummary`) is there as a whole displayed line, word for word: what
+    it is, the pull request and version, the fingerprint, every reason the safety check stopped it,
+    the `reply: I approve` line and the `Reference <code>` line. So he is always told why it waited
+    for him. Markdown emphasis and code marks, a leading bullet or quote mark, curly quotes, spacing,
+    letter case and a line wrapped onto the next may differ; other text may come before, between or
+    after. How this got here:
+    - Luna round 4: a message that only cites an old reference while asking something else does
+      not count. The same digits starting or inside another number or identifier never count
+      either: `482913-4`, `482913_4`, `482913.1`, `482913٧` (Luna rounds 1, 2 and 4).
+    - Codex P1 on the PR: the reasons, pull request and fingerprint must be shown too, not just
+      the name, reply and reference.
+    - CodeRabbit, then Codex P1 again: each must be a whole line, never words inside other prose
+      ("Do not reply: I approve", "The old Reference 123456 should be ignored").
 
-    A message that only cites an old reference while asking something else does not count. The same
-    digits starting or inside another number or identifier never count, in any script: `482913-4`,
-    `482913_4`, `482913.1`, `482913٧` (Luna rounds 1, 2 and 4). A request shown earlier, two shown at
-    once, or an unreadable transcript approves nothing.
+    A request shown earlier, two shown at once, or an unreadable transcript approves nothing.
   - The summary now ends with "reply: I approve" and "(Reference <code>. You don't need to type it.)".
 - `.claude/hooks/owner-approval-prompt.mjs`:
   - Handles both reply forms, then records through the unchanged `recordReplyApproval`. Session
@@ -88,7 +89,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 326 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 336 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
@@ -145,3 +146,8 @@ no longer types anything but the approval.
   reply line and the reference counted as "shown", without the reasons it was stopped. It now needs
   the Pull request and File fingerprint lines and every reason too, with tests for each missing or
   softened line, two reasons, and markdown; skipping that check makes the suite fail.
+- CodeRabbit then asked for those lines as whole displayed lines, and the Codex connector found the
+  reply and Reference checks still matched words inside prose. Now every summary line must be a
+  whole line, word for word. Tests cover reworded Reference lines, "Do not reply: I approve", the
+  reply line quoted in prose, a summary missing any line, and text around the summary. Matching
+  anywhere in the message again, or dropping the reply line from the check, fails the suite.

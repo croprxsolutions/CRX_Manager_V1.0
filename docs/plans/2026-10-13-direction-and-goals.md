@@ -71,7 +71,7 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 
 **Done when:** separate live checks, one per rule and role, all pass:
 - an admin can pull the register, and a sales rep, driver and applicator are each refused;
-- a signed-out visitor is refused a photo link, and a signed-in staff member can still open it;
+- for each of the three photo buckets (`delivery-photos`, `receiving-photos`, `team-note-attachments`), a signed-out visitor is refused a link, and a signed-in staff member can still open it;
 - a driver and an applicator are each refused cost and margin data;
 - an applicator sees fields for their assigned jobs and is refused other fields.
 
@@ -79,17 +79,24 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - Remove the "must be your own customer" check from saving and posting manual invoices and invoice groups.
 - Stop reps naming another salesperson.
 - Let reps find any customer when invoicing. Today a rep can only see customers assigned to them (the `customers_select` access rule, confirmed live 2026-10-13). How far reps' access to customer records widens is decided with Mason and built in the Goal 2 change. That change records the decision in its own PR and `DECISION_LOG.md` entry.
+- Let reps email that invoice too. Today the invoice page finds the recipient through the same rep-filtered customer list.
 
-**Done when:** a rep account, live, finds a customer with no assigned rep when invoicing, saves and posts an invoice for them, and is refused when naming someone else as salesperson.
+**Done when:** a rep account, live:
+- finds a customer with no assigned rep when invoicing;
+- saves, posts and emails an invoice to them;
+- is refused when naming someone else as salesperson.
 
 #### Goal 3: Billing you can trust (about 2–4 weeks)
-- Post uses what's on screen, or refuses until it's saved.
+- Post uses what's on screen, or refuses until it's saved. The database enforces this, not just the screen: `post_invoice` and `post_invoice_group` check the invoice version the screen loaded and refuse if it changed. That way a save from a second tab or another user can't be posted unseen (see `KNOWN_ISSUES.md`).
 - Voiding a delivery credits or flags its posted invoice.
-- Cap whole-order and orderless invoices at what was ordered or delivered.
+- Cap whole-order invoices at what was ordered or delivered.
+- Orderless invoices (made from scratch, no order or delivery) follow the rule Mason picks in question 6e.
 - Blend-ticket pricing picks the right quoted price.
 - A return on a Chem Man-billed delivery can't create a CRX credit.
 
-**Done when:** each case is run against a real database copy and refuses or corrects as described.
+**Done when:** each case is run against a real database copy and refuses or corrects as described. That includes these two cases:
+- an invoice saved in a second tab after the first screen loaded is refused at Post;
+- an orderless invoice that breaks the 6e rule is refused.
 
 #### Goal 4: Complete numbers at any volume (about 2–4 weeks)
 - Money reports and the remaining integrity checks are computed in the database.
@@ -112,7 +119,7 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - Photos and uploads included in the backup.
 - A staging copy of the system, with the browser tests back on in CI. The developer will need this too.
 
-**Done when:** a restore drill succeeds and is logged, and CI runs the browser tests against staging.
+**Done when:** a restore drill succeeds and is logged, and CI runs the browser tests against staging. The drill must restore the database and also files from each protected upload bucket, and the restored photos and uploads must open. Today's backup copies database tables only, not stored files.
 
 #### Goal 7: CRX becomes the system of record (about 6–10 weeks)
 - **QuickBooks Desktop sync.** Invoices, payments and credits flow from CRX into QuickBooks Desktop, and each night's totals reconcile.
@@ -173,6 +180,7 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 | 6b | When stock runs short, should a delivery warn (today) or be blocked? | Keep warn-only until physical counts are clean, then decide. |
 | 6c | Which card/ACH processor? | Pick one that matches your bank and offers capped ACH fees. Decide during Goal 7. |
 | 6d | Who is the senior developer, and when do they start? | Line them up by January so Phase C isn't waiting. |
+| 6e | Should an invoice made from scratch (no order, no delivery) be allowed to carry product lines at all? There's nothing to cap its quantity against. | **No.** Products are billed through an order or a delivery; from-scratch invoices carry only service or misc charges. Decide before Goal 3 starts. |
 
 ## 7. Not doing (parked on purpose)
 

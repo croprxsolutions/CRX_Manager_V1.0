@@ -7,9 +7,9 @@ entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150
 2026-10-07 read re-certified the CRX-LIFE-001 entry (fix live; two post-apply gates still open). Every other entry's status (open, or
 fixed/applied/closed) was last re-checked on 2026-09-26 against that day's ledger snapshot and
 `main`, except where an entry says otherwise; the detailed evidence inside an entry keeps its own
-date and was not all re-measured. On 2026-10-13 the GitHub branch cleanup added four OPEN entries
-rescued from never-merged branches and repointed the entries that name branches on the cleanup list
-(`docs/audits/2026-10-13-github-branch-cleanup-audit.md`).
+date and was not all re-measured. On 2026-10-13 the GitHub branch cleanup added five OPEN entries
+rescued from never-merged branches or found by its salvage review, and repointed the entries that name
+branches on the cleanup list (`docs/audits/2026-10-13-github-branch-cleanup-audit.md`).
 
 - **Applied live:** the September commission cohort `20260914100100` through `20260914100600`
   (`100100`–`100400` on 2026-09-21, `100500` and `100600` on 2026-09-22), the customer-document
@@ -105,8 +105,11 @@ changed both copies; only the QuoteBuilder copy matters.
   `below_cost_reason` as absent and searches the payload recursively, so an older "Below-cost approved:"
   line in copied or imported notes can be accepted as the approval reason without a fresh prompt. An
   admin is still required. Source: CodeRabbit finding 3779708583 on PR #397. Not re-measured 2026-10-13.
-  A never-applied candidate fix, `20260814041419_fresh_below_cost_reason.sql`, is on PR #397's branch; it
-  was written against an older function body, so re-derive it against the live body rather than apply it.
+  A never-applied candidate fix, `20260814041419_fresh_below_cost_reason.sql`, is on PR #397's branch. Its
+  precondition hash still matches the live function (`md5(prosrc)` `6fda4d6d…`, checked 2026-10-13), but it
+  only works together with its client half (commit `d197264e6`: send an explicit null reason and strip
+  approval markers from notes). Its header says it preserves access, yet it revokes `service_role`, so
+  re-review it before any apply.
 
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
 
@@ -235,6 +238,43 @@ else on `main`. None blocks anything; they are here so they are not lost. Each s
   it to `docs/reference/gotchas.md`; it was never added. Its content is finding 1 of
   `docs/audits/2026-08-08-product-pricing-full-audit-and-strategy.md`.
 
+## OPEN 2026-10-13 (one MED with an owner decision; the rest LOW) — found by the branch salvage review
+
+The cleanup's second salvage pass compared every line each old branch added with `main`'s whole tree.
+These came out of it. Each says how it was checked.
+
+- **Splitting an order's bill to a landlord always fails (MED). Mason, 2026-10-13: it should work**
+  ("landlord yes"). Read from the live database 2026-10-13: the invoice trigger
+  `trg_guard_invoice_terminal_order` (function `guard_invoice_terminal_order`) raises
+  `INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID` whenever an invoice's customer is not its order's customer,
+  so the split engine can never bill a landlord or any other non-owner. Per the review, one live billing
+  default would bill a non-owner and has never fired. Not exercised; the fix must let a split bill
+  another customer without opening the general check. Source: the KNOWN_ISSUES additions on the kept
+  branch `claude/rep-scope-order-invoices`.
+- **Invoices created through the order functions would be numbered INV- instead of CS- or MC- (LOW,
+  latent).** Same source. Per the review, 0 of 12 live order invoices are affected; not re-measured.
+- **The split-billing smoke chain `smoke-split_invoices_jsonb_fix.sql` is stale (LOW).** Same source;
+  reported, not re-run.
+- **Autopilot auto-approves some delete and hook-skip spellings (MED; inside Mason's 2026-09-10 exception
+  for deletion guards).** Reproduced 2026-10-13 by calling `autopilotDecision` from
+  `.claude/hooks/autopilot-lib.mjs` with sample commands (nothing ran). It denies `rm -rf`, `git clean -fd`,
+  `git branch -D` and `--no-verify`, but returns "allow" for `rm -Rf`, `rm -r -f`,
+  `rm --recursive --force`, `Remove-Item -Recurse`, `git clean --force -d`, `git branch -d -f` and
+  `git commit -n` (the short form of `--no-verify`). The cause is the `rm` rule near line 216, which matches
+  a lowercase `r` only, and similar single-spelling rules. Per the review, `bash-safety-lib.mjs` still
+  blocks recursive deletes of `src`, `supabase` and `docs` in every spelling, but its absolute-path rule also
+  matches lowercase `r` only. That part was not re-checked. A fix exists on the kept branch
+  `claude/autopilot-recursive-delete-alias-20260907` (with an 18,131-command sweep), but it must be
+  rebuilt on current `main`, not merged.
+- **Bulk order import: Escape on the below-cost prompt also closes the Import Orders dialog while the
+  upload continues out of sight (LOW).** Reasoned from code by the review, not run. PR #350's branch has a
+  fix in `src/components/orders/BulkOrderImport.tsx` ("Codex round 24").
+- **Two stale spots on `main` (LOW).** Both reported by the review, not re-checked:
+  - a comment in `src/lib/rlsContracts.test.ts` (about lines 148-160) still describes `quote_versions` as
+    allowing inserts;
+  - `scripts/land-pr.mjs` (about lines 23 and 165-167) suggests a `gh pr merge … --auto` command that the
+    merge guard refuses.
+
 ## OPEN 2026-10-07 (owner: Mason) — what the 2026-10-01 integrity-report fixes leave behind
 
 The fixes for PR #861's failing checks (`20261007150000`, `20261007150050`, `20261007150100`,
@@ -308,10 +348,13 @@ Found by the 2026-10-08 overnight bug hunt.
 unsaved edits, plus a re-read of the saved invoice before the Post confirm). The final Codex Sol review
 of that PR (2026-10-09) raised a HIGH: a browser-side re-check cannot bind what is posted, because
 another save can land between the re-check and `post_invoice`, which takes only the invoice ID. That
-fix was taken out of PR #892, so the editor's Post behaves exactly as before.
+fix was taken out of PR #892, so the editor's Post behaves exactly as before. The removed app-side code
+(`src/lib/invoicePostRecheck.ts`, the `InvoiceDetail.tsx` changes and two tests) is recoverable at
+`3507b92c5^` on PR #892's kept branch `claude/invoice-screen-safety-20261009`; it is absent from `main`.
 
-**Planned fix (not built).** To be built in the upcoming "invoicing admin-only" change, in two parts
-that are both required, because neither alone covers the bug:
+**Planned fix (not built).** It was to be built in the "invoicing admin-only" change, but that change
+(PR #902) was closed unmerged on 2026-10-13, so the fix has no home yet. It needs two parts, both
+required, because neither alone covers the bug:
 1. **In the editor:** Post stays disabled while the form has unsaved edits (the version check below
    cannot see edits that exist only in the browser), and the credit-limit and restricted-use
    warnings are computed from the saved invoice, not the on-screen copy.
@@ -502,6 +545,11 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   `src/pages/Reports.tsx` compute margins in the browser from `orders.total_profit` and `order_items.profit`.
   The server RPC `get_profitability_report` (`20260812115235`, live 2026-08-12), which uses the as-of-sale cost
   snapshot, has no caller. Fix: switch the three sub-fetchers to the RPC and compare a real date range.
+  Working code for that switch, with a test, is on PR #397's kept branch `codex/pr389-coderabbit-fixes`
+  (commit `d03a60fc9`: `src/pages/Reports.tsx`, `Reports.profitability.test.tsx`). The same branch has the
+  only database test of `get_profitability_report`, `scripts/smoke/smoke-remaining-money-inventory-hardening.sql`
+  (exact revenue, cost, profit and margin by customer, product and month; voided orders left out). Run it
+  in a throwaway database before relying on it, because `main`'s triggers changed after August.
   (Source: `docs/handoffs/2026-08-09-pricing-audit-local-finish.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/handoffs/2026-08-09-pricing-audit-local-finish.md`).)
 - **AR aging and date boundaries (2026-05-25 review).** (1) The Financial Dashboard's AR aging (current ≤ 30
   days, UTC `now()`) disagrees with the AR Aging page (current 0–29, as-of date), so a 30-day-old invoice shows
@@ -643,6 +691,12 @@ archive. They are listed here so the open part of this file shows them. None was
   allocated order fails on the table CHECK only after its first INSERT has drawn an invoice number
   from the sequence, so each such refused call (never sent by the app) leaves a numbering gap
   (Codex GitHub review on PR #885). (See CRX-LIFE-001.)
+  **Update 2026-10-13: neither planned change will carry the allow-list.** Mason dropped rep scoping on
+  2026-10-09, and admin-only invoicing (PR #902) was closed unmerged on 2026-10-13 when he decided reps
+  invoice any customer. PR #902 had re-emitted the split wrapper without the allow-list. The ready code
+  (`ORDER_INVOICE_TYPE_NOT_ALLOWED`, before any number is drawn) is in migration `20261008120000`, about
+  lines 339-344, on the kept branch `claude/rep-scope-order-invoices`. Whichever change next re-emits the
+  split wrapper should add it.
 
 - **Customer documents.** Not recorded in this file: the post-apply live check for `20260914100700`
   (the five browser Storage policies on `customer-documents` gone, the path-shape constraint present,

@@ -1,4 +1,4 @@
-## 2026-10-13 - GitHub branch cleanup audit: 191 branches inventoried, 185 audited, Sol 6.1 reviewed, records rescued before deletion
+## 2026-10-13 - GitHub branch cleanup audit: 191 branches inventoried, 185 audited, Sol 6.1 reviewed, salvage reviewed, records rescued before deletion
 
 Documentation only; nothing was deleted and no code or database changed.
 
@@ -35,9 +35,20 @@ Read-only tests: 21 of 25 exactly as expected, the other 4 also refusals; plus 9
 review comments on this PR were addressed: the 8.3 wording now names only the measured path, and the
 refresh rule now catches changes to files the review already saw.
 
-**Verdicts.** 177 deletable (159 after Mason's yes, 18 after this PR merges), 6 kept, 2 for Mason's
-decision. Each deletion is an atomic compare-and-delete, so a newly pushed commit cannot be lost. The
-deletions wait for Mason's explicit yes.
+**Salvage review.** Mason then asked for an adversarial review for work worth reusing, his example being
+pricing history and cost tracking for quotes. It ran in two read-only passes of 13 agents each:
+- **Pass 1** compared files. It found reusable quote-pricing work on PR #397 and PR #350, and the invoice
+  editor's unsaved-edits guard on PR #892, which the audit had wrongly called fully landed.
+- **Pass 2** compared every added line with all of `main`: 21,567 lines in 227 groups, each with a verdict.
+  It found no further branch to keep.
+
+Mason kept all six branches in question: #397, #350, #892, `backup/pr432-multitarget-20260825`, F3's
+`claude/control-file-coverage-a41c` and #449's branch. He also decided that landlord split billing should
+work.
+
+**Verdicts.** 173 deletable (157 after Mason's yes, 16 after this PR merges) and 12 kept. Each deletion is
+an atomic compare-and-delete, so a newly pushed commit cannot be lost. The deletions wait for Mason's
+explicit yes. The helper's sealed counts were updated to match, and its new SHA-256 is in the report.
 
 This PR rescues or corrects:
 
@@ -58,6 +69,12 @@ This PR rescues or corrects:
     against the hooks and both settings files).
   - The review-proof forgery class, with its full limitation.
   - A small-notes list, each item with how it was checked.
+  - The salvage review's findings, also each with how it was checked:
+    - the landlord split-billing refusal, read from the live trigger, which Mason wants fixed;
+    - autopilot's delete-spelling gap, reproduced by calling its decision function;
+    - two latent billing notes and two stale spots;
+    - the profitability database test and pointers to the kept code;
+    - a correction: the parked below-cost fix's precondition still matches the live function.
   
   Existing pointers to branches on the cleanup list are reworded to stay true before and after deletion.
 - **Stale references:** `docs/manual/CURRENT_STATE.md` (#605/#612/#631 closed) and one changelog citation

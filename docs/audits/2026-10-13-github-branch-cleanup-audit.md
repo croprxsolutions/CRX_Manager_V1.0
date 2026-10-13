@@ -1,6 +1,7 @@
 # GitHub branch cleanup audit and restore ledger (2026-10-13)
 
-**Status: REPORT, revised after four rounds of independent review. Nothing has been deleted.** Mason asked on
+**Status: REPORT, revised after four rounds of independent review and a two-pass salvage review. Nothing
+has been deleted.** Mason asked on
 2026-10-13 to "analyze all our branches we have in github … remove what is useless and cleanup", then to
 have Codex Sol 6.1 review the proposal before anything happens. Every measurement behind this document
 was read-only. Branch deletion is a hard-gated action (`AGENTS.md`), so the deletions below wait for
@@ -8,16 +9,17 @@ Mason's explicit yes in the conversation. When they run, this file is the restor
 
 ## The answer
 
-- **GitHub holds 191 branches besides `main`.** The 6 that belong to open PRs (#897-#902, including this
-  report's own PR #901 and admin-only invoicing #902) are out of scope. Of the other 185: **177 can be
-  deleted, 6 stay for now, and 2 need Mason's call.**
-- **Nothing is lost by deleting the 177.** Each one's work either merged under a later PR (most are
+- **GitHub held 191 branches besides `main` at the audit.** The 6 that belonged to open PRs (#897-#902,
+  including this report's own PR #901 and admin-only invoicing #902, since closed) are out of scope. Of
+  the other 185: **173 can be deleted and 12 stay.** Two salvage reviews and Mason's 2026-10-13 answers
+  moved 6 branches from the delete list to "stay" (see "Salvage review").
+- **Nothing is lost by deleting the 173.** Each one's work either merged under a later PR (most are
   "delivery laps": a PR closed and reopened as a fresh branch until one merged), was deliberately
-  dropped by a Mason decision, or was made obsolete by `main`. 159 can go after Mason's yes; 18 wait
+  dropped by a Mason decision, or was made obsolete by `main`. 157 can go after Mason's yes; 16 wait
   until this PR merges, because this PR rescues or repoints something on them.
-- **Every deleted branch stays restorable.** 164 tips are the final commit of their PR, which GitHub
+- **Every deleted branch stays restorable.** 161 tips are the final commit of their PR, which GitHub
   keeps as `refs/pull/<N>/head` (fetching four of them back, from July to October, returned exactly the
-  branch tips). 12 get a new `archive/2026-10-13/<branch>` tag, made and read back before any deletion, and 1
+  branch tips). 11 get a new `archive/2026-10-13/<branch>` tag, made and read back before any deletion, and 1
   already has a tag. A verified local bundle of all 185 candidate tips is a second, independent copy.
 - **No live database change is at risk** (proved, not inferred; see "Database").
 - **Rescued in this PR:** two owner decisions that never reached `DECISION_LOG.md`; Revisions 12-13 of the
@@ -216,12 +218,13 @@ Commit counts and three-dot diffs were not used as evidence, because this reposi
 Then three targeted verifications and the Sol review above. Live checks were read-only `SELECT`s.
 
 **Containment proof (added in round 3).**
-- **Proven mechanically: 99 of the 177 deletion tips.** In a scratch clone holding every PR's saved head
+- **Proven mechanically: 99 of the 177 deletion tips proposed at round 3** (98 of today's 173, since
+  `claude/invoice-screen-safety-20261009` now stays). In a scratch clone holding every PR's saved head
   (`refs/pull/*/head`, 889 refs), each of these tips is an ancestor of the head of at least one MERGED PR.
   Every commit on such a branch is in the history of a PR that was reviewed and merged. That proves the
   work was inside a merged PR's history; it does not prove every intermediate change landed, because later
   commits in that PR may have revised or reverted it (as with lap 9's discarded trigger).
-- **Resting on stated reasons: the other 78.** Abandoned designs, Mason's decisions, rebuilt or
+- **Resting on stated reasons: the other 78 (75 of today's 173).** Abandoned designs, Mason's decisions, rebuilt or
   cherry-picked copies, and duplicates. Each is stated per branch in the evidence. Their complete changed-file
   lists went to the round-4 review.
 
@@ -260,7 +263,7 @@ Deleting branches cannot strand a live database change:
 
 ## What happens to each branch
 
-**Delete after Mason's yes (159).** Superseded laps, duplicates and abandoned designs:
+**Delete after Mason's yes (157).** Superseded laps, duplicates and abandoned designs:
 
 - **Job-to-invoice transfer retries (22)** were 19 delivery laps of PR #638 plus a 3-lap follow-up. They
   landed as #721 and #757; every lap tip is an ancestor of a merged head.
@@ -274,24 +277,22 @@ Deleting branches cannot strand a live database change:
 - **Migration bookkeeping (11)**: restamps, applied-live records and registry refreshes, each merged under a
   later PR.
 - **CodeRabbit and merge-gate attempts (10)** were overtaken by #456, #570, #571, #657, #706, #804 and #888.
-- **Guard fixes (14 across two groups)** either landed under other PRs (#630, #794, #855, #455, #564)
+- **Guard fixes (13 across two groups)** either landed under other PRs (#630, #794, #855, #455, #564)
   or were dropped by Mason's 2026-08-25 freeze and 2026-10-02 guard policy.
 - **Customer documents (6)** landed as #764, #800 and #875, verified live 2026-10-04.
 - **Dependency advisories (4)** were duplicates of #645 and #844.
 - **Permissions and owner approval (4)** landed as #841, #857 and #894.
-- **Leftovers (12)**, each covered elsewhere: return-credit work rebuilt as #509 (live 2026-09-01);
-  PRs merged under other numbers (#892 as #895 and #893; #321 as #322; #491 as #500; #468 as #465; #363's
+- **Leftovers (11)**, each covered elsewhere: return-credit work rebuilt as #509 (live 2026-09-01);
+  PRs merged under other numbers (#321 as #322; #491 as #500; #468 as #465; #363's
   follow-ups via #399; `claude/pr611-land-20260905` as #611); #373, which sits inside retired #449; two
   integrity-report PRs resolved by #889; and a 2026-09-08 snapshot of uncommitted files, all superseded.
 
-**Delete after this PR merges (18).** This PR rescues or repoints something on each:
+**Delete after this PR merges (16).** This PR rescues or repoints something on each:
 
 | PR | What this PR rescues or repoints |
 |---|---|
 | #612 | Review-proof forgery class |
 | #605 | MCP permission gap |
-| #397 | Quote findings |
-| #350 | Pricing decisions; quote findings |
 | #507 | Plan Revisions 12-13; D-AA |
 | #591 | Changelog citation |
 | #527 | git clean note |
@@ -305,7 +306,8 @@ Deleting branches cannot strand a live database change:
 | the bulk-import branch | `save_field` note |
 | the three customer-document page branches | Pointers |
 
-**Kept for now (6)**, each with the reason it stays:
+**Kept (12)**, each with the reason it stays. The first six were kept by the audit; the last six by Mason on
+2026-10-13 ("keep all of the branches you have in question"), after the salvage review:
 
 | Branch | Commit | Why it stays |
 |---|---|---|
@@ -314,14 +316,37 @@ Deleting branches cannot strand a live database change:
 | `claude/audit-brace-expansion-fast-uri` | `6ead36f7bf48f8b1eaef1bf1bd81ced1c21a377a` | Checked out at C:/CRX_mergeperm; held until that folder is dealt with separately (nothing unique on it; PR #847 keeps the tip). |
 | `claude/autopilot-recursive-delete-alias-20260907` | `00cb318708b3048aa2a71fe7a58d97e8e02a3492` | Checked out at C:/CRX_rmguard, which holds one unpushed commit and one uncommitted edit. |
 | `claude/return-credit-chain-applied-2026-09-01` | `56812f3dd5e28c551a5e5dcb40898d88c2b6ead8` | Open issue #747 names this branch as its evidence. |
-| `claude/rep-scope-order-invoices` | `322cbbd04d00ebbe0001e5b4c311b216bbd9b63b` | Its replacement, admin-only invoicing PR #902, is open but not merged. Release only when #902 has merged AND, on main: the branch's four OPEN findings (INV- numbering through the order RPCs, the split engine never billing a landlord, and two more listed in its KNOWN_ISSUES) are recorded or fixed, the split-wrapper type allow-list item is disposed of, and the 2026-10-06 DECISION_LOG text calling rep scoping the next change is reconciled with Mason's 2026-10-09 decision. |
+| `claude/rep-scope-order-invoices` | `322cbbd04d00ebbe0001e5b4c311b216bbd9b63b` | Holds the only copy of the split-invoice type allow-list code (migration `20261008120000`, about lines 339-344) and four billing findings, now recorded in `KNOWN_ISSUES.md` by this PR. Admin-only invoicing PR #902, once its planned replacement, was closed unmerged on 2026-10-13 when Mason decided reps invoice any customer. Release when the allow-list is built or consciously dropped, and the 2026-10-06 DECISION_LOG text calling rep scoping the next change is reconciled with Mason's later decisions. |
+| `codex/pr389-coderabbit-fixes` | `203a4742a9c2f072de63db52848035ebda510b98` | PR #397. The largest quote-pricing branch: quote line identity and quote-time cost on screen (`dec5d3378`, `8e147f40d`, `b3d2bba0d`, `81240c6f3`), Convert to Order atomicity (`dc4ad87fd`), profitability reports on the as-of-sale report (`d03a60fc9`) and its database test. Template for the pricing plan. |
+| `claude/pricing-audit-strategy-jym8rr` | `f4eaa8259834405d26ae11b57ed454e881d94ec9` | PR #350. An earlier version of the quote line-identity screen code that installs the `item_ids` the database returns; its pricing decisions are recorded by this PR. |
+| `claude/invoice-screen-safety-20261009` | `f6d996e56892d7118d9546dbdc41a20b1bbbc3d4` | PR #892. At `3507b92c5^`, the only copy of the invoice editor's "no Post, Print or Email with unsaved edits" code, removed from #892 and absent from `main`. |
+| `backup/pr432-multitarget-20260825` | `5ffda1dd4c1e928f9b22d6ca7ffad16035dbe079` | Offsite copy of the frozen PR #432 guard work that Mason approved pushing on 2026-09-03 (also contains `codex/pr402-review-gaps-20260819`). |
+| `claude/control-file-coverage-a41c` | `b985e919bef5e3dea538f7c6b9b5fd5b9d76a908` | F3 (nine files to add to the permission ask list). KNOWN_ISSUES says the branch stays until F3 lands; no PR copy. |
+| `codex/actor-binding-mixed-notation-repair-20260810` | `b73dfc9ff7881814cf81f1d3c01d04fab212dc92` | PR #449, which Mason retired on 2026-09-12 and chose to keep the branch of (also contains `codex/harden-actor-binding-sql-reader`). |
 
-**Mason's call (2).** Both are fully preserved either way. Recommendation: delete both. For F3, your 2026-09-26 decision already took most of its files off the ask list on purpose, and all nine patterns are written word for word in `KNOWN_ISSUES.md` (with the `.claude/agents/**` caveat); an archive tag keeps the commit.
+**Mason's call (0).** Both questions were answered on 2026-10-13: keep F3's branch and PR #449's branch
+(now in the table above). No branch waits on a further answer.
 
-| Branch | Commit | Restore from | Question |
-|---|---|---|---|
-| `claude/control-file-coverage-a41c` | `b985e919bef5e3dea538f7c6b9b5fd5b9d76a908` | tag archive/2026-10-13/claude/control-file-coverage-a41c (to create) | F3 (nine files to add to the permission ask list). KNOWN_ISSUES says the branch stays until F3 lands, but your 2026-09-26 "fewer permission prompts" decision took most of those files off the ask list on purpose. Retire F3 and delete (an archive tag keeps the commit), or keep it? |
-| `codex/actor-binding-mixed-notation-repair-20260810` | `b73dfc9ff7881814cf81f1d3c01d04fab212dc92` | PR #449 | PR #449, which you retired on 2026-09-12 and chose to keep the branch of. Fully restorable from the PR #449 page. OK to delete? |
+## Salvage review (2026-10-13, after the Sol rounds)
+
+Mason asked for an adversarial review of the branches for work worth reusing, his example being "pricing
+history lookup and cost tracking on products for quoting". Two read-only passes ran, each with a skeptic
+per scope:
+- **Pass 1 (file status, 13 agents).** It compared each branch's changed files with `main` and found real
+  reusable work that the audit's one-line reasons hid. That work is on PR #397 (the quote screen's half of
+  quote-time cost, Convert to Order atomicity, profitability reports), PR #350 (an earlier line-identity
+  version) and PR #892 (the invoice editor's unsaved-edits guard, at `3507b92c5^`). The audit had wrongly
+  said nothing on #892 was missing.
+- **Pass 2 (content, 13 agents).** A script took every line each branch added since it forked and kept the
+  lines found nowhere in `main`'s whole tree: 21,567 lines on 163 branches, in 227 groups. Every group got
+  a verdict. It found no further branch to keep, but several things worth recording, which this PR adds to
+  `KNOWN_ISSUES.md`: the landlord split-billing refusal, the unbuilt split-invoice type allow-list, the
+  autopilot delete-spelling gap (reproduced by calling `autopilotDecision`), and the profitability
+  database test on #397.
+- **Limits of pass 2.** It sees only added lines, not deletions. It scanned product folders, not
+  `.claude/`, agent tooling or `docs/manual`. The 22 branches with no orphan lines rest on pass 1.
+- **Outcome.** Mason kept all six branches in question (the table above). The pricing work is set as the
+  next section of work, planned before it is built, in a separate change.
 
 ## Other things this audit found (not deletion blockers)
 
@@ -360,13 +385,14 @@ Deleting branches cannot strand a live database change:
 
 ## Deletion procedure (for each batch, after Mason's yes)
 
-The batches are: the 159 "after yes" rows; the 18 "after this PR" rows; and each "Mason's call" row only on
-his explicit answer for that row.
+The batches are: the 157 "after yes" rows and the 16 "after this PR" rows. No "Mason's call" rows remain:
+Mason answered both on 2026-10-13 (keep).
 
 **The helper (version 2, after Sol's round 4).** Every step below is done by one script kept next to the
 local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs`, with its review baseline
 `2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
-- script: `b9086fe5ec7a922f0a47009938d974d8e06cfc366893973b7750ce540c2cd178`
+- script: `e80f52bf633c09edd6ced6956ab7629683c1eadd0ebc25029175befe38621988` (2026-10-13 salvage revision:
+  only the sealed counts 157/16/0 and the "Mason's call (0)" marker changed)
 - baseline: `0cbdd53507c2bcfed28f34db85614b8337b19cbd5115e4defa358a7bc82c1d75`
 - bundle: `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
 
@@ -378,7 +404,7 @@ How the helper behaves:
 - **It prints every command that changes GitHub;** the operating session runs each one itself, in plain
   text, so the repository's safety hooks see every change.
 - **It reads the ledger only from the commit Mason approves** (`--approved`). It accepts that ledger only
-  if it has exactly 159, 18 and 2 rows, no duplicates, safe names, and restore sources in the expected
+  if it has exactly 157, 16 and 0 rows, no duplicates, safe names, and restore sources in the expected
   form.
 - **Any doubt is a refusal:** a failed lookup, unreadable output, or an unexpected error.
 
@@ -392,7 +418,7 @@ branches and continues.
    and GitHub's live ID for that repository equals the ID used in the delete command.
 3. **The approved ledger is the published one.** The ledger at PR #901's live head (or on `main` after the
    merge) is byte-for-byte the ledger at the approved commit.
-4. **For the 18 "after this PR" rows, all of the following:**
+4. **For the 16 "after this PR" rows, all of the following:**
    - PR #901 merged at exactly the approved commit;
    - every file this PR rescues is byte-for-byte identical in the merge commit and the approved commit;
    - CodeRabbit's latest verdict is APPROVED on that exact commit;
@@ -487,7 +513,7 @@ beside it.
 
 Like the earlier ledgers, this file deliberately carries no copy-paste shell command.
 
-## Restore ledger: branches to delete (177)
+## Restore ledger: branches to delete (173)
 
 ### Job-to-invoice transfer retries (PR #638 lineage) (22)
 
@@ -592,7 +618,7 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `claude/restamp-stranded-20260905-migrations-delivery-5` | `ec0af0d84a1acd17ab2ede6cdcf67c304dec22f6` | #703 closed | PR #703 | after yes |
 | `claude/schema-registry-refresh-20260905` | `dd212907206896976192919e46990528eb7ace2d` | #602 closed | PR #602 | after yes |
 
-### CodeRabbit and merge-gate attempts (11)
+### CodeRabbit and merge-gate attempts (10)
 
 | Branch | Commit | PR | Restore from | When |
 |---|---|---|---|---|
@@ -606,7 +632,6 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `codex/coderabbit-native-landing-20260913` | `e8527796971d13e1bc3e356349bda6ddf04820a1` | #654 closed | PR #654 | after yes |
 | `codex/coderabbit-native-request-20260909` | `27531bf188fc6db3ab6726f0b28f362b4985e4d3` | #647 closed | PR #647 | after yes |
 | `codex/coderabbit-snapshot-retry-20260913` | `e3f9d006fd64fe483909a39eb5b467d3a8cc7e86` | #655 closed | PR #655 | after yes |
-| `codex/pr389-coderabbit-fixes` | `203a4742a9c2f072de63db52848035ebda510b98` | #397 closed | PR #397 | after this PR |
 
 ### adjust_inventory receipt binding (11)
 
@@ -652,11 +677,10 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `codex/field-app-season-review-fixes-20260913` | `dd3ce212c884c20f575ed189225f0549e04a5894` | no PR | tag archive/2026-10-13/codex/field-app-season-review-fixes-20260913 (to create) | after yes |
 | `codex/field-app-season-reviewed-20260913` | `5818d67aee18ae3a02d957a4359f859d4dedae0a` | #662 closed | PR #662 | after yes |
 
-### Guard fixes (B) (9)
+### Guard fixes (B) (8)
 
 | Branch | Commit | PR | Restore from | When |
 |---|---|---|---|---|
-| `backup/pr432-multitarget-20260825` | `5ffda1dd4c1e928f9b22d6ca7ffad16035dbe079` | no PR | tag archive/2026-10-13/backup/pr432-multitarget-20260825 (to create) | after yes |
 | `claude/actor-forgery-sweeps-20260902` | `c12c85ab8ec905ba8e6e162ffa61c7a312adfdd7` | #551 closed | PR #551 | after yes |
 | `claude/push-guard-git-resolution` | `62d22b6e9de259f5c5653d7a0ebc5f911a779d10` | #445 closed | PR #445 | after yes |
 | `claude/remove-guard-hooks-f23691` | `0ac235d0e50e106fb2c5e5df4dff46aad02144fa` | #503 closed | PR #503 | after yes |
@@ -703,11 +727,10 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `codex/inventory-peer-ack-delivery-20260913` | `86b9ecb3a3f92831be9968e51d2c9a716fb45c93` | #659 closed | PR #659 | after yes |
 | `codex/inventory-retry-native-delivery-20260913` | `f7b7bfc6b74d5af7b7ff16e9ddb11afa504e5b48` | #658 closed | PR #658 | after yes |
 
-### Money and security one-offs (7)
+### Money and security one-offs (6)
 
 | Branch | Commit | PR | Restore from | When |
 |---|---|---|---|---|
-| `claude/invoice-screen-safety-20261009` | `f6d996e56892d7118d9546dbdc41a20b1bbbc3d4` | #892 closed | PR #892 | after yes |
 | `codex/harden-actor-binding-sql-reader` | `e652f7232da2b16b10d5e770b919d969337488d4` | #373 closed | PR #373 | after yes |
 | `codex/idempotency-reset-order-hardening-20260802` | `9049efc80e3e9cf8956b32061fab0688487a8758` | no PR | tag archive/2026-10-13/codex/idempotency-reset-order-hardening-20260802 (to create) | after this PR |
 | `codex/pr-comment-remediation-20260903` | `5dbad8a3fa76f2ae1a8a86a9bf9ab7108a260def` | #591 closed | PR #591 | after this PR |
@@ -726,13 +749,12 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `ops/integrity-report-2026-10-01` | `fa748a0fdc8a4d17e42e2ca0916fc3fec4d35f45` | #861 closed | PR #861 | after yes |
 | `preserve/crx-manager-uncommitted-archive-20260908` | `5dcdb853e4bcf5101fa4966fface8ce64cf0dbc5` | no PR | tag archive/2026-10-13/preserve/crx-manager-uncommitted-archive-20260908 (to create) | after yes |
 
-### Pricing and return-credit (August) (6)
+### Pricing and return-credit (August) (5)
 
 | Branch | Commit | PR | Restore from | When |
 |---|---|---|---|---|
 | `claude/codex-claude-cogs-handoff-7bde15` | `e3c4a3fc47df9c8c9eabe3e35452482a5775ff64` | no PR | tag archive/2026-10-13/claude/codex-claude-cogs-handoff-7bde15 (to create) | after yes |
 | `claude/ordering-cycle-review-t41vat` | `992ee08881768f008ef0e51dac22972ed531615f` | #363 closed | PR #363 | after yes |
-| `claude/pricing-audit-strategy-jym8rr` | `f4eaa8259834405d26ae11b57ed454e881d94ec9` | #350 closed | PR #350 | after this PR |
 | `claude/product-plan-rev12-followup` | `74ccba0f7888e69050d4951be9df02de2de25d68` | #507 closed | PR #507 | after this PR |
 | `claude/return-credit-cogs-reversal` | `c4e83dea632b37b02e8b14e64c2859b7668f0e77` | #361 closed | PR #361 | after yes |
 | `codex/defer-return-credit-rollout-20260831` | `ac695f4993effb3f2dafb2a77acf85e6670b2d74` | #532 closed | PR #532 | after this PR |

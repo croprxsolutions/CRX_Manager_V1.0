@@ -19,6 +19,22 @@ report). It refuses on any doubt and only prints the commands that change GitHub
 bundle was demonstrated in a separate clone, and 99 of the 177 deletion tips were proved to sit inside a
 merged PR's head.
 
+Round 4 (BLOCK 26; the same HIGH findings survived two fix rounds) triggered the project's stop rule, and
+Mason chose "fix and go". Version 2 of the helper is described in the report and its SHA-256 recorded
+there. It:
+- re-runs every gate before each branch's delete;
+- binds the repository identity;
+- requires the merged docs to be byte-identical to the approved commit, with CodeRabbit APPROVED and the
+  required checks green on that commit;
+- snapshots the full `protect-main` rules;
+- refuses stale or malformed session lists;
+- hashes and verifies the bundle.
+
+Bundle recovery was repeated in a brand-new empty repository (185/185, 18,000 objects, 0 missing).
+Read-only tests: 21 of 25 exactly as expected, the other 4 also refusals; plus 9 of 9 per-branch cases. Two
+review comments on this PR were addressed: the 8.3 wording now names only the measured path, and the
+refresh rule now catches changes to files the review already saw.
+
 **Verdicts.** 177 deletable (159 after Mason's yes, 18 after this PR merges), 6 kept, 2 for Mason's
 decision. Each deletion is an atomic compare-and-delete, so a newly pushed commit cannot be lost. The
 deletions wait for Mason's explicit yes.

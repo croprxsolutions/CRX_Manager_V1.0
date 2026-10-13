@@ -141,14 +141,19 @@ and `generated-column-check.mjs` judge only `tool_input.content` or `tool_input.
 `judgedContent()` change covered it. The current desktop harness exposes no `MultiEdit` tool, so this
 matters only if one returns.
 
+**Same PR, third item (historical, not re-verified):** a Codex P1 on PR #605 reported that a non-canonical
+path spelling such as `.github/scripts/../workflows/ci.yml` could skip `ask`-tier path matching. It was not
+re-checked against the current harness on 2026-10-13; whoever fixes the MCP gap above should test it too.
+
 ## OPEN 2026-10-13 (first measured 2026-09-05; owner action: Mason) — a review proof can be read and rewritten through its Windows 8.3 short name
 
 **Rescued from closed PR #612** (`claude/review-proof-guard-read-only-narrowing`, closed unmerged
 2026-09-30 Chicago time, 2026-10-01 UTC; the full write-up is in that branch's `docs/manual/KNOWN_ISSUES.md`, restorable from the PR
 #612 page). Not re-run on 2026-10-13; recorded as the PR #612 review rounds measured it.
 
-Every long file name on this NTFS volume also answers to an 8.3 short alias
-(`.claude/session-state/CODEX-~1.JSO` is a `codex-review-<sha>.json` proof). The review-proof guard's
+The PR #612 rounds measured that the review-proof file answers to an 8.3 short alias on this NTFS volume
+(`.claude/session-state/CODEX-~1.JSO` is a `codex-review-<sha>.json` proof); whether every long file name
+has one depends on the volume's short-name setting, which was not measured. The review-proof guard's
 shell rule matches protected names in the command text, so a command that spells the alias is not
 recognised. Two `gpt-5.6-sol` rounds showed that, combined with a hard link made through the alias, an
 agent could rewrite a proof's `base_sha`, timestamp, model or verdict, and the push guard would accept

@@ -1,6 +1,6 @@
 # GitHub branch cleanup audit and restore ledger (2026-10-13)
 
-**Status: REPORT, revised after three rounds of independent review. Nothing has been deleted.** Mason asked on
+**Status: REPORT, revised after four rounds of independent review. Nothing has been deleted.** Mason asked on
 2026-10-13 to "analyze all our branches we have in github … remove what is useless and cleanup", then to
 have Codex Sol 6.1 review the proposal before anything happens. Every measurement behind this document
 was read-only. Branch deletion is a hard-gated action (`AGENTS.md`), so the deletions below wait for
@@ -132,6 +132,57 @@ This revision answers the rest:
 | MED R1-20 | PR #639's backslash caveat recorded |
 | LOW R3-7, R3-8, R1-26 | The quote fix's reference commit `dec5d3378` is named on both branches; the recovered August changelog note now says it is recovered; the changelog wording no longer claims anything is already on `main` |
 
+**Round 4** reviewed the helper script line by line and returned **BLOCK, 26 open**, five of them HIGH:
+- S01: adoption detection incomplete;
+- S02: printed commands disconnected from the gates;
+- S03: rescue markers not proving fidelity;
+- S04: weak review and check gate;
+- S08: repository identity not bound.
+
+N1, N4 and N5 had now survived two fix rounds. So, as the project rule requires, the loop stopped and Mason
+was given both positions. He chose "fix and go": fix the remaining defects without another review round,
+finish this PR through its normal review, then ask him for the deletion yes. Version 2 of the helper
+answers round 4:
+
+| Round-4 finding | What changed (version 2) |
+|---|---|
+| HIGH S02 / N4: commands disconnected from the gates | Every `check` re-runs every gate (identity, publication, docs gate, refresh, preservation, bundle) immediately before its delete |
+| HIGH S03 / N5: markers do not prove fidelity | Every rescued file must be byte-for-byte identical between the merge commit and the approved commit; markers must still be on `main` |
+| HIGH S04: weak review/check gate | CodeRabbit's latest verdict must be APPROVED on the exact approved commit; each required check must be green there, and an empty or truncated check list refuses |
+| HIGH S08: repository identity | `origin`'s fetch and push URLs and GitHub's live repository ID must match before anything runs |
+| HIGH S01 / N1: adoption detection | Session list must be under 30 minutes old and well-formed. Worktree HEAD and folder matching are added, and `sweep` reports any target still present. The residual the helper cannot see is stated exactly and does not lose commits |
+| MED S05, S06, S12, S13 + Codex P2 on this PR | Refresh compares the exact lines naming each branch, the full `protect-main` rules snapshot (types and parameters), and any file `main` changed since review that the branch also changes. #901's own edits are excluded, and deleted files are handled |
+| MED S07, S09, S10, S11, S14, S15, S17, S18, S19 | Malformed sessions and unreadable ref listings refuse. The ledger is a sealed whitelist with exact counts. Printed text is restricted to safe characters. The bundle is hashed and verified. `sweep` reports present targets and validates its time. Truncated lists refuse. `confirm-restore` exists. Every error exits as a refusal |
+| MED N01 / R1-33: bundle independence | Recovery repeated in a brand-new empty repository holding only `main` (see "Restoring a branch") |
+| MED N02 / R1-36 | The containment proof now says "every commit was inside a merged PR's history", not "every change landed" |
+| MED N03 / N6 | The approval limits now exclude accepting any HIGH that names a missing control |
+| LOW S16, S20, S21 | Wording fixed; the helper refuses the whole batch instead of dropping branches |
+| LOW N05 | PR #605's non-canonical path finding is recorded as historical and unverified |
+| CodeRabbit on this PR | The 8.3 wording is narrowed to the measured review-proof path |
+
+**One round-4 claim was checked and is wrong.** N04 said the baseline omitted five "after yes" rows, so a
+successful `plan` was impossible. The baseline holds all 185 rows, including those five. The excerpt shown
+to Sol started at the second printed command, not the first; that was an excerpt error, not a ledger one.
+
+**Version-2 test results (read-only, against the published head `de661f871`).**
+- **Main suite: 21 of 25 exactly as expected.** The other four also refused, for a reason the test did not
+  predict:
+  - every per-branch check refuses until the archive tags exist (by design);
+  - an older ledger is refused at the publication gate before the row-count gate.
+- **Per-branch suite: 9 of 9.** Run against the #449 row, which needs no new tag, it proved:
+  - `OK` for that row;
+  - refusals for another batch's branch, `main`, a kept branch, an adopting session, a stale session list,
+    a malformed list and a missing list;
+  - a successful `verify-tags`.
+
+  Further cases:
+  - a valid but unpublished ledger, built as an unreferenced local commit, was refused;
+  - a repository whose `origin` is not CRX Manager was refused;
+  - the `--since` checks behaved as designed;
+  - `sweep` reported a still-present target.
+- **Printed commands.** `plan --batch now` printed 159 delete commands and one 7-tag push, and named
+  `refs/heads/main` nowhere.
+
 The full reviews are kept with the session record.
 
 ## Baseline and method
@@ -167,8 +218,9 @@ Then three targeted verifications and the Sol review above. Live checks were rea
 **Containment proof (added in round 3).**
 - **Proven mechanically: 99 of the 177 deletion tips.** In a scratch clone holding every PR's saved head
   (`refs/pull/*/head`, 889 refs), each of these tips is an ancestor of the head of at least one MERGED PR.
-  Every commit on such a branch was inside a PR that was reviewed and merged, and any later difference is
-  that PR's own later work.
+  Every commit on such a branch is in the history of a PR that was reviewed and merged. That proves the
+  work was inside a merged PR's history; it does not prove every intermediate change landed, because later
+  commits in that PR may have revised or reverted it (as with lap 9's discarded trigger).
 - **Resting on stated reasons: the other 78.** Abandoned designs, Mason's decisions, rebuilt or
   cherry-picked copies, and duplicates. Each is stated per branch in the evidence. Their complete changed-file
   lists went to the round-4 review.
@@ -308,103 +360,108 @@ Deleting branches cannot strand a live database change:
 
 ## Deletion procedure (for each batch, after Mason's yes)
 
-The batches are: the 159 "after yes" rows; the 18 "after this PR" rows; and each "Mason's call" row only
-on his explicit answer for that row.
+The batches are: the 159 "after yes" rows; the 18 "after this PR" rows; and each "Mason's call" row only on
+his explicit answer for that row.
 
-**The helper.** The checks below are done by one read-only script, kept next to the local bundle at
-`C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs` with its review baseline
-`2026-10-13-cleanup-baseline.json`. Their SHA-256 values, re-checked before each run, are:
-- script: `d5f872559137630d3484670b943e5eb47b1557641d3da3e7d19b22f768cd8a32`
-- baseline: `b4f9aec1776836b64ea329d7a00eb8e3d48a4e0ce90e1184ef5a7df9335c2d91`
+**The helper (version 2, after Sol's round 4).** Every step below is done by one script kept next to the
+local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs`, with its review baseline
+`2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
+- script: `b9086fe5ec7a922f0a47009938d974d8e06cfc366893973b7750ce540c2cd178`
+- baseline: `0cbdd53507c2bcfed28f34db85614b8337b19cbd5115e4defa358a7bc82c1d75`
 - bundle: `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
 
-A different file means it was changed after review and must not run.
-- **It never changes anything.** Every git and gh call in it only reads. It prints the exact
-  tag-creation, delete and restore commands. The operating session runs each printed command itself in
-  plain text, so every change passes through the repository's own safety hooks.
-- **It reads the ledger only from the commit Mason approves** (`--approved <commit>`), never from a
-  working copy.
-- **Every check fails closed.** A lookup that errors or cannot be read counts as a refusal.
+A different file must not run.
 
-**A. Batch preconditions** (the script's `plan` mode, run in the same turn as the batch). It refuses the
-whole batch unless all of these hold:
-1. **Mason's yes** for that batch, given in the conversation.
-2. **The approved ledger is the published one.** The ledger file at PR #901's live head (or on `origin/main`
-   once merged) is byte-for-byte the ledger at the approved commit. A later change to the ledger means a
-   new approval.
-3. **Nothing relevant moved since review.**
-   - The `protect-main` rules are unchanged.
-   - No batch branch is newly named in `KNOWN_ISSUES.md`, `DECISION_LOG.md`, `CURRENT_STATE.md`,
-     `TODO.md`, `AGENTS.md` or `CLAUDE.md` (an exact-name match, compared with the reviewed baseline).
-   - If `origin/main` moved past `7abd52f6d`, no batch branch differs from `main` in any file the review did
-     not already see.
+How the helper behaves:
+- **It changes nothing on GitHub.** Its git and gh calls only read. The one local side effect is fetching
+  `main` and PR #901's head into this PC's remote-tracking refs.
+- **It prints every command that changes GitHub;** the operating session runs each one itself, in plain
+  text, so the repository's safety hooks see every change.
+- **It reads the ledger only from the commit Mason approves** (`--approved`). It accepts that ledger only
+  if it has exactly 159, 18 and 2 rows, no duplicates, safe names, and restore sources in the expected
+  form.
+- **Any doubt is a refusal:** a failed lookup, unreadable output, or an unexpected error.
 
-   Any branch that fails is dropped from the batch for re-review.
+**A. Gates run before EVERY check, not just once per batch.** The helper's `plan`, `verify-tags` and every
+per-branch `check` all re-run every gate below. A command printed earlier cannot act on a state that has
+since changed. Any failure refuses the whole batch for re-review; the helper never quietly drops some
+branches and continues.
+1. **Mason's yes** for that batch, in the conversation. This is the operating session's duty; the script
+   cannot see the chat.
+2. **Right repository.** `origin`'s fetch and push addresses are `github.com/masonwells1/CRX_Manager_V1.0`,
+   and GitHub's live ID for that repository equals the ID used in the delete command.
+3. **The approved ledger is the published one.** The ledger at PR #901's live head (or on `main` after the
+   merge) is byte-for-byte the ledger at the approved commit.
 4. **For the 18 "after this PR" rows, all of the following:**
-   - PR #901 has MERGED;
-   - its merged head is exactly the approved commit;
-   - its review decision is APPROVED and every reported check is green;
-   - each branch's rescued record (a fixed text marker per branch, listed in the script) is present on
-     `origin/main`.
+   - PR #901 merged at exactly the approved commit;
+   - every file this PR rescues is byte-for-byte identical in the merge commit and the approved commit;
+   - CodeRabbit's latest verdict is APPROVED on that exact commit;
+   - each of `main`'s required checks (Vercel; Lint, Type Check, Test, Build; SQL Migration Validation) is
+     green there, and no check run on that commit is failing or unfinished;
+   - each branch's rescued record (a fixed text marker per branch) is still on `main`.
+5. **Nothing relevant moved since review:**
+   - the `protect-main` rules are identical, types and parameters, to the reviewed snapshot;
+   - the lines naming each batch branch in `KNOWN_ISSUES.md`, `DECISION_LOG.md`, `CURRENT_STATE.md`,
+     `TODO.md`, `AGENTS.md` and `CLAUDE.md` are unchanged from the reviewed state;
+   - `main` has not changed, since the reviewed state, any file the branch also changes. PR #901's own
+     reviewed edits do not count as a change.
+6. **Preservation.** Every restore source matches on GitHub:
+   - each `refs/pull/N/head`;
+   - section1's existing tag;
+   - after step B, every new archive tag.
 
-**B. Preservation, verified before anything is deleted:**
-1. Every "PR #N" row's `refs/pull/N/head` equals the ledger commit. Section1's existing tag
-   (`preserve/2026-07-29/codex-section1-security-hardening-20260725`) equals `53f6177eb`.
-2. The "to create" archive tags are made with one ordinary `git push` of each commit to
-   `refs/tags/archive/2026-10-13/<branch>`, so the pre-push hook runs. The script's `verify-tags` mode then
-   reads every restore source back from GitHub.
-3. The local bundle still verifies.
-4. Any mismatch stops the batch.
+   The local bundle's SHA-256 matches and `git bundle verify` passes.
 
-**C. Per branch, immediately before its delete** (the script's `check` mode). The script REFUSES the
-branch, and the session stops, if any of these is true:
+**B. Archive tags, before any delete.** One ordinary `git push` creates the "to create" tags, so the
+pre-push hook runs. The helper's `verify-tags` then reads every restore source back from GitHub.
+
+**C. Per branch, immediately before its delete** (`check`). After all of A, the helper REFUSES the branch
+if:
+- it is not a row of this batch in the approved ledger, or is `main`;
+- the session list is missing, malformed, or more than 30 minutes old;
 - its live tip is not the ledger commit, or it is already gone;
-- an open PR uses it as head or as base;
-- a worktree on this PC has it checked out, or sits at its commit;
-- an active agent session is on it (from a session list read at the start of the batch);
-- its restore source no longer matches;
-- any of those lookups fails.
+- an open PR uses it as head or base;
+- a worktree on this PC has it checked out or sits at its commit;
+- an active agent session is on it, or has a working folder that resolves to it.
 
-Only after `OK` does the session run the printed GitHub `updateRefs` call, which deletes
-`refs/heads/<branch>` only if it still points at the ledger commit (`beforeOid`). Then the script's
-`confirm` mode checks the branch is gone. The printed command chains these with `&&`, so the first refusal
-stops everything after it. The script accepts only branch names that are deletion rows in the approved
-ledger and refuses `main`.
+Only after `OK` does the printed GitHub `updateRefs` call run. It deletes `refs/heads/<branch>` only if the
+branch still points at the ledger commit, so a commit pushed in the meantime makes GitHub refuse and
+nothing is lost. Then `confirm` checks the branch is gone. Each printed line chains these with `&&`. **The
+first branch of a batch runs alone as a canary,** and GitHub's reply is read back before any other branch.
+This is the first real use of `updateRefs` in this repository.
 
-**Canary first.** The first branch of a batch runs alone, and the session reads back GitHub's reply before
-any other branch is attempted. This is the first real use of `updateRefs` in this repository.
-
-**D. Failure handling.** If GitHub or a guard refuses a call, or any result is unknown (timeout, unreadable
-reply, mismatch):
+**D. Failure handling.** If GitHub or a guard refuses a call, or any result is unknown:
 - stop the batch;
 - re-read the affected refs;
 - reconcile, and record what actually happened.
 
-Never retry blindly or switch routes without telling Mason. Run through every repository hook with
-synthetic input on 2026-10-13, the tag push, the `updateRefs` delete and the restore command were all
-allowed. Whether the desktop app's own permission layer prompts was not tested; a prompt is shown to
-Mason, never answered by the agent.
+Never retry blindly or switch routes without telling Mason. A permission prompt from the desktop app is
+shown to Mason, never answered by the agent.
 
-**E. After the batch** (the script's `sweep` mode, given the batch start time):
-1. **Per ref:** every deleted branch is absent, and every restore source still matches.
-2. **Adoption check.** Any branch name that, since the batch started, became the head or base of a PR
-   (any state), a worktree checkout, or an active session's branch is reported.
-3. **Restore if needed.** For such a branch the script prints a create-if-absent restore: an `updateRefs`
-   with `beforeOid` all zeros. GitHub refuses it if the name already exists, so a branch someone recreated
-   in the meantime is never overwritten. It is reported for hand reconciliation instead.
-4. **Record outcomes.** The actual outcome of every row goes in a follow-up docs change. The total branch
-   count is only a secondary check.
+**E. After the batch** (`sweep`, given the batch start time as ISO-8601 UTC):
+1. **Per ref:** every target is absent. A target still present, even at its own commit, is reported, as is
+   any broken restore source.
+2. **Adoption:** any target that became the head or base of a new or open PR, or is in use by a worktree
+   or session, is reported, with a create-if-absent restore command. GitHub refuses that restore if the
+   name exists, so nothing is overwritten; `confirm-restore` then reads the branch back at its ledger
+   commit.
+3. **Record outcomes:** the actual outcome of every row goes in a follow-up docs change.
 
-**The one residual Mason is asked to accept.** A PR, session or checkout could pick a branch up in the
-seconds between its `check` and its delete. Step E detects every such case and restores the branch at the
-same commit. No commit can be lost, because the delete only succeeds at the ledger commit.
+**The residual Mason is asked to accept, stated exactly.** The helper sees PRs on GitHub, worktrees on this
+PC, and the Claude desktop sessions in a list it requires to be under 30 minutes old. It cannot see a Codex
+session, a separate clone or another computer that checks a branch out. It also cannot see a session that
+picks a branch up and drops it again between checks. If one of those happens:
+- **No commit is lost.** The delete succeeds only at the ledger commit, which stays on GitHub as a PR ref or
+  tag and in the local bundle. That person's local copy is untouched.
+- **The cost is small.** At worst, their next push of that branch recreates it, or a PR they opened closes
+  and must be reopened with GitHub's Restore button.
 
-Any work that adopter had already done against the branch is still on their own machine. Every target has
-had no open PR and no new commit since 2026-10-09 at the latest.
+Every target has had no open PR and no new commit since 2026-10-09 at the latest.
 
-**What Mason's approval can and cannot cover.** He can accept a documented residual risk of this cleanup,
-like the one above. His approval does not waive a merge or delivery gate, and no open BLOCKER finding is
-accepted.
+**What Mason's approval can and cannot cover.**
+- **It can** accept a documented residual of this cleanup, like the one above.
+- **It cannot** waive a merge or delivery gate, accept an open BLOCKER, or accept a HIGH finding that names
+  a missing control. Those are fixed before deletion, never accepted.
 
 ## Restoring a branch
 
@@ -413,16 +470,19 @@ Each row gives the branch name, its exact commit, and where that commit lives:
   `refs/pull/<N>/head` and create a branch at the recorded commit.
 - **A tag:** create a branch at that tag.
 
-**Independent fallback, not dependent on GitHub keeping PR refs.** A git bundle of all 185 candidate
-branch tips is at `C:/Users/mason/CRX_branch_archive/2026-10-13-github-branch-cleanup.bundle`, made
-2026-10-13 before any deletion. Its facts:
-- **Size and contents.** It is 8.6 MB, with a manifest next to it, and passes `git bundle verify`.
-- **What it needs.** It omits `main`'s history, so restoring from it needs a repository that already has
-  the 197 prerequisite commits `git bundle verify` lists. All of them are commits on `main` as of
-  `7abd52f6d`, so any full clone of this repository qualifies; a shallow clone may not.
-- **Restore demonstrated 2026-10-13.** In a separate scratch clone holding `main`, all 185 refs were
-  fetched out of the bundle. Every one equals its ledger commit, `git fsck --connectivity-only` passes, and
-  all 18,000 objects unique to those branches are present.
+**Independent fallback, not dependent on GitHub keeping PR refs.** A git bundle of all 185 candidate branch
+tips is at `C:/Users/mason/CRX_branch_archive/2026-10-13-github-branch-cleanup.bundle`, with a manifest
+beside it.
+- **What restoring needs.** It omits `main`'s history, so restoring needs a repository that already has the
+  197 prerequisite commits `git bundle verify` lists. All are commits on `main` as of `7abd52f6d`, so any
+  full clone of this repository qualifies; a shallow clone may not.
+- **Restore proved independently on 2026-10-13.**
+  - In a brand-new empty repository given only `main` at `7abd52f6d` from GitHub, a sample branch commit
+    was confirmed absent beforehand.
+  - The bundle verified.
+  - All 185 refs were fetched from the bundle, each equal to its ledger commit.
+  - `git fsck --connectivity-only` passed.
+  - All 18,000 objects the branches need beyond `main` were present, none missing.
 - **Where it lives.** Only on this PC, so it is a second copy, not an offsite one.
 
 Like the earlier ledgers, this file deliberately carries no copy-paste shell command.

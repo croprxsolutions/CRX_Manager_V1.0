@@ -42,14 +42,18 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   values on the invoice: the retry keeps the unanswered save's key (the database runs saves
   with one key one at a time, so a create is never made twice and a still-running older update
   cannot land after it), then writes the current values onto the invoice under a new key (Luna
-  and CodeRabbit on PR #893). Before, the database could answer
+  and CodeRabbit on PR #893). The follow-up is only for a lost reply: when the server answered
+  with an error (for example a closed accounting period), nothing was saved, so the retry is a
+  plain save with no extra write or extra activity entry (Codex review on PR #893). Before, the database could answer
   the retry with the first attempt's result while the later steps saved the new billing and
   applied info, leaving a mix.
 - The Discount Earned amount is read in exact cents. Anything that is not a plain dollar amount
   with at most two decimal places (`1.005`, `1e2`, `abc`) is refused with a message before
   anything is saved. It was rounded with binary floating point, so `$1.005` became `$1.00`
   (Luna on PR #893), and a first fix read `1e2` as $0 instead of refusing it (Codex P2 on
-  PR #893). Blank, zero or negative still means no discount, as before.
+  PR #893). Blank, zero or negative still means no discount, as before. **Print** and **Email**
+  refuse the same way, so a refused amount is never put on a PDF for the customer as $0 (Codex
+  review on PR #893).
 - If the page cannot tell which customer each saved invoice belongs to, it no longer writes the
   billing details with zero discounts while reporting success: it says the billing details did
   not save and keeps the form unsaved (Codex Sol 6.1 on PR #893; an invoice coming back with a

@@ -470,6 +470,38 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     });
   });
 
+  it.each(['Print', 'Email'])('%s refuses a typed discount that is not a plain dollar amount instead of putting a zero discount on the PDF', async (button) => {
+    // Print and Email build the PDF from the form as typed, before any Save; a refused amount
+    // must not be printed or sent to the customer as $0 (Codex review, PR #893).
+    mockUseParams.mockReturnValue({ id: 'inv-saved' });
+    mockFrom.mockImplementation(
+      makeFromMock({
+        invoices: {
+          data: [{
+            id: 'inv-saved', invoice_number: 'INV-2001', invoice_type: 'field_application', invoice_date: '2026-09-15',
+            season: 2026, header_notes: '', status: 'draft', application_service_id: null, invoice_group_id: null,
+            customer_id: 'cust-A', total_amount_cents: 100000, discount_earned_cents: null,
+          }],
+        },
+        field_app_locations: { data: [] },
+        invoice_items: { data: [] },
+        invoice_shares: { data: [] },
+      }),
+    );
+    await renderPage();
+    await screen.findByText(/Field Application INV-2001/);
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    await waitFor(() =>
+      expect(mockRpc.mock.calls.some((c) => c[0] === 'derive_customer_shares_from_fields')).toBe(true),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Preview$/i }));
+    fireEvent.change(await screen.findByTitle(/Early-pay discount earned/i), { target: { value: '1e2' } });
+
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${button}$`) }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Discount Earned must be a plain dollar amount such as 25.00, with no more than two decimal places.');
+  });
+
   // The transaction date decides the SEASON, and the season selects the
   // customer_application_rates row — so it changes the PRICE exactly as much as locations,
   // chemicals and the service selector do, all of which already invalidate the preview.

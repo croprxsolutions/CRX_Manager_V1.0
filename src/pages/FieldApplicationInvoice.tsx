@@ -163,6 +163,15 @@ type CreatedInvoiceCheck =
   | { state: 'opening'; id: string; invoiceNumber: string | null }
   | { state: 'unavailable'; invoiceNumber: string | null; deleted: boolean };
 
+/**
+ * True when the server answered with an error: PostgREST/PostgreSQL ran the call (or refused it)
+ * and rolled it back, so nothing was saved under its key. An error with no code (a network
+ * failure, a lost reply) is NOT definitive: the call may have committed.
+ */
+function isDefinitiveRpcError(error: { code?: string | null } | null | undefined): boolean {
+  return !!error?.code;
+}
+
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'locations', label: 'Locations', icon: <MapPin className="w-4 h-4" /> },
   { key: 'chemicals', label: 'Chemicals/Charges', icon: <FlaskConical className="w-4 h-4" /> },
@@ -590,6 +599,15 @@ export default function FieldApplicationInvoice() {
     setCreatedCheck({ state: 'none' });
     skipUnsavedPromptRef.current = true;
     navigate({ search: '' }, { replace: true });
+  };
+
+  // A typed Discount Earned that is not a plain dollar amount. Save, Print and Email all refuse
+  // while one is on screen, so a refused amount never becomes a silent $0 on a saved invoice or
+  // on a PDF sent to the customer (Codex review, PR #893).
+  const discountInputRefused = (): boolean => {
+    if (!Object.values(discountByCustomer).some((entry) => parseDiscountEarnedCents(entry.dollars) === null)) return false;
+    toast('error', DISCOUNT_EARNED_INPUT_MESSAGE);
+    return true;
   };
 
   // True from the moment a Save starts until it has finished, set before anything awaits, so
@@ -1778,10 +1796,7 @@ export default function FieldApplicationInvoice() {
       toast('error', 'Enter a valid diluent / carrier-water rate (a number 0 or greater, gal/acre), or leave it blank.');
       return;
     }
-    if (Object.values(discountByCustomer).some((entry) => parseDiscountEarnedCents(entry.dollars) === null)) {
-      toast('error', DISCOUNT_EARNED_INPUT_MESSAGE);
-      return;
-    }
+    if (discountInputRefused()) return;
     // The invoice this save writes to: the routed one, or the one an earlier Save on this
     // still-/new page already created. Only when neither exists does the save CREATE.
     const targetInvoiceId = id || createdInvoiceIdRef.current;
@@ -1855,7 +1870,12 @@ export default function FieldApplicationInvoice() {
         p_idempotency_key: key,
       });
 
-      if (error) throw error;
+      if (error) {
+        // The server refused it (rolled back, no receipt): a retry under this key is a fresh
+        // save, not a replay, so it needs no follow-up write (Codex review, PR #893).
+        if (isDefinitiveRpcError(error)) unansweredSaveRef.current = null;
+        throw error;
+      }
       let result = assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');
       saveIdem.resetKey();
       unansweredSaveRef.current = null;
@@ -1881,7 +1901,10 @@ export default function FieldApplicationInvoice() {
           ...saveArgs,
           p_idempotency_key: followUpKey,
         });
-        if (followUp.error) throw followUp.error;
+        if (followUp.error) {
+          if (isDefinitiveRpcError(followUp.error)) unansweredSaveRef.current = null;
+          throw followUp.error;
+        }
         result = assertRpcResult<FieldAppInvoiceResult>(followUp.data, 'save_field_app_invoice');
         saveIdem.resetKey();
         unansweredSaveRef.current = null;
@@ -2037,6 +2060,9 @@ export default function FieldApplicationInvoice() {
                 level: 'error',
                 extra: { context: 'field_app_invoice_billing_persist', invoice_ids: ids },
               });
+              // Refused by the server: nothing was stored under this key, so the next retry is a
+              // fresh write and needs no follow-up.
+              if (isDefinitiveRpcError(billingResult.error)) delete billingKeysRef.current[billingKeyId];
               return false;
             }
             assertRpcResult(billingResult.data, 'update_field_app_invoice_billing');
@@ -2452,6 +2478,7 @@ export default function FieldApplicationInvoice() {
       toast('error', 'Save the invoice before printing.');
       return;
     }
+    if (discountInputRefused()) return;
     setPrinting(true);
     try {
       const pdfData = await buildEditorPdfData(format);
@@ -2484,6 +2511,7 @@ export default function FieldApplicationInvoice() {
       toast('info', 'This $0 invoice is recorded and shown in the account summary, but is not emailed.');
       return;
     }
+    if (discountInputRefused()) return;
     await runCriticalAction({
       action: async () => {
         const { data: cust } = await supabase

@@ -354,6 +354,29 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
   });
 
+  it('a create the server refused, retried with changed values, is saved once with no follow-up write', async () => {
+    // A refusal (an error with a code, e.g. a closed accounting period) rolled back and stored
+    // nothing under the key, so the retry is a fresh save, not a replay: a follow-up would save
+    // everything twice and log a false extra update (Codex review, PR #893).
+    let createCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        createCalls += 1;
+        if (createCalls === 1) return Promise.resolve({ data: null, error: { message: 'Accounting period is closed', code: 'P0001' } });
+        return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice created'));
+    expect(saveCalls()).toHaveLength(2);
+  });
+
   it('a create retried with the same values after no answer is sent once more with the same key, and nothing else', async () => {
     let createCalls = 0;
     mockRpc.mockImplementation((name: string) => {

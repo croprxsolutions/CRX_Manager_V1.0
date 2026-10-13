@@ -208,25 +208,31 @@ export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(promp
 
 const textOf = (content) => (typeof content === "string" ? content
   : Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join("\n") : "");
-// A message Mason sent: a main-thread user entry carrying text. Tool results carry
-// none, and isMeta entries are text Claude Code adds itself.
-const isOwnerMessage = (e) => e?.type === "user" && !e.isSidechain && !e.isMeta && textOf(e.message?.content) !== "";
+// A message Mason sent: any main-thread user entry that is not purely tool
+// results and not text Claude Code adds itself (isMeta). An image-only message
+// counts too, so the scan never reaches past it (Luna BLOCKER, round 1).
+const isOwnerMessage = (e) => e?.type === "user" && !e.isSidechain && !e.isMeta &&
+  (typeof e.message?.content === "string" ||
+    (Array.isArray(e.message?.content) && e.message.content.some((b) => b?.type !== "tool_result")));
+const DAMAGED = Symbol("damaged transcript line");
 
 /**
  * What the agent showed Mason in its last turn: the text of every main-thread
  * assistant message after the message he sent before this one, read from the
  * session transcript Claude Code hands the hook. His current message may or may
- * not be written yet; when it is, it is skipped. Only the transcript's tail is
- * read; a turn longer than that yields only its end, which can only refuse more.
- * Throws when the transcript cannot be read, so a plain reply then approves nothing.
+ * not be written yet; when it is, it is skipped. Throws, so a plain reply then
+ * approves nothing, when the transcript cannot be read, when a damaged line
+ * (other than the last, which may still be being written) lies inside the turn,
+ * or when the turn starts before the tail that was read (Luna round 1).
  */
-export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 8 * 1024 * 1024 } = {}) {
+export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024 } = {}) {
   if (typeof transcriptPath !== "string" || !transcriptPath) throw new Error("the message carried no transcript");
   const fd = openSync(transcriptPath, "r");
   let raw;
+  let start;
   try {
     const size = fstatSync(fd).size;
-    const start = Math.max(0, size - maxBytes);
+    start = Math.max(0, size - maxBytes);
     const buf = Buffer.alloc(size - start);
     let got = 0;
     while (got < buf.length) {
@@ -239,21 +245,24 @@ export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 8 
   } finally {
     closeSync(fd);
   }
-  const entries = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    try { entries.push(JSON.parse(line)); } catch { /* a line still being written */ }
-  }
+  const lines = raw.split("\n").filter((l) => l.trim());
+  const entries = lines.map((line, i) => {
+    try { return JSON.parse(line); }
+    catch { return i === lines.length - 1 ? null : DAMAGED; } // only the last line may be half-written
+  });
   const said = [];
   let sawAgent = false;
   let skippedCurrent = false;
+  let reachedPrevious = false;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
+    if (e === DAMAGED) throw new Error("a damaged transcript line lies inside the agent's last turn");
     if (isOwnerMessage(e)) {
       if (!sawAgent && !skippedCurrent && textOf(e.message.content).trim() === String(currentPrompt ?? "").trim()) {
         skippedCurrent = true;
         continue;
       }
+      reachedPrevious = true;
       break;
     }
     if (e?.type === "assistant" && !e.isSidechain) {
@@ -262,6 +271,9 @@ export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 8 
       if (t) said.unshift(t);
     }
   }
+  // Without Mason's previous message in the part read, the turn may start earlier
+  // and hold a request that was not seen, so nothing can be concluded.
+  if (!reachedPrevious && start > 0) throw new Error("the agent's last turn is longer than the part of the transcript read");
   return said.join("\n");
 }
 
@@ -296,7 +308,9 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
   let shownText;
   try { shownText = String(readShown() ?? ""); }
   catch (e) { return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` }; }
-  const shown = [...live].filter((c) => new RegExp(`(?<!\\d)${c}(?!\\d)`).test(shownText));
+  // Shown means labelled as the request's reference ("Reference 482913", markdown
+  // allowed between), not the same six digits inside some other number (Luna HIGH).
+  const shown = [...live].filter((c) => new RegExp(`\\breference\\b[^0-9A-Za-z\\n]{0,6}${c}(?![0-9A-Za-z])`, "i").test(shownText));
   if (!shown.length) return { ok: false, reason: "the agent's message just before it did not show the approval request (its reference number), so it may have been about something else" };
   if (shown.length > 1) return { ok: false, reason: `the agent's last message showed ${shown.length} requests (${shown.join(", ")}), so it is ambiguous` };
   return { ok: true, code: shown[0] };

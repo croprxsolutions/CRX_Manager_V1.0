@@ -414,9 +414,17 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "text Claude Code adds itself does not end the agent's turn");
     ok(!has(turn([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), agentSaid("Recorded."), masonSaid("I approve")])),
       "repeating the reply does not reach back past the previous one");
-    ok(has(turn([masonSaid("fix it"), "not json", agentSaid(SHOWN), "{\"type\":\"assist"])), "damaged and half-written lines are skipped");
-    ok(turn([masonSaid("fix it"), agentSaid(SHOWN), agentSaid("y".repeat(5000))], { maxBytes: 200 }) === "",
-      "a turn longer than the read window yields only its end, which here holds no request");
+    ok(has(turn([masonSaid("fix it"), agentSaid(SHOWN), "{\"type\":\"assist"])), "a half-written last line is skipped");
+    assert.throws(() => turn([masonSaid("fix it"), agentSaid(SHOWN), "not json", agentSaid("Done.")]), /damaged/,
+      "a damaged line inside the turn (it could be one of Mason's messages) refuses (Luna BLOCKER, round 1)"); pass++;
+    ok(has(turn(["not json", masonSaid("fix it"), agentSaid(SHOWN)])), "a damaged line before Mason's previous message does not matter");
+    ok(!has(turn([masonSaid("fix it"), agentSaid(SHOWN), T("user", [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } }]),
+      agentSaid("That screenshot shows the invoice list.")])),
+      "an image-only message from Mason ends the turn like any other message (Luna BLOCKER, round 1)");
+    assert.throws(() => turn([masonSaid("fix it"), agentSaid(SHOWN), agentSaid("y".repeat(5000))], { maxBytes: 200 }), /longer than/,
+      "a turn that starts before the part read refuses: an earlier request could be hidden there (Luna HIGH, round 1)"); pass++;
+    ok(has(turn([agentSaid("x".repeat(5000)), masonSaid("fix it"), agentSaid(SHOWN)], { maxBytes: 600 })),
+      "a long transcript is fine when Mason's previous message is inside the part read");
     assert.throws(() => lastAgentTurnText(path.join(tdir, "missing.jsonl"), "I approve"), "a missing transcript throws"); pass++;
     assert.throws(() => lastAgentTurnText(undefined, "I approve"), /no transcript/, "no transcript path throws"); pass++;
 
@@ -433,6 +441,12 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     refuses(resolve("Sure, merging the pull request now."), "did not show the approval request",
       "\"I approve\" after a message about something else approves nothing");
     refuses(resolve("Invoice 15353531 is ready."), "did not show the approval request", "the reference must be a whole number, not part of a longer one");
+    refuses(resolve("Lot 901-535353-4 is in stock."), "did not show the approval request",
+      "the same six digits inside another identifier are not the reference (Luna HIGH, round 1)");
+    refuses(resolve("Order 535353 shipped."), "did not show the approval request", "the digits alone, without the Reference label, do not count");
+    refuses(resolve("Reference 5353531"), "did not show the approval request", "a longer number after the label does not count");
+    ok(resolve("**Reference:** 535353").ok && resolve("(Reference: 535353.)").ok && resolve("reference 535353").ok,
+      "the Reference label survives the agent's markdown and punctuation");
     refuses(resolve("", { readShown: () => { throw new Error("EACCES"); } }), "could not be read", "an unreadable transcript approves nothing");
     const one = resolve(SHOWN.replace(base.code, "535353"));
     ok(one.ok && one.code === "535353", `the request shown just before is the one approved: ${one.reason}`);

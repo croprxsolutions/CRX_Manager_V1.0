@@ -407,6 +407,13 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     ok(has(last([masonSaid("fix it"), agentSaid(SHOWN)])), "the agent's last message is read before Mason's reply is written");
     ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), T("attachment", "hook output")])),
       "Mason's current message, once written, is skipped");
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", [{ type: "text", text: "I approve" }])])),
+      "Mason's current message written as a text block is skipped too");
+    for (const extra of [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } },
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: "AA==" } }]) {
+      assert.throws(() => last([masonSaid("fix it"), agentSaid(SHOWN), T("user", [{ type: "text", text: "I approve" }, extra])]), /picture or file/,
+        `"I approve" sent with a ${extra.type} is not those words alone, so it refuses (Codex P1, PR #900)`); pass++;
+    }
     {
       const t = last([masonSaid("fix it"), A([{ type: "thinking", thinking: "x" }], "m1"), agentSaid("Approve this ONE change:", "m1"),
         agentSaid(`(Reference ${base.code}.)`, "m1"), agentRan("m1")]);
@@ -613,6 +620,10 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "\"I approve\" answering a different question approves nothing and says so");
     ok(run("prompt-router.mjs", "I approve", SID).includes("could not be read") && existsSync(path.join(dir, requestFileName("515151"))),
       "\"I approve\" with no transcript approves nothing (fail closed)");
+    const withPicture = run("prompt-router.mjs", "I approve", SID, tx([masonSaid("fix it"), agentSaid(shown2),
+      T("user", [{ type: "text", text: "I approve" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } }])]));
+    ok(withPicture.includes("OWNER APPROVAL NOT RECORDED") && withPicture.includes("picture or file") && existsSync(path.join(dir, requestFileName("515151"))),
+      `"I approve" sent with a picture approves nothing and says why (Codex P1, PR #900): ${withPicture}`);
     ok(run("prompt-router.mjs", "I approve", OTHER_SID, tx([masonSaid("fix it"), agentSaid(shown2)])) === "" &&
       existsSync(path.join(dir, requestFileName("515151"))), "\"I approve\" in another conversation sharing the folder approves nothing");
     const plainSaid = run("prompt-router.mjs", "I approve.", SID, tx([masonSaid("fix it"), agentSaid(shown2), masonSaid("I approve.")]));

@@ -208,6 +208,7 @@ export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(promp
 
 const textOf = (content) => (typeof content === "string" ? content
   : Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join("\n") : "");
+const isTextOnly = (content) => typeof content === "string" || (Array.isArray(content) && content.every((b) => b?.type === "text"));
 // The bookkeeping records Claude Code writes after every turn and around each
 // message (measured on a real session transcript, 2026-10-13). Nothing in them is
 // shown to Mason as something to answer. Any OTHER entry between the agent's
@@ -302,9 +303,12 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
       if (t) said.unshift(t);
       continue;
     }
-    // Mason's current message, when it is already written, is the one entry skipped.
+    // Mason's current message, when it is already written, is the one entry skipped,
+    // and only when it is those words alone: a picture or file sent with "I approve"
+    // could be about something else, so it refuses (Codex P1, PR #900).
     if (!sawAgent && !skippedCurrent && e?.type === "user" && !e.isMeta &&
       textOf(e.message?.content).trim() === String(currentPrompt ?? "").trim()) {
+      if (!isTextOnly(e.message?.content)) throw new Error("his reply carried a picture or file as well as the words, so it was not those words alone");
       skippedCurrent = true;
       continue;
     }

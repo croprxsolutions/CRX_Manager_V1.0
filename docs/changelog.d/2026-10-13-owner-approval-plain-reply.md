@@ -28,7 +28,8 @@ no longer types anything but the approval.
     - Only messages the model wrote count; `isMeta`, API-error and `<synthetic>` assistant entries
       never do (Luna round 3).
     - Tool output, subagent text and Claude Code's own `isMeta` entries do not count.
-    - His current message is skipped whether or not it has been written yet.
+    - His current message is skipped whether or not it has been written yet. When it is written, it
+      must be those words alone: "I approve" sent with a picture or file refuses (Codex P1 on the PR).
     - It throws, so nothing is approved, when the transcript is unreadable, when any damaged or
       half-written line lies in what is scanned, when an assistant entry has no message id, or when
       the message's start is not in the part read (Luna rounds 1-2).
@@ -64,12 +65,16 @@ no longer types anything but the approval.
 - Unchanged from 2026-10-09: an agent that deliberately fakes the approval is not stopped.
 - New and small: if an agent shows a request and also asks something else in the same message,
   "I approve" approves the request. The scripts tell agents never to bundle.
+- New and small: Claude Code runs the hook before it writes Mason's message to the transcript
+  (measured on a real session transcript, 2026-10-13), and the hook reads only the typed words from
+  its input. So a picture or file sent with "I approve" is refused only when the message is already
+  written; otherwise the approval still binds to the one request the agent showed just before.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 270 assertions (151 before). They cover:
+- `owner-approval-lib.test.mjs`: 274 assertions (151 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
-    an image-only message, damaged and half-written lines, a turn longer than the part read, a missing file;
+    an image-only message, "I approve" sent with a picture or file, damaged and half-written lines, a turn longer than the part read, a missing file;
   - the reference label: digits inside another number or identifier, or without the label, do not count;
   - which request is chosen;
   - the hook as a real process through `prompt-router.mjs`, including "I approve" answering another

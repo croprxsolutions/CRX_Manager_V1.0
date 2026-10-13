@@ -1,4 +1,4 @@
-## 2026-10-13 - GitHub branch cleanup audit: 191 branches measured, Sol 6.1 reviewed, records rescued before deletion
+## 2026-10-13 - GitHub branch cleanup audit: 191 branches inventoried, 185 audited, Sol 6.1 reviewed, records rescued before deletion
 
 Documentation only; nothing was deleted and no code or database changed.
 
@@ -48,7 +48,8 @@ This PR rescues or corrects:
   - The 2026-08-27 ingredient identity model D-AA.
   - The 2026-09-01 return-credit split entry, marked superseded by #544's close.
 - **`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`**: PR #507's Revisions 12-13, merged in
-  unchanged (a clean three-way merge), plus that PR's changelog fragment.
+  by a clean three-way merge with one qualifier added at review (the first concurrency criterion now
+  requires the same CAS), plus that PR's changelog fragment.
 - **`docs/manual/KNOWN_ISSUES.md`**, new OPEN entries:
   - Two latent quote bugs (re-save refusal; Convert to Order leaving an accepted quote with no order) and a
     display-only quote cost difference, all traced on `main`. Plus the `quote_sections` grants (verified
@@ -63,7 +64,7 @@ This PR rescues or corrects:
   repointed to PR #591.
 
 Proof observed:
-- every branch got exactly one verdict;
+- every in-scope branch (185) got exactly one verdict;
 - 59 cited successor PRs confirmed MERGED;
 - every branch re-measured at `7abd52f6d` after #893 moved `main`;
 - four PR refs fetched back to their exact branch tips;

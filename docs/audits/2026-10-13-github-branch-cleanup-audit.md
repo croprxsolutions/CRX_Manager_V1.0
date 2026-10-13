@@ -45,8 +45,8 @@ The run was validated: exit 0, the end-of-packet canary echoed, exactly one verd
 |---|---|
 | HIGH: `audit-brace-expansion-fast-uri` is checked out at `C:/CRX_mergeperm` | Moved to KEEP |
 | HIGH: F3's "branch stays until" condition was not discharged | `control-file-coverage-a41c` moved to Mason's call; KNOWN_ISSUES restored to say the branch stays |
-| HIGH: product-plan rescue was only a pointer | Revisions 12-13 merged into the plan itself (clean three-way merge, no conflicts) |
-| HIGH: check-then-delete race could lose a newly pushed commit | Deletion now uses one atomic GitHub `updateRefs` call per branch that deletes ONLY if the branch still points at the ledger commit (and creates its tag in the same call) |
+| HIGH: product-plan rescue was only a pointer | Revisions 12-13 merged into the plan itself (clean three-way merge, no conflicts; one qualifier added later at CodeRabbit's request) |
+| HIGH: check-then-delete race could lose a newly pushed commit | Deletion now uses one atomic GitHub `updateRefs` call per branch that deletes ONLY if the branch still points at the ledger commit (round 2 moved tag creation to an ordinary push, so `updateRefs` only deletes) |
 | HIGH: no fresh PR check right before deletion | Procedure re-reads every PR (all states, as head AND base) immediately before each batch |
 | MED: D-AA, pricing and below-cost text lost precision | Rewritten from the source: CAS backfills go through the D-I queue, no-signal rows stay visibly separate, D-AA-4 marked "settled technically"; the no-backfill boundary is "issued before the apply"; the below-cost wall's locked-cost, whole-surface and fail-closed rules restored; clawback kept as settled |
 | MED: "clawback not built" rested on a keyword search | Replaced by a full trace of the live catalog and `main` (no function, trigger, view, job or app code touches commission on a return; `commission_amount >= 0` forbids a negative row) |

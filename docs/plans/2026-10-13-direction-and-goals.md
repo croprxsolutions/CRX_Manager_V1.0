@@ -60,7 +60,7 @@ That means every quote, order, delivery, invoice and payment for the season live
 
 ## 5. Goals, in order
 
-Each goal has a plain test for "done". Sizes are rough agent-build estimates, not promises. Goals that touch different code can run at the same time.
+Each goal has a plain test for "done". That test is the **minimum**: each goal's own pull request turns it into exact test cases, covering every role, path and failure case it touches, and those are reviewed with the code. Sizes are rough agent-build estimates, not promises. Goals that touch different code can run at the same time.
 
 ### Phase A: Build
 
@@ -81,9 +81,9 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - Let reps find any customer when invoicing. Today a rep can only see customers assigned to them (the `customers_select` access rule, confirmed live 2026-10-13). How far reps' access to customer records widens is decided with Mason and built in the Goal 2 change. That change records the decision in its own PR and `DECISION_LOG.md` entry.
 - Let reps email that invoice too. Today the invoice page finds the recipient through the same rep-filtered customer list.
 
-**Done when:** a rep account, live:
-- finds a customer with no assigned rep when invoicing;
-- saves, posts and emails an invoice to them;
+**Done when:** a rep account, live, does all of the following for two customers, one with no assigned rep and one assigned to a different rep:
+- finds the customer when invoicing;
+- saves, posts and emails both a single invoice and an invoice group (split invoice) to them;
 - is refused when naming someone else as salesperson.
 
 #### Goal 3: Billing you can trust (about 2–4 weeks)
@@ -105,7 +105,8 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 - List pages get real paging and search.
 
 **Done when:** with test data past the old limits (for example 5,000 invoices):
-- every report total and integrity check matches a direct database count;
+- every money total matches a database sum to the exact cent;
+- every record-based integrity check matches a direct database count;
 - picker search finds records beyond the old limits;
 - list paging and search reach every record.
 
@@ -132,6 +133,7 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 **Done when:**
 - a full test month of invoices, payments **and credits** lands in QuickBooks Desktop matching CRX to the cent;
 - a real **card** payment and a real **ACH** payment each settle end to end;
+- a pending payment and a failed or declined one each leave the invoice unpaid, with its balance unchanged, until the processor confirms settlement;
 - the cut-over plan is written.
 
 #### Goal 8: Spend on product, not process (ongoing; reviewed monthly through handoff, not a Phase A gate)

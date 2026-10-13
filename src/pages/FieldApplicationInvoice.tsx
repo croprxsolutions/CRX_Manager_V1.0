@@ -1836,14 +1836,15 @@ export default function FieldApplicationInvoice() {
       };
       const fingerprint = JSON.stringify(saveArgs);
       const unanswered = unansweredSaveRef.current;
-      // An update with changed values gets a new key: it replaces the invoice's contents, so
-      // applying the newer values is right whether or not the unanswered one landed.
-      if (!creating && unanswered && unanswered.fingerprint !== fingerprint) saveIdem.resetKey();
+      // A retry keeps the unanswered save's key: the database runs saves with one key one at a
+      // time (check_idempotency's advisory lock), so the first attempt has certainly finished
+      // when this one answers, and a create can never be made twice. A new key instead could
+      // create a second invoice, or let a still-running older update land AFTER this one and
+      // put the old values back (CodeRabbit, PR #893). But if the values changed since that
+      // save, its answer may be the first attempt's result with the OLD values: the current
+      // ones are written over it right after, under a new key.
       const key = saveIdem.getKey();
-      // A create keeps its key (a new one could create a second invoice), so if the values
-      // changed since the unanswered create, its answer may be that create's invoice with the
-      // OLD values: those are written over it with the current ones right after.
-      const createMayReplayOldValues = creating && unanswered?.key === key && unanswered.fingerprint !== fingerprint;
+      const retryMayReplayOldValues = unanswered?.key === key && unanswered.fingerprint !== fingerprint;
       if (unanswered?.key !== key) unansweredSaveRef.current = { key, fingerprint };
       const { data, error } = await supabase.rpc('save_field_app_invoice', {
         // save_field_app_invoice accepts NULL p_invoice_id to create a new
@@ -1870,11 +1871,12 @@ export default function FieldApplicationInvoice() {
           navigate({ search: createdInvoiceAddressSearch(ids[0]) }, { replace: true });
         }
       }
-      if (createMayReplayOldValues && ids[0]) {
+      const replayedInvoiceId = targetInvoiceId || ids[0];
+      if (retryMayReplayOldValues && replayedInvoiceId) {
         const followUpKey = saveIdem.getKey();
         unansweredSaveRef.current = { key: followUpKey, fingerprint };
         const followUp = await supabase.rpc('save_field_app_invoice', {
-          p_invoice_id: ids[0],
+          p_invoice_id: replayedInvoiceId,
           ...saveArgs,
           p_idempotency_key: followUpKey,
         });

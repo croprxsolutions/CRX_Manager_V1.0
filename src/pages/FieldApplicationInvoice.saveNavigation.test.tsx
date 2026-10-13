@@ -369,9 +369,10 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(saveKey(1)).toBe(saveKey(0));
   });
 
-  it('an update retried with changed values after no answer gets a new key; an unchanged retry keeps it', async () => {
-    // An update replaces the invoice's contents, so the newer values must be applied rather
-    // than answered with the first attempt's stored result (Luna, PR #893).
+  it('an update retried with changed values after no answer keeps its key, then writes the current values', async () => {
+    // The newer values must be applied rather than answered with the first attempt's stored
+    // result (Luna, PR #893), but only once that attempt has finished: a new key straight away
+    // would let a still-running older update land after it (CodeRabbit, PR #893).
     let saves = 0;
     mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
       if (name === 'save_field_app_invoice') {
@@ -394,12 +395,15 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(saveKey(2)).toBe(saveKey(1));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled());
 
-    // Changed values: a new key.
+    // Changed values: the unanswered key first, then the current values under a new key.
     editHeaderNotes('Spray south field instead');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(saveCalls()).toHaveLength(4));
+    await waitFor(() => expect(saveCalls()).toHaveLength(5));
     expect(savedInvoiceId(3)).toBe(CREATED_ID);
-    expect(saveKey(3)).not.toBe(saveKey(1));
+    expect(saveKey(3)).toBe(saveKey(1));
+    expect(savedInvoiceId(4)).toBe(CREATED_ID);
+    expect(saveKey(4)).not.toBe(saveKey(1));
+    expect((saveCalls()[4][1] as { p_invoice: { header_notes: string } }).p_invoice.header_notes).toBe('Spray south field instead');
   });
 
   it('two Save clicks before the page re-renders send one create', async () => {

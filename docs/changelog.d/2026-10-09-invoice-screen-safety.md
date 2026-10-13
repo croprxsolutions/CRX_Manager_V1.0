@@ -35,9 +35,10 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   the retry uses a new repeat-protection key, so the change is written instead of the server
   answering with its first result; an unchanged retry keeps the key (Codex Sol on PR #893).
 - A Save that got no answer and is retried with **changed** values no longer keeps the old
-  values on the invoice: a retried create keeps its key (so it never creates a second invoice)
-  and then writes the current values onto the invoice it returns; a retried update gets a new
-  key so the current values are applied (Luna on PR #893). Before, the database could answer
+  values on the invoice: the retry keeps the unanswered save's key (the database runs saves
+  with one key one at a time, so a create is never made twice and a still-running older update
+  cannot land after it), then writes the current values onto the invoice under a new key (Luna
+  and CodeRabbit on PR #893). Before, the database could answer
   the retry with the first attempt's result while the later steps saved the new billing and
   applied info, leaving a mix.
 - The Discount Earned amount is read in exact cents. Anything that is not a plain dollar amount

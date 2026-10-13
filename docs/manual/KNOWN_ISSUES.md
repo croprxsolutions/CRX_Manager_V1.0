@@ -63,9 +63,10 @@ refusal would hit the first time someone edits a saved quote into that shape. **
 sends each saved line's `id`, sends a `client_key` on every new line, and installs the `item_ids` mapping
 the RPC returns (client key to new id), so the next save can name every line. Identity rule from the same
 reference fix: swapping a line to a different product clears its saved `id` (it becomes a new line at
-today's cost), while re-picking the same product keeps it. The only implementation is
-on PR #397's branch (`QuoteBuilder.tsx` about lines 1586-1666); it predates months of `main` changes, so
-re-derive it rather than cherry-pick. Fix it before quoting is used for real.
+today's cost), while re-picking the same product keeps it. The reference implementation is commit
+`dec5d3378`, carried on both PR #350's and PR #397's branches (`QuoteBuilder.tsx` about lines 1586-1666);
+it predates months of `main` changes, so re-derive it rather than cherry-pick. Fix it before quoting is
+used for real.
 
 **Convert to Order marks the quote accepted before the order exists (MED, latent; flagged by the branch
 reviews, traced on `main` 2026-10-13).** `executeConvertToOrder` commits `save_quote` with status
@@ -78,8 +79,11 @@ cancels the second below-cost reason prompt returns silently (`:3132-3134`). Res
 as converted, no order, and stock that was held for a planned booking now neither held nor pre-booked.
 Recovery: Convert stays available on accepted quotes (`:597`) and the RPC creates the missing order on
 retry. **Fix shape:** save without changing the status and let `convert_quote_to_order` flip it to
-`accepted` inside the same transaction that creates the order (it already sets it). Same exposure as
-above: 4 idle quotes today.
+`accepted` inside the same transaction that creates the order (it already sets it). **Live state
+2026-10-13 (read-only):** one of the 4 quotes is `accepted` with no order. It belongs to a real customer,
+was last updated 2026-07-19, has 3 lines, and has never had an inventory hold. That shape matches this
+bug, but it may also have been accepted by hand; the record is identified in the live database, not
+named here. Whether that customer still expects an order is a question for Mason.
 
 **The quote screen shows profit from today's product cost (LOW, display only).** QuoteBuilder's own
 `recalcItem` (`QuoteBuilder.tsx:1337`; the copy in `src/lib/quoteCalc.ts` is used only by tests) replaces
@@ -203,7 +207,10 @@ else on `main`. None blocks anything; they are here so they are not lost. Each s
   the same delete when the batch also contains `SELECT '[E2E]';`. PR #639 had scoped the marker to its own
   statement; that change never landed. `main` mentioned this only in two 2026-08-08 audit documents
   (`docs/audits/2026-08-08-crx-harness-permissions-audit.md`, `…-permissions-overhaul-handoff.md`), not
-  as an open item. It reaches irreversible live-data deletes, so it meets Mason's 2026-10-02 bar.
+  as an open item. It reaches irreversible live-data deletes, so it meets Mason's 2026-10-02 bar. PR #639's
+  other unlanded change made `isClearlyReadOnlySql` hold under both readings of a backslash in a string;
+  per its reviewer, on `main` that matters only in a database session with `standard_conforming_strings`
+  turned off, which is not the default (reported, not re-measured).
 - **Local hooks do not inspect GitHub GraphQL ref updates.** Measured the same way: a
   `gh api graphql … updateRefs` mutation passes every Bash hook, even one aimed at `refs/heads/main`. The
   boundary for `main` is GitHub's server-side `protect-main` ruleset (rules read 2026-10-13: deletion,

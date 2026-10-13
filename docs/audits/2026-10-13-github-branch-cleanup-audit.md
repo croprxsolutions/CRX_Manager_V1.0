@@ -1,6 +1,6 @@
 # GitHub branch cleanup audit and restore ledger (2026-10-13)
 
-**Status: REPORT, revised after two rounds of independent review. Nothing has been deleted.** Mason asked on
+**Status: REPORT, revised after three rounds of independent review. Nothing has been deleted.** Mason asked on
 2026-10-13 to "analyze all our branches we have in github … remove what is useless and cleanup", then to
 have Codex Sol 6.1 review the proposal before anything happens. Every measurement behind this document
 was read-only. Branch deletion is a hard-gated action (`AGENTS.md`), so the deletions below wait for
@@ -13,7 +13,7 @@ Mason's explicit yes in the conversation. When they run, this file is the restor
   deleted, 6 stay for now, and 2 need Mason's call.**
 - **Nothing is lost by deleting the 177.** Each one's work either merged under a later PR (most are
   "delivery laps": a PR closed and reopened as a fresh branch until one merged), was deliberately
-  dropped by a Mason decision, or was made obsolete by `main`. 160 can go after Mason's yes; 17 wait
+  dropped by a Mason decision, or was made obsolete by `main`. 159 can go after Mason's yes; 18 wait
   until this PR merges, because this PR rescues or repoints something on them.
 - **Every deleted branch stays restorable.** 164 tips are the final commit of their PR, which GitHub
   keeps as `refs/pull/<N>/head` (fetching four of them back, from July to October, returned exactly the
@@ -103,6 +103,35 @@ This revision addresses them:
 - **pr364.** The pr364 branch could also be retired later by an approved swap to an archive tag plus a
   `KNOWN_ISSUES.md` repoint, without declining its protections; that is not proposed here.
 
+**Round 3** (a 1,028 KB packet adding the round-2 text) returned **BLOCK, 18 open**:
+- **Still open from round 2:** 10 items, three of them HIGH (N1, N4, N5).
+- **New:** 8 findings, one HIGH (R3-1).
+
+Sol judged several choices acceptable for Mason to approve:
+- keeping the six protected branches;
+- tagging the frozen PR #432 backup instead of keeping it as a branch;
+- recording, not redesigning, the product plan's open questions;
+- keeping historical narratives that carry explicit corrections;
+- a local-only bundle, once recovery is shown.
+
+This revision answers the rest:
+
+| Round-3 finding | What changed |
+|---|---|
+| HIGH R3-1: the per-branch checks did not say "refuse" | The written procedure and the script refuse on an open head/base PR, a checkout, a session, a moved tip, a broken restore source, or any lookup that fails |
+| HIGH N4: execution not bound to the approved ledger | The script reads the ledger only from the commit Mason approves and refuses if the published ledger differs from it byte for byte |
+| HIGH N5: "PR merged" too loose for the 18 | The script requires #901 merged at exactly the approved commit, APPROVED, every check green, and each branch's rescue marker present on `main` |
+| HIGH N1: the post-batch sweep covered only PRs | The sweep also checks worktrees and active sessions, and restores create-if-absent; the remaining seconds-long window is stated as the one residual |
+| MED R3-2: the newly rescued #639 finding was in the first batch | `claude/live-data-guard-comment-aware` moved to "after this PR" (now 159 and 18) |
+| MED R3-3, R1-33: bundle prerequisites and recovery unproven | Recovery demonstrated in a separate clone (185/185 refs, 18,000 objects, 0 missing); the 197 prerequisite commits are named as `main` history |
+| MED R3-4: restore could overwrite a recreated branch | Restore is create-if-absent; a collision is reported, never overwritten |
+| MED R3-5: no reviewable script | The script and its baseline are in the review packet and are the exact files that will run |
+| MED R3-6: quote exposure overstated | Checked live: one real customer's quote is accepted with no order (since 2026-07-19, never held stock); recorded, and the assurance removed |
+| MED N6, N7, R1-34 | Approval limits stated; the refresh rule also catches new references on `main`; the first deletion runs alone as a canary |
+| MED R1-36: incomplete per-file dispositions | Containment proof added (99 of 177 deletion tips are inside a merged PR's head); the round-4 packet lists every changed file for the other 78 |
+| MED R1-20 | PR #639's backslash caveat recorded |
+| LOW R3-7, R3-8, R1-26 | The quote fix's reference commit `dec5d3378` is named on both branches; the recovered August changelog note now says it is recovered; the changelog wording no longer claims anything is already on `main` |
+
 The full reviews are kept with the session record.
 
 ## Baseline and method
@@ -134,6 +163,15 @@ Commit counts and three-dot diffs were not used as evidence, because this reposi
   the one closed PR it lists, #807, is a split branch's own PR) and re-ran 8 delete verdicts end to end.
 
 Then three targeted verifications and the Sol review above. Live checks were read-only `SELECT`s.
+
+**Containment proof (added in round 3).**
+- **Proven mechanically: 99 of the 177 deletion tips.** In a scratch clone holding every PR's saved head
+  (`refs/pull/*/head`, 889 refs), each of these tips is an ancestor of the head of at least one MERGED PR.
+  Every commit on such a branch was inside a PR that was reviewed and merged, and any later difference is
+  that PR's own later work.
+- **Resting on stated reasons: the other 78.** Abandoned designs, Mason's decisions, rebuilt or
+  cherry-picked copies, and duplicates. Each is stated per branch in the evidence. Their complete changed-file
+  lists went to the round-4 review.
 
 ## Database
 
@@ -170,7 +208,7 @@ Deleting branches cannot strand a live database change:
 
 ## What happens to each branch
 
-**Delete after Mason's yes (160).** Superseded laps, duplicates and abandoned designs:
+**Delete after Mason's yes (159).** Superseded laps, duplicates and abandoned designs:
 
 - **Job-to-invoice transfer retries (22)** were 19 delivery laps of PR #638 plus a 3-lap follow-up. They
   landed as #721 and #757; every lap tip is an ancestor of a merged head.
@@ -184,7 +222,7 @@ Deleting branches cannot strand a live database change:
 - **Migration bookkeeping (11)**: restamps, applied-live records and registry refreshes, each merged under a
   later PR.
 - **CodeRabbit and merge-gate attempts (10)** were overtaken by #456, #570, #571, #657, #706, #804 and #888.
-- **Guard fixes (15 across two groups)** either landed under other PRs (#630, #648, #794, #855, #455, #564)
+- **Guard fixes (14 across two groups)** either landed under other PRs (#630, #794, #855, #455, #564)
   or were dropped by Mason's 2026-08-25 freeze and 2026-10-02 guard policy.
 - **Customer documents (6)** landed as #764, #800 and #875, verified live 2026-10-04.
 - **Dependency advisories (4)** were duplicates of #645 and #844.
@@ -194,7 +232,7 @@ Deleting branches cannot strand a live database change:
   follow-ups via #399; `claude/pr611-land-20260905` as #611); #373, which sits inside retired #449; two
   integrity-report PRs resolved by #889; and a 2026-09-08 snapshot of uncommitted files, all superseded.
 
-**Delete after this PR merges (17).** This PR rescues or repoints something on each:
+**Delete after this PR merges (18).** This PR rescues or repoints something on each:
 
 | PR | What this PR rescues or repoints |
 |---|---|
@@ -208,6 +246,7 @@ Deleting branches cannot strand a live database change:
 | #532 | Prover note |
 | #672 | Test note |
 | #395 | Test note |
+| #639 | E2E-marker guard gap |
 | F1's branch | Pointer |
 | section1 | Pointer |
 | the cited `adjust_inventory` lap | Pointer |
@@ -225,7 +264,7 @@ Deleting branches cannot strand a live database change:
 | `claude/return-credit-chain-applied-2026-09-01` | `56812f3dd5e28c551a5e5dcb40898d88c2b6ead8` | Open issue #747 names this branch as its evidence. |
 | `claude/rep-scope-order-invoices` | `322cbbd04d00ebbe0001e5b4c311b216bbd9b63b` | Its replacement, admin-only invoicing PR #902, is open but not merged. Release only when #902 has merged AND, on main: the branch's four OPEN findings (INV- numbering through the order RPCs, the split engine never billing a landlord, and two more listed in its KNOWN_ISSUES) are recorded or fixed, the split-wrapper type allow-list item is disposed of, and the 2026-10-06 DECISION_LOG text calling rep scoping the next change is reconciled with Mason's 2026-10-09 decision. |
 
-**Mason's call (2).** Both are fully preserved either way. Recommendation: delete both. For F3, your 2026-09-26 decision already took most of its files off the ask list on purpose, and all nine patterns are written word for word in `KNOWN_ISSUES.md`; an archive tag keeps the commit.
+**Mason's call (2).** Both are fully preserved either way. Recommendation: delete both. For F3, your 2026-09-26 decision already took most of its files off the ask list on purpose, and all nine patterns are written word for word in `KNOWN_ISSUES.md` (with the `.claude/agents/**` caveat); an archive tag keeps the commit.
 
 | Branch | Commit | Restore from | Question |
 |---|---|---|---|
@@ -238,8 +277,11 @@ Deleting branches cannot strand a live database change:
    environment changes, a Supabase project pause, and email send, because `migration-apply-guard.mjs`
    returns an explicit allow and no ask/deny rule names those tools. The Vercel denies are spelled for a
    different server name. Recorded in `KNOWN_ISSUES.md` as its own reviewed fix.
-2. **Two latent quote bugs**, recorded with fix shapes. Exposure today: 4 quotes exist, none currently in
-   the affected shape, idle since July.
+2. **Two latent quote bugs**, recorded with fix shapes:
+   - **Re-save refusal:** none of the 4 live quotes currently holds a repeated product.
+   - **Convert to Order:** one real customer's quote has been `accepted` with no order since 2026-07-19
+     (3 lines, no stock ever held). That matches this bug, or a manual accept. Mason should check whether
+     the customer still expects an order.
    - Re-saving a quote with two lines of one product is refused.
    - Convert to Order can leave an accepted quote with no order and its holds released.
 3. **Commission clawback on returns (Mason, 2026-08-09) was never built.** The trace and live data are in
@@ -266,57 +308,103 @@ Deleting branches cannot strand a live database change:
 
 ## Deletion procedure (for each batch, after Mason's yes)
 
-The batches are: the 160 "after yes" rows; the 17 "after this PR" rows; and each "Mason's call" row only
-on his explicit answer. A batch starts only when all of these hold.
+The batches are: the 159 "after yes" rows; the 18 "after this PR" rows; and each "Mason's call" row only
+on his explicit answer for that row.
 
-**A. Batch preconditions** (checked in the same turn as the batch):
-1. Mason's yes for that batch, in the conversation.
-2. **The ledger is published.** This file at PR #901's live head, or on `origin/main` once merged, lists
-   every branch and commit in the batch.
-3. **Nothing moved since review.** If `origin/main` or the `protect-main` rules changed since the reviewed
-   baseline (`7abd52f6d`), re-measure the batch and drop, for re-review, any branch whose unlanded content
-   grew.
-4. **For the 17 "after this PR" rows:** PR #901 has merged, and each rescued record is present on
-   `origin/main` before its source branch is touched.
+**The helper.** The checks below are done by one read-only script, kept next to the local bundle at
+`C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs` with its review baseline
+`2026-10-13-cleanup-baseline.json`. Their SHA-256 values, re-checked before each run, are:
+- script: `d5f872559137630d3484670b943e5eb47b1557641d3da3e7d19b22f768cd8a32`
+- baseline: `b4f9aec1776836b64ea329d7a00eb8e3d48a4e0ce90e1184ef5a7df9335c2d91`
+- bundle: `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
+
+A different file means it was changed after review and must not run.
+- **It never changes anything.** Every git and gh call in it only reads. It prints the exact
+  tag-creation, delete and restore commands. The operating session runs each printed command itself in
+  plain text, so every change passes through the repository's own safety hooks.
+- **It reads the ledger only from the commit Mason approves** (`--approved <commit>`), never from a
+  working copy.
+- **Every check fails closed.** A lookup that errors or cannot be read counts as a refusal.
+
+**A. Batch preconditions** (the script's `plan` mode, run in the same turn as the batch). It refuses the
+whole batch unless all of these hold:
+1. **Mason's yes** for that batch, given in the conversation.
+2. **The approved ledger is the published one.** The ledger file at PR #901's live head (or on `origin/main`
+   once merged) is byte-for-byte the ledger at the approved commit. A later change to the ledger means a
+   new approval.
+3. **Nothing relevant moved since review.**
+   - The `protect-main` rules are unchanged.
+   - No batch branch is newly named in `KNOWN_ISSUES.md`, `DECISION_LOG.md`, `CURRENT_STATE.md`,
+     `TODO.md`, `AGENTS.md` or `CLAUDE.md` (an exact-name match, compared with the reviewed baseline).
+   - If `origin/main` moved past `7abd52f6d`, no batch branch differs from `main` in any file the review did
+     not already see.
+
+   Any branch that fails is dropped from the batch for re-review.
+4. **For the 18 "after this PR" rows, all of the following:**
+   - PR #901 has MERGED;
+   - its merged head is exactly the approved commit;
+   - its review decision is APPROVED and every reported check is green;
+   - each branch's rescued record (a fixed text marker per branch, listed in the script) is present on
+     `origin/main`.
 
 **B. Preservation, verified before anything is deleted:**
 1. Every "PR #N" row's `refs/pull/N/head` equals the ledger commit. Section1's existing tag
    (`preserve/2026-07-29/codex-section1-security-hardening-20260725`) equals `53f6177eb`.
-2. The "to create" archive tags are made with an ordinary `git push` of each commit to
-   `refs/tags/archive/2026-10-13/<branch>`, so the pre-push hook runs. Each is then read back with
-   `git ls-remote`.
-3. The local bundle below still verifies.
+2. The "to create" archive tags are made with one ordinary `git push` of each commit to
+   `refs/tags/archive/2026-10-13/<branch>`, so the pre-push hook runs. The script's `verify-tags` mode then
+   reads every restore source back from GitHub.
+3. The local bundle still verifies.
 4. Any mismatch stops the batch.
 
-**C. Per branch, immediately before its delete:**
-1. Re-read the tip.
-2. Re-run the PR lookup for that branch, all states, as head and as base.
-3. Re-check the worktree list.
-4. The batch starts by reading the list of active agent sessions; refuse a branch any of them is on.
-5. Then run one GitHub `updateRefs` call that deletes `refs/heads/<branch>` only if it still points at the
-   ledger commit (`beforeOid`). If anyone pushed after the check, GitHub refuses the call and nothing is
-   lost.
-6. The script accepts only branch names from this ledger and refuses `refs/heads/main`.
+**C. Per branch, immediately before its delete** (the script's `check` mode). The script REFUSES the
+branch, and the session stops, if any of these is true:
+- its live tip is not the ledger commit, or it is already gone;
+- an open PR uses it as head or as base;
+- a worktree on this PC has it checked out, or sits at its commit;
+- an active agent session is on it (from a session list read at the start of the batch);
+- its restore source no longer matches;
+- any of those lookups fails.
 
-**D. Failure handling.** If GitHub or a guard refuses a call, or any result is unknown (timeout,
-unreadable reply, mismatch):
+Only after `OK` does the session run the printed GitHub `updateRefs` call, which deletes
+`refs/heads/<branch>` only if it still points at the ledger commit (`beforeOid`). Then the script's
+`confirm` mode checks the branch is gone. The printed command chains these with `&&`, so the first refusal
+stops everything after it. The script accepts only branch names that are deletion rows in the approved
+ledger and refuses `main`.
+
+**Canary first.** The first branch of a batch runs alone, and the session reads back GitHub's reply before
+any other branch is attempted. This is the first real use of `updateRefs` in this repository.
+
+**D. Failure handling.** If GitHub or a guard refuses a call, or any result is unknown (timeout, unreadable
+reply, mismatch):
 - stop the batch;
 - re-read the affected refs;
 - reconcile, and record what actually happened.
 
-Never retry blindly or switch routes without telling Mason. All planned commands were run through every
-repository hook with synthetic input on 2026-10-13 and all were allowed. Whether the desktop app's own
-permission layer prompts was not tested.
+Never retry blindly or switch routes without telling Mason. Run through every repository hook with
+synthetic input on 2026-10-13, the tag push, the `updateRefs` delete and the restore command were all
+allowed. Whether the desktop app's own permission layer prompts was not tested; a prompt is shown to
+Mason, never answered by the agent.
 
-**E. After the batch:**
-- Verify each ref individually: every deleted branch is absent, every tag points at its commit, and every
-  PR ref still equals its commit.
-- Re-query all PRs. If any PR was opened against a deleted branch while the batch ran, restore that branch
-  at its ledger commit immediately and report it. This covers the only residual: a new PR, session or
-  checkout picking up a branch in the seconds between its check and its delete. Every target has had no
-  open PR and no new commit since 2026-10-09 at the latest.
-- Record the actual outcome of every row in a follow-up docs change. The total branch count is only a
-  secondary check.
+**E. After the batch** (the script's `sweep` mode, given the batch start time):
+1. **Per ref:** every deleted branch is absent, and every restore source still matches.
+2. **Adoption check.** Any branch name that, since the batch started, became the head or base of a PR
+   (any state), a worktree checkout, or an active session's branch is reported.
+3. **Restore if needed.** For such a branch the script prints a create-if-absent restore: an `updateRefs`
+   with `beforeOid` all zeros. GitHub refuses it if the name already exists, so a branch someone recreated
+   in the meantime is never overwritten. It is reported for hand reconciliation instead.
+4. **Record outcomes.** The actual outcome of every row goes in a follow-up docs change. The total branch
+   count is only a secondary check.
+
+**The one residual Mason is asked to accept.** A PR, session or checkout could pick a branch up in the
+seconds between its `check` and its delete. Step E detects every such case and restores the branch at the
+same commit. No commit can be lost, because the delete only succeeds at the ledger commit.
+
+Any work that adopter had already done against the branch is still on their own machine. Every target has
+had no open PR and no new commit since 2026-10-09 at the latest.
+
+**What Mason's approval can and cannot cover.** He can accept a documented residual risk of this cleanup,
+like the one above. His approval does not waive a merge or delivery gate, and no open BLOCKER finding is
+accepted.
 
 ## Restoring a branch
 
@@ -327,10 +415,15 @@ Each row gives the branch name, its exact commit, and where that commit lives:
 
 **Independent fallback, not dependent on GitHub keeping PR refs.** A git bundle of all 185 candidate
 branch tips is at `C:/Users/mason/CRX_branch_archive/2026-10-13-github-branch-cleanup.bundle`, made
-2026-10-13 before any deletion. It is 8.6 MB and passes `git bundle verify`, and every one of its 185 tips
-was checked against this ledger. A manifest sits next to it. The bundle excludes `main`'s own history, so
-restoring from it needs any clone of this repository. It lives only on this PC, so it is a second copy,
-not an offsite one.
+2026-10-13 before any deletion. Its facts:
+- **Size and contents.** It is 8.6 MB, with a manifest next to it, and passes `git bundle verify`.
+- **What it needs.** It omits `main`'s history, so restoring from it needs a repository that already has
+  the 197 prerequisite commits `git bundle verify` lists. All of them are commits on `main` as of
+  `7abd52f6d`, so any full clone of this repository qualifies; a shallow clone may not.
+- **Restore demonstrated 2026-10-13.** In a separate scratch clone holding `main`, all 185 refs were
+  fetched out of the bundle. Every one equals its ledger commit, `git fsck --connectivity-only` passes, and
+  all 18,000 objects unique to those branches are present.
+- **Where it lives.** Only on this PC, so it is a second copy, not an offsite one.
 
 Like the earlier ledgers, this file deliberately carries no copy-paste shell command.
 
@@ -520,7 +613,7 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `claude/bash-safety-opacity-cleanup` | `bf54a52c9114e803ef95cc5c9a4eee93ea02c507` | #527 closed | PR #527 | after this PR |
 | `claude/codex-guard-single-ampersand` | `dddc6d74820a6f82e9a8cbdc54ede3838c4a3f76` | #464 closed | PR #464 | after yes |
 | `claude/codex-recursion-hard-guard` | `47820dff7ed6f4fd85767f8a62d0e9f21880808e` | #452 closed | PR #452 | after yes |
-| `claude/live-data-guard-comment-aware` | `b326461e0e9974bb185d6e1f578c592f6a6bcf1f` | #639 closed | PR #639 | after yes |
+| `claude/live-data-guard-comment-aware` | `b326461e0e9974bb185d6e1f578c592f6a6bcf1f` | #639 closed | PR #639 | after this PR |
 | `claude/nested-guards-delivery-20260930` | `9704220f3b166f7252ecdce8d5045b6c408cd505` | #851 closed | PR #851 | after yes |
 | `claude/peer-envelope-fence-504b` | `890b41dcb233ad8c3f45c6dd9d3e14d38388135a` | #768 closed | PR #768 | after yes |
 | `claude/pr-630-adversarial-review-vrpl9r` | `e9e212fa395633ba0ff78d027e24ad12b91da8b3` | #795 closed | PR #795 | after yes |

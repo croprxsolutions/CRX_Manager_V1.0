@@ -13,12 +13,17 @@ round 1. Claude agreed with nearly all of them and revised the proposal. Round 2
 HIGH) and raised 18 new findings, mostly about the deletion procedure. The revision answering them is in
 the report: preservation is verified before deletion, tags are made by an ordinary push, checks run per
 branch, there is a post-batch sweep, and a verified local bundle serves as an independent fallback.
+Round 3 (BLOCK 18) asked for the deletion steps to be bound to the approved ledger and made reviewable. They
+now run through a read-only helper script (kept next to the bundle, with its SHA-256 recorded in the
+report). It refuses on any doubt and only prints the commands that change GitHub. Restoring from the
+bundle was demonstrated in a separate clone, and 99 of the 177 deletion tips were proved to sit inside a
+merged PR's head.
 
-**Verdicts.** 177 deletable (160 after Mason's yes, 17 after this PR merges), 6 kept, 2 for Mason's
+**Verdicts.** 177 deletable (159 after Mason's yes, 18 after this PR merges), 6 kept, 2 for Mason's
 decision. Each deletion is an atomic compare-and-delete, so a newly pushed commit cannot be lost. The
 deletions wait for Mason's explicit yes.
 
-Rescued or corrected on `main`:
+This PR rescues or corrects:
 
 - **`docs/manual/DECISION_LOG.md`**
   - Mason's 2026-08-09 pricing answers. Commission clawback on returns is settled but, per a full

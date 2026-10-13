@@ -1,5 +1,10 @@
 ## 2026-08-27 - product data model amendment Revisions 12-13: ingredient identity settled as owner decision D-AA, bound restamp fingerprint
 
+> **Recovered 2026-10-13.** This note was written on 2026-08-27 for PR #507, which closed without merging,
+> so neither it nor the plan text it describes reached `main` then. Both land through PR #901 on or after
+> 2026-10-13, during the GitHub branch cleanup. The dates below are the August drafting and decision dates,
+> not the landing date. Where it says "this change" or "this PR", read PR #507.
+
 PR #498 merged the workbook-first amendment at Revision 11 while the fixes for the third
 hard-merge-gate proof run were still in their commit gate, so its two HIGH findings landed on
 `main` known-but-unfixed. This change is the immediate follow-up carrying Revision 12, and then

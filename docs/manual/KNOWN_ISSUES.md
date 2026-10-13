@@ -42,11 +42,12 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-13 (latent; rescued from closed PR #397) — re-saving an existing quote that has two lines of the same product is refused
+## OPEN 2026-10-13 (latent; rescued from closed PRs #397 and #350) — quote screen: re-saving a quote with two lines of one product is refused, and Convert to Order can leave an accepted quote with no order
 
 **Rescued in the 2026-10-13 GitHub branch cleanup** (`docs/audits/2026-10-13-github-branch-cleanup-audit.md`).
-These three findings existed only on the never-merged branch `codex/pr389-coderabbit-fixes` (PR #397,
-closed 2026-08-20; its commits stay restorable from the PR #397 page).
+These findings were recorded only on the never-merged branches `codex/pr389-coderabbit-fixes` (PR #397,
+closed 2026-08-20) and `claude/pricing-audit-strategy-jym8rr` (PR #350), whose commits stay restorable
+from their PR pages. Each was re-checked against `main` on 2026-10-13 as stated below.
 
 **The quote re-save refusal (MED, latent).** The live `save_quote` (`20260812115236`, applied
 2026-08-12) keeps each existing line's recorded cost only when the browser says which saved line each
@@ -54,14 +55,41 @@ row is. `src/pages/QuoteBuilder.tsx` on `main` sends no line `id` (checked 2026-
 built near line 1740 carries `product_id`, prices and quantities only). So when an EXISTING quote
 already holds a line of a product and a save sends two or more lines of that product, the RPC raises
 `QUOTE_ITEM_AMBIGUOUS_COST` and tells the user to reload, which cannot help because the page never sends
-ids. New quotes, and quotes with no repeated product, are unaffected. **Nobody is affected today:** a
-read-only live query on 2026-10-13 found 4 quotes in total, none with a repeated product, last updated
-2026-07-19. **Fix shape:** QuoteBuilder sends each saved line's `id` and installs the `item_ids` the RPC
-returns. The only implementation is on PR #397's branch (`QuoteBuilder.tsx` about lines 1586-1666); it
-predates months of `main` changes, so re-derive it rather than cherry-pick. Fix it before quoting is used
-for real.
+ids. That includes the ordinary act of adding a second line of a product the saved quote already has.
+A brand-new quote is unaffected (nothing is saved yet), and so is any save that carries at most one line
+per product the quote already holds. **Exposure today:** a read-only live query on 2026-10-13 found 4
+quotes in total, none currently holding a repeated product, the newest last updated 2026-07-19; the
+refusal would hit the first time someone edits a saved quote into that shape. **Fix shape:** QuoteBuilder
+sends each saved line's `id`, sends a `client_key` on every new line, and installs the `item_ids` mapping
+the RPC returns (client key to new id), so the next save can name every line. The only implementation is
+on PR #397's branch (`QuoteBuilder.tsx` about lines 1586-1666); it predates months of `main` changes, so
+re-derive it rather than cherry-pick. Fix it before quoting is used for real.
 
-**Two smaller database findings from the same PR (LOW).**
+**Convert to Order marks the quote accepted before the order exists (MED, latent; flagged by the branch
+reviews, traced on `main` 2026-10-13).** `executeConvertToOrder` commits `save_quote` with status
+`accepted` (`src/pages/QuoteBuilder.tsx:3053-3055`) before calling `convert_quote_to_order` (`:3065`).
+Entering `accepted` fires the hold-release trigger, which deactivates every active hold on the quote
+(`20260706030000_closed_short_booking_closure.sql:133-137`). If the conversion then fails, the page's
+live-status check finds `accepted` and no order, warns that "its order could not be found" and returns
+(`:3164-3194`), so the revert to `sent` (`:3221-3240`) is effectively never reached; and an admin who
+cancels the second below-cost reason prompt returns silently (`:3132-3134`). Result: a quote that reads
+as converted, no order, and stock that was held for a planned booking now neither held nor pre-booked.
+Recovery: Convert stays available on accepted quotes (`:597`) and the RPC creates the missing order on
+retry. **Fix shape:** save without changing the status and let `convert_quote_to_order` flip it to
+`accepted` inside the same transaction that creates the order (it already sets it). Same exposure as
+above: 4 idle quotes today.
+
+**The quote screen shows profit from today's product cost (LOW, display only).** QuoteBuilder's own
+`recalcItem` (`QuoteBuilder.tsx:1337`; the copy in `src/lib/quoteCalc.ts` is used only by tests) replaces
+a line's cost with the product's current catalog cost and recomputes profit and margin (`:1352`, `:1368`)
+on a tier or customer change, any line edit, or a field pick. `save_quote` ignores those numbers and
+reprices every line from the frozen `cost_at_quote_cents`, so on an existing quote whose product cost has
+changed, the internal Cost/Profit/Margin columns can differ from what is stored until the quote is
+reloaded (the screen can also be one cent off: it rounds profit as one figure, the server rounds revenue
+and cost separately). Customers never see these columns and no stored money is wrong. PR #350's branch
+changed both copies; only the QuoteBuilder copy matters.
+
+**Two smaller database findings from PR #397 (LOW).**
 - `public.quote_sections` still grants the browser role `authenticated` `TRUNCATE`, `TRIGGER` and
   `REFERENCES`, and still carries the obsolete `qsections_insert`/`qsections_update`/`qsections_delete`
   policies (verified read-only on live 2026-10-13; `20260730235031` revoked only INSERT/UPDATE/DELETE).
@@ -71,28 +99,46 @@ for real.
   `below_cost_reason` as absent and searches the payload recursively, so an older "Below-cost approved:"
   line in copied or imported notes can be accepted as the approval reason without a fresh prompt. An
   admin is still required. Source: CodeRabbit finding 3779708583 on PR #397. Not re-measured 2026-10-13.
+  A never-applied candidate fix, `20260814041419_fresh_below_cost_reason.sql`, is on PR #397's branch; it
+  was written against an older function body, so re-derive it against the live body rather than apply it.
 
-## OPEN 2026-10-13 (rescued from closed PR #605) — an MCP tool with no permission entry runs without a prompt
+## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
 
-`.claude/hooks/migration-apply-guard.mjs` runs on every `mcp__.*` call and, for any tool whose name does
-not contain `apply_migration`, returns an explicit `permissionDecision: "allow"` (line 59, checked on
-`main` 2026-10-13). A hook's explicit allow skips the permission prompt, so a tool from a newly connected
-connector, or an old connector reconnected under a new id, runs without asking Mason even when no
-`allow` rule names it. Until this is fixed, check the `ask`/`deny` lists in `.claude/settings.json`
-whenever a connector is added. PR #605 (closed unmerged 2026-09-30; restorable from its PR page) held the
-reference fix: return no decision instead of `allow`, and deny unregistered connector ids in
-`.claude/hooks/mcp-tool-guard.mjs`.
+**What happens.** `.claude/hooks/migration-apply-guard.mjs` runs on every `mcp__.*` call and, for any
+tool whose name does not contain `apply_migration`, returns an explicit `permissionDecision: "allow"`
+(line 59; it also allows when its input cannot be parsed, line 54). Claude Code's documentation
+(fetched 2026-10-13) says a hook's "allow" skips the permission prompt but does NOT override settings
+rules: "a matching deny rule blocks the call, and a matching ask rule still prompts even when the hook
+returned allow". So any MCP tool that no `ask` or `deny` rule names runs with no prompt. In the
+project's `dontAsk` mode such a call would otherwise be auto-denied; the hook's allow lets it run.
 
-**Same PR, second gap:** `money-safety.mjs`, `rls-on-new-tables.mjs`, `env-guard.mjs` and
-`generated-column-check.mjs` judge only `tool_input.content` or `tool_input.new_string`, so a `MultiEdit`
-call (whose text is in `edits[]`) is never inspected (checked on `main` 2026-10-13). PR #605's
-`judgedContent()` change covered it. Under Mason's 2026-10-02 guard policy no guard work is scheduled;
-these are recorded so they are not lost with the branch.
+**Measured 2026-10-13 against `main`'s hooks and both settings files, with synthetic hook input (no tool
+was called):** the hook returned allow, and no allow/ask/deny rule in `.claude/settings.json` or the
+user's `~/.claude/settings.json` names, any of these connected tools: the Vercel connector's
+`request_promote`, `edit_project_env` and `create_deployment`; a Supabase connector's `pause_project`;
+`mcp__supabase__create_edge_function_secret` and `mcp__supabase__delete_branch`; and an email
+connector's `send_message`. **Why the existing Vercel denies do not help:** they are written as
+`mcp__Vercel__*`, and MCP rules match the server name as configured; the connected Vercel server is
+named by a UUID (`0fb370f6-…`), so those rules match nothing (only its `deploy_to_vercel` is denied by
+UUID). Not verified: whether the desktop app's auto-mode classifier still reviews a hook-allowed call.
+
+**Fix shape.** Either make the hook return no decision for tools it does not judge (PR #605's reference
+fix, restorable from the PR #605 page, also denied unregistered connector ids in
+`.claude/hooks/mcp-tool-guard.mjs`), or add `ask`/`deny` rules spelled with the connected servers' real
+names. This touches the agent permission layer, so it is its own reviewed change; it reaches
+irreversible, outward-facing actions, which meets Mason's 2026-10-02 bar for guard work. PR #605 closed
+unmerged 2026-09-30 Chicago time (2026-10-01 UTC).
+
+**Same PR, second gap (LOW, likely latent):** `money-safety.mjs`, `rls-on-new-tables.mjs`, `env-guard.mjs`
+and `generated-column-check.mjs` judge only `tool_input.content` or `tool_input.new_string`, so a
+`MultiEdit` call (whose text is in `edits[]`) is never inspected (checked on `main` 2026-10-13). PR #605's
+`judgedContent()` change covered it. The current desktop harness exposes no `MultiEdit` tool, so this
+matters only if one returns.
 
 ## OPEN 2026-10-13 (first measured 2026-09-05; owner action: Mason) — a review proof can be read and rewritten through its Windows 8.3 short name
 
 **Rescued from closed PR #612** (`claude/review-proof-guard-read-only-narrowing`, closed unmerged
-2026-09-30; the full write-up is in that branch's `docs/manual/KNOWN_ISSUES.md`, restorable from the PR
+2026-09-30 Chicago time, 2026-10-01 UTC; the full write-up is in that branch's `docs/manual/KNOWN_ISSUES.md`, restorable from the PR
 #612 page). Not re-run on 2026-10-13; recorded as the PR #612 review rounds measured it.
 
 Every long file name on this NTFS volume also answers to an 8.3 short alias
@@ -104,11 +150,57 @@ it, because proof validation trusts those fields without checking who wrote them
 expiry and moved-base rules of the protected-review gate. (Merging into `main` still also needs
 CodeRabbit's APPROVED review of the exact head, which a rewritten proof does not supply.)
 
-**Fix options.** (1) An owner action: turn off Windows short-name creation for the drive (reversible),
-then strip the existing short names under the repository folder only (not reversible: run the tool's
-test mode first and take a backup, because programs that stored a short path can break). An agent must
-not do either; they change a system setting. (2) The durable fix is a design change: authenticate proof
-content (wrapper-held creation and validation) rather than add another command-text rule.
+**The 8.3 alias is one route, not the whole problem.** The same write-up records that the review-proof
+guard is a named-access speed bump against mistakes and casual self-certification, NOT a
+confidentiality or integrity boundary for proof bytes. Routes that stay open regardless of short names:
+a shell, PowerShell or Node interpreter can construct a proof pathname instead of spelling it; a hard
+link made outside the state directory can expose proof bytes under a harmless name; and a check made
+before a tool runs cannot bind the file the tool later opens (an alias, junction or hard link can be
+swapped in after the check). Command-text matching cannot enumerate every interpreter or
+path-construction form. So removing short names closes only the alias route.
+
+**Fix options.** (1) An owner action that narrows the alias route only: turn off Windows short-name
+creation for the drive (reversible), then strip the existing short names under the repository folder
+only (not reversible: run the tool's test mode first and take a backup, because programs that stored a
+short path can break). An agent must not do either; they change a system setting. (2) The durable fix
+for the whole class is a design change: authenticate proof content (wrapper-held creation and
+validation, so a rewritten field is detected) rather than add another command-text rule.
+
+## OPEN 2026-10-13 (LOW) — small notes rescued from branches in the GitHub branch cleanup
+
+Each was found by the cleanup's reviewers on a branch that is being removed and was written down nowhere
+else on `main`. None blocks anything; they are here so they are not lost. Each says how it was checked.
+
+- **`save_field` has no "row not found" check** (from `claude/bulk-import-retry-scopes`). Verified on the
+  live catalog 2026-10-13: its body contains no `FOUND`/`NOT FOUND` test. It matters to whoever builds the
+  tracked bulk-import duplicate-field fix in `TODO.md`, which names a stable client-generated field id as
+  the redesign: an update aimed at a missing id would succeed silently.
+- **`git clean` with `clean.requireForce` switched off** (from `claude/bash-safety-opacity-cleanup`,
+  PR #527). Measured 2026-10-13 by feeding `main`'s Bash hooks synthetic input (nothing was run): the
+  project `bash-safety.mjs` denies the reported `-c clean.requireForce=false clean -d`, `=0` and
+  `--config-env` forms, but allows a `git clean` with no `-f`/`-d`/`-x` flag (plain, or `-X`) when the
+  override is given by `-c`, `--config-env` or `GIT_CONFIG_*` variables. With the override, plain `clean`
+  deletes untracked files and `-X` deletes ignored ones such as `.env*` (git documentation; not run).
+- **Transfer-created field invoices are stamped Net 30** (from the PR #591 review). On `main`,
+  `transfer_job_to_invoice` sets `due_date` to Chicago today + 30 days
+  (`20260914100500_commission_dates_follow_chicago_business_day.sql:2587` and `:2820`). Reported, not
+  re-measured: posting keeps a non-null due date, so a transferred invoice for a Net 15 or due-on-receipt
+  customer, posted without re-saving its billing form, keeps Net 30; the field-app editor clears a
+  matching stamp when the form is saved, so the exposure is narrow and may be intended.
+- **Return-credit container prover is pre-apply** (from `codex/defer-return-credit-rollout-20260831`,
+  PR #532). Reasoned from the code, not run: it replays the six return-credit migrations onto a fresh
+  live dump, and their pre-flight checks expect the state from before their 2026-09-01 apply, so it can
+  no longer pass. A rebuild should also pin `America/Chicago` (the smoke file uses `CURRENT_DATE`) and
+  normalize Windows line endings in the dump; PR #532 holds reference commits.
+- **Two test hardenings that never landed** (test-only; no product bug). The inventory hold retry tests
+  in `src/pages/InventoryPage.uncertainRetry.test.tsx` compare the retry key with the original without
+  first asserting a non-empty key (the live wrapper refuses a blank key, so a regression fails loudly);
+  PR #672 held the assertions. And `src/lib/waveAMoneyMigrations.test.ts` lacks PR #395's case pinning the
+  parked Wave A `030000` probe's locked product cost (`FOR SHARE OF p` and its NOT NULL column list);
+  Wave A gets a full re-review before any apply anyway.
+- **"Gross margin means markup" note** (from PR #350). The 2026-08-08 pricing audit on `main` says to add
+  it to `docs/reference/gotchas.md`; it was never added. Its content is finding 1 of
+  `docs/audits/2026-08-08-product-pricing-full-audit-and-strategy.md`.
 
 ## OPEN 2026-10-07 (owner: Mason) — what the 2026-10-01 integrity-report fixes leave behind
 
@@ -622,8 +714,9 @@ time.
 - Superseded: the earlier branch `claude/bind-adjust-inventory-receipt-delivery-20260917` HEAD
   `143da828f` (unpushed) **still cannot be applied** — it edits an applied migration, and its
   preflight accepts only `ef485890…` or `457cfb00…` while live is `9a503e54…`
-  (`PREFLIGHT_BODY`). Do not revive that one. (Its GitHub copy, an older delivery lap kept by the PR
-  #711 page, was removed in the 2026-10-13 branch cleanup. The parked branch above was kept.)
+  (`PREFLIGHT_BODY`). Do not revive that one. (Its GitHub copy, the older delivery lap at `965089215`,
+  is on the 2026-10-13 branch-cleanup list and stays restorable from the PR #711 page. The parked branch
+  above is kept.)
 - **Known-open on the parked branch, if it is ever taken up:** two postflight assertions were proven
   defeatable by review — the cutover-trigger check no longer inspects the trigger function's body,
   and the control-character check is satisfied by a *commented-out* clause. Four documents also still
@@ -1660,7 +1753,7 @@ That limit is now written into the test file rather than assumed away.**
 **F1 (original report) — idempotency key discarded before the RPC result is checked (money paths).** On `main`,
 `src/pages/OrderDetail.tsx` calls `resetKey()` at lines 596, 698, 891 and 906 **before**
 `assertRpcResult(...)`; the 2026-08-02 branch `codex/idempotency-reset-order-hardening-20260802`
-(removed from GitHub in the 2026-10-13 branch cleanup; its tip is kept as tag
+(on the 2026-10-13 branch-cleanup list; if it is gone from GitHub, its tip `9049efc80` is kept as tag
 `archive/2026-10-13/codex/idempotency-reset-order-hardening-20260802`) found the same shape across ~22 files (cancel/void order, split invoicing, invoice creation,
 deliveries, prepayments, returns, month-end close, vendor bills). Transport errors are caught earlier
 and a SQL error rolls back, so the exposure is an **ambiguous reply** — a null or malformed success
@@ -1689,11 +1782,11 @@ which covers most of these nine patterns. Treat F3 as needing a fresh decision b
 not as a ready fix.
 
 **Branch retention (updated 2026-10-13):** F1 (PR #584, merged 2026-09-04) and F2 (PR #583, merged
-2026-09-03) have landed. Every F3 pattern is listed above word for word, so the branch is no longer the
-only record: in the 2026-10-13 branch cleanup `claude/control-file-coverage-a41c` was removed from
-GitHub and its commit `b985e919b` kept as tag `archive/2026-10-13/claude/control-file-coverage-a41c`.
-`codex/section1-security-hardening-20260725` was removed too; its tip `53f6177eb` was already kept as tag
-`preserve/2026-07-29/codex-section1-security-hardening-20260725`. Restore details:
+2026-09-03) have landed. F3's branch `claude/control-file-coverage-a41c` (on origin at `b985e919b`) still
+stays until F3 lands or Mason retires F3; the 2026-10-13 branch cleanup put it to Mason as a decision
+rather than deleting it. Every F3 pattern is listed above word for word.
+`codex/section1-security-hardening-20260725` is on the 2026-10-13 cleanup list; its tip `53f6177eb` is
+already kept as tag `preserve/2026-07-29/codex-section1-security-hardening-20260725`. Restore details:
 `docs/audits/2026-10-13-github-branch-cleanup-audit.md`.
 
 ## OPEN 2026-09-01 — agents share Mason's admin identity, so the manual merge override can only be fenced off by command matching, never truly withheld
@@ -2815,7 +2908,7 @@ without `RETURNING`. Reproduced on a local copy of the live policies; admins are
 document exists, so no one has hit it yet. Fixing it is a policy or RPC design choice (for example, a
 `SECURITY DEFINER` soft-delete RPC with an idempotency key) and belongs in its own change.
 
-**Database fix APPLIED LIVE 2026-10-02** (`20260921180000_soft_delete_customer_document_rpc`, ledger version `20261002230949`; PR #800 merged as `c78b73b67`). What remains is the page change: until it ships, the live Documents tab still updates the row directly, so a rep's Remove is still refused. It is on branch `claude/customer-document-rep-remove-page-v4`, rebuilt on current `main`. The history below is the pre-apply record.
+**Database fix APPLIED LIVE 2026-10-02** (`20260921180000_soft_delete_customer_document_rpc`, ledger version `20261002230949`; PR #800 merged as `c78b73b67`). (As of 2026-10-02, before the page change shipped as PR #875 the next day:) What remains is the page change: until it ships, the live Documents tab still updates the row directly, so a rep's Remove is still refused. It is on branch `claude/customer-document-rep-remove-page-v4`, rebuilt on current `main`. The history below is the pre-apply record. (2026-10-13: the earlier PR-less page branches `-remove-page`, `-v2` and `-v3` named below are on the GitHub branch-cleanup list; their tips are kept as `archive/2026-10-13/claude/customer-document-rep-remove-page…` tags, listed in `docs/audits/2026-10-13-github-branch-cleanup-audit.md`.)
 
 **Pre-apply record (checked 2026-09-28).** Open PR #800 (it replaced the closed PR #785) carries
 the parked migration `20260921180000_soft_delete_customer_document_rpc` (on the PR branch, not on
@@ -3638,8 +3731,8 @@ lands." All three were obtained on 2026-09-04 and the migration applied; the ite
 the heading above. **Branch retention (updated 2026-09-26):** the note that kept
 `codex/section1-security-hardening-20260725` moved to the F3 OPEN entry at the top of this file; F2
 landed (PR #583), so the original retention rule no longer requires this branch; deleting it is Mason's call.
-**Update 2026-10-13:** removed from GitHub in Mason's branch cleanup; its tip `53f6177eb` stays on GitHub
-as tag `preserve/2026-07-29/codex-section1-security-hardening-20260725`.
+**Update 2026-10-13:** on the GitHub branch-cleanup list; if it is gone, its tip `53f6177eb` stays on
+GitHub as tag `preserve/2026-07-29/codex-section1-security-hardening-20260725`.
 
 (The F3 finding and the branch-retention note that followed here were moved on 2026-09-26 to their
 own OPEN entry at the top of this file.)

@@ -12,21 +12,29 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 **Recovered.** Mason made this decision on 2026-08-27, but it was written only on the never-merged
 branch of PR #507 (`claude/product-plan-rev12-followup`, Revision 13 of
-`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`). It is condensed here from that text during the
-2026-10-13 GitHub branch cleanup; the full table and reasoning stay restorable from the PR #507 page.
-**Decision (Mason, in chat, 2026-08-27, after the trade-offs were explained):**
+`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`). On 2026-10-13 that revision text was merged
+into the plan on `main`, whose §D-AA table is the authoritative wording; this entry summarizes it.
+**Decision (Mason, in chat, 2026-08-27, after the trade-offs were explained), D-AA-1 to D-AA-3:**
 - **D-AA-1.** Where a CAS number is present it is the chemical's identity: same CAS means the same
-  chemical, merged automatically across trade, common and IUPAC names and spelling variants. Mason's
-  per-row review is the catch for a typo in the CAS itself; that is an accepted trade.
-- **D-AA-2.** Any identity match that rests on a name alone (a CAS-less row and a later same-name row
-  with a CAS, or two CAS-less rows with the same normalized name) is queued for Mason's explicit
-  approval, shown side by side, and never merged automatically. Every CAS-less ingredient is flagged
-  provisional and listed on a "needs CAS" worklist, so duplicates caused by missing data stay findable.
-- **D-AA-3.** A proposal that matches an existing ingredient by name or by CAS but claims a different
-  canonical parent is refused at import with a named error, before any queue or chemistry write, on
-  every identity path. This takes precedence over D-AA-2.
-- **D-AA-4.** No conflict-resolution path may rename a shared ingredient row, and multi-ingredient
-  inserts take a deterministic order so opposite-order drafts cannot deadlock.
+  chemical, merged into one identity across trade, common and IUPAC names and spelling variants; the
+  name is a label, not a key. Mason's per-row review is the catch for a typo in the CAS itself; that is
+  a deliberate accepted trade.
+- **D-AA-2.** The uniform rule: a CAS match merges automatically (D-AA-1); ANY identity claim resting on
+  a name alone is queued for Mason's explicit approval, shown side by side, and never merged
+  automatically (a CAS-less row and a later same-name row with a CAS; two CAS-less rows with the same
+  normalized name); and a row with no matching signal at all stays separate, visibly. Every CAS-less
+  identity is flagged provisional and listed on a "needs CAS" backfill worklist. A CAS backfill goes
+  through the plan's D-I approval queue like any other edit; only once it is approved does any
+  resulting CAS match resolve through D-AA-1's automatic merge or surface D-AA-3's refusal.
+- **D-AA-3.** A proposal that matches an existing ingredient, by name OR by CAS, but claims a different
+  canonical parent is refused at import with a named error, on every identity-resolution path, before
+  any queue insertion and with zero queue or chemistry writes. D-AA-1's automatic merge proceeds only
+  when the parents agree, and D-AA-3 takes precedence over D-AA-2: a queued merge candidate whose two
+  rows disagree on canonical parent is refused, never queued. The sheet is corrected and re-uploaded.
+**Settled technically, reviewed and confirmed (not one of Mason's business rulings), D-AA-4:** no
+conflict-resolution path may rename a shared ingredient row, under any mechanism, and multi-identity
+inserts take a deterministic order so two drafts carrying the same identities in opposite order cannot
+deadlock.
 **What this forbids/implies:** WP-1's migration implements D-AA as settled here; Revision 12's
 unique-key and `ON CONFLICT … DO UPDATE SET name` mechanism is withdrawn because it contradicts D-AA-1,
 D-AA-2 and D-AA-4. Until WP-1 ships, two products creating the same new ingredient at the same time can
@@ -40,22 +48,40 @@ two never-merged branches (PR #350 `claude/pricing-audit-strategy-jym8rr` and PR
 `codex/pr389-coderabbit-fixes`). It is condensed here from #397's newer text during the 2026-10-13
 GitHub branch cleanup. Source audit: `docs/audits/2026-08-08-product-pricing-full-audit-and-strategy.md`.
 **Decision (Mason, in chat, 2026-08-09):**
-1. **Commission is clawed back on returns.** A return creates a proportional negative commission
+1. **Commission is clawed back on returns.** A return generates a proportional negative commission
    adjustment: unpaid commission is reduced directly, and commission already paid becomes a debit
-   against the rep's next check. **Status 2026-10-13: not built.** No migration on `main` adjusts
-   commission for a return (the return path only zeroes a cancelled order's pending commissions).
-   Confirm with Mason that this still stands before building it.
-2. **No historical backfill** of return costs: rows from before the change were test and transitional
-   data. The original boundary named `20260808170000_return_credit_cogs_reversal`, which was never
-   applied; the change shipped instead as the six-file return-credit chain applied live 2026-09-01
-   (`20260827041000`..`20260827041500`). Revisit if real customer returns were entered before then.
+   carried into the next commission period (reversed against the rep's next check). This is a settled
+   decision; no later reversal is recorded. **Implementation status (2026-10-13): not built.** A trace of the live catalog
+   and `main` found no function, trigger, view, scheduled job or app code that changes a commission
+   when a return is created, received or credited, or when its credit memo is applied, unapplied or
+   voided. Commission is fixed from order or job profit when it is minted and can never be negative
+   (`chk_commission_amount >= 0`). The only reversal today is cancelling PENDING commission in full when a
+   whole order, delivery or invoice is voided or cancelled; already-paid commission is never debited.
+   Live data that day: one approved return, no credit memos ever, so no rep has yet been overpaid.
+2. **No historical backfill** of return costs: the existing rows were test and transitional data, not
+   real financial history. The boundary is an apply event, not a calendar date: credit memos ISSUED
+   before the return-credit cost reversal was applied live are out of scope regardless of when they were
+   created, and everything issued after it follows the new behavior. The original text named
+   `20260808170000_return_credit_cogs_reversal`, which was never applied; the reversal shipped as the
+   six-file return-credit chain (`20260827041000`..`20260827041500`), whose live apply on 2026-09-01 is
+   therefore the boundary. Do not write a backfill migration for the earlier rows; revisit if real
+   customer returns were entered before then.
 3. **Margin targets are per product, not one company-wide number.** A global default may exist only as a
-   fallback. Seeding targets across the catalog is tracked in `TODO.md` ("Per-product margin targets").
-4. **Below-cost selling is a server-side wall, with an admin exception.** **Status: live** since
-   2026-08-12 (`20260812115237_enforce_below_cost_admin_approval`, ledger `20260812154028`).
+   fallback for products with no target; the per-product value is authoritative. Seeding targets across
+   the catalog is tracked in `TODO.md` ("Per-product margin targets").
+4. **Below-cost selling is a hard rule enforced server-side, with an admin exception.** **Status: live**
+   since 2026-08-12 (`20260812115237_enforce_below_cost_admin_approval`, ledger `20260812154028`).
+   Operative rule: the money-write RPCs reject a below-cost line unless an approval reason is supplied,
+   checked against the LOCKED current product cost inside the same transaction, and an active admin can
+   still proceed. It covers the whole money-write surface at once (`create_direct_order`,
+   `create_rush_order`, `bulk_import_order`, `update_order_items`, `price_order`, `save_invoice`,
+   `save_quote`, `convert_quote_to_order`, `draw_down_quote`, `restore_quote_version`,
+   `duplicate_quote`); any other line-writing path may proceed without approval context only when the
+   locked cost is not above the sale price, and an unrecognized below-cost path fails closed.
 **What this forbids/implies:** keep the browser's below-cost checks as a convenience, never as the
 financial control; the approval reason is written in the same transaction as the money; a below-cost
-refusal is a structured error that names the lines so the operator can refresh and retry.
+refusal is a structured error that names the lines so the operator can refresh and retry. A new
+line-writing workflow must join the wall, not bypass it.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 

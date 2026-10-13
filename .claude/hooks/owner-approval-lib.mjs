@@ -214,12 +214,17 @@ const textOf = (content) => (typeof content === "string" ? content
 // message and his reply (a message of his, image-only included; text Claude Code
 // injects such as a Stop hook's feedback; a notification; a compaction; an error
 // or synthetic message; a record type not listed here) ends the scan, so "I
-// approve" is never carried past it (Luna rounds 1 and 3).
+// approve" is never carried past it (Luna rounds 1 and 3). A queue record that
+// carries a message (one waiting to be delivered, or withdrawn) is not
+// bookkeeping either, unless it is Mason's current message itself (Luna round 4).
 const BOOKKEEPING_TYPES = new Set([
-  "attachment", "queue-operation", "last-prompt", "custom-title", "agent-name", "atis-latch", "pr-link",
-  "bridge-session", "file-history-snapshot", "file-history-delta", "summary",
+  "attachment", "last-prompt", "custom-title", "agent-name", "atis-latch", "pr-link",
+  "bridge-session", "file-history-snapshot", "file-history-delta",
 ]);
-const isBookkeeping = (e) => BOOKKEEPING_TYPES.has(e?.type) || (e?.type === "system" && e.subtype === "stop_hook_summary");
+const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
+  (e?.type === "system" && e.subtype === "stop_hook_summary") ||
+  (e?.type === "queue-operation" &&
+    (e.content == null || String(e.content).trim() === String(currentPrompt ?? "").trim()));
 const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&
   e.message.content.every((b) => b?.type === "tool_result");
 // A message the model wrote, not one Claude Code made up (an API error, an
@@ -247,7 +252,10 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
   let raw;
   try {
     const size = fstatSync(fd).size;
-    const start = Math.max(0, size - maxBytes);
+    // Read from one byte before the window, so a window that starts exactly at a
+    // line keeps that line: everything through the first newline is dropped, and
+    // that newline is the byte before the line (Luna LOW, round 4).
+    const start = size > maxBytes ? size - maxBytes - 1 : 0;
     const buf = Buffer.alloc(size - start);
     let got = 0;
     while (got < buf.length) {
@@ -273,7 +281,7 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     if (e === DAMAGED) throw new Error("a damaged transcript line lies in what had to be read");
-    if (isBookkeeping(e) || e?.isSidechain) continue; // a subagent's entries are not the conversation with Mason
+    if (isBookkeeping(e, currentPrompt) || e?.isSidechain) continue; // a subagent's entries are not the conversation with Mason
     if (isToolResult(e)) {
       if (said.length) { found = true; break; }
       continue;
@@ -312,9 +320,29 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
 }
 
 /**
+ * True when the text SHOWS this request rather than merely mentioning it: its
+ * Reference line, the reply it asks for, and what it is for (the migration's name,
+ * or that it is the test). A message that only cites an old reference number
+ * while asking something else does not count (Luna BLOCKER, round 4).
+ * The reference is never the same six digits starting or inside another number
+ * or identifier, in any script: 482913-4, 482913_4, 482913.1, 482913٧ (Luna
+ * rounds 1, 2 and 4). Markdown may sit between a label and its value.
+ */
+export function requestShownIn(text, p) {
+  const s = String(text ?? "");
+  const code = String(p?.code ?? "");
+  if (!/^\d{6}$/.test(code)) return false;
+  const reference = new RegExp(`\\breference\\b[^\\p{L}\\p{N}\\n]{0,6}${code}(?![\\p{L}\\p{N}_]|[-.,/:][\\p{L}\\p{N}])`, "iu");
+  const reply = /\breply:[^\p{L}\p{N}\n]{0,6}I approve\b/iu;
+  const what = p.purpose === OWNER_SELFTEST_PURPOSE ? s.includes("This is a TEST of approving by chat reply")
+    : typeof p.migration === "string" && p.migration !== "" && s.includes(p.migration);
+  return reference.test(s) && reply.test(s) && what;
+}
+
+/**
  * Which request a plain `I approve` is for. The live requests this session built
  * (pending, unexpired, code not retired) are matched against the agent's last message:
- * exactly one of them must have its reference number there.
+ * exactly one of them must be shown there (requestShownIn).
  *
  * @param {object} args
  * @param {string[]} args.dirs  this session's session-state folders (ownerRequestDirs)
@@ -325,7 +353,7 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
  */
 export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now() }) {
   if (!usableSessionId(sessionId)) return { silent: true };
-  const live = new Set();
+  const live = new Map();
   // Silence must mean "nothing is waiting", never "could not tell" (Luna LOW, round 2).
   for (const dir of new Set(dirs || [])) {
     let names;
@@ -341,19 +369,15 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
       try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); }
       catch (e) { return { ok: false, reason: `the request file ${name} could not be read (${errText(e)})` }; }
       const deadline = Date.parse(p?.expiresAt);
-      if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.add(m[1]);
+      if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.set(m[1], p);
     }
   }
   if (!live.size) return { silent: true };
   let shownText;
   try { shownText = String(readShown() ?? ""); }
   catch (e) { return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` }; }
-  // Shown means labelled as the request's reference ("Reference 482913", markdown
-  // allowed between), never the same six digits starting or inside another number
-  // or identifier such as 482913-4, 482913_4 or 482913.1 (Luna HIGH round 1, MED round 2).
-  const shown = [...live].filter((c) =>
-    new RegExp(`\\breference\\b[^0-9A-Za-z\\n]{0,6}${c}(?![0-9A-Za-z_]|[-.,/:][0-9A-Za-z])`, "i").test(shownText));
-  if (!shown.length) return { ok: false, reason: "the agent's message just before it did not show the approval request (its reference number), so it may have been about something else" };
+  const shown = [...live].filter(([, p]) => requestShownIn(shownText, p)).map(([c]) => c);
+  if (!shown.length) return { ok: false, reason: "the agent's message just before it did not show the approval request (its summary with the Reference line), so it may have been about something else" };
   if (shown.length > 1) return { ok: false, reason: `the agent's last message showed ${shown.length} requests (${shown.join(", ")}), so it is ambiguous` };
   return { ok: true, code: shown[0] };
 }

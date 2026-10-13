@@ -16,8 +16,12 @@ no longer types anything but the approval.
     - A request shown earlier in the same turn, before a later question, does not count (Luna round 2).
     - Only the bookkeeping records Claude Code writes after every turn are skipped. That list was
       measured on a real session transcript: `system`/`stop_hook_summary`, `last-prompt`,
-      `custom-title`, `agent-name`, `atis-latch`, `pr-link`, `bridge-session`, `queue-operation`,
-      `attachment`, `file-history-*` and `summary`.
+      `custom-title`, `agent-name`, `atis-latch`, `pr-link`, `bridge-session`, `attachment`,
+      `file-history-*`, and a `queue-operation` that carries no message or carries Mason's current
+      message itself. A queued or withdrawn message that is anything else ends the scan, and so does
+      a `summary` record, which current Claude Code does not write (Luna round 4).
+    - The tail is read from one byte before the window, so a window starting exactly at a line keeps
+      that line (Luna round 4).
     - Any other entry after the agent's message makes the result empty (Luna round 3). That covers a
       message of Mason's (image-only included), injected text such as a Stop hook's feedback, a
       notification, a compaction, an error or synthetic message, and an unknown record type.
@@ -31,10 +35,16 @@ no longer types anything but the approval.
   - `resolvePlainReply` finds the live requests this session built (pending, unexpired, code not
     retired). With none, it is ordinary chat and the hook stays silent. An unreadable folder or
     request file is reported, never taken as "nothing waiting" (Luna round 2). Otherwise exactly one
-    of them must have its reference number in the agent's last message, labelled `Reference`
-    (markdown allowed between). The same digits starting or inside another number or identifier, such
-    as `482913-4`, `482913_4` or `482913.1`, never count (Luna rounds 1-2). A request shown earlier,
-    two shown at once, or an unreadable transcript approves nothing.
+    of them must be SHOWN in the agent's last message (`requestShownIn`, Luna round 4). Shown means
+    all three of:
+    - its `Reference <code>` line (markdown allowed between);
+    - the `reply: I approve` line;
+    - its migration's name (or the self-test line).
+
+    A message that only cites an old reference while asking something else does not count. The same
+    digits starting or inside another number or identifier never count, in any script: `482913-4`,
+    `482913_4`, `482913.1`, `482913٧` (Luna rounds 1, 2 and 4). A request shown earlier, two shown at
+    once, or an unreadable transcript approves nothing.
   - The summary now ends with "reply: I approve" and "(Reference <code>. You don't need to type it.)".
 - `.claude/hooks/owner-approval-prompt.mjs`:
   - Handles both reply forms, then records through the unchanged `recordReplyApproval`. Session
@@ -56,7 +66,7 @@ no longer types anything but the approval.
   "I approve" approves the request. The scripts tell agents never to bundle.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 252 assertions (151 before). They cover:
+- `owner-approval-lib.test.mjs`: 270 assertions (151 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,
     an image-only message, damaged and half-written lines, a turn longer than the part read, a missing file;
@@ -82,6 +92,18 @@ no longer types anything but the approval.
   check, each with tests.
 - When a plain reply is refused, the hook tells the agent to fall back to `approve <reference>` if
   re-showing does not help, so Mason is never stuck.
+- Luna round 4 found 2 BLOCKERs, 1 HIGH, 1 MED and 1 LOW:
+  - a stale reference mention;
+  - a queued message;
+  - a `summary` record;
+  - Unicode digits;
+  - a boundary-aligned read window.
+
+  That round reached `ship.md`'s three-round cap, so the work stopped and Mason chose: "fix and
+  ship" (2026-10-13). All five are fixed with tests. Breaking the new "request shown" rule makes the
+  suite fail. No further Luna round was run, by his choice; CodeRabbit and Sol review the final head.
+- One unexplained crash of the test suite in 34 runs (33 passed). Its output was lost to a piped
+  command, so the cause is not known.
 - The transcript reader was also run against this session's real transcript, cut at Mason's own
   "Approve 301239". It returned exactly the agent's preceding message, both before and after his
   message was written.

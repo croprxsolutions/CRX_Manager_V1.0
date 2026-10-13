@@ -894,7 +894,7 @@ export function evaluateMigrationApply({
     const OWNER_ROUTE =
       `\n\nTHE ONE WAY THROUGH (Mason, 2026-09-29; by chat reply since 2026-10-09): once every other proof for ` +
       `this exact file is fresh, run \`node scripts/owner-approve-migration.mjs supabase/migrations/${migName || "<file>"}.sql\` ` +
-      `from the PR's checkout, show Mason the plain-English summary it prints (with its Reference line) as the last ` +
+      `from the PR's checkout, show Mason the plain-English summary it prints, word for word, as the last ` +
       `message of your turn, ask him nothing else in that message, and ask him to reply \`I approve\` (he can do it from his ` +
       `phone; \`approve <code>\` also works), then ` +
       `apply within 30 minutes of his reply through ` +

@@ -50,12 +50,15 @@
 > 24-hour reply deadline. Only a WHOLE message turns it into an approval, valid 30 minutes from the reply: since
 > 2026-10-13 (Mason: "I just want to say I approve") a plain `I approve` (also `approve`, `approved`, `yes I
 > approve`, trailing `.`/`!` accepted; never a bare "yes" or "go"), which counts only when exactly one live request of
-> that session has its reference number, labelled `Reference` (never the same digits starting or inside another
-> number or identifier), in the agent's LAST message before the reply, read from the session transcript the hook is
+> that session is SHOWN in the agent's LAST message before the reply: its `Reference <code>` line (never the same
+> digits starting or inside another number or identifier, in any script), the `reply: I approve` line, and its
+> migration's name (or the self-test line), so a message that only cites an old reference does not count. That
+> message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;
 > only the bookkeeping records Claude Code writes after every turn are skipped, so any other entry after it, such as a
-> message of Mason's (image-only included), injected text like a Stop hook's feedback, a notification, a compaction,
-> an error or synthetic message, or an unknown record type, means nothing counts; tool output and subagent text
+> message of Mason's (image-only included), injected text like a Stop hook's feedback, a notification, a queued
+> message waiting to be delivered, a compaction, an error or synthetic message, or an unknown record type, means
+> nothing counts; tool output and subagent text
 > never count). An unreadable transcript or approval folder, a damaged or half-written line in what is scanned, an assistant
 > entry without a message id, or a message whose start is not in the 32 MB tail read approves nothing. With no request waiting in the session the hook stays silent, so an
 > "I approve" about anything else does nothing. `approve <code>` still works. The code is retired in that folder first (exclusively, before the approval is written; if it cannot be

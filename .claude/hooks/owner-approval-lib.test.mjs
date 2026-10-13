@@ -39,6 +39,7 @@ import {
   recordReplyApproval,
   recordUsedApproval,
   requestFileName,
+  requestShownIn,
   resolvePlainReply,
   safeMigrationName,
   selfTestResultName,
@@ -438,6 +439,24 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "a system notice of any other kind after the agent's message ends the scan (Luna BLOCKER, round 3)");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "some-future-record" })])),
       "a record type Claude Code may add later ends the scan rather than being skipped");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "summary", summary: "Asked whether to merge #900" })])),
+      "a summary record (not written by current Claude Code) ends the scan (Luna HIGH, round 4)");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN),
+      JSON.stringify({ type: "queue-operation", operation: "enqueue", content: "Should I merge PR #900?" })])),
+      "a queued message waiting to be delivered ends the scan (Luna BLOCKER, round 4)");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN),
+      JSON.stringify({ type: "queue-operation", operation: "remove", content: "<task-notification>x</task-notification>" })])),
+      "a withdrawn queued message ends the scan too");
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "queue-operation", operation: "enqueue", content: "I approve" }),
+      JSON.stringify({ type: "queue-operation", operation: "dequeue" }), masonSaid("I approve")])),
+      "Mason's own reply passing through the queue is not something after the agent's message");
+    {
+      // A read window that starts exactly at the start of a line keeps that line (Luna LOW, round 4).
+      const keep = [masonSaid("fix it"), agentSaid(SHOWN)];
+      const tail = Buffer.byteLength(`${keep.join("\n")}\n`);
+      ok(has(last([agentSaid("x".repeat(500)), ...keep], { maxBytes: tail })),
+        "a read window starting exactly at a line keeps that line");
+    }
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "assistant", isApiErrorMessage: true,
       message: { id: "e1", model: "<synthetic>", content: [{ type: "text", text: "API Error" }] } })])),
       "an error message Claude Code made up after the agent's message ends the scan");
@@ -480,43 +499,60 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     // Which request "I approve" is for.
     const sdir = path.join(tdir, "s", ".claude", "session-state");
     const resolve = (shown, over = {}) => resolvePlainReply({ dirs: [sdir], sessionId: SID, readShown: () => shown, now: APPROVED, ...over });
-    ok(resolve(SHOWN).silent === true, "with no request waiting, \"I approve\" is ordinary chat and the hook stays silent");
+    // What showing a request means: its summary, with the Reference line written as given.
+    const SECOND = "20260914101700_second";
+    const pOf = (code, migration = base.migration) => JSON.parse(buildApprovalPayload({ ...base, code, migration }));
+    const show = (code, migration = base.migration, ref = `(Reference ${code}. You don't need to type it.)`) =>
+      `Approve this ONE change to the live CRX Manager database:\n\nMigration: ${migration}\n\n` +
+      `To approve, reply: I approve (before Oct 10, 2026, 9:00 AM Central).\n${ref}`;
+    {
+      const C = "535353";
+      ok(requestShownIn(ownerApprovalSummary(pOf(C)).join("\n"), pOf(C)), "the summary the script prints shows its request");
+      ok(requestShownIn(show(C), pOf(C)), "a summary with the migration, the reply and the Reference line shows its request");
+      ok(requestShownIn(ownerApprovalSummary(JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt, expiresAt: base.expiresAt,
+        nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
+        expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");
+      for (const ref of ["**Reference:** 535353", "(Reference: 535353.)", "reference 535353", "Reference 535353, thanks", "Reference 535353.\nThanks"]) {
+        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown and sentence punctuation are fine`);
+      }
+      ok(!requestShownIn(`An earlier request had Reference ${C}. Should I merge PR #900?`, pOf(C)),
+        "a message that only cites an old reference while asking something else does not show the request (Luna BLOCKER, round 4)");
+      ok(!requestShownIn(show(C).replace(`Migration: ${base.migration}`, "Migration: (see above)"), pOf(C)),
+        "without the migration's name, the request is not shown");
+      ok(!requestShownIn(show(C).replace("To approve, reply: I approve", "Ready when you are"), pOf(C)),
+        "without the reply it asks for, the request is not shown");
+      ok(!requestShownIn(show(C, SECOND), pOf(C)), "the summary of another migration with the same reference does not show this one");
+      for (const ref of ["Reference 5353531", "Reference 535353-4", "Reference 535353_4", "Reference 535353.1", "Reference 535353/2",
+        "Reference 535353:9", "Reference 535353٧", "Reference 535353é", "Order 535353", "Lot 901-535353-4", "Invoice 15353531"]) {
+        ok(!requestShownIn(show(C, base.migration, ref), pOf(C)),
+          `${JSON.stringify(ref)}: not the reference (longer number, compound or Unicode identifier, or no label; Luna rounds 1, 2, 4)`);
+      }
+    }
+    ok(resolve(show("535353")).silent === true, "with no request waiting, \"I approve\" is ordinary chat and the hook stays silent");
     writeApprovalRequest(sdir, buildApprovalPayload({ ...base, code: "424242", sessionId: OTHER_SID }));
-    ok(resolve("Reference 424242").silent === true, "a request built in another conversation is not waiting in this one");
+    ok(resolve(show("424242")).silent === true, "a request built in another conversation is not waiting in this one");
     rmSync(path.join(sdir, requestFileName("424242")));
     writeApprovalRequest(sdir, buildApprovalPayload({ ...base, code: "535353" }));
-    ok(resolve("Reference 535353", { now: Date.parse(base.expiresAt) + 1 }).silent === true, "an expired request is not waiting");
-    ok(resolve("Reference 535353", { sessionId: undefined }).silent === true, "a message with no session id approves nothing");
+    ok(resolve(show("535353"), { now: Date.parse(base.expiresAt) + 1 }).silent === true, "an expired request is not waiting");
+    ok(resolve(show("535353"), { sessionId: undefined }).silent === true, "a message with no session id approves nothing");
     refuses(resolve("Sure, merging the pull request now."), "did not show the approval request",
       "\"I approve\" after a message about something else approves nothing");
-    refuses(resolve("Invoice 15353531 is ready."), "did not show the approval request", "the reference must be a whole number, not part of a longer one");
-    refuses(resolve("Lot 901-535353-4 is in stock."), "did not show the approval request",
-      "the same six digits inside another identifier are not the reference (Luna HIGH, round 1)");
-    refuses(resolve("Order 535353 shipped."), "did not show the approval request", "the digits alone, without the Reference label, do not count");
-    refuses(resolve("Reference 5353531"), "did not show the approval request", "a longer number after the label does not count");
-    for (const compound of ["Reference 535353-4", "Reference 535353_4", "Reference 535353.1", "Reference 535353/2", "Reference 535353:9"]) {
-      refuses(resolve(compound), "did not show the approval request",
-        `${JSON.stringify(compound)}: a compound identifier that starts with the code is not the reference (Luna MED, round 2)`);
-    }
-    ok(resolve("(Reference 535353.)").ok && resolve("Reference 535353, reply I approve").ok && resolve("Reference 535353.\nThanks").ok,
-      "sentence punctuation after the reference is fine");
-    ok(resolve("**Reference:** 535353").ok && resolve("(Reference: 535353.)").ok && resolve("reference 535353").ok,
-      "the Reference label survives the agent's markdown and punctuation");
+    refuses(resolve("Reference 535353"), "did not show the approval request", "the reference alone, without the request, does not count");
     refuses(resolve("", { readShown: () => { throw new Error("EACCES"); } }), "could not be read", "an unreadable transcript approves nothing");
-    const one = resolve(SHOWN.replace(base.code, "535353"));
+    const one = resolve(show("535353"));
     ok(one.ok && one.code === "535353", `the request shown just before is the one approved: ${one.reason}`);
-    writeApprovalRequest(sdir, buildApprovalPayload({ ...base, migration: "20260914101700_second", code: "646464" }));
-    refuses(resolve("Reference 535353 and Reference 646464"), "ambiguous", "two requests shown at once approve neither");
-    const second = resolve("Reference 646464");
+    writeApprovalRequest(sdir, buildApprovalPayload({ ...base, migration: SECOND, code: "646464" }));
+    refuses(resolve(`${show("535353")}\n\n${show("646464", SECOND)}`), "ambiguous", "two requests shown at once approve neither");
+    const second = resolve(show("646464", SECOND));
     ok(second.ok && second.code === "646464", "with two waiting, the one shown just before is chosen");
     const r = rec({ code: second.code, dirs: [sdir], reply: "I approve", now: APPROVED });
     ok(r.ok && JSON.parse(readFileSync(r.file, "utf8")).reply === "I approve", "the plain reply records the approval through the same path");
-    ok(check(JSON.parse(readFileSync(r.file, "utf8")), { expect: { ...expect, migration: "20260914101700_second" } }).ok,
+    ok(check(JSON.parse(readFileSync(r.file, "utf8")), { expect: { ...expect, migration: SECOND } }).ok,
       "a plain-reply approval verifies at the apply like any other");
-    ok(resolve("Reference 646464").ok === false && resolve("Reference 646464").reason.includes("did not show"),
+    ok(resolve(show("646464", SECOND)).ok === false && resolve(show("646464", SECOND)).reason.includes("did not show"),
       "a used request is no longer waiting, so the same reply cannot approve it twice");
     writeFileSync(path.join(sdir, usedCodeMarkerName("535353")), "{}");
-    ok(resolve("Reference 535353").silent === true, "a request whose code is retired is not waiting");
+    ok(resolve(show("535353")).silent === true, "a request whose code is retired is not waiting");
     // Silence must mean nothing is waiting, never that the lookup failed (Luna LOW, round 2).
     ok(resolve("x", { dirs: [path.join(tdir, "nowhere", ".claude", "session-state")] }).silent === true,
       "a session folder that does not exist yet simply has nothing waiting");

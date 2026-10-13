@@ -71,7 +71,7 @@ Each goal has a plain test for "done". That test is the **minimum**: each goal's
 
 **Done when:** separate live checks, one per rule and role, all pass:
 - an admin can pull the register, and a sales rep, driver and applicator are each refused;
-- for each of the three photo buckets (`delivery-photos`, `receiving-photos`, `team-note-attachments`), a signed-out visitor is refused a link, and a signed-in staff member can still open it;
+- for each of the three photo buckets (`delivery-photos`, `receiving-photos`, `team-note-attachments`), a signed-out visitor and a deactivated staff account are each refused a link, and an active signed-in staff member can still open it;
 - a driver and an applicator are each refused cost and margin data;
 - an applicator sees fields for their assigned jobs and is refused other fields.
 
@@ -88,14 +88,14 @@ Each goal has a plain test for "done". That test is the **minimum**: each goal's
 
 #### Goal 3: Billing you can trust (about 2–4 weeks)
 - Post uses what's on screen, or refuses until it's saved. The database enforces this, not just the screen: `post_invoice` and `post_invoice_group` check the invoice version the screen loaded and refuse if it changed. That way a save from a second tab or another user can't be posted unseen (see `KNOWN_ISSUES.md`).
-- Voiding a delivery must leave nothing collectible for goods that came back. Its posted invoice gets an automatic credit, or the void is refused until an admin credits it. A warning message alone (today's behavior) does not count.
+- Voiding a delivery must leave nothing collectible for the goods on **that delivery**. A credit for exactly the voided delivery's value is issued automatically, or the void is refused until an admin issues it. Charges for the order's other deliveries stay collectible. A warning message alone (today's behavior) does not count.
 - Cap whole-order invoices at what was ordered or delivered.
 - Orderless invoices (made from scratch, no order or delivery) follow the rule Mason picks in question 6e.
 - Blend-ticket pricing picks the right quoted price.
 - Returns against a Chem Man-billed delivery **stay allowed**, with the credit handled in Chem Man or the books (Mason, 2026-10-07; see `KNOWN_ISSUES.md`). Not changed here. The issue goes away at the Chem Man cut-over (Goal 7).
 
 **Done when:** each case is run against a real database copy and refuses or corrects as described. That includes these cases:
-- after a delivery with a posted invoice is voided, that invoice is no longer collectible;
+- on an order with several deliveries, voiding one removes only that delivery's value from what is owed, and the rest stays collectible;
 - an invoice saved in a second tab after the first screen loaded is refused at Post;
 - an orderless invoice that breaks the 6e rule is refused.
 
@@ -134,6 +134,7 @@ Each goal has a plain test for "done". That test is the **minimum**: each goal's
 - a full test month of invoices, payments **and credits** lands in QuickBooks Desktop matching CRX to the cent;
 - a real **card** payment and a real **ACH** payment each settle end to end;
 - a pending payment and a failed or declined one each leave the invoice unpaid, with its balance unchanged, until the processor confirms settlement;
+- a settled payment later reversed (an ACH return or a card chargeback) reopens the invoice balance exactly once, and the reversal reaches QuickBooks;
 - the cut-over plan is written.
 
 #### Goal 8: Spend on product, not process (ongoing; reviewed monthly through handoff, not a Phase A gate)

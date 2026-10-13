@@ -355,7 +355,7 @@ export default function BatchAdjustModal({ open, onClose, items, userId, onSucce
       if (uncertainCount === 0) {
         // This dialog is resolving the batch itself, so the unfreeze that follows
         // is not "finished elsewhere". If resolving fails the batch stays frozen
-        // and the effect above records it as seen again.
+        // and the effect above records it as seen again once saving ends.
         setSawFrozenBatch(false);
         try {
           await batchIntent.resolveIntent();

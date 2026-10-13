@@ -49,9 +49,17 @@ correct under any React version:
   rendered by then. Under React 19 the page could flag its own load as an edit, which disabled
   Approve/Reject. Renders that still show the exact hydrated objects are no longer counted as edits.
 
+- `UnbilledApplicationsPanel`: after a "could not verify the invoice result" refusal, a fresh
+  idempotency key came only from the loading spinner remounting each row action. React 19 can merge
+  a fast loading true→false pair into one render, which skipped the remount and replayed the old key
+  until a page reload. A successful reconciliation now bumps a generation that keys each row action,
+  so the remount always happens. The test mocks still answer instantly; without the key, 7 of 12 fail.
+- `BlendTicketDetail` (pre-existing, found in review): the OCR re-process path cleared dirty
+  tracking before reloading. A failed reload therefore left later edits untracked, so a ticket could
+  be approved or left with unsaved edits silently lost. `loadTicketData` already suspends and
+  restores tracking itself. A new test fails with the old line and passes without it.
+
 **Test-only timing fixes.**
-- `UnbilledApplicationsPanel`: list reads now resolve on a later task, like a real network read.
-  This keeps the loading boundary that remounts each row action with a fresh key.
 - `SupplierPricing`: `findByText` replaces a synchronous assertion.
 - `JobDetail` (discontinued product): the test now waits for the by-id lookup to settle. It still
   fails if the block never clears, which was mutation-checked by disabling the by-id form lookup.
@@ -59,7 +67,7 @@ correct under any React version:
 **Proof observed** on this tree:
 - `npm run typecheck`, `npm run lint`, `npm run build`, `npm run test:correction-guards` and
   `npm run test:agent-workflows` all passed.
-- Full `npm test`: 391 files, 5,571 passed, 0 failed.
+- Full `npm test`: 391 files, all passed, 0 failed.
 - `node scripts/verify-deps.mjs --force` passed, and `npm audit --audit-level=high` found 0 vulnerabilities.
 - The same five failing test files passed 106/106 on `main` under React 18, which confirms React 19
   caused the failures.

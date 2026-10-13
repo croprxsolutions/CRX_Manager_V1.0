@@ -759,7 +759,8 @@ export function BlendTicketDetail() {
       }
       toast('success', 'OCR re-processing complete');
       await logActivity({ event: 'blend_ticket_reprocessed', description: `Re-processed OCR for ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id });
-      initialLoadDone.current = false;
+      // loadTicketData suspends dirty tracking itself and restores the prior mode if the
+      // reload fails; clearing it here first would leave later edits untracked after a failure.
       await loadTicketData();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reprocess_ocr' } });

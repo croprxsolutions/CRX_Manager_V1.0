@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockFrom, mockRpc, mockToast, mockNavigate } = vi.hoisted(() => ({
@@ -1067,6 +1067,10 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     await waitFor(() => {
       expect(screen.queryByText(/This line cannot be saved/i)).toBeNull();
     }, { timeout: 5000 });
+    // Absent before the lookup settled is not enough: let every mocked read finish,
+    // then require the line to still be saveable.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByText(/This line cannot be saved/i)).toBeNull();
   }, 30000);
 });
 

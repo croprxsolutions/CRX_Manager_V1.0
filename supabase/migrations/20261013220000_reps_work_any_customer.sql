@@ -33,10 +33,15 @@
 --   unmerged; its 20261013160000 was never applied) and the 2026-10-06 rep-scoping plan.
 --   This WIDENS permissions, so it is applied only with Mason's explicit owner approval.
 --
--- NOT CHANGED: every admin-only action (void, unpost, credit memos, write-offs, prepay apply,
---   assign_customers_sales_rep) and everything an admin can do; drivers, applicators and every
---   other role (their policy legs are copied verbatim); invoices_select (a rep still reads the
---   invoices they created or are the salesperson on); the reps' own work lists (call lists,
+-- NOT CHANGED: everything an admin can do, and every action that is already admin-only stays
+--   admin-only (write-offs, invoice deletion, delivery voids, assign_customers_sales_rep); the
+--   other invoice functions reps can already call (unpost, payments, credit-memo and prepay
+--   application, consolidation, transfer back to a job, the field-application billing updates)
+--   keep exactly today's gates; drivers, applicators and every other role (their policy legs are
+--   copied verbatim); invoices_select (a rep still reads only the invoices they created or are
+--   the salesperson on; Mason chose on 2026-10-13 to let reps READ every invoice, which ships as
+--   the next change together with own-name checks on those other invoice functions); the reps'
+--   own work lists (call lists,
 --   get_rep_customer_purchase_flags) and notification sweeps, which use assigned_sales_rep to mean
 --   "my book", not as an access gate; create_quick_delivery's replay-only DELIVERY_SCOPE_DENIED;
 --   the order-invoice RPCs (their salesperson gap is a separate follow-up); jobs.commission_split
@@ -223,7 +228,7 @@ CREATE TEMP TABLE reps_any_customer_security_20261013 ON COMMIT DROP AS
    );
 
 -- ---------------------------------------------------------------------------------------------
--- 1. FUNCTIONS. Each body below is the live body (pg_get_functiondef, 2026-10-13) with ONLY the
+-- 1. FUNCTIONS. Each body below is the live definition (read 2026-10-13) with ONLY the
 --    assigned-rep checks removed or narrowed as listed in the header. CREATE OR REPLACE keeps
 --    each function's OID, owner, grants, SECURITY DEFINER and search_path.
 

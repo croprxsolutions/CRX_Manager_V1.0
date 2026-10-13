@@ -429,10 +429,24 @@ archive. They are listed here so the open part of this file shows them. None was
 
 - **Follow-ups left by the reps-work-any-customer change (`20261013220000`, 2026-10-13; review
   findings, read from code, not exercised live).**
-  - **Job commission splits.** `jobs_update` is `is_admin() OR is_sales_rep()` and nothing guards
-    `jobs.commission_split`, so any active rep can change the split on any job (pre-existing; the
-    2026-10-13 rule protects only `customers.default_commission_split`). Confirm with Mason whether
-    job splits should follow the same admin-or-assigned-rep rule.
+  - **NEXT CHANGE: reps read every invoice (Mason, 2026-10-13: "Reps see all invoices", read-only
+    for other reps' invoices).** Not in `20261013220000`. It must widen the read policies of
+    `invoices` and its child tables AND add the same own-name check (`INVOICE_SCOPE_DENIED`) to the
+    other invoice functions any active rep can already call on any invoice id, which the wider read
+    would make easy to reach: `unpost_invoice`, `unpost_invoice_group`, `transfer_invoice_to_job`,
+    `consolidate_draft_invoices`, `update_field_app_applied_info`, `update_field_app_invoice_billing`,
+    `save_field_app_invoice` (existing invoice), and the `invoice_shares_insert` policy (read live
+    2026-10-13: all executable by authenticated with no ownership test; pre-existing). Screens must
+    hide Edit/Post on other reps' invoices and keep "Post All" to the rep's own. Payments and
+    prepay/credit application stay open to reps (collecting money is not editing an invoice).
+  - **Commission splits outside the customer default.** `jobs_update` is `is_admin() OR
+    is_sales_rep()` and nothing guards `jobs.commission_split`; quote and order splits are likewise
+    editable by any rep on any customer (`save_quote`, order functions; pre-existing). The 2026-10-13
+    rule protects only `customers.default_commission_split`. Confirm with Mason whether job, quote
+    and order splits should follow the same admin-or-assigned-rep rule.
+  - **Prepay on a new customer.** The prepay guard covers UPDATE only: a rep's direct INSERT of a
+    self-assigned customer could set a non-zero `prepay_balance_cents` (pre-existing; `save_customer`
+    never sets it, and `reconcile_prepay_balances` corrects it).
   - **Year-end batch for reps.** Reports' batch mode finds customers through the invoices the rep
     can read (created or salesperson on), so a rep's batch skips customers billed only by others;
     the single-customer year-end works for any customer.

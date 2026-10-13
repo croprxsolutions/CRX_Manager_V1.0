@@ -29,7 +29,7 @@ import {
   buildSelfTestPayload,
   findOwnerApprovals,
   isPlainApprovalReply,
-  lastAgentTurnText,
+  lastAgentMessageText,
   newApprovalCode,
   ownerApprovalSummary,
   ownerOnceGuardSql,
@@ -383,50 +383,77 @@ try {
 }
 
 // ── A plain reply: what the agent showed last, and which request it is for.
+// Entries in the shape Claude Code writes: one assistant message may span several
+// entries that share its message id (thinking, text, tool use).
 const T = (type, content, extra = {}) => JSON.stringify({ type, message: { role: type, content }, ...extra });
-const agentSaid = (text) => T("assistant", [{ type: "text", text }]);
+let msgSeq = 0;
+const A = (blocks, id = `msg_${++msgSeq}`, extra = {}) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: blocks }, ...extra });
+const agentSaid = (text, id) => A([{ type: "text", text }], id);
+const agentRan = (id) => A([{ type: "tool_use", id: "t", name: "Bash", input: {} }], id);
+const toolGave = (content) => T("user", [{ type: "tool_result", tool_use_id: "t", content }]);
 const masonSaid = (text) => T("user", text);
 const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Reference ${base.code}. You don't need to type it.)`;
 {
   const tdir = mkdtempSync(path.join(os.tmpdir(), "crx-owner-transcript-"));
   try {
     let n = 0;
-    const turn = (lines, opts) => {
+    const last = (lines, opts) => {
       const f = path.join(tdir, `t${n++}.jsonl`);
       writeFileSync(f, `${lines.join("\n")}\n`);
-      return lastAgentTurnText(f, "I approve", opts);
+      return lastAgentMessageText(f, "I approve", opts);
     };
     const has = (text) => text.includes(base.code);
-    ok(has(turn([masonSaid("fix it"), agentSaid(SHOWN)])), "the agent's last message is read before Mason's reply is written");
-    ok(has(turn([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), T("attachment", "hook output")])),
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN)])), "the agent's last message is read before Mason's reply is written");
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), T("attachment", "hook output")])),
       "Mason's current message, once written, is skipped");
-    ok(has(turn([masonSaid("fix it"), agentSaid("Checking."), T("assistant", [{ type: "tool_use", id: "t", name: "Bash", input: {} }]),
-      T("user", [{ type: "tool_result", tool_use_id: "t", content: "ok" }]), agentSaid(SHOWN)])),
-      "every message of the agent's last turn counts, across its tool calls");
-    ok(!has(turn([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("what does it do?"), agentSaid("It changes who can read invoices.")])),
+    {
+      const t = last([masonSaid("fix it"), A([{ type: "thinking", thinking: "x" }], "m1"), agentSaid("Approve this ONE change:", "m1"),
+        agentSaid(`(Reference ${base.code}.)`, "m1"), agentRan("m1")]);
+      ok(has(t) && t.includes("Approve this ONE change:"), "the entries of one message (same message id) are read together");
+    }
+    ok(has(last([masonSaid("fix it"), agentSaid("Checking."), agentRan(), toolGave("ok"), agentSaid(SHOWN)])),
+      "the final message counts after the agent's tool calls");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), agentRan(), toolGave("ok"), agentSaid("PR #900 is ready to merge. Approve?")])),
+      "a request shown earlier in the same turn does not count once a later message asks something else (Luna HIGH, round 2)");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("what does it do?"), agentSaid("It changes who can read invoices.")])),
       "a request shown before Mason's previous message does not count");
-    ok(!has(turn([masonSaid("fix it"), T("assistant", [{ type: "tool_use", id: "t", name: "Bash", input: {} }]),
-      T("user", [{ type: "tool_result", tool_use_id: "t", content: SHOWN }]), agentSaid("Done.")])),
+    ok(!has(last([masonSaid("fix it"), agentRan(), toolGave(SHOWN), agentSaid("Done.")])),
       "the script's output in a tool result is not something the agent showed Mason");
-    ok(!has(turn([masonSaid("fix it"), T("assistant", [{ type: "text", text: SHOWN }], { isSidechain: true }), agentSaid("Done.")])),
+    ok(!has(last([masonSaid("fix it"), A([{ type: "text", text: SHOWN }], "s1", { isSidechain: true }), agentSaid("Done.")])),
       "a subagent's text is not something the agent showed Mason");
-    ok(has(turn([masonSaid("fix it"), agentSaid(SHOWN), T("user", "<system note>", { isMeta: true }), agentSaid("Waiting.")])),
-      "text Claude Code adds itself does not end the agent's turn");
-    ok(!has(turn([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), agentSaid("Recorded."), masonSaid("I approve")])),
-      "repeating the reply does not reach back past the previous one");
-    ok(has(turn([masonSaid("fix it"), agentSaid(SHOWN), "{\"type\":\"assist"])), "a half-written last line is skipped");
-    assert.throws(() => turn([masonSaid("fix it"), agentSaid(SHOWN), "not json", agentSaid("Done.")]), /damaged/,
-      "a damaged line inside the turn (it could be one of Mason's messages) refuses (Luna BLOCKER, round 1)"); pass++;
-    ok(has(turn(["not json", masonSaid("fix it"), agentSaid(SHOWN)])), "a damaged line before Mason's previous message does not matter");
-    ok(!has(turn([masonSaid("fix it"), agentSaid(SHOWN), T("user", [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } }]),
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), A([{ type: "text", text: "sub" }], "s2", { isSidechain: true })])),
+      "a subagent's text after the agent's message is not a message to Mason either");
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", "<system note>", { isMeta: true })])),
+      "text Claude Code adds itself is not a message after the agent's");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("<task-notification>done</task-notification>"), agentSaid("The review finished.")])),
+      "a notification the agent answered with something else moves the last message on");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve"), agentSaid("Recorded."), masonSaid("I approve")])),
+      "repeating the reply does not reach back past the agent's answer to the previous one");
+    // Mason sending the same plain reply twice in a row straight after the request,
+    // before his second is written: both messages answer that same request, so
+    // reading back to it is his intent either way (Luna round 2, refuted).
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), masonSaid("I approve")])),
+      "an earlier identical reply straight after the request reads as the same reply");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } }]),
       agentSaid("That screenshot shows the invoice list.")])),
-      "an image-only message from Mason ends the turn like any other message (Luna BLOCKER, round 1)");
-    assert.throws(() => turn([masonSaid("fix it"), agentSaid(SHOWN), agentSaid("y".repeat(5000))], { maxBytes: 200 }), /longer than/,
-      "a turn that starts before the part read refuses: an earlier request could be hidden there (Luna HIGH, round 1)"); pass++;
-    ok(has(turn([agentSaid("x".repeat(5000)), masonSaid("fix it"), agentSaid(SHOWN)], { maxBytes: 600 })),
-      "a long transcript is fine when Mason's previous message is inside the part read");
-    assert.throws(() => lastAgentTurnText(path.join(tdir, "missing.jsonl"), "I approve"), "a missing transcript throws"); pass++;
-    assert.throws(() => lastAgentTurnText(undefined, "I approve"), /no transcript/, "no transcript path throws"); pass++;
+      "an image-only message from Mason counts as a message (Luna BLOCKER, round 1)");
+    ok(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } }])]) === "",
+      "with a message of Mason's after the agent's, nothing the agent said counts");
+    assert.throws(() => last([masonSaid("fix it"), agentSaid(SHOWN), "not json", agentSaid("Done.")]), /damaged/,
+      "a damaged line in what is read refuses: it could be one of Mason's messages (Luna BLOCKER, round 1)"); pass++;
+    assert.throws(() => last([masonSaid("fix it"), agentSaid(SHOWN), "{\"type\":\"user\",\"message\":{\"content\":\"what"]), /damaged/,
+      "a half-written last line refuses too: it could be a message of Mason's (Luna HIGH, round 2)"); pass++;
+    ok(has(last(["not json", masonSaid("fix it"), agentSaid(SHOWN)])), "a damaged line before the agent's last message does not matter");
+    assert.throws(() => last([agentSaid("Approve this ONE change:", "m9"), agentSaid(`(Reference ${base.code}.)`, "m9")]), /not in the part/,
+      "a transcript with nothing before the agent's message proves nothing (Luna HIGH, round 2)"); pass++;
+    assert.throws(() => last([masonSaid("fix it"), agentSaid(SHOWN, "m8"), agentSaid("y".repeat(5000), "m8")], { maxBytes: 200 }), /not in the part/,
+      "a message that starts before the part read refuses: a request could be hidden there (Luna HIGH, round 1)"); pass++;
+    ok(has(last([agentSaid("x".repeat(5000)), masonSaid("fix it"), agentSaid(SHOWN)], { maxBytes: 600 })),
+      "a long transcript is fine when the start of the agent's last message is inside the part read");
+    assert.throws(() => last([masonSaid("fix it"), T("assistant", [{ type: "text", text: SHOWN }])]), /no message id/,
+      "an assistant entry without a message id refuses"); pass++;
+    assert.throws(() => lastAgentMessageText(path.join(tdir, "missing.jsonl"), "I approve"), "a missing transcript throws"); pass++;
+    assert.throws(() => lastAgentMessageText(undefined, "I approve"), /no transcript/, "no transcript path throws"); pass++;
 
     // Which request "I approve" is for.
     const sdir = path.join(tdir, "s", ".claude", "session-state");
@@ -445,6 +472,12 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "the same six digits inside another identifier are not the reference (Luna HIGH, round 1)");
     refuses(resolve("Order 535353 shipped."), "did not show the approval request", "the digits alone, without the Reference label, do not count");
     refuses(resolve("Reference 5353531"), "did not show the approval request", "a longer number after the label does not count");
+    for (const compound of ["Reference 535353-4", "Reference 535353_4", "Reference 535353.1", "Reference 535353/2", "Reference 535353:9"]) {
+      refuses(resolve(compound), "did not show the approval request",
+        `${JSON.stringify(compound)}: a compound identifier that starts with the code is not the reference (Luna MED, round 2)`);
+    }
+    ok(resolve("(Reference 535353.)").ok && resolve("Reference 535353, reply I approve").ok && resolve("Reference 535353.\nThanks").ok,
+      "sentence punctuation after the reference is fine");
     ok(resolve("**Reference:** 535353").ok && resolve("(Reference: 535353.)").ok && resolve("reference 535353").ok,
       "the Reference label survives the agent's markdown and punctuation");
     refuses(resolve("", { readShown: () => { throw new Error("EACCES"); } }), "could not be read", "an unreadable transcript approves nothing");
@@ -462,6 +495,15 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "a used request is no longer waiting, so the same reply cannot approve it twice");
     writeFileSync(path.join(sdir, usedCodeMarkerName("535353")), "{}");
     ok(resolve("Reference 535353").silent === true, "a request whose code is retired is not waiting");
+    // Silence must mean nothing is waiting, never that the lookup failed (Luna LOW, round 2).
+    ok(resolve("x", { dirs: [path.join(tdir, "nowhere", ".claude", "session-state")] }).silent === true,
+      "a session folder that does not exist yet simply has nothing waiting");
+    const notADir = path.join(tdir, "plain-file");
+    writeFileSync(notADir, "x");
+    refuses(resolve("x", { dirs: [notADir] }), "could not be read", "an approval folder that cannot be read is reported, not taken as empty");
+    writeFileSync(path.join(sdir, requestFileName("757575")), "not json");
+    refuses(resolve("Reference 757575"), "could not be read", "a request file that cannot be read is reported, not skipped");
+    rmSync(path.join(sdir, requestFileName("757575")));
   } finally {
     rmSync(tdir, { recursive: true, force: true });
   }

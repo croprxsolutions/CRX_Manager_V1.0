@@ -217,22 +217,26 @@ const isOwnerMessage = (e) => e?.type === "user" && !e.isSidechain && !e.isMeta 
 const DAMAGED = Symbol("damaged transcript line");
 
 /**
- * What the agent showed Mason in its last turn: the text of every main-thread
- * assistant message after the message he sent before this one, read from the
- * session transcript Claude Code hands the hook. His current message may or may
- * not be written yet; when it is, it is skipped. Throws, so a plain reply then
- * approves nothing, when the transcript cannot be read, when a damaged line
- * (other than the last, which may still be being written) lies inside the turn,
- * or when the turn starts before the tail that was read (Luna round 1).
+ * What the agent said to Mason last: the text of the final main-thread assistant
+ * message before his reply (Claude Code stores one message as several entries
+ * sharing its message id), read from the session transcript Claude Code hands the
+ * hook. Only that message counts, so a request shown earlier in the same turn,
+ * before a later question, is not what "I approve" answers (Luna HIGH, round 2).
+ * If any message reached the session after the agent's last message (another of
+ * Mason's, or a notification), the result is empty. His current message may or
+ * may not be written yet; when it is, it is skipped.
+ *
+ * Throws, so a plain reply then approves nothing, when the transcript cannot be
+ * read, when a damaged line lies in what is scanned, or when the start of that
+ * message cannot be found in the part read (Luna rounds 1-2).
  */
-export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024 } = {}) {
+export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024 } = {}) {
   if (typeof transcriptPath !== "string" || !transcriptPath) throw new Error("the message carried no transcript");
   const fd = openSync(transcriptPath, "r");
   let raw;
-  let start;
   try {
     const size = fstatSync(fd).size;
-    start = Math.max(0, size - maxBytes);
+    const start = Math.max(0, size - maxBytes);
     const buf = Buffer.alloc(size - start);
     let got = 0;
     while (got < buf.length) {
@@ -245,61 +249,81 @@ export function lastAgentTurnText(transcriptPath, currentPrompt, { maxBytes = 32
   } finally {
     closeSync(fd);
   }
-  const lines = raw.split("\n").filter((l) => l.trim());
-  const entries = lines.map((line, i) => {
-    try { return JSON.parse(line); }
-    catch { return i === lines.length - 1 ? null : DAMAGED; } // only the last line may be half-written
+  // Every line is either a whole entry or damage: a half-written line could be
+  // one of Mason's messages, so it is never skipped (Luna HIGH, round 2).
+  const entries = raw.split("\n").filter((l) => l.trim()).map((line) => {
+    try { return JSON.parse(line); } catch { return DAMAGED; }
   });
   const said = [];
+  let messageId;
   let sawAgent = false;
   let skippedCurrent = false;
-  let reachedPrevious = false;
+  let found = false; // the scan stopped on a real boundary, not the edge of what was read
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
-    if (e === DAMAGED) throw new Error("a damaged transcript line lies inside the agent's last turn");
+    if (e === DAMAGED) throw new Error("a damaged transcript line lies in what had to be read");
     if (isOwnerMessage(e)) {
       if (!sawAgent && !skippedCurrent && textOf(e.message.content).trim() === String(currentPrompt ?? "").trim()) {
         skippedCurrent = true;
         continue;
       }
-      reachedPrevious = true;
+      found = true; // a message after the agent's text, or the one before it: either way the scan ends
       break;
     }
-    if (e?.type === "assistant" && !e.isSidechain) {
-      sawAgent = true;
-      const t = textOf(e.message?.content);
-      if (t) said.unshift(t);
+    if (e?.type === "user") { // a tool result
+      if (said.length) { found = true; break; }
+      continue;
     }
+    if (e?.type !== "assistant" || e.isSidechain) continue;
+    sawAgent = true;
+    const t = textOf(e.message?.content);
+    if (!said.length) {
+      if (!t) continue;
+      said.unshift(t);
+      messageId = e.message?.id;
+      // Claude Code gives every assistant message an id; without one, where the
+      // message starts cannot be told, so nothing is concluded.
+      if (!messageId) throw new Error("the agent's last message carries no message id");
+      continue;
+    }
+    if (e.message?.id !== messageId) { found = true; break; }
+    if (t) said.unshift(t);
   }
-  // Without Mason's previous message in the part read, the turn may start earlier
-  // and hold a request that was not seen, so nothing can be concluded.
-  if (!reachedPrevious && start > 0) throw new Error("the agent's last turn is longer than the part of the transcript read");
+  // Running off the start of what was read proves nothing: the message, or a
+  // message of Mason's after it, could lie before it (Luna HIGH, rounds 1-2).
+  if (!found) throw new Error("the start of the agent's last message is not in the part of the transcript read");
   return said.join("\n");
 }
 
 /**
  * Which request a plain `I approve` is for. The live requests this session built
- * (pending, unexpired, code not retired) are matched against the agent's last turn:
+ * (pending, unexpired, code not retired) are matched against the agent's last message:
  * exactly one of them must have its reference number there.
  *
  * @param {object} args
  * @param {string[]} args.dirs  this session's session-state folders (ownerRequestDirs)
  * @param {string} args.sessionId
- * @param {() => string} args.readShown  the agent's last turn (lastAgentTurnText); may throw
+ * @param {() => string} args.readShown  the agent's last message (lastAgentMessageText); may throw
  * @returns {{silent: true}|{ok: false, reason: string}|{ok: true, code: string}}
  *   silent: nothing is waiting in this conversation, so the message is ordinary chat.
  */
 export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now() }) {
   if (!usableSessionId(sessionId)) return { silent: true };
   const live = new Set();
+  // Silence must mean "nothing is waiting", never "could not tell" (Luna LOW, round 2).
   for (const dir of new Set(dirs || [])) {
     let names;
-    try { names = readdirSync(dir); } catch { continue; }
+    try { names = readdirSync(dir); }
+    catch (e) {
+      if (e?.code === "ENOENT") continue;
+      return { ok: false, reason: `the approval folder ${dir} could not be read (${errText(e)})` };
+    }
     for (const name of names) {
       const m = /^owner-approval-request-(\d{6})\.json$/.exec(name);
       if (!m || existsSync(path.join(dir, usedCodeMarkerName(m[1])))) continue;
       let p;
-      try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); } catch { continue; }
+      try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); }
+      catch (e) { return { ok: false, reason: `the request file ${name} could not be read (${errText(e)})` }; }
       const deadline = Date.parse(p?.expiresAt);
       if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.add(m[1]);
     }
@@ -309,8 +333,10 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
   try { shownText = String(readShown() ?? ""); }
   catch (e) { return { ok: false, reason: `what the agent last showed him could not be read (${errText(e)})` }; }
   // Shown means labelled as the request's reference ("Reference 482913", markdown
-  // allowed between), not the same six digits inside some other number (Luna HIGH).
-  const shown = [...live].filter((c) => new RegExp(`\\breference\\b[^0-9A-Za-z\\n]{0,6}${c}(?![0-9A-Za-z])`, "i").test(shownText));
+  // allowed between), never the same six digits starting or inside another number
+  // or identifier such as 482913-4, 482913_4 or 482913.1 (Luna HIGH round 1, MED round 2).
+  const shown = [...live].filter((c) =>
+    new RegExp(`\\breference\\b[^0-9A-Za-z\\n]{0,6}${c}(?![0-9A-Za-z_]|[-.,/:][0-9A-Za-z])`, "i").test(shownText));
   if (!shown.length) return { ok: false, reason: "the agent's message just before it did not show the approval request (its reference number), so it may have been about something else" };
   if (shown.length > 1) return { ok: false, reason: `the agent's last message showed ${shown.length} requests (${shown.join(", ")}), so it is ambiguous` };
   return { ok: true, code: shown[0] };

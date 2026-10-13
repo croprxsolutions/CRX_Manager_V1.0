@@ -16,7 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import {
-  approvalCodeFromReply, isPlainApprovalReply, lastAgentTurnText, ownerRequestDirs, recordReplyApproval, resolvePlainReply,
+  approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordReplyApproval, resolvePlainReply,
 } from "./owner-approval-lib.mjs";
 
 function emit(extra) {
@@ -46,7 +46,7 @@ try {
     which = resolvePlainReply({
       dirs,
       sessionId: payload?.session_id,
-      readShown: () => lastAgentTurnText(payload?.transcript_path, reply),
+      readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
     });
     if (which.ok) code = which.code;
   }

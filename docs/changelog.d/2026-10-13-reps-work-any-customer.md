@@ -17,7 +17,8 @@ only with Mason's owner-approval reply):
   dispatched list, which now show reps every customer's name); 19 policies lose their assigned-rep
   condition, every other condition kept (20 pinned: `customers_insert` is pinned unchanged).
 - Still refused: a rep naming another salesperson (`SALESMAN_SCOPE_DENIED`); a rep changing or posting an
-  EXISTING invoice or split set they did not create and are not the salesperson on (`INVOICE_SCOPE_DENIED`,
+  EXISTING invoice or split set not under their own name, i.e. they are not its salesperson and it is not an
+  unattributed invoice they created (`INVOICE_SCOPE_DENIED`,
   `SPLIT_SET_NOT_OWNED`; added after review, since the old assigned-customer rule was the only gate on
   someone else's draft); a rep creating a customer not assigned to themselves (`REP_MUST_SELF_ASSIGN`); a rep
   reassigning a customer (`REP_CANNOT_REASSIGN`, compared with the stored rep, since the edit page always
@@ -50,7 +51,7 @@ split read-only to a rep on a customer not assigned to them, and its save errors
 
 **Proof:** `node scripts/smoke/prove-reps-work-any-customer-real-schema.mjs` builds the production schema
 baseline in a disposable PostgreSQL 17 container, replays every migration, checks the 20 bodies and 20
-policies match live, then runs 63 calls as an admin, two reps, a driver, an applicator and a deactivated
+policies match live, then runs 65 calls as an admin, two reps, a driver, an applicator and a deactivated
 rep BEFORE and AFTER the candidate: reps are refused before and allowed after; the narrower rules still
 refuse after; every admin and other-role result is identical before and after; a drifted body aborts the
 preflight; a second apply is refused; and with the guard trigger dropped the rep's direct reassignment

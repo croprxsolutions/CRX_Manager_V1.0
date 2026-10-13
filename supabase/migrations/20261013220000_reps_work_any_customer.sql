@@ -5,8 +5,9 @@
 --   * Invoicing: a rep creates, saves, posts and emails invoices (single, field-application split
 --     and invoice groups) for any customer, under their OWN name only (SALESMAN_SCOPE_DENIED and
 --     the split writer's forced-self salesman stay; admins may name anyone). An EXISTING invoice
---     or split set a rep edits or posts must be one they created or are the salesperson on (the
---     same rows invoices_select already shows them): INVOICE_SCOPE_DENIED / SPLIT_SET_NOT_OWNED.
+--     or split set a rep edits or posts must also be under the rep's own name: the rep is its
+--     salesperson, or it has no salesperson and the rep created it (INVOICE_SCOPE_DENIED /
+--     SPLIT_SET_NOT_OWNED). "Own name" below always means exactly that.
 --   * Customers: a rep reads and edits every customer and every customer-related record:
 --     addresses, contacts, documents, facts, interactions and their transcripts, and external
 --     identities; the dispatch board and dispatched list show reps every customer's name.
@@ -52,15 +53,15 @@
 --  1  CREATE OR REPLACE of 20 functions, each the verbatim live body with ONLY these hunks:
 --       _save_invoice_split_provenance_impl_20260719 (save_invoice): the three CUSTOMER_SCOPE_DENIED
 --         tests are removed; SALESMAN_SCOPE_DENIED stays; a rep editing or replaying an EXISTING
---         invoice must have created it or be its salesperson (INVOICE_SCOPE_DENIED).
+--         invoice must find it under their own name (INVOICE_SCOPE_DENIED).
 --       _save_invoice_below_cost_impl_20260810 (save_invoice wrapper): the two replay-branch
---         CUSTOMER_SCOPE_DENIED tests become the same created-by-or-salesperson test, so a
---         mismatched receipt's invoice id is reported only to a rep who may see that invoice.
+--         CUSTOMER_SCOPE_DENIED tests become the same own-name test, so a mismatched receipt's
+--         invoice id is reported only to a rep the invoice belongs to.
 --       _post_invoice_public_impl_20260718 (post_invoice) and post_invoice_group: the
---         CUSTOMER_SCOPE_DENIED test becomes INVOICE_SCOPE_DENIED (every invoice posted must be one
---         the rep created or is the salesperson on); the row locks before it stay.
+--         CUSTOMER_SCOPE_DENIED test becomes INVOICE_SCOPE_DENIED (every invoice posted must be
+--         under the rep's own name); the row locks before it stay.
 --       _save_field_app_split_invoice_impl: SPLIT_SET_NOT_OWNED now means "an existing child is not
---         an invoice the rep created or is the salesperson on"; the member and source-job tests
+--         under the rep's own name"; the member and source-job tests
 --         keep refusing a non-admin only a member that is not a customer row and a job with no
 --         customer (SPLIT_CUSTOMER_NOT_ASSIGNED / SPLIT_JOB_NOT_ASSIGNED keep their codes).
 --       resolve_line_split_vector: RESOLVER_NOT_AUTHORIZED (the direct-call assigned-rep test) is
@@ -287,10 +288,11 @@ BEGIN
         RAISE EXCEPTION 'IDEMPOTENCY_PAYLOAD_CONFLICT';
       END IF;
       -- Any customer (Mason, 2026-10-13): no assigned-rep check (20261013220000). A rep
-      -- replays only an invoice they created or are the salesperson on.
+      -- replays only an invoice under their own name (they are its salesperson, or it has
+      -- none and they created it).
       IF v_actor_role = 'sales_rep'
-         AND v_owner_created_by IS DISTINCT FROM v_actor
-         AND v_owner_salesman_id IS DISTINCT FROM v_actor THEN
+         AND NOT (v_owner_salesman_id IS NOT DISTINCT FROM v_actor
+             OR (v_owner_salesman_id IS NULL AND v_owner_created_by IS NOT DISTINCT FROM v_actor)) THEN
         RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
       END IF;
       RETURN v_cached_invoice_id;
@@ -317,13 +319,13 @@ BEGIN
   END IF;
 
   -- Reps save invoices for ANY customer (Mason, 2026-10-13; 20261013220000
-  -- removed the two assigned-rep checks here), but only under their own name, and
-  -- edit only an existing invoice they created or are the salesperson on (the same
-  -- rows invoices_select shows them).
+  -- removed the two assigned-rep checks here), but only under their own name: an
+  -- existing invoice only when they are its salesperson, or it has none and they
+  -- created it.
   IF v_actor_role = 'sales_rep' THEN
     IF v_invoice_id IS NOT NULL
-       AND v_owner_created_by IS DISTINCT FROM v_actor
-       AND v_owner_salesman_id IS DISTINCT FROM v_actor THEN
+       AND NOT (v_owner_salesman_id IS NOT DISTINCT FROM v_actor
+             OR (v_owner_salesman_id IS NULL AND v_owner_created_by IS NOT DISTINCT FROM v_actor)) THEN
       RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
     END IF;
     IF v_requested_salesman_id IS NOT NULL
@@ -418,11 +420,11 @@ BEGIN
         RAISE EXCEPTION 'INVOICE_NOT_FOUND';
       END IF;
       -- Any customer (Mason, 2026-10-13; 20261013220000 removed the assigned-rep
-      -- check), but a rep sees the receipt only for an invoice they created or are
-      -- the salesperson on.
+      -- check), but a rep sees the receipt only for an invoice under their own name
+      -- (they are its salesperson, or it has none and they created it).
       IF v_actor_role = 'sales_rep'
-         AND v_cached_created_by IS DISTINCT FROM v_actor
-         AND v_cached_salesman_id IS DISTINCT FROM v_actor THEN
+         AND NOT (v_cached_salesman_id IS NOT DISTINCT FROM v_actor
+             OR (v_cached_salesman_id IS NULL AND v_cached_created_by IS NOT DISTINCT FROM v_actor)) THEN
         RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
       END IF;
       RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH'
@@ -448,11 +450,11 @@ BEGIN
         RAISE EXCEPTION 'INVOICE_NOT_FOUND';
       END IF;
       -- Any customer (Mason, 2026-10-13; 20261013220000 removed the assigned-rep
-      -- check), but a rep sees the receipt only for an invoice they created or are
-      -- the salesperson on.
+      -- check), but a rep sees the receipt only for an invoice under their own name
+      -- (they are its salesperson, or it has none and they created it).
       IF v_actor_role = 'sales_rep'
-         AND v_cached_created_by IS DISTINCT FROM v_actor
-         AND v_cached_salesman_id IS DISTINCT FROM v_actor THEN
+         AND NOT (v_cached_salesman_id IS NOT DISTINCT FROM v_actor
+             OR (v_cached_salesman_id IS NULL AND v_cached_created_by IS NOT DISTINCT FROM v_actor)) THEN
         RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
       END IF;
       RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH'
@@ -530,11 +532,11 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'INVOICE_NOT_FOUND'; END IF;
 
   -- Reps post invoices for ANY customer (Mason, 2026-10-13; 20261013220000 removed
-  -- the assigned-rep check), but only an invoice they created or are the
-  -- salesperson on (the rows invoices_select shows them).
+  -- the assigned-rep check), but only an invoice under their own name: they are
+  -- its salesperson, or it has none and they created it.
   IF v_actor_role = 'sales_rep'
-     AND v_created_by IS DISTINCT FROM v_actor
-     AND v_salesman_id IS DISTINCT FROM v_actor THEN
+     AND NOT (v_salesman_id IS NOT DISTINCT FROM v_actor
+             OR (v_salesman_id IS NULL AND v_created_by IS NOT DISTINCT FROM v_actor)) THEN
     RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
   END IF;
 
@@ -600,16 +602,16 @@ BEGIN
   END IF;
 
   -- Reps post invoice groups for ANY customer (Mason, 2026-10-13; 20261013220000
-  -- removed the assigned-rep check), but only when they created, or are the
-  -- salesperson on, every invoice in the group.
+  -- removed the assigned-rep check), but only when every invoice in the group is
+  -- under their own name (they are its salesperson, or it has none and they created it).
   IF v_actor_role = 'sales_rep'
      AND EXISTS (
        SELECT 1
          FROM public.invoices invoice_row
         WHERE invoice_row.invoice_group_id = p_invoice_group_id
           AND invoice_row.deleted_at IS NULL
-          AND invoice_row.created_by IS DISTINCT FROM v_actor
-          AND invoice_row.salesman_id IS DISTINCT FROM v_actor
+          AND NOT (invoice_row.salesman_id IS NOT DISTINCT FROM v_actor
+             OR (invoice_row.salesman_id IS NULL AND invoice_row.created_by IS NOT DISTINCT FROM v_actor))
      ) THEN
     RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
   END IF;
@@ -896,12 +898,13 @@ BEGIN
 
     -- Ownership on re-save (Codex P1 #4; narrowed 2026-10-13 by 20261013220000): reps may
     -- re-save a split set for ANY customer (Mason, 2026-10-13), but only when every EXISTING
-    -- child is an invoice they created or are the salesperson on (before any delete/insert).
+    -- child is under their own name: they are its salesperson, or it has none and they created
+    -- it (before any delete/insert).
     IF NOT is_admin() AND EXISTS (
       SELECT 1 FROM invoices i
       WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL
-        AND i.created_by IS DISTINCT FROM v_actor
-        AND i.salesman_id IS DISTINCT FROM v_actor
+        AND NOT (i.salesman_id IS NOT DISTINCT FROM v_actor
+             OR (i.salesman_id IS NULL AND i.created_by IS NOT DISTINCT FROM v_actor))
     ) THEN
       RAISE EXCEPTION 'SPLIT_SET_NOT_OWNED: not authorized to modify this billing set'
         USING ERRCODE = 'insufficient_privilege';

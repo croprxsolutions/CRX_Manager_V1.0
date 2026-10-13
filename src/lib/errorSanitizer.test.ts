@@ -115,7 +115,7 @@ describe('sanitizeError', () => {
     expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP: only an admin or this customer\'s assigned sales rep can change its default commission split'))
       .toBe("Only an admin or this customer's assigned sales rep can change its default commission split");
-    expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices you created or are the salesperson on');
+    expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices under your own name');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_INVOICES: this customer has posted or overdue invoices; resolve them before deactivating it'))
       .toBe('This customer has posted or overdue invoices. Resolve them before deactivating the customer');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))

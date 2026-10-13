@@ -353,6 +353,10 @@ const CASES = [
   ['rep posts another rep\'s draft on that rep\'s customer', U.REP, `public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-xpost') IS NULL`, { fixture: adminDraft(C3, 'x3', `, 'salesman_id', '${U.REP_B}'`) }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
   ['rep posts another rep\'s draft on the rep\'s own customer', U.REP, `public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-xpost1') IS NULL`, { fixture: adminDraft(C1, 'x1', `, 'salesman_id', '${U.REP_B}'`) }, /^ok\|/, /INVOICE_SCOPE_DENIED/],
   ['rep edits another rep\'s draft', U.REP, `public.save_invoice(jsonb_build_object('id', current_setting('prover.inv'), 'customer_id', '${C4}', 'invoice_type', 'misc_charge', 'status', 'draft', 'invoice_date', ${TODAY}, 'salesman_id', '${U.REP}', 'header_notes', '[PROVER] takeover'), jsonb_build_array(jsonb_build_object('description', '[PROVER] fee', 'quantity', 1, 'unit_price_cents', 1500, 'extended_cents', 1500)), 'prover-rac-takeover') IS NOT NULL`, { fixture: adminDraft(C4, 'x4', `, 'salesman_id', '${U.REP_B}'`) }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
+  // The rep created it, but it now names another salesperson (an admin moved it): not the rep's to post.
+  ['rep posts an invoice they created that now names another salesperson', U.REP, `public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-moved') IS NULL`,
+    { fixture: `${adminDraft(C4, 'moved', `, 'salesman_id', '${U.REP_B}'`)}
+  UPDATE public.invoices SET created_by = '${U.REP}' WHERE id = current_setting('prover.inv')::uuid;` }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
   ['rep names another salesperson', U.REP, `${misc(C1, 'repname', `, 'salesman_id', '${U.REP_B}'`)} IS NOT NULL`, {}, /SALESMAN_SCOPE_DENIED/, /SALESMAN_SCOPE_DENIED/],
   ['rep posts admin draft for unassigned customer', U.REP, `(SELECT status FROM public.invoices WHERE id = current_setting('prover.inv')::uuid)`,
     { fixture: adminDraft(C4, 'p4', `, 'salesman_id', '${U.REP}'`), pre: `PERFORM public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-reppost');` },
@@ -387,6 +391,9 @@ const CASES = [
   ['rep edits another rep\'s customer', U.REP, saveCustomer(U.REP, C3), {}, /NOT_CUSTOMER_OWNER/, new RegExp(`^ok\\|${C3}$`)],
   ['rep edits own customer', U.REP, saveCustomer(U.REP, C1), {}, new RegExp(`^ok\\|${C1}$`), 'same'],
   ['rep reassigns via save_customer', U.REP, saveCustomer(U.REP, C4, `jsonb_build_object('assigned_sales_rep', '${U.REP}')`), {}, /NOT_CUSTOMER_OWNER/, /REP_CANNOT_REASSIGN/],
+  // A page loaded before an admin reassigned the customer sends the OLD rep and row version back: it
+  // must get the reload prompt, not read as a reassignment.
+  ['rep saves from a stale page after a reassignment', U.REP, saveCustomer(U.REP, C3, `jsonb_build_object('assigned_sales_rep', '${U.REP}', 'row_version_expected', (SELECT row_version - 1 FROM public.customers WHERE id = '${C3}'))`), {}, /NOT_CUSTOMER_OWNER/, /CUSTOMER_STALE_WRITE/],
   ['rep changes another rep\'s commission split via save_customer', U.REP, saveCustomer(U.REP, C3, splitTo(U.REP)), {}, /NOT_CUSTOMER_OWNER/, /COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP/],
   ['rep re-saves another rep\'s unchanged split', U.REP, saveCustomer(U.REP, C3, `jsonb_build_object('default_commission_split', (SELECT default_commission_split FROM public.customers WHERE id = '${C3}'))`), {}, /NOT_CUSTOMER_OWNER/, new RegExp(`^ok\\|${C3}$`)],
   ['rep changes own commission split', U.REP, saveCustomer(U.REP, C1, splitTo(U.REP_B)), {}, new RegExp(`^ok\\|${C1}$`), 'same'],

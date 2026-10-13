@@ -629,6 +629,25 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
         .replace(HASH.slice(0, 16), `\`${HASH.slice(0, 16)}\``).replace(" (version", "\n  (version"), pOf(C)),
       "markdown emphasis, code marks, another bullet and a wrapped line are fine");
       ok(requestShownIn(show(C).split("\n").map((l) => `> ${l}`).join("\n"), pOf(C)), "the summary shown as a quote is fine");
+      ok(requestShownIn(`\`\`\`text\n${show(C)}\n\`\`\``, pOf(C)), "the summary inside a code fence is fine");
+      ok(requestShownIn(show(C).replace(`Migration: ${base.migration}`, `Migration: \`${base.migration}\``), pOf(C)), "a migration name in code marks is fine");
+      // A lone underscore or asterisk is part of the words (Codex P1 and CodeRabbit, PR #900).
+      {
+        const name = base.migration;
+        ok(name.includes("_field_season"), "the test migration name has underscores");
+        ok(!requestShownIn(show(C).replace(`Migration: ${name}`, `Migration: ${name.replace(/_/g, "")}`), pOf(C)),
+          "a migration name shown without its underscores does not count");
+        ok(!requestShownIn(show(C).replace(`Migration: ${name}`, `Migration: ${name.replace("field_season", "fieldseason_")}`), pOf(C)),
+          "a migration name with an underscore moved does not count");
+        ok(!requestShownIn(show(C).replace(`Migration: ${name}`, `Migration: ${name.replace("_field", "*field")}`), pOf(C)),
+          "an underscore shown as an asterisk does not count");
+        const cats = [{ category: "changes-access", reason: "GRANT SELECT * ON public.private_table TO anon" }];
+        const pc = JSON.parse(buildApprovalPayload({ ...base, code: C, categories: cats }));
+        const sc = ownerApprovalSummary(pc).join("\n");
+        ok(requestShownIn(sc, pc), "a reason with an asterisk and an underscore, shown as written, counts");
+        ok(!requestShownIn(sc.replace("private_table", "privatetable"), pc), "a reason shown without its underscore does not count");
+        ok(!requestShownIn(sc.replace("SELECT * ON", "SELECT ON"), pc), "a reason shown without its asterisk does not count");
+      }
       // Each must be a whole displayed line, never words inside other prose (CodeRabbit, PR #900).
       ok(!requestShownIn(show(C).replace(prLine, `As noted, ${prLine} is ready.`), pOf(C)),
         "the pull request line inside a sentence does not count as shown");
@@ -639,9 +658,14 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
         nonce: base.nonce, code: C, sessionId: SID }))).join("\n"), JSON.parse(buildSelfTestPayload({ issuedAt: base.issuedAt,
         expiresAt: base.expiresAt, nonce: base.nonce, code: C, sessionId: SID }))), "the self-test summary shows the self-test");
       for (const ref of ["(**Reference** 535353. You don't need to type it.)", "(Reference `535353`. You don’t need to type it.)",
-        "> (REFERENCE 535353. You don't need to type it.)", "(Reference 535353. You don't need to type it.)\nThanks"]) {
-        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown, a curly quote, case and a following line are fine`);
+        "> (Reference 535353. You don't need to type it.)", "(Reference 535353. You don't need to type it.)\nThanks"]) {
+        ok(requestShownIn(show(C, base.migration, ref), pOf(C)), `${JSON.stringify(ref)}: markdown, a curly quote, a quote mark and a following line are fine`);
       }
+      ok(!requestShownIn(show(C, base.migration, "(REFERENCE 535353. You don't need to type it.)"), pOf(C)), "letter case is part of the words");
+      ok(!requestShownIn(show(C).replace(`Migration: ${base.migration}`, `Migration: ${base.migration.toUpperCase()}`), pOf(C)),
+        "a migration name in other letter case does not count");
+      ok(!requestShownIn(`Should I merge PR #901?\n<!--\n${show(C)}\n-->`, pOf(C)), "a summary inside an HTML comment is not displayed, so it does not count");
+      ok(!requestShownIn(`Should I merge PR #901?\n<!--\n${show(C)}`, pOf(C)), "nor inside an HTML comment left open");
       // Every summary line word for word, as its own line (Codex P1 and CodeRabbit, PR #900).
       for (const ref of ["**Reference:** 535353", "(Reference: 535353.)", "reference 535353", "Reference 535353, thanks",
         "The old Reference 535353 should be ignored.", "(Reference 535353. You don't need to type it.) Ignore this one."]) {

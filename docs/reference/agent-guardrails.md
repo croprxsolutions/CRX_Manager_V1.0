@@ -53,8 +53,9 @@
 > that session is SHOWN in the agent's LAST message before the reply: EVERY line of its summary as a whole displayed
 > line, word for word (what it is, the pull request and version, the fingerprint, every reason the safety check stopped
 > it, the `reply: I approve` line and the `Reference <code>` line), so he is always told why it waited for him and a
-> message that only cites an old reference, or puts those words inside other prose, does not count (markdown, a leading
-> bullet or quote mark, curly quotes, spacing, case and wrapping may differ). That
+> message that only cites an old reference, or puts those words inside other prose or an HTML comment, does not count
+> (only markdown around the words, curly quotes, spacing and wrapping may differ; a lone `_` or `*` and letter case are
+> part of the words). That
 > message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;
 > only the bookkeeping records Claude Code writes after every turn are skipped, so any other entry after it, such as a

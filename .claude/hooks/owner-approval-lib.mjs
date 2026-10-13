@@ -426,15 +426,22 @@ export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
  * for and its Reference line. A message that only cites an old reference, or
  * says "Do not reply: I approve", or puts any of those words inside other prose,
  * does not count (Luna BLOCKER round 4; Codex P1 and CodeRabbit, PR #900).
- * Markdown emphasis and code marks, a leading bullet or quote mark, curly
- * quotes, spacing and letter case may differ, and a line wrapped onto the next
- * is joined back. Other text may come before, between or after the lines.
+ * Only markdown around the words may differ: **bold** or __bold__ pairs, `code`
+ * marks, a code fence, a leading bullet or quote mark. So may curly quotes and
+ * spacing, and a line wrapped onto the next is joined back. A lone underscore or
+ * asterisk, and letter case, are part of the words (drop_a_b is not drop_ab;
+ * Codex P1 and CodeRabbit, PR #900). Text in an HTML comment is not displayed, so
+ * it never counts. Other text may come before, between or after.
  */
 export function requestShownIn(text, p) {
   if (!/^\d{6}$/.test(String(p?.code ?? ""))) return false;
-  const loose = (t) => String(t).replace(/[‘’]/g, "'").replace(/[“”]/g, "\"").replace(/[*_`]/g, "")
-    .replace(/\s+/g, " ").trim().toLowerCase();
-  const lines = String(text ?? "").split(/\r?\n/).map((l) => loose(l).replace(/^(?:[-+•>]\s*)+/, ""));
+  const loose = (t) => String(t).replace(/[‘’]/g, "'").replace(/[“”]/g, "\"")
+    .replace(/\s+/g, " ").trim();
+  // Markdown is removed from what was displayed only, never from the summary itself.
+  const unmark = (l) => (/^\s*```[\w-]*\s*$/.test(l) ? ""
+    : l.replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1").replace(/`([^`]*)`/g, "$1"));
+  const displayed = String(text ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+  const lines = displayed.split(/\r?\n/).map((l) => loose(unmark(l)).replace(/^(?:[-+•*]\s+|>\s?)+/, ""));
   const mustShow = ownerApprovalSummary(p).map((l) => loose(l.replace(/^- /, ""))).filter(Boolean);
   const shownAsLine = (want) => lines.some((line, start) => {
     let joined = line;

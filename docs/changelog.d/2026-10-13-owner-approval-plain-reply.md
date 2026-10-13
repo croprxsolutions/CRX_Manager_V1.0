@@ -53,9 +53,11 @@ no longer types anything but the approval.
     of its summary (`ownerApprovalSummary`) is there as a whole displayed line, word for word: what
     it is, the pull request and version, the fingerprint, every reason the safety check stopped it,
     the `reply: I approve` line and the `Reference <code>` line. So he is always told why it waited
-    for him. Markdown emphasis and code marks, a leading bullet or quote mark, curly quotes, spacing,
-    letter case and a line wrapped onto the next may differ; other text may come before, between or
-    after. How this got here:
+    for him. Only markdown around the words may differ (`**bold**`/`__bold__` pairs, code marks, a
+    code fence, a leading bullet or quote mark), and curly quotes, spacing and a line wrapped onto
+    the next; a lone underscore or asterisk, and letter case, are part of the words, so `drop_a_b`
+    is not `drop_ab` or `DROP_A_B`. Text in an HTML comment is not displayed, so it never counts.
+    Other text may come before, between or after. How this got here:
     - Luna round 4: a message that only cites an old reference while asking something else does
       not count. The same digits starting or inside another number or identifier never count
       either: `482913-4`, `482913_4`, `482913.1`, `482913٧` (Luna rounds 1, 2 and 4).
@@ -63,6 +65,11 @@ no longer types anything but the approval.
       the name, reply and reference.
     - CodeRabbit, then Codex P1 again: each must be a whole line, never words inside other prose
       ("Do not reply: I approve", "The old Reference 123456 should be ignored").
+    - Codex P1 and CodeRabbit once more: the markdown clean-up deleted every `_`, `*` and backtick
+      from both sides, so a name shown without its underscores matched. Now markdown is removed
+      only from what was displayed, and only as pairs, code marks, fences and leading marks.
+      While there, letter case became exact and HTML comments (hidden in the chat) stopped
+      counting, each with a test that fails if the rule is undone.
 
     A request shown earlier, two shown at once, or an unreadable transcript approves nothing.
   - The summary now ends with "reply: I approve" and "(Reference <code>. You don't need to type it.)".
@@ -89,7 +96,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 336 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 349 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,

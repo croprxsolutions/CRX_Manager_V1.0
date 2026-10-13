@@ -440,9 +440,22 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     }
     {
       const t = last([masonSaid("fix it"), A([{ type: "thinking", thinking: "x" }], "m1"), agentSaid("Approve this ONE change:", "m1"),
-        agentSaid(`(Reference ${base.code}.)`, "m1"), agentRan("m1")]);
+        agentSaid(`(Reference ${base.code}.)`, "m1")]);
       ok(has(t) && t.includes("Approve this ONE change:"), "the entries of one message (same message id) are read together");
     }
+    // Anything the agent did through a tool after showing it ends the window (Sol HIGH, PR #900).
+    ok(last([masonSaid("fix it"), agentSaid(SHOWN, "m2"), agentRan("m2")]) === "",
+      "a tool call after the request, in the same message, means nothing it said counts");
+    ok(last([masonSaid("fix it"), agentSaid(SHOWN, "m3"), A([{ type: "tool_use", id: "q", name: "AskUserQuestion", input: {} }], "m3"),
+      toolGave("Merge PR #901")]) === "", "a question asked through a tool after the request, and its answer, mean nothing it said counts");
+    ok(last([masonSaid("fix it"), agentSaid(SHOWN), agentRan(), toolGave("ok")]) === "",
+      "a tool call and result after the request, with no words after them, mean nothing it said counts");
+    ok(last([masonSaid("fix it"), A([{ type: "text", text: SHOWN }, { type: "tool_use", id: "t", name: "Bash", input: {} }], "m4")]) === "",
+      "a tool call after the request inside one entry means nothing it said counts");
+    ok(last([masonSaid("fix it"), agentSaid(SHOWN), toolGave("an answer")]) === "",
+      "a tool result after the request ends the window even with no tool call written before it");
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN, "m5"), A([{ type: "thinking", thinking: "done" }], "m5")])),
+      "thinking after the request is not a tool interaction");
     ok(has(last([masonSaid("fix it"), agentSaid("Checking."), agentRan(), toolGave("ok"), agentSaid(SHOWN)])),
       "the final message counts after the agent's tool calls");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), agentRan(), toolGave("ok"), agentSaid("PR #900 is ready to merge. Approve?")])),

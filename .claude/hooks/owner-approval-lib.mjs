@@ -305,14 +305,16 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
     const e = entries[i];
     if (e === DAMAGED) throw new Error("a damaged transcript line lies in what had to be read");
     if (isBookkeeping(e, currentPrompt) || e?.isSidechain) continue; // a subagent's entries are not the conversation with Mason
-    if (isToolResult(e)) {
-      if (said.length) { found = true; break; }
-      continue;
-    }
+    // A tool call or its result after the agent's last words means it went on
+    // working, or asked him something through a tool, after them: "I approve" may
+    // answer that instead, so nothing it said counts (Sol HIGH, PR #900). Before
+    // its last words, it is where that message begins.
+    if (isToolResult(e)) { found = true; break; }
     if (isAgentMessage(e)) {
       sawAgent = true;
       const t = textOf(e.message?.content);
       if (!said.length) {
+        if (Array.isArray(e.message?.content) && e.message.content.some((b) => b?.type === "tool_use")) { found = true; break; }
         if (!t) continue;
         said.unshift(t);
         messageId = e.message?.id;

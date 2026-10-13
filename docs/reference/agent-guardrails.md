@@ -62,8 +62,9 @@
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;
 > only the bookkeeping records Claude Code writes after every turn are skipped, so any other entry after it, such as a
 > message of Mason's (image-only included), injected text like a Stop hook's feedback, a notification, a queued
-> message waiting to be delivered, a compaction, an error or synthetic message, or an unknown record type, means
-> nothing counts; tool output and subagent text
+> message waiting to be delivered, a compaction, an error or synthetic message, an unknown record type, or a tool call
+> or its result (the agent kept working, or asked him something through a tool), means nothing counts; tool output and
+> subagent text
 > never count). His reply itself must be those words alone: one sent with a picture or file approves nothing. Claude
 > Code normally writes his message just after the hook runs, so the hook records where it will land (`replyMark`: the
 > transcript's size, or that it is already written and was checked then), and the apply reads it back there

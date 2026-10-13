@@ -25,7 +25,11 @@ no longer types anything but the approval.
       that line (Luna round 4).
     - Any other entry after the agent's message makes the result empty (Luna round 3). That covers a
       message of Mason's (image-only included), injected text such as a Stop hook's feedback, a
-      notification, a compaction, an error or synthetic message, and an unknown record type.
+      notification, a compaction, an error or synthetic message, and an unknown record type. It also
+      covers a tool call or its result after the agent's last words (it kept working, or asked him
+      something through a tool such as a pop-up question), so "I approve" then counts for nothing
+      until the request is shown again (Sol HIGH on the PR; each half of that rule has a test that
+      fails if it is removed, and a replay of a real transcript still found the agent's last words).
     - Only messages the model wrote count; `isMeta`, API-error and `<synthetic>` assistant entries
       never do (Luna round 3).
     - Tool output, subagent text and Claude Code's own `isMeta` entries do not count.
@@ -111,7 +115,7 @@ no longer types anything but the approval.
   is how every message with a picture on this machine was saved.
 
 **Proof.**
-- `owner-approval-lib.test.mjs`: 367 assertions (151 before); `migration-apply-lib.test.mjs`: 299
+- `owner-approval-lib.test.mjs`: 373 assertions (151 before); `migration-apply-lib.test.mjs`: 299
   (297 before). They cover:
   - every plain-reply form, and 21 messages that must not count;
   - the transcript reader on Claude Code's entry shapes: tool calls, tool results, subagents, `isMeta`,

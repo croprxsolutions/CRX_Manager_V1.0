@@ -1,12 +1,61 @@
 # Decision Log
 
-Last verified: 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (two owner decisions recovered from never-merged branches in the GitHub branch cleanup: the 2026-08-09 pricing answers and the 2026-08-27 ingredient-identity model D-AA; the 2026-09-01 return-credit split entry marked superseded by #544's close). Before that, 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
+
+## 2026-08-27 (recovered 2026-10-13) — Product data model: the ingredient identity model (D-AA)
+
+**Recovered.** Mason made this decision on 2026-08-27, but it was written only on the never-merged
+branch of PR #507 (`claude/product-plan-rev12-followup`, Revision 13 of
+`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`). It is condensed here from that text during the
+2026-10-13 GitHub branch cleanup; the full table and reasoning stay restorable from the PR #507 page.
+**Decision (Mason, in chat, 2026-08-27, after the trade-offs were explained):**
+- **D-AA-1.** Where a CAS number is present it is the chemical's identity: same CAS means the same
+  chemical, merged automatically across trade, common and IUPAC names and spelling variants. Mason's
+  per-row review is the catch for a typo in the CAS itself; that is an accepted trade.
+- **D-AA-2.** Any identity match that rests on a name alone (a CAS-less row and a later same-name row
+  with a CAS, or two CAS-less rows with the same normalized name) is queued for Mason's explicit
+  approval, shown side by side, and never merged automatically. Every CAS-less ingredient is flagged
+  provisional and listed on a "needs CAS" worklist, so duplicates caused by missing data stay findable.
+- **D-AA-3.** A proposal that matches an existing ingredient by name or by CAS but claims a different
+  canonical parent is refused at import with a named error, before any queue or chemistry write, on
+  every identity path. This takes precedence over D-AA-2.
+- **D-AA-4.** No conflict-resolution path may rename a shared ingredient row, and multi-ingredient
+  inserts take a deterministic order so opposite-order drafts cannot deadlock.
+**What this forbids/implies:** WP-1's migration implements D-AA as settled here; Revision 12's
+unique-key and `ON CONFLICT … DO UPDATE SET name` mechanism is withdrawn because it contradicts D-AA-1,
+D-AA-2 and D-AA-4. Until WP-1 ships, two products creating the same new ingredient at the same time can
+still make duplicate ingredient rows; the plan carries that as a known open HIGH. The build has not
+started (plan status 2026-09-26).
+
+## 2026-08-09 (recovered 2026-10-13) — Pricing: commission clawed back on returns, no historical backfill, per-product margin targets, below-cost as a hard rule
+
+**Recovered.** Mason gave these four answers in chat on 2026-08-09, but the entry was written only on
+two never-merged branches (PR #350 `claude/pricing-audit-strategy-jym8rr` and PR #397
+`codex/pr389-coderabbit-fixes`). It is condensed here from #397's newer text during the 2026-10-13
+GitHub branch cleanup. Source audit: `docs/audits/2026-08-08-product-pricing-full-audit-and-strategy.md`.
+**Decision (Mason, in chat, 2026-08-09):**
+1. **Commission is clawed back on returns.** A return creates a proportional negative commission
+   adjustment: unpaid commission is reduced directly, and commission already paid becomes a debit
+   against the rep's next check. **Status 2026-10-13: not built.** No migration on `main` adjusts
+   commission for a return (the return path only zeroes a cancelled order's pending commissions).
+   Confirm with Mason that this still stands before building it.
+2. **No historical backfill** of return costs: rows from before the change were test and transitional
+   data. The original boundary named `20260808170000_return_credit_cogs_reversal`, which was never
+   applied; the change shipped instead as the six-file return-credit chain applied live 2026-09-01
+   (`20260827041000`..`20260827041500`). Revisit if real customer returns were entered before then.
+3. **Margin targets are per product, not one company-wide number.** A global default may exist only as a
+   fallback. Seeding targets across the catalog is tracked in `TODO.md` ("Per-product margin targets").
+4. **Below-cost selling is a server-side wall, with an admin exception.** **Status: live** since
+   2026-08-12 (`20260812115237_enforce_below_cost_admin_approval`, ledger `20260812154028`).
+**What this forbids/implies:** keep the browser's below-cost checks as a convenience, never as the
+financial control; the approval reason is written in the same transaction as the money; a below-cost
+refusal is a structured error that names the lines so the operator can refresh and retry.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 
@@ -1235,7 +1284,9 @@ including the per-migration ledger rows a session reads to decide what is pendin
 urgent and low-risk. The gate hardening had produced two successive rounds of real exact-head review
 findings and was starting to reach into the apply guard itself; holding the corrections behind it was
 the worse trade.
-**What this forbids/implies:** Do not treat the parked gate work as abandoned or as already landed.
+**Superseded 2026-09-20:** Mason closed that work's PR #544 without merging it; its findings are open
+issue #747, and the branch below is kept only as that issue's evidence. Do not resume it.
+**What this forbids/implies (as written on 2026-09-01):** Do not treat the parked gate work as abandoned or as already landed.
 Its working state is on branch `claude/return-credit-chain-applied-2026-09-01`, with two known open
 findings from the 2026-09-01 exact-head review: caller discovery misses unqualified calls (proven by
 `PERFORM void_invoice(...)` inside `batch_void_invoices`), and `evidenceHash` is written into the

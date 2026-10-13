@@ -7,6 +7,15 @@
 > 2026-08-26 amendment (PR #498), whose own revision notes are the latest word. Codex routing moved to
 > the GPT-6 class on 2026-09-23 (PR #796): read every `gpt-5.6-sol` below as `gpt-6-sol`, and take exact
 > model IDs and efforts from `docs/reference/codex-model-tuning.md`.
+>
+> **Missing revisions (found 2026-10-13).** Revisions 12 and 13 of this plan were written on PR #507
+> (`claude/product-plan-rev12-followup`), which never merged, so this copy stops at the 2026-08-26
+> amendment. What matters from them: **the ingredient identity model is SETTLED as owner decision D-AA**
+> (Mason, 2026-08-27; now recorded in `docs/manual/DECISION_LOG.md`), WP-1's migration implements it,
+> Revision 12's unique-key / `ON CONFLICT … DO UPDATE SET name` mechanism is withdrawn, and two products
+> creating the same new ingredient at once is a known open HIGH until WP-1 ships. Revision 12 also bound
+> the restamp idempotency fingerprint to the operation mode and every mutation-defining input. The full
+> revision text stays restorable from the PR #507 page; read it before building WP-1.
 
 **Date:** 2026-08-19 · **Revision 2** (folds in the Fable adversarial review, 26 findings, and
 two owner decisions taken 2026-08-19)

@@ -9,7 +9,9 @@
  *
  * Follow-up (CodeRabbit, PR #893): the id of the invoice that first Save created must
  * survive a page refresh. It is written into the address (/new?created=<id>); a refresh
- * opens the created invoice, and pressing New there starts a genuinely new one.
+ * opens the created invoice (whatever its status), and pressing New there starts a genuinely
+ * new one. A refresh BEFORE the create answered is a plain new page (known gap: see
+ * docs/changelog.d/2026-10-09-invoice-screen-safety.md).
  *
  * Unlike FieldApplicationInvoice.test.tsx, this file uses the REAL router (a data router,
  * as App.tsx does), the REAL route wrapper and the REAL useUnsavedChanges hook, because
@@ -52,7 +54,6 @@ vi.mock('../contexts/AuthContext', () => ({
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import FieldApplicationInvoiceRoute from '../components/FieldApplicationInvoiceRoute';
-import { draftTokenStartedAt, mintDraftToken } from '../lib/fieldAppNewInvoiceAddress';
 
 const CREATED_ID = '3f2b8c1e-5d4a-4b6f-9a1c-2e7d8f9a0b1c';
 const SECOND_ID = '7a9d2e4f-1b3c-4d5e-8f6a-0b1c2d3e4f5a';
@@ -69,8 +70,8 @@ let releaseInvoiceCheck: () => void = () => {};
 
 function ownNewDraft(id: string, overrides: Record<string, unknown> = {}) {
   return {
-    id, invoice_type: 'field_application', status: 'draft', created_by: 'user-1',
-    created_at: new Date().toISOString(), ...overrides,
+    id, invoice_number: null, invoice_type: 'field_application', status: 'draft', created_by: 'user-1',
+    deleted_at: null, ...overrides,
   };
 }
 
@@ -86,32 +87,32 @@ function emptyChain() {
   return chain;
 }
 
-/** Invoices the reopened-draft check finds (this user's field invoices since the draft began). */
-let lostCreateRows: Array<Record<string, unknown>> = [];
-let lostCreateError: { message: string } | null = null;
-/** The created_at lower bound the reopened-draft check asked for, if it ran. */
-let lostCreateSince: string | null = null;
-const LOST_CREATE_SELECT = 'id, invoice_number, status, created_at, deleted_at';
+/** The billing step's customer lookup: fails, or leaves out the saved invoice. */
+let customerMapError: { message: string } | null = null;
+let customerMapDrops = false;
 
 /**
  * Like emptyChain, but maybeSingle answers the created-id check with the row for the filtered
- * id, and the reopened-draft check's list query answers with lostCreateRows.
+ * id, and the billing step's customer lookup (.in('id', ids)) answers one customer per id.
  */
 function invoicesChain() {
   const chain = emptyChain();
   let idFilter: string | null = null;
+  let inIds: string[] = [];
   let columns: string | null = null;
   chain.select = vi.fn((cols: string) => { columns = cols; return chain; });
-  chain.gte = vi.fn((column: string, value: string) => {
-    if (columns === LOST_CREATE_SELECT && column === 'created_at') lostCreateSince = value;
-    return chain;
-  });
   chain.eq = vi.fn((column: string, value: string) => {
     if (column === 'id') idFilter = value;
     return chain;
   });
-  chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(columns === LOST_CREATE_SELECT
-    ? { data: lostCreateError ? null : lostCreateRows, error: lostCreateError }
+  chain.in = vi.fn((column: string, values: string[]) => {
+    if (column === 'id') inIds = values;
+    return chain;
+  });
+  chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(columns === 'id, customer_id'
+    ? (customerMapError
+      ? { data: null, error: customerMapError }
+      : { data: customerMapDrops ? [] : inIds.map((id) => ({ id, customer_id: 'customer-1' })), error: null })
     : { data: [], error: null }).then(resolve);
   const answer = () => (invoiceCheckError
     ? { data: null, error: invoiceCheckError }
@@ -161,7 +162,7 @@ function mockSaveWithFirstBillingFailure(invoiceId: string) {
   });
 }
 
-/** One value from the router's current address (?draft=…&created=…). */
+/** One value from the router's current address (?created=…). */
 function addressParam(router: { state: { location: { search: string } } }, name: string) {
   return new URLSearchParams(router.state.location.search).get(name);
 }
@@ -200,9 +201,8 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     invoiceCheckError = null;
     invoiceCheckHangs = false;
     invoiceCheckHeld = false;
-    lostCreateRows = [];
-    lostCreateError = null;
-    lostCreateSince = null;
+    customerMapError = null;
+    customerMapDrops = false;
     mockFrom.mockImplementation((table: string) => (table === 'invoices' ? invoicesChain() : emptyChain()));
   });
 
@@ -255,149 +255,13 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(headerNotes().value).toBe('Spray north field');
   });
 
-  it('the first Save writes a draft tag into the address before the create is sent, and keys the create on it', async () => {
-    let finishCreate: (v: unknown) => void = () => {};
-    mockRpc.mockImplementation((name: string) => {
-      if (name === 'save_field_app_invoice') return new Promise((resolve) => { finishCreate = resolve; });
-      return Promise.resolve({ data: { success: true }, error: null });
-    });
-    const router = await renderAt();
+  it('the first Save keys its create on this page alone', async () => {
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    await renderAt();
     editHeaderNotes('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
-
-    // The reply has not come back yet, and the address already names the draft.
-    const draft = addressParam(router, 'draft');
-    expect(draft).toMatch(/^[0-9a-f-]{36}$/);
-    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${draft}`);
-    expect(headerNotes().value).toBe('Spray north field');
-
-    await act(async () => {
-      finishCreate({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
-    });
-    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
-  });
-
-  it('a refresh after a lost reply, with no invoice found from that draft, saves with the same key (a create still in flight is answered, not doubled)', async () => {
-    const DRAFT = '5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f';
-    mockSaveWithFirstBillingFailure(CREATED_ID);
-    // The reply to the first create never arrived; the page was refreshed at the draft address.
-    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
-
-    editHeaderNotes('Spray north field');
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    expect(savedInvoiceId(0)).toBeNull();
-    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${DRAFT}`);
-    await waitFor(() => expect(addressParam(router, 'created')).toBe(CREATED_ID));
-    expect(addressParam(router, 'draft')).toBe(DRAFT);
-  });
-
-  it('a reopened draft whose earlier Save created an invoice lists it and does not save blind, even days later', async () => {
-    // The create committed two days ago but its reply was lost; the database's stored answer
-    // for that key has expired (24 hours), so re-sending the key would create a second invoice,
-    // and inside 24 hours it would replay the first submission, not what is typed now
-    // (Codex review, PR #893).
-    const startedAt = Date.now() - 2 * 24 * 60 * 60 * 1000;
-    const DRAFT = mintDraftToken(startedAt);
-    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1001', status: 'draft', created_at: new Date(startedAt + 5000).toISOString(), deleted_at: null }];
-    mockSaveWithFirstBillingFailure(SECOND_ID);
-    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
-
-    expect(await screen.findByRole('link', { name: 'FA-1001' })).toHaveAttribute('href', `/invoices/field-app/${CREATED_ID}`);
-    // The search starts an hour before the draft began (slack for a fast computer clock).
-    expect(lostCreateSince).toBe(new Date(startedAt - 60 * 60 * 1000).toISOString());
-    editHeaderNotes('Spray north field');
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may already have created this invoice'));
-    expect(saveCalls()).toHaveLength(0);
-
-    // "None of these": the next Save creates a new invoice under a NEW draft, never the old key.
-    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
-    await waitFor(() => expect(screen.queryByRole('link', { name: 'FA-1001' })).not.toBeInTheDocument());
-    expect(headerNotes().value).toBe('Spray north field');
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    expect(savedInvoiceId(0)).toBeNull();
-    expect(saveKey(0)).not.toContain(DRAFT);
-    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${addressParam(router, 'draft')}`);
-  });
-
-  it('a reopened draft refuses to save when its check cannot run', async () => {
-    lostCreateError = { message: 'network down' };
-    mockSaveWithFirstBillingFailure(SECOND_ID);
-    await renderAt(`${NEW_PATH}?draft=${mintDraftToken()}`);
-
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Could not check whether your last Save')));
-    editHeaderNotes('Spray north field');
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('nothing was saved'));
-    expect(saveCalls()).toHaveLength(0);
-  });
-
-  it('a reopened draft waits while its earlier create may still be running', async () => {
-    // The page was reloaded seconds after the first Save sent its create: the search can run
-    // before that create is saved, and a create with the same key would then replay the FIRST
-    // submission instead of what is typed now (Codex Sol, PR #893).
-    mockSaveWithFirstBillingFailure(CREATED_ID);
-    await renderAt(`${NEW_PATH}?draft=${mintDraftToken(Date.now() - 10_000)}`);
-    await waitFor(() => expect(lostCreateSince).not.toBeNull());
-
-    editHeaderNotes('Spray north field');
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may still be finishing')));
-    expect(saveCalls()).toHaveLength(0);
-  });
-
-  it('a reopened draft searches again right before saving, and an invoice found then stops the create', async () => {
-    // Nothing yet when the page opened; the earlier create was saved after that search.
-    mockSaveWithFirstBillingFailure(SECOND_ID);
-    await renderAt(`${NEW_PATH}?draft=${mintDraftToken(Date.now() - 10 * 60 * 1000)}`);
-    await waitFor(() => expect(lostCreateSince).not.toBeNull());
-    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1002', status: 'draft', created_at: new Date().toISOString(), deleted_at: null }];
-
-    editHeaderNotes('Spray north field');
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    expect(await screen.findByRole('link', { name: 'FA-1002' })).toBeInTheDocument();
-    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('already created an invoice'));
-    expect(saveCalls()).toHaveLength(0);
-  });
-
-  it('"Start a new invoice instead" waits while the first create may still be running', async () => {
-    // An unrelated recent invoice is listed while the first create is still on its way; starting
-    // a new draft now would let a second create race the first (Codex Sol, PR #893).
-    lostCreateRows = [{ id: SECOND_ID, invoice_number: 'FA-0999', status: 'draft', created_at: new Date().toISOString(), deleted_at: null }];
-    mockSaveWithFirstBillingFailure(CREATED_ID);
-    const DRAFT = mintDraftToken(Date.now() - 10_000);
-    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
-    expect(await screen.findByRole('link', { name: 'FA-0999' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may still be finishing')));
-    expect(screen.getByRole('link', { name: 'FA-0999' })).toBeInTheDocument();
-    expect(addressParam(router, 'draft')).toBe(DRAFT);
-    expect(saveCalls()).toHaveLength(0);
-  });
-
-  it('"Start a new invoice instead" searches again and shows an invoice that appeared since', async () => {
-    const old = { id: SECOND_ID, invoice_number: 'FA-0999', status: 'draft', created_at: new Date().toISOString(), deleted_at: null };
-    lostCreateRows = [old];
-    mockSaveWithFirstBillingFailure(SECOND_ID);
-    const DRAFT = mintDraftToken(Date.now() - 10 * 60 * 1000);
-    const router = await renderAt(`${NEW_PATH}?draft=${DRAFT}`);
-    expect(await screen.findByRole('link', { name: 'FA-0999' })).toBeInTheDocument();
-
-    // The first create was saved after the page's search.
-    lostCreateRows = [{ id: CREATED_ID, invoice_number: 'FA-1003', status: 'draft', created_at: new Date().toISOString(), deleted_at: null }, old];
-    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
-    expect(await screen.findByRole('link', { name: 'FA-1003' })).toBeInTheDocument();
-    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('The list changed'));
-    expect(addressParam(router, 'draft')).toBe(DRAFT);
-
-    // Pressed again with the same list: the user has seen it, so a new draft starts.
-    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
-    await waitFor(() => expect(screen.queryByRole('link', { name: 'FA-1003' })).not.toBeInTheDocument());
-    expect(addressParam(router, 'draft')).toBeNull();
+    expect(saveKey(0)).toMatch(/^save_field_app_invoice:/);
   });
 
   it('a billing retry with changed values uses a new key; an unchanged retry reuses it', async () => {
@@ -437,38 +301,64 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(billingKeys()[2]).not.toBe(billingKeys()[0]);
   });
 
-  it('a new draft tag carries the time it started', async () => {
-    mockSaveWithFirstBillingFailure(CREATED_ID);
-    const before = Date.now();
+  it('the address never carries a draft tag: a refresh before the create answered is a plain new page', async () => {
+    let finishCreate: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') return new Promise((resolve) => { finishCreate = resolve; });
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
     const router = await renderAt();
     editHeaderNotes('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    const startedAt = draftTokenStartedAt(addressParam(router, 'draft') ?? '');
-    expect(startedAt).not.toBeNull();
-    expect(startedAt!).toBeGreaterThanOrEqual(before);
-    expect(startedAt!).toBeLessThanOrEqual(Date.now());
-    // A plain new page never runs the reopened-draft check.
-    expect(lostCreateSince).toBeNull();
+    expect(router.state.location.search).toBe('');
+    await act(async () => {
+      finishCreate({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+    });
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
   });
 
-  it('a rejected address also drops its draft tag, so a new invoice is not answered with the old create', async () => {
-    const OLD_DRAFT = '5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f';
-    // The address's invoice has since been posted, so it is rejected.
-    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { status: 'posted' }));
-    mockSaveWithFirstBillingFailure(SECOND_ID);
-    const router = await renderAt(`${NEW_PATH}?draft=${OLD_DRAFT}&created=${CREATED_ID}`);
+  it('two Save clicks before the page re-renders send one create', async () => {
+    mockSaveWithFirstBillingFailure(CREATED_ID);
+    await renderAt();
+    editHeaderNotes('Spray north field');
+    const save = screen.getByRole('button', { name: /^Save$/i });
+    await act(async () => {
+      save.click();
+      save.click();
+    });
+    await waitFor(() => expect(mockRpc.mock.calls.some(([n]) => n === 'update_field_app_invoice_billing')).toBe(true));
+    expect(saveCalls()).toHaveLength(1);
+  });
 
-    await waitFor(() => expect(router.state.location.search).toBe(''));
-    editHeaderNotes('A different application');
+  it.each([
+    ['cannot be read', true],
+    ['comes back without one of the saved invoices', false],
+  ])('when the saved invoices\' customers %s, billing details are not written and the user is told', async (_label, readFails) => {
+    // Unresolved customers would be sent a zero Discount Earned while the save reports success
+    // (Codex Sol 6.1, PR #893).
+    customerMapError = readFails ? { message: 'network blip' } : null;
+    customerMapDrops = !readFails;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') {
+        return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    expect(savedInvoiceId(0)).toBeNull();
-    expect(saveKey(0)).not.toContain(OLD_DRAFT);
-    expect(saveKey(0)).toBe(`save_field_app_invoice:user-1:${addressParam(router, 'draft')}`);
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('billing details (PO / terms / due date / notes / discount) did NOT persist')));
+    expect(mockRpc.mock.calls.some(([n]) => n === 'update_field_app_invoice_billing')).toBe(false);
+    // The form is still unsaved, so leaving asks first.
+    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(router.state.location.pathname).toBe(NEW_PATH);
+    expect(addressParam(router, 'created')).toBe(CREATED_ID);
   });
 
-  it('New starts a new draft: its create uses a different key', async () => {
+  it('New starts a new page: its create uses a different key', async () => {
     const created = [CREATED_ID, SECOND_ID];
     mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
       if (name === 'save_field_app_invoice') {
@@ -479,7 +369,6 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     });
     const router = await renderAt();
     await createWithPartialFailureAndStay();
-    const firstDraft = addressParam(router, 'draft');
 
     await act(async () => {
       await router.navigate(NEW_PATH);
@@ -488,10 +377,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(headerNotes().value).toBe(''));
     await createWithPartialFailureAndStay();
 
-    const secondDraft = addressParam(router, 'draft');
-    expect(secondDraft).toMatch(/^[0-9a-f-]{36}$/);
-    expect(secondDraft).not.toBe(firstDraft);
-    expect(saveKey(1)).toBe(`save_field_app_invoice:user-1:${secondDraft}`);
+    expect(savedInvoiceId(1)).toBeNull();
     expect(saveKey(0)).not.toBe(saveKey(1));
   });
 
@@ -521,20 +407,48 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
   it.each([
     ['no such invoice', null],
     ['an invoice someone else created', { created_by: 'user-2' }],
-    ['an invoice that is already posted', { status: 'posted' }],
     ['a different kind of invoice', { invoice_type: 'chemical_sale' }],
-  ])('an address naming %s drops the id and stays a new invoice', async (_label, overrides) => {
+    ['this user\'s invoice that has since been deleted', { deleted_at: new Date().toISOString() }],
+  ])('an address naming %s never quietly becomes a new invoice: Save waits until the user starts one', async (_label, overrides) => {
+    // A missing or unusable result is not proof that nothing was created (Codex Sol 6.1, PR #893).
     if (overrides) invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, overrides));
     mockSaveWithFirstBillingFailure(SECOND_ID);
     const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
 
-    await waitFor(() => expect(router.state.location.search).toBe(''));
+    expect(await screen.findByRole('button', { name: 'Start a new invoice instead' })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(NEW_PATH);
-    expect(mockToast).not.toHaveBeenCalledWith('info', expect.anything());
+    expect(addressParam(router, 'created')).toBe(CREATED_ID);
     editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('Start a new invoice instead'));
+    expect(saveCalls()).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(headerNotes().value).toBe('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
     expect(savedInvoiceId(0)).toBeNull();
+  });
+
+  it('the deleted case names the invoice', async () => {
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { invoice_number: 'FA-3001', deleted_at: new Date().toISOString() }));
+    await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+    expect(await screen.findByText(/created invoice FA-3001, and it has since been deleted/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['posted', 'posted'],
+    ['cancelled (returned to scheduling)', 'cancelled'],
+  ])('a refresh after this user\'s invoice was %s opens it instead of offering a new one', async (_label, status) => {
+    // Posting it is proof the create happened; treating it as "not mine" let a second invoice be
+    // created for the same application (Codex Sol 6.1, PR #893).
+    invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { status }));
+    const router = await renderAt(`${NEW_PATH}?created=${CREATED_ID}`);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+    expect(saveCalls()).toHaveLength(0);
   });
 
   it('a draft this user created days ago still opens: a late refresh must never lead to a duplicate', async () => {
@@ -564,11 +478,11 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(screen.getByRole('link', { name: 'FA-2001' })).toHaveAttribute('href', `/invoices/field-app/${CREATED_ID}`);
 
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('may already have created this invoice'));
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('already created this invoice. Open it'));
     expect(saveCalls()).toHaveLength(0);
   });
 
-  it('typing while the check runs: dropping a rejected id asks first, and Stay then Save creates a new invoice', async () => {
+  it('typing while the check runs: an id this page cannot open keeps the typed values, and Save waits for "Start a new invoice instead"', async () => {
     invoiceCheckHeld = true;
     invoiceRows.set(CREATED_ID, ownNewDraft(CREATED_ID, { created_by: 'user-2' }));
     mockSaveWithFirstBillingFailure(SECOND_ID);
@@ -576,14 +490,18 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
     editHeaderNotes('My own new invoice');
     await act(async () => { releaseInvoiceCheck(); });
-    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
-    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(await screen.findByRole('button', { name: 'Start a new invoice instead' })).toBeInTheDocument();
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
     expect(headerNotes().value).toBe('My own new invoice');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    expect(saveCalls()).toHaveLength(0);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
     expect(savedInvoiceId(0)).toBeNull();
-    // The new invoice's own id replaces the rejected one, on the same page.
+    // The new invoice's own id goes into the address, on the same page.
     await waitFor(() => expect(addressParam(router, 'created')).toBe(SECOND_ID));
     expect(headerNotes().value).toBe('My own new invoice');
   });

@@ -1,4 +1,4 @@
-## 2026-10-09 - New field-application invoices: no false "Unsaved Changes" box, no duplicate invoice
+## 2026-10-09 - New field-application invoices: no false "Unsaved Changes" box, no duplicate after Stay
 
 App-only; no database change. Delivered as PR #893, which replaced PR #892 with the same code
 (CodeRabbit kept a stale "changes requested" on #892). The invoice-list half of the original
@@ -15,52 +15,41 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
 - If part of the save fails (for example the billing details), the form keeps your typed values
   and the prompt still appears, as before. Choosing Stay and saving again now **updates the
   invoice that was already created** instead of creating another one.
-- If the page is **refreshed** (or reached again with Back) after that first Save created the
-  invoice, it now opens the **already-created invoice** with a note to re-enter anything that did
-  not save, instead of a blank new form whose Save would create a second invoice (CodeRabbit on
-  PR #893). The first Save writes the created invoice's id into the page address
-  (`/invoices/field-app/new?created=<id>`, same page, typed values kept), so nothing is stored in
-  the browser. Pressing **New** there starts a genuinely new, blank invoice, and Back/Forward
-  between two such drafts opens the right one. Before opening an invoice named in the address,
-  the page checks it is still a field-application invoice (draft or unposted) that the same
-  user created, with no time limit, so a late refresh can never lead to a duplicate. A link
-  naming anything else (no such invoice, someone else's, a posted one, another kind) is
-  ignored and the page stays a new invoice; a link to the user's own unposted field invoice
-  simply opens it, like opening it from the list. If something was typed while the check ran,
-  the usual "Unsaved Changes" box asks before the page moves; if the user stays, the page never
-  saves over that invoice (its form was not loaded here, and a save replaces the invoice's lines):
-  Save waits and a box at the top links to it (Codex Sol on PR #893). If the check cannot run, the page
-  stays where it is and Save refuses until a reload, so there is neither a duplicate nor an
-  unchecked invoice; Save also waits while the check runs. A Save still running when the user
-  presses New finishes its writes but no longer pulls them back to the old invoice.
-- If the database created the invoice but its reply was lost (a network blip) and the page is
-  then refreshed, saving again no longer creates a second invoice (CodeRabbit on PR #893, second
-  review). Just before the first Save sends its create, the page writes a draft tag into its
-  address (`?draft=<tag>`); the create's repeat-protection key is built from that tag and the
-  user. New starts a new draft with a new tag.
-- The database keeps the answer for that key only 24 hours, and it repeats the FIRST
-  submission, not what was re-typed after the refresh (Codex review on PR #893: P1 and P2; the
-  24-hour expiry was confirmed read-only on the live database, 2026-10-12). So a page reopened at
-  a draft address no longer saves blind. It first looks for field-application invoices this user
-  created since the draft started (the draft tag carries its start time; the search allows an
-  hour for a computer clock running fast). If there are any, a box at the top lists them with
-  links, and Save waits until the user opens one or presses **Start a new invoice instead**
-  (which starts a new draft, keeping what was typed). The search runs again right before the
-  create, once the earlier create has certainly finished (the database stops a signed-in request
-  after 8 seconds; the page waits two minutes from the first Save, and says so if Save is pressed
-  sooner). Nothing found then means the earlier Save saved nothing, so the same draft key holds
-  no stored answer and the create saves what is on screen (Codex Sol on PR #893). Deleted
-  invoices count in the search too. If the search cannot run, Save refuses. **Start a new invoice
-  instead** follows the same rule: it waits out the two minutes, searches again, and if an
-  invoice appeared that was not in the list it shows the new list and asks once more (Codex Sol on
-  PR #893: an unrelated invoice in the list must not let a second create race the first).
-- If the billing details step fails after the invoice was created and the user changes a
-  billing value (discount, PO, terms, notes) before saving again, the retry now uses a new
-  repeat-protection key, so the change is written instead of the server answering with its first
-  result. An unchanged retry keeps the same key, so a first attempt that did land is not applied
-  twice (Codex Sol on PR #893).
+- Once the create has answered, the page writes the created invoice's id into its address
+  (`/invoices/field-app/new?created=<id>`, same page, typed values kept). A **refresh** (or Back)
+  of that address opens the **already-created invoice** with a note to re-enter anything that did
+  not save, instead of a blank form whose Save would create a second invoice (CodeRabbit on
+  PR #893). It opens whatever its status: a posted or returned-to-scheduling invoice is proof the
+  create happened (Codex Sol 6.1 on PR #893). The page never saves onto that invoice from a form
+  it did not load (a save replaces the invoice's lines): if the user chose Stay while it opened,
+  Save waits and a box at the top links to it (Codex Sol on PR #893).
+- If the address names an invoice this page cannot open (deleted since, someone else's, another
+  kind, or not found), the page does **not** quietly become a new invoice: a box explains, and
+  Save waits until the user presses **Start a new invoice instead** (typed values kept). If the
+  check cannot run, Save refuses until a reload; Save also waits while the check runs.
+- Pressing **New** starts a genuinely new, blank page; Back/Forward between two such pages opens
+  the right invoice; a Save still running when the user presses New finishes its writes but no
+  longer pulls them back to the old invoice.
+- Two Save clicks before the page redraws send one save, not two.
+- If the billing details step fails and the user changes a billing value before saving again,
+  the retry uses a new repeat-protection key, so the change is written instead of the server
+  answering with its first result; an unchanged retry keeps the key (Codex Sol on PR #893).
+- If the page cannot tell which customer each saved invoice belongs to, it no longer writes the
+  billing details with zero discounts while reporting success: it says the billing details did
+  not save and keeps the form unsaved (Codex Sol 6.1 on PR #893).
 - Deleting a field-application invoice, or transferring it back to scheduling, also leaves the
   page without a false "Unsaved Changes" prompt.
+
+### Removed before landing: the "lost reply" recovery
+
+Earlier heads of #893 also tried to stop a duplicate when the database created the invoice but
+its reply was lost and the page was then refreshed: a draft tag in the address keyed the create,
+and a reopened draft searched the user's recent invoices. Codex Sol blocked that four times in a
+row, each time on a new edge case of the same guess (time windows, a capped search, a clock
+running fast). A design review by Codex Sol 6.1 (2026-10-12) confirmed a screen cannot settle it
+and recommended a permanent database record of each create request. That is planned as its own
+change after admin-only invoicing (it has to build on that migration's version of
+`save_field_app_invoice`), so this PR ships without the draft tag and the search.
 
 ### Not in this change
 
@@ -74,62 +63,44 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
 
 - `src/pages/FieldApplicationInvoice.saveNavigation.test.tsx` runs the real router, the real
   route wrapper and the real leave-page guard (only the database, sign-in and toasts are
-  mocked). Each new test was run first against the code before its fix, where it failed.
-- Refresh fix (CodeRabbit, PR #893): tests cover the first Save writing the created id into the
-  address while keeping the typed values; a refresh of that address opening the created invoice
-  with no second create; an address whose id is not an invoice id staying a new invoice; and New
-  pressed on that address starting a genuinely new invoice. They failed against f1b415fe3. A
-  first version kept the id in the browser tab's storage instead; two Luna rounds found it could
-  be lost or outlive its draft, so it was replaced by the address.
-- Luna rounds 3 to 8 (rounds 4, 7 and 8 had no BLOCKER/HIGH) added tests for Back between two
-  drafts, five kinds of address that must be ignored, a failed check refusing Save, Save waiting
-  while the check runs, a Save left behind by New not moving the user, any UUID version
-  accepted, the check's move asking before leaving, the route wrapper giving a fresh page on New
-  (PUSH) and Back/Forward (POP) while keeping it for the page's own REPLACE rewrites, and a
-  rejected address dropping its draft tag. Each failed against the commit before its fix
-  (877163547, 608f5dd5d, eb84edea4, fb788f29d).
-- CodeRabbit's second review (head eb1200120): three tests for the draft tag (written before the
-  create is sent and used for its key; a refresh at the draft address reusing the key; New
-  giving a new key) failed against eb1200120.
-- Codex review of 585b34f74 (P1: the stored answer expires after 24 hours; P2: a replay keeps
-  the first submission): three new page tests (an invoice created two days earlier is listed and
-  Save waits, then "Start a new invoice instead" creates under a new draft; Save refuses when the
-  check cannot run; a new draft tag carries its start time) failed against 585b34f74; unit tests
-  in `src/lib/fieldAppNewInvoiceAddress.test.ts` cover the draft tag's time.
-- Codex Sol on d5e4568d9 (HIGH: a billing retry with changed values replayed the first result;
-  HIGH: a reload while the first create was still running could replay the first submission):
-  three new tests (a billing retry with changed values gets a new key and an unchanged one keeps
-  it; Save waits while the earlier create may still be running; an invoice found by the search
-  right before saving stops the create) failed against d5e4568d9.
-- Codex Sol on cd9a1f46b (HIGH: after Stay, Save updated the address's invoice from a partly
-  re-typed form): the test that expected that update now expects Save to wait with a link to the
-  invoice; it failed against cd9a1f46b.
-- Codex Sol on 06622fe1f (HIGH: "Start a new invoice instead" skipped the two-minute wait): two
-  new tests (the button waits while the first create may be running; it searches again and shows
-  an invoice that appeared since) failed against 06622fe1f.
-- After merging main (with #895) on 2026-10-12: typecheck, lint and the full Vitest suite pass.
+  mocked). Its tests cover: no false prompt; Stay then Save updating the created invoice; the
+  created id in the address with typed values kept; a refresh opening the created invoice (draft,
+  unposted, posted, cancelled, created days ago, any UUID version); four kinds of address that
+  must wait for "Start a new invoice instead"; typing while the check runs; a failed or running
+  check refusing Save; New and Back/Forward; a Save left behind by New; two quick Save clicks; the
+  billing key; and the billing customer lookup failing or coming back short.
+- The four 2026-10-13 fixes (posted opens, unopenable address waits, two clicks send one save,
+  billing lookup refuses) were each broken on purpose and their tests failed, then restored.
+- Earlier rounds (Luna 3 to 8, CodeRabbit, Codex Sol) each added tests that failed against the
+  commit before their fix.
 
-### Known gaps and deferred items (not fixed in this change)
+### Known gaps (not fixed in this change)
 
-- **A partly-failed first save of a new field-application invoice.** If the first Save creates the
-  invoice but a later step fails (for example the billing details), the page keeps a link to the
-  invoice it created and a second Save updates it (a refresh opens that invoice instead). But
-  some checks (season date guard, split preview, billing key) still behave as if the invoice were
-  new until the page moves to the saved invoice (the server still refuses a filed-season change).
-- **Leaving while the first Save is still running, then re-typing it.** If someone presses Save
-  on a new field-application invoice, leaves for another page before it finishes, and later
-  types the same application into a fresh New page, that Save creates a second invoice, as it
-  does on main today. A screen cannot tell a re-typed application from a new one; the real guard
-  would be a database rule (for example one draft invoice per field application).
-- **New pressed during a Save can be dropped.** If someone presses New while a new invoice's
-  first Save is running and the Save finishes while the "Unsaved Changes" box is still open,
-  the New press can be lost and the page goes on to the saved invoice. Nothing is duplicated
-  or lost; press New again. (Luna round 7, MED, accepted.)
-- **A different sign-in while the page stays open is not re-checked by the page.** Signing out
-  sends the browser to the login page, which closes this page; the database decides who may
-  edit an invoice either way.
+- **Lost reply, then refresh, then re-type: still a second invoice, exactly as on main.** If the
+  database creates the invoice but the reply never reaches the browser and the page is refreshed,
+  the address has no created id, the typed form is gone, and saving the re-typed form creates a
+  second invoice. Planned fix: the permanent create-request record above (Codex Sol 6.1 design,
+  2026-10-12).
+- **A retry after an unknown outcome, with changed values, on the same page.** If a Save gets no
+  answer and the user changes the locations or chemicals before pressing Save again, the
+  database may answer with the first attempt's result (same repeat-protection key), and the new
+  values in those fields are not applied, while the later steps save the current billing and
+  applied info. This is how main behaves today; the planned create-request record covers it for
+  new invoices.
+- **The billing key is protected by the screen only.** The server does not check that a reused
+  key carries the same values, and a delayed older billing write could still land after a newer
+  one.
+- **One Save is several separate writes** (invoice, applied info, billing details, override
+  note); a failure part way is reported and the form stays unsaved, but the steps are not one
+  transaction.
+- **A partly-failed first save** keeps some checks (season date guard, split preview) behaving
+  as if the invoice were new until the page moves to the saved invoice (the server still refuses
+  a filed-season change).
+- **New pressed during a Save can be dropped** if the Save finishes while the "Unsaved Changes"
+  box is open; nothing is duplicated or lost; press New again (Luna round 7, MED, accepted).
+- **Re-typing the same application on a fresh page** creates another invoice; a screen cannot
+  tell a re-typed application from a new one.
 
 ### Not verified here
 
-- Not clicked through in a signed-in browser against live data: a new field-app Save landing on
-  the saved invoice, and a refresh at a draft address showing the list of recent invoices.
+- Not clicked through in a signed-in browser against live data.

@@ -12,8 +12,9 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 **Recovered.** Mason made this decision on 2026-08-27, but it was written only on the never-merged
 branch of PR #507 (`claude/product-plan-rev12-followup`, Revision 13 of
-`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`). On 2026-10-13 that revision text was merged
-into the plan on `main`, whose §D-AA table is the authoritative wording; this entry summarizes it.
+`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`). The same 2026-10-13 change that adds this
+entry merges that revision text into the plan, whose §D-AA table is the authoritative wording; this entry
+summarizes it.
 **Decision (Mason, in chat, 2026-08-27, after the trade-offs were explained), D-AA-1 to D-AA-3:**
 - **D-AA-1.** Where a CAS number is present it is the chemical's identity: same CAS means the same
   chemical, merged into one identity across trade, common and IUPAC names and spelling variants; the
@@ -57,15 +58,17 @@ GitHub branch cleanup. Source audit: `docs/audits/2026-08-08-product-pricing-ful
    voided. Commission is fixed from order or job profit when it is minted and can never be negative
    (`chk_commission_amount >= 0`). The only reversal today is cancelling PENDING commission in full when a
    whole order, delivery or invoice is voided or cancelled; already-paid commission is never debited.
-   Live data that day: one approved return, no credit memos ever, so no rep has yet been overpaid.
+   Live data that day: one approved return and no credit memos ever (whether that return's sale carried
+   commission was not traced).
 2. **No historical backfill** of return costs: the existing rows were test and transitional data, not
    real financial history. The boundary is an apply event, not a calendar date: credit memos ISSUED
    before the return-credit cost reversal was applied live are out of scope regardless of when they were
    created, and everything issued after it follows the new behavior. The original text named
-   `20260808170000_return_credit_cogs_reversal`, which was never applied; the reversal shipped as the
-   six-file return-credit chain (`20260827041000`..`20260827041500`), whose live apply on 2026-09-01 is
-   therefore the boundary. Do not write a backfill migration for the earlier rows; revisit if real
-   customer returns were entered before then.
+   `20260808170000_return_credit_cogs_reversal`, which was never applied; the reversal shipped instead as
+   `20260827041100_rebuild_return_credit_cogs_reversal`, part of the six-file return-credit chain applied
+   live on 2026-09-01 (ledger `20260901163711`..`20260901184530`). The operative event is that file's
+   live apply, ledger version `20260901182753`. Do not write a backfill migration for credit memos issued
+   before it; revisit if real customer returns were entered before then.
 3. **Margin targets are per product, not one company-wide number.** A global default may exist only as a
    fallback for products with no target; the per-product value is authoritative. Seeding targets across
    the catalog is tracked in `TODO.md` ("Per-product margin targets").

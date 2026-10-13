@@ -7,8 +7,8 @@ entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150
 2026-10-07 read re-certified the CRX-LIFE-001 entry (fix live; two post-apply gates still open). Every other entry's status (open, or
 fixed/applied/closed) was last re-checked on 2026-09-26 against that day's ledger snapshot and
 `main`, except where an entry says otherwise; the detailed evidence inside an entry keeps its own
-date and was not all re-measured. On 2026-10-13 the GitHub branch cleanup added three OPEN entries
-rescued from never-merged branches and repointed the entries that named removed branches
+date and was not all re-measured. On 2026-10-13 the GitHub branch cleanup added four OPEN entries
+rescued from never-merged branches and repointed the entries that name branches on the cleanup list
 (`docs/audits/2026-10-13-github-branch-cleanup-audit.md`).
 
 - **Applied live:** the September commission cohort `20260914100100` through `20260914100600`
@@ -61,7 +61,9 @@ per product the quote already holds. **Exposure today:** a read-only live query 
 quotes in total, none currently holding a repeated product, the newest last updated 2026-07-19; the
 refusal would hit the first time someone edits a saved quote into that shape. **Fix shape:** QuoteBuilder
 sends each saved line's `id`, sends a `client_key` on every new line, and installs the `item_ids` mapping
-the RPC returns (client key to new id), so the next save can name every line. The only implementation is
+the RPC returns (client key to new id), so the next save can name every line. Identity rule from the same
+reference fix: swapping a line to a different product clears its saved `id` (it becomes a new line at
+today's cost), while re-picking the same product keeps it. The only implementation is
 on PR #397's branch (`QuoteBuilder.tsx` about lines 1586-1666); it predates months of `main` changes, so
 re-derive it rather than cherry-pick. Fix it before quoting is used for real.
 
@@ -166,27 +168,46 @@ short path can break). An agent must not do either; they change a system setting
 for the whole class is a design change: authenticate proof content (wrapper-held creation and
 validation, so a rewritten field is detected) rather than add another command-text rule.
 
-## OPEN 2026-10-13 (LOW) — small notes rescued from branches in the GitHub branch cleanup
+## OPEN 2026-10-13 (mostly LOW; two MED) — smaller notes rescued from branches in the GitHub branch cleanup
 
 Each was found by the cleanup's reviewers on a branch that is being removed and was written down nowhere
 else on `main`. None blocks anything; they are here so they are not lost. Each says how it was checked.
 
-- **`save_field` has no "row not found" check** (from `claude/bulk-import-retry-scopes`). Verified on the
-  live catalog 2026-10-13: its body contains no `FOUND`/`NOT FOUND` test. It matters to whoever builds the
-  tracked bulk-import duplicate-field fix in `TODO.md`, which names a stable client-generated field id as
-  the redesign: an update aimed at a missing id would succeed silently.
+- **`save_field` reports success for a field id that does not exist** (from
+  `claude/bulk-import-retry-scopes`). Read from the live function body 2026-10-13: when `p_field_id` is
+  given it runs `UPDATE fields … WHERE id = p_field_id` with no row-count or `FOUND` check, sets the
+  returned id to `p_field_id`, writes an activity row and saves the idempotency result. With no billing
+  splits in the payload, a missing id therefore returns that id as if saved while nothing was written
+  (with billing splits, their insert would presumably fail on the field foreign key; not tested). It
+  matters to whoever builds the tracked bulk-import duplicate-field fix in `TODO.md`, which names a stable
+  client-generated field id as the redesign. The same body checks only the admin or sales-rep role, not
+  which customer the field belongs to; whether reps are meant to be limited there is not settled here.
 - **`git clean` with `clean.requireForce` switched off** (from `claude/bash-safety-opacity-cleanup`,
   PR #527). Measured 2026-10-13 by feeding `main`'s Bash hooks synthetic input (nothing was run): the
   project `bash-safety.mjs` denies the reported `-c clean.requireForce=false clean -d`, `=0` and
   `--config-env` forms, but allows a `git clean` with no `-f`/`-d`/`-x` flag (plain, or `-X`) when the
   override is given by `-c`, `--config-env` or `GIT_CONFIG_*` variables. With the override, plain `clean`
   deletes untracked files and `-X` deletes ignored ones such as `.env*` (git documentation; not run).
-- **Transfer-created field invoices are stamped Net 30** (from the PR #591 review). On `main`,
-  `transfer_job_to_invoice` sets `due_date` to Chicago today + 30 days
-  (`20260914100500_commission_dates_follow_chicago_business_day.sql:2587` and `:2820`). Reported, not
-  re-measured: posting keeps a non-null due date, so a transferred invoice for a Net 15 or due-on-receipt
-  customer, posted without re-saving its billing form, keeps Net 30; the field-app editor clears a
-  matching stamp when the form is saved, so the exposure is narrow and may be intended.
+- **Transfer-created field invoices are stamped Net 30 regardless of the customer's terms (MED, needs a
+  trace)** (from the PR #591 review). On `main`, `transfer_job_to_invoice` sets the invoice date to the
+  Chicago date and `due_date` to that date + 30 days
+  (`20260914100500_commission_dates_follow_chicago_business_day.sql:2587` and `:2820`). Mason's settled
+  rule (`DECISION_LOG.md`, 2026-09-03) is that payment terms run from the invoice date using the
+  customer's terms, so for a Net 15 or due-on-receipt customer this stamp contradicts the rule unless
+  something corrects it before posting. Reported, not re-measured: posting keeps a non-null due date, and
+  the field-app editor clears a matching stamp when the billing form is saved. Trace the post path before
+  relying on either.
+- **Live-data guard: an `[E2E]` marker anywhere in a SQL batch exempts every write in it** (from
+  `claude/live-data-guard-comment-aware`, PR #639). Measured 2026-10-13 with synthetic hook input (nothing
+  ran): `.claude/hooks/live-testdata-guard.mjs` denies `DELETE FROM customers WHERE id = '…'` but allows
+  the same delete when the batch also contains `SELECT '[E2E]';`. PR #639 had scoped the marker to its own
+  statement; that change never landed. `main` mentioned this only in two 2026-08-08 audit documents
+  (`docs/audits/2026-08-08-crx-harness-permissions-audit.md`, `…-permissions-overhaul-handoff.md`), not
+  as an open item. It reaches irreversible live-data deletes, so it meets Mason's 2026-10-02 bar.
+- **Local hooks do not inspect GitHub GraphQL ref updates.** Measured the same way: a
+  `gh api graphql … updateRefs` mutation passes every Bash hook, even one aimed at `refs/heads/main`. The
+  boundary for `main` is GitHub's server-side `protect-main` ruleset (rules read 2026-10-13: deletion,
+  non-fast-forward, pull request, required status checks; no bypass actors per `DECISION_LOG.md`).
 - **Return-credit container prover is pre-apply** (from `codex/defer-return-credit-rollout-20260831`,
   PR #532). Reasoned from the code, not run: it replays the six return-credit migrations onto a fresh
   live dump, and their pre-flight checks expect the state from before their 2026-09-01 apply, so it can
@@ -1779,7 +1800,9 @@ of the 9 at a different layer (Bash guard). **Fix shape:** land the 18 entries a
 **Does it still stand? (2026-10-13)** Mason's 2026-09-26 "fewer permission prompts" decision
 (`DECISION_LOG.md`, PR #841) deliberately took check scripts, tests and routers out of the `ask` tier,
 which covers most of these nine patterns. Treat F3 as needing a fresh decision before anyone builds it,
-not as a ready fix.
+not as a ready fix. One pattern may still qualify under that decision: `.claude/agents/**` holds the
+reviewer charters that feed the live-apply proof minter, which is a production-gate path (raised by a
+Codex review on closed PR #605; not re-checked against the current harness).
 
 **Branch retention (updated 2026-10-13):** F1 (PR #584, merged 2026-09-04) and F2 (PR #583, merged
 2026-09-03) have landed. F3's branch `claude/control-file-coverage-a41c` (on origin at `b985e919b`) still
@@ -2908,7 +2931,7 @@ without `RETURNING`. Reproduced on a local copy of the live policies; admins are
 document exists, so no one has hit it yet. Fixing it is a policy or RPC design choice (for example, a
 `SECURITY DEFINER` soft-delete RPC with an idempotency key) and belongs in its own change.
 
-**Database fix APPLIED LIVE 2026-10-02** (`20260921180000_soft_delete_customer_document_rpc`, ledger version `20261002230949`; PR #800 merged as `c78b73b67`). (As of 2026-10-02, before the page change shipped as PR #875 the next day:) What remains is the page change: until it ships, the live Documents tab still updates the row directly, so a rep's Remove is still refused. It is on branch `claude/customer-document-rep-remove-page-v4`, rebuilt on current `main`. The history below is the pre-apply record. (2026-10-13: the earlier PR-less page branches `-remove-page`, `-v2` and `-v3` named below are on the GitHub branch-cleanup list; their tips are kept as `archive/2026-10-13/claude/customer-document-rep-remove-page…` tags, listed in `docs/audits/2026-10-13-github-branch-cleanup-audit.md`.)
+**Database fix APPLIED LIVE 2026-10-02** (`20260921180000_soft_delete_customer_document_rpc`, ledger version `20261002230949`; PR #800 merged as `c78b73b67`). (As of 2026-10-02, before the page change shipped as PR #875 the next day:) What remains is the page change: until it ships, the live Documents tab still updates the row directly, so a rep's Remove is still refused. It is on branch `claude/customer-document-rep-remove-page-v4`, rebuilt on current `main`. The history below is the pre-apply record. (2026-10-13: the earlier PR-less page branches `-remove-page`, `-v2` and `-v3` named below are on the GitHub branch-cleanup list; their tips will be kept as `archive/2026-10-13/claude/customer-document-rep-remove-page…` tags when they are removed, listed in `docs/audits/2026-10-13-github-branch-cleanup-audit.md`.)
 
 **Pre-apply record (checked 2026-09-28).** Open PR #800 (it replaced the closed PR #785) carries
 the parked migration `20260921180000_soft_delete_customer_document_rpc` (on the PR branch, not on

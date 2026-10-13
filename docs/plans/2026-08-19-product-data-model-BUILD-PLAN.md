@@ -15,6 +15,16 @@
 > ingredient identity model is SETTLED as owner decision **D-AA** (Mason, 2026-08-27; also in
 > `docs/manual/DECISION_LOG.md`), WP-1's migration implements it, Revision 12's unique-key mechanism is
 > withdrawn, and the cross-product ingredient race is a known open HIGH until WP-1 ships.
+>
+> **Open design questions on Revisions 12-13 (Codex `gpt-6.1-sol` review, 2026-10-13; resolve while
+> designing WP-1, before building it).** (1) The first concurrency acceptance criterion asks for one
+> identity with both products attached for the same new form, while the CAS-less criterion asks for one
+> identity plus a queued candidate; qualify the first by authoritative identity evidence (a CAS match) so
+> it cannot demand a merge that D-AA-2 sends to Mason. (2) D-AA-3 is checked at import, but a
+> different-parent identity can appear between two imports and their approval; specify the commit-time
+> recheck and refusal, and add that race to the acceptance criteria. (3) D-AA's concurrent-approval proofs
+> are assigned to WP-1, but `commit_label_draft_proposal` lands in WP-4; say which executable path proves
+> WP-1's mechanism and when the full approval-path proof becomes mandatory.
 
 **Date:** 2026-08-19 · **Revision 2** (folds in the Fable adversarial review, 26 findings, and
 two owner decisions taken 2026-08-19)

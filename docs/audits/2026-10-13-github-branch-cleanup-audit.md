@@ -1,6 +1,6 @@
 # GitHub branch cleanup audit and restore ledger (2026-10-13)
 
-**Status: REPORT, revised after an independent review. Nothing has been deleted.** Mason asked on
+**Status: REPORT, revised after two rounds of independent review. Nothing has been deleted.** Mason asked on
 2026-10-13 to "analyze all our branches we have in github … remove what is useless and cleanup", then to
 have Codex Sol 6.1 review the proposal before anything happens. Every measurement behind this document
 was read-only. Branch deletion is a hard-gated action (`AGENTS.md`), so the deletions below wait for
@@ -17,8 +17,8 @@ Mason's explicit yes in the conversation. When they run, this file is the restor
   until this PR merges, because this PR rescues or repoints something on them.
 - **Every deleted branch stays restorable.** 164 tips are the final commit of their PR, which GitHub
   keeps as `refs/pull/<N>/head` (fetching four of them back, from July to October, returned exactly the
-  branch tips). 12 get a new `archive/2026-10-13/<branch>` tag in the same atomic step that deletes the
-  branch, and 1 already has a tag.
+  branch tips). 12 get a new `archive/2026-10-13/<branch>` tag, made and read back before any deletion, and 1
+  already has a tag. A verified local bundle of all 185 candidate tips is a second, independent copy.
 - **No live database change is at risk** (proved, not inferred; see "Database").
 - **Rescued in this PR:** two owner decisions that never reached `DECISION_LOG.md`; Revisions 12-13 of the
   product data model plan; and new `KNOWN_ISSUES.md` entries.
@@ -29,10 +29,11 @@ Mason's explicit yes in the conversation. When they run, this file is the restor
 
 ## The independent review (Codex `gpt-6.1-sol`, 2026-10-13)
 
-Mason asked for a Codex Sol 6.1 review before any deletion. `gpt-6.1-sol` is newer than the
-`gpt-6-sol` pinned for merge gates; this review is advisory and gates nothing, so the newer model was used
-as he asked. It ran read-only (`--sandbox read-only --ignore-user-config --ephemeral`) at `xhigh` effort on
-an 810 KB inline packet:
+Mason asked for a Codex Sol 6.1 review before any deletion, so its findings must be fixed, or explicitly
+accepted by Mason, before any branch is deleted. It is not a merge gate: `gpt-6.1-sol` is newer than the
+`gpt-6-sol` the merge gates pin, and PR #901 itself is a documentation-only change that the gates exempt
+from Sol. Round 1 ran read-only (`--sandbox read-only --ignore-user-config --ephemeral`) at `xhigh` effort
+on an 810 KB inline packet:
 - this proposal, PR #901's diff and the source text of every rescued record;
 - Claude's live facts, the prior-decisions summary and the completeness critic;
 - every branch's evidence.
@@ -65,13 +66,50 @@ Two Sol points were checked and turned out narrower than stated:
   `C:/CRX_solfix`. Their GitHub branches (#874, #882, #890) merged and were auto-deleted, so none is on
   this list.
 
-The full review is kept with the session record.
+**Round 2** (same settings, a 996 KB packet that also carried Sol's round-1 text, every changed `src/` and
+`supabase/` file per branch untruncated, and the round-2 evidence) returned **BLOCK, 33 open**:
+- **Round 1:** 30 of 45 findings FIXED, including all five HIGH; 15 PARTLY or NOT FIXED.
+- **New:** 18 findings, 5 HIGH, about the deletion procedure.
+
+This revision addresses them:
+
+| Round-2 finding | What changed |
+|---|---|
+| HIGH N1: a PR, session or worktree could adopt a branch after the pre-flight | Checks moved to each branch immediately before its delete, plus a post-batch sweep that restores any branch a new PR points at |
+| HIGH N2: preservation was verified after deletion | Every restore source is verified before the first deletion of a batch |
+| HIGH N3: creating tags through the API skipped the pre-push hook | Tags are created with an ordinary `git push` (the pre-push hook runs, as in the 2026-09-01 and 09-03 runs); the API call only deletes |
+| HIGH N4: the ledger had to be published first | Each batch requires the ledger at PR #901's live head to list every branch and commit in the batch |
+| HIGH N5: "after #901 merges" was too loose | The 17 also require each rescued record to be present on `origin/main` |
+| MED N6: review called non-gating | Reworded above |
+| MED N7: `main` or rules could change after review | Each batch re-measures against the then-current `main` and drops any branch whose unlanded set grew |
+| MED N8: migration copy count units | Units stated (see "Database") |
+| MED N9: "no rep overpaid" unsupported | Removed |
+| MED N10: Net 30 note understated | Reclassified MED against the 2026-09-03 rule; needs a post-path trace |
+| MED N12-N14: product-plan design questions | Recorded in the plan header as open questions for WP-1 design (the plan text is PR #507's, merged unchanged; designing it is outside this cleanup) |
+| MED N18: failure handling | Stop on any mismatch or unknown outcome, reconcile, record actual results |
+| LOW N11, N15-N17 | Quote product-swap identity rule added; KNOWN_ISSUES header count fixed; baseline wording fixed; rep-scoping release condition expanded |
+| R1 #3, #7, #12, #20, #21, #24-#26, #32-#34, #42, #43, #45 | `.claude/agents/**` caveat added to F3; no-backfill boundary bound to ledger `20260901182753`; quote exposure worded precisely; E2E-marker guard gap measured and recorded; `save_field` behavior read from its live body; memory notes and the 2026-09-28 changelog repointed; remaining "removed/kept" wording made prospective; section1's tag added to post-flight; a verified local bundle added as an independent fallback; the planned commands run through every hook (all allow); notes below on skeptic coverage, superseded narratives and pr364 |
+
+**Coverage notes.**
+- **No skeptics on `backup/pr432-multitarget-20260825`.** Round 1 put it to Mason, so it was never
+  skeptic-challenged. Its deletion now rests on the investigator's evidence, the prior-reports reader
+  (#432 frozen permanently on 2026-08-25) and Sol's own round-1 finding #44.
+- **Superseded narratives.** Where a round-1 investigator narrative and this report disagree, this report
+  wins. Known corrections:
+  - the field-season install laps were cherry-picked into #871, not literal ancestors;
+  - `codex/lean-agent-docs-20260904` is a parallel commit, not one on top of #600;
+  - lap 19's successor carries more merges than stated;
+  - the download-revoke v3 branch already has the cited postflight check.
+- **pr364.** The pr364 branch could also be retired later by an approved swap to an archive tag plus a
+  `KNOWN_ISSUES.md` repoint, without declining its protections; that is not proposed here.
+
+The full reviews are kept with the session record.
 
 ## Baseline and method
 
 | | |
 |---|---|
-| `origin/main` | first measured at `af0ce0c4c`; every branch re-measured at `7abd52f6d` after #893 merged. 19 branches changed class: 18 field-season laps now differ only in `FieldApplicationInvoiceRoute.tsx`, and each holds exactly the pre-#893 `main` version of it; `invoice-screen-safety` became more landed. No tip moved. |
+| `origin/main` | first measured at `af0ce0c4c`; every branch re-measured at `7abd52f6d` after #893 merged. 19 branches changed class. In 18 field-season laps the only change was that `FieldApplicationInvoiceRoute.tsx` became MAIN-MOVED, and each holds exactly the pre-#893 `main` version of that file. `invoice-screen-safety` became more landed. No tip moved. |
 | Branches | `git ls-remote --heads origin`: 192 heads = `main` + 191 |
 | PRs | `gh pr list --state all`: 889 PRs, matched to branches by head name |
 | Repo setting | "Automatically delete head branches" is ON, so merged PRs clean up after themselves; the pile-up is closed-but-not-merged PRs, which GitHub never deletes |
@@ -104,9 +142,11 @@ Deleting branches cannot strand a live database change:
 - **`main` holds exactly what ran.** For the 23 applied migrations whose names also appear on branches,
   the SQL the live database recorded when it applied them (fingerprint of
   `supabase_migrations.schema_migrations.statements`) matches `main`'s file in all 23 cases.
-- **The branch drafts are earlier versions.** The 42 branch copies of those migrations whose content
-  differs are earlier drafts that were never what ran. The 7 branch copies that match the live
-  fingerprint are byte-identical to `main`.
+- **The branch drafts are earlier versions.** Branches carry 136 per-branch copies of those 23
+  migrations, under 34 distinct file names, which reduce to 49 distinct (file name, content) versions. Of
+  the 49:
+  - 7 match the live fingerprint and are byte-identical to `main`;
+  - 42 differ and are earlier drafts that were never what ran.
 - **Unapplied drafts.** 10 migrations (18 file versions across branches) exist only on branches and were
   never applied. Each was replaced, decided against, or is parked on a kept branch.
 
@@ -183,7 +223,7 @@ Deleting branches cannot strand a live database change:
 | `claude/audit-brace-expansion-fast-uri` | `6ead36f7bf48f8b1eaef1bf1bd81ced1c21a377a` | Checked out at C:/CRX_mergeperm; held until that folder is dealt with separately (nothing unique on it; PR #847 keeps the tip). |
 | `claude/autopilot-recursive-delete-alias-20260907` | `00cb318708b3048aa2a71fe7a58d97e8e02a3492` | Checked out at C:/CRX_rmguard, which holds one unpushed commit and one uncommitted edit. |
 | `claude/return-credit-chain-applied-2026-09-01` | `56812f3dd5e28c551a5e5dcb40898d88c2b6ead8` | Open issue #747 names this branch as its evidence. |
-| `claude/rep-scope-order-invoices` | `322cbbd04d00ebbe0001e5b4c311b216bbd9b63b` | Its replacement, admin-only invoicing PR #902, is open but not merged; four findings on this branch get recorded when #902 lands. |
+| `claude/rep-scope-order-invoices` | `322cbbd04d00ebbe0001e5b4c311b216bbd9b63b` | Its replacement, admin-only invoicing PR #902, is open but not merged. Release only when #902 has merged AND, on main: the branch's four OPEN findings (INV- numbering through the order RPCs, the split engine never billing a landlord, and two more listed in its KNOWN_ISSUES) are recorded or fixed, the split-wrapper type allow-list item is disposed of, and the 2026-10-06 DECISION_LOG text calling rep scoping the next change is reconciled with Mason's 2026-10-09 decision. |
 
 **Mason's call (2).** Both are fully preserved either way. Recommendation: delete both. For F3, your 2026-09-26 decision already took most of its files off the ask list on purpose, and all nine patterns are written word for word in `KNOWN_ISSUES.md`; an archive tag keeps the commit.
 
@@ -198,12 +238,19 @@ Deleting branches cannot strand a live database change:
    environment changes, a Supabase project pause, and email send, because `migration-apply-guard.mjs`
    returns an explicit allow and no ask/deny rule names those tools. The Vercel denies are spelled for a
    different server name. Recorded in `KNOWN_ISSUES.md` as its own reviewed fix.
-2. **Two latent quote bugs**, recorded with fix shapes. Nobody is affected today; 4 quotes exist, idle
-   since July.
+2. **Two latent quote bugs**, recorded with fix shapes. Exposure today: 4 quotes exist, none currently in
+   the affected shape, idle since July.
    - Re-saving a quote with two lines of one product is refused.
    - Convert to Order can leave an accepted quote with no order and its holds released.
 3. **Commission clawback on returns (Mason, 2026-08-09) was never built.** The trace and live data are in
    `DECISION_LOG.md`.
+3a. **Two more guard gaps, measured with synthetic hook input and recorded in `KNOWN_ISSUES.md`:**
+   - **Live-data guard:** an `[E2E]` marker anywhere in a SQL batch exempts a live-data delete beside it.
+   - **GraphQL ref updates:** local hooks do not inspect them at all; for `main`, GitHub's `protect-main`
+     ruleset is the boundary.
+3b. **`save_field` reports success for a missing field id**, and transfer-created field invoices are stamped
+   Net 30 regardless of the customer's terms. Both are recorded; the second needs a post-path trace
+   against Mason's 2026-09-03 rule.
 4. **Stale tracking for PR #638's migration.** GitHub issue #669 ("Must fix before apply: … no enforced
    post-lock deadline") is still OPEN, though `20260914100800` went live 2026-09-27 without that fix.
    Left for a separate reconcile, because commenting on or closing an issue is outward-facing.
@@ -219,24 +266,57 @@ Deleting branches cannot strand a live database change:
 
 ## Deletion procedure (for each batch, after Mason's yes)
 
-1. **Same-turn pre-flight, per branch.** Refuse the branch if any of these fails:
-   - its live tip equals this ledger's commit;
-   - a fresh all-states PR lookup shows no open PR using it as head or base;
-   - it is not checked out in any worktree on this PC;
-   - it is not the branch of any active agent session.
-2. **One atomic GitHub `updateRefs` call per branch.** It deletes the branch only if the branch still
-   points at the ledger commit, and where the restore source says "to create", it creates the
-   `archive/2026-10-13/<branch>` tag at that commit in the same call. Either both happen or neither does,
-   so a commit pushed after the pre-flight can never be lost: the call fails instead.
-3. **Stop on any refusal.** If GitHub or a repository guard refuses the call, stop and report; no other
-   route is tried without telling Mason. The API route skips the git pre-push hook, which checks pushed
-   content; a ref update at a commit already on GitHub transmits none.
-4. **Verify each ref individually:**
-   - every deleted branch is absent;
-   - every new tag points at its exact commit;
-   - every "PR #N" row's `refs/pull/N/head` still equals the recorded commit.
+The batches are: the 160 "after yes" rows; the 17 "after this PR" rows; and each "Mason's call" row only
+on his explicit answer. A batch starts only when all of these hold.
 
-   The total count is only a secondary check.
+**A. Batch preconditions** (checked in the same turn as the batch):
+1. Mason's yes for that batch, in the conversation.
+2. **The ledger is published.** This file at PR #901's live head, or on `origin/main` once merged, lists
+   every branch and commit in the batch.
+3. **Nothing moved since review.** If `origin/main` or the `protect-main` rules changed since the reviewed
+   baseline (`7abd52f6d`), re-measure the batch and drop, for re-review, any branch whose unlanded content
+   grew.
+4. **For the 17 "after this PR" rows:** PR #901 has merged, and each rescued record is present on
+   `origin/main` before its source branch is touched.
+
+**B. Preservation, verified before anything is deleted:**
+1. Every "PR #N" row's `refs/pull/N/head` equals the ledger commit. Section1's existing tag
+   (`preserve/2026-07-29/codex-section1-security-hardening-20260725`) equals `53f6177eb`.
+2. The "to create" archive tags are made with an ordinary `git push` of each commit to
+   `refs/tags/archive/2026-10-13/<branch>`, so the pre-push hook runs. Each is then read back with
+   `git ls-remote`.
+3. The local bundle below still verifies.
+4. Any mismatch stops the batch.
+
+**C. Per branch, immediately before its delete:**
+1. Re-read the tip.
+2. Re-run the PR lookup for that branch, all states, as head and as base.
+3. Re-check the worktree list.
+4. The batch starts by reading the list of active agent sessions; refuse a branch any of them is on.
+5. Then run one GitHub `updateRefs` call that deletes `refs/heads/<branch>` only if it still points at the
+   ledger commit (`beforeOid`). If anyone pushed after the check, GitHub refuses the call and nothing is
+   lost.
+6. The script accepts only branch names from this ledger and refuses `refs/heads/main`.
+
+**D. Failure handling.** If GitHub or a guard refuses a call, or any result is unknown (timeout,
+unreadable reply, mismatch):
+- stop the batch;
+- re-read the affected refs;
+- reconcile, and record what actually happened.
+
+Never retry blindly or switch routes without telling Mason. All planned commands were run through every
+repository hook with synthetic input on 2026-10-13 and all were allowed. Whether the desktop app's own
+permission layer prompts was not tested.
+
+**E. After the batch:**
+- Verify each ref individually: every deleted branch is absent, every tag points at its commit, and every
+  PR ref still equals its commit.
+- Re-query all PRs. If any PR was opened against a deleted branch while the batch ran, restore that branch
+  at its ledger commit immediately and report it. This covers the only residual: a new PR, session or
+  checkout picking up a branch in the seconds between its check and its delete. Every target has had no
+  open PR and no new commit since 2026-10-09 at the latest.
+- Record the actual outcome of every row in a follow-up docs change. The total branch count is only a
+  secondary check.
 
 ## Restoring a branch
 
@@ -244,6 +324,13 @@ Each row gives the branch name, its exact commit, and where that commit lives:
 - **A PR number:** GitHub's *Restore branch* button on that PR page. If the button is gone, fetch
   `refs/pull/<N>/head` and create a branch at the recorded commit.
 - **A tag:** create a branch at that tag.
+
+**Independent fallback, not dependent on GitHub keeping PR refs.** A git bundle of all 185 candidate
+branch tips is at `C:/Users/mason/CRX_branch_archive/2026-10-13-github-branch-cleanup.bundle`, made
+2026-10-13 before any deletion. It is 8.6 MB and passes `git bundle verify`, and every one of its 185 tips
+was checked against this ledger. A manifest sits next to it. The bundle excludes `main`'s own history, so
+restoring from it needs any clone of this repository. It lives only on this PC, so it is a second copy,
+not an offsite one.
 
 Like the earlier ledgers, this file deliberately carries no copy-paste shell command.
 

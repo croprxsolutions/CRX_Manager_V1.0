@@ -8,8 +8,11 @@ review the proposal first. The report and restore ledger are in
 
 **How it was reviewed.** A read-only 56-agent workflow measured the 185 branches not owned by an open PR.
 It used investigators per topic, two skeptics per delete verdict, a prior-reports reader and a
-completeness critic. Sol's advisory review returned BLOCK with 45 findings (5 HIGH). Claude agreed with
-nearly all of them, revised the proposal, and recorded the changes in the report.
+completeness critic. Sol's review, which Mason made a precondition for deleting, returned BLOCK with 45 findings (5 HIGH) in
+round 1. Claude agreed with nearly all of them and revised the proposal. Round 2 found 30 fixed (all five
+HIGH) and raised 18 new findings, mostly about the deletion procedure. The revision answering them is in
+the report: preservation is verified before deletion, tags are made by an ordinary push, checks run per
+branch, there is a post-batch sweep, and a verified local bundle serves as an independent fallback.
 
 **Verdicts.** 177 deletable (160 after Mason's yes, 17 after this PR merges), 6 kept, 2 for Mason's
 decision. Each deletion is an atomic compare-and-delete, so a newly pushed commit cannot be lost. The

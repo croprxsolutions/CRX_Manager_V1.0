@@ -202,9 +202,10 @@ export default function FieldApplicationInvoice() {
   // #33: per-invoice key cache for the billing-details RPC (PO/terms/due/footer/memo
   // + per-invoice Discount Earned). Keyed by the editor's invoice id (or '__new__'
   // before the first save) so a retry after a timeout reuses the SAME idempotency key
-  // and the server dedup never double-applies. The key is bound to the values it sent: the
-  // server answers a repeated key with its first result without applying anything, so a
-  // retry with CHANGED billing values gets a new key (Codex Sol, PR #893).
+  // and the server dedup never double-applies. The server answers a repeated key with its
+  // first result without applying anything, so when a retry's values CHANGED it is followed
+  // by one more write under a new key (Codex Sol and CodeRabbit, PR #893; see the billing
+  // step in performSave).
   const billingKeysRef = useRef<Record<string, { key: string; fingerprint: string }>>({});
   const postIdem = useIdempotencyKey('post_invoice_group', profile?.id || '');
   // Keep receipt ownership scoped by invoice id even though the route wrapper now
@@ -2014,28 +2015,41 @@ export default function FieldApplicationInvoice() {
           p_performed_by: profile.id,
         };
         if (billingOk) {
+          // A retry keeps the unanswered write's key. The billing RPC saves that key in the same
+          // transaction as the update, and the key is unique (live, 2026-10-13), so only one
+          // write per key can ever commit: an older one still running can no longer land after
+          // this one. If the values changed since that write, its answer may be the old
+          // result, so the current values follow under a new key (CodeRabbit, PR #893).
           const billingKeyId = id || '__new__';
           const billingFingerprint = JSON.stringify(billingArgs);
-          const cachedBillingKey = billingKeysRef.current[billingKeyId];
-          const billingKey = cachedBillingKey?.fingerprint === billingFingerprint
-            ? cachedBillingKey.key
-            : generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
-          billingKeysRef.current[billingKeyId] = { key: billingKey, fingerprint: billingFingerprint };
-          const billingResult = await supabase.rpc('update_field_app_invoice_billing', {
-            ...billingArgs,
-            p_idempotency_key: billingKey,
-          });
-          if (billingResult.error) {
-            billingOk = false;
-            Sentry.captureException(billingResult.error, {
-              level: 'error',
-              extra: { context: 'field_app_invoice_billing_persist', invoice_ids: ids },
+          const unansweredBilling = billingKeysRef.current[billingKeyId];
+          const billingKey = unansweredBilling?.key
+            ?? generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
+          const billingMayReplayOldValues = !!unansweredBilling && unansweredBilling.fingerprint !== billingFingerprint;
+          if (!unansweredBilling) billingKeysRef.current[billingKeyId] = { key: billingKey, fingerprint: billingFingerprint };
+          const writeBilling = async (key: string) => {
+            const billingResult = await supabase.rpc('update_field_app_invoice_billing', {
+              ...billingArgs,
+              p_idempotency_key: key,
             });
-          } else {
+            if (billingResult.error) {
+              Sentry.captureException(billingResult.error, {
+                level: 'error',
+                extra: { context: 'field_app_invoice_billing_persist', invoice_ids: ids },
+              });
+              return false;
+            }
             assertRpcResult(billingResult.data, 'update_field_app_invoice_billing');
-            // Clear the per-id key only on success so a retry after a failure reuses it.
-            delete billingKeysRef.current[id || '__new__'];
+            return true;
+          };
+          billingOk = await writeBilling(billingKey);
+          if (billingOk && billingMayReplayOldValues) {
+            const followUpKey = generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
+            billingKeysRef.current[billingKeyId] = { key: followUpKey, fingerprint: billingFingerprint };
+            billingOk = await writeBilling(followUpKey);
           }
+          // Clear the per-id key only on success so a retry after a failure reuses it.
+          if (billingOk) delete billingKeysRef.current[billingKeyId];
         }
       }
 

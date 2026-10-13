@@ -266,7 +266,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(saveKey(0)).toMatch(/^save_field_app_invoice:/);
   });
 
-  it('a billing retry with changed values uses a new key; an unchanged retry reuses it', async () => {
+  it('a billing retry keeps its key; with changed values the current values follow under a new key', async () => {
     // The billing RPC answers a repeated key with its first result without applying anything,
     // so a changed retry under the old key would report success with the old values (Codex
     // Sol, PR #893).
@@ -296,11 +296,16 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
     await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
 
-    // Changed values: a new key, so the server applies them.
+    // Changed values: the unanswered key first (only one write per key can commit, so an older
+    // write still running cannot land after this one), then the current values under a new key.
     editHeaderNotes('Spray south field instead');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    await waitFor(() => expect(billingKeys()).toHaveLength(3));
-    expect(billingKeys()[2]).not.toBe(billingKeys()[0]);
+    await waitFor(() => expect(billingKeys()).toHaveLength(4));
+    expect(billingKeys()[2]).toBe(billingKeys()[0]);
+    expect(billingKeys()[3]).not.toBe(billingKeys()[0]);
+    const billingCalls = mockRpc.mock.calls.filter(([n]) => n === 'update_field_app_invoice_billing');
+    const lastBilling = billingCalls[billingCalls.length - 1][1] as { p_header_notes: string };
+    expect(lastBilling.p_header_notes).toBe('Spray south field instead');
   });
 
   it('the address never carries a draft tag: a refresh before the create answered is a plain new page', async () => {

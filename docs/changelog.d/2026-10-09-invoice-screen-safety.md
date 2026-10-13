@@ -32,8 +32,12 @@ had worked, and choosing **Stay** then **Save** created a **second, duplicate** 
   longer pulls them back to the old invoice.
 - Two Save clicks before the page redraws send one save, not two.
 - If the billing details step fails and the user changes a billing value before saving again,
-  the retry uses a new repeat-protection key, so the change is written instead of the server
-  answering with its first result; an unchanged retry keeps the key (Codex Sol on PR #893).
+  the change is now written instead of the server answering with its first result (Codex Sol
+  on PR #893). The retry keeps its repeat-protection key, then sends the current values under a
+  new key. The billing RPC saves the key in the same transaction as the update and the key is
+  unique (checked live, 2026-10-13), so only one write per key can commit and an older write
+  still running cannot land after the newer one (CodeRabbit on PR #893). An unchanged retry
+  just keeps the key.
 - A Save that got no answer and is retried with **changed** values no longer keeps the old
   values on the invoice: the retry keeps the unanswered save's key (the database runs saves
   with one key one at a time, so a create is never made twice and a still-running older update
@@ -99,9 +103,9 @@ cannot bind what `post_invoice` posts). Tracked OPEN in `docs/manual/KNOWN_ISSUE
   the address has no created id, the typed form is gone, and saving the re-typed form creates a
   second invoice. Planned fix: the permanent create-request record above (Codex Sol 6.1 design,
   2026-10-12).
-- **The billing key is protected by the screen only.** The server does not check that a reused
-  key carries the same values, and a delayed older billing write could still land after a newer
-  one.
+- **The server does not check that a reused key carries the same values** (save or billing);
+  the screen handles a changed retry as above. A write from a different page or tab is not
+  ordered against this one.
 - **One Save is several separate writes** (invoice, applied info, billing details, override
   note); a failure part way is reported and the form stays unsaved, but the steps are not one
   transaction.

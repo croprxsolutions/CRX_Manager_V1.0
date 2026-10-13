@@ -90,6 +90,7 @@ function emptyChain() {
 /** The billing step's customer lookup: fails, or leaves out the saved invoice. */
 let customerMapError: { message: string } | null = null;
 let customerMapDrops = false;
+let customerMapBlank = false;
 
 /**
  * Like emptyChain, but maybeSingle answers the created-id check with the row for the filtered
@@ -112,7 +113,7 @@ function invoicesChain() {
   chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(columns === 'id, customer_id'
     ? (customerMapError
       ? { data: null, error: customerMapError }
-      : { data: customerMapDrops ? [] : inIds.map((id) => ({ id, customer_id: 'customer-1' })), error: null })
+      : { data: customerMapDrops ? [] : inIds.map((id) => ({ id, customer_id: customerMapBlank ? null : 'customer-1' })), error: null })
     : { data: [], error: null }).then(resolve);
   const answer = () => (invoiceCheckError
     ? { data: null, error: invoiceCheckError }
@@ -203,6 +204,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     invoiceCheckHeld = false;
     customerMapError = null;
     customerMapDrops = false;
+    customerMapBlank = false;
     mockFrom.mockImplementation((table: string) => (table === 'invoices' ? invoicesChain() : emptyChain()));
   });
 
@@ -333,12 +335,14 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
   it.each([
     ['cannot be read', true],
-    ['comes back without one of the saved invoices', false],
-  ])('when the saved invoices\' customers %s, billing details are not written and the user is told', async (_label, readFails) => {
+    ['comes back without one of the saved invoices', 'drop'],
+    ['come back with no customer on a saved invoice', 'blank'],
+  ])('when the saved invoices\' customers %s, billing details are not written and the user is told', async (_label, mode) => {
     // Unresolved customers would be sent a zero Discount Earned while the save reports success
-    // (Codex Sol 6.1, PR #893).
-    customerMapError = readFails ? { message: 'network blip' } : null;
-    customerMapDrops = !readFails;
+    // (Codex Sol 6.1, PR #893; a blank customer: Luna, PR #893).
+    customerMapError = mode === true ? { message: 'network blip' } : null;
+    customerMapDrops = mode === 'drop';
+    customerMapBlank = mode === 'blank';
     mockRpc.mockImplementation((name: string) => {
       if (name === 'save_field_app_invoice') {
         return Promise.resolve({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });

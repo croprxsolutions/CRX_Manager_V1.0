@@ -1931,7 +1931,8 @@ export default function FieldApplicationInvoice() {
           .select('id, customer_id')
           .in('id', ids);
         const customerByInvoiceId = new Map<string, string>(
-          ((idRows as Array<{ id: string; customer_id: string }> | null) ?? [])
+          ((idRows as Array<{ id: string; customer_id: string | null }> | null) ?? [])
+            .filter((r): r is { id: string; customer_id: string } => !!r.customer_id)
             .map((r) => [r.id, r.customer_id]),
         );
         // Every saved invoice must resolve to its customer before the billing write: an

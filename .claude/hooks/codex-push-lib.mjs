@@ -3463,6 +3463,14 @@ const POWERSHELL_ASSIGNMENT_WORD_RE = /^\$\{?[A-Za-z_][\w:]*\}?[+\-*/%]?=/;
 // `x=$($P` and allowed `x=$(x=$(x=$(x=$(x=$($P pr merge 1 --admin)))))`
 // (CodeRabbit, PR #882). An arithmetic `$(( … ))` there is not a command and
 // does not count; a backtick or an unclosed `$(` still does.
+//
+// A `$(` the reader cannot close is read as running to the end of the text,
+// and that tail is checked like any other substitution: a quoted `'$('` opened
+// a quote that never closed, so `echo '$('; x=$($P pr merge 1 --admin)` hid the
+// real substitution after it (CodeRabbit, PR #882). Refusing every unclosed
+// `$(` instead would refuse the everyday `git commit -m "$(cat <<'EOF' … EOF )"`
+// whenever the message holds an apostrophe, since the reader does not know
+// heredocs.
 function programBuiltAtRuntime(text, runtimeText = RUNTIME_TEXT_RE, depth = 0) {
   const source = String(text || "");
   const split = splitSubstitutions(source);
@@ -3471,13 +3479,15 @@ function programBuiltAtRuntime(text, runtimeText = RUNTIME_TEXT_RE, depth = 0) {
       programWordBuiltAtRuntime(source, runtimeText);
   }
   if (split.inners.some((inner) => programBuiltAtRuntime(inner, runtimeText, depth + 1))) return true;
+  if (split.unclosed !== undefined && programBuiltAtRuntime(split.unclosed, runtimeText, depth + 1)) return true;
   return programWordBuiltAtRuntime(split.outer, runtimeText);
 }
 
 // Replaces each outermost `$( … )` with `$()` and returns the inside texts.
 // A `$(` that never closes, and everything after it, stays in the outer text
-// as it was; the substitutions before it are still returned, so a quoted
-// `'$('` later in the command cannot hide an earlier one (CodeRabbit, PR #882).
+// as it was, and the text after it is returned as `unclosed`; the substitutions
+// before it are still returned, so a quoted `'$('` later in the command cannot
+// hide an earlier one (CodeRabbit, PR #882).
 //
 // An arithmetic `$(( … ))` is not a command: reading `i=$(($i+1))` as one made
 // `$i+1` a run-time program and refused `i=$(($i+1)); git status` (Codex
@@ -3504,7 +3514,7 @@ function splitSubstitutions(text) {
       if (char === "(") depth += 1;
       else if (char === ")" && --depth === 0) { end = at; break; }
     }
-    if (end < 0) return { outer: outer + text.slice(index), inners };
+    if (end < 0) return { outer: outer + text.slice(index), inners, unclosed: text.slice(index + 2) };
     if (text[index + 2] === "(" && text[end - 1] === ")") {
       outer += "$((";
       index += 2;

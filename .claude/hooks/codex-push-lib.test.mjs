@@ -3530,6 +3530,29 @@ assert.equal(pushNamesRefspec("git push --future-option origin main:refs/heads/f
     const nested = expandNestedCommands(command);
     assert.ok(nested.computed || nested.tooDeep, `an unread substitution is refused: ${command}`);
   }
+  // CodeRabbit, PR #882: an unclosed `$(` BEFORE the real substitution hid it
+  // too, since its quote ran to the end. The unclosed tail is now read as a
+  // substitution of its own.
+  for (const command of [
+    "P=gh; echo '$('; x=$($P pr merge 1 --admin)",
+    "P=git; echo '$('; x=$($P push origin HEAD:main --force)",
+    "P=gh; echo \"$(\"; x=$($P pr merge 1 --admin)",
+    "P=gh; x=$($P pr merge 1 --admin <<'E'\n'\nE\n)",
+    "P=gh; git commit -m \"$(cat <<'EOF'\ndon't\nEOF\n)\"; x=$($P pr merge 1 --admin)",
+    "P=gh; echo '$('; x=$(x=$(x=$(x=$($P pr merge 1 --admin))))",
+  ]) {
+    const nested = expandNestedCommands(command);
+    assert.ok(nested.computed || nested.tooDeep, `a substitution after an unclosed $( is refused: ${command}`);
+  }
+  // ...while the everyday heredoc message, whose apostrophe the reader takes for
+  // an unclosed quote, still passes.
+  for (const command of [
+    "git commit -m \"$(cat <<'EOF'\nfix: don't refuse it\nEOF\n)\"",
+    "git commit -m \"$(cat <<'EOF'\nfix: don't use $(git rev-parse HEAD) here\nEOF\n)\"",
+    "gh pr create --title t --body \"$(cat <<'EOF'\n## Summary\n- it's fine\nEOF\n)\"",
+  ]) {
+    assert.equal(expandNestedCommands(command).computed, false, `a heredoc message is not a run-time program: ${command}`);
+  }
   // ...while a program computed INSIDE a substitution is now found (it was not).
   for (const command of [
     // A command substitution nested in arithmetic, and `$((…) )` (bash 5.3 runs

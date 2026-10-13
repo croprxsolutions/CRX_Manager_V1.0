@@ -341,10 +341,15 @@ ok(r.status === 0 && r.decision === null, "ordinary push not this hook's busines
 for (const command of [
   `while IFS= read -r f; do safe=$(echo "$f" | tr '/' '_'); git show HEAD:"$f" > "/tmp/x/$safe"; done < list.txt`,
   "i=$(($i+1)); git status",
+  "git commit -m \"$(cat <<'EOF'\nfix: don't refuse it\nEOF\n)\"",
 ]) {
   r = runHook({ tool_name: "Bash", tool_input: { command } });
   ok(r.status === 0 && r.decision === null, `read-only command passes the hook: ${command}`);
 }
+
+// CodeRabbit, PR #882: a quoted `'$('` before a hidden merge no longer hides it.
+r = runHook({ tool_name: "Bash", tool_input: { command: "P=gh; echo '$('; x=$($P pr merge 1 --admin)" } });
+ok(r.decision?.permissionDecision === "deny", "a merge after an unclosed $( is denied");
 
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { mergePullRequest(input: {}) }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL merge denied");

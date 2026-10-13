@@ -80,9 +80,9 @@ if (argv.length === 1 && argv[0] === "--selftest") {
     code: c,
     sessionId,
   }));
-  console.log("Show Mason this, word for word:\n");
+  console.log("Your reply now must be only this, exactly as printed (say anything else BEFORE running this script):\n");
   for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
-  console.log(`\nMake this, exactly as printed (no bold, code or quote marks) and with nothing else in that message, the last message of your turn; say anything else in an earlier message. When he replies "I approve", the approval hook confirms in the next turn that the reply path works.`);
+  console.log(`\nMake this, exactly as printed (no bold, code or quote marks) and with nothing else in that reply, the last message of your turn: text you add after this output joins the same message. When he replies "I approve", the approval hook confirms in the next turn that the reply path works.`);
   process.exit(0);
 }
 
@@ -168,7 +168,7 @@ const { code, payload } = saveRequest((c) => buildApprovalPayload({
 
 console.log(`Approval request saved for ${migName} (PR #${pr.number}, head ${head.slice(0, 12)}):`);
 for (const c of categories) console.log(`  - ${PARKED_LABELS[c.category]}`);
-console.log("\nFirst tell Mason in plain English what the change does, in a message of its own. Then show him this, word for word:\n");
+console.log("\nExplain the change to Mason in plain English BEFORE running this script (or in an earlier turn): text you write after this output joins the same message as the summary, and then a plain \"I approve\" is refused. Your reply now must be only this, exactly as printed:\n");
 for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
 console.log(`\nThen wait for HIS reply "I approve" in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
 console.log(`A plain "I approve" only counts when your LAST message before it is this summary, exactly as printed (no bold, code or quote marks), and NOTHING else (no note, no question): end your turn with that message, and if you say anything else after it, show the request again.`);

@@ -53,8 +53,8 @@ no longer types anything but the approval.
     IS its summary (`ownerApprovalSummary`), exactly as printed, and nothing else: what it is, the
     pull request and version, the fingerprint, every reason the safety check stopped it, the
     `reply: I approve` line and the `Reference <code>` line. So he is always told why it waited for
-    him, and "I approve" can only answer that request; the agent explains the change in an earlier
-    message. Only spacing, blank lines, where lines wrap, and a code fence around the whole summary
+    him, and "I approve" can only answer that request; the agent explains the change before running
+    the script. Only spacing, blank lines, where lines wrap, and a code fence around the whole summary
     may differ. No markdown is interpreted, so no character of a name, fingerprint or reason can be
     dropped or reinterpreted: `drop_a_b` is never `drop_ab`, `DROP_A_B` or `d__ro__p_a_b`. Bold,
     code or quote marks, a curly apostrophe, or an HTML comment mean it does not count, and he is
@@ -74,7 +74,7 @@ no longer types anything but the approval.
     - CodeRabbit (Major): a message with the summary and an unrelated question still counted.
       Now the message must be the summary and nothing else; tests cover a note before it, a
       question after or inside it, one extra word, and the summary twice. Allowing extra text
-      again fails the suite. Agents are told to explain the change in an earlier message.
+      again fails the suite. Agents are told to explain the change before running the script.
     - Codex P1 once more: the markdown clean-up still turned `f__iel__d` into `field`. Every round
       of markdown leniency had opened a new way to misstate a name, so none is left: the words are
       compared exactly as printed. Tests cover bold, code marks, other bullet or quote marks, a
@@ -84,15 +84,19 @@ no longer types anything but the approval.
     A request shown earlier, two shown at once, or an unreadable transcript approves nothing.
   - The summary now ends with "reply: I approve" and "(Reference <code>. You don't need to type it.)".
 - `.claude/hooks/owner-approval-prompt.mjs`:
-  - Handles both reply forms, then records through the unchanged `recordReplyApproval`. Session
-    binding, code retirement, the atomic write and single use are all unchanged.
+  - Handles both reply forms, then records through `recordReplyApproval`, which now also requires
+    the reply mark (`readMark`). Session binding, code retirement, the atomic write and single use
+    are unchanged.
   - All output happens outside its `try`, because `process.exit` throws under `prompt-router.mjs`.
-- `scripts/owner-approve-migration.mjs` and the `migration-apply-lib.mjs` refusal text tell the agent:
-  - show the summary with its Reference line;
-  - ask nothing else in that message;
+- `scripts/owner-approve-migration.mjs`, the hook's refusal text and the `migration-apply-lib.mjs`
+  route tell the agent:
+  - explain the change BEFORE running the script: one reply is one message, so text written after
+    the script's output joins the summary and a plain "I approve" is refused (CodeRabbit);
+  - reply with only the summary, exactly as printed;
   - show the request again if anything else is said first.
-- `verifyOwnerApproval` and the apply gate are unchanged: a plain-reply approval is the same file,
-  checked the same way.
+- `verifyOwnerApproval` now ends with the reply read-back (`assertReplyAlone`) for every approval,
+  coded or plain; an approval without a `replyMark` (including any saved before this change) is
+  refused. Otherwise a plain-reply approval is the same file, checked the same way.
 - Docs: `OWNER_PLAYBOOK.md`, `DECISION_LOG.md` (2026-10-13 entry), `agent-guardrails.md`,
   `DATABASE_CHANGE_CHECKLIST.md`, `DEPLOYMENT.md`, `.claude/commands/ship.md` and the three migration
   skills, with their `.agents` mirrors.

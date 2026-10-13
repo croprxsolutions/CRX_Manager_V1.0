@@ -52,7 +52,8 @@
 > approve`, trailing `.`/`!` accepted; never a bare "yes" or "go"), which counts only when exactly one live request of
 > that session is SHOWN by the agent's LAST message before the reply: that message is its summary, exactly as printed,
 > and nothing else (what it is, the pull request and version, the fingerprint, every reason the safety check stopped it,
-> the `reply: I approve` line and the `Reference <code>` line; the agent explains the change in an earlier message), so
+> the `reply: I approve` line and the `Reference <code>` line; the agent explains the change before running the script,
+> because text in the same reply joins the summary's message), so
 > he is always told why it waited for him, and a message that adds a question or note, only cites an old reference, or
 > puts those words inside other prose does not count. Only spacing, blank lines, wrapping and a code fence around the
 > whole summary may differ; no markdown is interpreted, so bold, code or quote marks mean it does not count. That

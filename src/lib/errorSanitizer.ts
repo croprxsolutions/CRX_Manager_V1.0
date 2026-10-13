@@ -11,6 +11,12 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Create this field invoice from its job, blend ticket, or the Field Application screen'],
   [/^CUSTOMER_SCOPE_DENIED\b/i,
    'You can only work with customers assigned to you'],
+  // Reps edit any customer (2026-10-13) but only an admin reassigns one, and only an admin or the
+  // customer's own rep changes its default commission split.
+  [/^REP_CANNOT_REASSIGN\b/,
+   'Only an admin can change which sales rep a customer is assigned to'],
+  [/^COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP\b/,
+   "Only an admin or this customer's assigned sales rep can change its default commission split"],
   [/^RETURN_NOT_FOUND\b/i,
    'This return could not be found'],
   [/^RETURN_CREDIT_UNIT_MISMATCH\b/i,

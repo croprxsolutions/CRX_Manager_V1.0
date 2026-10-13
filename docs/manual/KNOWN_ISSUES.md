@@ -1,7 +1,10 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-12 (America/Chicago) against the live migration ledger** (read-only, after
-PR #889's last two applies; the counts and high-water live only in `docs/reference/migration-history.md`).
+**Last verified: 2026-10-13 (America/Chicago) against the live migration ledger** (read-only,
+2026-10-13 22:02 UTC, while building `20261013220000_reps_work_any_customer`, which is NOT applied;
+the ledger was unchanged since the 2026-10-12 read after PR #889's last two applies; the counts and
+high-water live only in `docs/reference/migration-history.md`). That read also re-checked the
+order-invoice rep-scope entry below against Mason's 2026-10-13 decision.
 That read re-certified only the applied-migration list in this header and the 2026-10-07 integrity-fix
 entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150200` and `20261010120000`). The
 2026-10-07 read re-certified the CRX-LIFE-001 entry (fix live; two post-apply gates still open). Every other entry's status (open, or
@@ -424,11 +427,16 @@ Each of these was recorded inside an entry that is otherwise fixed or closed and
 archive. They are listed here so the open part of this file shows them. None was re-measured on
 2026-09-26 unless it says so.
 
-- **Order-invoice RPCs are not scoped to the rep (found 2026-10-06 while fixing CRX-LIFE-001;
-  pre-existing; read from the live catalog, not exercised live).** Two related gaps in
+- **Order-invoice RPCs let a rep name another salesperson (found 2026-10-06 while fixing
+  CRX-LIFE-001; pre-existing; read from the live catalog, not exercised live).** **Updated
+  2026-10-13 (Mason: reps work with ANY customer, `DECISION_LOG.md`):** the customer-scope half
+  below is no longer a gap: a rep may bill any customer, and `20261013220000_reps_work_any_customer`
+  removes the matching `CUSTOMER_SCOPE_DENIED` from `save_invoice`, `post_invoice` and
+  `post_invoice_group` instead. The **salesperson half stays OPEN** and is the next change (reps
+  bill only under their own name, admins unrestricted). Original record, in
   `create_invoice_from_order` and `create_split_invoices_from_order`, whose only gate is
   `is_admin() OR is_sales_rep()`:
-  - **Customer scope.** They never check that the order's customer is assigned to the calling rep,
+  - **Customer scope (intended since 2026-10-13).** They never check that the order's customer is assigned to the calling rep,
     so any active rep holding an order's id can create a draft invoice on another rep's customer
     and then read it (`created_by` = the rep). `save_invoice` refuses the same case
     (`CUSTOMER_SCOPE_DENIED`); the CRX-LIFE-001 container run showed a rep invoicing an unassigned

@@ -1,12 +1,19 @@
 # Decision Log
 
-Last verified: 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (reps-work-any-customer entry added, superseding the 2026-10-06 rep-scoping plan; owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
+
+## 2026-10-13 — Sales reps work with ANY customer; rep scoping is dropped
+
+**Decision (Mason, in chat, 2026-10-13).** First "reps should be able to make invoices or email customers that arnt theirs" (session "App scalability assessment"), then, in the session that built the change: reps "can see all and edit all" customers; "Everything customer-related" opens (addresses, contacts, documents, facts, interactions and their transcripts, external identities); statements and year-end summaries open; reps invoice under their **own name only** (admins may name anyone); **only an admin** changes which rep a customer is assigned to; and on a customer not assigned to them a rep cannot change its **default commission split** (admin or the customer's own rep only).
+**Why.** Reps sell and bill across the whole customer base: 146 of 154 live customers have no assigned rep, so the old "assigned customers only" rule blocked almost all rep invoicing and emailing.
+**What this supersedes:** the 2026-10-06 entry below ("reps bill only their own customers"), and the 2026-10-09 admin-only invoicing plan (PR #902, closed unmerged; its `20261013160000` was never applied). Rep scoping is formally dropped.
+**What this forbids/implies:** `20261013220000_reps_work_any_customer.sql` removes every assigned-rep access test on the invoice, customer and customer-record paths and adds `customers_guard_rep_edit_20261013` for the two exceptions; the `customer-document-files` Edge Function opens documents the same way. Still narrower: `SALESMAN_SCOPE_DENIED` (own name), `REP_CANNOT_REASSIGN`, `REP_MUST_SELF_ASSIGN` (a rep's new customer is theirs), `COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`; every admin-only action (void, unpost, credit memos, write-offs, prepay apply, reassignment) is unchanged; a rep still reads only the invoices they created or are the salesperson on. The order-invoice RPCs' salesperson check (a rep naming another salesperson) is the follow-up change. Commissions are unaffected (they come from orders and jobs, not from who typed the invoice). Source: `docs/changelog.d/2026-10-13-reps-work-any-customer.md`.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 
@@ -22,6 +29,8 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 **What this forbids/implies:** the lists live in `.claude/hooks/sol-exempt-lib.mjs` (its readable copy is `docs/reference/sol-exempt-paths.md`). A new folder needs Sol until it is added there on purpose, and that change itself needs Sol. Any uncertainty in reading the diff means Sol is required. Source: `docs/changelog.d/2026-10-07-sol-exempt-docs-only.md`.
 
 ## 2026-10-06 — CRX-LIFE-001 lands as scoped; rep scoping of the order-invoice RPCs is the next change
+
+**Superseded 2026-10-13** by "Sales reps work with ANY customer" above: the customer-scope half is dropped (reps may bill any customer); the salesperson half (reps bill only under their own name) still stands and is the next change. Kept below as history.
 
 **Decision (Mason, in chat: "Land it then lock down rep scoping next").** PR #885 lands the CRX-LIFE-001 fix (order invoices may only be `chemical_sale` or `misc_charge`; a `field_application` invoice can never carry an order) without widening it. Codex Luna round 3 rated two pre-existing gaps in the same RPCs HIGH: they check neither that the order's customer is assigned to the calling rep nor that the salesperson the caller names is themselves. Those are deferred by this decision, not by an agent, and are the next job.
 **Why.** Closing them touches delivery completion and split billing (`complete_delivery` calls the split RPC), so it needs its own reviewed change; the CRX-LIFE-001 fix stands on its own and is proven.

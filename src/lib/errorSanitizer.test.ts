@@ -112,6 +112,9 @@ describe('sanitizeError', () => {
 
   it('maps return-credit and customer-scope tokens to operator guidance', () => {
     expect(sanitizeError('CUSTOMER_SCOPE_DENIED')).toBe('You can only work with customers assigned to you');
+    expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');
+    expect(sanitizeError('COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP: only an admin or this customer\'s assigned sales rep can change its default commission split'))
+      .toBe("Only an admin or this customer's assigned sales rep can change its default commission split");
     expect(sanitizeError('RETURN_CREDIT_UNIT_MISMATCH')).toContain('original sale');
     expect(sanitizeError('RETURN_CREDIT_INVENTORY_UNIT_MISMATCH')).toContain('warehouse inventory unit');
     expect(sanitizeError('RETURN_CREDIT_UNLINKED_COST_LINE')).toContain('Review the credit memo');

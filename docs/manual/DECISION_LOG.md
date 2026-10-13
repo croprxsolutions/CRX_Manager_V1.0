@@ -1,12 +1,38 @@
 # Decision Log
 
-Last verified: 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (sent-quote sell-price lock and landlord split-billing decisions added); 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
+
+## 2026-10-13 — Billing: an order's bill can be split to a landlord
+
+**Decision (Mason, in chat, 2026-10-13: "landlord yes"),** asked whether splitting an order's bill to a
+landlord should work.
+**Why it came up.** The 2026-10-13 branch salvage review found that it cannot today. The live invoice
+trigger `trg_guard_invoice_terminal_order` refuses any invoice whose customer is not its order's customer
+(`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), so the split engine can never bill a landlord. This was read
+from the live function, not exercised.
+**Operative rule.** Not built yet. A fix must let a split bill a landlord without opening the general
+customer-lineage check. Details are in `docs/manual/KNOWN_ISSUES.md` (the 2026-10-13 salvage-review
+entry, added by the branch cleanup change).
+
+## 2026-10-13 — Pricing: a sent quote's prices stay locked until it is accepted or expires
+
+**Decision (Mason, in chat, 2026-10-13: "yes a sent quote should stay locked until accepted or expires").**
+Once a quote is sent, its line sell prices are fixed. They do not follow later catalog price changes until
+the quote is accepted (and becomes an order at those prices) or it expires.
+**Why.** Today each line's cost is frozen when the quote is saved (`quote_items.cost_at_quote_cents`), but its
+sell price is not. Per two independent reviews on 2026-10-13, which read `save_quote`'s live body but did not
+exercise it, every save, including Convert to Order, re-prices each line without a manual override to that
+day's tier price. So a customer can accept a quote and get an order at different prices.
+**Operative rule.** Not built yet. Until it is, no change may describe sent-quote prices as locked. The
+design (when the lock starts, how expiry and revisions behave, manual overrides) is open in
+`docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`, which Mason wants
+iterated before any build starts.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 

@@ -78,9 +78,9 @@ Each goal has a plain test for "done". Sizes are rough agent-build estimates, no
 #### Goal 2: Reps invoice any customer, under their own name (days). IN PROGRESS 2026-10-13, "Invoice work continuation" session
 - Remove the "must be your own customer" check from saving and posting manual invoices and invoice groups.
 - Stop reps naming another salesperson.
-- Let reps find any customer when invoicing. Today a rep can only see customers assigned to them (the `customers_select` access rule, confirmed live 2026-10-13). Add an invoice-safe customer search that returns just what an invoice needs (name, billing contact), rather than opening every customer field to reps.
+- Let reps find any customer when invoicing. Today a rep can only see customers assigned to them (the `customers_select` access rule, confirmed live 2026-10-13). How far reps' access to customer records widens is decided with Mason and built in the Goal 2 change. That change records the decision in its own PR and `DECISION_LOG.md` entry.
 
-**Done when:** a rep account, live, finds a customer with no assigned rep in the invoice customer search, saves and posts an invoice for them, and is refused when naming someone else as salesperson.
+**Done when:** a rep account, live, finds a customer with no assigned rep when invoicing, saves and posts an invoice for them, and is refused when naming someone else as salesperson.
 
 #### Goal 3: Billing you can trust (about 2–4 weeks)
 - Post uses what's on screen, or refuses until it's saved.

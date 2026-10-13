@@ -1184,8 +1184,8 @@ export function evaluateMigrationApply({
       }
       return block(
         `OWNER APPROVAL GUARD: "${migName}" needs Mason's approval of this exact file, pull request and ` +
-        `head (his \`approve <code>\` reply), and none found is valid:\n${reasons.map((r) => `  - ${r}\n`).join("")}` +
-        `Ask Mason again: run \`node scripts/owner-approve-migration.mjs supabase/migrations/${migName}.sql\` for a fresh code. ` +
+        `head (his \`I approve\` reply), and none found is valid:\n${reasons.map((r) => `  - ${r}\n`).join("")}` +
+        `Ask Mason again: run \`node scripts/owner-approve-migration.mjs supabase/migrations/${migName}.sql\` for a fresh request. ` +
         `Do NOT edit or copy an approval file; only his own reply counts.`);
     }
     return allow();

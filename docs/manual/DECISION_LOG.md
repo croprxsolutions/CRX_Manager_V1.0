@@ -25,7 +25,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 **What this forbids/implies:**
 - Agents do not build or gate on L1–L3; they still flag a code defect they find in those areas.
 - The 6j rule tightens what shipped in PR #907, where the customer's assigned rep may still edit that customer's default split (`COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`). It also tightens jobs, where any active rep can edit the split today. Making splits admin-only is a follow-up code change to Goal 2, and it needs the usual review and its own migration.
-- The 2027-01-01 date compresses the plan: the build estimates (roughly 14–24 weeks) exceed the time left (about 11 weeks). The goals doc orders work by what must be ready on 2027-01-01. Mason decides any scope cut when a checkpoint slips.
+- The 2027-01-01 date compresses the plan: the build estimates (roughly 14–25 weeks) exceed the time left (about 11 weeks). The goals doc orders work by what must be ready on 2027-01-01. Mason decides any scope cut when a checkpoint slips.
 - Returns on Chem Man-billed deliveries stay allowed after 2026-12-31 (the 2026-10-07 rule).
 
 Detail: `docs/changelog.d/2026-10-14-goals-plan-sol-review-revision.md`.

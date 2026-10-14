@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generateIdempotencyKey, isDefinitiveRpcRejection } from '../lib/idempotency';
+import { useLatestRef } from './useLatestRef';
 
 export type MutationFailureDisposition = 'definitive' | 'resolved' | 'uncertain';
 
@@ -675,15 +676,13 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   const surface = options?.surface || '';
   const scope = options?.scope || '';
   const identityToken = `${storageKey || ''}:${JSON.stringify([surface, scope])}`;
-  /* eslint-disable react-hooks/refs -- Deliberate render-time ref use, reviewed 2026-10-14:
-     getIntentIdentityRef is a latest-callback ref read only inside beginIntent (an event
-     handler), never to decide what renders. tabIdRef is lazily set once per mount; the key
-     below uses only its tab prefix (before the last ':'), which is stable while sessionStorage
-     is available, so a discarded render's different UUID suffix cannot change
-     acknowledgmentKey. Without storage there is no receipt to preserve across reloads anyway,
-     and effects run only for the committed render. */
-  const getIntentIdentityRef = useRef(options?.getIntentIdentity);
-  getIntentIdentityRef.current = options?.getIntentIdentity;
+  // Latest committed fingerprint callback, read only inside beginIntent (an event handler).
+  const getIntentIdentityRef = useLatestRef(options?.getIntentIdentity);
+  /* eslint-disable react-hooks/refs -- Guarded one-time initialization, reviewed 2026-10-14:
+     tabIdRef is lazily set once per mount; the key below uses only its tab prefix (before the
+     last ':'), which is stable while sessionStorage is available, so a discarded render's
+     different UUID suffix cannot change acknowledgmentKey. Without storage there is no receipt
+     to preserve across reloads anyway, and effects run only for the committed render. */
   const tabIdRef = useRef<string | null>(null);
   if (tabIdRef.current === null && typeof window !== 'undefined') tabIdRef.current = currentPageClaimId();
   // The stable tab prefix preserves an unacknowledged receipt across reload.
@@ -915,7 +914,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     setUnresolvedIntent(intent);
     setHasUnresolvedRecord(true);
     return intent;
-  }, [acknowledgmentKey, activateCurrentIdentity, applyRecord, options, scope, storageKey, surface]);
+  }, [acknowledgmentKey, activateCurrentIdentity, applyRecord, getIntentIdentityRef, options, scope, storageKey, surface]);
 
   const getIdempotencyKey = useCallback((): string => {
     activateCurrentIdentity(true);

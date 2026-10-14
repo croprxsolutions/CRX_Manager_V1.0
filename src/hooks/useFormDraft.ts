@@ -20,6 +20,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLatestRef } from './useLatestRef';
 
 const DRAFT_PREFIX = 'crx_form_draft_';
 const DEBOUNCE_MS = 500;
@@ -40,11 +41,8 @@ export function useFormDraft<T extends object>(
 } {
   const storageKey = DRAFT_PREFIX + key;
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestState = useRef<T | undefined>(currentState);
-
-  // Keep latestState in sync so the visibility handler can flush it
-  // eslint-disable-next-line react-hooks/refs -- latest-value ref read only by the page-hide flush handler
-  latestState.current = currentState;
+  // Latest committed state, so the visibility handler can flush it (never an uncommitted render's).
+  const latestState = useLatestRef<T | undefined>(currentState);
 
   // Read the draft once on mount — ignore if expired
   const [draft] = useState<T | null>(() => {
@@ -126,7 +124,7 @@ export function useFormDraft<T extends object>(
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [flushNow]);
+  }, [flushNow, latestState]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {

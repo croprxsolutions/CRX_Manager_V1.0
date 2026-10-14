@@ -1849,7 +1849,7 @@ export default function Jobs() {
               <button
                 type="button"
                 onClick={clearAll}
-                disabled={activeCount === 0 && isJobFiltersEmpty(draft)}
+                disabled={activeCount === 0 && isJobFiltersEmpty(draft) && !needsDispatchOnly}
                 className="px-3 py-2 text-xs font-medium rounded-lg border border-gray-200 text-secondary hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 Clear All

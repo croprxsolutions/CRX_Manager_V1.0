@@ -22,8 +22,15 @@ plus ~230 in two noisier ones.
   flagged): `BulkFieldImport`, `BulkPOImport`, `TeamBoardFilters`, `TodaysDeliveries`, `useOCRProcessor`,
   `Rebates`, `SettingsPage`, `TeamBoard`, `Jobs`, `QuoteBuilder`; `LabelDataQuality` `useMemo` takes an
   inline function.
-- Reviewed and kept, each with an inline reason: latest-value/latest-callback refs (`useUncertainMutationIntent`,
-  `useRealtimeSubscription`, `useFormDraft`, `DrawControl`, `CustomerDetail`, `ProductDetail`); the
+- Latest-value/latest-callback refs (`useRealtimeSubscription`, `useFormDraft`, `DrawControl`,
+  `CustomerDetail`, `ProductDetail`, the fingerprint callback in `useUncertainMutationIntent`) now go
+  through the new `src/hooks/useLatestRef.ts`, which writes the ref in a layout effect, so listeners and
+  handlers only ever see committed values (CodeRabbit, PR #912). `DrawControl`'s `drawRef` is published
+  in a layout effect too.
+- Jobs: "Clear All" is no longer disabled when "Needs Dispatch only" is the only active filter
+  (pre-existing; CodeRabbit, PR #912).
+- Reviewed and kept, each with an inline reason: the one-time `tabIdRef` initialization in
+  `useUncertainMutationIntent`; the
   `FieldApplicationInvoice` route gate; display-only clock reads (`CustomerContacts`, `CustomerFacts`,
   `UnbilledApplicationsPanel`); a clock read inside a `QuoteBuilder` handler; and `isRetryExpired` in the
   anti-double-charge hook, whose expiry timer re-renders exactly when the retry window closes.

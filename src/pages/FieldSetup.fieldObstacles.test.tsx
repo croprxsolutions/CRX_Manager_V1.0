@@ -171,6 +171,13 @@ function configureSupabase(obstacleReadError: unknown = null, measuredAcres: num
     if (name === 'get_field_geojson' || name === 'get_field_polygons') {
       return Promise.resolve({ data: [], error: null });
     }
+    if (name === 'set_field_boundary') {
+      // Shape of the RPC's v_result (migration 20260623130000).
+      return Promise.resolve({
+        data: { field_id: 'field-1', measured_acres: 40, billable_acres: 40, acres_source: 'measured' },
+        error: null,
+      });
+    }
     return Promise.resolve({ data: null, error: null });
   });
 

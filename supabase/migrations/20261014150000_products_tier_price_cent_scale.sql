@@ -78,8 +78,11 @@ END
 $add$;
 
 -- Verify inside the same transaction: each constraint exists, is validated,
--- names its own column, and carries the round(x, 2)/±Infinity shape (mirrors
--- the 20260812115237 check).
+-- and its definition is EXACTLY the expected predicate. An exact comparison,
+-- not a fragment search, because a same-named constraint that already existed
+-- was not re-added above and could otherwise carry the right fragments in the
+-- wrong logic. The expected text is pg_get_constraintdef's rendering, as read
+-- live for products_current_cost_cent_scale_chk on 2026-10-14.
 DO $verify$
 DECLARE
   v_column text;
@@ -95,10 +98,9 @@ BEGIN
         AND c.conname = v_name
         AND c.contype = 'c'
         AND c.convalidated = true
-        AND position('round(' || v_column || ', 2)' in lower(pg_get_constraintdef(c.oid))) > 0
-        AND position(v_column || ' is null' in lower(pg_get_constraintdef(c.oid))) > 0
-        AND position('''-infinity''' in lower(pg_get_constraintdef(c.oid))) > 0
-        AND position('''infinity''' in lower(pg_get_constraintdef(c.oid))) > 0
+        AND pg_get_constraintdef(c.oid) = format(
+          'CHECK (((%1$s IS NULL) OR ((%1$s = round(%1$s, 2)) AND (%1$s > ''-Infinity''::numeric) AND (%1$s < ''Infinity''::numeric))))',
+          v_column)
     ) THEN
       RAISE EXCEPTION 'verify failed: % whole-cent constraint missing or incomplete', v_name;
     END IF;

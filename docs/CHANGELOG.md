@@ -1,8 +1,9 @@
 # CRX Manager V1.0 — Development Changelog
 
-> **New entries do not go here.** Since late August 2026 every change adds its own file,
-> `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` (see `docs/changelog.d/README.md`). This file is
-> the history up to 2026-08-26.
+> **Write new entries in `docs/changelog.d/`.** Since late August 2026 each change adds its own
+> file, `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` — the preferred path, because appending here makes
+> parallel sessions collide (see `docs/changelog.d/README.md`). This file holds the history up to
+> 2026-08-26 and still counts as a valid ledger file.
 
 ## 2026-08-26 — the hold latch matches only what Mason typed
 

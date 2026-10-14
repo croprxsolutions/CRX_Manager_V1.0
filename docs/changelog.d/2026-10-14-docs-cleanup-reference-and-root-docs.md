@@ -1,8 +1,8 @@
 ## 2026-10-14 — docs cleanup, part 2: reference, workflow and root docs match the code
 
 Second of two documentation-cleanup PRs. It touches only `.md` files, but some live in folders
-that need the Sol review (`docs/reference/`, `docs/workflows/`, `docs/archive/`, root docs and two
-never-eligible manual pages). Every factual change was checked against current code, migrations
+that need the Sol review (`docs/reference/`, `docs/workflows/`, `docs/archive/`, `docs/operations/`,
+`docs/loops/`, root docs and two never-eligible manual pages). Every factual change was checked against current code, migrations
 or git history. No rule, gate or approval requirement was loosened; where a rule document and the
 code disagree on a business rule, the document was left alone and the conflict went to Mason.
 

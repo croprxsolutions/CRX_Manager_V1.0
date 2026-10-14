@@ -2990,7 +2990,7 @@ export default function QuoteBuilder() {
           .limit(1);
         if (recentOrders && recentOrders.length > 0) {
           const recent = recentOrders[0];
-          // eslint-disable-next-line react-hooks/purity -- runs inside the async save handler after an await, not during render
+          // eslint-disable-next-line react-hooks/purity -- runs inside the async handleConvertToOrder handler after an await, not during render
           const daysAgo = Math.ceil((Date.now() - new Date(recent.order_date + 'T00:00:00').getTime()) / 86400000);
           setDuplicateOrderMsg(`This customer already has order ${recent.order_number} from ${daysAgo} day(s) ago. Convert this quote to another order?`);
           setDuplicateOrderConfirmOpen(true);

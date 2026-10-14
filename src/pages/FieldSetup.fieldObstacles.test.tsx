@@ -23,6 +23,21 @@ const {
   mockUseParams: vi.fn(),
 }));
 
+// A ~40 ac square near the test field, shaped like DrawLayer's DrawnPolygon.
+const mockDrawnPolygon = {
+  drawId: 'draw-1',
+  acres: 40,
+  label: 'Part 1',
+  polygon: {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[[-89.05, 39.15], [-89.0475, 39.15], [-89.0475, 39.1523], [-89.05, 39.1523], [-89.05, 39.15]]],
+    },
+  },
+};
+
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useParams: () => mockUseParams(),
@@ -82,20 +97,27 @@ vi.mock('../components/map/DrawLayer', () => ({
     disabled = false,
     allowRemoveSinglePart = false,
     onDrawingStateChange,
+    onPolygonsChange,
   }: {
     disabled?: boolean;
     allowRemoveSinglePart?: boolean;
     onDrawingStateChange?: (isDrawing: boolean) => void;
+    onPolygonsChange?: (polygons: unknown[]) => void;
   }) => {
     mockDrawLayer({ disabled, allowRemoveSinglePart, onDrawingStateChange });
     return (
-      <button
-        type="button"
-        data-testid="mock-draw-layer"
-        onClick={() => onDrawingStateChange?.(true)}
-      >
-        Start mock boundary drawing
-      </button>
+      <>
+        <button
+          type="button"
+          data-testid="mock-draw-layer"
+          onClick={() => onDrawingStateChange?.(true)}
+        >
+          Start mock boundary drawing
+        </button>
+        <button type="button" onClick={() => onPolygonsChange?.([mockDrawnPolygon])}>
+          Commit mock boundary
+        </button>
+      </>
     );
   },
 }));
@@ -293,6 +315,22 @@ describe('FieldSetup field obstacles', () => {
     render(<FieldSetup />);
 
     await screen.findByText(/West well/);
+    await waitFor(() => expect(mockDrawLayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ allowRemoveSinglePart: false }),
+    ));
+  });
+
+  it('stops offering single-part removal once a newly drawn boundary is saved', async () => {
+    render(<FieldSetup />);
+
+    await screen.findByText(/West well/);
+    expect(mockDrawLayer).toHaveBeenLastCalledWith(expect.objectContaining({ allowRemoveSinglePart: true }));
+    // FieldSetup marks geometry dirty only after its post-load tick.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(screen.getByRole('button', { name: 'Commit mock boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_boundary', expect.anything()));
     await waitFor(() => expect(mockDrawLayer).toHaveBeenLastCalledWith(
       expect.objectContaining({ allowRemoveSinglePart: false }),
     ));

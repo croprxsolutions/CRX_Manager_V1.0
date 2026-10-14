@@ -32,7 +32,11 @@ plus ~230 in two noisier ones.
 
 **Proof:** `npm run lint` and `npm run typecheck` clean; full `vitest` 5,571 passed (one known full-suite
 flake, `SupplierPricing.test.tsx`, passed 21/21 twice in isolation). New tests in
-`BulkPOImport.test.tsx` and `FieldSetup.fieldObstacles.test.tsx` fail when the fix is removed. A local
+`BulkPOImport.test.tsx` and `FieldSetup.fieldObstacles.test.tsx` (load path and save path) pin the new
+state wiring: each fails when its new `setState` publish is deleted. They do not reproduce a live
+regression, because the old ref reads were also re-rendered by an unrelated state update. The badge
+render copy clones each marker, so the in-place marker mutations in `bulkPOImportRetry.ts` never touch
+React state. A local
 click-through against live data (view only) loaded Team Board, Jobs (Clear All resets "Needs Dispatch
 only"), Rebates, Settings, Label Data Quality, a quote, Purchase Orders and Fields with no console errors.
 Modal titles resolve through `aria-labelledby`. The field-setup map HUD cannot render locally without a

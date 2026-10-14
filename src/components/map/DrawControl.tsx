@@ -62,7 +62,7 @@ export default function DrawControl({
   // every render — without this, committing a 2nd/3rd part fires a stale handler that overwrites
   // the earlier parts (the geometry that bills). Single-boundary callbacks are stable, so unaffected.
   const cbRef = useRef({ onDrawCreate, onDrawUpdate, onDrawDelete, onDrawingStateChange });
-  // eslint-disable-next-line react-hooks/refs -- latest-callback ref (see comment above); read only inside draw.* listeners
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref (see comment above); read only in draw.* listeners and HUD button handlers, never during render
   cbRef.current = { onDrawCreate, onDrawUpdate, onDrawDelete, onDrawingStateChange };
 
   // Read the current draw state straight off the mapbox-gl-draw instance and push it to the

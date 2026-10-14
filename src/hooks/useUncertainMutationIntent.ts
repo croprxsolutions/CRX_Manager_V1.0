@@ -678,8 +678,10 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   /* eslint-disable react-hooks/refs -- Deliberate render-time ref use, reviewed 2026-10-14:
      getIntentIdentityRef is a latest-callback ref read only inside beginIntent (an event
      handler), never to decide what renders. tabIdRef is lazily set once per mount; the key
-     below uses only its stable tab prefix (before the last ':'), so a discarded render's
-     different UUID suffix cannot change acknowledgmentKey. */
+     below uses only its tab prefix (before the last ':'), which is stable while sessionStorage
+     is available, so a discarded render's different UUID suffix cannot change
+     acknowledgmentKey. Without storage there is no receipt to preserve across reloads anyway,
+     and effects run only for the committed render. */
   const getIntentIdentityRef = useRef(options?.getIntentIdentity);
   getIntentIdentityRef.current = options?.getIntentIdentity;
   const tabIdRef = useRef<string | null>(null);

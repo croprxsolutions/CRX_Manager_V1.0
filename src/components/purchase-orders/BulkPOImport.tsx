@@ -69,6 +69,12 @@ interface BulkPOImportProps {
 
 // ---------- helpers ----------
 
+// A render copy that shares no entry objects with the marker ref, which
+// ensurePendingBulkPOIntent / markBulkPOIntentImported mutate in place.
+function snapshotPendingIntents(pending: PendingBulkPOIntents): PendingBulkPOIntents {
+  return Object.fromEntries(Object.entries(pending).map(([key, intent]) => [key, { ...intent }]));
+}
+
 function buildParsedPOIntentKey(po: ParsedPO): string | null {
   return buildBulkPOIntentKey({
     vendorName: po.vendor_name,
@@ -218,7 +224,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   useEffect(() => {
     if (!profile?.id || pendingProfileRef.current === profile.id) return;
     pendingIntentsRef.current = loadPendingBulkPOIntents(localStorage, profile.id);
-    setPendingIntentsView({ ...pendingIntentsRef.current });
+    setPendingIntentsView(snapshotPendingIntents(pendingIntentsRef.current));
     pendingProfileRef.current = profile.id;
   }, [profile?.id]);
 
@@ -497,7 +503,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
       }
     }
 
-    setPendingIntentsView({ ...pendingIntentsRef.current });
+    setPendingIntentsView(snapshotPendingIntents(pendingIntentsRef.current));
     setUploadResults(failedCount === 0
       ? { imported: newSuccessCount, skipped: skippedCount, failed: 0 }
       : null);

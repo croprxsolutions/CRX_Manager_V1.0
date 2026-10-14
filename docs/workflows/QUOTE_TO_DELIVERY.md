@@ -105,7 +105,7 @@ Quote sections and quote items are RPC-owned: browser roles may read them but mu
 ### Key RPCs
 - `convert_quote_to_order()` — creates order + order_items + commissions from a `sent`, `revised` or `accepted` quote and sets the quote to `accepted`. Any other status is refused (`BOOKING_CLOSED`), as is a partly drawn booking (`BOOKING_PARTIALLY_DRAWN`) or a line without a positive quote-time cost (`COST_BASIS_REQUIRED`)
 - `create_direct_order()` — creates an order without a quote
-- `cancel_order()` — cancels order and releases any inventory holds
+- `cancel_order()` — cancels order and releases its prebooked stock (the undelivered remainder, recorded as `released` ledger rows)
 - `update_order_items()` — modify order items (admin or sales rep)
 
 ### Rules

@@ -68,7 +68,7 @@ All variables must start with `VITE_` to be accessible in the app. See `.env.exa
 | **driver** | Own assigned deliveries, customer addresses (read-only) |
 | **applicator** | Own assigned jobs, application records, products/fields (read-only) |
 
-Sales reps have worked with any customer, not only the customers assigned to them, since migration `20261013220000` (Mason, 2026-10-13).
+Sales reps have worked with any customer, not only the customers assigned to them, since migration `20261013220000` (Mason's decision of 2026-10-13).
 
 The database also allows a fifth role, `entity_recipient`. It is not a login role: it marks the service profiles for business entities that receive commission payments. Those profiles can never sign in and are left out of the Team Board and Settings user lists.
 

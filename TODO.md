@@ -49,8 +49,8 @@ When an item here ships or is decided, update this file AND `docs/manual/KNOWN_I
 
 - **Landlord split billing must work (Mason, 2026-10-13: "landlord yes").** Today the live invoice trigger
   refuses every order-linked split to a non-owner (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID` from
-  `trg_guard_invoice_terminal_order`). See the 2026-10-13 entry in `docs/manual/DECISION_LOG.md`; the full
-  `docs/manual/KNOWN_ISSUES.md` entry arrives with the branch-cleanup change (PR #901). Not built.
+  `trg_guard_invoice_terminal_order`). See the 2026-10-13 entry in `docs/manual/DECISION_LOG.md` and
+  "Splitting an order's bill to a landlord always fails" in `docs/manual/KNOWN_ISSUES.md`. Not built.
 
 ## 🔴 1. Owner actions (needs Mason — ranked by value unblocked)
 

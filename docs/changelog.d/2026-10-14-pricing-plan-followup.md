@@ -9,10 +9,7 @@ PR #905 merged with two valid Codex review notes deferred so its approved, Sol-r
   RPC refuses and asks for a re-send unless current and sent lines pair up one-to-one by product, because
   `create_quote_version` snapshots `product_id` and price but not `quote_item_id`. The proof covers added,
   removed and swapped products, a duplicate added in the revision, and duplicates already present when sent.
-- **`TODO.md`:** the landlord split-billing line pointed to a `KNOWN_ISSUES.md` entry that is not on main
-  yet. It now points to the 2026-10-13 `DECISION_LOG.md` entry and notes that the full entry arrives with
-  PR #901. It also says the trigger refuses order-linked splits, not every split: an invoice with no
-  `order_id` skips the customer check.
-
-Checked: `origin/main`'s `KNOWN_ISSUES.md` has no `INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID` entry, and PR #901
-is still open.
+- **`TODO.md`:** the landlord split-billing line now points to the `KNOWN_ISSUES.md` entry that PR #901
+  added ("Splitting an order's bill to a landlord always fails") as well as the 2026-10-13
+  `DECISION_LOG.md` entry. It also says the trigger refuses order-linked splits, not every split: the live
+  `guard_invoice_terminal_order()` returns before its customer check when an invoice has no `order_id`.

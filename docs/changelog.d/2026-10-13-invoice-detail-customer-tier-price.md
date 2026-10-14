@@ -40,6 +40,11 @@ list, so the bug would have under-charged, and it had not yet affected a saved i
   `/invoices/:id`, so switching invoices now releases the lookup lock. Each lookup carries a token,
   so a lookup from the previous invoice that settles late cannot release the lock a newer lookup
   holds.
+- PR #908 review round 3 (Codex connector): closing the Add Product picker while the lookup is
+  pending cancels the add, so its late answer neither adds the product nor closes a reopened
+  picker. Declined: treating an explicit $0 tier-2/3 price as a real price. The shared
+  `getTierPrice` used by Quote Builder and New Order falls back to tier 1 on 0, the invoice keeps
+  that rule, and no product has a $0 tier price (0 of 604, 2026-10-14).
 - Merged current main (reps-work-any-customer #907): the customer-list query keeps that PR's
   email, billing-address and account-number columns and adds `assigned_tier`.
 

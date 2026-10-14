@@ -1222,6 +1222,26 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     expect(savedItems[0]).toMatchObject({ unit_price_cents: 1199 });
   });
 
+  // Codex connector on PR #908: closing the picker while the lookup is pending cancels the add, so
+  // the late answer neither adds the product nor closes a picker the user has since reopened.
+  it('closing the picker cancels a pending add', async () => {
+    const pending = buildDeferredChain();
+    setup({ listed: [], byId: () => pending.chain });
+    await addTieredProduct();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    pending.resolve({ data: { assigned_tier: 3 }, error: null });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByPlaceholderText('Search products by name or SKU...')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(0);
+  });
+
   function setup({ listed, tier3Price = 11.99, byId = { data: null, error: null } }: {
     listed: Record<string, unknown>[];
     tier3Price?: number | null;

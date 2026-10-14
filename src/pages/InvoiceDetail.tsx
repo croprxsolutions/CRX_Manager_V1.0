@@ -668,11 +668,16 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     invoiceCustomerIdRef.current = invoice.customer_id ?? null;
   }, [invoice.customer_id]);
 
-  // A lookup started on the previous invoice must not keep this one's Add Product and Save locked.
-  useEffect(() => {
+  // Invalidates a pending by-id tier lookup: it will add nothing, and Add Product and Save unlock.
+  const cancelPendingAddProduct = useCallback(() => {
     addingProductRef.current = 0;
     setAddingProduct(false);
-  }, [id]);
+  }, []);
+
+  // A lookup started on the previous invoice must not keep this one's Add Product and Save locked.
+  useEffect(() => {
+    cancelPendingAddProduct();
+  }, [id, cancelPendingAddProduct]);
 
   // Add product as line item
   const addProduct = async (product: Product) => {
@@ -2100,7 +2105,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       )}
 
       {/* Product Search Modal */}
-      <Modal open={showProductModal} onClose={() => { setShowProductModal(false); clearProductSearch(); }} title="Add Product" size="large">
+      {/* Closing the picker cancels a pending add, so a late tier answer cannot add the product. */}
+      <Modal open={showProductModal} onClose={() => { cancelPendingAddProduct(); setShowProductModal(false); clearProductSearch(); }} title="Add Product" size="large">
         <div className="space-y-4">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />

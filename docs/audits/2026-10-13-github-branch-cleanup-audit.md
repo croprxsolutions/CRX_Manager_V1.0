@@ -393,10 +393,27 @@ local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs
 `2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
 - script: `e80f52bf633c09edd6ced6956ab7629683c1eadd0ebc25029175befe38621988` (2026-10-13 salvage revision:
   only the sealed counts 157/16/0 and the "Mason's call (0)" marker changed)
-- baseline: `0cbdd53507c2bcfed28f34db85614b8337b19cbd5115e4defa358a7bc82c1d75`
+- baseline: `60ca1426cb3d19173bdaec95c0da992cb4c19b431aabdab67163df25665354c0` (re-measured at `main`
+  `22c10c8df` on 2026-10-13, after PRs #900, #903 and #904 merged; the review-time file, measured at
+  `7abd52f6d` with hash `0cbdd535…1d75`, is kept beside it as `2026-10-13-cleanup-baseline.at-7abd52f6d.json`)
 - bundle: `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
 
 A different file must not run.
+
+**Re-baseline on 2026-10-13, and how to repeat it.** After #900 and #904 merged, the helper refused the whole
+"after yes" batch, as designed: `main` had changed files such as `DECISION_LOG.md` and `ship.md` that many
+batch branches also change. The fix was not to loosen the rule. Every one of the 185 branches was
+re-classified against the new `main` with the audit's exact method (blob identity, MAIN-MOVED counted landed
+at 90% or more), and the result compared with the reviewed baseline:
+- 0 branches gained an unlanded path;
+- 0 changed at all;
+- the `protect-main` rules were unchanged.
+
+Only then was the baseline rewritten at the new `main`. Repeat exactly this, and nothing looser, whenever
+`main` moves before a batch runs. If any branch gains an unlanded path, it goes back for review. After the
+salvage revision, the helper's read-only tests gave 25 of 28 exact results. The other 3 refused at an
+earlier gate (publication binding twice; preservation, before the tags exist). `plan --batch now` printed
+157 deletes and never named `refs/heads/main`.
 
 How the helper behaves:
 - **It changes nothing on GitHub.** Its git and gh calls only read. The one local side effect is fetching

@@ -14,4 +14,15 @@ Documentation only; no app or database change.
   - Much fuller "done when" tests for posting, voids, pricing, split billing, reports, offline delivery, recovery and payments.
   - Photo privacy must not rely on expiring links alone.
   - Goal 9 cleanup can never force-apply a migration or switch off a required gate.
-  - Six new open questions for Mason (6f–6k).
+  - Six new questions (6f–6k), which Mason answered the same day.
+- **Mason's answers, 2026-10-14** (new `docs/manual/DECISION_LOG.md` entry; the goals doc's dates, checkpoints and tests updated to match):
+  - Chem Man's last new bill is 2026-12-31.
+  - From 2027-01-01 all billing runs in CRX, and the first 30 days are a daily-reconciled pilot.
+  - Products are billed only when delivered; money paid in advance is prepay.
+  - Mason Wells owns compliance and inventory.
+  - An overnight outage is acceptable.
+  - Only admins change commission splits. This tightens the PR #907 customer-split rule and the job-split rule, as a follow-up code change.
+  - The compliance, inventory and opening-balance checks (L1–L3) are Mason's own business tasks, with no code and no agent gate.
+- Review fixes:
+  - Goal 2 tests that create invoices, email or documents run on the test system, not live.
+  - A blank salesperson is stamped with the rep's own name, as shipped, not refused.

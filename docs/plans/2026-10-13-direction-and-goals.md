@@ -19,10 +19,10 @@ That means every quote, order, delivery, invoice and payment for the season live
 
 | Phase | What happens | Done when |
 |---|---|---|
-| **A. Build** | Finish Goals 1–7 and the three launch-readiness checks (L1–L3) below, including the QuickBooks and payment integrations, while tracking Goal 8. | Goals 1–7 and L1–L3 each pass their "done" test live. Goal 8 is an ongoing target, not a gate. |
+| **A. Build** | Finish Goals 1–7 below, including the QuickBooks and payment integrations, while tracking Goal 8. Alongside, Mason runs the business readiness tasks L1–L3 himself (no code, not an agent gate). | Goals 1–7 each pass their "done" test. Goal 8 is an ongoing target, not a gate. |
 | **B. Clean up** | Goal 9: docs, files, branches, open issues and the AI tooling all tidied and explained. | A newcomer can find, run and understand everything. |
 | **C. Hand off** | Goal 10: an outside **senior software developer** gets the handoff pack, sets the system up, and reviews it independently. | Their must-fix list is fixed and rechecked, **and** they sign off in writing. |
-| **D. Roll out** | Train staff, run a controlled pilot, then retire Chem Man for billing. | See Phase D below: a reconciled 30-day pilot and signed opening balances, not just finished features. |
+| **D. Roll out** | Chem Man issues its last new bill on **2026-12-31**. From **2027-01-01** all billing runs in CRX; the first 30 days are the pilot. | The 30-day pilot reconciles every day and is signed off (Phase D below). |
 
 **Goal numbers are priorities, not a strict one-after-another order.** Three things start now, in parallel with Goal 1:
 - **Goal 6's test system and backups.** The billing, volume, offline and integration proofs in Goals 3–5 and 7 need a safe test system to run on.
@@ -31,17 +31,20 @@ That means every quote, order, delivery, invoice and payment for the season live
 
 Sessions can run side by side only when they don't change the same database functions or migrations. Working on different screens is not enough.
 
-**Timeline risk:** spring 2027 is about 5 months away. The Phase A estimates add up to roughly 14–24 weeks, and cleanup plus handoff add another 4–7 weeks before rollout. Five months is possible only with early decisions, proven integrations and overlapping work. It is not yet a reliable forecast.
+**Dates (Mason, 2026-10-14):** Chem Man's last new bill is **2026-12-31**. CRX-only billing starts **2027-01-01**, and the first 30 days are the pilot.
 
-**Proposed checkpoints** (Mason to confirm; question 6k):
-- **By 2026-10-31:** test system and backup work underway; accountant asked, payment processor and senior developer chosen.
+**Timeline risk: this is very tight.** From 2026-10-14 to 2027-01-01 is about 11 weeks. The Phase A estimates add up to roughly 14–24 weeks, and cleanup plus handoff add another 4–7. Hitting January 1 needs early decisions, proven integrations, heavy overlap, and the work ordered by what must be ready that day. It is not yet a reliable forecast.
+
+**Checkpoints:**
+- **By 2026-10-31:** test system and backup work underway; accountant asked; payment processor and senior developer chosen.
 - **By 2026-11-15:** a QuickBooks Desktop connection proven with a real invoice, a payment applied to it, and a credit, in a copy of our actual company file.
-- **By 2026-12-31:** launch-critical features done, and a test month reconciled in accounting.
-- **January:** the senior developer's review and repairs.
-- **February:** pilot, staff training and a cut-over rehearsal.
-- **Before spring billing:** pilot results and opening balances signed off.
+- **By 2026-11-30:** Goals 1, 3, 5 and 6 done.
+- **By 2026-12-15:** Goals 4 and 7 done, and a test month reconciled in QuickBooks on the test system.
+- **December:** the senior developer's review and repairs; the cleanup the developer needs (setup guide, AI tooling guide); staff training.
+- **2026-12-31:** last Chem Man bill; Mason's opening balances in place (L3).
+- **2027-01-01:** CRX-only billing; the 30-day pilot begins.
 
-If a checkpoint slips, Mason gets a revised forecast straight away. Cut optional extras, cosmetic cleanup and archive tidying first. Accounting sync, online payments, backups, compliance and money correctness stay in scope. A smaller launch is Mason's business decision.
+If a checkpoint slips, Mason gets a revised forecast straight away. Cut optional extras, cosmetic cleanup and archive tidying first; the rest of Goal 9 can follow the pilot. Security, billing correctness, backups and money correctness stay in scope. If the QuickBooks sync or online payments can't be proven in time, Mason decides: either move January 1, or start on January 1 with entries keyed into QuickBooks by hand and payments recorded as today, until the integration is proven.
 
 ## 3. Where we are today
 
@@ -61,7 +64,7 @@ If a checkpoint slips, Mason gets a revised forecast straight away. Cut optional
 4. **Weak safety net.** The repo has weekly table snapshots, but they live inside the same database. The architecture doc describes an off-site copy, but no automated job for it exists in the repo, so it needs checking. The free hosting plan has no point-in-time recovery (rewinding the database to a chosen moment). Database backups don't include uploaded files. A test restore has never been done. There's no staging copy (a separate test system), and the browser tests are switched off until one exists.
 5. **Offline proof of delivery.** A delivery completed without signal saves no signature image, and starting a field stop needs signal.
 6. **Not yet the system of record.** There's no link to QuickBooks and no online payments.
-7. **Not yet launch-ready outside the code.** No compliance sign-off, no physical stock count reconciled to CRX, and no plan for opening balances.
+7. **Not yet launch-ready outside the code.** No compliance sign-off, no physical stock count reconciled to CRX, and no plan for opening balances. Mason handles these himself (L1–L3).
 8. **Process cost.** The AI tooling is nearly as large as the app.
 
 ## 4. Decisions made (do not reopen)
@@ -73,7 +76,11 @@ If a checkpoint slips, Mason gets a revised forecast straight away. Cut optional
 | 2026-10-13 | **Reps read every invoice;** other reps' invoices are read-only to them. Ships as the next change after PR #907. |
 | 2026-10-13 | **Upgrade Supabase to the Pro plan with point-in-time recovery** before next season. It's a billing change, so Mason does it. |
 | 2026-10-13 | **Photos become private:** delivery, receiving and team-note photos need a sign-in to view. |
-| 2026-10-13 | **Chem Man stops being used for billing by spring 2027.** |
+| 2026-10-14 | **Chem Man's last new bill is 2026-12-31; all billing runs in CRX from 2027-01-01**, and the first 30 days are the pilot. This replaces "by spring 2027" (2026-10-13). |
+| 2026-10-14 | **Product lines are billed only for delivered goods.** Money paid in advance is recorded as prepay. |
+| 2026-10-14 | **Only admins change commission splits**: on customers, jobs, quotes and orders. |
+| 2026-10-14 | **An outage may last overnight:** CRX is back up by the next business morning. |
+| 2026-10-14 | **Mason Wells owns pesticide compliance and inventory readiness,** and runs L1–L3 himself. They need no code and are not agent-enforced gates. |
 | 2026-10-13 | **Everything is built before handoff, integrations included.** Accounting sync and online card/ACH payments are part of Phase A. |
 | 2026-10-13 | **The books stay in QuickBooks Desktop** (most company data is there today). CRX syncs to it. |
 | 2026-10-13 | **All AI tooling is kept at handoff** and documented for the developer (Goal 9). |
@@ -106,12 +113,13 @@ PR #907 merged and its migration (`20261013220000_reps_work_any_customer`) was a
 **Still to do (the "Invoice work continuation" session's follow-up change):**
 - **Own-name everywhere.** The own-name rule also covers invoices generated from orders (single and split), and every path a rep can use to edit, unpost, consolidate or transfer an invoice. Taking payments and applying prepay or credits keep working under their current rules.
 - **Reps read every invoice,** with other reps' invoices read-only. Until then, a customer balance a rep sees may count only that rep's invoices. It must be labelled as such and never treated as the customer's full balance or credit exposure.
-- **Commission splits on jobs, quotes and orders.** Who may change them is an open question (6j). The shipped rule protects only the customer's default split.
+- **Only admins change commission splits** (Mason, 2026-10-14), on customers, jobs, quotes and orders. This tightens what shipped: today a customer's assigned rep may edit that customer's default split, and any active rep can edit a job's split.
 
-**Done when:** a rep account, live, does all of the following for two customers, one with no assigned rep and one assigned to a different rep:
+**Done when:** a rep account does all of the following for two customers, one with no assigned rep and one assigned to a different rep. Steps that create invoices, send email or change documents run on the test system (Goal 6) or on clearly marked test records; the live system is used only for read-only and refusal checks.
 - finds the customer when invoicing;
 - saves, posts and emails both a single invoice and an invoice group (split invoice) to them;
-- is refused when naming someone else as salesperson, through the screens **and** direct server calls, including by leaving the salesperson blank, on repeat requests, and on an invoice group with mixed owners;
+- is refused when naming someone else as salesperson, through the screens **and** direct server calls, on repeat requests, and on an invoice group with mixed owners. A blank or missing salesperson is filled in with the rep's own name, not refused (shipped behavior);
+- is refused when changing any commission split, while an admin can;
 - can read another rep's invoice but cannot change it, unpost it, or alter its split set;
 - can upload, download and remove a document for a customer assigned to another rep, while a deactivated account is refused;
 - customer totals reconcile across invoices made by an admin and by two different reps.
@@ -122,7 +130,7 @@ Admin reassignment still works throughout.
 - **Post uses what was saved and reviewed.** Post refuses while the screen has unsaved changes. The database enforces this, not just the screen: `post_invoice` and `post_invoice_group` check the invoice version the screen loaded and refuse if it changed. That way a save from a second tab or another user can't be posted unseen (see `KNOWN_ISSUES.md`). Group posting checks every member and the group's membership.
 - **Retries are safe.** A request that may or may not have gone through can be retried. If its quantities, customer, signer or amount changed in between, the retry must not silently reuse the earlier result. This includes the driver-retry gap in section 3.
 - **Voids and cancellations.** Voiding or cancelling a delivery leaves nothing collectible for the goods on **that delivery**. A credit for exactly the voided delivery's value is issued automatically, or the void is refused until an admin issues it. Charges for the order's other deliveries stay collectible. A warning message alone (today's behavior) does not count. If the invoice was already paid, the customer gets the right credit or refund, not a made-up unpaid balance.
-- **Quantity caps.** Whole-order product billing has a defined rule (question 6g: bill what was ordered or only what was delivered). The cap holds across all of an order's invoices and split children together, including two attempts at once, added lines, returns, credits and restored invoices. The existing ban on mixing whole-order and per-delivery billing stays.
+- **Quantity caps.** Product lines are billed only for goods actually delivered, and money paid in advance is recorded as prepay (Mason, 2026-10-14). The cap holds across all of an order's invoices and split children together, including two attempts at once, added lines, returns, credits and restored invoices. The existing ban on mixing whole-order and per-delivery billing stays.
 - **Orderless invoices** (made from scratch, no order or delivery) follow the rule Mason picks in question 6e, on every way of creating or editing one. Service and miscellaneous charges stay available.
 - **Pricing.** Blend-ticket billing uses the exact quoted line, even when a quote has the same product twice at different prices. Today it takes the first matching line in an arbitrary order. A product added on the invoice screen uses the customer's tier (PR #908, open), and changing the customer refreshes the price without silently replacing an agreed quoted price.
 - **Split billing.** Partly delivered orders shared among customers are handled by a proven workflow. Today this is a known limitation (`KNOWN_ISSUES.md`), partly because separate rounding of each share can lose cents. Customer shares add up exactly to the source charge. The Bill Split customer-list fix (PR #909) is open.
@@ -176,7 +184,7 @@ Failed work stays visible and recoverable. The app tells the driver which steps 
 - a restore drill succeeds and is logged. It restores the database, permissions, user access and files from each protected upload bucket into an isolated copy, and the restored photos and uploads open and match their records;
 - one rewind-to-a-time recovery is practiced on a throwaway copy;
 - before syncing resumes after a restore, payments already processed, QuickBooks entries already written and emails already sent are reconciled, so nothing is charged, invoiced, credited or emailed twice;
-- recovery meets the agreed targets (question 6i; proposed: back up within 4 hours, no more than 15 minutes of lost work);
+- recovery meets Mason's target (2026-10-14): an outage may last overnight, with CRX back by the next business morning, and lost work is limited to what point-in-time recovery allows (minutes, not a day);
 - a named person and a backup know how to run the recovery, and the paper fallback for dispatch, delivery and payments during an outage has been rehearsed;
 - CI runs the money and inventory browser tests for each role against staging, and a failing test blocks the change. One passing run is not a safety net; it has to keep running.
 
@@ -195,7 +203,7 @@ Failed work stays visible and recoverable. The app tells the driver which steps 
 
   For each one, name which system creates it, which may correct it, and how it reaches the other. Nothing is entered in both. Include the chart-of-accounts mapping and the rules for closed periods.
 - **Online card and ACH payments.** Use the processor's own hosted payment page; CRX never stores card or bank numbers. A payment link only lets the customer pay that invoice; it is not the grower portal. An invoice is marked paid only on a verified processor event, never because a browser showed a success page. Name which processor event counts as "settled", and how later bank deposits and fees reconcile.
-- **Opening balances and cut-over:** see L3.
+- **Opening balances and cut-over:** Mason's task L3.
 
 **Done when:**
 - a full test month of invoices, payments **and credits** lands in QuickBooks Desktop. It matches CRX in transaction counts, invoice numbers, each customer's open balance, payment allocations, credits and the agreed accounts, not just the grand total;
@@ -205,24 +213,32 @@ Failed work stays visible and recoverable. The app tells the driver which steps 
 - a settled payment later reversed (an ACH return or a card chargeback) reopens the invoice balance exactly once, and the reversal reaches QuickBooks;
 - also tested: duplicate, late, forged and out-of-order processor notifications; a lost reply; repeated clicks; paying an already-paid or voided invoice; partial, multi-invoice and over-payment (overpayment becomes prepay); partial and full refunds; and a chargeback later resolved. Each changes the customer balance and QuickBooks exactly once. Gross payments, fees and net bank deposits reconcile.
 
-#### Launch-readiness checks (part of Phase A; they gate Phase D)
-These aren't app features, but the business can't go live without them. Each needs a named owner (question 6h).
+#### Business readiness tasks L1–L3 (Mason's; no code; not an agent gate)
+These aren't app features, but the business needs them before January 1. **Mason Wells owns all three and runs them himself** (2026-10-14). Agents don't build anything for them and don't hold other work waiting on them. If an agent finds a code defect in one of these areas, it still reports it. The lists below are a checklist for Mason, not acceptance tests.
 
-**L1. Compliance readiness.** The person responsible for Crop RX compliance writes down the dealer, RUP sale, applicator, application-record, record-keeping and state-reporting rules for every state we serve. Today the RUP license check only warns and never blocks a sale (`src/lib/rupCompliance.ts`). Where a rule forbids the sale or application, a warning isn't enough.
+**L1. Compliance readiness.** Mason writes down the dealer, RUP sale, applicator, application-record, record-keeping and state-reporting rules for every state we serve, with an outside adviser where needed. Note that today the RUP license check only warns and never blocks a sale (`src/lib/rupCompliance.ts`). If a rule forbids the sale outright, Mason decides whether the app should block it, and that becomes a normal code request.
 
-**Done when:** the active catalog's EPA numbers and labels are verified, and the required customer and staff licenses are on file. Tests cover missing, expired and wrong-state licenses, label restrictions, complete application records, corrections, voids, returns, and a full reporting period past the old row limits. The responsible person approves the resulting records and state reports.
+**Checklist:**
+- the active catalog's EPA numbers and labels are verified;
+- the required customer and staff licenses are on file;
+- missing, expired and wrong-state licenses, label restrictions, application records, corrections, voids and returns all look right;
+- a full reporting period produces correct state reports.
 
 **L2. Inventory readiness.** Count the stock by product, package size and location. Bring CRX in line through approved, logged adjustments. Clear out old deliveries, reservations and supplier receipts that still hold stock (`KNOWN_ISSUES.md` records wrong opening stock and old orders still reserving goods).
 
-**Done when:** the counts match CRX, and every accepted difference is visible with an owner and a resolution date. Receiving, partial delivery, return, void, transfer and field-application use are proven against the same stock records, including package conversions, damaged returns and lot tracing. Warn-only shortages stay the policy until Mason decides otherwise (6b), but every shortage has someone assigned to deal with it.
+**Checklist:**
+- the counts match CRX, and every accepted difference has an owner and a resolution date;
+- receiving, partial delivery, return, void, transfer and field-application use all hit the same stock records, including package conversions, damaged returns and lot tracing.
 
-**L3. Opening balances and cut-over rehearsal.** Rehearse the move using a dated extract from Chem Man and QuickBooks.
+Warn-only shortages stay the policy until Mason decides otherwise (6b), but every shortage has someone assigned to deal with it.
 
-**Done when:**
-- every opening customer balance, unpaid invoice, prepay or deposit, unapplied payment, outstanding credit, open order, unbilled delivery and stock balance reconciles to Chem Man, QuickBooks and the physical count;
-- original IDs and the billing system each record came from are kept, and re-running the import creates no duplicate debt, payment or stock;
-- the final cutoff, last Chem Man bill, first CRX bill, corrections between rehearsal and go-live, what history moves into CRX and what stays read-only, and old-sale returns are all written down (question 6f);
-- the bookkeeper signs the opening balances, and restoring the archived Chem Man history has been demonstrated before Chem Man billing is retired.
+**L3. Opening balances and cut-over.** Chem Man's last bill is 2026-12-31 and CRX's first is 2027-01-01.
+
+**Checklist:**
+- every opening customer balance, unpaid invoice, prepay or deposit, unapplied payment, outstanding credit, open order, unbilled delivery and stock balance matches Chem Man, QuickBooks and the physical count;
+- original IDs and the billing system each record came from are kept, and nothing is entered twice;
+- what history moves into CRX, what stays read-only in Chem Man, and how old-sale returns work after 2026-12-31 are all written down;
+- the bookkeeper signs the opening balances, and the Chem Man history can still be opened after billing stops.
 
 #### Goal 8: Spend on product, not process (ongoing; reviewed monthly through handoff, not a Phase A gate)
 - Keep the freeze on new safety guards.
@@ -290,13 +306,14 @@ These aren't app features, but the business can't go live without them. Each nee
 - launch support, incident response, ongoing maintenance and a backup contact are agreed before Phase D.
 
 ### Phase D: Roll out
-- Train each role and rehearse the cut-over.
-- **Pilot:** before Chem Man billing stops, run 30 days in a row of real billing in CRX, reconciled daily. Each day checks customer balances, payments, credits, stock movements and QuickBooks entries, and every unexplained difference is found and fixed.
+- Train each role in December and rehearse the cut-over on the test system.
+- Chem Man issues its last new bill on **2026-12-31**. Its history stays available, and old-sale returns stay supported.
+- **Pilot:** from **2027-01-01**, all billing runs in CRX. The first 30 days are reconciled daily. Each day checks customer balances, payments, credits, stock movements and QuickBooks entries, and every unexplained difference is found and fixed.
 - Staff show they can do their normal work and the exceptions: partial deliveries, returns, split billing, failed payments, missing signatures and an outage.
 - Mason, the bookkeeper and the senior developer approve the recorded results. No unresolved security, money, inventory or compliance defect is accepted just to hit the date.
-- Chem Man stops issuing new bills on the agreed date (6f). Its history stays available, and old-sale returns stay supported.
+- If the pilot turns up a money, stock or compliance defect, it's fixed first. Billing stays in CRX; the fix doesn't wait for the 30 days to end.
 
-**Done when:** the pilot is signed off and the spring 2027 season is billed entirely in CRX.
+**Done when:** the 30-day pilot is signed off, and the spring 2027 season is billed entirely in CRX.
 
 ## 6. Open questions
 
@@ -308,13 +325,15 @@ Each answer gets recorded with its owner, the date, and the goal it unlocks.
 | 6b | When stock runs short, should a delivery warn (today) or be blocked? | Keep warn-only until the L2 stock count is clean, then decide. |
 | 6c | Which card/ACH processor? It has to accept an agricultural chemical business and support card and ACH, refunds, returns, reliable notifications and the chosen QuickBooks route. | Pick one and start sign-up **in October**. Compare approval time, all fees, ACH limits, payout timing, reserves, dispute handling and support, not only ACH fees. |
 | 6d | Who is the senior developer, what will they charge, and can they hold time for the final review and launch support? | Engage them **in October** for early advice on QuickBooks Desktop, payments and backups. The formal handoff still waits for the finished build and cleanup. |
-| 6e | Should an invoice made from scratch (no order, no delivery) be allowed to carry product lines at all? There's nothing to cap its quantity against. | **No.** Products are billed through an order or a delivery; from-scratch invoices carry only service or misc charges. Decide before Goal 3 starts. |
-| 6f | What exact date stops new Chem Man billing, and who signs the opening balances? | Choose the date now, before spring billing starts. The bookkeeper owns the balance reconciliation; Mason approves the cut-over. |
-| 6g | May whole-order product invoices be posted before the goods are delivered? | Prefer billing delivered goods, with money paid in advance recorded as prepay, unless a real business workflow needs otherwise. Decide before Goal 3's caps. |
-| 6h | Who owns pesticide compliance (L1) and inventory readiness (L2)? | Name a responsible staff member for each now, with an outside compliance adviser where needed. |
-| 6i | How much outage and lost data can the business tolerate? | Start with "back up within 4 hours, no more than 15 minutes of lost work", then confirm cost and whether the drills meet it. |
-| 6j | Who may change commission splits on jobs, quotes and orders? | Admin, or the customer's assigned rep, with a clear rule for customers with no rep. Settle before rollout. |
-| 6k | Adopt the dated checkpoints in section 2? | **Yes**, aiming for a February pilot before the spring cut-over. |
+| 6e | Should an invoice made from scratch (no order, no delivery) be allowed to carry product lines at all? There's nothing to cap its quantity against. | **No.** It follows from the 2026-10-14 decision to bill products only for delivered goods: from-scratch invoices carry only service or misc charges. Confirm before Goal 3 starts. |
+
+**Answered 2026-10-14** (now in section 4 and `DECISION_LOG.md`):
+- 6f: Chem Man's last bill is 2026-12-31.
+- 6g: products are billed only when delivered, with advance money recorded as prepay.
+- 6h: Mason Wells owns compliance and inventory.
+- 6i: an overnight outage is acceptable.
+- 6j: only admins change commission splits.
+- 6k: the pilot starts 2027-01-01.
 
 ## 7. Not doing (parked on purpose)
 
@@ -336,5 +355,6 @@ Each answer gets recorded with its owner, the date, and the goal it unlocks.
   - no off-site backup job in `.github/workflows/`.
 
   Claude also confirmed live that the customer-documents service was redeployed on 2026-10-14.
+- Mason's answers to 6f–6k and his call that L1–L3 are his own tasks, in chat, 2026-10-14.
 - **Evidence status:** code findings refer to commit `395bdcd9a`. Live counts, database size, subscription and recovery settings, deployed services, outside integrations and restore history need a dated live check before anyone relies on them. Measurements here are observations from their stated date, not current guarantees.
 - `docs/manual/KNOWN_ISSUES.md` holds the full open-issue list; this doc covers only what moves the $10M goal.

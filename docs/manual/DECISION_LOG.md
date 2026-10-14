@@ -1,12 +1,33 @@
 # Decision Log
 
-Last verified: 2026-10-13 (three entries added: a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-14 (one entry added: Chem Man's last bill 2026-12-31 and a CRX-only pilot from 2027-01-01, plus Mason's answers to the goals plan's questions 6f–6k; earlier, 2026-10-13, three entries added: a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
+
+## 2026-10-14 — Chem Man's last bill is 2026-12-31; CRX-only billing pilot from 2027-01-01; goals-plan answers
+
+**Decision (Mason, in chat, answering the Sol 6.1 review of `docs/plans/2026-10-13-direction-and-goals.md`).**
+- **6f:** Chem Man issues its last new bill on **2026-12-31**. This replaces "retired for billing by spring 2027" in the 2026-10-13 direction entry below.
+- **6k:** billing runs **only in CRX from 2027-01-01**. The first 30 days are the pilot, reconciled daily.
+- **6g:** product lines are billed only for delivered goods. Money paid in advance is recorded as prepay.
+- **6h:** Mason Wells owns pesticide compliance and inventory readiness.
+- **6i:** an outage may last **overnight**, meaning CRX is back by the next business morning.
+- **6j:** **only admins** change commission splits, on customers, jobs, quotes and orders.
+- Mason also said the compliance, physical-inventory and opening-balance checks (plan L1–L3) are **his business tasks**. They are not agent-enforced gates and need no code.
+
+**Why.** Mason wants the new year to start in CRX, and he will run the business readiness work himself.
+
+**What this forbids/implies:**
+- Agents do not build or gate on L1–L3; they still flag a code defect they find in those areas.
+- The 6j rule tightens what shipped in PR #907, where the customer's assigned rep may still edit that customer's default split (`COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`). It also tightens jobs, where any active rep can edit the split today. Making splits admin-only is a follow-up code change to Goal 2, and it needs the usual review and its own migration.
+- The 2027-01-01 date compresses the plan: the build estimates (roughly 14–24 weeks) exceed the time left (about 11 weeks). The goals doc orders work by what must be ready on 2027-01-01. Mason decides any scope cut when a checkpoint slips.
+- Returns on Chem Man-billed deliveries stay allowed after 2026-12-31 (the 2026-10-07 rule).
+
+Detail: `docs/changelog.d/2026-10-14-goals-plan-sol-review-revision.md`.
 
 ## 2026-10-13 — A plain "I approve" is enough; no code to type
 

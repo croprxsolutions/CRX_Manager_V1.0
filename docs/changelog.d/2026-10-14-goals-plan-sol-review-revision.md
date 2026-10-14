@@ -19,6 +19,7 @@ Documentation only; no app or database change.
   - Chem Man's last new bill is 2026-12-31.
   - From 2027-01-01 all billing runs in CRX, and the first 30 days are a daily-reconciled pilot.
   - Products are billed only when delivered; money paid in advance is prepay.
+  - 6e confirmed: invoices made from scratch carry no product lines, only service or misc charges. The `KNOWN_ISSUES.md` owner decision is marked decided; database enforcement is Goal 3.
   - Mason Wells owns compliance and inventory.
   - An overnight outage is acceptable.
   - Only admins change commission splits. This tightens the PR #907 customer-split rule and the job-split rule, as a follow-up code change.

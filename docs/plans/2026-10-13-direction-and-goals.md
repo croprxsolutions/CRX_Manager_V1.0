@@ -78,6 +78,7 @@ If a checkpoint slips, Mason gets a revised forecast straight away. Cut optional
 | 2026-10-13 | **Photos become private:** delivery, receiving and team-note photos need a sign-in to view. |
 | 2026-10-14 | **Chem Man's last new bill is 2026-12-31; all billing runs in CRX from 2027-01-01**, and the first 30 days are the pilot. This replaces "by spring 2027" (2026-10-13). |
 | 2026-10-14 | **Product lines are billed only for delivered goods.** Money paid in advance is recorded as prepay. |
+| 2026-10-14 | **Invoices made from scratch carry no product lines,** only service or misc charges. Product sales go through an order and a delivery; a counter sale uses a quick delivery. |
 | 2026-10-14 | **Only admins change commission splits**: on customers, jobs, quotes and orders. |
 | 2026-10-14 | **An outage may last overnight:** CRX is back up by the next business morning. |
 | 2026-10-14 | **Mason Wells owns pesticide compliance and inventory readiness,** and runs L1–L3 himself. They need no code and are not agent-enforced gates. |
@@ -131,7 +132,7 @@ Admin reassignment still works throughout.
 - **Retries are safe.** A request that may or may not have gone through can be retried. If its quantities, customer, signer or amount changed in between, the retry must not silently reuse the earlier result. This includes the driver-retry gap in section 3.
 - **Voids and cancellations.** Voiding or cancelling a delivery leaves nothing collectible for the goods on **that delivery**. A credit for exactly the voided delivery's value is issued automatically, or the void is refused until an admin issues it. Charges for the order's other deliveries stay collectible. A warning message alone (today's behavior) does not count. If the invoice was already paid, the customer gets the right credit or refund, not a made-up unpaid balance.
 - **Quantity caps.** Product lines are billed only for goods actually delivered, and money paid in advance is recorded as prepay (Mason, 2026-10-14). The cap holds across all of an order's invoices and split children together, including two attempts at once, added lines, returns, credits and restored invoices. The existing ban on mixing whole-order and per-delivery billing stays.
-- **Orderless invoices** (made from scratch, no order or delivery) follow the rule Mason picks in question 6e, on every way of creating or editing one. Service and miscellaneous charges stay available.
+- **Orderless invoices** (made from scratch, no order or delivery) carry **no product lines** (Mason, 2026-10-14, 6e). This holds on every way of creating, editing or importing one, and on direct server calls. Service and miscellaneous charges stay available. A counter sale goes through a quick delivery, which ties the invoice to real goods.
 - **Pricing.** Blend-ticket billing uses the exact quoted line, even when a quote has the same product twice at different prices. Today it takes the first matching line in an arbitrary order. A product added on the invoice screen uses the customer's tier (PR #908, open), and changing the customer refreshes the price without silently replacing an agreed quoted price.
 - **Split billing.** Partly delivered orders shared among customers are handled by a proven workflow. Today this is a known limitation (`KNOWN_ISSUES.md`), partly because separate rounding of each share can lose cents. Customer shares add up exactly to the source charge. The Bill Split customer-list fix (PR #909) is open.
 - **Old Chem Man sales.** Returns against Chem Man-billed deliveries **stay allowed**, before and after the cut-over, with the credit handled in Chem Man or the books (Mason, 2026-10-07). Keep the original billing reference, record where the credit was handled, and never credit the same old sale both in CRX and in the books. A written procedure for old-sale returns stays in place after Chem Man stops issuing bills.
@@ -139,7 +140,7 @@ Admin reassignment still works throughout.
 **Done when:** each case is run against a real database copy and refuses or corrects as described. That includes these cases:
 - **Posting:** unsaved price, quantity, customer and charge edits; a second tab and a second user saving just before Post; a changed or added split sibling; and every single, group and batch posting route. Credit and RUP checks use the same saved data that gets posted. Leaving a screen with unsaved edits warns first. An uncertain reply can be recovered without posting twice.
 - **Voids and cancellations:** both voiding and cancelling, against draft, posted, overdue, partly paid and fully paid invoices, with whole-order and split billing, discounts, taxes, and earlier returns and credits. On an order with several deliveries, voiding one removes only that delivery's value and the rest stays collectible. Repeat or simultaneous requests never restock, credit or refund twice.
-- **Caps and orderless invoices:** a second invoice that would exceed the order's allowance is refused, including when the first was split. An orderless invoice that breaks the 6e rule is refused.
+- **Caps and orderless invoices:** a second invoice that would exceed the order's allowance is refused, including when the first was split. An orderless invoice with a product line is refused, on both save and post, while one with only service or misc charges still saves and posts.
 - **Pricing:** a blend with two lines for the same product at different prices bills each correctly, checked through the saved invoice, the PDF and the accounting entry.
 - **Split billing:** partly delivered and per-acre splits, several delivery dates, final remainders and returns, with every quantity and cent accounted for.
 - **What the customer actually receives:** the office and bookkeeper review real printed and emailed invoices, split invoices, credits, statements and delivery receipts. They check recipient, address, product and unit, price, discounts, tax, due date, payment instructions and final balance, including long and corrected documents, season boundaries and aging cutoffs. A failed email stays visible and can be retried without billing twice.
@@ -325,9 +326,8 @@ Each answer gets recorded with its owner, the date, and the goal it unlocks.
 | 6b | When stock runs short, should a delivery warn (today) or be blocked? | Keep warn-only until the L2 stock count is clean, then decide. |
 | 6c | Which card/ACH processor? It has to accept an agricultural chemical business and support card and ACH, refunds, returns, reliable notifications and the chosen QuickBooks route. | Pick one and start sign-up **in October**. Compare approval time, all fees, ACH limits, payout timing, reserves, dispute handling and support, not only ACH fees. |
 | 6d | Who is the senior developer, what will they charge, and can they hold time for the final review and launch support? | Engage them **in October** for early advice on QuickBooks Desktop, payments and backups. The formal handoff still waits for the finished build and cleanup. |
-| 6e | Should an invoice made from scratch (no order, no delivery) be allowed to carry product lines at all? There's nothing to cap its quantity against. | **No.** It follows from the 2026-10-14 decision to bill products only for delivered goods: from-scratch invoices carry only service or misc charges. Confirm before Goal 3 starts. |
-
 **Answered 2026-10-14** (now in section 4 and `DECISION_LOG.md`):
+- 6e: invoices made from scratch carry no product lines, only service or misc charges.
 - 6f: Chem Man's last bill is 2026-12-31.
 - 6g: products are billed only when delivered, with advance money recorded as prepay.
 - 6h: Mason Wells owns compliance and inventory.
@@ -355,6 +355,6 @@ Each answer gets recorded with its owner, the date, and the goal it unlocks.
   - no off-site backup job in `.github/workflows/`.
 
   Claude also confirmed live that the customer-documents service was redeployed on 2026-10-14.
-- Mason's answers to 6f–6k and his call that L1–L3 are his own tasks, in chat, 2026-10-14.
+- Mason's answers to 6e–6k and his call that L1–L3 are his own tasks, in chat, 2026-10-14.
 - **Evidence status:** code findings refer to commit `395bdcd9a`. Live counts, database size, subscription and recovery settings, deployed services, outside integrations and restore history need a dated live check before anyone relies on them. Measurements here are observations from their stated date, not current guarantees.
 - `docs/manual/KNOWN_ISSUES.md` holds the full open-issue list; this doc covers only what moves the $10M goal.

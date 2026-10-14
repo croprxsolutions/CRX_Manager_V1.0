@@ -26,11 +26,18 @@ list, so the bug would have under-charged, and it had not yet affected a saved i
   columns the page asked for, so removing `assigned_tier` from the query turns it red (verified
   against the unfixed code: a tier-3 line was saved at the tier-1 price).
 
+- PR #908 review round (CodeRabbit, Codex connector): the picker list holds only active customers,
+  capped at 500, and may not have loaded when Add Product is clicked. A customer missing from it is
+  now read by id (`select('assigned_tier')`). If that read fails, the product is refused with an
+  error instead of being priced at tier 1. The price and cost are converted to cents with the exact
+  `parseDollarsToCents` instead of `Math.round(x * 100)`, and a sub-cent value is refused. Live has
+  none: 0 of 595 active products have a sub-cent price or cost.
+
 **Known, not fixed here (pre-existing, found in review).** The same list query also omits `email`
 and the billing-address and account-number columns that the Email button and the invoice PDF read
-from it. The unmerged reps-work-any-customer branch adds those columns to this query. A customer who
-is inactive or beyond the 500-row list cap also falls back to tier 1, and lines added before a
-customer is picked keep their price when the customer changes.
+from it. The unmerged reps-work-any-customer branch adds those columns to this query. Lines added
+before a customer is picked keep their price when the customer changes; re-pricing them could
+overwrite a hand-typed price, so that is left as a business decision.
 
 **Visible change.** Admins and reps now see the customer's tier price, not the tier-1 price, when they
 add a product to an invoice on this screen. Tier-1 customers (all but one today) see no change.

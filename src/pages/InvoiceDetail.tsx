@@ -658,13 +658,41 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   }, [productSearch, searchProducts]);
 
   // Add product as line item
-  const addProduct = (product: Product) => {
-    // Shared helper: a product with no tier-2/3 price falls back to tier 1 instead of $0.
-    const cust = invoice.customer_id ? customers.find((c) => c.id === invoice.customer_id) : undefined;
-    const tierPrice = getTierPrice(product, cust?.assigned_tier || 1);
+  const addProduct = async (product: Product) => {
+    // save_invoice stores the price sent, so the customer's tier must be known before pricing.
+    // The picker list holds only active customers (capped) and may not have loaded yet, so a
+    // customer missing from it is read by id; if the tier cannot be read, refuse rather than
+    // fall back to tier 1.
+    let tier = 1;
+    if (invoice.customer_id) {
+      const listed = customers.find((c) => c.id === invoice.customer_id);
+      if (listed) {
+        tier = listed.assigned_tier || 1;
+      } else {
+        const requestedFor = id;
+        const { data, error } = await supabase
+          .from('customers')
+          .select('assigned_tier')
+          .eq('id', invoice.customer_id)
+          .maybeSingle();
+        if (activeInvoiceIdRef.current !== requestedFor) return;
+        if (error || !data) {
+          if (error) Sentry.captureException(error, { extra: { context: 'invoice_add_product_customer_tier' } });
+          toast('error', "Could not load this customer's price tier. The product was not added; try again.");
+          return;
+        }
+        tier = (data as { assigned_tier: number | null }).assigned_tier || 1;
+      }
+    }
 
-    const priceCents = Math.round(tierPrice * 100);
-    const costCents = Math.round((product.current_cost || 0) * 100);
+    // Shared helper: a product with no tier-2/3 price falls back to tier 1 instead of $0.
+    // Exact decimal-to-cents parse (no binary-float rounding); a sub-cent price is refused.
+    const priceCents = parseDollarsToCents(String(getTierPrice(product, tier)));
+    const costCents = parseDollarsToCents(String(product.current_cost || 0));
+    if (priceCents === null || costCents === null) {
+      toast('error', `${product.product_name} has a price or cost with more than two decimal places. Fix it in Products before invoicing it.`);
+      return;
+    }
 
     setItems((prev) => [
       ...prev,

@@ -1,11 +1,11 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-13 (America/Chicago) against the live migration ledger** (read-only,
-2026-10-13 22:02 UTC, while building `20261013220000_reps_work_any_customer`, which is NOT applied;
-the ledger was unchanged since the 2026-10-12 read after PR #889's last two applies; the counts and
-high-water live only in `docs/reference/migration-history.md`). That read also re-checked the
-order-invoice rep-scope entry below against Mason's 2026-10-13 decision.
-That read re-certified only the applied-migration list in this header and the 2026-10-07 integrity-fix
+**Last verified: 2026-10-14 (America/Chicago) against the live migration ledger** (read-only,
+2026-10-14 14:16 UTC, after `20261013220000_reps_work_any_customer` applied at 13:14:50 UTC; the
+counts and high-water live only in `docs/reference/migration-history.md`). That read re-certified the
+applied-migration list in this header and the reps-work-any-customer follow-ups entry (migration and
+`customer-document-files` v2 both live). The 2026-10-13 22:02 UTC read re-checked the order-invoice
+rep-scope entry below against Mason's 2026-10-13 decision, and re-certified the 2026-10-07 integrity-fix
 entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150200` and `20261010120000`). The
 2026-10-07 read re-certified the CRX-LIFE-001 entry (fix live; two post-apply gates still open). Every other entry's status (open, or
 fixed/applied/closed) was last re-checked on 2026-09-26 against that day's ledger snapshot and
@@ -25,7 +25,9 @@ date and was not all re-measured.
   `20260921180000_soft_delete_customer_document_rpc` (ledger `20261002230949`), and on 2026-10-07 by
   `20261006200000_refuse_field_invoice_through_order_rpcs` (ledger `20261007114554`, CRX-LIFE-001),
   and on 2026-10-10 (UTC) by PR #889's `20261007150000` (ledger `20261010014555`), `20261007150050`
-  (`20261010014642`) and `20261007150100` (`20261010043006`).
+  (`20261010014642`) and `20261007150100` (`20261010043006`); then on 2026-10-12 by PR #889's
+  `20261007150200` (`20261012234157`) and `20261010120000` (`20261012234633`); and on 2026-10-14 by
+  PR #907's `20261013220000_reps_work_any_customer` (`20261014131450`).
 
 **Layout.** Open items come first. Everything fixed, merged, applied, retired or closed is in
 **Resolved and closed (archive)** at the end of this file, newest first, with its original text.
@@ -444,10 +446,9 @@ archive. They are listed here so the open part of this file shows them. None was
     editable by any rep on any customer (`save_quote`, order functions; pre-existing). The 2026-10-13
     rule protects only `customers.default_commission_split`. Confirm with Mason whether job, quote
     and order splits should follow the same admin-or-assigned-rep rule.
-  - **`customer-document-files` deploy.** The repo code opens documents to every rep; until that
-    function is redeployed (Mason's OK required), reps see other customers' document rows but the
-    live function still refuses their uploads and downloads. Deploy right after the migration
-    applies, never before it.
+  - **RESOLVED 2026-10-14: `customer-document-files` deploy.** Redeployed as v2 at 13:54 UTC on
+    Mason's yes, after the migration applied at 13:14:50 UTC; the live function now admits reps to
+    every customer's documents. A signed-in rep click-through is still owed (goals doc, Goal 2).
 
 - **Order-invoice RPCs let a rep name another salesperson (found 2026-10-06 while fixing
   CRX-LIFE-001; pre-existing; read from the live catalog, not exercised live).** **Updated

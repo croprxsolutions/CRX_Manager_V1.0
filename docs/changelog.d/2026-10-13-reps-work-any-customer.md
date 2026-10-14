@@ -62,6 +62,18 @@ refuse after; every admin and other-role result is identical before and after; a
 preflight; a second apply is refused; and with the guard trigger dropped the rep's direct reassignment
 succeeds (so the refusal is the trigger). Prints `REPS_ANY_CUSTOMER_PROOF_PASS`.
 
+**Live smoke chains** (run on live, rolled back, after the apply): new `smoke-reps-work-any-customer.sql`
+(spec `reps_work_any_customer`) covers the eight touched functions no chain covered (the four fact and
+interaction writers, prep card, lapsed products, purchase summary, dispatch board) plus the reassignment
+refusal; in a disposable container it fails before the candidate (`FACT_ACCESS_DENIED`) and passes after.
+Four chains that asserted the old assigned-customer rule now assert the new one:
+`smoke-financial-scope-and-delivery-aggregate.sql` (a rep reads any statement and invoices any customer under
+their own name; other people's invoices are `INVOICE_SCOPE_DENIED`), `smoke-adversarial-money-inventory-closeout.sql`,
+`smoke-per-line-split-billing.sql` (G4: a rep resolves any customer's split) and
+`smoke-save-quote-customer-row-version.sql` (a rep edits any customer but cannot reassign it). The first two
+were already failing on main at their replay step (`IDEMPOTENCY_ACTOR_MISMATCH` since the August
+actor-bound receipts, measured in a disposable container) and now accept that refusal too.
+
 **Follow-ups (not in this change):** the order-invoice RPCs' salesperson check (`KNOWN_ISSUES.md`); the old
 SQL smoke chains that assert `CUSTOMER_SCOPE_DENIED` describe the rule at their own migration and are not
 re-run past it.

@@ -474,8 +474,9 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF; IF SQLERRM <> 'AUTH_REQUIRED' THEN RAISE EXCEPTION 'SMOKE_FAIL: customer auth gate %', SQLERRM; END IF; END;
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
-  BEGIN PERFORM public.save_customer(v_customer, jsonb_build_object('farm_name', 'REP-MUST-NOT-OWN', 'row_version_expected', v_customer_after), '[]'::jsonb, v_rep, NULL); RAISE EXCEPTION 'SMOKE_FAIL: non-owner sales rep customer save succeeded';
-  EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF; IF SQLERRM <> 'NOT_CUSTOMER_OWNER' THEN RAISE EXCEPTION 'SMOKE_FAIL: customer ownership gate %', SQLERRM; END IF; END;
+  -- Since 20261013220000 any sales rep edits any customer, but only an admin reassigns one.
+  BEGIN PERFORM public.save_customer(v_customer, jsonb_build_object('farm_name', 'REP-MUST-NOT-REASSIGN', 'assigned_sales_rep', v_rep, 'row_version_expected', v_customer_after), '[]'::jsonb, v_rep, NULL); RAISE EXCEPTION 'SMOKE_FAIL: sales rep reassigned a customer';
+  EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF; IF SQLERRM <> 'REP_CANNOT_REASSIGN' THEN RAISE EXCEPTION 'SMOKE_FAIL: customer reassignment gate %', SQLERRM; END IF; END;
   BEGIN
     PERFORM public.save_quote(
       v_quote,

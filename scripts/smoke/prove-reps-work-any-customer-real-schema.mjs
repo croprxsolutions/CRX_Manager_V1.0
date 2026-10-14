@@ -483,6 +483,13 @@ function main() {
     'the reused container already has the candidate applied (it is in the AFTER state); rebuild it');
   fidelity();
   if (scalar("SELECT count(*) FROM public.profiles WHERE id::text LIKE '7a300000-%';") === '0') seed();
+  if (process.env.CRX_PROVER_BUILD_ONLY === '1') {
+    // Dev aid: stop at the BEFORE state (seeded, candidate not applied) so other chains can be run
+    // against the same real schema before and after applying the candidate by hand.
+    assert.ok(KEEP, 'CRX_PROVER_BUILD_ONLY needs CRX_PROVER_KEEP_CONTAINER=1');
+    console.log(`[prover] BUILD ONLY: ${NAME} kept in the BEFORE state; the proof did not run`);
+    return;
+  }
 
   const before = runMatrix('before');
   check('before', before);

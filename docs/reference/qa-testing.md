@@ -39,7 +39,7 @@ may still appear inside pages the role can open, as RLS allows.
 5. Convert to order (creates order + order_items + commissions)
 6. Create delivery from order
 7. Assign driver
-8. Confirm/start delivery (scheduled -> in_progress, inventory check warning)
+8. Confirm/start delivery (scheduled -> in_progress; no stock check here — a short delivery shows the shortage badge on the Deliveries page, and completion warns rather than blocks)
 9. Complete delivery (updates inventory, order fulfillment, creates remainders for partial)
 10. Record payment (updates the invoice's `paid_amount_cents`, so its generated `balance_cents` falls — orders carry no balance)
 

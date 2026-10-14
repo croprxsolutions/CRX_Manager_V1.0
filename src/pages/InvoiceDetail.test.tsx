@@ -1153,10 +1153,42 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
 
   const CUSTOMER = { id: 'cust-tier', farm_name: 'Tier Farm', payment_terms: 'Net 30', is_active: true, assigned_tier: 1 };
 
+  // Luna round 3: while the by-id lookup is in flight, a second click must not add a second line,
+  // Save must be blocked, and a customer switched meanwhile must not be priced with the old tier.
+  it('runs one lookup at a time and blocks Save until the line is added', async () => {
+    const pending = buildDeferredChain();
+    const lookup = setup({ listed: [], byId: () => pending.chain });
+    await addTieredProduct();
+    fireEvent.click(screen.getByText('Product ID: product-tier-uuid'));
+
+    expect(lookup.byIdCalls).toBe(1);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    pending.resolve({ data: { assigned_tier: 3 }, error: null });
+    await waitFor(() => expect(screen.queryByPlaceholderText('Search products by name or SKU...')).not.toBeInTheDocument());
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0]).toMatchObject({ unit_price_cents: 1199 });
+  });
+
+  it('drops a lookup answered after the customer was switched', async () => {
+    const pending = buildDeferredChain();
+    setup({ listed: [{ ...CUSTOMER, id: 'cust-other', farm_name: 'Other Farm' }], byId: () => pending.chain });
+    await addTieredProduct();
+
+    fireEvent.change(screen.getByPlaceholderText('Search customers...'), { target: { value: 'Other' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Other Farm' }));
+    pending.resolve({ data: { assigned_tier: 3 }, error: null });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'The customer changed while the product was being added. Add the product again.'));
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(0);
+  });
+
   function setup({ listed, tier3Price = 11.99, byId = { data: null, error: null } }: {
     listed: Record<string, unknown>[];
     tier3Price?: number | null;
-    byId?: { data: unknown; error: unknown };
+    byId?: { data: unknown; error: unknown } | (() => Record<string, unknown>);
   }) {
     const invoice = {
       id: 'inv-tier', invoice_number: 'INV-TIER', invoice_type: 'chemical_sale', status: 'draft',
@@ -1182,7 +1214,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
         listChain.select = (cols: string) => {
           if (cols.trim() === 'assigned_tier') {
             lookup.byIdCalls += 1;
-            return buildChain(byId);
+            return typeof byId === 'function' ? byId() : buildChain(byId);
           }
           return select(cols);
         };

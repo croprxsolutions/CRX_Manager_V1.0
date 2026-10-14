@@ -180,6 +180,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Latest invoice id the route is showing — older in-flight fetches bail (stale guard).
   const activeInvoiceIdRef = useRef<string | undefined>(undefined);
   const productSearchRequestRef = useRef(0);
+  // Add Product's by-id tier lookup: a single flight, bound to the customer it was asked for.
+  const addingProductRef = useRef(false);
+  const [addingProduct, setAddingProduct] = useState(false);
+  const invoiceCustomerIdRef = useRef<string | null>(null);
 
   // Email invoice
   const [emailing, setEmailing] = useState(false);
@@ -657,6 +661,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     return () => clearTimeout(t);
   }, [productSearch, searchProducts]);
 
+  useEffect(() => {
+    invoiceCustomerIdRef.current = invoice.customer_id ?? null;
+  }, [invoice.customer_id]);
+
   // Add product as line item
   const addProduct = async (product: Product) => {
     // save_invoice stores the price sent, so the customer's tier must be known before pricing.
@@ -669,19 +677,34 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       if (listed) {
         tier = listed.assigned_tier || 1;
       } else {
-        const requestedFor = id;
-        const { data, error } = await supabase
-          .from('customers')
-          .select('assigned_tier')
-          .eq('id', invoice.customer_id)
-          .maybeSingle();
-        if (activeInvoiceIdRef.current !== requestedFor) return;
-        if (error || !data) {
-          if (error) Sentry.captureException(error, { extra: { context: 'invoice_add_product_customer_tier' } });
-          toast('error', "Could not load this customer's price tier. The product was not added; try again.");
-          return;
+        // One lookup at a time: a second click would add a duplicate line, and Save is disabled
+        // meanwhile so it cannot persist the items without the line being added.
+        if (addingProductRef.current) return;
+        addingProductRef.current = true;
+        setAddingProduct(true);
+        try {
+          const requestedFor = id;
+          const requestedCustomerId = invoice.customer_id;
+          const { data, error } = await supabase
+            .from('customers')
+            .select('assigned_tier')
+            .eq('id', requestedCustomerId)
+            .maybeSingle();
+          if (activeInvoiceIdRef.current !== requestedFor) return;
+          if (invoiceCustomerIdRef.current !== requestedCustomerId) {
+            toast('error', 'The customer changed while the product was being added. Add the product again.');
+            return;
+          }
+          if (error || !data) {
+            if (error) Sentry.captureException(error, { extra: { context: 'invoice_add_product_customer_tier' } });
+            toast('error', "Could not load this customer's price tier. The product was not added; try again.");
+            return;
+          }
+          tier = (data as { assigned_tier: number | null }).assigned_tier || 1;
+        } finally {
+          addingProductRef.current = false;
+          setAddingProduct(false);
         }
-        tier = (data as { assigned_tier: number | null }).assigned_tier || 1;
       }
     }
 
@@ -746,6 +769,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Save invoice
   const handleSave = async () => {
+    if (addingProductRef.current) return;
     if (paymentTerms === 'Custom date…' && !customDueDate) {
       toast('error', 'Choose a custom due date before saving.');
       return;
@@ -1489,7 +1513,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         </div>
         <div className="flex gap-2 flex-wrap">
           {editable && (
-            <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+            <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={addingProduct}>
               Save
             </Button>
           )}

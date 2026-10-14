@@ -32,6 +32,10 @@ list, so the bug would have under-charged, and it had not yet affected a saved i
   error instead of being priced at tier 1. The price and cost are converted to cents with the exact
   `parseDollarsToCents` instead of `Math.round(x * 100)`, and a sub-cent value is refused. Live has
   none: 0 of 595 active products have a sub-cent price or cost.
+- Luna round 3: only one by-id lookup runs at a time. A second click cannot add a duplicate line,
+  and Save is disabled until the line is added. An answer that arrives after the invoice's customer
+  was switched is dropped with an error, so the old customer's tier never prices the new customer's
+  line.
 
 **Known, not fixed here (pre-existing, found in review).** The same list query also omits `email`
 and the billing-address and account-number columns that the Email button and the invoice PDF read

@@ -88,6 +88,9 @@ landing: docs now, migration-gate hardening separately", which said not to treat
 abandoned.
 **Decision.** Mason closed that work's PR #544 without merging it on 2026-09-20. Its measured findings
 moved to open issue #747 the same day.
+**Why.** The PR's stated purpose had already landed on `main` separately, its technical premise was
+superseded, and two independent reviews agreed it should be neither merged nor repaired in place (the
+PR's closing comment).
 **What this forbids/implies:** do not resume or reopen PR #544. The branch the 2026-09-01 entry names is
 kept only as issue #747's evidence. Work on the migration-proof gate starts from issue #747.
 
@@ -101,6 +104,9 @@ on a name alone waits for Mason's side-by-side approval; CAS-less identities are
 for CAS backfill. D-AA-3, a match by name OR CAS that claims a different canonical parent is refused at
 import with a named error, before any write. D-AA-4 (settled technically): no path renames a shared
 ingredient row, and multi-identity inserts take a deterministic order.
+**Why.** A CAS number is an official registry identifier, while names are not unique and change, so a
+name-only match is a suspicion that goes to a person; and ambiguous chemistry must not enter the system
+(plan §D-AA).
 **What this forbids/implies:** WP-1 implements D-AA as settled; Revision 12's `ON CONFLICT … DO UPDATE SET
 name` mechanism stays withdrawn. Until WP-1 ships, concurrent creation of one new ingredient can still
 duplicate rows (an open HIGH in the plan).
@@ -117,6 +123,9 @@ of scope; revisit only if real customer returns predate it. (3) Margin targets a
 value is only a fallback (seeding is in `TODO.md`). (4) Below-cost lines are refused server-side unless an
 approval reason is checked against the locked cost, with an admin exception; live since 2026-08-12
 (`20260812115237_enforce_below_cost_admin_approval`) on every money-write RPC.
+**Why.** The 2026-08-08 audit found the sale-time margin guard was only a text colour, so a rep could save
+a below-cost line freely; and the existing return-cost rows were test and transitional data, not real
+history. The sources record no separate reason for the clawback or the per-product targets.
 **What this forbids/implies:** browser below-cost checks are a convenience, never the control; a new
 line-writing path must join the server-side wall, and an unrecognized below-cost path fails closed.
 

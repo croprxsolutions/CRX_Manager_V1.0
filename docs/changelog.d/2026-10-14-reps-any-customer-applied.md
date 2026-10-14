@@ -6,7 +6,13 @@
 v2 at 13:54 UTC on his yes. Read-only re-check 14:16 UTC: 1025 ledger rows / 1018 names, trigger
 `customers_guard_rep_edit_20261013` enabled, function v2 ACTIVE. Updated: `docs/reference/migration-history.md`
 (new live capture, row 943 APPLIED), `docs/manual/CURRENT_STATE.md`, `docs/manual/KNOWN_ISSUES.md` (deploy
-follow-up resolved), `docs/manual/ARCHITECTURE.md`. Still owed: a signed-in rep click-through on the live
+follow-up resolved), `docs/manual/ARCHITECTURE.md`, and `.claude/schema-registry.json` (CodeRabbit: high-water and
+applied-name list were still at `20261012234633`). The registry was brought to the live state of ~15:10 UTC, which
+also includes `20261014150000_products_tier_price_cent_scale` (applied 15:02 UTC from open PR #910; its three
+`products_tier*_price_whole_cents_chk` CHECKs go to `skipped_constraints`). Only those two migrations ran since the
+registry build and neither touched another table, so the change was applied as a delta and then checked against live:
+the CHECK-constraint names, column list, NOT NULL columns and applied-migration names each hash identically to a
+read-only live read (1019 names, 2097 columns). Still owed: a signed-in rep click-through on the live
 site (goals doc, Goal 2).
 
 **Smoke chains.** After the apply, the live run of the new `reps_work_any_customer` chain passed, but three
@@ -17,8 +23,8 @@ rules. Fixed (chain files only; no app or database change):
   2026-07-18). Now creates a pricing-free shell and prices it through `preview_product_pricing_changes` /
   `apply_product_pricing_change_set`, the pattern of `smoke-order-invoice-type-gate.sql`.
 - `smoke-per-line-split-billing.sql`: its cost-less product hit `_enforce_below_cost_line`
-  (`COST_BASIS_REQUIRED`) before the split guards ran. Same governed pricing (cost 5.00, three equal tier
-  prices); the line still uses its manual override price.
+  (`COST_BASIS_REQUIRED`) before the split guards ran. Same governed pricing (cost 5.00, the same price
+  across all three tiers); the line still uses its manual override price.
 - `smoke-adversarial-money-inventory-closeout.sql`: its source-text check expected `save_purchase_order`
   to call the ASCII-identity impl directly. Since `20260726190515` it takes the PO advisory lock and calls
   `_section9_save_purchase_order_serialized`, which owns the bulk vendor checks and calls the identity impl.

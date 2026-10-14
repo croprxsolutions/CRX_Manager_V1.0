@@ -106,16 +106,16 @@ BEGIN
      -- (5.00) and tier-1 price (7.00) at both the stored item and the
      -- returned/stored quote-total boundaries: 2 units = 14.00 price,
      -- 10.00 cost, 4.00 profit.
-     OR (SELECT price_per_unit FROM quote_items WHERE quote_id = v_quote) <> 7
-     OR (SELECT current_cost FROM quote_items WHERE quote_id = v_quote) <> 5
-     OR (SELECT total_price FROM quote_items WHERE quote_id = v_quote) <> 14
-     OR (SELECT profit FROM quote_items WHERE quote_id = v_quote) <> 4
-     OR (SELECT total_price FROM quotes WHERE id = v_quote) <> 14
-     OR (SELECT total_cost FROM quotes WHERE id = v_quote) <> 10
-     OR (SELECT total_profit FROM quotes WHERE id = v_quote) <> 4
-     OR (v_q->'server_totals'->>'total_price')::numeric <> 14
-     OR (v_q->'server_totals'->>'total_cost')::numeric <> 10
-     OR (v_q->'server_totals'->>'total_profit')::numeric <> 4 THEN
+     OR (SELECT price_per_unit FROM quote_items WHERE quote_id = v_quote) IS DISTINCT FROM 7::numeric
+     OR (SELECT current_cost FROM quote_items WHERE quote_id = v_quote) IS DISTINCT FROM 5::numeric
+     OR (SELECT total_price FROM quote_items WHERE quote_id = v_quote) IS DISTINCT FROM 14::numeric
+     OR (SELECT profit FROM quote_items WHERE quote_id = v_quote) IS DISTINCT FROM 4::numeric
+     OR (SELECT total_price FROM quotes WHERE id = v_quote) IS DISTINCT FROM 14::numeric
+     OR (SELECT total_cost FROM quotes WHERE id = v_quote) IS DISTINCT FROM 10::numeric
+     OR (SELECT total_profit FROM quotes WHERE id = v_quote) IS DISTINCT FROM 4::numeric
+     OR (v_q->'server_totals'->>'total_price')::numeric IS DISTINCT FROM 14::numeric
+     OR (v_q->'server_totals'->>'total_cost')::numeric IS DISTINCT FROM 10::numeric
+     OR (v_q->'server_totals'->>'total_profit')::numeric IS DISTINCT FROM 4::numeric THEN
     RAISE EXCEPTION 'SMOKE_FAIL: fresh quote save lost canonical section/item/math behavior';
   END IF;
 

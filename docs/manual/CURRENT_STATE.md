@@ -14,7 +14,10 @@ ships or quarterly, whichever comes first.
 - **Effective ordering high-water: `20261013220000_reps_work_any_customer`**
   (ledger version `20261014131450`, UTC; applied live 2026-10-14 from PR #907, which merged as
   `395bdcd9a`). It replaced `20261010120000_cap_delivery_invoice_at_delivered` (ledger
-  `20261012234633`, applied 2026-10-12 from PR #889). Nothing from PR #889 or PR #907 is left unapplied. The effective ordering high-water is the
+  `20261012234633`, applied 2026-10-12 from PR #889). Nothing from PR #889 or PR #907 is left unapplied.
+  **Superseded live at 15:02 UTC the same day:** `20261014150000_products_tier_price_cent_scale` (ledger
+  `20261014150257`) was applied from PR #910 (open when this was written; read-only ledger read
+  2026-10-14 ~15:10 UTC: 1026 rows / 1019 names), so that file is now the high-water. The effective ordering high-water is the
   newest applied row's effective stamp: its authored 14-digit name stamp, or, for a row registered
   under a bare name, a stamp synthesized from its ledger version. It is what the migration ordering
   guard compares, so a new migration must sort above it. Re-read live before numbering one; this

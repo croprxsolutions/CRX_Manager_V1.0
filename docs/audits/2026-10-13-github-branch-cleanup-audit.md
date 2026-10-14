@@ -445,7 +445,11 @@ How the helper behaves:
 - **It changes nothing on GitHub.** Its git and gh calls only read. The one local side effect is fetching
   `main` and PR #901's head into this PC's remote-tracking refs.
 - **It prints every command that changes GitHub;** the operating session runs each one itself, in plain
-  text, so the repository's safety hooks see every change.
+  text, so every change is visible in the session. The tag push is an ordinary `git push`, so the pre-push
+  hook runs on it. **No local hook inspects the `updateRefs` deletes** (`KNOWN_ISSUES.md`, "Local hooks do
+  not inspect GitHub GraphQL ref updates"). What guards each delete is: the helper's `check` immediately
+  before it; GitHub's compare-and-swap, which deletes only at the ledger commit; GitHub's server-side
+  `protect-main` ruleset, which forbids deleting `main`; and Mason's yes for that batch.
 - **It reads the ledger only from the commit Mason approves** (`--approved`). It accepts that ledger only
   if it has exactly 157, 16 and 0 rows, no duplicates, safe names, and restore sources in the expected
   form.

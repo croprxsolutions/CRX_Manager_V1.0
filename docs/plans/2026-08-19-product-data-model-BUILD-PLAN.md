@@ -2369,7 +2369,8 @@ concentration on spray paperwork must not depend on array order.**
   mechanism WP-1 builds for D-AA** keeps the catalogue consistent across every approval that will
   ever run. **Neither substitutes for the other** — a global constraint cannot see two elements inside one
   payload, and the payload check cannot see another session. **This rule stands and is unaffected by
-  the withdrawal**; it is simply half of a pair whose other half is undecided.
+  the withdrawal**; it is simply half of a pair whose other half is settled (D-AA, below) but not yet
+  implemented.
 
 **Canonical form identity is SETTLED as D-AA *(Mason, 2026-08-27)*, its mechanism belongs to WP-1's
 build cycle, and the cross-product race stays a KNOWN OPEN HIGH until that mechanism ships

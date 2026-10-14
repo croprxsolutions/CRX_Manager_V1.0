@@ -8,7 +8,7 @@ v2 at 13:54 UTC on his yes. Read-only re-check 14:16 UTC: 1025 ledger rows / 101
 (new live capture, row 943 APPLIED), `docs/manual/CURRENT_STATE.md`, `docs/manual/KNOWN_ISSUES.md` (deploy
 follow-up resolved), `docs/manual/ARCHITECTURE.md`, and `.claude/schema-registry.json` (CodeRabbit: high-water and
 applied-name list were still at `20261012234633`). The registry was brought to the live state of ~15:10 UTC, which
-also includes `20261014150000_products_tier_price_cent_scale` (applied 15:02 UTC from open PR #910; its three
+also includes `20261014150000_products_tier_price_cent_scale` (applied 15:02 UTC from PR #910; its three
 `products_tier*_price_whole_cents_chk` CHECKs go to `skipped_constraints`). Only those two migrations ran since the
 registry build and neither touched another table, so the change was applied as a delta and then checked against live:
 the CHECK-constraint names, column list, NOT NULL columns and applied-migration names each hash identically to a

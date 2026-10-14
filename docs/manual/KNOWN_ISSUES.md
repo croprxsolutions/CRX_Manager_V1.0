@@ -30,7 +30,7 @@ date and was not all re-measured.
   (`20261010014642`) and `20261007150100` (`20261010043006`); then on 2026-10-12 by PR #889's
   `20261007150200` (`20261012234157`) and `20261010120000` (`20261012234633`); and on 2026-10-14 by
   PR #907's `20261013220000_reps_work_any_customer` (`20261014131450`) and PR #910's
-  `20261014150000_products_tier_price_cent_scale` (`20261014150257`; PR #910 open when this was written).
+  `20261014150000_products_tier_price_cent_scale` (`20261014150257`; PR #910 merged as `729f9fa2d`).
 
 **Layout.** Open items come first. Everything fixed, merged, applied, retired or closed is in
 **Resolved and closed (archive)** at the end of this file, newest first, with its original text.

@@ -13,8 +13,8 @@ ships or quarterly, whichever comes first.
 ## Current state at a glance (2026-10-14)
 
 - **Effective ordering high-water: `20261014150000_products_tier_price_cent_scale`**
-  (ledger version `20261014150257`, UTC; applied live 2026-10-14 15:02 UTC from PR #910, open when this
-  was written; read-only ledger read 2026-10-14 15:35 UTC: 1026 rows / 1019 names). Before it, the same
+  (ledger version `20261014150257`, UTC; applied live 2026-10-14 15:02 UTC from PR #910, merged as
+  `729f9fa2d`; read-only ledger read 2026-10-14 15:35 UTC: 1026 rows / 1019 names). Before it, the same
   morning: `20261013220000_reps_work_any_customer` (ledger `20261014131450`, applied from PR #907, which
   merged as `395bdcd9a`), which replaced `20261010120000_cap_delivery_invoice_at_delivered` (ledger
   `20261012234633`, applied 2026-10-12 from PR #889). Nothing from PR #889 or PR #907 is left
@@ -47,7 +47,7 @@ ships or quarterly, whichever comes first.
   (2026-10-12 UTC), `20261007150200_release_reservations_of_deleted_spring_orders` (`20261012234157`)
   and `20261010120000_cap_delivery_invoice_at_delivered` (`20261012234633`). Then, from PR #907
   (2026-10-14 UTC), `20261013220000_reps_work_any_customer` (`20261014131450`); then, from PR #910
-  (open when this was written; 2026-10-14 UTC), `20261014150000_products_tier_price_cent_scale`
+  (merged as `729f9fa2d`; 2026-10-14 UTC), `20261014150000_products_tier_price_cent_scale`
   (`20261014150257`).
 - **Nothing from the commission cohort is parked on `main` any more.** The whole cohort
   `20260914100100`..`20260914100900` is live. (Until 2026-09-27 evening, `20260914100900` was the

@@ -1,7 +1,7 @@
 # CRX Manager: Direction and Goals (October 2026)
 
 **Owner:** Mason Wells. **Drafted:** 2026-10-13, from the scalability review (Claude, plus two independent Codex Sol reviews). Mason's decisions were recorded the same day.
-**Revised:** 2026-10-14, after an independent Codex `gpt-6.1-sol` (high reasoning) review of this plan. Claude checked that review's key claims against the code and the live system before applying them.
+**Revised:** 2026-10-14, after an independent Codex `gpt-6.1-sol` (high reasoning) review of this plan. Mason asked for that model by name, and the review was advice on the plan, not a ship gate. Ship gates still use the pinned models in `docs/reference/codex-model-tuning.md`, and this docs-only change uses the documentation-only exemption. Claude checked that review's key claims against the code and the live system before applying them.
 **Status:** ACTIVE. Mason sets the goals; open decisions are in section 6.
 **Replaces:** the priority order in `docs/roadmap/2026-07-15-roadmap-and-execution-plan.md`. The north star there still stands.
 
@@ -99,7 +99,7 @@ Each goal has a plain test for "done". That test is the **minimum**: each goal's
 - Photos require an active staff sign-in to view.
 - Drivers and applicators can't read product cost or margin; applicators only see fields for their assigned jobs.
 
-**Done when:** separate live checks, one per rule and identity, all pass:
+**Done when:** separate checks, one per rule and identity, all pass. Read-only access and refusal checks run on live. Anything that writes runs on the isolated test system (Goal 6), unless Mason approves a specific live test in that conversation. That includes new uploads, previews, printed documents, deactivating an account, and ending an assignment.
 - an admin can pull the register, and a sales rep, driver and applicator are each refused;
 - for each of the three photo buckets (`delivery-photos`, `receiving-photos`, `team-note-attachments`): old public links stop working; viewing a photo needs an active, authorized staff sign-in every time, so a copied link alone grants nothing; a signed-out visitor and a deactivated account are each refused; existing photos, new uploads, previews and printed documents still work for staff. An expiring "signed" link does **not** meet this on its own, because anyone holding it can open it until it expires;
 - customer delivery receipts keep working without exposing private staff-photo links. Today's receipt email embeds the photo links directly (`src/lib/deliveryCompletionEmail.ts`), so this has to be redesigned along with the photo change;
@@ -209,7 +209,7 @@ Failed work stays visible and recoverable. The app tells the driver which steps 
 **Done when:**
 - a full test month of invoices, payments **and credits** lands in QuickBooks Desktop. It matches CRX in transaction counts, invoice numbers, each customer's open balance, payment allocations, credits and the agreed accounts, not just the grand total;
 - sync failures are tested: partial and multi-invoice payments, unapplied money, a repeated export, a lost acknowledgement, a batch that fails halfway, an edit made in QuickBooks, and a restore of either system. Recovery picks up from confirmed results without duplicates. Each CRX record keeps a permanent link to its QuickBooks record, unresolved entries are visible with an owner, and closed periods are never silently rewritten;
-- a real **card** payment and a real **ACH** payment each settle end to end;
+- a **card** payment and an **ACH** payment each settle end to end in the processor's test mode. Then one small real card payment and one small real ACH payment settle on live. These move real money, so they run only after Mason approves each one in that conversation. Every other payment case below runs in the processor's test mode;
 - a pending payment and a failed or declined one each leave the invoice unpaid, with its balance unchanged, until the processor confirms settlement;
 - a settled payment later reversed (an ACH return or a card chargeback) reopens the invoice balance exactly once, and the reversal reaches QuickBooks;
 - also tested: duplicate, late, forged and out-of-order processor notifications; a lost reply; repeated clicks; paying an already-paid or voided invoice; partial, multi-invoice and over-payment (overpayment becomes prepay); partial and full refunds; and a chargeback later resolved. Each changes the customer balance and QuickBooks exactly once. Gross payments, fees and net bank deposits reconcile.

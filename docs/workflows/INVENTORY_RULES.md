@@ -80,7 +80,7 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
 | Type | When used | Effect on quantity_available |
 |------|-----------|------------------------------|
 | `received` | PO items are received | + (increases stock) |
-| `booked` | An order is created and its lines are pre-booked (quote conversion, direct order, booking draw-down). Inventory holds write no ledger row | No change to quantity_available (adds to quantity_prebooked) |
+| `booked` | An order is created and its lines are pre-booked, by every order-creation path except quick delivery: quote conversion, direct order, rush order, bulk import, blend-ticket order and booking draw-down. Inventory holds write no ledger row | No change to quantity_available (adds to quantity_prebooked) |
 | `delivered` | Delivery is completed | - (decreases stock) |
 | `returned` | Customer return is received back | + (increases stock, if restocked) |
 | `adjusted` | Manual inventory adjustment or cycle count variance | +/- (can go either direction) — **see caveat below** |

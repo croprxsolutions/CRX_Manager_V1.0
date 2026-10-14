@@ -26,6 +26,8 @@ file; building starts only when Mason says so in chat.
 **Iteration 2 (2026-10-14).** Merged the findings of three sessions ("CRX pricing updates and history",
 "Missing pricing and cost tracking features" and the branch-cleanup session that wrote this draft), with a Codex
 `gpt-6-luna` xhigh second opinion. The new material is in section 7; sections 4 and 5 are updated to match.
+Section 8 adds a `gpt-6-sol` high review of the Excel workbook method, at Mason's request, with its findings
+checked against source and the live database.
 
 **Where this came from.** The 2026-10-13 GitHub branch cleanup ran two read-only reviews of all 185 old
 branches for work worth reusing, led by Mason's question about "pricing history lookup and cost tracking on
@@ -112,6 +114,12 @@ approval still needs an active admin) and `20260814063000_quote_sections_rpc_own
 
 Small slices, each its own change. Order and scope are open for discussion.
 
+0. **Workbook hardening** (section 8, from the Sol review; can run alongside slices 1-2). A "Download full
+   price sheet" action that always exports every active product; outlier warnings in the preview (large jump,
+   below cost, margin outside a band) that the approver must acknowledge; the effective price per tier after
+   fallback; required source and reason columns for changed rows, stored with history; and the uploaded file
+   plus an approval receipt kept with the change set. Proof: a real export, edit and apply on a test product,
+   including one deliberate tenfold typo that the preview must flag.
 1. **Quote line identity and quote-time cost on screen.** Rebuild by hand from #397's commits (main's
    QuoteBuilder has moved on). Do the money math in `src/lib/money.ts`. Re-picking the same product keeps the
    line's frozen cost; swapping to a different product starts fresh. Proof: save a quote with one product in
@@ -193,6 +201,11 @@ Questions:
 Carried from the salvage review:
 - ~~**(b) Visibility.**~~ **Answered 2026-10-14:** sales reps see the last price charged to a customer; price
   history (sell and cost) is admin-only.
+- **Other ways to change a price (section 8).** Inline editing on the Products page and the product page's
+  pricing card still change prices outside the workbook's review. Keep them for one-off fixes (with the same
+  required source and reason), limit them, or remove them so the workbook is the only way?
+- **Outlier band.** What counts as a suspicious change for the preview warning: for example a move of more
+  than 15% from the current price, any price below cost, or a margin under a floor?
 - ~~**Price intake cadence.**~~ **Answered 2026-10-14:** download the entire sheet each time, monthly or
   mid-month. The export is valid for 7 days and a preview for 2 hours, so each change starts from a fresh
   export.
@@ -271,3 +284,81 @@ Mason's July decision. The screens look empty because almost nothing feeds them:
 11. **Related, outside this plan.** Inventory is valued at today's `current_cost` times quantity, with no
     per-receipt cost (`docs/plans/2026-07-16-inventory-costing-plan.md`, parked). `issue_return_credit`
     reverses revenue but not cost of goods (known open item).
+
+## 8. The Excel workbook method: Sol review (2026-10-14)
+
+Mason asked for a Sol review of "how to update pricing" with the workbook. Advisory run: `gpt-6-sol` at
+`high`, read-only, given this plan, the live facts and the workbook code (`src/lib/productPricingWorkbook.ts`,
+`src/lib/productPricingSupplierEvidenceWorkbook.ts`, `src/pages/Products.tsx`, and the v2 export/preview/apply
+SQL). It returned 30 findings. Each one below was checked against source and the live database; Sol's
+"cannot verify" items were resolved where possible.
+
+**Verdict.** The full-sheet workbook is a sound operating method for about 595 active products, three tiers and
+one or two admins. It already proves which product and version each row belongs to. It cannot tell whether a
+valid-looking number is wrong: a case price typed as a jug price, a 30-gallon quote on the 2.5-gallon row, or
+$900 typed for $90. The method needs a tighter review step and a few small product changes, listed below.
+
+**Already handled (checked):**
+- **Formulas are rejected.** The upload marks any formula cell (`productPricingWorkbook.ts`, about lines
+  680-697), and the live `preview_product_pricing_changes`, which the v2 preview calls, refuses any
+  `pricing_worksheet` row with a formula.
+- **Apply is all-or-nothing.** The live `apply_product_cost_basis_change_set` and
+  `apply_product_pricing_change_set` have no exception handler, so any failure rolls back every row, the
+  cost-basis rows and the history rows together.
+- **A blank pricing mode cannot silently drop an edit.** The preview raises
+  `WORKBOOK_BLANK_MODE_CHANGED_VALUES` ("Pricing values changed, but no pricing mode was selected for this
+  row").
+- **The preview already shows before and after.** `PricingChangePreviewModal.tsx` shows ready, unchanged,
+  conflict and invalid counts, and for each row old and new cost, all three tier prices, margins and per-acre
+  prices.
+- **Concurrent edits are caught.** Row versions make a stale row a conflict rather than an overwrite.
+
+**Real gaps (checked):**
+1. **"Entire sheet" is not guaranteed.** The export takes the selected rows, or else every row passing the
+   current Products-page filters (`Products.tsx`, about lines 517-521). A forgotten filter exports 40 products
+   instead of 595. Fix: a separate "Download full price sheet" action that always exports every active product.
+2. **No warning on suspicious jumps.** Nothing flags a price that moved by more than a set percentage, a
+   price below cost, or a margin outside a normal band. Fix: outlier warnings in the preview, which the
+   approver must acknowledge.
+3. **Tier fallback is not shown.** A blank tier 2 or 3 price falls back to tier 1, and the preview shows the
+   blank rather than the price those customers will actually pay. Fix: show the effective price per tier.
+4. **No source per row.** The sheet has `change_reason` but no supplier, document date or effective date, and
+   the reason defaults to a generic text when blank (section 7, finding 6). Fix: required source and reason
+   columns for every changed row, stored with the history row.
+5. **No record of what was reviewed and approved.** History records who applied and when, but not the
+   reviewed file or the agents' exception reports. Fix: keep the uploaded file and an approval receipt with
+   the change set.
+6. **Product details ride along.** The v2 sheet also edits product information such as `rate_unit`, which
+   changes per-acre pricing without a price-history row (section 7, finding 5).
+7. **Units are the biggest human risk.** A supplier price per case entered as the CRX per-jug cost passes
+   every check. The sheet shows supplier evidence and units only where supplier links exist (10 products
+   today).
+
+**Conflicts with other parts of this plan:**
+- **The quote lock must come first (Sol's only BLOCKER).** Under today's code a mid-month workbook change
+  re-prices every sent quote on its next save and on Convert (section 7, finding 1). Slice 2 should land
+  before Mason relies on sent quotes keeping their prices.
+- **Other ways to change a price still exist.** Inline editing on the Products page and the product page's
+  pricing card still change prices without the workbook's review. Open question for Mason (section 5).
+- **Stale costs.** 600 of 602 cost bases are still the original load, so margins in the sheet are measured
+  against old costs until supplier evidence is refreshed (slice 7 and the TODO deadline item).
+
+**How a reviewing agent should work** (Sol's advice). The agent gets read-only copies of the final workbook,
+each supplier PDF, email or text behind a changed row, and a changes-only report. For every changed row it
+checks: supplier and document date, product and package, quoted unit and the conversion to the CRX unit, old
+and new cost, pricing mode, all three resulting tier prices (with fallback), margin and per-acre result. It
+returns a list of discrepancies with their sources, and never edits numbers or approves. A second agent can
+recheck the arithmetic independently. Mason or an admin resolves every exception against the original
+supplier message.
+
+**Draft monthly / mid-month routine** (to be confirmed with Mason):
+1. Save the supplier message (PDF, email or text) and note its effective date.
+2. Download a fresh full price sheet. Keep the original download unedited as the dated "before" record.
+3. In a working copy, find the products the supplier changed, check the package and unit, enter the new
+   cost or prices, the pricing mode, the source and the reason.
+4. Have one or more agents review the changed rows against the supplier messages and return discrepancies
+   only. Fix them.
+5. Upload with "Review Pricing File". Approve only if the counts match what you changed, nothing is in
+   conflict or invalid, and every warning is explained.
+6. After applying, open two or three changed products and confirm the live prices. If the sheet or preview
+   expired, or another admin changed a product, start again from a fresh download.

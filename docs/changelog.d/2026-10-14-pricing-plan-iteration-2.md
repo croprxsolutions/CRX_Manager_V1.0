@@ -15,7 +15,12 @@ tracking features") to compare notes and produce one document to build from. The
     eleven findings with live read-only evidence, including the Convert path confirmed from live function
     bodies, the need for a database-enforced lock, tier changes erasing negotiated prices, the missing
     starting snapshot, unlogged per-acre changes and the optional reason;
-  - updates slices 2-4 and the open questions to match, and records a third read of PRs #397 and #350.
+  - updates slices 2-4 and the open questions to match, and records a third read of PRs #397 and #350;
+  - adds section 8, a `gpt-6-sol` high review of the Excel workbook method that Mason asked for. Of its 30
+    findings, the ones checked as already handled (formula rejection, all-or-nothing apply, blank-mode
+    refusal, before/after preview, version conflicts) are separated from the real gaps (export follows the
+    page filter, no outlier warnings, tier fallback not shown, no per-row source, no approval receipt). It also
+    adds a draft monthly routine, a "workbook hardening" slice 0 and two open questions.
 - **`docs/manual/DECISION_LOG.md`:** one 2026-10-14 entry for the three decisions.
 
 Checked: live read-only queries and live function definitions on 2026-10-13/14. A claim from one session that

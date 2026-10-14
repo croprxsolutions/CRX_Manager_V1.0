@@ -1,13 +1,15 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-14 (America/Chicago) against the live migration ledger** (read-only,
-2026-10-14 15:35 UTC, after `20261014150000_products_tier_price_cent_scale` applied at 15:02:57 UTC from
-PR #910; the counts and high-water live only in `docs/reference/migration-history.md`). That read
-re-certified the applied-migration list in this header; the 14:16 UTC read, after
-`20261013220000_reps_work_any_customer` applied at 13:14:50 UTC, re-certified the reps-work-any-customer
-follow-ups entry (migration and
-`customer-document-files` v2 both live). The 2026-10-13 22:02 UTC read re-checked the order-invoice
-rep-scope entry below against Mason's 2026-10-13 decision, and re-certified the 2026-10-07 integrity-fix
+**Last verified: 2026-10-14 (America/Chicago) against the live migration ledger** (read-only
+Management API query, 2026-10-14 17:28 UTC; the two changes since the 2026-10-13 22:02 UTC read are
+that `20261013220000_reps_work_any_customer` (ledger `20261014131450`) and
+`20261014150000_products_tier_price_cent_scale` (ledger `20261014150257`) are now applied; the counts
+and high-water live only in `docs/reference/migration-history.md`). That 2026-10-14 read re-certified only
+this header's ledger facts. A 14:16 UTC read the same day, after `20261013220000_reps_work_any_customer`
+applied at 13:14:50 UTC, re-certified the reps-work-any-customer follow-ups entry (migration and
+`customer-document-files` v2 both live). The 2026-10-13 read also re-checked the
+order-invoice rep-scope entry below against Mason's 2026-10-13 decision.
+That read re-certified only the applied-migration list in this header and the 2026-10-07 integrity-fix
 entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150200` and `20261010120000`). The
 2026-10-07 read re-certified the CRX-LIFE-001 entry (fix live; two post-apply gates still open). Every other entry's status (open, or
 fixed/applied/closed) was last re-checked on 2026-09-26 against that day's ledger snapshot and

@@ -6,14 +6,10 @@
 v2 at 13:54 UTC on his yes. Read-only re-check 14:16 UTC: 1025 ledger rows / 1018 names, trigger
 `customers_guard_rep_edit_20261013` enabled, function v2 ACTIVE. Updated: `docs/reference/migration-history.md`
 (new live capture, row 943 APPLIED), `docs/manual/CURRENT_STATE.md`, `docs/manual/KNOWN_ISSUES.md` (deploy
-follow-up resolved), `docs/manual/ARCHITECTURE.md`, and `.claude/schema-registry.json` (CodeRabbit: high-water and
-applied-name list were still at `20261012234633`). The registry was brought to the live state of ~15:10 UTC, which
-also includes `20261014150000_products_tier_price_cent_scale` (applied 15:02 UTC from PR #910; its three
-`products_tier*_price_whole_cents_chk` CHECKs go to `skipped_constraints`). Only those two migrations ran since the
-registry build and neither touched another table, so the change was applied as a delta and then checked against live:
-the CHECK-constraint names, column list, NOT NULL columns and applied-migration names each hash identically to a
-read-only live read (1019 names, 2097 columns). Still owed: a signed-in rep click-through on the live
-site (goals doc, Goal 2).
+follow-up resolved), and `docs/manual/ARCHITECTURE.md`. This PR had also brought `.claude/schema-registry.json` to live by delta
+(CodeRabbit: high-water and applied-name list were still at `20261012234633`); PR #921 then regenerated the
+whole registry from live at 17:28 UTC, so this PR now carries main's copy unchanged. Still owed: a signed-in
+rep click-through on the live site (goals doc, Goal 2).
 
 **Smoke chains.** After the apply, the live run of the new `reps_work_any_customer` chain passed, but three
 older chains this change edited stopped AFTER every step it touches, on fixtures that rotted under earlier

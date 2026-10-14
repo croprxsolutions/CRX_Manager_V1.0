@@ -405,6 +405,8 @@
       "20261007150100_mark_spring_2026_deliveries_billed_in_chem_man",
       "20261007150200_release_reservations_of_deleted_spring_orders",
       "20261010120000_cap_delivery_invoice_at_delivered",
+      "20261013220000_reps_work_any_customer",
+      "20261014150000_products_tier_price_cent_scale",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1024,9 +1026,7 @@
       "workflow_gaps_phase3_field_billing_splits",
       "workflow_gaps_phase4_dispatch_columns",
       "workflow_gaps_phase5_crop_history",
-      "year_end_summary",
-      "20261013220000_reps_work_any_customer",
-      "20261014150000_products_tier_price_cent_scale"
+      "year_end_summary"
     ]
   },
   "generated_columns": [

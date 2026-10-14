@@ -55,7 +55,8 @@ tags it needed were created first, and the helper's sweep reported all 157 gone 
 intact. All 12 kept branches are unchanged. Each time `main` moved, the review baseline was re-measured
 and rewritten each time, as the report records: at `22c10c8df` (after #900, #903 and #904), `82c8c0817`
 (after #906, mid-batch), `395bdcd9a` (after #907), `eec473890` (after #909), `d12fc0f2a` (after #908),
-`95f3c563c` (after #905) and `5976d3dbc` (after #914). The report names the snapshot in force for the 16. The 16 "after this PR" deletions are approved
+`95f3c563c` (after #905), `5976d3dbc` (after #914) and `ca20e4757` (after #911, #912, #915 and #916).
+The report names the snapshot in force for the 16. The 16 "after this PR" deletions are approved
 by Mason ("yes delete the 16", 2026-10-14) and wait only for this PR to merge and the helper's gates to pass.
 
 This PR rescues or corrects:

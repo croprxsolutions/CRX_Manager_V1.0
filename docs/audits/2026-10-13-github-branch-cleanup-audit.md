@@ -400,9 +400,10 @@ local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs
 `2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
 - script: `e80f52bf633c09edd6ced6956ab7629683c1eadd0ebc25029175befe38621988` (2026-10-13 salvage revision:
   only the sealed counts 157/16/0 and the "Mason's call (0)" marker changed)
-- baseline: `236949fd8f989562e7d847f7e4b1eb5c648a1a8ac45653dc4f898da3a64df36f` (re-measured at `main`
-  `5976d3dbc` on 2026-10-14, after PR #914 merged, before the "after this PR" batch; the earlier files are
-  kept beside it: `2026-10-13-cleanup-baseline.at-95f3c563c.json`, hash `dbf459d4…a44e`;
+- baseline: `43086de83b6dcfc73aa846a55c440803ed6094531bb2d24cbde8c6f46105d9c0` (re-measured at `main`
+  `ca20e4757` on 2026-10-14, after PRs #911, #912, #915 and #916 merged, before the "after this PR" batch;
+  the earlier files are kept beside it: `2026-10-13-cleanup-baseline.at-5976d3dbc.json`, hash
+  `236949fd…df36f`; `2026-10-13-cleanup-baseline.at-95f3c563c.json`, hash `dbf459d4…a44e`;
   `2026-10-13-cleanup-baseline.at-d12fc0f2a.json`, hash `9813b04a…dcb7`;
   `2026-10-13-cleanup-baseline.at-eec473890.json`, hash `60176b3f…b002`;
   `2026-10-13-cleanup-baseline.at-395bdcd9a.json`, hash `9db70b71…4219`;
@@ -457,7 +458,11 @@ merge and only if the helper's "after this PR" gates all pass on the merged stat
 (`codex/pr389-coderabbit-fixes`, `claude/pricing-audit-strategy-jym8rr`,
 `claude/invoice-screen-safety-20261009`) as pricing-plan sources; no deletion row is newly named, so the
 baseline was rewritten at that `main` with those three references recorded. PR #914 then merged
-(`main` `5976d3dbc`); all 185 were unchanged, and the baseline was rewritten at that `main`.
+(`main` `5976d3dbc`); all 185 were unchanged, and the baseline was rewritten at that `main`. PRs #911,
+#912, #915 and #916 then merged (`main` `ca20e4757`). The two docs-cleanup PRs rewrote old documents that
+14 branches also edit, so those 14 gained MAIN-MOVED paths. All 14 were already deleted in the "after
+yes" batch and stay restorable from their PRs; none of the 16 "after this PR" branches changed, and no
+deletion row is newly named in the watched documents. The baseline was rewritten at that `main`.
 
 **Landing this record.** Each re-baseline edits only this file, so the PR stays documentation-only under
 `docs/reference/sol-exempt-paths.md` and needs no fresh Sol review. Every exact-head gate still applies:

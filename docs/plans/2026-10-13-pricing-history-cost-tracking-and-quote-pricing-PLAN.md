@@ -165,6 +165,13 @@ Small slices, each its own change. Order and scope are open for discussion.
      sent. The proof covers an added line, a removed line, a product
      swapped on an existing line, a duplicate added in the revision, and a quote sent with two differently
      priced lines of the same product followed by a quantity-only revision.
+   - Rewind breaks ID matching (Codex on PR #917, confirmed live 2026-10-14). An ordinary save keeps each
+     line's ID: `_save_quote_below_cost_impl_20260810` deletes and re-inserts the lines but writes the same
+     `id`. A rewind does not: `_restore_quote_version_owner_impl` deletes the quote's sections, which cascades
+     to the lines, and re-inserts them without `id`, so every restored line gets a new ID. Under ID matching,
+     rewinding to the sent version and then converting would be refused even though nothing changed. Restore
+     must keep the snapshot's line IDs or record an old-to-new ID map that Convert uses. The proof adds
+     rewind-then-convert, with and without a later quantity edit.
    - Partly drawn quotes: `draw_down_quote` relies on stable `quote_item_id` provenance and the
      `units_current` / `units_settled` split so a price change never re-bills delivered product
      (`20260816120000_draw_down_split_order_lines_by_price_tier.sql`; invariant in `KNOWN_ISSUES.md`). The

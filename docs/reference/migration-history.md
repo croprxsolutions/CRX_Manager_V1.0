@@ -52,9 +52,10 @@ capture, now superseded by the one above.** Read-only reads on project `rhyzpcqh
 
 Re-read the high-water read-only immediately before each apply, because another lane can move it,
 and refresh the applied-migration snapshot the ordering guard reads
-(`node scripts/refresh-applied-migrations.mjs`). `.claude/schema-registry.json` was last regenerated
-from live on 2026-10-07 ~12:25 UTC (PR #887, through `20261006200000`, `migrations_high_water`
-`20261007114554`); refresh it after the next live apply. Older boundary captures were removed from this
+(`node scripts/refresh-applied-migrations.mjs`). `.claude/schema-registry.json` was last brought to
+live on 2026-10-14 (PR #913, through `20261014150000`, `migrations_high_water` `20261014150257`; its
+CHECK names, columns, NOT NULL columns and applied-migration names each hash identically to a read-only
+live read); refresh it after the next live apply. Older boundary captures were removed from this
 section on 2026-10-02 because they read as competing "latest" evidence; they remain in git history
 and in the table rows below.
 

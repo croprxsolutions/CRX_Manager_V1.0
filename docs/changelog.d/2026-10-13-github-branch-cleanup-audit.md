@@ -57,7 +57,8 @@ and rewritten each time, as the report records: at `22c10c8df` (after #900, #903
 (after #906, mid-batch), `395bdcd9a` (after #907), `eec473890` (after #909), `d12fc0f2a` (after #908),
 `95f3c563c` (after #905), `5976d3dbc` (after #914) and `ca20e4757` (after #911, #912, #915 and #916).
 The report names the snapshot in force for the 16. The 16 "after this PR" deletions are approved
-by Mason ("yes delete the 16", 2026-10-14) and wait only for this PR to merge and the helper's gates to pass.
+by Mason ("yes delete the 16", 2026-10-14) in the conversation that ran the 157; they wait for this PR to
+merge and the helper's gates to pass. Any other session needs a fresh yes from Mason first.
 
 This PR rescues or corrects:
 

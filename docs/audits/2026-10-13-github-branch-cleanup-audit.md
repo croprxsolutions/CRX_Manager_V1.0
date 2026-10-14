@@ -1,7 +1,8 @@
 # GitHub branch cleanup audit and restore ledger (2026-10-13)
 
 **Status (2026-10-14): the 157 "after yes" deletions are DONE; the 16 "after this PR" deletions are
-APPROVED by Mason ("yes delete the 16") and wait only for this PR to merge and the helper's gates to pass.** Mason approved the 157 batch on 2026-10-14. It paused once
+APPROVED by Mason ("yes delete the 16") in the conversation that ran the 157, and wait for this PR to merge
+and the helper's gates to pass. Any other session needs a fresh yes from Mason first.** Mason approved the 157 batch on 2026-10-14. It paused once
 after 77 deletes, when PR #906 merged, and resumed under the re-baseline and the standing approval
 recorded in "Second re-baseline" below, which cover only the rest of that batch. The helper's sweep then
 reported all 157 gone with every restore source intact, and all 12 kept branches unchanged. The report
@@ -450,7 +451,9 @@ branch, `claude/rep-scope-order-invoices`: three paths it already held unlanded 
 `smoke-specs.json`, `src/lib/db.ts`) moved from BRANCH-ONLY to MAIN-MOVED because #907 edited them. No
 branch gained an unlanded path, so the rule above allowed the re-baseline. Mason gave his yes for the 16
 the same day ("yes delete the 16"), after being told they would run only once this PR merged. That yes is
-the batch's approval: no further approval is asked after the merge, but the batch still runs only after the
+the batch's approval only in the conversation where Mason gave it (`AGENTS.md`: approval must be in the
+current conversation). If that conversation runs the batch, it asks nothing further. Any other session
+must get a fresh yes from Mason in its own conversation first. Either way, the batch runs only after the
 merge and only if the helper's "after this PR" gates all pass on the merged state. PR #909 then merged (`main` `eec473890`); the re-measure there found all
 185 branches unchanged, so the baseline was rewritten once more at that `main`. PR #908 then merged
 (`main` `d12fc0f2a`); again all 185 were unchanged, and the baseline was rewritten at that `main`. PR #905 then merged

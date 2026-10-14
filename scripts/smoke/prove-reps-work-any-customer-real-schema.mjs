@@ -478,6 +478,9 @@ ROLLBACK;`,
 }
 
 function main() {
+  if (process.env.CRX_PROVER_BUILD_ONLY === '1') {
+    assert.ok(KEEP, 'CRX_PROVER_BUILD_ONLY needs CRX_PROVER_KEEP_CONTAINER=1');
+  }
   if (!REUSE) buildContainer();
   else assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'customers_guard_rep_edit_20261013';"), '0',
     'the reused container already has the candidate applied (it is in the AFTER state); rebuild it');
@@ -486,7 +489,6 @@ function main() {
   if (process.env.CRX_PROVER_BUILD_ONLY === '1') {
     // Dev aid: stop at the BEFORE state (seeded, candidate not applied) so other chains can be run
     // against the same real schema before and after applying the candidate by hand.
-    assert.ok(KEEP, 'CRX_PROVER_BUILD_ONLY needs CRX_PROVER_KEEP_CONTAINER=1');
     console.log(`[prover] BUILD ONLY: ${NAME} kept in the BEFORE state; the proof did not run`);
     return;
   }

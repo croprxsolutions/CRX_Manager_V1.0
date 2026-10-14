@@ -64,7 +64,7 @@ All variables must start with `VITE_` to be accessible in the app. See `.env.exa
 | Role | Access |
 |------|--------|
 | **admin** | Full access to everything |
-| **sales_rep** | Any customer (read and edit; only an admin reassigns one, and only an admin or the assigned rep changes its default commission split), all quotes (edits only their own), all orders (creates them and edits their lines), purchase orders (create, edit, submit, cancel and receive; deleting, reversing a receipt and over-receiving are admin-only), invoices under their own name, products (read-only) |
+| **sales_rep** | Any customer (read and edit; only an admin reassigns one, and only an admin or the assigned rep changes its default commission split), all quotes (edits only their own), all orders (creates them and edits their lines), purchase orders (create, edit, submit, cancel and receive; deleting, reversing a receipt and over-receiving are admin-only), invoices under their own name (enforced by save and post; the two create-invoice-from-order functions do not check it yet, see `docs/manual/KNOWN_ISSUES.md`), products (read-only) |
 | **driver** | Own assigned deliveries, customer addresses (read-only) |
 | **applicator** | Own assigned jobs, application records, products/fields (read-only) |
 

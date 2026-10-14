@@ -728,9 +728,11 @@ archive. They are listed here so the open part of this file shows them. None was
   allocated order fails on the table CHECK only after its first INSERT has drawn an invoice number
   from the sequence, so each such refused call (never sent by the app) leaves a numbering gap
   (Codex GitHub review on PR #885). (See CRX-LIFE-001.)
-  **Update 2026-10-13: neither planned change will carry the allow-list.** Mason dropped rep scoping on
-  2026-10-09, and admin-only invoicing (PR #902) was closed unmerged on 2026-10-13 when he decided reps
-  invoice any customer. PR #902 had re-emitted the split wrapper without the allow-list. The ready code
+  **Update 2026-10-13: neither planned change will carry the allow-list.** On 2026-10-09 Mason chose
+  admin-only invoicing (PR #902) instead of the rep-scoping change; #902 was closed unmerged on 2026-10-13,
+  when he decided reps invoice any customer (`DECISION_LOG.md`, 2026-10-13). That decision drops only the
+  customer-assignment half of rep scoping: a rep may still name only themselves as salesperson, and that
+  own-name rule stays enforced. PR #902 had re-emitted the split wrapper without the allow-list. The ready code
   (`ORDER_INVOICE_TYPE_NOT_ALLOWED`, before any number is drawn) is in migration `20261008120000`, about
   lines 339-344, on the kept branch `claude/rep-scope-order-invoices`. Whichever change next re-emits the
   split wrapper should add it.

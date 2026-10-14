@@ -96,9 +96,13 @@ Small slices, each its own change. Order and scope are open for discussion.
 5. **Cost evidence beside each quote line** (admin only, hidden in Customer View and on PDFs).
 6. **Profitability reports on cost at time of sale** (independent; can go first). Copy #397's three report
    fetchers and its test. The numbers will change, because lines on deleted or cancelled orders drop out.
-7. **Cost freshness.** Turn on supplier-evidence cost selection beyond the 10 pilot products (a live
-   switch: needs Mason's yes) and map the remaining purchase-order vendor names. Mostly data entry. This
-   overlaps the TODO deadline item "test the pricing/repricing path before sales season".
+7. **Cost freshness.** Widen supplier-evidence cost selection beyond the 10 pilot products and map the
+   remaining purchase-order vendor names. Mostly data entry. Roll it out product by product (or vendor by
+   vendor) through the `product_cost_basis_rollout` list, adding a product only once it has current
+   supplier evidence. The global `supplier_cost_basis_enabled` setting switches it on for every product
+   at once (`supabase/migrations/20260722064814_wells_cost_basis_rollout_gate.sql`), so it is the last
+   step, after the rollout is complete. Both are live changes and need Mason's yes. This overlaps the
+   TODO deadline item "test the pricing/repricing path before sales season".
 8. **Margin targets and floor.**
 9. **Early Bird price lists**, from the deleted design. Only after slice 2.
 
@@ -121,7 +125,13 @@ Questions:
   skips planned quotes (`is_planned`) and quotes with any partial draw-down, which staff close by hand. So
   under the lock decision, a planned or partly drawn quote would stay price-locked until someone closes it.
   - Should those quotes stay locked indefinitely, or does the lock need its own end?
-  - How is `expires_at` set from `valid_days`, and from creation or from sending? Not yet checked.
+  - **Every save resets the expiry date** (read from code 2026-10-14, not exercised). The quote screen
+    sends `expires_at` = the moment of the save plus `valid_days` on every save
+    (`src/pages/QuoteBuilder.tsx`, about lines 1719-1722), and `save_quote` overwrites the stored date
+    with it (`supabase/migrations/20260812115236_quote_items_cost_at_quote_snapshot.sql`, about lines
+    907-908; the live `save_quote` wrapper from `20260812115237` calls that body). So editing or revising
+    a sent quote today pushes its expiry, and with it any price lock, further out. The lock design must
+    keep or change this on purpose.
   - Does a separate 30-day stale rule matter here? The review mentioned one.
   - After expiry, does the quote re-price on its next save, or must it be re-sent?
 - **What if cost rises above a locked price before conversion?** The below-cost check uses today's cost, so
@@ -136,8 +146,8 @@ Carried from the salvage review:
 - **(b) Visibility.** Should sales reps see "last charged" prices and sell-price history? Cost history is
   admin-only under the 2026-07-20 decision.
 - **(c) Which cost the quote screen shows:** quote-time cost, today's cost, or both.
-- **(d) Supplier quotes.** Who supplies fresh supplier quotes, and should the supplier-evidence switch be
-  turned on for all products?
+- **(d) Supplier quotes.** Who supplies fresh supplier quotes, in what order should products join the
+  per-product rollout list, and when is the rollout complete enough to flip the global switch (slice 7)?
 - **(e) Margin targets:** one per product, a company default, or seeded from past selling prices?
 - **(f) Early Bird.** The design's four open questions, including what happens when a committed price is
   below today's cost.

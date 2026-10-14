@@ -10,12 +10,12 @@ may still appear inside pages the role can open, as RLS allows.
 |---------|-------|-----------|--------|------------|
 | Dashboard KPIs | Full view | Full view | No page access (lands on My Route) | No page access (lands on Field View) |
 | Products CRUD | Full | Read only | No page access | No page access |
-| Customers CRUD | Full | Read/edit any customer; create only self-assigned; no delete (only an admin reassigns; only an admin or the assigned rep changes the default commission split) | Via delivery only | No page access |
+| Customers CRUD | Full | Read/edit any customer; create only self-assigned; no delete (only an admin reassigns; only an admin or the assigned rep changes the default commission split; a customer with a posted or overdue invoice cannot be deactivated, `CUSTOMER_HAS_OPEN_INVOICES`) | Via delivery only | No page access |
 | Quotes CRUD | Full | Read all; edit own | No access | No access |
 | Orders CRUD | Full | Create/Read/Edit lines | No access | No access |
 | Inventory | Full | Read + holds | No page access | No access |
 | Deliveries | Full | Create/Edit/Cancel | Own + confirm/complete/photos/issues/quick delivery | No access |
-| Purchase Orders | Full | Create/Edit/Submit/Cancel/Receive (no delete) | No access | No access |
+| Purchase Orders | Full | Create/Edit/Submit/Cancel/Receive (no delete, no reversing a receipt, no over-receiving) | No access | No access |
 | Blend Tickets | Full | Upload/review | No access | No access |
 | Jobs | Full | Create/Edit | No access | Own assigned + record applied info |
 | Vehicles | Full | No page access | No access | No page access |

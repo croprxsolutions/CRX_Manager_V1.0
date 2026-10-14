@@ -443,8 +443,11 @@ archive. They are listed here so the open part of this file shows them. None was
   - **Commission splits outside the customer default.** `jobs_update` is `is_admin() OR
     is_sales_rep()` and nothing guards `jobs.commission_split`; quote and order splits are likewise
     editable by any rep on any customer (`save_quote`, order functions; pre-existing). The 2026-10-13
-    rule protects only `customers.default_commission_split`. Confirm with Mason whether job, quote
-    and order splits should follow the same admin-or-assigned-rep rule.
+    rule protects only `customers.default_commission_split`. **Decided 2026-10-14 (Mason, "admin
+    only on commision splits"; `DECISION_LOG.md`):** only admins change any commission split, on
+    customers, jobs, quotes and orders. That is stricter than the shipped admin-or-assigned-rep rule
+    on the customer default. Still open until the Goal 2 follow-up change enforces it, with its own
+    migration; do not ask Mason again.
   - **`customer-document-files` deploy.** The repo code opens documents to every rep; until that
     function is redeployed (Mason's OK required), reps see other customers' document rows but the
     live function still refuses their uploads and downloads. Deploy right after the migration

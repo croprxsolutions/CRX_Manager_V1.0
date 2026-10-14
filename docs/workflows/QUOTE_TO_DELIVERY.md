@@ -7,7 +7,7 @@ Complete reference for the business pipeline from quoting a customer through del
 ## Pipeline Overview
 
 ```
-Quote (draft) -> Send -> Accept -> Convert to Order -> Create Delivery -> Confirm -> Complete -> Invoice -> Payment
+Quote (draft) -> Send -> [Accept, optional] -> Convert to Order -> Create Delivery -> Confirm -> Complete -> Invoice -> Payment
 ```
 
 A separate Accept step is optional: `convert_quote_to_order()` converts a `sent`, `revised` or `accepted` quote and marks it `accepted` itself.
@@ -116,7 +116,7 @@ Quote sections and quote items are RPC-owned: browser roles may read them but mu
 - Always send the idempotency key from `useIdempotencyKey()` (`src/hooks/useIdempotencyKey.ts`) for order creation to prevent double-submissions. The key is stable across re-renders and retries only while the hook instance is mounted; after an unmount/remount, use durable intent restoration or authoritative reconciliation. ESLint (`local-rules/idempotency-key-from-hook`) rejects a fresh `generateIdempotencyKey()` call at the RPC call site, because a retry would send a different key.
 
 ### What can go wrong
-- Trying to convert a `draft`, `declined`, `expired`, `cancelled` or closed quote (the RPC refuses it with `BOOKING_CLOSED`; send the quote first)
+- Trying to convert a `draft`, `declined`, `expired`, `cancelled` or closed quote (the RPC refuses it with `BOOKING_CLOSED`; only a `sent`, `revised` or `accepted` quote converts, so a draft must be sent first and a terminal quote cannot be converted)
 - Forgetting that order items have `quantity_remaining` which drives delivery fulfillment
 - Modifying an order after deliveries have already been made
 

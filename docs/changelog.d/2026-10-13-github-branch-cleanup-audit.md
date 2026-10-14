@@ -47,8 +47,14 @@ Mason kept all six branches in question: #397, #350, #892, `backup/pr432-multita
 work.
 
 **Verdicts.** 173 deletable (157 after Mason's yes, 16 after this PR merges) and 12 kept. Each deletion is
-an atomic compare-and-delete, so a newly pushed commit cannot be lost. The deletions wait for Mason's
-explicit yes. The helper's sealed counts were updated to match, and its new SHA-256 is in the report.
+an atomic compare-and-delete, so a newly pushed commit cannot be lost. The helper's sealed counts were
+updated to match, and its new SHA-256 is in the report.
+
+**Outcome so far (2026-10-14).** Mason approved the 157 "after yes" batch and it is done: the six archive
+tags it needed were created first, and the helper's sweep reported all 157 gone with every restore source
+intact. All 12 kept branches are unchanged. `main` moved twice during the work, so the review baseline was
+re-measured and rewritten twice, as recorded in the report. The 16 "after this PR" deletions wait for this
+PR to merge and for Mason's separate yes.
 
 This PR rescues or corrects:
 

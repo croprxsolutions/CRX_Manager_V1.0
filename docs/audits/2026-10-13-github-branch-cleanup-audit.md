@@ -690,7 +690,7 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `claude/bind-adjust-inventory-receipt-delivery-20260917-2` | `96508921571f883ab2de6d53e1622ca12deb7755` | #714 closed | PR #714 | after yes |
 | `claude/bind-adjust-inventory-receipt-delivery-20260917-3` | `ed017afc7263871ef6cb74a340d2b5e24c7471ff` | #716 closed | PR #716 | after yes |
 | `claude/bind-adjust-inventory-receipt-delivery-20260917-4` | `5a837a1de13b3b792dce7651efc3f8cd6e9b004e` | #718 closed | PR #718 | after yes |
-| `claude/bind-adjust-inventory-receipt-delivery-20260917-5` | `2939083b633ad8138104b800a79a9e048f0af422` | #723 closed | tag archive/2026-10-13/claude/bind-adjust-inventory-receipt-delivery-20260917-5 (to create) | after yes |
+| `claude/bind-adjust-inventory-receipt-delivery-20260917-5` | `2939083b633ad8138104b800a79a9e048f0af422` | #723 closed | tag archive/2026-10-13/claude/bind-adjust-inventory-receipt-delivery-20260917-5 (exists) | after yes |
 | `claude/bind-adjust-inventory-receipt-delivery-20260917-6` | `b0d6236bb6208b65336bda945ee619d4e82b26b3` | #727 closed | PR #727 | after yes |
 | `claude/bind-adjust-inventory-receipt-delivery-20260917-7` | `6eca0d786edd6c4155cc61f2ebe62d4fcad99c92` | #732 closed | PR #732 | after yes |
 | `claude/bind-adjust-inventory-receipt-delivery-20260917-8` | `ca68bb3df9435a074e51c7706938ab1c9b593a20` | #735 closed | PR #735 | after yes |
@@ -721,7 +721,7 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `codex/field-app-current-main-20260914` | `dbd3fb333eba20ab36d64f208c1b9daaaa336672` | #700 closed | PR #700 | after yes |
 | `codex/field-app-filed-season-guard-20260912` | `7a0ed406b1fec7459edea78243bbc0fddffde7a5` | #652 closed | PR #652 | after yes |
 | `codex/field-app-season-final-20260913` | `e730b40b403044b1217870915a7e402e214e5c2d` | #660 closed | PR #660 | after yes |
-| `codex/field-app-season-review-fixes-20260913` | `dd3ce212c884c20f575ed189225f0549e04a5894` | no PR | tag archive/2026-10-13/codex/field-app-season-review-fixes-20260913 (to create) | after yes |
+| `codex/field-app-season-review-fixes-20260913` | `dd3ce212c884c20f575ed189225f0549e04a5894` | no PR | tag archive/2026-10-13/codex/field-app-season-review-fixes-20260913 (exists) | after yes |
 | `codex/field-app-season-reviewed-20260913` | `5818d67aee18ae3a02d957a4359f859d4dedae0a` | #662 closed | PR #662 | after yes |
 
 ### Guard fixes (B) (8)
@@ -760,7 +760,7 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | `claude/docs-cleanup-fix-stale-facts` | `98f60e6d0ff719223d3ed164bffe2c98a15b9f01` | #807 closed | PR #807 | after yes |
 | `claude/docs-review-best-practices-trv6qq` | `fbbe6fd311d37d6f6285667cb0e404762eb48f77` | #836 closed | PR #836 | after yes |
 | `claude/repo-docs-cleanup-101ef7` | `a3f58c5811c4b42095a2f35a7dc6721a6f5fe148` | #803 closed | PR #803 | after yes |
-| `codex/lean-agent-docs-20260904` | `f1d2037df191d9a854b03257e07c0204d0126335` | #600 merged | tag archive/2026-10-13/codex/lean-agent-docs-20260904 (to create) | after yes |
+| `codex/lean-agent-docs-20260904` | `f1d2037df191d9a854b03257e07c0204d0126335` | #600 merged | tag archive/2026-10-13/codex/lean-agent-docs-20260904 (exists) | after yes |
 
 ### Inventory retries — other laps (7)
 
@@ -790,17 +790,17 @@ Like the earlier ledgers, this file deliberately carries no copy-paste shell com
 | Branch | Commit | PR | Restore from | When |
 |---|---|---|---|---|
 | `claude/bulk-import-retry-scopes` | `ed62508e2937457a3ff58658b76d95525983320a` | no PR | tag archive/2026-10-13/claude/bulk-import-retry-scopes (to create) | after this PR |
-| `claude/pr611-land-20260905` | `231ad9cdde4b137aa36eedb88cd6c75f3e25fbd7` | no PR | tag archive/2026-10-13/claude/pr611-land-20260905 (to create) | after yes |
+| `claude/pr611-land-20260905` | `231ad9cdde4b137aa36eedb88cd6c75f3e25fbd7` | no PR | tag archive/2026-10-13/claude/pr611-land-20260905 (exists) | after yes |
 | `fix/quote-fixture-stale-date` | `be5df11c5dafce08f69bec0e9c4ad079122d24eb` | #468 closed | PR #468 | after yes |
 | `ops/integrity-report-2026-09-01` | `a9dad49cb2a135cc7a3ac5c7fd6827d93922cc85` | #539 closed | PR #539 | after yes |
 | `ops/integrity-report-2026-10-01` | `fa748a0fdc8a4d17e42e2ca0916fc3fec4d35f45` | #861 closed | PR #861 | after yes |
-| `preserve/crx-manager-uncommitted-archive-20260908` | `5dcdb853e4bcf5101fa4966fface8ce64cf0dbc5` | no PR | tag archive/2026-10-13/preserve/crx-manager-uncommitted-archive-20260908 (to create) | after yes |
+| `preserve/crx-manager-uncommitted-archive-20260908` | `5dcdb853e4bcf5101fa4966fface8ce64cf0dbc5` | no PR | tag archive/2026-10-13/preserve/crx-manager-uncommitted-archive-20260908 (exists) | after yes |
 
 ### Pricing and return-credit (August) (5)
 
 | Branch | Commit | PR | Restore from | When |
 |---|---|---|---|---|
-| `claude/codex-claude-cogs-handoff-7bde15` | `e3c4a3fc47df9c8c9eabe3e35452482a5775ff64` | no PR | tag archive/2026-10-13/claude/codex-claude-cogs-handoff-7bde15 (to create) | after yes |
+| `claude/codex-claude-cogs-handoff-7bde15` | `e3c4a3fc47df9c8c9eabe3e35452482a5775ff64` | no PR | tag archive/2026-10-13/claude/codex-claude-cogs-handoff-7bde15 (exists) | after yes |
 | `claude/ordering-cycle-review-t41vat` | `992ee08881768f008ef0e51dac22972ed531615f` | #363 closed | PR #363 | after yes |
 | `claude/product-plan-rev12-followup` | `74ccba0f7888e69050d4951be9df02de2de25d68` | #507 closed | PR #507 | after this PR |
 | `claude/return-credit-cogs-reversal` | `c4e83dea632b37b02e8b14e64c2859b7668f0e77` | #361 closed | PR #361 | after yes |

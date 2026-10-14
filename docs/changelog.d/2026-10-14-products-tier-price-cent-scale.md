@@ -7,9 +7,11 @@
 digits.
 
 **Change:** `supabase/migrations/20261014150000_products_tier_price_cent_scale.sql` adds
-`products_tier1_price_cent_scale_chk`, `products_tier2_price_cent_scale_chk` and
-`products_tier3_price_cent_scale_chk` (NULL, or finite and equal to `round(x, 2)`), the same shape as the
-cost constraint, plus an in-transaction verify block. Non-destructive: no row changes, no grants, no
+`products_tier1_price_whole_cents_chk`, `products_tier2_price_whole_cents_chk` and
+`products_tier3_price_whole_cents_chk` (NULL, or finite and equal to `round(x, 2)`; named per
+`docs/workflows/SAFE_DEVELOPMENT_RULES.md`, CodeRabbit on PR #910), the same predicate as the cost
+constraint. Each is added only if absent, so the file is re-runnable (Codex connector on PR #910), and an
+in-transaction verify block checks each constraint is validated and names its own column. Non-destructive: no row changes, no grants, no
 functions. `docs/reference/database-schema.md` names the constraints; the migration index, the
 `CURRENT_STATE.md` / `KNOWN_ISSUES.md` ledger headers and `migration-history.md`'s live capture were
 re-read against live (this also records that `20261013220000_reps_work_any_customer` is now applied,

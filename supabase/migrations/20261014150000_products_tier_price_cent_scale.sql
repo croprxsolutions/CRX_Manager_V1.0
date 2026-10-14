@@ -15,40 +15,67 @@
 -- runs with triggers disabled or replication-role writes, and once the schema
 -- registry is regenerated after apply, its reviewers can see it.
 --
+-- The predicate is the full finite whole-cent CHECK and the names follow
+-- `<table>_<column>_whole_cents_chk` (docs/workflows/SAFE_DEVELOPMENT_RULES.md).
+--
 -- Live read-only measurement immediately before this migration was written
 -- (2026-10-14): 604 products, 0 with a sub-cent, infinite or NaN tier1/2/3
 -- price. NULL stays allowed (3/5/12 products carry a NULL tier1/2/3 price).
 --
 -- Non-destructive: adds three validated CHECK constraints; no row is changed.
 -- Each ADD CONSTRAINT scans products once under a brief ACCESS EXCLUSIVE lock.
+-- Re-runnable: a constraint that already exists is not re-added, and the verify
+-- block below then checks its shape, so a stale definition fails closed.
 -- Rollback:
---   ALTER TABLE public.products DROP CONSTRAINT products_tier1_price_cent_scale_chk;
---   ALTER TABLE public.products DROP CONSTRAINT products_tier2_price_cent_scale_chk;
---   ALTER TABLE public.products DROP CONSTRAINT products_tier3_price_cent_scale_chk;
+--   ALTER TABLE public.products DROP CONSTRAINT products_tier1_price_whole_cents_chk;
+--   ALTER TABLE public.products DROP CONSTRAINT products_tier2_price_whole_cents_chk;
+--   ALTER TABLE public.products DROP CONSTRAINT products_tier3_price_whole_cents_chk;
 
-ALTER TABLE public.products
-  ADD CONSTRAINT products_tier1_price_cent_scale_chk
-  CHECK (tier1_price IS NULL OR (
-    tier1_price = round(tier1_price, 2)
-    AND tier1_price > '-Infinity'::numeric
-    AND tier1_price < 'Infinity'::numeric
-  ));
+DO $add$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.products'::regclass
+      AND conname = 'products_tier1_price_whole_cents_chk'
+  ) THEN
+    ALTER TABLE public.products
+      ADD CONSTRAINT products_tier1_price_whole_cents_chk
+      CHECK (tier1_price IS NULL OR (
+        tier1_price = round(tier1_price, 2)
+        AND tier1_price > '-Infinity'::numeric
+        AND tier1_price < 'Infinity'::numeric
+      ));
+  END IF;
 
-ALTER TABLE public.products
-  ADD CONSTRAINT products_tier2_price_cent_scale_chk
-  CHECK (tier2_price IS NULL OR (
-    tier2_price = round(tier2_price, 2)
-    AND tier2_price > '-Infinity'::numeric
-    AND tier2_price < 'Infinity'::numeric
-  ));
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.products'::regclass
+      AND conname = 'products_tier2_price_whole_cents_chk'
+  ) THEN
+    ALTER TABLE public.products
+      ADD CONSTRAINT products_tier2_price_whole_cents_chk
+      CHECK (tier2_price IS NULL OR (
+        tier2_price = round(tier2_price, 2)
+        AND tier2_price > '-Infinity'::numeric
+        AND tier2_price < 'Infinity'::numeric
+      ));
+  END IF;
 
-ALTER TABLE public.products
-  ADD CONSTRAINT products_tier3_price_cent_scale_chk
-  CHECK (tier3_price IS NULL OR (
-    tier3_price = round(tier3_price, 2)
-    AND tier3_price > '-Infinity'::numeric
-    AND tier3_price < 'Infinity'::numeric
-  ));
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.products'::regclass
+      AND conname = 'products_tier3_price_whole_cents_chk'
+  ) THEN
+    ALTER TABLE public.products
+      ADD CONSTRAINT products_tier3_price_whole_cents_chk
+      CHECK (tier3_price IS NULL OR (
+        tier3_price = round(tier3_price, 2)
+        AND tier3_price > '-Infinity'::numeric
+        AND tier3_price < 'Infinity'::numeric
+      ));
+  END IF;
+END
+$add$;
 
 -- Verify inside the same transaction: each constraint exists, is validated,
 -- names its own column, and carries the round(x, 2)/±Infinity shape (mirrors
@@ -60,7 +87,7 @@ DECLARE
 BEGIN
   FOREACH v_column IN ARRAY ARRAY['tier1_price', 'tier2_price', 'tier3_price']
   LOOP
-    v_name := 'products_' || v_column || '_cent_scale_chk';
+    v_name := 'products_' || v_column || '_whole_cents_chk';
     IF NOT EXISTS (
       SELECT 1
       FROM pg_constraint c
@@ -73,7 +100,7 @@ BEGIN
         AND position('''-infinity''' in lower(pg_get_constraintdef(c.oid))) > 0
         AND position('''infinity''' in lower(pg_get_constraintdef(c.oid))) > 0
     ) THEN
-      RAISE EXCEPTION 'verify failed: % cent-scale constraint missing or incomplete', v_name;
+      RAISE EXCEPTION 'verify failed: % whole-cent constraint missing or incomplete', v_name;
     END IF;
   END LOOP;
 END

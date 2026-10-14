@@ -400,9 +400,10 @@ local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs
 `2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
 - script: `e80f52bf633c09edd6ced6956ab7629683c1eadd0ebc25029175befe38621988` (2026-10-13 salvage revision:
   only the sealed counts 157/16/0 and the "Mason's call (0)" marker changed)
-- baseline: `60176b3fee40a7456eb51f0f3842c9a2809779d32f4f14400e5055215547b002` (re-measured at `main`
-  `eec473890` on 2026-10-14, after PR #909 merged, before the "after this PR" batch; the earlier files are
-  kept beside it: `2026-10-13-cleanup-baseline.at-395bdcd9a.json`, hash `9db70b71…4219`;
+- baseline: `9813b04aa1904ba4787583d3ca22ad77af158055a896ff2140a5e82acea5dcb7` (re-measured at `main`
+  `d12fc0f2a` on 2026-10-14, after PR #908 merged, before the "after this PR" batch; the earlier files are
+  kept beside it: `2026-10-13-cleanup-baseline.at-eec473890.json`, hash `60176b3f…b002`;
+  `2026-10-13-cleanup-baseline.at-395bdcd9a.json`, hash `9db70b71…4219`;
   `2026-10-13-cleanup-baseline.at-82c8c0817.json`, hash `127e4dc2…d533`;
   `2026-10-13-cleanup-baseline.at-22c10c8df.json`, hash `60ca1426…54c0`; and the review-time
   `2026-10-13-cleanup-baseline.at-7abd52f6d.json`, hash `0cbdd535…1d75`)
@@ -448,7 +449,8 @@ branch gained an unlanded path, so the rule above allowed the re-baseline. Mason
 the same day ("yes delete the 16"), after being told they would run only once this PR merged. That yes is
 the batch's approval: no further approval is asked after the merge, but the batch still runs only after the
 merge and only if the helper's "after this PR" gates all pass on the merged state. PR #909 then merged (`main` `eec473890`); the re-measure there found all
-185 branches unchanged, so the baseline was rewritten once more at that `main`.
+185 branches unchanged, so the baseline was rewritten once more at that `main`. PR #908 then merged
+(`main` `d12fc0f2a`); again all 185 were unchanged, and the baseline was rewritten at that `main`.
 
 **Landing this record.** Each re-baseline edits only this file, so the PR stays documentation-only under
 `docs/reference/sol-exempt-paths.md` and needs no fresh Sol review. Every exact-head gate still applies:

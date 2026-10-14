@@ -197,7 +197,7 @@ The full reviews are kept with the session record.
 |---|---|
 | `origin/main` | first measured at `af0ce0c4c`; every branch re-measured at `7abd52f6d` after #893 merged. 19 branches changed class. In 18 field-season laps the only change was that `FieldApplicationInvoiceRoute.tsx` became MAIN-MOVED, and each holds exactly the pre-#893 `main` version of that file. `invoice-screen-safety` became more landed. No tip moved. |
 | Branches | `git ls-remote --heads origin`: 192 heads = `main` + 191 |
-| PRs | `gh pr list --state all`: 889 PRs, matched to branches by head name |
+| PRs | `gh pr list --state all --limit 5000` (the default limit is 30): 889 PRs, every PR then, matching the 889 `refs/pull/*/head` refs; matched to branches by head name |
 | Repo setting | "Automatically delete head branches" is ON, so merged PRs clean up after themselves; the pile-up is closed-but-not-merged PRs, which GitHub never deletes |
 
 **How each branch was measured** (the method from `docs/audits/2026-09-02-github-branch-cleanup-audit.md`):

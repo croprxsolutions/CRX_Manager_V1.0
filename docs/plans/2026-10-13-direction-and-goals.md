@@ -33,12 +33,12 @@ Sessions can run side by side only when they don't change the same database func
 
 **Dates (Mason, 2026-10-14):** Chem Man's last new bill is **2026-12-31**. CRX-only billing starts **2027-01-01**, and the first 30 days are the pilot.
 
-**Timeline risk: this is very tight.** From 2026-10-14 to 2027-01-01 is about 11 weeks. The Phase A estimates add up to roughly 14–25 weeks (Goal 2 shipped; Mason's Supabase billing change takes minutes and is not counted), and cleanup plus handoff add another 4–7. Hitting January 1 needs early decisions, proven integrations, heavy overlap, and the work ordered by what must be ready that day. It is not yet a reliable forecast.
+**Timeline risk: this is very tight.** From 2026-10-14 to 2027-01-01 is about 11 weeks. The Phase A estimates add up to roughly 14–25 weeks, plus about a week for the Goal 2 follow-up (its main change shipped; Mason's Supabase billing change takes minutes and is not counted), and cleanup plus handoff add another 4–7. Hitting January 1 needs early decisions, proven integrations, heavy overlap, and the work ordered by what must be ready that day. It is not yet a reliable forecast.
 
 **Checkpoints:**
 - **By 2026-10-31:** test system and backup work underway; accountant asked; payment processor and senior developer chosen.
 - **By 2026-11-15:** a QuickBooks Desktop connection proven with a real invoice, a payment applied to it, and a credit, in a copy of our actual company file.
-- **By 2026-11-30:** Goals 1, 3, 5 and 6 done.
+- **By 2026-11-30:** Goals 1, 3, 5 and 6 done, and the Goal 2 follow-up (own-name on every invoice path, reps read every invoice, admin-only commission splits) shipped.
 - **By 2026-12-15:** Goals 4 and 7 done, and a test month reconciled in QuickBooks on the test system.
 - **December:** the senior developer's review and repairs; the cleanup the developer needs (setup guide, AI tooling guide); staff training.
 - **2026-12-31:** last Chem Man bill; Mason's opening balances in place (L3).
@@ -111,7 +111,7 @@ The checks test the server, not just hidden screens: direct table reads, views, 
 #### Goal 2: Reps invoice any customer, under their own name. MAIN CHANGE SHIPPED 2026-10-14
 PR #907 merged and its migration (`20261013220000_reps_work_any_customer`) was applied live on 2026-10-14. Reps now find, read and edit all customers and related records, and save and post manual invoices and invoice groups for any customer under their own name. Only admins reassign customers. The customer-documents service was redeployed on 2026-10-14 (version 2).
 
-**Still to do (the "Invoice work continuation" session's follow-up change):**
+**Still to do (the "Invoice work continuation" session's follow-up change; about 1 week; due 2026-11-30, before the December developer review):**
 - **Own-name everywhere.** The own-name rule also covers invoices generated from orders (single and split), and every path a rep can use to edit, unpost, consolidate or transfer an invoice. Taking payments and applying prepay or credits keep working under their current rules.
 - **Reps read every invoice,** with other reps' invoices read-only. Until then, a customer balance a rep sees may count only that rep's invoices. It must be labelled as such and never treated as the customer's full balance or credit exposure.
 - **Only admins change commission splits** (Mason, 2026-10-14), on customers, jobs, quotes and orders. This tightens what shipped: today a customer's assigned rep may edit that customer's default split, and any active rep can edit a job's split.

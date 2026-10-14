@@ -30,6 +30,15 @@ may run the remaining batch:
   `641a62a5f` (PR #901's merge); earlier baselines are kept beside it as `.at-<commit>.json`
 - **bundle:** unchanged, `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
 
+**This baseline stays valid when this record merges.** Merging it moves `main`, but only by adding this
+file and its changelog note. Neither exists at the approved #901 head, and none of the 16 branches
+touches either. The helper's refresh gate therefore finds no batch branch overlapping a moved path, and no
+watched-document line naming one of them changes. So the batch runs against this exact baseline, with no
+rewrite. If anything else lands on `main` first, the audit's re-measure procedure applies unchanged:
+re-measure every branch, rewrite only if no branch gains an unlanded path and none of the 16 changes, and
+otherwise stop and ask Mason. A rewritten baseline's hash is reported to Mason before the batch runs and
+recorded with the 16's outcome.
+
 **Why it changed.** PR #901 merged at exactly its approved head `64a7250dd` (CodeRabbit APPROVED, every
 required check green), but GitHub squash-merged it onto a `main` that already held PR #910. #910 had edited
 the "Last verified" headers of two rescued files, `KNOWN_ISSUES.md` and `CURRENT_STATE.md`. Helper v2

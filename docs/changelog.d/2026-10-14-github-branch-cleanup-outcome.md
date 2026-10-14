@@ -11,7 +11,7 @@ cleanup:
   record.
 
 PR #901 was squash-merged onto a `main` that already held #910. Its two rescued files therefore carry
-#910's header edits, and helper version 2's byte-identity check could never pass. With Mason's approval,
+the header edits from #910, and helper version 2's byte-identity check could never pass. With Mason's approval,
 helper version 3 accepts a difference only when it is exactly `main`'s own clean changes. An independent
 review found it clean. The new helper and baseline hashes are in the outcome record, which supersedes the
 ledger's recorded helper hash. The ledger file itself is unchanged, because the helper requires it to

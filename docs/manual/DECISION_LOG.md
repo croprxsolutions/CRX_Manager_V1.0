@@ -1,6 +1,6 @@
 # Decision Log
 
-Last verified: 2026-10-13 (sent-quote sell-price lock and landlord split-billing decisions added); 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (five entries added: a sent quote's prices stay locked until accepted or expired; an order's bill can be split to a landlord; a plain "I approve" replaces typing the approval code; reps invoice any customer under their own name, superseding the 2026-10-06 rep-scoping entry; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
@@ -10,29 +10,34 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 ## 2026-10-13 — Billing: an order's bill can be split to a landlord
 
-**Decision (Mason, in chat, 2026-10-13: "landlord yes"),** asked whether splitting an order's bill to a
-landlord should work.
-**Why it came up.** The 2026-10-13 branch salvage review found that it cannot today. The live invoice
-trigger `trg_guard_invoice_terminal_order` refuses any invoice whose customer is not its order's customer
-(`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), so the split engine can never bill a landlord. This was read
-from the live function, not exercised.
-**Operative rule.** Not built yet. A fix must let a split bill a landlord without opening the general
-customer-lineage check. Details are in `docs/manual/KNOWN_ISSUES.md` (the 2026-10-13 salvage-review
-entry, added by the branch cleanup change).
+**Decision (Mason, in chat: "landlord yes").** Splitting an order's bill to a landlord, a customer other than the order's own, must work.
+**Why.** The 2026-10-13 branch salvage review found it never can today: the live trigger `trg_guard_invoice_terminal_order` refuses any invoice whose customer is not its order's customer (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`; read from the live function, not exercised).
+**What this forbids/implies:** not built. The fix must let a split bill a landlord without opening the general customer-lineage check. Tracked in `TODO.md`; the branch cleanup change (PR #901) adds the full `KNOWN_ISSUES.md` entry.
 
 ## 2026-10-13 — Pricing: a sent quote's prices stay locked until it is accepted or expires
 
-**Decision (Mason, in chat, 2026-10-13: "yes a sent quote should stay locked until accepted or expires").**
-Once a quote is sent, its line sell prices are fixed. They do not follow later catalog price changes until
-the quote is accepted (and becomes an order at those prices) or it expires.
-**Why.** Today each line's cost is frozen when the quote is saved (`quote_items.cost_at_quote_cents`), but its
-sell price is not. Per two independent reviews on 2026-10-13, which read `save_quote`'s live body but did not
-exercise it, every save, including Convert to Order, re-prices each line without a manual override to that
-day's tier price. So a customer can accept a quote and get an order at different prices.
-**Operative rule.** Not built yet. Until it is, no change may describe sent-quote prices as locked. The
-design (when the lock starts, how expiry and revisions behave, manual overrides) is open in
-`docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`, which Mason wants
-iterated before any build starts.
+**Decision (Mason, in chat: "yes a sent quote should stay locked until accepted or expires").** Once a quote is sent, its line sell prices stop following the catalog until it is accepted (becoming an order at those prices) or it expires.
+**Why.** Each line's cost is frozen at save (`quote_items.cost_at_quote_cents`), but its sell price is not. Two 2026-10-13 reviews of `save_quote`'s live body (not exercised) found that every save, including Convert to Order, re-prices lines without a manual override to that day's tier price.
+**What this forbids/implies:** not built; until it is, nothing may describe sent-quote prices as locked. The open design questions (when the lock starts, revisions, expiry, overrides) are in `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`, to be iterated before any build.
+
+## 2026-10-13 — A plain "I approve" is enough; no code to type
+
+**Decision (Mason, in chat: "can we make it even simpler than that? … I just want to say I approve and that's good enough").** For a parked migration, Mason's whole-message reply `I approve` (also `approve`, `approved`, `yes I approve`) is his approval; he no longer types the 6-digit code, which is now shown only as a reference number. `approve <code>` still works.
+**Why.** He wants fewer hoops. The code's one real job was to tie his reply to a specific request, so an "I approve" meant for a plan or a merge could not approve a database change still waiting from earlier. That job moved to the reply hook: a plain `I approve` counts only when the agent's message just before it was that request's summary, exactly as printed and nothing else, and with nothing waiting it is ordinary chat.
+**What this forbids/implies:** agents explain the change first, then send the summary alone as its own message; if they say anything else first, they show it again. A bare "yes" or "go" is still not this approval. Everything else in the 2026-10-09 entry below stands, including the accepted residual (an agent that deliberately fakes the approval is not stopped). Detail: `docs/changelog.d/2026-10-13-owner-approval-plain-reply.md`.
+
+## 2026-10-13 — Sales reps invoice and email any customer, under their own name only
+
+**Decision (Mason, in chat).** A sales rep may create, post and email invoices for any customer, but only as themselves; admins may reassign the salesperson.
+**Supersedes** the 2026-10-06 entry "CRX-LIFE-001 lands as scoped; rep scoping of the order-invoice RPCs is the next change" (reps bill only their own customers) and the 2026-10-09 admin-only invoicing plan (PR #902, closed unmerged; its migration was never applied).
+**Why.** Reps sell across the whole customer base, and 146 of 150 customers have no assigned rep.
+**What this forbids/implies:** never propose admin-only or own-customer-only invoicing again; a rep invoicing or emailing another rep's customer is intended. The change loosens permissions, so its migration still needs Mason's approval reply. Source: `docs/plans/2026-10-13-direction-and-goals.md` (Goal 2).
+
+## 2026-10-13 — Direction: build, clean up, senior-developer handoff, then roll out
+
+**Decision (Mason, in chat, answering the scalability review).** Finish Goals 1–7 of `docs/plans/2026-10-13-direction-and-goals.md` (including a QuickBooks Desktop sync and online card/ACH payments), clean up, hand off to an outside senior developer for independent review, then roll out, with Chem Man retired for billing by spring 2027.
+**Why.** The review found a sound foundation but real gaps, and an outside expert should check the system before real money depends on it.
+**What this forbids/implies:** the same day Mason also chose a Supabase Pro upgrade with point-in-time recovery, private photos, and keeping all AI tooling (documented) at handoff. The goals doc sets priorities only and authorizes no build; open questions are listed there.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 

@@ -33,9 +33,10 @@ When an item here ships or is decided, update this file AND `docs/manual/KNOWN_I
 >     edits" guard, which is related but not pricing.
 > - **Related:** the ⏰ deadline item below (test the repricing path before sales season; costs are stale).
 >   It overlaps the plan's "cost freshness" slice.
-> - **Where it sits against the 2026-10-13 direction-and-goals plan** (PR #904, open when this was
->   written): that plan's ten goals do not include pricing. Mason set pricing as the next section *to plan*
->   in a later chat the same day. When building starts, confirm its order against those goals with him.
+> - **Where it sits against the 2026-10-13 direction-and-goals plan**
+>   (`docs/plans/2026-10-13-direction-and-goals.md`, PR #904): that plan's ten goals do not include pricing.
+>   Mason set pricing as the next section *to plan* in a later chat the same day. When building starts,
+>   confirm its order against those goals with him.
 
 > ### ⏰ DEADLINE: before 2026-12-31 — quote, order and rebate-claim numbers take their year from the UTC clock
 >

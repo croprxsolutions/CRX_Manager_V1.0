@@ -115,10 +115,15 @@ Questions:
 - **Does "locked" mean prices only, or no edits at all** once a quote is sent?
 - **When does "sent" start the lock?** On the first move to `sent`, or on every send?
 - **Can an admin unlock a sent quote**, and should that be recorded?
-- **How does expiry work?** Quotes carry `valid_days` and an `expired` status, and the review mentions a
-  30-day stale rule. Which one ends the lock? Is expiry counted from creation or from sending? Does anything
-  expire quotes automatically today? After expiry, does the quote re-price on its next save, or must it be
-  re-sent?
+- **Expiry already runs automatically, but not for every quote.** Checked live 2026-10-13: the cron job
+  `auto-expire-quotes` (daily at 06:05 UTC) runs `auto_expire_quotes()`. It sets `sent` and `revised` quotes
+  whose `expires_at` is before the current date to `expired` and releases their stock holds. It deliberately
+  skips planned quotes (`is_planned`) and quotes with any partial draw-down, which staff close by hand. So
+  under the lock decision, a planned or partly drawn quote would stay price-locked until someone closes it.
+  - Should those quotes stay locked indefinitely, or does the lock need its own end?
+  - How is `expires_at` set from `valid_days`, and from creation or from sending? Not yet checked.
+  - Does a separate 30-day stale rule matter here? The review mentioned one.
+  - After expiry, does the quote re-price on its next save, or must it be re-sent?
 - **What if cost rises above a locked price before conversion?** The below-cost check uses today's cost, so
   converting a locked quote could be refused.
 - **What about a revision?** A sent quote can become `revised`. Does a revision keep the locked prices, or

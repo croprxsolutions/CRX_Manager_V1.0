@@ -21,7 +21,8 @@ file; building starts only when Mason says so in chat.
   visibility and accountability, and lets several agents review the numbers before anything is applied.
   Automatic reading "we can build this in future"; if it is, it only drafts a workbook for review and never
   changes prices. Each change downloads the entire sheet ("might aswell download entire sheet so is simple and
-  that is all current pricing"). Mason asked for a Sol review of the workbook method (section 8).
+  that is all current pricing"). Inline price editing stays for one-off fixes ("keep inline edits for one-off
+  fixes"). Mason asked for a Sol review of the workbook method (section 8).
 
 **Iteration 2 (2026-10-14).** Merged the findings of three sessions ("CRX pricing updates and history",
 "Missing pricing and cost tracking features" and the branch-cleanup session that wrote this draft), with a Codex
@@ -201,9 +202,9 @@ Questions:
 Carried from the salvage review:
 - ~~**(b) Visibility.**~~ **Answered 2026-10-14:** sales reps see the last price charged to a customer; price
   history (sell and cost) is admin-only.
-- **Other ways to change a price (section 8).** Inline editing on the Products page and the product page's
-  pricing card still change prices outside the workbook's review. Keep them for one-off fixes (with the same
-  required source and reason), limit them, or remove them so the workbook is the only way?
+- ~~**Other ways to change a price (section 8).**~~ **Answered 2026-10-14:** keep inline editing on the
+  Products page and the product page's pricing card for one-off fixes (Mason: "keep inline edits for one-off
+  fixes"). Slice 0's required source and reason should apply to them too.
 - **Outlier band.** What counts as a suspicious change for the preview warning: for example a move of more
   than 15% from the current price, any price below cost, or a margin under a floor?
 - ~~**Price intake cadence.**~~ **Answered 2026-10-14:** download the entire sheet each time, monthly or
@@ -339,7 +340,7 @@ $900 typed for $90. The method needs a tighter review step and a few small produ
   re-prices every sent quote on its next save and on Convert (section 7, finding 1). Slice 2 should land
   before Mason relies on sent quotes keeping their prices.
 - **Other ways to change a price still exist.** Inline editing on the Products page and the product page's
-  pricing card still change prices without the workbook's review. Open question for Mason (section 5).
+  pricing card change prices without the workbook's review. Mason keeps them for one-off fixes (2026-10-14).
 - **Stale costs.** 600 of 602 cost bases are still the original load, so margins in the sheet are measured
   against old costs until supplier evidence is refreshed (slice 7 and the TODO deadline item).
 

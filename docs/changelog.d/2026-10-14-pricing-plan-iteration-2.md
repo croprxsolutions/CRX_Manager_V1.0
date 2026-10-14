@@ -10,7 +10,7 @@ tracking features") to compare notes and produce one document to build from. The
   - records Mason's 2026-10-14 answers (revised quotes keep locked prices, with an "update to today's
     prices" option per line and for the whole quote, and a rewind to the last version sent; reps see
     last-charged prices while price history stays admin-only; prices keep coming in through the full Excel
-    workbook, with no automatic PDF reading for now);
+    workbook, with no automatic PDF reading for now, and inline price edits stay for one-off fixes);
   - adds section 7: why the app looks like it "went backwards" (data starvation, not removed features), and
     eleven findings with live read-only evidence, including the Convert path confirmed from live function
     bodies, the need for a database-enforced lock, tier changes erasing negotiated prices, the missing

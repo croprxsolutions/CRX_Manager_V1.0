@@ -393,9 +393,10 @@ local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs
 `2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
 - script: `e80f52bf633c09edd6ced6956ab7629683c1eadd0ebc25029175befe38621988` (2026-10-13 salvage revision:
   only the sealed counts 157/16/0 and the "Mason's call (0)" marker changed)
-- baseline: `60ca1426cb3d19173bdaec95c0da992cb4c19b431aabdab67163df25665354c0` (re-measured at `main`
-  `22c10c8df` on 2026-10-13, after PRs #900, #903 and #904 merged; the review-time file, measured at
-  `7abd52f6d` with hash `0cbdd535…1d75`, is kept beside it as `2026-10-13-cleanup-baseline.at-7abd52f6d.json`)
+- baseline: `127e4dc29d034972ad8660088ff1d83e00ac81858cdad3528109c766abf0d533` (re-measured at `main`
+  `82c8c0817` on 2026-10-14, after PR #906 merged mid-batch; the earlier files are kept beside it:
+  `2026-10-13-cleanup-baseline.at-22c10c8df.json`, hash `60ca1426…54c0`, and the review-time
+  `2026-10-13-cleanup-baseline.at-7abd52f6d.json`, hash `0cbdd535…1d75`)
 - bundle: `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
 
 A different file must not run.
@@ -414,6 +415,21 @@ Only then was the baseline rewritten at the new `main`. Repeat exactly this, and
 salvage revision, the helper's read-only tests gave 25 of 28 exact results. The other 3 refused at an
 earlier gate (publication binding twice; preservation, before the tags exist). `plan --batch now` printed
 157 deletes and never named `refs/heads/main`.
+
+**Second re-baseline, 2026-10-14, mid-batch.** Mason approved the 157 batch on 2026-10-14. After 77 deletes,
+PR #906 (React 19) merged and the helper refused the batch again, as designed. The re-measure at
+`82c8c0817` found 183 of 185 branches unchanged, and two that changed only because of #906's own edits:
+- `codex/autonomy-with-hard-boundaries-20260827`: `docs/operations/production-runbook.md` moved from
+  BRANCH-ONLY to MAIN-MOVED, because #906 changed that file's "React 18" line to "React 19". The branch's
+  unlanded change is the same one already reviewed.
+- `codex/pr624-batch-retry-integration-20260913`, already deleted before #906 merged:
+  `src/components/inventory/BatchAdjustModal.tsx` fell below the 90% landed mark, because #906 rewrote that
+  file's frozen-batch effect. The branch's tip is still restorable from PR #689, as its row says.
+
+Both went back for review, as the rule above requires. Mason approved the re-baseline on 2026-10-14 ("yes
+re-snapshot and finish"), with standing approval for the rest of this batch: whenever `main` moves, re-measure;
+if no branch gains an unlanded path, re-baseline and continue; otherwise stop and ask him. No referencing
+line in the six watched documents changed, and the `protect-main` rules were unchanged.
 
 How the helper behaves:
 - **It changes nothing on GitHub.** Its git and gh calls only read. The one local side effect is fetching

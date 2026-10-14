@@ -18,6 +18,10 @@ in line with the live database.
   `skipped_constraints`, since they are range checks, not value lists), the two applied names
   `20261013220000_reps_work_any_customer` and `20261014150000_products_tier_price_cent_scale`,
   `migrations_high_water` `20261014150257`, and the date. Every other section count is unchanged.
+- The registry "last regenerated" markers now name this refresh: `CURRENT_STATE.md` (was 2026-10-12),
+  `migration-history.md` (was 2026-10-07) and `database-schema.md` (was 2026-09-26). The schema doc's
+  table count moves from 160 to 161: `delivery_external_billings` (`20261007150000`) was added after
+  its last count.
 
 **Proof.** Live read-only ledger query and introspection, 2026-10-14 17:28 UTC. No code, SQL or
 live data changed.

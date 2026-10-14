@@ -1,6 +1,6 @@
 # Decision Log
 
-Last verified: 2026-10-14 (one entry added: Chem Man's last bill 2026-12-31 and a CRX-only pilot from 2027-01-01, plus Mason's answers to the goals plan's questions 6e–6k; earlier, 2026-10-13, three entries added: a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-14 (two entries added: invoices made from scratch carry no product lines (6e); Chem Man's last bill 2026-12-31 and a CRX-only pilot from 2027-01-01, plus Mason's answers to the goals plan's questions 6f–6k; earlier, 2026-10-13, three entries added: a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
@@ -8,14 +8,18 @@ settled calls. Newest first, roughly — a few entries from the same week sit sl
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 
+## 2026-10-14 — Invoices made from scratch carry no product lines
+
+**Decision (Mason, in chat: "confirm 6e", after a plain-English explanation of goals-plan question 6e).** An invoice made from scratch (no order, no delivery) carries **only service or misc charges**, never product lines. Product sales go through an order and a delivery; a counter sale uses a quick delivery, which records the delivery and the invoice together.
+**Why.** A from-scratch invoice links to nothing, so neither the delivery-quantity cap nor the order/delivery overlap guard can see it. Product lines on one could overbill, double-bill a delivered sale, or bill goods with no matching stock or delivery record. It also follows from the same day's rule that products are billed only for delivered goods.
+**What this forbids/implies:** this closes the owner decision in the `KNOWN_ISSUES.md` entry "an invoice made from scratch can name any product and quantity". Enforcing it on every create, edit, import and direct server path is Goal 3 work in `docs/plans/2026-10-13-direction-and-goals.md`; until then the gap stays open. Service and misc charges on from-scratch invoices stay allowed.
+
 ## 2026-10-14 — Chem Man's last bill is 2026-12-31; CRX-only billing pilot from 2027-01-01; goals-plan answers
 
 **Decision (Mason, in chat, answering the Sol 6.1 review of `docs/plans/2026-10-13-direction-and-goals.md`).**
 - **6f:** Chem Man issues its last new bill on **2026-12-31**. This replaces "retired for billing by spring 2027" in the 2026-10-13 direction entry below.
 - **6k:** billing runs **only in CRX from 2027-01-01**. The first 30 days are the pilot, reconciled daily.
-- **6g:** product lines are billed only for delivered goods. Money paid in advance is recorded as prepay.
-- **6e** (Mason: "confirm 6e"): an invoice made from scratch (no order, no delivery) carries **no product lines**, only service or misc charges. Product sales go through an order and a delivery; a counter sale uses a quick delivery. This closes the `KNOWN_ISSUES.md` "invoice made from scratch can name any product and quantity" owner decision. Enforcing it in the database is Goal 3 work.
-- **6h:** Mason Wells owns pesticide compliance and inventory readiness.
+- **6g:** product lines are billed only for delivered goods. Money paid in advance is recorded as prepay.- **6h:** Mason Wells owns pesticide compliance and inventory readiness.
 - **6i:** an outage may last **overnight**, meaning CRX is back by the next business morning.
 - **6j:** **only admins** change commission splits, on customers, jobs, quotes and orders.
 - Mason also said the compliance, physical-inventory and opening-balance checks (plan L1–L3) are **his business tasks**. They are not agent-enforced gates and need no code.

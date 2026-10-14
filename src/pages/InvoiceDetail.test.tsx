@@ -1083,3 +1083,73 @@ describe('InvoiceDetail — new-invoice date default follows the Chicago busines
     expect(dateInput.value).not.toBe('2026-03-16');
   });
 });
+
+describe('InvoiceDetail — a product added on this screen is priced at the customer tier', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intentKeys.clear();
+    nextIntentKey.value = 0;
+    mockIntentAwareRpc({ data: 'inv-tier', error: null });
+  });
+
+  // The shared buildChain ignores select(), so a customer row handed to it would carry
+  // assigned_tier whether or not the page asked for that column, and this test would pass
+  // against the original bug (the list query never selected assigned_tier, so every added
+  // product fell back to tier 1). This chain returns only the columns the page requested,
+  // the way PostgREST does, so dropping assigned_tier from the select turns the test red.
+  function buildSelectedColumnsChain(rows: Record<string, unknown>[]): Record<string, unknown> {
+    let columns: string[] | null = null;
+    const self: Record<string, unknown> = {};
+    const passthrough = (..._args: unknown[]) => self;
+    for (const m of ['eq', 'order', 'limit', 'in', 'maybeSingle', 'single']) self[m] = passthrough;
+    self.select = (cols: string) => { columns = cols.split(',').map((c) => c.trim()); return self; };
+    const result = () => ({
+      data: rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => columns?.includes(key)))),
+      error: null,
+    });
+    self.then = (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+      Promise.resolve(result()).then(onFulfilled, onRejected);
+    return self;
+  }
+
+  it.each([
+    { tier: 2, expectedCents: 850 },
+    { tier: 3, expectedCents: 799 },
+  ])('a tier-$tier customer gets the tier-$tier price, and that is the price saved', async ({ tier, expectedCents }) => {
+    const invoice = {
+      id: 'inv-tier', invoice_number: 'INV-TIER', invoice_type: 'chemical_sale', status: 'draft',
+      customer_id: 'cust-tier', order_id: 'ord-1', invoice_date: '2026-03-15', due_date: null,
+      payment_terms: 'Net 30', subtotal_cents: 0, total_cents: 0, balance_cents: 0,
+      header_notes: '', footer_notes: '', purchase_order_ref: '', created_at: '2026-03-15T00:00:00Z',
+    };
+    const customer = { id: 'cust-tier', farm_name: 'Tier Farm', payment_terms: 'Net 30', is_active: true, assigned_tier: tier };
+    const product = {
+      id: 'product-tier-uuid', product_name: 'Tiered Product', sku: null,
+      tier1_price: 10, tier2_price: 8.5, tier3_price: 7.99, current_cost: 5,
+    };
+    let invoiceCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'invoices') {
+        invoiceCalls += 1;
+        return buildChain({ data: invoiceCalls <= 2 ? invoice : [], error: null });
+      }
+      if (table === 'customers') return buildSelectedColumnsChain([customer]);
+      if (table === 'products') return buildChain({ data: [product], error: null });
+      return buildChain({ data: [], error: null });
+    });
+
+    renderInvoiceDetail('inv-tier');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    fireEvent.change(screen.getByPlaceholderText('Search products by name or SKU...'), { target: { value: 'tiered' } });
+    fireEvent.click(await screen.findByText('Product ID: product-tier-uuid'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.anything()));
+    const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
+    const savedItems = saveCall?.[1].p_items as Array<{ product_id: string; unit_price_cents: number }>;
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0]).toMatchObject({ product_id: 'product-tier-uuid', unit_price_cents: expectedCents });
+    expect(savedItems[0].unit_price_cents).not.toBe(1000);
+  });
+});

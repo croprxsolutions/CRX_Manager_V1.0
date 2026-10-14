@@ -154,8 +154,8 @@ re-checked against the current harness on 2026-10-13; whoever fixes the MCP gap 
 ## OPEN 2026-10-13 (first measured 2026-09-05; owner action: Mason) — a review proof can be read and rewritten through its Windows 8.3 short name
 
 **Rescued from closed PR #612** (`claude/review-proof-guard-read-only-narrowing`, closed unmerged
-2026-09-30 Chicago time, 2026-10-01 UTC; the full write-up is in that branch's `docs/manual/KNOWN_ISSUES.md`, restorable from the PR
-#612 page). Not re-run on 2026-10-13; recorded as the PR #612 review rounds measured it.
+2026-09-30 Chicago time, 2026-10-01 UTC; the full write-up is in that branch's `docs/manual/KNOWN_ISSUES.md`, restorable from
+the PR #612 page). Not re-run on 2026-10-13; recorded as the PR #612 review rounds measured it.
 
 The PR #612 rounds measured that the review-proof file answers to an 8.3 short alias on this NTFS volume
 (`.claude/session-state/CODEX-~1.JSO` is a `codex-review-<sha>.json` proof); whether every long file name

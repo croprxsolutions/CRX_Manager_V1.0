@@ -304,11 +304,14 @@ Deleting branches cannot strand a live database change:
 | #672 | Test note |
 | #395 | Test note |
 | #639 | E2E-marker guard gap |
-| F1's branch | Pointer |
-| section1 | Pointer |
-| the cited `adjust_inventory` lap | Pointer |
-| the bulk-import branch | `save_field` note |
-| the three customer-document page branches | Pointers |
+| `codex/idempotency-reset-order-hardening-20260802` (cited by F1's original report) | Pointer |
+| `codex/section1-security-hardening-20260725` (section1) | Pointer |
+| `claude/bind-adjust-inventory-receipt-delivery-20260917` (the cited `adjust_inventory` lap) | Pointer |
+| `claude/bulk-import-retry-scopes` (the bulk-import branch) | `save_field` note |
+| `claude/customer-document-rep-remove-page`, `-v2` and `-v3` (the three customer-document page branches) | Pointers |
+
+The table has 14 lines because the last line covers three branches: 9 PRs plus 7 named branches make
+the 16 "after this PR" rows of the restore ledger below.
 
 **Kept (12)**, each with the reason it stays. The first six were kept by the audit; the last six by Mason on
 2026-10-13 ("keep all of the branches you have in question"), after the salvage review:
@@ -442,7 +445,9 @@ line in the six watched documents changed, and the `protect-main` rules were unc
 branch, `claude/rep-scope-order-invoices`: three paths it already held unlanded (`RLS_SECURITY_GUIDE.md`,
 `smoke-specs.json`, `src/lib/db.ts`) moved from BRANCH-ONLY to MAIN-MOVED because #907 edited them. No
 branch gained an unlanded path, so the rule above allowed the re-baseline. Mason gave his yes for the 16
-the same day ("yes delete the 16"). PR #909 then merged (`main` `eec473890`); the re-measure there found all
+the same day ("yes delete the 16"), after being told they would run only once this PR merged. That yes is
+the batch's approval: no further approval is asked after the merge, but the batch still runs only after the
+merge and only if the helper's "after this PR" gates all pass on the merged state. PR #909 then merged (`main` `eec473890`); the re-measure there found all
 185 branches unchanged, so the baseline was rewritten once more at that `main`.
 
 **Landing this record.** Each re-baseline edits only this file, so the PR stays documentation-only under

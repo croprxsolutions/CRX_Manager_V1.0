@@ -151,6 +151,10 @@ Small slices, each its own change. Order and scope are open for discussion.
    - Changing a quote's tier must not silently erase negotiated line prices (section 7, finding 3).
    - Codex's suggested shape (section 7, finding 10): the sent version is the price authority; Convert
      builds the order from that exact version.
+   - A revised quote can be converted without being re-sent (`QuoteBuilder.tsx`, about line 597; the status
+     map allows `revised` to `accepted`). Then Convert must build from the current revision's products and
+     quantities, taking only the locked prices from the sent version (or require a re-send first). The proof
+     includes revise-then-convert.
    - Partly drawn quotes: `draw_down_quote` relies on stable `quote_item_id` provenance and the
      `units_current` / `units_settled` split so a price change never re-bills delivered product
      (`20260816120000_draw_down_split_order_lines_by_price_tier.sql`; invariant in `KNOWN_ISSUES.md`). The
@@ -162,7 +166,9 @@ Small slices, each its own change. Order and scope are open for discussion.
    blank or wrong. The function deliberately returns, across reps, only the customer, product, unit price,
    tier and date. It must define what counts as a charge (posted, paid or overdue invoice lines; not draft,
    unposted or voided ones; how credits and returns are treated; whether an uninvoiced order line counts),
-   and its proof covers those statuses and a rep reading another rep's customer. Coordinate with the planned
+   and its proof covers those statuses and a rep reading another rep's customer. The tier at the time of
+   sale is not stored on `orders`, `order_items` or `invoice_items`, and `customers.assigned_tier` can
+   change, so new charges need a stored tier snapshot and older rows show the tier as unknown. Coordinate with the planned
    "reps see all invoices" change (`DECISION_LOG.md`, 2026-10-13).
 4. **Sell-price history on the product page**, admin-only (Mason, 2026-10-14). A read function over
    the tier columns `cost_history` already stores; a real date axis on the chart; deleting a product refuses

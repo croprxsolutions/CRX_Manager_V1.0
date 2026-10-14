@@ -3,8 +3,9 @@
 --
 -- WHAT: sales reps work with ANY customer, not only the customers assigned to them.
 --   * Invoicing: a rep creates, saves, posts and emails invoices (single, field-application split
---     and invoice groups) for any customer, under their OWN name only (SALESMAN_SCOPE_DENIED and
---     the split writer's forced-self salesman stay; admins may name anyone). An EXISTING invoice
+--     and invoice groups) for any customer, under their OWN name only: save_invoice now forces a
+--     rep's salesman_id to the rep (like the split writer already does) and SALESMAN_SCOPE_DENIED
+--     still refuses a rep who names someone else; admins may name anyone. An EXISTING invoice
 --     or split set a rep edits or posts must also be under the rep's own name: the rep is its
 --     salesperson, or it has no salesperson and the rep created it (INVOICE_SCOPE_DENIED /
 --     SPLIT_SET_NOT_OWNED). "Own name" below always means exactly that.
@@ -17,8 +18,8 @@
 --     customer's OWN assigned rep changes its default commission split
 --     (COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP); a customer with a posted or overdue invoice is not
 --     deactivated (CUSTOMER_HAS_OPEN_INVOICES); and prepay_balance_cents changes only through the
---     server's prepay and payment functions, never a direct browser UPDATE
---     (PREPAY_BALANCE_SERVER_ONLY).
+--     server's prepay and payment functions, never a direct browser UPDATE, and a customer a rep
+--     inserts directly starts at 0 (PREPAY_BALANCE_SERVER_ONLY).
 --   * Reports: get_customer_statement (the 90-day activity ledger on a customer's page) and
 --     get_customer_year_end_summary open to reps for any customer; so do the purchase-intelligence
 --     readers (prep card, lapsed products, purchase summary). get_customer_balance_listing lists
@@ -58,9 +59,9 @@
 --  1  CREATE OR REPLACE of 20 functions, each the verbatim live body with ONLY these hunks:
 --       _save_invoice_split_provenance_impl_20260719 (save_invoice): the three CUSTOMER_SCOPE_DENIED
 --         tests are removed; SALESMAN_SCOPE_DENIED stays; a rep editing or replaying an EXISTING
---         invoice must find it under their own name (INVOICE_SCOPE_DENIED), and an existing
---         invoice that names a salesperson must keep naming the rep, so "No Salesman" or an
---         omitted salesman_id cannot blank it (SALESMAN_SCOPE_DENIED).
+--         invoice must find it under their own name (INVOICE_SCOPE_DENIED); a rep's payload is
+--         passed on with salesman_id set to the rep, so "No Salesman" or an omitted key can neither
+--         leave a new invoice unattributed nor blank an existing one.
 --       _save_invoice_below_cost_impl_20260810 (save_invoice wrapper): the two replay-branch
 --         CUSTOMER_SCOPE_DENIED tests become the same own-name test, so a mismatched receipt's
 --         invoice id is reported only to a rep the invoice belongs to.
@@ -97,7 +98,7 @@
 --     other condition (provenance, uploaded_by, created_by, verified_at, deleted_at, the driver
 --     and applicator legs) is kept word for word. customers_insert is pinned and NOT changed.
 --  3  _customer_has_open_invoice_20261013(uuid) (definer-rights boolean read, authenticated only)
---     and trigger customers_guard_rep_edit_20261013 (BEFORE UPDATE OF assigned_sales_rep,
+--     and trigger customers_guard_rep_edit_20261013 (BEFORE INSERT OR UPDATE OF assigned_sales_rep,
 --     default_commission_split, is_active, prepay_balance_cents ON customers; SECURITY INVOKER so
 --     current_user tells a direct browser UPDATE from a server function) enforce the four rules
 --     listed under "What stays narrower" for an active sales rep who is not an admin. The split is
@@ -339,18 +340,17 @@ BEGIN
        AND v_requested_salesman_id IS DISTINCT FROM v_actor THEN
       RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';
     END IF;
-    -- An existing invoice that names the rep keeps naming the rep: the writer stores the
-    -- requested salesman_id as sent, so "No Salesman" (or an omitted key) would blank it and
-    -- drop the invoice out of the rep's own name (Codex P1 on PR #907).
-    IF v_invoice_id IS NOT NULL
-       AND v_owner_salesman_id IS NOT NULL
-       AND v_requested_salesman_id IS DISTINCT FROM v_actor THEN
-      RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';
-    END IF;
   END IF;
 
+  -- A rep's invoice is always saved under the rep's own name: the writer stores the requested
+  -- salesman_id as sent, so "No Salesman" or an omitted key would leave it unattributed or blank
+  -- an existing one (Codex P1 on PR #907, Luna round 4). Same as the split writer, which forces a
+  -- non-admin's salesman to self. Admins' payloads pass through unchanged.
   RETURN public._save_invoice_scoped_impl(
-    p_invoice,
+    CASE WHEN v_actor_role = 'sales_rep'
+         THEN p_invoice || jsonb_build_object('salesman_id', v_actor)
+         ELSE p_invoice
+    END,
     p_items,
     p_idempotency_key
   );
@@ -3866,7 +3866,8 @@ ALTER POLICY external_identities_update ON public.external_identities
 --         (CUSTOMER_HAS_OPEN_INVOICES; the Customers page checked this only in React, against the
 --         invoices the rep can read);
 --      d. prepay_balance_cents changes only through the server's prepay and payment functions,
---         never by a direct table UPDATE from the browser (PREPAY_BALANCE_SERVER_ONLY). Those
+--         never by a direct table UPDATE from the browser, and a customer the rep INSERTs directly
+--         starts at 0 (PREPAY_BALANCE_SERVER_ONLY). Those
 --         functions are SECURITY DEFINER, so inside them current_user is their owner; a direct
 --         PostgREST UPDATE runs as authenticated. This trigger function is deliberately NOT
 --         SECURITY DEFINER, so current_user still names the caller's role here.
@@ -3900,6 +3901,13 @@ BEGIN
   IF public.is_admin() OR NOT public.is_sales_rep() THEN
     RETURN NEW;
   END IF;
+  -- A customer a rep creates directly starts with no prepay balance (prepayments add it later).
+  IF TG_OP = 'INSERT' THEN
+    IF COALESCE(NEW.prepay_balance_cents, 0) <> 0 AND current_user = 'authenticated' THEN
+      RAISE EXCEPTION 'PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.assigned_sales_rep IS DISTINCT FROM OLD.assigned_sales_rep THEN
     RAISE EXCEPTION 'REP_CANNOT_REASSIGN';
   END IF;
@@ -3926,7 +3934,7 @@ $guard$;
 REVOKE ALL ON FUNCTION public.guard_customer_rep_edit_20261013() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER customers_guard_rep_edit_20261013
-  BEFORE UPDATE OF assigned_sales_rep, default_commission_split, is_active, prepay_balance_cents
+  BEFORE INSERT OR UPDATE OF assigned_sales_rep, default_commission_split, is_active, prepay_balance_cents
   ON public.customers
   FOR EACH ROW EXECUTE FUNCTION public.guard_customer_rep_edit_20261013();
 
@@ -4055,8 +4063,11 @@ BEGIN
        AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM unnest(t.tgattr) k JOIN pg_attribute a
               ON a.attrelid = t.tgrelid AND a.attnum = k)
            = ARRAY['assigned_sales_rep', 'default_commission_split', 'is_active', 'prepay_balance_cents']
+       AND (t.tgtype::int & 4) <> 0    -- fires on INSERT
+       AND (t.tgtype::int & 16) <> 0   -- and on UPDATE
+       AND (t.tgtype::int & 3) = 3     -- ROW level, BEFORE
   ) THEN
-    RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: customers_guard_rep_edit_20261013 does not watch the four guarded columns';
+    RAISE EXCEPTION 'REPS_ANY_CUSTOMER_POSTFLIGHT: customers_guard_rep_edit_20261013 is not BEFORE INSERT OR UPDATE OF the four guarded columns';
   END IF;
 END
 $postflight$;

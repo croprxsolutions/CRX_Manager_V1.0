@@ -16,9 +16,10 @@ only with Mason's owner-approval reply):
   the assigned-rep tests removed or narrowed (the header lists every hunk, including the dispatch board and
   dispatched list, which now show reps every customer's name); 19 policies lose their assigned-rep
   condition, every other condition kept (20 pinned: `customers_insert` is pinned unchanged).
-- Still refused: a rep naming another salesperson, or blanking the salesperson ("No Salesman" or an
-  omitted key) on an existing invoice that names one (`SALESMAN_SCOPE_DENIED`; the blanking case is the
-  Codex P1 on PR #907); a rep changing or posting an
+- Reps always invoice under their own name: `save_invoice` sets a rep's salesperson to the rep ("No
+  Salesman" or an omitted key cannot leave a new invoice unattributed or blank an existing one; Codex P1 on
+  PR #907), and naming someone else is still refused (`SALESMAN_SCOPE_DENIED`).
+- Still refused: a rep changing or posting an
   EXISTING invoice or split set not under their own name, i.e. they are not its salesperson and it is not an
   unattributed invoice they created (`INVOICE_SCOPE_DENIED`,
   `SPLIT_SET_NOT_OWNED`; added after review, since the old assigned-customer rule was the only gate on
@@ -28,7 +29,8 @@ only with Mason's owner-approval reply):
   the default commission split of a customer not assigned to them (`COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`);
   a rep deactivating a customer with posted or overdue invoices (`CUSTOMER_HAS_OPEN_INVOICES`; the
   Customers page checked this only in React); and a rep editing a prepay balance by a direct table UPDATE
-  (`PREPAY_BALANCE_SERVER_ONLY`; the prepay and payment functions still work). The last four are enforced
+  (`PREPAY_BALANCE_SERVER_ONLY`; the prepay and payment functions still work), and a customer a rep inserts
+  directly starts with no prepay balance. The last four are enforced
   on every path by the new trigger `customers_guard_rep_edit_20261013`, which runs with the caller's rights,
   plus the definer-rights reader `_customer_has_open_invoice_20261013`.
 - "Statements" means the 90-day ledger on a customer's page (`get_customer_statement`); printable and
@@ -54,7 +56,7 @@ split read-only to a rep on a customer not assigned to them, and its save errors
 
 **Proof:** `node scripts/smoke/prove-reps-work-any-customer-real-schema.mjs` builds the production schema
 baseline in a disposable PostgreSQL 17 container, replays every migration, checks the 20 bodies and 20
-policies match live, then runs 67 calls as an admin, two reps, a driver, an applicator and a deactivated
+policies match live, then runs 70 calls as an admin, two reps, a driver, an applicator and a deactivated
 rep BEFORE and AFTER the candidate: reps are refused before and allowed after; the narrower rules still
 refuse after; every admin and other-role result is identical before and after; a drifted body aborts the
 preflight; a second apply is refused; and with the guard trigger dropped the rep's direct reassignment

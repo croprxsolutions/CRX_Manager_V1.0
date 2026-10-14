@@ -357,8 +357,13 @@ const CASES = [
   ['rep posts an invoice they created that now names another salesperson', U.REP, `public.post_invoice(current_setting('prover.inv')::uuid, 'prover-rac-moved') IS NULL`,
     { fixture: `${adminDraft(C4, 'moved', `, 'salesman_id', '${U.REP_B}'`)}
   UPDATE public.invoices SET created_by = '${U.REP}' WHERE id = current_setting('prover.inv')::uuid;` }, /CUSTOMER_SCOPE_DENIED/, /INVOICE_SCOPE_DENIED/],
-  // Codex P1 on #907: an invoice naming the rep cannot be saved with "No Salesman".
-  ['rep blanks the salesperson on an invoice that names them', U.REP, `public.save_invoice(jsonb_build_object('id', current_setting('prover.inv'), 'customer_id', '${C4}', 'invoice_type', 'misc_charge', 'status', 'draft', 'invoice_date', ${TODAY}, 'salesman_id', NULL, 'header_notes', '[PROVER] blank'), jsonb_build_array(jsonb_build_object('description', '[PROVER] fee', 'quantity', 1, 'unit_price_cents', 1500, 'extended_cents', 1500)), 'prover-rac-blank') IS NOT NULL`, { fixture: adminDraft(C4, 'blank', `, 'salesman_id', '${U.REP}'`) }, /CUSTOMER_SCOPE_DENIED/, /SALESMAN_SCOPE_DENIED/],
+  // Codex P1 on #907 / Luna r4: a rep's invoice is always saved under the rep's own name, so "No
+  // Salesman" neither blanks an existing invoice nor leaves a new one unattributed.
+  ['rep saves an invoice that names them with No Salesman', U.REP, `(SELECT salesman_id FROM public.invoices WHERE id = current_setting('prover.inv')::uuid)`,
+    { fixture: adminDraft(C4, 'blank', `, 'salesman_id', '${U.REP}'`), pre: `PERFORM public.save_invoice(jsonb_build_object('id', current_setting('prover.inv'), 'customer_id', '${C4}', 'invoice_type', 'misc_charge', 'status', 'draft', 'invoice_date', ${TODAY}, 'salesman_id', NULL, 'header_notes', '[PROVER] blank'), jsonb_build_array(jsonb_build_object('description', '[PROVER] fee', 'quantity', 1, 'unit_price_cents', 1500, 'extended_cents', 1500)), 'prover-rac-blank');` },
+    /CUSTOMER_SCOPE_DENIED/, new RegExp(`^ok\\|${U.REP}$`)],
+  ['rep saves a new invoice with No Salesman', U.REP, `(SELECT salesman_id FROM public.invoices WHERE id = current_setting('prover.mine')::uuid)`,
+    { pre: `PERFORM set_config('prover.mine', (${misc(C4, 'nosales', `, 'salesman_id', NULL`)})::text, true);` }, /CUSTOMER_SCOPE_DENIED/, new RegExp(`^ok\\|${U.REP}$`)],
   ['rep re-saves an invoice that names them', U.REP, `public.save_invoice(jsonb_build_object('id', current_setting('prover.inv'), 'customer_id', '${C4}', 'invoice_type', 'misc_charge', 'status', 'draft', 'invoice_date', ${TODAY}, 'salesman_id', '${U.REP}', 'header_notes', '[PROVER] keep'), jsonb_build_array(jsonb_build_object('description', '[PROVER] fee', 'quantity', 1, 'unit_price_cents', 1500, 'extended_cents', 1500)), 'prover-rac-keep') IS NOT NULL`, { fixture: adminDraft(C4, 'keep', `, 'salesman_id', '${U.REP}'`) }, /CUSTOMER_SCOPE_DENIED/, /^ok\|true$/],
   ['rep names another salesperson', U.REP, `${misc(C1, 'repname', `, 'salesman_id', '${U.REP_B}'`)} IS NOT NULL`, {}, /SALESMAN_SCOPE_DENIED/, /SALESMAN_SCOPE_DENIED/],
   ['rep posts admin draft for unassigned customer', U.REP, `(SELECT status FROM public.invoices WHERE id = current_setting('prover.inv')::uuid)`,
@@ -415,6 +420,8 @@ const CASES = [
   ['rep changes a prepay balance through a server function', U.REP, `public.prover_rac_bump_prepay('${C1}')`, { fixture: serverPrepayFn }, /^ok\|100$/, 'same'],
   ['admin edits a prepay balance directly', U.ADMIN, `UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 100 WHERE id = '${C4}'`, { statement: true }, 'same', 'same'],
   ['rep clears an unset split on another rep\'s customer', U.REP, `UPDATE public.customers SET default_commission_split = 'null'::jsonb WHERE id = '${C4}'`, { statement: true }, RLS_HIDDEN, /^ok\|1$/],
+  ['rep inserts a customer with a prepay balance', U.REP, `INSERT INTO public.customers (farm_name, assigned_sales_rep, prepay_balance_cents) VALUES ('[PROVER] New Farm', '${U.REP}', 100000)`, { statement: true }, /^ok\|1$/, /PREPAY_BALANCE_SERVER_ONLY/],
+  ['rep inserts a customer with no prepay balance', U.REP, `INSERT INTO public.customers (farm_name, assigned_sales_rep) VALUES ('[PROVER] New Farm 2', '${U.REP}')`, { statement: true }, /^ok\|1$/, 'same'],
   ['driver direct-updates a customer', U.DRIVER, `UPDATE public.customers SET notes = 'x' WHERE id = '${C1}'`, { statement: true }, RLS_HIDDEN, 'same'],
 
   // Customer-related records.
@@ -472,6 +479,8 @@ ROLLBACK;`,
 
 function main() {
   if (!REUSE) buildContainer();
+  else assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'customers_guard_rep_edit_20261013';"), '0',
+    'the reused container already has the candidate applied (it is in the AFTER state); rebuild it');
   fidelity();
   if (scalar("SELECT count(*) FROM public.profiles WHERE id::text LIKE '7a300000-%';") === '0') seed();
 

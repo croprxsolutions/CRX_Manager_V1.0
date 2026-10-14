@@ -431,6 +431,12 @@ re-snapshot and finish"), with standing approval for the rest of this batch: whe
 if no branch gains an unlanded path, re-baseline and continue; otherwise stop and ask him. No referencing
 line in the six watched documents changed, and the `protect-main` rules were unchanged.
 
+**Landing this record.** Each re-baseline edits only this file, so the PR stays documentation-only under
+`docs/reference/sol-exempt-paths.md` and needs no fresh Sol review. Every exact-head gate still applies:
+CodeRabbit APPROVED on the exact candidate head, every required check green on it, a head that contains
+GitHub's real base, and a merge pinned to that head with `--match-head-commit`. The "after this PR" batch
+then re-runs the helper with `--approved` set to the PR head that was merged (not the merge commit).
+
 How the helper behaves:
 - **It changes nothing on GitHub.** Its git and gh calls only read. The one local side effect is fetching
   `main` and PR #901's head into this PC's remote-tracking refs.

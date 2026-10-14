@@ -1,12 +1,31 @@
 # Decision Log
 
-Last verified: 2026-10-13 (two owner decisions recovered from never-merged branches in the GitHub branch cleanup: the 2026-08-09 pricing answers and the 2026-08-27 ingredient-identity model D-AA; the 2026-09-01 return-credit split entry marked superseded by #544's close). Before that, 2026-10-10 (owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (two owner decisions recovered from never-merged branches in the GitHub branch cleanup: the 2026-08-09 pricing answers and the 2026-08-27 ingredient-identity model D-AA; the 2026-09-01 return-credit split entry marked superseded by #544's close; three entries added: a plain "I approve" replaces typing the approval code; reps invoice any customer under their own name, superseding the 2026-10-06 rep-scoping entry; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
+
+## 2026-10-13 — A plain "I approve" is enough; no code to type
+
+**Decision (Mason, in chat: "can we make it even simpler than that? … I just want to say I approve and that's good enough").** For a parked migration, Mason's whole-message reply `I approve` (also `approve`, `approved`, `yes I approve`) is his approval; he no longer types the 6-digit code, which is now shown only as a reference number. `approve <code>` still works.
+**Why.** He wants fewer hoops. The code's one real job was to tie his reply to a specific request, so an "I approve" meant for a plan or a merge could not approve a database change still waiting from earlier. That job moved to the reply hook: a plain `I approve` counts only when the agent's message just before it was that request's summary, exactly as printed and nothing else, and with nothing waiting it is ordinary chat.
+**What this forbids/implies:** agents explain the change first, then send the summary alone as its own message; if they say anything else first, they show it again. A bare "yes" or "go" is still not this approval. Everything else in the 2026-10-09 entry below stands, including the accepted residual (an agent that deliberately fakes the approval is not stopped). Detail: `docs/changelog.d/2026-10-13-owner-approval-plain-reply.md`.
+
+## 2026-10-13 — Sales reps invoice and email any customer, under their own name only
+
+**Decision (Mason, in chat).** A sales rep may create, post and email invoices for any customer, but only as themselves; admins may reassign the salesperson.
+**Supersedes** the 2026-10-06 entry "CRX-LIFE-001 lands as scoped; rep scoping of the order-invoice RPCs is the next change" (reps bill only their own customers) and the 2026-10-09 admin-only invoicing plan (PR #902, closed unmerged; its migration was never applied).
+**Why.** Reps sell across the whole customer base, and 146 of 150 customers have no assigned rep.
+**What this forbids/implies:** never propose admin-only or own-customer-only invoicing again; a rep invoicing or emailing another rep's customer is intended. The change loosens permissions, so its migration still needs Mason's approval reply. Source: `docs/plans/2026-10-13-direction-and-goals.md` (Goal 2).
+
+## 2026-10-13 — Direction: build, clean up, senior-developer handoff, then roll out
+
+**Decision (Mason, in chat, answering the scalability review).** Finish Goals 1–7 of `docs/plans/2026-10-13-direction-and-goals.md` (including a QuickBooks Desktop sync and online card/ACH payments), clean up, hand off to an outside senior developer for independent review, then roll out, with Chem Man retired for billing by spring 2027.
+**Why.** The review found a sound foundation but real gaps, and an outside expert should check the system before real money depends on it.
+**What this forbids/implies:** the same day Mason also chose a Supabase Pro upgrade with point-in-time recovery, private photos, and keeping all AI tooling (documented) at handoff. The goals doc sets priorities only and authorizes no build; open questions are listed there.
 
 ## 2026-08-27 (recovered 2026-10-13) — Product data model: the ingredient identity model (D-AA)
 

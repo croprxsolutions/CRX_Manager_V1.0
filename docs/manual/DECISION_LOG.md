@@ -10,9 +10,9 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 ## 2026-10-14 — Clarification: the 6e and 6g rules leave field-application billing as it is
 
-**Decision (clarifies the two 2026-10-14 entries below, "Invoices made from scratch carry no product lines" and "Products are billed only when delivered").** The 6e rule covers only the New Invoice page's from-scratch `misc_charge` invoices; that is the page it was explained to Mason as. It does not cover field-application invoices: direct field-app, blend-ticket and completed-job invoices. For the 6g rule, chemicals applied on a field application count as delivered goods.
+**Decision (clarifies the two 2026-10-14 entries below, "Invoices made from scratch carry no product lines" and "Products are billed only when delivered").** The 6e rule covers invoices made from scratch, as it was explained to Mason: any invoice with no order, delivery, job, field application or blend ticket behind it, whatever its type. The New Invoice page makes `misc_charge` invoices, and without `?type=misc_charge` it defaults to `chemical_sale` (`src/pages/InvoiceDetail.tsx`). It does not cover field-application invoices: direct field-app, blend-ticket and completed-job invoices. For the 6g rule, chemicals applied on a field application count as delivered goods.
 **Why.** Field-application invoices have no order by design (`invoices_field_application_has_no_order`; `docs/workflows/QUOTE_TO_DELIVERY.md`, Field Application Workflow) and carry chemical lines. Read literally, the two entries below would refuse every one of them. Codex flagged this on PRs #911 and #918.
-**What this forbids/implies:** Goal 3's enforcement must not refuse field-application, blend-ticket or job invoices for having product lines or no order. Their quantity controls are the job and field-application records, not a delivery. The entries below stay as written.
+**What this forbids/implies:** Goal 3's enforcement must not refuse field-application, blend-ticket or job invoices for having product lines or no order. Instead, each is capped in PostgreSQL at the quantity applied on its source record (job, field application or blend ticket), including draft edits and concurrent saves. The entries below stay as written.
 
 ## 2026-10-14 — Invoices made from scratch carry no product lines
 

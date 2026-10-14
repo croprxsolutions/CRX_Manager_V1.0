@@ -26,8 +26,9 @@ may run the remaining batch:
 - **helper v3:** `53e250ca48eb05d2e1de0a79905b6146a0bffaecc8e7163532565a5e972a0574`
   (`C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs`; v2 kept beside it as
   `branch-cleanup-2026-10-13.v2-e80f52bf.mjs`)
-- **baseline:** `8967eb601e6c572a80efb612b60f4d86ac4b8d308b616823aba12a887eecac11`, measured at `main`
-  `ab3600c9f` (PR #917's merge); earlier baselines are kept beside it as `.at-<commit>.json`, including
+- **baseline:** `920b7b3eb3ec62d34459aaf29e4360c40ae5c1d2ad909a398cbff73946d83bd3`, measured at `main`
+  `133416234` (PR #913's merge); earlier baselines are kept beside it as `.at-<commit>.json`, including
+  `8967eb601e6c572a80efb612b60f4d86ac4b8d308b616823aba12a887eecac11` at `ab3600c9f` (PR #917's merge) and
   `4e26e807fd67897e2ef053799759d4468127049ae8f91be7ca0f18485d2caef4` at `641a62a5f` (PR #901's merge)
 - **bundle:** unchanged, `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
 
@@ -35,7 +36,16 @@ may run the remaining batch:
 and changed `TODO.md` and two pricing-plan files. Every branch was re-measured at `ab3600c9f` with the
 audit's method: all 185 match the previous baseline exactly, no branch gains an unlanded path, and no
 watched-document line naming any branch changed. The baseline was therefore rewritten at `ab3600c9f` with
-no branch entry changed, giving the hash above, which was reported to Mason before the batch.
+no branch entry changed (`8967eb60…`).
+
+**Re-measured after PRs #921 and #913.** Both then landed on `main` (database and smoke-test
+documentation). They edit shared manual files that 11 of the 16 also edit, so every branch was re-measured
+at `133416234`: 184 of 185 match, including all 16 and all 12 kept branches, no watched-document line naming any branch changed, and all 22 rescue markers are present. The
+one difference is `claude/docs-cleanup-1-corrections-v12`, already deleted in the 157 (restore source
+PR #821 intact): it now also counts `docs/reference/database-schema.md` as unlanded only because #921
+edited `main`'s copy of that file. Because this is a branch gaining an unlanded path, the rewrite stopped
+for Mason, who accepted it ("Accept", 2026-10-14). The baseline was rewritten at `133416234` with only that
+entry changed, giving the hash above, which was reported to Mason before the batch.
 
 **This baseline stays valid when this record merges.** Merging it moves `main`, but only by adding this
 file and its changelog note. Neither exists at the approved #901 head, and none of the 16 branches

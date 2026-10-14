@@ -1,7 +1,7 @@
 # GitHub branch cleanup audit and restore ledger (2026-10-13)
 
-**Status (2026-10-14): the 157 "after yes" deletions are DONE; the 16 "after this PR" deletions wait for
-this PR to merge and for Mason's separate yes.** Mason approved the 157 batch on 2026-10-14. It paused once
+**Status (2026-10-14): the 157 "after yes" deletions are DONE; the 16 "after this PR" deletions are
+APPROVED by Mason ("yes delete the 16") and wait only for this PR to merge and the helper's gates to pass.** Mason approved the 157 batch on 2026-10-14. It paused once
 after 77 deletes, when PR #906 merged, and resumed under the re-baseline and the standing approval
 recorded in "Second re-baseline" below, which cover only the rest of that batch. The helper's sweep then
 reported all 157 gone with every restore source intact, and all 12 kept branches unchanged. The report

@@ -1185,6 +1185,43 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     expect(savedItems).toHaveLength(0);
   });
 
+  // CodeRabbit + Codex connector on PR #908: React reuses this page across /invoices/:id, so a
+  // lookup still pending from invoice A must not keep invoice B's Save locked, and when A's lookup
+  // finally settles it must not release the lock held by B's own lookup.
+  it('releases the lock on an invoice switch, and a stale lookup cannot unlock a newer one', async () => {
+    const lookupA = buildDeferredChain();
+    const lookupB = buildDeferredChain();
+    const lookup = setup({ listed: [], byId: () => (lookup.byIdCalls === 1 ? lookupA.chain : lookupB.chain) });
+    render(
+      <MemoryRouter initialEntries={['/invoices/inv-tier']}>
+        <Link to="/invoices/inv-tier-b">Invoice B</Link>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await pickTieredProduct();
+    expect(lookup.byIdCalls).toBe(1);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    lookup.switchToInvoiceB();
+    fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
+    await waitFor(() => expect(screen.getAllByText('INV-TIER-B').length).toBeGreaterThan(0));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+
+    await pickTieredProduct();
+    expect(lookup.byIdCalls).toBe(2);
+    lookupA.resolve({ data: { assigned_tier: 2 }, error: null });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    lookupB.resolve({ data: { assigned_tier: 3 }, error: null });
+    await waitFor(() => expect(screen.queryByPlaceholderText('Search products by name or SKU...')).not.toBeInTheDocument());
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0]).toMatchObject({ unit_price_cents: 1199 });
+  });
+
   function setup({ listed, tier3Price = 11.99, byId = { data: null, error: null } }: {
     listed: Record<string, unknown>[];
     tier3Price?: number | null;
@@ -1200,12 +1237,20 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
       id: 'product-tier-uuid', product_name: 'Tiered Product', sku: null,
       tier1_price: 10, tier2_price: 10.75, tier3_price: tier3Price, current_cost: 5,
     };
-    const lookup = { byIdCalls: 0 };
+    let shown = invoice;
     let invoiceCalls = 0;
+    const lookup = {
+      byIdCalls: 0,
+      // The next invoice the route loads is a second draft for the same customer.
+      switchToInvoiceB: () => {
+        shown = { ...invoice, id: 'inv-tier-b', invoice_number: 'INV-TIER-B' };
+        invoiceCalls = 0;
+      },
+    };
     mockFrom.mockImplementation((table: string) => {
       if (table === 'invoices') {
         invoiceCalls += 1;
-        return buildChain({ data: invoiceCalls <= 2 ? invoice : [], error: null });
+        return buildChain({ data: invoiceCalls <= 2 ? shown : [], error: null });
       }
       if (table === 'customers') {
         // The picker list asks for farm_name; the by-id tier read asks for assigned_tier alone.
@@ -1228,8 +1273,14 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
 
   async function addTieredProduct() {
     renderInvoiceDetail('inv-tier');
+    await pickTieredProduct();
+  }
+
+  async function pickTieredProduct() {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    if (!screen.queryByPlaceholderText('Search products by name or SKU...')) {
+      fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    }
     fireEvent.change(screen.getByPlaceholderText('Search products by name or SKU...'), { target: { value: 'tiered' } });
     fireEvent.click(await screen.findByText('Product ID: product-tier-uuid'));
   }

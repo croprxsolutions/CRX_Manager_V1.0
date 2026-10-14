@@ -180,8 +180,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Latest invoice id the route is showing — older in-flight fetches bail (stale guard).
   const activeInvoiceIdRef = useRef<string | undefined>(undefined);
   const productSearchRequestRef = useRef(0);
-  // Add Product's by-id tier lookup: a single flight, bound to the customer it was asked for.
-  const addingProductRef = useRef(false);
+  // Add Product's by-id tier lookup: a single flight, bound to the invoice and customer it was
+  // asked for. The ref holds the in-flight lookup's token (0 = none); switching invoices clears it.
+  const addingProductRef = useRef(0);
+  const addProductLookupSeqRef = useRef(0);
   const [addingProduct, setAddingProduct] = useState(false);
   const invoiceCustomerIdRef = useRef<string | null>(null);
 
@@ -316,8 +318,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   useEffect(() => {
     const fetchRef = async () => {
       const [custRes, salesRes] = await Promise.all([
+        // email + billing address feed Email and the printed invoice (buildInvoicePdfData, handleEmail);
         // assigned_tier prices each product added below (addProduct); save_invoice stores the sent price as-is.
-        supabase.from('customers').select('id, farm_name, payment_terms, assigned_tier').eq('is_active', true).order('farm_name').limit(500),
+        supabase.from('customers').select('id, farm_name, payment_terms, email, billing_address, city, state, zip, account_number, assigned_tier').eq('is_active', true).order('farm_name').limit(500),
         // PR-07 follow-up: profile_public_view exposes only id/full_name/role/is_active.
         supabase.from('profile_public_view').select('id, full_name').in('role', ['admin', 'sales_rep']).eq('is_active', true).order('full_name'),
       ]);
@@ -665,6 +668,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     invoiceCustomerIdRef.current = invoice.customer_id ?? null;
   }, [invoice.customer_id]);
 
+  // A lookup started on the previous invoice must not keep this one's Add Product and Save locked.
+  useEffect(() => {
+    addingProductRef.current = 0;
+    setAddingProduct(false);
+  }, [id]);
+
   // Add product as line item
   const addProduct = async (product: Product) => {
     // save_invoice stores the price sent, so the customer's tier must be known before pricing.
@@ -680,7 +689,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         // One lookup at a time: a second click would add a duplicate line, and Save is disabled
         // meanwhile so it cannot persist the items without the line being added.
         if (addingProductRef.current) return;
-        addingProductRef.current = true;
+        const lookup = ++addProductLookupSeqRef.current;
+        addingProductRef.current = lookup;
         setAddingProduct(true);
         try {
           const requestedFor = id;
@@ -690,7 +700,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             .select('assigned_tier')
             .eq('id', requestedCustomerId)
             .maybeSingle();
-          if (activeInvoiceIdRef.current !== requestedFor) return;
+          if (addingProductRef.current !== lookup || activeInvoiceIdRef.current !== requestedFor) return;
           if (invoiceCustomerIdRef.current !== requestedCustomerId) {
             toast('error', 'The customer changed while the product was being added. Add the product again.');
             return;
@@ -702,8 +712,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           }
           tier = (data as { assigned_tier: number | null }).assigned_tier || 1;
         } finally {
-          addingProductRef.current = false;
-          setAddingProduct(false);
+          // Only the current lookup releases the lock; one invalidated by an invoice switch must
+          // not unlock a newer lookup.
+          if (addingProductRef.current === lookup) {
+            addingProductRef.current = 0;
+            setAddingProduct(false);
+          }
         }
       }
     }

@@ -36,11 +36,16 @@ list, so the bug would have under-charged, and it had not yet affected a saved i
   and Save is disabled until the line is added. An answer that arrives after the invoice's customer
   was switched is dropped with an error, so the old customer's tier never prices the new customer's
   line.
+- PR #908 review round 2 (CodeRabbit, Codex connector): the page is reused across
+  `/invoices/:id`, so switching invoices now releases the lookup lock. Each lookup carries a token,
+  so a lookup from the previous invoice that settles late cannot release the lock a newer lookup
+  holds.
+- Merged current main (reps-work-any-customer #907): the customer-list query keeps that PR's
+  email, billing-address and account-number columns and adds `assigned_tier`.
 
-**Known, not fixed here (pre-existing, found in review).** The same list query also omits `email`
-and the billing-address and account-number columns that the Email button and the invoice PDF read
-from it. The unmerged reps-work-any-customer branch adds those columns to this query. Lines added
-before a customer is picked keep their price when the customer changes; re-pricing them could
+**Known, not fixed here (pre-existing, found in review).** The Email button and the invoice PDF
+read `email` and the billing-address and account-number columns from the list query, which used
+to omit them; reps-work-any-customer (#907, merged in above) added them. Lines added before a customer is picked keep their price when the customer changes; re-pricing them could
 overwrite a hand-typed price, so that is left as a business decision.
 
 **Visible change.** Admins and reps now see the customer's tier price, not the tier-1 price, when they

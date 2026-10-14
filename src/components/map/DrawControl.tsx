@@ -54,6 +54,7 @@ export default function DrawControl({
   // The control is registered once, so its map event listeners must read the current disabled
   // state rather than the value from their initial render.
   const disabledRef = useRef(disabled);
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref read only by map event listeners registered once in onAdd
   disabledRef.current = disabled;
   // react-map-gl registers the useControl onAdd ONCE (its effect has [] deps), so the draw.*
   // listeners would otherwise close over the FIRST render's parent callbacks. DrawLayer rebuilds
@@ -61,6 +62,7 @@ export default function DrawControl({
   // every render — without this, committing a 2nd/3rd part fires a stale handler that overwrites
   // the earlier parts (the geometry that bills). Single-boundary callbacks are stable, so unaffected.
   const cbRef = useRef({ onDrawCreate, onDrawUpdate, onDrawDelete, onDrawingStateChange });
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref (see comment above); read only inside draw.* listeners
   cbRef.current = { onDrawCreate, onDrawUpdate, onDrawDelete, onDrawingStateChange };
 
   // Read the current draw state straight off the mapbox-gl-draw instance and push it to the
@@ -228,6 +230,7 @@ export default function DrawControl({
     },
     { position: 'top-left' }
   );
+  // eslint-disable-next-line react-hooks/refs -- the same MapboxDraw instance useControl returns on every render; read only in handlers and effects
   drawRef.current = draw;
 
   // Mapbox Draw's built-in polygon button lives outside React. Disable that button and the

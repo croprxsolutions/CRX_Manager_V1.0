@@ -43,6 +43,7 @@ export function useFormDraft<T extends object>(
   const latestState = useRef<T | undefined>(currentState);
 
   // Keep latestState in sync so the visibility handler can flush it
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref read only by the page-hide flush handler
   latestState.current = currentState;
 
   // Read the draft once on mount — ignore if expired

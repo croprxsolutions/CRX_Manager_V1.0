@@ -298,6 +298,7 @@ export default function ProductDetail() {
   const costBasisWorkspaceRequestRef = useRef(0);
   const pricingPreviewRequestRef = useRef(0);
   const productIdRef = useRef(id);
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref read only after awaits in async handlers to drop results for a product the user has left
   productIdRef.current = id;
   const [persistedLabelFields, setPersistedLabelFields] = useState<{
     signalWord: Product['signal_word'];

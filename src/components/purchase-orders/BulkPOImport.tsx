@@ -185,23 +185,15 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   const [vendors, setVendors] = useState<string[]>([]);
   const [showRawText, setShowRawText] = useState<number | null>(null);
   const pendingIntentsRef = useRef<PendingBulkPOIntents>({});
+  // Render copy of the markers above, so "already imported" badges re-render on their own
+  // instead of depending on an unrelated state change after handleImport mutates the ref.
+  const [pendingIntentsView, setPendingIntentsView] = useState<PendingBulkPOIntents>({});
   const pendingProfileRef = useRef<string | null>(null);
   const refreshNeededRef = useRef(false);
 
   // Product search state
   const [productSearchOpen, setProductSearchOpen] = useState<{ poIdx: number; itemIdx: number } | null>(null);
   const [productQuery, setProductQuery] = useState('');
-
-  useEffect(() => {
-    if (open) fetchProducts();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  useEffect(() => {
-    if (!profile?.id || pendingProfileRef.current === profile.id) return;
-    pendingIntentsRef.current = loadPendingBulkPOIntents(localStorage, profile.id);
-    pendingProfileRef.current = profile.id;
-  }, [profile?.id]);
 
   const fetchProducts = async () => {
     const { data, error } = await supabase
@@ -217,6 +209,18 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
     setProducts(prods);
     setVendors([...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[]);
   };
+
+  useEffect(() => {
+    if (open) fetchProducts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!profile?.id || pendingProfileRef.current === profile.id) return;
+    pendingIntentsRef.current = loadPendingBulkPOIntents(localStorage, profile.id);
+    setPendingIntentsView({ ...pendingIntentsRef.current });
+    pendingProfileRef.current = profile.id;
+  }, [profile?.id]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
@@ -493,6 +497,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
       }
     }
 
+    setPendingIntentsView({ ...pendingIntentsRef.current });
     setUploadResults(failedCount === 0
       ? { imported: newSuccessCount, skipped: skippedCount, failed: 0 }
       : null);
@@ -650,7 +655,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                 const hasItems = po.items.length > 0;
                 const intentKey = buildParsedPOIntentKey(po);
                 const importedIntent = intentKey
-                  ? getPendingBulkPOIntent(pendingIntentsRef.current, intentKey)
+                  ? getPendingBulkPOIntent(pendingIntentsView, intentKey)
                   : undefined;
                 const alreadyImported = importedIntent?.status === 'imported';
 

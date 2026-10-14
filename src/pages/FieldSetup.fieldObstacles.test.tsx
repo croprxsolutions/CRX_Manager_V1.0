@@ -80,12 +80,14 @@ vi.mock('../components/map/CRXMap', () => ({
 vi.mock('../components/map/DrawLayer', () => ({
   default: ({
     disabled = false,
+    allowRemoveSinglePart = false,
     onDrawingStateChange,
   }: {
     disabled?: boolean;
+    allowRemoveSinglePart?: boolean;
     onDrawingStateChange?: (isDrawing: boolean) => void;
   }) => {
-    mockDrawLayer({ disabled, onDrawingStateChange });
+    mockDrawLayer({ disabled, allowRemoveSinglePart, onDrawingStateChange });
     return (
       <button
         type="button"
@@ -142,7 +144,7 @@ function listChain(data: unknown, error: unknown = null): Record<string, unknown
   return chain;
 }
 
-function configureSupabase(obstacleReadError: unknown = null): void {
+function configureSupabase(obstacleReadError: unknown = null, measuredAcres: number | null = null): void {
   mockRpc.mockImplementation((name: string) => {
     if (name === 'get_field_geojson' || name === 'get_field_polygons') {
       return Promise.resolve({ data: [], error: null });
@@ -162,7 +164,7 @@ function configureSupabase(obstacleReadError: unknown = null): void {
                 field_name: 'North 40',
                 state: 'IL',
                 total_acres: 40,
-                measured_acres: null,
+                measured_acres: measuredAcres,
                 override_acres: null,
                 irrigation: false,
                 is_active: true,
@@ -276,6 +278,24 @@ describe('FieldSetup field obstacles', () => {
       'Finish or cancel the boundary before adding an obstacle.',
     );
     expect(mockDrawLayer).toHaveBeenLastCalledWith(expect.objectContaining({ disabled: false }));
+  });
+
+  it('lets a field without a saved boundary remove its only drawn part', async () => {
+    render(<FieldSetup />);
+
+    await screen.findByText(/West well/);
+    expect(mockDrawLayer).toHaveBeenLastCalledWith(expect.objectContaining({ allowRemoveSinglePart: true }));
+  });
+
+  it('keeps a saved measured boundary from being removed down to nothing', async () => {
+    // Render state, not a ref read during render, drives this prop (React 19 follow-up, 2026-10-14).
+    configureSupabase(null, 38.5);
+    render(<FieldSetup />);
+
+    await screen.findByText(/West well/);
+    await waitFor(() => expect(mockDrawLayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ allowRemoveSinglePart: false }),
+    ));
   });
 
   it('keeps obstacle write controls hidden from applicators', async () => {

@@ -12,6 +12,7 @@ Project-specific quirks that aren't obvious from reading the code, but have caus
 | Vite manualChunks for maps | put `react-map-gl` in chunks | only put `mapbox-gl` in chunks |
 | Lucide icon tooltips | `<Icon title="..." />` (Lucide ignores it) | `<span title="..."><Icon /></span>` |
 | JSX truthy with unknown values | `{maybeNumber && <X/>}` (renders `0`) | `{maybeNumber ? <X/> : null}` |
+| What renders depends on a ref (React 19 batching; lint `react-hooks/refs` blocks it) | `allowX={someRef.current}` and hope another `setState` re-renders | keep a `useState` mirror for rendering; the ref stays for async handlers. A latest-callback ref needs an inline `eslint-disable-next-line react-hooks/refs -- <reason>` |
 
 ---
 

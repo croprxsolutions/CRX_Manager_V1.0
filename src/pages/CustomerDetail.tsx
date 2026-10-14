@@ -140,6 +140,7 @@ export default function CustomerDetail() {
   // Read by the route-change reset, which must not re-run when the profile
   // resolves — that would clobber an already-loaded customer.
   const salesRepIdRef = useRef(profile?.id);
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref read only by the route-change reset effect, never to decide what renders
   salesRepIdRef.current = profile?.id;
   const [addresses, setAddresses] = useState<Partial<CustomerAddress>[]>([]);
   // Lost-update guard: split as loaded from the DB, and whether the user has

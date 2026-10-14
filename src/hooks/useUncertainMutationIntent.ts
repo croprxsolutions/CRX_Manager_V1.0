@@ -675,6 +675,11 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   const surface = options?.surface || '';
   const scope = options?.scope || '';
   const identityToken = `${storageKey || ''}:${JSON.stringify([surface, scope])}`;
+  /* eslint-disable react-hooks/refs -- Deliberate render-time ref use, reviewed 2026-10-14:
+     getIntentIdentityRef is a latest-callback ref read only inside beginIntent (an event
+     handler), never to decide what renders. tabIdRef is lazily set once per mount; the key
+     below uses only its stable tab prefix (before the last ':'), so a discarded render's
+     different UUID suffix cannot change acknowledgmentKey. */
   const getIntentIdentityRef = useRef(options?.getIntentIdentity);
   getIntentIdentityRef.current = options?.getIntentIdentity;
   const tabIdRef = useRef<string | null>(null);
@@ -688,6 +693,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     ? `${ACKNOWLEDGMENT_PREFIX}${JSON.stringify([options.operation, options.userId,
       surface, scope, tabIdRef.current.slice(0, tabIdRef.current.lastIndexOf(':'))])}`
     : null;
+  /* eslint-enable react-hooks/refs */
   const initialRecord = readDurableRecord<T>(storageKey, options);
   const savedAttempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
   const initialVisible = savedAttempt ?? initialRecord;
@@ -1094,6 +1100,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     getIsIntentResolved,
     isIntentLocked: hasUnresolvedRecord,
     isForeignIntentLocked,
+    // eslint-disable-next-line react-hooks/purity -- the retryNotAfterMs effect above re-renders exactly when the window expires, so this clock read cannot go stale
     isRetryExpired: retryNotAfterMs !== null && Date.now() >= retryNotAfterMs,
   };
 }

@@ -23,10 +23,14 @@ export function useRealtimeSubscription(config: SubscriptionConfig) {
   const onUpdateRef = useRef(config.onUpdate);
   const onDeleteRef = useRef(config.onDelete);
 
+  /* eslint-disable react-hooks/refs -- latest-callback refs, read only inside the channel's
+     postgres_changes listener (never during render), so the subscription is not torn down and
+     re-created every time a parent passes a new inline callback. */
   onChangeRef.current = config.onChange;
   onInsertRef.current = config.onInsert;
   onUpdateRef.current = config.onUpdate;
   onDeleteRef.current = config.onDelete;
+  /* eslint-enable react-hooks/refs */
 
   useEffect(() => {
     if (config.disabled) return;

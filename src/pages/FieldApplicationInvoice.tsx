@@ -2835,6 +2835,7 @@ export default function FieldApplicationInvoice() {
     navigate('/field-invoices');
   };
 
+  // eslint-disable-next-line react-hooks/refs -- route only advances in the [id] effect after a render where loadedInvoice.id !== id already shows Loading, and every load ends in setLoadedInvoice (a re-render), so this gate cannot show a stale invoice
   if (!isNew && (loadedInvoice?.id !== id || loadedInvoice.route !== invoiceLoadRef.current.route)) {
     return <>
       <Card><p role="status" className="p-4">Loading invoice…</p></Card>

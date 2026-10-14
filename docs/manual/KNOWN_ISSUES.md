@@ -186,7 +186,7 @@ validation, so a rewritten field is detected) rather than add another command-te
 ## OPEN 2026-10-13 (mostly LOW; two MED) — smaller notes rescued from branches in the GitHub branch cleanup
 
 Each was found by the cleanup's reviewers on a branch that is being removed and was written down nowhere
-else on `main`. None blocks anything; they are here so they are not lost. Each says how it was checked.
+else on `main`. None blocks this branch cleanup; they are recorded here for follow-up so they are not lost, and some are real gaps. Each says how it was checked.
 
 - **`save_field` reports success for a field id that does not exist** (from
   `claude/bulk-import-retry-scopes`). Read from the live function body 2026-10-13: when `p_field_id` is

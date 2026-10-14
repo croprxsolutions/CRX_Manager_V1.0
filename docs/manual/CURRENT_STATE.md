@@ -1,10 +1,11 @@
 # CRX Manager — Current State
 
 **Last verified:** 2026-10-14 (America/Chicago) for the migration ledger only (read-only ledger
-query against project `rhyzpcqhnizqbxphqdkr`, 2026-10-14 14:16 UTC: 1025 rows / 1018 names,
-`max(version)` `20261014131450`, which is `20261013220000_reps_work_any_customer`, applied
-13:14:50 UTC; the read before it, 2026-10-13 22:02 UTC, had 1024 rows / 1017 names, `max(version)`
-`20261012234633`, unchanged since PR #889's last two applies).
+query against project `rhyzpcqhnizqbxphqdkr`, 2026-10-14 15:35 UTC: 1026 rows / 1019 names,
+`max(version)` `20261014150257`, which is `20261014150000_products_tier_price_cent_scale`, applied
+15:02:57 UTC from PR #910; the 14:16 UTC read before it had 1025 rows / 1018 names, `max(version)`
+`20261014131450` (`20261013220000_reps_work_any_customer`, applied 13:14:50 UTC), and the 2026-10-13
+22:02 UTC read had 1024 rows / 1017 names, `max(version)` `20261012234633`).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
 ships or quarterly, whichever comes first.
@@ -45,7 +46,9 @@ ships or quarterly, whichever comes first.
   `20261007150100_mark_spring_2026_deliveries_billed_in_chem_man` (`20261010043006`); then, from PR #889
   (2026-10-12 UTC), `20261007150200_release_reservations_of_deleted_spring_orders` (`20261012234157`)
   and `20261010120000_cap_delivery_invoice_at_delivered` (`20261012234633`). Then, from PR #907
-  (2026-10-14 UTC), `20261013220000_reps_work_any_customer` (`20261014131450`).
+  (2026-10-14 UTC), `20261013220000_reps_work_any_customer` (`20261014131450`); then, from PR #910
+  (open when this was written; 2026-10-14 UTC), `20261014150000_products_tier_price_cent_scale`
+  (`20261014150257`).
 - **Nothing from the commission cohort is parked on `main` any more.** The whole cohort
   `20260914100100`..`20260914100900` is live. (Until 2026-09-27 evening, `20260914100900` was the
   one file written but not applied.) The four field-season migrations `20260914101000`..`20260914101300`
@@ -53,8 +56,9 @@ ships or quarterly, whichever comes first.
 - **Read ordering from the authored NAME, not from `version`.** The two diverge: the ledger
   `version` is the apply-time stamp. `.claude/schema-registry.json`'s `migrations_high_water` holds
   a **version**, so a "greater than high-water" rule compared against it silently skips files.
-- **Schema registry:** `.claude/schema-registry.json` was regenerated from live on 2026-10-12 on PR
-  #889's branch (`migrations_high_water` `20261012234633`), after `20261010120000`. Refresh it after
+- **Schema registry:** `.claude/schema-registry.json` was brought to live on 2026-10-14 (PR #913;
+  `migrations_high_water` `20261014150257`), after `20261014150000`: its CHECK names, columns, NOT NULL
+  columns and applied-migration names each hash identically to a read-only live read. Refresh it after
   the next live apply.
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on
   2026-09-22 UTC, the Documents tab that calls it merged in PR #764 (2026-09-23 UTC, the evening

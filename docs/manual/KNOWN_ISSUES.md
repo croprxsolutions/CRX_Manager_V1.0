@@ -1,9 +1,11 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-14 (America/Chicago) against the live migration ledger** (read-only,
-2026-10-14 14:16 UTC, after `20261013220000_reps_work_any_customer` applied at 13:14:50 UTC; the
-counts and high-water live only in `docs/reference/migration-history.md`). That read re-certified the
-applied-migration list in this header and the reps-work-any-customer follow-ups entry (migration and
+2026-10-14 15:35 UTC, after `20261014150000_products_tier_price_cent_scale` applied at 15:02:57 UTC from
+PR #910; the counts and high-water live only in `docs/reference/migration-history.md`). That read
+re-certified the applied-migration list in this header; the 14:16 UTC read, after
+`20261013220000_reps_work_any_customer` applied at 13:14:50 UTC, re-certified the reps-work-any-customer
+follow-ups entry (migration and
 `customer-document-files` v2 both live). The 2026-10-13 22:02 UTC read re-checked the order-invoice
 rep-scope entry below against Mason's 2026-10-13 decision, and re-certified the 2026-10-07 integrity-fix
 entry (all five of PR #889's migrations live: `150000`, `150050`, `150100`, `150200` and `20261010120000`). The
@@ -27,7 +29,8 @@ date and was not all re-measured.
   and on 2026-10-10 (UTC) by PR #889's `20261007150000` (ledger `20261010014555`), `20261007150050`
   (`20261010014642`) and `20261007150100` (`20261010043006`); then on 2026-10-12 by PR #889's
   `20261007150200` (`20261012234157`) and `20261010120000` (`20261012234633`); and on 2026-10-14 by
-  PR #907's `20261013220000_reps_work_any_customer` (`20261014131450`).
+  PR #907's `20261013220000_reps_work_any_customer` (`20261014131450`) and PR #910's
+  `20261014150000_products_tier_price_cent_scale` (`20261014150257`; PR #910 open when this was written).
 
 **Layout.** Open items come first. Everything fixed, merged, applied, retired or closed is in
 **Resolved and closed (archive)** at the end of this file, newest first, with its original text.

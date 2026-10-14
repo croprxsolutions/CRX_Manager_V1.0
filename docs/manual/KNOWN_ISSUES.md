@@ -183,10 +183,19 @@ short path can break). An agent must not do either; they change a system setting
 for the whole class is a design change: authenticate proof content (wrapper-held creation and
 validation, so a rewritten field is detected) rather than add another command-text rule.
 
-## OPEN 2026-10-13 (mostly LOW; two MED) — smaller notes rescued from branches in the GitHub branch cleanup
+## OPEN 2026-10-13 (mostly LOW; three MED) — smaller notes rescued from branches in the GitHub branch cleanup
 
 Each was found by the cleanup's reviewers on a branch that is being removed and was written down nowhere
 else on `main`. None blocks this branch cleanup; they are recorded here for follow-up so they are not lost, and some are real gaps. Each says how it was checked.
+
+- **MED (money): commission clawback on returns is decided but not built** (Mason's 2026-08-09 decision,
+  `DECISION_LOG.md`). A trace of the live catalog and `main` on 2026-10-13 found no function, trigger,
+  view, scheduled job or app code that changes a commission when a return is created, received or
+  credited, or when its credit memo is applied, unapplied or voided. Commission is fixed from order or
+  job profit when it is minted and can never be negative (`chk_commission_amount >= 0`). The only
+  reversal today is cancelling PENDING commission in full when a whole order, delivery or invoice is
+  voided or cancelled; already-paid commission is never debited. Live data that day: one approved return
+  and no credit memos ever (whether that return's sale carried commission was not traced).
 
 - **`save_field` reports success for a field id that does not exist** (from
   `claude/bulk-import-retry-scopes`). Read from the live function body 2026-10-13: when `p_field_id` is

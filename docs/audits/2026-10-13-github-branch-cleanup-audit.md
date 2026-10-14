@@ -369,7 +369,7 @@ per scope:
    - Re-saving a quote with two lines of one product is refused.
    - Convert to Order can leave an accepted quote with no order and its holds released.
 3. **Commission clawback on returns (Mason, 2026-08-09) was never built.** The trace and live data are in
-   `DECISION_LOG.md`.
+   `KNOWN_ISSUES.md` (moved there from the decision log, which keeps entries short).
 3a. **Two more guard gaps, measured with synthetic hook input and recorded in `KNOWN_ISSUES.md`:**
    - **Live-data guard:** an `[E2E]` marker anywhere in a SQL batch exempts a live-data delete beside it.
    - **GraphQL ref updates:** local hooks do not inspect them at all; for `main`, GitHub's `protect-main`

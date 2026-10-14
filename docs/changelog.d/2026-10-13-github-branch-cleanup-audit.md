@@ -62,8 +62,8 @@ This PR rescues or corrects:
 
 - **`docs/manual/DECISION_LOG.md`**
   - Mason's 2026-08-09 pricing answers. Commission clawback on returns is settled but, per a full
-    live-catalog trace, not built. The entry also covers the no-backfill boundary and the below-cost
-    wall's full operative rule.
+    live-catalog trace, not built (the trace is in `KNOWN_ISSUES.md`). The entry also covers the
+    no-backfill boundary and the below-cost wall.
   - The 2026-08-27 ingredient identity model D-AA.
   - The 2026-09-01 return-credit split entry, marked superseded by #544's close.
 - **`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`**: PR #507's Revisions 12-13, merged in

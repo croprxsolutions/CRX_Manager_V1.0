@@ -717,14 +717,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           }
           tier = (data as { assigned_tier: number | null }).assigned_tier || 1;
         } catch (err) {
-          // A thrown lookup (e.g. a network failure) adds nothing; tell the user only if it is
-          // still the current one, under the same checks as an answered lookup.
+          // The client reports network failures as { error } above; this catches anything that
+          // still throws. It adds nothing, and tells the user only if the lookup is still the
+          // current one, under the same checks as an answered lookup.
           if (addingProductRef.current !== lookup || activeInvoiceIdRef.current !== requestedFor) return;
           if (invoiceCustomerIdRef.current !== requestedCustomerId) {
             toast('error', 'The customer changed while the product was being added. Add the product again.');
             return;
           }
-          Sentry.captureException(err, { extra: { context: 'invoice_add_product_customer_tier' } });
+          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_add_product_customer_tier' } });
           toast('error', "Could not load this customer's price tier. The product was not added; try again.");
           return;
         } finally {

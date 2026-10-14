@@ -32,9 +32,14 @@ function buildChain(result: { data: unknown; error: unknown }): Record<string, u
   return self;
 }
 
-function buildDeferredChain(): { chain: Record<string, unknown>; resolve: (result: { data: unknown; error: unknown }) => void } {
+function buildDeferredChain(): {
+  chain: Record<string, unknown>;
+  resolve: (result: { data: unknown; error: unknown }) => void;
+  reject: (reason: unknown) => void;
+} {
   let resolve!: (result: { data: unknown; error: unknown }) => void;
-  const promise = new Promise<{ data: unknown; error: unknown }>((done) => { resolve = done; });
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<{ data: unknown; error: unknown }>((done, fail) => { resolve = done; reject = fail; });
   const chain: Record<string, unknown> = {};
   const method = (..._args: unknown[]) => chain;
   const methods = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq',
@@ -46,7 +51,7 @@ function buildDeferredChain(): { chain: Record<string, unknown>; resolve: (resul
   chain.then = promise.then.bind(promise);
   chain.catch = promise.catch.bind(promise);
   chain.finally = promise.finally.bind(promise);
-  return { chain, resolve };
+  return { chain, resolve, reject };
 }
 
 vi.mock('../lib/db', () => ({
@@ -1154,19 +1159,72 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     expect(savedItems).toHaveLength(0);
   });
 
-  // Sol on PR #908: a lookup that throws (network failure) instead of returning { error } must
-  // still tell the user the product was not added, so they know to retry.
+  // Sol on PR #908: the Supabase client reports network failures as { error }, but if the lookup
+  // ever throws (an unexpected client or runtime error) the user must still be told the product
+  // was not added, so they know to retry.
   it('refuses to add the product and says so when the tier lookup throws', async () => {
-    const failure = new Error('Failed to fetch');
-    setup({ listed: [], byId: () => buildRejectingChain(failure) });
+    const failure = new Error('unexpected client error');
+    const lookup = setup({ listed: [], byId: () => buildRejectingChain(failure) });
     await addTieredProduct();
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', "Could not load this customer's price tier. The product was not added; try again."));
-    expect(mockCaptureException).toHaveBeenCalledWith(failure, { extra: { context: 'invoice_add_product_customer_tier' } });
+    expect(lookup.byIdCalls).toBe(1);
+    expect(mockCaptureException).toHaveBeenCalledWith(failure, TIER_SENTRY_CONTEXT);
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
     const savedItems = await saveAndReadItems();
     expect(savedItems).toHaveLength(0);
   });
+
+  it('a lookup that throws after the customer was switched reports the switch, not a tier failure', async () => {
+    const pending = buildDeferredChain();
+    setup({ listed: [{ ...CUSTOMER, id: 'cust-other', farm_name: 'Other Farm' }], byId: () => pending.chain });
+    await addTieredProduct();
+
+    fireEvent.change(screen.getByPlaceholderText('Search customers...'), { target: { value: 'Other' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Other Farm' }));
+    pending.reject(new Error('unexpected client error'));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'The customer changed while the product was being added. Add the product again.'));
+    expect(mockToast).not.toHaveBeenCalledWith('error', "Could not load this customer's price tier. The product was not added; try again.");
+    expect(mockCaptureException).not.toHaveBeenCalledWith(expect.anything(), TIER_SENTRY_CONTEXT);
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(0);
+  });
+
+  it('a stale lookup that throws stays silent and cannot unlock a newer one', async () => {
+    const lookupA = buildDeferredChain();
+    const lookupB = buildDeferredChain();
+    const lookup = setup({ listed: [], byId: () => (lookup.byIdCalls === 1 ? lookupA.chain : lookupB.chain) });
+    render(
+      <MemoryRouter initialEntries={['/invoices/inv-tier']}>
+        <Link to="/invoices/inv-tier-b">Invoice B</Link>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await pickTieredProduct();
+    lookup.switchToInvoiceB();
+    fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
+    await waitFor(() => expect(screen.getAllByText('INV-TIER-B').length).toBeGreaterThan(0));
+
+    await pickTieredProduct();
+    expect(lookup.byIdCalls).toBe(2);
+    lookupA.reject(new Error('unexpected client error'));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(mockCaptureException).not.toHaveBeenCalledWith(expect.anything(), TIER_SENTRY_CONTEXT);
+
+    lookupB.resolve({ data: { assigned_tier: 3 }, error: null });
+    await waitFor(() => expect(screen.queryByPlaceholderText('Search products by name or SKU...')).not.toBeInTheDocument());
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(1);
+    expect(savedItems[0]).toMatchObject({ unit_price_cents: 1199 });
+  });
+
+  // Other panels on this page report unrelated mock gaps to Sentry, so assert on this context only.
+  const TIER_SENTRY_CONTEXT = { extra: { context: 'invoice_add_product_customer_tier' } };
 
   function buildRejectingChain(reason: unknown): Record<string, unknown> {
     const chain: Record<string, unknown> = {};

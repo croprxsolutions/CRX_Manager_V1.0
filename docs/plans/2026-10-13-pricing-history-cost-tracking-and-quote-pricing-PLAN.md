@@ -119,7 +119,10 @@ approval still needs an active admin) and `20260814063000_quote_sections_rpc_own
 
 Small slices, each its own change. Order and scope are open for discussion.
 
-0. **Workbook hardening** (section 8, from the Sol review; can run alongside slices 1-2). A "Download full
+0. **Workbook hardening** (section 8, from the Sol review; can run alongside slices 1-2). It must include
+   slice 4's per-acre history (or disable workbook edits to `rate_per_acre` and `rate_unit` until slice 4
+   lands), because otherwise a rate-only workbook edit would satisfy "source and reason stored with history"
+   while writing no history; its proof includes a rate-only edit. A "Download full
    price sheet" action that always exports every active product; outlier warnings for a large jump or a margin
    outside a band, added beside the existing below-cost warning; a required acknowledgement of every warning,
    **enforced by the apply RPC** (the preview stores the exact warning set and apply refuses a change set
@@ -153,7 +156,14 @@ Small slices, each its own change. Order and scope are open for discussion.
      (`20260816120000_draw_down_split_order_lines_by_price_tier.sql`; invariant in `KNOWN_ISSUES.md`). The
      lock must be built in PostgreSQL and its proof must include a partial draw followed by a revision, not
      only a normal Convert.
-3. **"Last charged" panel in the quote screen**, visible to sales reps (Mason, 2026-10-14).
+3. **"Last charged" panel in the quote screen**, visible to sales reps (Mason, 2026-10-14). It needs a
+   database read function, not a table read from the screen: `invoice_items_select` lets a rep see only
+   invoices they created or are the salesperson on, so a customer last billed by another rep would show
+   blank or wrong. The function deliberately returns, across reps, only the customer, product, unit price,
+   tier and date. It must define what counts as a charge (posted, paid or overdue invoice lines; not draft,
+   unposted or voided ones; how credits and returns are treated; whether an uninvoiced order line counts),
+   and its proof covers those statuses and a rep reading another rep's customer. Coordinate with the planned
+   "reps see all invoices" change (`DECISION_LOG.md`, 2026-10-13).
 4. **Sell-price history on the product page**, admin-only (Mason, 2026-10-14). A read function over
    the tier columns `cost_history` already stores; a real date axis on the chart; deleting a product refuses
    rather than erasing history. Add in the same slice:

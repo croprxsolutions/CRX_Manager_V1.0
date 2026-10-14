@@ -377,7 +377,7 @@ Live postflight: catalog 604 Products → `no_return`=21, `returnable`=2, `unkno
 | quote_items | Admin / Sales Rep | - (RPC only, since `20260812115236` dropped `qitems_insert`/`qitems_update`/`qitems_delete`) | - (RPC only) | - (RPC only) |
 | quote_versions | Admin / Sales Rep | - for browser roles (`create_quote_version` RPC only, since `20260813080000`, ledger version `20260816174353`; `service_role` and `postgres` retain direct write grants and bypass RLS) | - (same scope) | - (same scope) |
 | orders | Admin / Sales Rep | Admin / Sales Rep | Admin | Admin |
-| order_items | Admin / Sales Rep | Admin / Sales Rep | Admin | Admin |
+| order_items | Admin / Sales Rep | Admin / Sales Rep | Admin (sales reps edit order lines only through `update_order_items()`, never by direct UPDATE) | Admin |
 | inventory | Admin / Sales Rep / Driver | Admin | Admin | Admin |
 | inventory_transactions | Admin / Sales Rep | Admin / Sales Rep | - | - |
 | inventory_holds | All authenticated | - (no write policy; SECDEF RPCs only) | - (no write policy) | - (no write policy) |

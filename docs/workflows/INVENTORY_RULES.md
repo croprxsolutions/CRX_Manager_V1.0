@@ -129,7 +129,7 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
 
 ### Critical rule: All inventory math happens in the database, NOT in React.
 
-Inventory calculations are done in PostgreSQL RPCs and triggers. The React frontend only displays results — it never calculates stock levels itself.
+Inventory calculations are done in PostgreSQL RPCs and triggers. The React frontend only displays results — it never calculates an authoritative stock level itself. Its one client-side figure is the manual-hold warning preview, "Today's Free" (above), and `create_inventory_hold()` recomputes free stock in the database before it saves the hold.
 
 The single source of truth for inventory math is the `get_inventory_position()` RPC (added in Wave B.3, migration 20260507150000). It returns one row per (product, location) for active products with `quantity_available`, `quantity_prebooked`, `quantity_on_order`, `holds_qty`, `planned_qty`, `delivered_ytd` (season-to-date), and the computed `net_position`. **Don't add a parallel inventory aggregation in another file; if you need numbers, call this RPC.** One existing exception: the order-creation RPCs (`create_direct_order`, `convert_quote_to_order`, the booking draw-down, `bulk_import_order` and `create_rush_order`) check stock inside their own write transaction, so they compute net position inline from the `inventory` row (see Net Position above) instead of calling this RPC. `convert_quote_to_order`, the draw-down and `bulk_import_order` lock that row first; `create_direct_order` and `create_rush_order` read it without a lock. The exception covers only those transactional checks, never display or reporting.
 

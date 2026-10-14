@@ -326,7 +326,7 @@ to show was stale: live also pins the actor.
 | profiles | Own/Admin | Own/Admin | Own/Admin | - |
 | products | All authenticated | Admin | Admin | Admin |
 | cost_history | Admin | - (no INSERT policy) | - | - |
-| customers | Admin / Sales Rep / Driver (recent delivery) / Applicator (recent job) / dispatched to a job location | Admin / Sales Rep (assigned to themselves) | Admin / Sales Rep (any customer; reassignment admin-only, the commission split admin-or-assigned-rep, no deactivating a customer with a posted or overdue invoice (`CUSTOMER_HAS_OPEN_INVOICES`), and `prepay_balance_cents` changed only by server functions (`PREPAY_BALANCE_SERVER_ONLY`), all enforced by `customers_guard_rep_edit_20261013`) | Admin |
+| customers | Admin / Sales Rep / Driver (recent delivery) / Applicator (recent job) / dispatched to a job location | Admin / Sales Rep (assigned to themselves) | Admin / Sales Rep (any customer). For a sales rep only (admins skip these checks), `customers_guard_rep_edit_20261013` refuses reassignment, a default commission split change unless they are the assigned rep, deactivating a customer with a posted or overdue invoice (`CUSTOMER_HAS_OPEN_INVOICES`), and a direct `prepay_balance_cents` change (`PREPAY_BALANCE_SERVER_ONLY`) | Admin |
 | customer_addresses | All authenticated | Admin / Sales Rep by policy, but `authenticated` holds no INSERT grant (`save_customer` writes addresses) | Admin / Sales Rep by policy, but no UPDATE grant either | Admin |
 | quotes | Admin / Sales Rep | Admin / Sales Rep (own) | Admin / Sales Rep (own) | Admin |
 | quote_sections | All authenticated | Admin / Sales Rep (quote owner) | Admin / Sales Rep (quote owner) | Admin / Sales Rep (quote owner) |

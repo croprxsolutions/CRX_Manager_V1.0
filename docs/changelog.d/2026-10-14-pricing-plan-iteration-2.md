@@ -3,8 +3,8 @@
 Documentation only. No code or database changed, and nothing is built.
 
 Mason asked the sessions looking at pricing ("CRX pricing updates and history" and "Missing pricing and cost
-tracking features") to compare notes and produce one document to build from. The existing draft plan on PR
-#905 became that document instead of a second plan being written.
+tracking features") to compare notes and produce one document to build from. The existing draft plan on
+PR #905 became that document instead of a second plan being written.
 
 - **`docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`:**
   - records Mason's 2026-10-14 answers (revised quotes keep locked prices, with an "update to today's

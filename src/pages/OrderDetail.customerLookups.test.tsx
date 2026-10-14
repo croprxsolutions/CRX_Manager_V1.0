@@ -26,8 +26,12 @@ const { mockFrom, mockRpc, mockToast, mockCaptureException } = vi.hoisted(() => 
 // this follows schema refreshes. It has is_active and no deleted_at.
 const registry = JSON.parse(readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.claude', 'schema-registry.json'), 'utf8',
-)) as { columns: Record<string, string[]> };
-const CUSTOMER_COLUMNS = new Set(registry.columns.customers);
+)) as { columns?: Record<string, string[] | undefined> };
+const registryCustomerColumns = registry.columns?.customers;
+if (!registryCustomerColumns?.length) {
+  throw new Error('schema-registry.json has no customers columns; regenerate the registry');
+}
+const CUSTOMER_COLUMNS = new Set(registryCustomerColumns);
 // Methods whose first argument is a column name.
 const FILTER_METHODS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'ilike', 'is', 'in', 'not', 'order', 'filter']);
 

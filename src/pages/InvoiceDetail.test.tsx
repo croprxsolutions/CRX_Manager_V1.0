@@ -6,11 +6,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { sanitizeError } from '../lib/errorSanitizer';
 
-const { mockFrom, mockRpc, mockToast, mockNavigate, intentKeys, nextIntentKey } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockNavigate, mockCaptureException, intentKeys, nextIntentKey } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
   mockNavigate: vi.fn(),
+  mockCaptureException: vi.fn(),
   intentKeys: new Map<string, string>(),
   nextIntentKey: { value: 0 },
 }));
@@ -54,6 +55,8 @@ vi.mock('../lib/db', () => ({
   assertRpcResult: vi.fn((d) => d),
   sanitizeError: (e: unknown) => sanitizeError(e),
 }));
+
+vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mockCaptureException } }));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Test Admin' }, role: 'admin' }),
@@ -1150,6 +1153,28 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     const savedItems = await saveAndReadItems();
     expect(savedItems).toHaveLength(0);
   });
+
+  // Sol on PR #908: a lookup that throws (network failure) instead of returning { error } must
+  // still tell the user the product was not added, so they know to retry.
+  it('refuses to add the product and says so when the tier lookup throws', async () => {
+    const failure = new Error('Failed to fetch');
+    setup({ listed: [], byId: () => buildRejectingChain(failure) });
+    await addTieredProduct();
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', "Could not load this customer's price tier. The product was not added; try again."));
+    expect(mockCaptureException).toHaveBeenCalledWith(failure, { extra: { context: 'invoice_add_product_customer_tier' } });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    const savedItems = await saveAndReadItems();
+    expect(savedItems).toHaveLength(0);
+  });
+
+  function buildRejectingChain(reason: unknown): Record<string, unknown> {
+    const chain: Record<string, unknown> = {};
+    for (const m of ['eq', 'maybeSingle']) chain[m] = () => chain;
+    chain.then = (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+      Promise.reject(reason).then(onFulfilled, onRejected);
+    return chain;
+  }
 
   const CUSTOMER = { id: 'cust-tier', farm_name: 'Tier Farm', payment_terms: 'Net 30', is_active: true, assigned_tier: 1 };
 

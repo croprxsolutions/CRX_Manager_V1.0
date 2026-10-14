@@ -1899,7 +1899,7 @@ Its contract, per CRX canon and **D-J** / **D-S**:
   unknown, or whose `sku` no longer matches that id; a row populating both domains; **a draft whose
   `ingredients[]` carries TWO elements resolving to the same logical ingredient identity — the same
   `ingredient_id`, or two `proposed_form` elements of the same identity** *(FOLLOW-UP 2, below)*;
-  **a `proposed_form` whose name matches an existing ingredient but claims a DIFFERENT
+  **a `proposed_form` whose name OR CAS number matches an existing ingredient but claims a DIFFERENT
   `canonical_ingredient_id`** *(D-AA-3, Mason 2026-08-27 — refused HERE at import with a named error,
   never queued and never resolved at commit, because ambiguous chemistry must not enter the system;
   the correction is a corrected sheet, re-uploaded)*;

@@ -143,6 +143,12 @@ Small slices, each its own change. Order and scope are open for discussion.
    - A revision keeps the locked prices. Add an **"Update to today's prices"** action on a revised quote, both
      per line and for the whole quote, that shows each line's locked price beside today's price and applies
      only what the user picks.
+   - **Price authority after a price change (CodeRabbit on PR #923).** A revision that changes any line's
+     price (this update action, a manual price edit or a tier change) must be re-sent before Convert, and
+     Convert then uses that newly sent version's prices. The customer is never billed a price they were not
+     sent, and an update is never silently ignored. Revise-then-convert without a re-send (below) applies only
+     to revisions that leave every price unchanged. The proof covers update-then-convert, refused until
+     re-sent and then billed at the new prices.
    - **Rewind:** the quote screen already has Version History (`src/pages/QuoteBuilder.tsx`, about line 3604:
      "Every time you send or revise, a snapshot is saved. You can compare versions side-by-side or restore an
      older version"), backed by `quote_versions` and `restore_quote_version`. Build on it: make "the version

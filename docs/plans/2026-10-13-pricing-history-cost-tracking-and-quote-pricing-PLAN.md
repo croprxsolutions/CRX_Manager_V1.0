@@ -176,8 +176,11 @@ Small slices, each its own change. Order and scope are open for discussion.
      `id`. A rewind does not: `_restore_quote_version_owner_impl` deletes the quote's sections, which cascades
      to the lines, and re-inserts them without `id`, so every restored line gets a new ID. Under ID matching,
      rewinding to the sent version and then converting would be refused even though nothing changed. Restore
-     must keep the snapshot's line IDs or record an old-to-new ID map that Convert uses. The proof adds
-     rewind-then-convert, with and without a later quantity edit.
+     must keep the snapshot's line IDs or record an old-to-new ID map that Convert uses. Snapshots saved
+     before slice 2 carry no line IDs (Codex on PR #923). They are not backfilled; restoring and converting
+     one falls back to the one-to-one pairing by product above, which fails closed, so any duplicate product
+     or other mismatch requires a re-send. The proof adds rewind-then-convert with and without a later
+     quantity edit, and a rewind to a version saved before slice 2, with and without a duplicate product.
    - Partly drawn quotes: `draw_down_quote` relies on stable `quote_item_id` provenance and the
      `units_current` / `units_settled` split so a price change never re-bills delivered product
      (`20260816120000_draw_down_split_order_lines_by_price_tier.sql`; invariant in `KNOWN_ISSUES.md`). The

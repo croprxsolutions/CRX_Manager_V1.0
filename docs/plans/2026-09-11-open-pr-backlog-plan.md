@@ -3,8 +3,9 @@
 # CRX Manager backlog plan — approved 2026-09-11
 
 > **STATUS 2026-10-14 — complete.** The queue is finished and its guard-policy window ran to
-> 2026-09-25: #599, #630, #646 and #650 merged; the other rows closed. Details:
-> `docs/manual/CURRENT_STATE.md`, "Open-PR landing queue". This file is a frozen record.
+> 2026-09-25: #599, #630, #646 and #650 merged; every other row is closed. GitHub shows #605, #612
+> and #631 closed unmerged on 2026-10-01 (`docs/manual/CURRENT_STATE.md`, "Open-PR landing queue",
+> still lists those three as open). This file is a frozen record.
 
 Status: Astra (gpt-6-astra, read-only) round 2 verdict APPROVE WITH CHANGES; all ten changes are folded in below. Mason's standing rule for this plan: "send to astra; if it approves I agree with it all." Two items still need Mason's own words (marked MASON).
 

@@ -58,7 +58,9 @@
 --  1  CREATE OR REPLACE of 20 functions, each the verbatim live body with ONLY these hunks:
 --       _save_invoice_split_provenance_impl_20260719 (save_invoice): the three CUSTOMER_SCOPE_DENIED
 --         tests are removed; SALESMAN_SCOPE_DENIED stays; a rep editing or replaying an EXISTING
---         invoice must find it under their own name (INVOICE_SCOPE_DENIED).
+--         invoice must find it under their own name (INVOICE_SCOPE_DENIED), and an existing
+--         invoice that names a salesperson must keep naming the rep, so "No Salesman" or an
+--         omitted salesman_id cannot blank it (SALESMAN_SCOPE_DENIED).
 --       _save_invoice_below_cost_impl_20260810 (save_invoice wrapper): the two replay-branch
 --         CUSTOMER_SCOPE_DENIED tests become the same own-name test, so a mismatched receipt's
 --         invoice id is reported only to a rep the invoice belongs to.
@@ -334,6 +336,14 @@ BEGIN
       RAISE EXCEPTION 'INVOICE_SCOPE_DENIED';
     END IF;
     IF v_requested_salesman_id IS NOT NULL
+       AND v_requested_salesman_id IS DISTINCT FROM v_actor THEN
+      RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';
+    END IF;
+    -- An existing invoice that names the rep keeps naming the rep: the writer stores the
+    -- requested salesman_id as sent, so "No Salesman" (or an omitted key) would blank it and
+    -- drop the invoice out of the rep's own name (Codex P1 on PR #907).
+    IF v_invoice_id IS NOT NULL
+       AND v_owner_salesman_id IS NOT NULL
        AND v_requested_salesman_id IS DISTINCT FROM v_actor THEN
       RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';
     END IF;

@@ -417,8 +417,8 @@ describe('return-credit COGS migration', () => {
     }
   });
 
-  it('gives sales reps the same batch as admins, with one empty-season message', () => {
-    // Reps work with any customer (Mason, 2026-10-13): nothing is skipped as "not assigned to you".
+  it('uses unfiltered batch selection and the all-customer empty-season message', () => {
+    // Batch selection has no assigned-rep filter. Generate All remains admin-only.
     expect(reportsPage).not.toContain('skippedCount');
     expect(reportsPage).not.toContain('No assigned customers have invoices for season');
     expect(reportsPage).toContain('No customers have invoices for season');

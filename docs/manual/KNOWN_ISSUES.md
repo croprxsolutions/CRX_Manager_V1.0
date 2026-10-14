@@ -447,9 +447,6 @@ archive. They are listed here so the open part of this file shows them. None was
   - **Prepay on a new customer.** The prepay guard covers UPDATE only: a rep's direct INSERT of a
     self-assigned customer could set a non-zero `prepay_balance_cents` (pre-existing; `save_customer`
     never sets it, and `reconcile_prepay_balances` corrects it).
-  - **Year-end batch for reps.** Reports' batch mode finds customers through the invoices the rep
-    can read (created or salesperson on), so a rep's batch skips customers billed only by others;
-    the single-customer year-end works for any customer.
   - **`customer-document-files` deploy.** The repo code opens documents to every rep; until that
     function is redeployed (Mason's OK required), reps see other customers' document rows but the
     live function still refuses their uploads and downloads. Deploy right after the migration

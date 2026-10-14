@@ -16,6 +16,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Only an admin can change which sales rep a customer is assigned to'],
   [/^COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP\b/i,
    "Only an admin or this customer's assigned sales rep can change its default commission split"],
+  [/^SALESMAN_SCOPE_DENIED\b/i,
+   'Sales reps invoice under their own name: choose yourself as the salesman'],
   [/^INVOICE_SCOPE_DENIED\b/i,
    'You can only change or post invoices under your own name'],
   [/^CUSTOMER_HAS_OPEN_INVOICES\b/i,

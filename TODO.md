@@ -24,7 +24,10 @@ When an item here ships or is decided, update this file AND `docs/manual/KNOWN_I
 > - **Plan (draft):** `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`
 >   covers what exists, what's missing, reusable work, a draft build path and the open questions.
 > - **Decided:** a sent quote's prices stay locked until it is accepted or expires
->   (`docs/manual/DECISION_LOG.md`, 2026-10-13).
+>   (`docs/manual/DECISION_LOG.md`, 2026-10-13). Also decided 2026-10-14: a revised quote keeps its locked
+>   prices, with an "update to today's prices" option (per line and whole quote) and a rewind to the last
+>   version sent; reps see last-charged prices, price history stays admin-only; prices keep coming in through
+>   the full Excel workbook, with no automatic PDF reading for now.
 > - **Reusable work is on kept GitHub branches.** Do not delete them until the plan is built or the work is
 >   consciously dropped:
 >   - PR #397, `codex/pr389-coderabbit-fixes`;

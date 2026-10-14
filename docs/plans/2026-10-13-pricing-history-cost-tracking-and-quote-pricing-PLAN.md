@@ -5,8 +5,27 @@ anything but want to leave top of list on to do this is next section of work. I 
 before start building." Nothing here is a build instruction yet. Each round of iteration should update this
 file; building starts only when Mason says so in chat.
 
-**Decided so far.** A sent quote's prices stay locked until the quote is accepted or expires (Mason,
-2026-10-13; `docs/manual/DECISION_LOG.md`).
+**Decided so far** (all in `docs/manual/DECISION_LOG.md`):
+- A sent quote's prices stay locked until the quote is accepted or expires (Mason, 2026-10-13).
+- **A revised quote keeps its locked prices**, with an option to **update to today's prices** when the
+  situation calls for it (Mason, 2026-10-14: "sent quotes should keep its locked prices unless updated in the
+  revised version, but give option to update to todays prices aswell. depends on the situation"). Offer it
+  **both per line and for the whole quote**, plus a **rewind** to see the last version quoted to the customer
+  (Mason, 2026-10-14: "offer both options, and offer a rewind to see the last version quoted to customer").
+- **Who sees what** (Mason, 2026-10-14). Sales reps see the last price we charged a customer ("yes they
+  should see the last price we charged this customer"). **Price history stays admin-only** ("only admin can
+  see the price hisotry"), which keeps the 2026-07-20 admin-only rule for cost history.
+- **Price changes keep coming in through the downloadable/uploadable Excel workbook, as one full sheet.** No
+  automatic reading of supplier PDFs for now (Mason, 2026-10-14). Prices arrive as supplier PDFs, emails and
+  texts, "usually monthly but sometimes randomly in middle of month". His reason: the workbook gives control,
+  visibility and accountability, and lets several agents review the numbers before anything is applied.
+  Automatic reading "we can build this in future"; if it is, it only drafts a workbook for review and never
+  changes prices. Each change downloads the entire sheet ("might aswell download entire sheet so is simple and
+  that is all current pricing"). Mason asked for a Sol review of the workbook method (section 8).
+
+**Iteration 2 (2026-10-14).** Merged the findings of three sessions ("CRX pricing updates and history",
+"Missing pricing and cost tracking features" and the branch-cleanup session that wrote this draft), with a Codex
+`gpt-6-luna` xhigh second opinion. The new material is in section 7; sections 4 and 5 are updated to match.
 
 **Where this came from.** The 2026-10-13 GitHub branch cleanup ran two read-only reviews of all 185 old
 branches for work worth reusing, led by Mason's question about "pricing history lookup and cost tracking on
@@ -80,6 +99,15 @@ live `20260812115235/6/7`; #397's draw-down owner restriction, which contradicts
 rep" decision; the old `BelowCostConfirmModal` / `belowCostRpc.ts`, replaced on main; and the parked "New
 Order cost" migration, made redundant by the live trigger.
 
+**Third look at #397 and #350 (2026-10-14, read-only, `git show` against main 395bdcd9a).** #350 is fully
+contained in #397. Neither branch locks quote sell prices, adds sell-price history, price lists or dated
+prices, or makes the server compute order cost, so slices 2 and 4 are new work. The QuoteBuilder pieces above
+must be rebuilt by hand, because main has changed `QuoteBuilder.tsx`, `NewOrder.tsx` and `Reports.tsx` since
+the branch point. Two smaller #397 pieces are not in this plan's scope and are recorded only so they are not
+lost: `20260814041419_fresh_below_cost_reason` (an old below-cost approval note can be reused as the reason;
+approval still needs an active admin) and `20260814063000_quote_sections_rpc_owned` (drops the
+`qsections_insert/update/delete` policies, which live still has).
+
 ## 4. Draft build path (to iterate, not to start)
 
 Small slices, each its own change. Order and scope are open for discussion.
@@ -88,11 +116,30 @@ Small slices, each its own change. Order and scope are open for discussion.
    QuoteBuilder has moved on). Do the money math in `src/lib/money.ts`. Re-picking the same product keeps the
    line's frozen cost; swapping to a different product starts fresh. Proof: save a quote with one product in
    two sections, edit it and save it again.
-2. **Sell-price lock** (Mason's 2026-10-13 decision). Freeze each line's sell price when the quote is sent,
-   the same way cost is frozen, and stop Convert to Order from re-pricing. Depends on slice 1.
-3. **"Last charged" panel in the quote screen.**
-4. **Sell-price history on the product page.** A read function over the tier columns `cost_history`
-   already stores; a real date axis on the chart; deleting a product refuses rather than erasing history.
+2. **Sell-price lock** (Mason's 2026-10-13 and 2026-10-14 decisions). Freeze each line's sell price when the
+   quote is sent, the same way cost is frozen, and stop Convert to Order from re-pricing. Depends on slice 1.
+   - Enforce it in the database, not only on screen: `save_quote` today checks only status *changes*, so a
+     same-status save of a sent or accepted quote is accepted by the server (section 7, finding 2).
+   - A revision keeps the locked prices. Add an **"Update to today's prices"** action on a revised quote, both
+     per line and for the whole quote, that shows each line's locked price beside today's price and applies
+     only what the user picks.
+   - **Rewind:** the quote screen already has Version History (`src/pages/QuoteBuilder.tsx`, about line 3604:
+     "Every time you send or revise, a snapshot is saved. You can compare versions side-by-side or restore an
+     older version"), backed by `quote_versions` and `restore_quote_version`. Build on it: make "the version
+     last sent to the customer" one click away. Under the lock, a restored version must keep its own prices;
+     today the next save re-prices restored lines to the catalog (from source).
+   - Changing a quote's tier must not silently erase negotiated line prices (section 7, finding 3).
+   - Codex's suggested shape (section 7, finding 10): the sent version is the price authority; Convert
+     builds the order from that exact version.
+3. **"Last charged" panel in the quote screen**, visible to sales reps (Mason, 2026-10-14).
+4. **Sell-price history on the product page**, admin-only (Mason, 2026-10-14). A read function over
+   the tier columns `cost_history` already stores; a real date axis on the chart; deleting a product refuses
+   rather than erasing history. Add in the same slice:
+   - a one-time **dated starting snapshot** of every product's current cost and tier prices, because 578 of
+     604 products have no history row, so "what was the price on date X" has no answer before their first
+     change (section 7, finding 4);
+   - a history row for per-acre price changes, which today change the price but write no row (finding 5);
+   - a required reason on each price change instead of the generic default (finding 6).
 5. **Cost evidence beside each quote line** (admin only, hidden in Customer View and on PDFs).
 6. **Profitability reports on cost at time of sale** (independent; can go first). Copy #397's three report
    fetchers and its test. The numbers will change, because lines on deleted or cancelled orders drop out.
@@ -136,15 +183,19 @@ Questions:
   - After expiry, does the quote re-price on its next save, or must it be re-sent?
 - **What if cost rises above a locked price before conversion?** The below-cost check uses today's cost, so
   converting a locked quote could be refused.
-- **What about a revision?** A sent quote can become `revised`. Does a revision keep the locked prices, or
-  re-price to today's catalog until it is sent again?
+- ~~**What about a revision?**~~ **Answered 2026-10-14:** a revision keeps the locked prices, with an
+  "update to today's prices" option, offered both per line and for the whole quote, plus a rewind to the
+  version last quoted to the customer.
 - **What about manual price overrides and below-cost approvals** on a locked line?
 - **The cost side.** Should quote-time cost also stay locked for the margin shown, given that the
   below-cost check today uses today's cost (a line can look profitable on screen and still be refused)?
 
 Carried from the salvage review:
-- **(b) Visibility.** Should sales reps see "last charged" prices and sell-price history? Cost history is
-  admin-only under the 2026-07-20 decision.
+- ~~**(b) Visibility.**~~ **Answered 2026-10-14:** sales reps see the last price charged to a customer; price
+  history (sell and cost) is admin-only.
+- ~~**Price intake cadence.**~~ **Answered 2026-10-14:** download the entire sheet each time, monthly or
+  mid-month. The export is valid for 7 days and a preview for 2 hours, so each change starts from a fresh
+  export.
 - **(c) Which cost the quote screen shows:** quote-time cost, today's cost, or both.
 - **(d) Supplier quotes.** Who supplies fresh supplier quotes, in what order should products join the
   per-product rollout list, and when is the rollout complete enough to flip the global switch (slice 7)?
@@ -159,3 +210,64 @@ Carried from the salvage review:
 - The quote re-pricing behavior was read from code by two reviews, not exercised.
 - Live counts other than `cost_history` (33) and `quote_items` (20) come from the review agents' read-only
   queries.
+- Iteration 2's live facts (section 7) come from read-only queries and live function definitions on
+  2026-10-13/14; none of the behavior was exercised.
+
+## 7. Iteration 2 findings (2026-10-14)
+
+Evidence is live and read-only unless marked "from source". Nothing was built or changed.
+
+**Why it looks like the app "went backwards".** Mason, 2026-10-13: "i am missing alot of pricing features and
+historical cost tracking etc i thought we had at one point". Nothing pricing-related was dropped from the
+database. The only feature removed is the old PDF/CSV `BulkPricingImport` with OCR (PR #163, 2026-07-18), by
+Mason's July decision. The screens look empty because almost nothing feeds them:
+- the last purchase order in CRX is dated 2026-06-10 (194 lines with a cost, 88 products), so the chart's
+  "received PO cost" line stops in June;
+- `supplier_price_observations` has 10 rows, all from 2026-07-21 (the Wells pilot);
+- `cost_history` has 33 rows, only 2 since 2026-07-19;
+- the price-history chart and cost history are admin-only.
+
+**Findings**
+1. **The Convert path is confirmed from live function bodies.** Accept runs `saveQuote('accepted')`; the
+   live `save_quote` wrapper calls `_save_quote_below_cost_impl_20260810`, which re-prices every line without a
+   `price_override` from the live tier price; the live `_convert_quote_to_order_owner_impl` then copies
+   `qi.price_per_unit` into `order_items`. A price change between send and accept therefore reaches the order.
+   The one exception is the already-accepted recovery path, which skips the save. Exposure today is nil: 4
+   quotes live, none sent and waiting.
+2. **The lock must live in the database.** `_save_quote_below_cost_impl_20260810` checks only status
+   transitions, so a same-status save of a `sent` or `accepted` quote passes the server (owner or admin). The
+   screen blocks it only through `canEdit = ['draft', 'revised']` (`src/pages/QuoteBuilder.tsx`, about line
+   587).
+3. **A tier change erases negotiated prices.** `recalcAllForTier` sets every line's `price_override` to null
+   (`src/pages/QuoteBuilder.tsx`, about lines 1412-1417; from source). Related: `save_quote` never checks the
+   quote's tier against `customers.assigned_tier` (`TODO.md`).
+4. **History has no starting point for most products.** 578 of 604 products have no `cost_history` row, so
+   history begins only at a product's first change.
+5. **Per-acre price changes are not logged.** The live `write_product_pricing_history` trigger tests cost,
+   tier margins, tier prices and gross margins only. A rate or unit change still moves the per-acre price and
+   bumps `pricing_version` (`20260722091359_supplier_pricing_workbook_v2_product_info.sql`, about lines
+   1002-1005 and 1047-1049; from source).
+6. **The reason is effectively optional.** `costBasisRows` in `src/lib/productPricing.ts` fills a generic
+   default ("Products list pricing update" and similar) when the reason is blank. Live: 1 of the 3 governed
+   changes carries a generic reason.
+7. **Deleting a product erases its history.** Live `cost_history.product_id` is `ON DELETE CASCADE`. Slice 4
+   already covers this.
+8. **No history gaps were found in the governed path.** Live `require_governed_product_pricing` rejects any
+   cost, margin or tier-price write that is not marked by the governed RPC, and the history trigger writes a
+   row for every marked change. The one product whose `cost_updated_date` is newer than its last history row
+   is 0.13 seconds of clock difference on a seed product. History before 2026-07-18 was written by the old
+   screen (`change_source = 'legacy_frontend'`, 30 rows), not by the trigger.
+9. **Order cost is already server-owned (confirms section 3).** Live trigger `zz_crx_below_cost_order_items`
+   (BEFORE INSERT, or UPDATE OF `product_id`, `price_per_unit`, `total_units_needed`; enabled) sets
+   `cost_per_unit` and `cost_at_time_cents` from the locked product cost for `create_direct_order`,
+   `bulk_import_order`, `update_order_items` and `price_order`. The parked
+   `scripts/.staging-migrations/20260813010000_wave_a_order_cost_authority_and_finiteness.sql` is not needed for
+   cost. Its NaN/Infinity checks were not re-checked here.
+10. **Codex's suggested lock design** (advisory, `gpt-6-luna` xhigh): the sent version is the price authority;
+    Convert builds the order from that exact version without re-pricing; re-sending sends the same version; a
+    revision is a new editable version with a line-by-line price comparison and an explicit choice to apply
+    today's prices; the database enforces all of it. Codex listed these edge cases: a tier change, a customer
+    change, draw-downs (drawn quantities keep their prices), Convert, and re-send.
+11. **Related, outside this plan.** Inventory is valued at today's `current_cost` times quantity, with no
+    per-receipt cost (`docs/plans/2026-07-16-inventory-costing-plan.md`, parked). `issue_return_credit`
+    reverses revenue but not cost of goods (known open item).

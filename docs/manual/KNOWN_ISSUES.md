@@ -332,8 +332,9 @@ leave these open:
 - **An invoice made from scratch (no order, no delivery) can name any product and quantity**
   (pre-existing; found in the PR #889 security review, 2026-10-10). The New Invoice page creates
   `misc_charge` invoices with no order link, so neither the delivery cap nor the order/delivery
-  overlap guard can see them. **Decided 2026-10-14 (Mason, "confirm 6e"):** invoices made
-  on the New Invoice page carry no product lines, only service or misc charges; field-application,
+  overlap guard can see them. **Decided 2026-10-14 (Mason, "confirm 6e"):** any invoice with no order,
+  delivery, job, field application or blend ticket behind it (the New Invoice page's `misc_charge`
+  and `chemical_sale` types) carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices keep their chemical lines (`DECISION_LOG.md`). Still open until Goal 3
   of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the

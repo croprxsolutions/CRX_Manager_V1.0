@@ -397,9 +397,10 @@ local bundle at `C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs
 `2026-10-13-cleanup-baseline.json`. Their SHA-256 values, checked before each run, are:
 - script: `e80f52bf633c09edd6ced6956ab7629683c1eadd0ebc25029175befe38621988` (2026-10-13 salvage revision:
   only the sealed counts 157/16/0 and the "Mason's call (0)" marker changed)
-- baseline: `9db70b7128311174a44b0ff44905282d66b9ef5b176e0ce7247f22bde7134219` (re-measured at `main`
-  `395bdcd9a` on 2026-10-14, after PR #907 merged, before the "after this PR" batch; the earlier files are
-  kept beside it: `2026-10-13-cleanup-baseline.at-82c8c0817.json`, hash `127e4dc2…d533`;
+- baseline: `60176b3fee40a7456eb51f0f3842c9a2809779d32f4f14400e5055215547b002` (re-measured at `main`
+  `eec473890` on 2026-10-14, after PR #909 merged, before the "after this PR" batch; the earlier files are
+  kept beside it: `2026-10-13-cleanup-baseline.at-395bdcd9a.json`, hash `9db70b71…4219`;
+  `2026-10-13-cleanup-baseline.at-82c8c0817.json`, hash `127e4dc2…d533`;
   `2026-10-13-cleanup-baseline.at-22c10c8df.json`, hash `60ca1426…54c0`; and the review-time
   `2026-10-13-cleanup-baseline.at-7abd52f6d.json`, hash `0cbdd535…1d75`)
 - bundle: `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
@@ -441,7 +442,8 @@ line in the six watched documents changed, and the `protect-main` rules were unc
 branch, `claude/rep-scope-order-invoices`: three paths it already held unlanded (`RLS_SECURITY_GUIDE.md`,
 `smoke-specs.json`, `src/lib/db.ts`) moved from BRANCH-ONLY to MAIN-MOVED because #907 edited them. No
 branch gained an unlanded path, so the rule above allowed the re-baseline. Mason gave his yes for the 16
-the same day ("yes delete the 16").
+the same day ("yes delete the 16"). PR #909 then merged (`main` `eec473890`); the re-measure there found all
+185 branches unchanged, so the baseline was rewritten once more at that `main`.
 
 **Landing this record.** Each re-baseline edits only this file, so the PR stays documentation-only under
 `docs/reference/sol-exempt-paths.md` and needs no fresh Sol review. Every exact-head gate still applies:

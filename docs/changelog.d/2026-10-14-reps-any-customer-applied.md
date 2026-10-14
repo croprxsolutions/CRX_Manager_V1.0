@@ -43,5 +43,11 @@ with `psql -f`); before these edits each stopped at the step described above. Th
 the pricing and role steps there too (the non-office check accepts that catalog's older message), but that
 prover was already failing on `main` for two unrelated reasons (`smoke-backfill-refuse-split-billing.sql`'s
 CRX-LIFE-001 step, and the quote chain's 2026-10-13 customer-rule asserts, which a July catalog cannot
-meet); it is left for a separate fix. The live re-run needs
-Mason's REAL-DATA-OK and is recorded on the PR.
+meet); it is left for a separate fix.
+
+**Live re-run.** On Mason's REAL-DATA-OK (given in chat for that run only; the marker was removed after it),
+all four repaired chains returned `SMOKE_PASS_ROLLBACK` on live at about 15:00 UTC, as written at revision
+`0472e7254`; a read-only check afterwards found no leftover `[SMOKE]` rows and the split-billing flag
+unchanged (details on the PR). The quote chain's money asserts were made NULL-safe afterwards (`336198c9e`),
+and that version was not re-run live; it was re-run at head `8a30f2986` in the disposable container and
+returned `SMOKE_PASS_ROLLBACK`. The other three chains are unchanged since the live run.

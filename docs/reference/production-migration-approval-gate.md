@@ -205,7 +205,9 @@ automated gate; safety takes priority over coverage.
 
 The workflow remains inert until
 `20260827223000_enforce_global_migration_ledger_order.sql` is applied through the existing reviewed
-manual path. Resolve or apply every older approved pending migration first; installing the guard
+manual path. (That migration's design was rejected on 2026-08-31 and it was never applied; it is
+parked as `scripts/.staging-migrations/20260827223000_enforce_global_migration_ledger_order.sql.REJECTED`.)
+Resolve or apply every older approved pending migration first; installing the guard
 intentionally makes any later attempt to insert an older authored timestamp fail and roll back.
 
 The guard runs for every ledger insert, regardless of whether it came from GitHub, Supabase MCP, or

@@ -113,3 +113,4 @@ After ANY migration:
 1. Run the `regen-schema-registry` workflow: collect its six live read-only Supabase query results, then run `node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json>`. The no-argument command only updates the timestamp and is not a schema refresh.
 2. `bash scripts/validate-sql-migrations.sh` — verify no new violations
 3. Update the relevant entry in `docs/reference/migration-history.md`
+4. Add a new `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` entry (every change needs one, per `AGENTS.md`; do not append to `docs/CHANGELOG.md` — see `docs/changelog.d/README.md`)

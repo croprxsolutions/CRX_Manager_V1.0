@@ -1,5 +1,9 @@
 # CRX Manager V1.0 — Development Changelog
 
+> **New entries do not go here.** Since late August 2026 every change adds its own file,
+> `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` (see `docs/changelog.d/README.md`). This file is
+> the history up to 2026-08-26.
+
 ## 2026-08-26 — the hold latch matches only what Mason typed
 
 Two sessions could not talk to each other. A coordinator session sent a peer a

@@ -335,7 +335,8 @@ leave these open:
   overlap guard can see them. **Decided 2026-10-14 (Mason, "confirm 6e"):** any invoice with no order,
   delivery, job, field application or blend ticket behind it (the New Invoice page's `misc_charge`
   and `chemical_sale` types) carries no product lines, only service or misc charges; field-application,
-  blend-ticket and job invoices keep their chemical lines (`DECISION_LOG.md`). Still open until Goal 3
+  blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
+  (`DECISION_LOG.md`). Still open until Goal 3
   of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or

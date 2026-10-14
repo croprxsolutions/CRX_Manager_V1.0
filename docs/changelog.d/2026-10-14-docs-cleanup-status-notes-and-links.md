@@ -18,10 +18,15 @@ the files it points to; nothing changes how the app or the agents behave.
 - `docs/audits/per-line-split-billing-CODEX-REVIEW-RUNBOOK-2026-07-20.md` — historical; the
   feature shipped (#164, #244).
 
-**Broken links repaired** (80 links in five files): repo-root paths written from inside
-`docs/audits/` and absolute `C:/CRX_Manager/...` paths now resolve as relative links, with
-`:LINE` suffixes turned into `#L<line>` anchors. A link to a plan deleted in #139 now gives the
-`git show` command that recovers it.
+**Broken links repaired** (80 links in four audit files): repo-root paths written from inside
+`docs/audits/` and absolute `C:/CRX_Manager/...` paths were unreadable on GitHub. The 79 links
+that cite a line number (`:LINE`) are now GitHub permalinks pinned to the commit that added each
+audit (`86e9391b3`, `95dffee7f`, `c6de9b4ba`), so the line numbers still point at the code and
+plans the audit described; the one same-folder link (`overnight-bug-hunt/REPORT.md` →
+`LEDGER.json`) is now relative.
+
+**Deleted-plan reference** (separate fix): in `docs/audits/2026-06-18-as-applied-overnight-handoff.md`
+the link to a plan removed in #139 is replaced by the `git show` command that recovers it.
 
 Skipped because another open PR changes them: `docs/manual/ARCHITECTURE.md`,
 `CURRENT_STATE.md`, `KNOWN_ISSUES.md`, `DECISION_LOG.md`, the 2026-10-13 direction and pricing

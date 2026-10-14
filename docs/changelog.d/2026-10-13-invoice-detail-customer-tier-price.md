@@ -15,11 +15,22 @@ tier 2, and the tier-3 customer has no invoices yet. Tier prices rise with tier 
 list, so the bug would have under-charged, and it had not yet affected a saved invoice.
 
 **What changed.**
-- `src/pages/InvoiceDetail.tsx`: the customer-list query also selects `assigned_tier`.
-- `src/pages/InvoiceDetail.test.tsx`: a tier-2 and a tier-3 customer each add a product and Save;
-  the price sent to `save_invoice` must be that tier's price. The test's customer mock returns only
-  the columns the page asked for, so removing `assigned_tier` from the query turns it red (verified
-  against the unfixed code: tier 3 saved 1000 cents instead of 799).
+- `src/pages/InvoiceDetail.tsx`: the customer-list query also selects `assigned_tier`, and
+  `addProduct` prices through the shared `getTierPrice` (`src/lib/quoteCalc.ts`), the same rule the
+  quote and order screens use. Its tier-1 fallback matters now that tier 2/3 is reachable: the old
+  inline code returned a missing tier-2/3 price as $0, and 4 active products have no tier-2 price
+  and 8 no tier-3 price (compliance review).
+- `src/pages/InvoiceDetail.test.tsx`: a tier-2 and a tier-3 customer each add a product and Save,
+  and the price sent to `save_invoice` must be that tier's price; a tier-3 customer adding a product
+  with no tier-3 price must get the tier-1 price, not $0. The test's customer mock returns only the
+  columns the page asked for, so removing `assigned_tier` from the query turns it red (verified
+  against the unfixed code: a tier-3 line was saved at the tier-1 price).
+
+**Known, not fixed here (pre-existing, found in review).** The same list query also omits `email`
+and the billing-address and account-number columns that the Email button and the invoice PDF read
+from it. The unmerged reps-work-any-customer branch adds those columns to this query. A customer who
+is inactive or beyond the 500-row list cap also falls back to tier 1, and lines added before a
+customer is picked keep their price when the customer changes.
 
 **Visible change.** Admins and reps now see the customer's tier price, not the tier-1 price, when they
 add a product to an invoice on this screen. Tier-1 customers (all but one today) see no change.

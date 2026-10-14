@@ -1112,10 +1112,14 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     return self;
   }
 
+  // Live prices rise with tier (tier 3 above tier 1 on every active product, 2026-10-13), so the
+  // fixture does too. A product with no price for the customer's tier falls back to tier 1 (the
+  // shared getTierPrice rule), never $0.
   it.each([
-    { tier: 2, expectedCents: 850 },
-    { tier: 3, expectedCents: 799 },
-  ])('a tier-$tier customer gets the tier-$tier price, and that is the price saved', async ({ tier, expectedCents }) => {
+    { tier: 2, tier3Price: 11.99, expectedCents: 1075, label: 'a tier-2 customer gets the tier-2 price' },
+    { tier: 3, tier3Price: 11.99, expectedCents: 1199, label: 'a tier-3 customer gets the tier-3 price' },
+    { tier: 3, tier3Price: null, expectedCents: 1000, label: 'a tier-3 customer falls back to tier 1 when the product has no tier-3 price' },
+  ])('$label, and that is the price saved', async ({ tier, tier3Price, expectedCents }) => {
     const invoice = {
       id: 'inv-tier', invoice_number: 'INV-TIER', invoice_type: 'chemical_sale', status: 'draft',
       customer_id: 'cust-tier', order_id: 'ord-1', invoice_date: '2026-03-15', due_date: null,
@@ -1125,7 +1129,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     const customer = { id: 'cust-tier', farm_name: 'Tier Farm', payment_terms: 'Net 30', is_active: true, assigned_tier: tier };
     const product = {
       id: 'product-tier-uuid', product_name: 'Tiered Product', sku: null,
-      tier1_price: 10, tier2_price: 8.5, tier3_price: 7.99, current_cost: 5,
+      tier1_price: 10, tier2_price: 10.75, tier3_price: tier3Price, current_cost: 5,
     };
     let invoiceCalls = 0;
     mockFrom.mockImplementation((table: string) => {
@@ -1150,6 +1154,5 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     const savedItems = saveCall?.[1].p_items as Array<{ product_id: string; unit_price_cents: number }>;
     expect(savedItems).toHaveLength(1);
     expect(savedItems[0]).toMatchObject({ product_id: 'product-tier-uuid', unit_price_cents: expectedCents });
-    expect(savedItems[0].unit_price_cents).not.toBe(1000);
   });
 });

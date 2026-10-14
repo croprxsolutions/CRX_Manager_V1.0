@@ -19,6 +19,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents'
 import type { Invoice, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
+import { getTierPrice } from '../lib/quoteCalc';
 import { withBelowCostReason } from '../lib/belowCostApproval';
 import { sendEmail, pdfToBase64, buildEmailHtml, isInvoiceEmailSuppressed } from '../lib/emailService';
 import { logActivity } from '../lib/activityLogger';
@@ -658,17 +659,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Add product as line item
   const addProduct = (product: Product) => {
-    const tierPrice = invoice.customer_id
-      ? (() => {
-          const cust = customers.find((c) => c.id === invoice.customer_id);
-          const tier = cust?.assigned_tier || 1;
-          if (tier === 1) return product.tier1_price;
-          if (tier === 2) return product.tier2_price;
-          return product.tier3_price;
-        })()
-      : product.tier1_price;
+    // Shared helper: a product with no tier-2/3 price falls back to tier 1 instead of $0.
+    const cust = invoice.customer_id ? customers.find((c) => c.id === invoice.customer_id) : undefined;
+    const tierPrice = getTierPrice(product, cust?.assigned_tier || 1);
 
-    const priceCents = Math.round((tierPrice || 0) * 100);
+    const priceCents = Math.round(tierPrice * 100);
     const costCents = Math.round((product.current_cost || 0) * 100);
 
     setItems((prev) => [

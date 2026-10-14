@@ -10,13 +10,9 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 ## 2026-10-14 — Pricing: revised quotes keep locked prices; reps see last-charged prices, price history stays admin-only; prices come in through the full Excel workbook
 
-**Decision (Mason, in chat, answering the plan's questions in two rounds).**
-1. A revised quote keeps its locked prices, with an option to update to today's prices ("sent quotes should keep its locked prices unless updated in the revised version , but give option to update to todays prices aswell. dpeends on the situation"), offered per line and for the whole quote, plus a rewind to the last version quoted ("offer both options, and offer a rewind to see the last version quoted to customer etc").
-2. Sales reps see the last price charged to a customer ("yes they should see the last price we charged this customer"). Price history is admin-only ("only admin can see the price hisotry").
-3. Price changes keep coming in through the downloadable/uploadable Excel workbook, the entire sheet each time ("might aswell download entire sheet so is simple"); no automatic reading of supplier PDFs for now ("we can build this in future"). Inline editing on the Products page and the product page stays for one-off fixes ("keep inline edits for one-off fixes").
-
-**Why.** Prices arrive as supplier PDFs, emails and texts, usually monthly but sometimes mid-month. Mason chose the workbook for control, visibility and accountability: he was "scared a agent would extract numbers wrong", and a workbook can be reviewed by several agents before anything is applied.
-**What this forbids/implies:** not built. Never auto-apply prices read from a document; any future PDF reading only drafts a workbook for review. Price history, sell and cost, stays admin-only, consistent with the 2026-07-20 decision. Design and open questions: `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`.
+**Decision (Mason, in chat).** (1) A revised quote keeps its locked prices, with "update to today's prices" per line and for the whole quote, and a rewind to the last version quoted. (2) Reps see the last price charged to a customer; price history is admin-only ("only admin can see the price hisotry"). (3) Prices come in through the full downloadable/uploadable Excel workbook, with no automatic PDF reading for now ("we can build this in future"); inline edits stay for one-off fixes.
+**Why.** Prices arrive as supplier PDFs, emails and texts, monthly and sometimes mid-month. Mason wants control, visibility and accountability ("scared a agent would extract numbers wrong"); a workbook can be checked by several agents before it is applied.
+**What this forbids/implies:** not built. Never auto-apply prices read from a document; future PDF reading may only draft a workbook. Price history, sell and cost, stays admin-only (2026-07-20). Quotes and detail: `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`.
 
 ## 2026-10-13 — Billing: an order's bill can be split to a landlord
 
@@ -28,7 +24,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 **Decision (Mason, in chat: "yes a sent quote should stay locked until accepted or expires").** Once a quote is sent, its line sell prices stop following the catalog until it is accepted (becoming an order at those prices) or it expires.
 **Why.** Each line's cost is frozen at save (`quote_items.cost_at_quote_cents`), but its sell price is not. Two 2026-10-13 reviews of `save_quote`'s live body (not exercised) found that every save, including Convert to Order, re-prices lines without a manual override to that day's tier price.
-**What this forbids/implies:** not built; until it is, nothing may describe sent-quote prices as locked. The open design questions (when the lock starts, revisions, expiry, overrides) are in `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`, to be iterated before any build.
+**What this forbids/implies:** not built; until it is, nothing may describe sent-quote prices as locked. Revised quotes keep their locked prices (2026-10-14 entry above). The open design questions (when the lock starts, how a restored version keeps its prices, expiry, overrides) are in `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`, to be iterated before any build.
 
 ## 2026-10-13 — A plain "I approve" is enough; no code to type
 

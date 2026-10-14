@@ -52,11 +52,15 @@ work are kept (see "Reusable work").
 1. **Sell-price lock on sent quotes** (decided; design open, see section 5).
 2. **The quote screen's half of quote-time cost.** The database already keeps each line's quote-time cost
    and accepts line ids, but the screen never sends a line's id. So a quote holding the same product twice
-   can't be saved again, and the screen shows today's cost instead of the frozen one (recorded in
-   `docs/manual/KNOWN_ISSUES.md` by the cleanup change).
-3. **"What did we charge this customer before?"** inside the quote screen: the last quoted, ordered and
-   invoiced price per customer and product, with date and tier. The data exists in quote, order and invoice
-   lines.
+   can't be saved again (recorded in `docs/manual/KNOWN_ISSUES.md` by the cleanup change). An existing quote
+   first shows its frozen cost (the loader copies `quote_items.current_cost`, `QuoteBuilder.tsx` about lines
+   1022-1061), but the first edit flips it to today's product cost when `recalcItem` runs (about lines
+   1337-1406), so the margin jumps. The fix must keep the loaded frozen cost through recalculation.
+3. **"What did we charge this customer before?"** inside the quote screen: the last **charged** price per
+   customer and product, with date and tier, from the latest order and invoice lines. Reps see this (Mason,
+   2026-10-14); an unaccepted quote is not a charged price, so it stays out of the rep view. For admins, a
+   "last quoted" price must come from the latest sent `quote_versions.snapshot_data`, not `quote_items`,
+   which holds the current, possibly re-priced line.
 4. **Sell-price history on the product page**, and a real date axis on the existing chart.
 5. **Cost freshness.** An "as of" date on cost, a stale-cost report, and wider use of supplier evidence.
 6. **Per-product margin targets** and a below-the-floor warning.
@@ -116,11 +120,15 @@ approval still needs an active admin) and `20260814063000_quote_sections_rpc_own
 Small slices, each its own change. Order and scope are open for discussion.
 
 0. **Workbook hardening** (section 8, from the Sol review; can run alongside slices 1-2). A "Download full
-   price sheet" action that always exports every active product; outlier warnings in the preview (large jump,
-   below cost, margin outside a band) that the approver must acknowledge; the effective price per tier after
-   fallback; required source and reason columns for changed rows, stored with history; and the uploaded file
-   plus an approval receipt kept with the change set. Proof: a real export, edit and apply on a test product,
-   including one deliberate tenfold typo that the preview must flag.
+   price sheet" action that always exports every active product; outlier warnings for a large jump or a margin
+   outside a band, added beside the existing below-cost warning; a required acknowledgement of every warning,
+   **enforced by the apply RPC** (the preview stores the exact warning set and apply refuses a change set
+   without a matching acknowledgement, so a stale or bypassed screen cannot skip it); the effective price per
+   tier after fallback; required source and reason columns for changed rows, stored with history; and the
+   uploaded file plus an approval receipt kept with the change set. Proof: a rolled-back database smoke test
+   and a local run with fixture products, including one deliberate tenfold typo that must be flagged and
+   refused until acknowledged. There is no staging database (`TODO.md`), so any apply on live products is a
+   production change and needs Mason's explicit approval in the current conversation first.
 1. **Quote line identity and quote-time cost on screen.** Rebuild by hand from #397's commits (main's
    QuoteBuilder has moved on). Do the money math in `src/lib/money.ts`. Re-picking the same product keeps the
    line's frozen cost; swapping to a different product starts fresh. Proof: save a quote with one product in
@@ -140,6 +148,11 @@ Small slices, each its own change. Order and scope are open for discussion.
    - Changing a quote's tier must not silently erase negotiated line prices (section 7, finding 3).
    - Codex's suggested shape (section 7, finding 10): the sent version is the price authority; Convert
      builds the order from that exact version.
+   - Partly drawn quotes: `draw_down_quote` relies on stable `quote_item_id` provenance and the
+     `units_current` / `units_settled` split so a price change never re-bills delivered product
+     (`20260816120000_draw_down_split_order_lines_by_price_tier.sql`; invariant in `KNOWN_ISSUES.md`). The
+     lock must be built in PostgreSQL and its proof must include a partial draw followed by a revision, not
+     only a normal Convert.
 3. **"Last charged" panel in the quote screen**, visible to sales reps (Mason, 2026-10-14).
 4. **Sell-price history on the product page**, admin-only (Mason, 2026-10-14). A read function over
    the tier columns `cost_history` already stores; a real date axis on the chart; deleting a product refuses
@@ -147,7 +160,10 @@ Small slices, each its own change. Order and scope are open for discussion.
    - a one-time **dated starting snapshot** of every product's current cost and tier prices, because 578 of
      604 products have no history row, so "what was the price on date X" has no answer before their first
      change (section 7, finding 4);
-   - a history row for per-acre price changes, which today change the price but write no row (finding 5);
+   - history for per-acre price changes, which today change the price but write no row (finding 5). A
+     `cost_history` row alone is not enough, because its old and new per-unit prices can be identical while
+     the per-acre price moved: store the old and new `rate_per_acre` and `rate_unit`, or the old and new
+     per-acre prices in whole cents;
    - a required reason on each price change instead of the generic default (finding 6).
 5. **Cost evidence beside each quote line** (admin only, hidden in Customer View and on PDFs).
 6. **Profitability reports on cost at time of sale** (independent; can go first). Copy #397's three report
@@ -318,9 +334,10 @@ $900 typed for $90. The method needs a tighter review step and a few small produ
 1. **"Entire sheet" is not guaranteed.** The export takes the selected rows, or else every row passing the
    current Products-page filters (`Products.tsx`, about lines 517-521). A forgotten filter exports 40 products
    instead of 595. Fix: a separate "Download full price sheet" action that always exports every active product.
-2. **No warning on suspicious jumps.** Nothing flags a price that moved by more than a set percentage, a
-   price below cost, or a margin outside a normal band. Fix: outlier warnings in the preview, which the
-   approver must acknowledge.
+2. **No warning on suspicious jumps.** The preview already warns "this price is below cost"
+   (`PricingChangePreviewModal.tsx`, about lines 190-231), but nothing flags a price that moved by more than
+   a set percentage or a margin outside a normal band, and no warning has to be acknowledged. Fix: add the
+   jump and margin warnings, and require acknowledgement of every warning, enforced by the apply RPC.
 3. **Tier fallback is not shown.** A blank tier 2 or 3 price falls back to tier 1, and the preview shows the
    blank rather than the price those customers will actually pay. Fix: show the effective price per tier.
 4. **No source per row.** The sheet has `change_reason` but no supplier, document date or effective date, and

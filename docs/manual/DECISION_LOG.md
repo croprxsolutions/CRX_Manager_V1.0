@@ -1,6 +1,6 @@
 # Decision Log
 
-Last verified: 2026-10-13 (reps-work-any-customer entry added, superseding the 2026-10-06 rep-scoping plan; owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-13 (three entries added: a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
@@ -8,12 +8,24 @@ settled calls. Newest first, roughly — a few entries from the same week sit sl
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 
+## 2026-10-13 — A plain "I approve" is enough; no code to type
+
+**Decision (Mason, in chat: "can we make it even simpler than that? … I just want to say I approve and that's good enough").** For a parked migration, Mason's whole-message reply `I approve` (also `approve`, `approved`, `yes I approve`) is his approval; he no longer types the 6-digit code, which is now shown only as a reference number. `approve <code>` still works.
+**Why.** He wants fewer hoops. The code's one real job was to tie his reply to a specific request, so an "I approve" meant for a plan or a merge could not approve a database change still waiting from earlier. That job moved to the reply hook: a plain `I approve` counts only when the agent's message just before it was that request's summary, exactly as printed and nothing else, and with nothing waiting it is ordinary chat.
+**What this forbids/implies:** agents explain the change first, then send the summary alone as its own message; if they say anything else first, they show it again. A bare "yes" or "go" is still not this approval. Everything else in the 2026-10-09 entry below stands, including the accepted residual (an agent that deliberately fakes the approval is not stopped). Detail: `docs/changelog.d/2026-10-13-owner-approval-plain-reply.md`.
+
 ## 2026-10-13 — Sales reps work with ANY customer; rep scoping is dropped
 
 **Decision (Mason, in chat, 2026-10-13).** First "reps should be able to make invoices or email customers that arnt theirs" (session "App scalability assessment"), then, in the session that built the change: reps "can see all and edit all" customers; "Everything customer-related" opens (addresses, contacts, documents, facts, interactions and their transcripts, external identities); statements and year-end summaries open; reps invoice under their **own name only** (admins may name anyone); **only an admin** changes which rep a customer is assigned to; and on a customer not assigned to them a rep cannot change its **default commission split** (admin or the customer's own rep only).
 **Why.** Reps sell and bill across the whole customer base: 146 of 154 live customers have no assigned rep, so the old "assigned customers only" rule blocked almost all rep invoicing and emailing.
 **What this supersedes:** the 2026-10-06 entry below ("reps bill only their own customers"), and the 2026-10-09 admin-only invoicing plan (PR #902, closed unmerged; its `20261013160000` was never applied). Rep scoping is formally dropped.
-**What this forbids/implies:** `20261013220000_reps_work_any_customer.sql` removes every assigned-rep access test on the invoice, customer and customer-record paths and adds `customers_guard_rep_edit_20261013`; the `customer-document-files` Edge Function opens documents the same way. Still narrower: `SALESMAN_SCOPE_DENIED` (own name), `INVOICE_SCOPE_DENIED` / `SPLIT_SET_NOT_OWNED` (a rep changes or posts only an existing invoice under their own name: they are its salesperson, or it has none and they created it; the agent's reading of "own name", added after review, so it also covers other people's drafts), `REP_CANNOT_REASSIGN`, `REP_MUST_SELF_ASSIGN` (a rep's new customer is theirs), `COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`, and two money safeguards the wider edit access needed: a rep cannot deactivate a customer with posted or overdue invoices (`CUSTOMER_HAS_OPEN_INVOICES`) or edit a prepay balance directly (`PREPAY_BALANCE_SERVER_ONLY`). "Statements" means the 90-day ledger on a customer's page; printable and emailed statements (AR Aging) stay admin-only. **Also decided 2026-10-13 (Mason, "Reps see all invoices"; he kept the three safeguards above):** reps READ every invoice, read-only for other reps' invoices. That ships as the next change, because the wider read needs the own-name check on every other invoice function first (list in `KNOWN_ISSUES.md`). Every admin-only action (void, unpost, credit memos, write-offs, prepay apply, reassignment) is unchanged; a rep still reads only the invoices they created or are the salesperson on. The order-invoice RPCs' salesperson check (a rep naming another salesperson) is the follow-up change. Commissions are unaffected (they come from orders and jobs, not from who typed the invoice). Source: `docs/changelog.d/2026-10-13-reps-work-any-customer.md`.
+**What this forbids/implies:** `20261013220000_reps_work_any_customer.sql` removes every assigned-rep access test on the invoice, customer and customer-record paths and adds `customers_guard_rep_edit_20261013`; the `customer-document-files` Edge Function opens documents the same way. Still narrower: `SALESMAN_SCOPE_DENIED` (own name), `INVOICE_SCOPE_DENIED` / `SPLIT_SET_NOT_OWNED` (a rep changes or posts only an existing invoice under their own name: they are its salesperson, or it has none and they created it; the agent's reading of "own name", added after review, so it also covers other people's drafts), `REP_CANNOT_REASSIGN`, `REP_MUST_SELF_ASSIGN` (a rep's new customer is theirs), `COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP`, and two money safeguards the wider edit access needed: a rep cannot deactivate a customer with posted or overdue invoices (`CUSTOMER_HAS_OPEN_INVOICES`) or edit a prepay balance directly (`PREPAY_BALANCE_SERVER_ONLY`). "Statements" means the 90-day ledger on a customer's page; printable and emailed statements (AR Aging) stay admin-only. **Also decided 2026-10-13 (Mason, "Reps see all invoices"; he kept the three safeguards above):** reps READ every invoice, read-only for other reps' invoices. That ships as the next change, because the wider read needs the own-name check on every other invoice function first (list in `KNOWN_ISSUES.md`). Every action that is already admin-only stays admin-only, and the other invoice actions reps can already call (unpost, payments, prepay and credit-memo application) keep today's gates until the next change; a rep still reads only the invoices they created or are the salesperson on. The order-invoice RPCs' salesperson check (a rep naming another salesperson) is the follow-up change. Commissions are unaffected (they come from orders and jobs, not from who typed the invoice). Never propose admin-only or own-customer-only invoicing again. Also recorded as Goal 2 of `docs/plans/2026-10-13-direction-and-goals.md`; this entry replaces the short one PR #904 added. Source: `docs/changelog.d/2026-10-13-reps-work-any-customer.md`.
+
+## 2026-10-13 — Direction: build, clean up, senior-developer handoff, then roll out
+
+**Decision (Mason, in chat, answering the scalability review).** Finish Goals 1–7 of `docs/plans/2026-10-13-direction-and-goals.md` (including a QuickBooks Desktop sync and online card/ACH payments), clean up, hand off to an outside senior developer for independent review, then roll out, with Chem Man retired for billing by spring 2027.
+**Why.** The review found a sound foundation but real gaps, and an outside expert should check the system before real money depends on it.
+**What this forbids/implies:** the same day Mason also chose a Supabase Pro upgrade with point-in-time recovery, private photos, and keeping all AI tooling (documented) at handoff. The goals doc sets priorities only and authorizes no build; open questions are listed there.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 
@@ -829,7 +841,6 @@ loss; it is covered and mutation-tested.
 **SUPERSEDED the same day by the entry above — the lock was deleted rather than kept narrowed.**
 Retained because the narrowing rationale explains what is and is not worth guarding.
 
-
 **Amends the 2026-08-31 entry below.** That entry's "operative rules" list a guarded set including
 `package.json`, `package-lock.json`, `scripts/(check|validate|verify)-*`, and the proof/review
 runners. Those are **no longer guarded**. The rest of that entry — especially the CORRECTION that
@@ -1148,7 +1159,6 @@ refusal text and header comments do not claim a property the test suite has not 
 author of a guard cannot correctly state what it does, that is the system reporting that it exceeded the
 complexity a reader can hold.
 
-
 ## 2026-08-31 — `core.hooksPath` points at the tracked `.husky`, never husky's generated `.husky/_`
 
 **Source:** Mason's in-chat approval on 2026-08-31 ("ok fix it") after the harness review found the
@@ -1393,7 +1403,6 @@ when a complete reread is deliberately justified. This decision supersedes the a
 and two-commit throttle portions of the 2026-07-17 and 2026-08-24 entries; their review-quality,
 path-selection, and final-head safety rules remain active.
 
-
 ## 2026-08-27 — Codex live migrations use a protected GitHub approval environment
 
 **SUPERSEDED 2026-08-31 — this approval environment and its workflows never ran and were deleted
@@ -1434,7 +1443,6 @@ the live ledger inside the same transaction, applies only transaction-compatible
 content-bound ledger row, then commits. Credential-bearing actions use full commit pins and the
 installed Supabase CLI version is verified. No prompt-text approval token is part of this gate.
 
-
 ## 2026-08-27 — preserve CRX safety rules while collapsing harness machinery
 
 **Decision:** Pause the recurring gauntlet, retune it to monthly/on-demand read-only review, retire
@@ -1445,7 +1453,6 @@ many independent processes, while the audit policy itself rewarded creating more
 **What this forbids/implies:** A new hook needs a named reproducible BLOCKER/HIGH recurrence, a
 measured false-positive budget, and removal or consolidation of an existing mechanism; keep the
 underlying business invariant and prefer an owning regression test or existing static check.
-
 
 ## 2026-08-26 — ordinary documentation gets a trusted fast CI lane; uncertainty still runs everything
 
@@ -1492,7 +1499,6 @@ it does not create a metadata-only success that could overwrite a failed exact-S
 **Operative rule.** Additions to the fast allowlist require a new decision, a real timing benefit,
 both-direction path tests, and proof that the path cannot affect runtime, build inputs, agent/harness
 behavior, generated truth, deployment, or database state. Ambiguity runs everything.
-
 
 ## 2026-08-26 — CORRECTION: a closed allowlist only closes what is inside it
 

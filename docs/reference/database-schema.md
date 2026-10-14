@@ -369,8 +369,8 @@ Live postflight: catalog 604 Products → `no_return`=21, `returnable`=2, `unkno
 | product_cost_basis *(Phase 2 live)* | RPC only | RPC only | RPC only (close active row) | RPC only |
 | product_cost_basis_change_rows *(Phase 2 live)* | RPC only | RPC only | RPC only | RPC only |
 | product_cost_basis_rollout *(live Wells canary)* | RPC only | RPC only | RPC only | RPC only |
-| customers | Admin / Sales Rep (assigned) / Driver (recent delivery) / Applicator (recent job) / dispatched to a job location | Admin / Sales Rep (assigned) | Admin / Sales Rep (assigned) | Admin |
-| customer_addresses | All authenticated | Admin / Sales Rep (own customer) | Admin / Sales Rep (own customer) | Admin |
+| customers | Admin / Sales Rep / Driver (recent delivery) / Applicator (recent job) / dispatched to a job location | Admin / Sales Rep (assigned to themselves) | Admin / Sales Rep (any customer; reassignment admin-only and the commission split admin-or-assigned-rep, enforced by `customers_guard_rep_edit_20261013`) | Admin |
+| customer_addresses | All authenticated | Admin / Sales Rep by policy, but `authenticated` holds no INSERT grant (`save_customer` writes addresses) | Admin / Sales Rep by policy, but no UPDATE grant either | Admin |
 | quotes | Admin / Sales Rep | Admin / Sales Rep (own) | Admin / Sales Rep (own) | Admin |
 | quote_sections | All authenticated | Admin / Sales Rep (quote owner) | Admin / Sales Rep (quote owner) | Admin / Sales Rep (quote owner) |
 | quote_product_draws | Admin / Sales Rep | - (SECDEF RPCs only) | - (SECDEF RPCs only) | - (SECDEF RPCs only) |

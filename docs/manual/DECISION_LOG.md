@@ -45,6 +45,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 **Why.** The review found a sound foundation but real gaps, and an outside expert should check the system before real money depends on it.
 **What this forbids/implies:** the same day Mason also chose a Supabase Pro upgrade with point-in-time recovery, private photos, and keeping all AI tooling (documented) at handoff. The goals doc sets priorities only and authorizes no build; open questions are listed there.
 
+## 2026-09-20 (recorded 2026-10-14) — The parked return-credit gate work is closed, not resumed
+
+**Supersedes** the "What this forbids/implies" rule of the 2026-09-01 entry "split the return-credit
+landing: docs now, migration-gate hardening separately", which said not to treat the parked gate work as
+abandoned.
+**Decision.** Mason closed that work's PR #544 without merging it on 2026-09-20. Its measured findings
+moved to open issue #747 the same day.
+**What this forbids/implies:** do not resume or reopen PR #544. The branch the 2026-09-01 entry names is
+kept only as issue #747's evidence. Work on the migration-proof gate starts from issue #747.
+
 ## 2026-08-27 (recovered 2026-10-13) — Product data model: the ingredient identity model (D-AA)
 
 **Recovered** from never-merged PR #507 (`claude/product-plan-rev12-followup`); this change merges its
@@ -73,16 +83,6 @@ approval reason is checked against the locked cost, with an admin exception; liv
 (`20260812115237_enforce_below_cost_admin_approval`) on every money-write RPC.
 **What this forbids/implies:** browser below-cost checks are a convenience, never the control; a new
 line-writing path must join the server-side wall, and an unrecognized below-cost path fails closed.
-
-## 2026-09-20 (recorded 2026-10-14) — The parked return-credit gate work is closed, not resumed
-
-**Supersedes** the "What this forbids/implies" rule of the 2026-09-01 entry "split the return-credit
-landing: docs now, migration-gate hardening separately", which said not to treat the parked gate work as
-abandoned.
-**Decision.** Mason closed that work's PR #544 without merging it on 2026-09-20. Its measured findings
-moved to open issue #747 the same day.
-**What this forbids/implies:** do not resume or reopen PR #544. The branch the 2026-09-01 entry names is
-kept only as issue #747's evidence. Work on the migration-proof gate starts from issue #747.
 
 ## 2026-10-09 — Mason approves parked migrations by chat reply, not Windows Hello
 

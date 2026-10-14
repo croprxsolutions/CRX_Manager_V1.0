@@ -78,7 +78,7 @@ This PR rescues or corrects:
   - The review-proof forgery class, with its full limitation.
   - A small-notes list, each item with how it was checked.
   - The salvage review's findings, also each with how it was checked:
-    - the landlord split-billing refusal, read from the live trigger, which Mason wants fixed;
+    - the landlord split-billing refusal, read from the live trigger, which Mason wants to have fixed;
     - autopilot's delete-spelling gap, reproduced by calling its decision function;
     - two latent billing notes and two stale spots;
     - the profitability database test and pointers to the kept code;

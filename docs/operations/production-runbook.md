@@ -26,8 +26,8 @@
 
 ## 2. Deploy
 
-The step-by-step procedures live in `DEPLOYMENT.md` and `.claude/commands/ship.md`; this
-section only summarizes them. Where they differ, those two files win.
+The step-by-step procedures live in `DEPLOYMENT.md` and `.claude/commands/ship.md` (the file
+`AGENTS.md` routes pushes, merges and releases to); this section only summarizes them.
 
 ### 2.1 Normal deploy (frontend)
 

@@ -205,8 +205,10 @@ automated gate; safety takes priority over coverage.
 
 The workflow remains inert until
 `20260827223000_enforce_global_migration_ledger_order.sql` is applied through the existing reviewed
-manual path. (That migration's design was rejected on 2026-08-31 and it was never applied; it is
-parked as `scripts/.staging-migrations/20260827223000_enforce_global_migration_ledger_order.sql.REJECTED`.)
+manual path. (Historical design text, like the rest of this retired page: that migration's design
+was rejected on 2026-08-31 and it must never be applied. It is parked as
+`scripts/.staging-migrations/20260827223000_enforce_global_migration_ledger_order.sql.REJECTED`, and
+the workflow this section describes was removed. Nothing in this section is an instruction.)
 Resolve or apply every older approved pending migration first; installing the guard
 intentionally makes any later attempt to insert an older authored timestamp fail and roll back.
 

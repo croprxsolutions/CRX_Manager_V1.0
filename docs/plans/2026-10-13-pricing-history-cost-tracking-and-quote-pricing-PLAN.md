@@ -194,6 +194,15 @@ Small slices, each its own change. Order and scope are open for discussion.
 
      The proof adds rewind-then-convert with and without a later quantity edit, a trusted pre-slice-2
      version with and without a duplicate product, and an untrusted version that is refused and re-sent.
+   - **Open for the slice 2 build** (Codex on PR #923, confirmed live 2026-10-14; to be designed when slice 2
+     is built, not settled here):
+     - Partial draw-downs: `_draw_down_quote_below_cost_impl_20260810` accepts `revised` quotes and prices
+       the new order from the current lines. The same re-send gate must apply there, with a proof that a
+       price-changing revision cannot be partly drawn until it is re-sent.
+     - Rewind stays unavailable for a booking that has ever been partly drawn:
+       `_restore_quote_version_owner_impl` raises `QUOTE_RESTORE_BLOCKED_BY_DRAW`, an accepted invariant in
+       `KNOWN_ISSUES.md`, even after the drawn orders are cancelled or voided. Keep it, or design and prove a
+       safe replacement that covers cancelled and voided draws.
    - Partly drawn quotes: `draw_down_quote` relies on stable `quote_item_id` provenance and the
      `units_current` / `units_settled` split so a price change never re-bills delivered product
      (`20260816120000_draw_down_split_order_lines_by_price_tier.sql`; invariant in `KNOWN_ISSUES.md`). The

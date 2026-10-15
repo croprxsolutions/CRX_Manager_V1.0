@@ -6,15 +6,18 @@
 -- SMOKE_FAIL at step 1. Against the fix:
 --   1-3. create_invoice_from_order: a rep naming another rep or an admin is SALESMAN_SCOPE_DENIED
 --        with nothing written, even on a key that already replays; a rep naming themselves
---        works and replays exactly; a NULL salesperson keeps the order's salesperson; an admin
---        names another rep.
+--        works and replays exactly; a NULL salesperson is refused on another rep's order and
+--        resolves to the rep on the rep's own order and to no one on an order with none; an
+--        admin names another rep.
 --   4.   create_split_invoices_from_order on a field-allocated order: a NULL or blank key is
 --        IDEMPOTENCY_KEY_REQUIRED, SQLSTATE 22023; field_application is ORDER_INVOICE_TYPE_NOT_ALLOWED,
 --        SQLSTATE 23514, before any invoice number is drawn: no invoice sequence moves, and it leaves no
---        claim; a rep naming another rep is SALESMAN_SCOPE_DENIED; a rep naming themselves gets
+--        claim; a rep naming another rep, or passing NULL on another rep's order, is
+--        SALESMAN_SCOPE_DENIED; a rep naming themselves gets
 --        governed split drafts under their own name; an admin names another rep.
---   5.   complete_delivery's automatic split, which sends a NULL salesperson, still creates the
---        governed split drafts under the order's salesperson when a rep completes the delivery.
+--   5.   complete_delivery's automatic split, which sends a NULL salesperson and marks its own
+--        call, still creates the governed split drafts under the order's salesperson when a rep
+--        completes another rep's delivery.
 --
 -- Fixtures: an [E2E]-marked product priced through the governed preview/apply path, two
 -- existing active sales reps, and a customer assigned to the OTHER rep: reps invoice any customer,
@@ -109,11 +112,12 @@ BEGIN
   VALUES (v_customer, '[E2E] Own Name Field ' || v_suffix, 'corn', 100)
   RETURNING id INTO v_field;
 
-  -- Six orders, all with the OTHER rep as salesperson: 1-3 plain, 4-5 field-allocated,
-  -- 6 field-allocated for the delivery-completion step.
-  FOR v_i IN 1..6 LOOP
+  -- Seven orders: 1-6 with the OTHER rep as salesperson (1-3 plain, 4-5 field-allocated, 6
+  -- field-allocated for the delivery-completion step), 7 plain with no salesperson.
+  FOR v_i IN 1..7 LOOP
     INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
-    VALUES ('E2E-OWN-NAME-' || v_i || '-' || v_suffix, v_customer, v_today, 'confirmed', false, v_other_rep)
+    VALUES ('E2E-OWN-NAME-' || v_i || '-' || v_suffix, v_customer, v_today, 'confirmed', false,
+            CASE WHEN v_i = 7 THEN NULL ELSE v_other_rep END)
     RETURNING id INTO v_order;
     INSERT INTO public.order_items (
       order_id, product_id, product_name, price_per_unit, cost_per_unit,
@@ -123,7 +127,7 @@ BEGIN
       v_order, v_product, '[E2E] own name line ' || v_i, 10, 5,
       2, 20, 10, 50, 0, 2
     ) RETURNING id INTO v_item;
-    IF v_i >= 4 THEN
+    IF v_i BETWEEN 4 AND 6 THEN
       INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
       VALUES (v_item, v_field, 100);
     END IF;
@@ -176,10 +180,23 @@ BEGIN
     END IF;
   END;
 
-  -- 3. A NULL salesperson keeps the order's salesperson, the documented fallback, and an
-  --    admin may name any rep.
+  -- 3. A NULL salesperson resolves to the order's salesperson, so a rep is refused on another
+  --    rep's order (FAIL-FIRST against the first fix: it accepted this), allowed on their own
+  --    order and on an order with no salesperson; an admin may name any rep.
+  BEGIN
+    PERFORM public.create_invoice_from_order(v_orders[2], NULL, 'chemical_sale', 'e2e-own-name-single-null-other-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a NULL salesperson let a rep invoice under another rep''s name';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err IS DISTINCT FROM 'SALESMAN_SCOPE_DENIED' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong NULL-salesperson refusal: %', v_err;
+    END IF;
+  END;
+  UPDATE public.orders SET salesman_id = v_rep WHERE id = v_orders[2];  -- now the rep's own order
   v_ids := ARRAY[
-    public.create_invoice_from_order(v_orders[2], NULL, 'chemical_sale', 'e2e-own-name-single-null-' || v_suffix)
+    public.create_invoice_from_order(v_orders[2], NULL, 'chemical_sale', 'e2e-own-name-single-null-' || v_suffix),
+    public.create_invoice_from_order(v_orders[7], NULL, 'chemical_sale', 'e2e-own-name-single-none-' || v_suffix)
   ];
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
@@ -189,9 +206,10 @@ BEGIN
   );
   IF (SELECT salesman_id FROM public.invoices WHERE id = v_invoice) IS DISTINCT FROM v_rep
      OR (SELECT created_by FROM public.invoices WHERE id = v_invoice) IS DISTINCT FROM v_rep
-     OR (SELECT salesman_id FROM public.invoices WHERE id = v_ids[1]) IS DISTINCT FROM v_other_rep
-     OR (SELECT salesman_id FROM public.invoices WHERE id = v_ids[2]) IS DISTINCT FROM v_other_rep
-     OR (SELECT count(*) FROM public.invoices WHERE order_id = ANY (v_orders[1:3])) <> 3 THEN
+     OR (SELECT salesman_id FROM public.invoices WHERE id = v_ids[1]) IS DISTINCT FROM v_rep
+     OR (SELECT salesman_id FROM public.invoices WHERE id = v_ids[2]) IS NOT NULL
+     OR (SELECT salesman_id FROM public.invoices WHERE id = v_ids[3]) IS DISTINCT FROM v_other_rep
+     OR (SELECT count(*) FROM public.invoices WHERE order_id = ANY (v_orders[1:3] || v_orders[7])) <> 4 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: order invoices carry the wrong salesperson or count';
   END IF;
 
@@ -239,19 +257,22 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused field_application split drew an invoice number (% -> %)', v_seq_before, v_seq_after;
   END IF;
 
-  -- 4c. A rep naming another rep on a split is refused and writes nothing.
-  BEGIN
-    PERFORM public.create_split_invoices_from_order(
-      v_orders[4], v_other_rep, 'chemical_sale', 'e2e-own-name-split-denied-' || v_suffix
-    );
-    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep created split invoices under another rep''s name';
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT, v_state = RETURNED_SQLSTATE;
-    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err IS DISTINCT FROM 'SALESMAN_SCOPE_DENIED' OR v_state <> 'P0001' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: wrong split salesperson refusal, SQLSTATE %: %', v_state, v_err;
-    END IF;
-  END;
+  -- 4c. A rep naming another rep on a split, or passing NULL on another rep's order outside
+  --     complete_delivery's marked call, is refused and writes nothing.
+  FOREACH v_named IN ARRAY ARRAY[v_other_rep, NULL]::uuid[] LOOP
+    BEGIN
+      PERFORM public.create_split_invoices_from_order(
+        v_orders[4], v_named, 'chemical_sale', 'e2e-own-name-split-denied-' || COALESCE(v_named::text, 'null') || '-' || v_suffix
+      );
+      RAISE EXCEPTION 'SMOKE_FAIL: a sales rep created split invoices under another rep''s name (named %)', COALESCE(v_named::text, 'NULL');
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT, v_state = RETURNED_SQLSTATE;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err IS DISTINCT FROM 'SALESMAN_SCOPE_DENIED' OR v_state <> 'P0001' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong split salesperson refusal, SQLSTATE %: %', v_state, v_err;
+      END IF;
+    END;
+  END LOOP;
   IF EXISTS (SELECT 1 FROM public.invoices WHERE order_id = v_orders[4])
      OR EXISTS (SELECT 1 FROM public.split_invoice_creation_claims WHERE order_id = v_orders[4]) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused split left an invoice or creation claim behind';

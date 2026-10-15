@@ -15,8 +15,10 @@
  *   3. the candidate applies and prints POSTFLIGHT_OK;
  *   4. AFTER: the new chain and every other covering chain pass and roll back;
  *   5. RE-APPLY: refused by the preflight's own pins;
- *   6. MUTATION: with each split-wrapper hunk removed in turn (own name, type gate, key) the new
- *      chain fails at exactly that step, so each step really tests its hunk.
+ *   6. MUTATION: with each hunk removed or reverted in turn (the split own-name test, the single
+ *      wrapper's NULL-resolves-to-the-order test, the split's autosplit exemption, complete_delivery's
+ *      autosplit marker, the split type gate and key requirement) the new chain fails at exactly
+ *      that step, so each step really tests its hunk.
  *
  * Run: node scripts/smoke/prove-order-invoice-rep-own-name-real-schema.mjs   (needs Docker)
  * Prints ORDER_INVOICE_OWN_NAME_PROOF_PASS on success.
@@ -52,18 +54,22 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const OWN_NAME_CHAIN = path.join(SMOKE, 'smoke-order-invoice-rep-own-name.sql');
-// Every other registered chain whose `covers` names either RPC. (smoke-split_invoices_jsonb_fix.sql
+// Every other registered chain whose `covers` names either wrapper. (smoke-split_invoices_jsonb_fix.sql
 // is unregistered and stale, KNOWN_ISSUES.md: it builds the retired quote_sections split path.)
 const COVERING_CHAINS = [
   'smoke-order-invoice-type-gate.sql',
   'smoke-backfill-refuse-split-billing.sql',
   'smoke-govern-invoice-order-money-lifecycle.sql',
   'smoke-money-lifecycle-idempotency-required.sql',
+  // ...and every other non-container chain covering complete_delivery, which the candidate re-emits.
+  'smoke-financial-scope-and-delivery-aggregate.sql',
+  'smoke-delivery-accounting-period-guard.sql',
+  'smoke-offline-action-receipts.sql',
 ];
 const SUPERUSER_CHAINS = new Set(['smoke-govern-invoice-order-money-lifecycle.sql']);
 
 const id = (n) => `7a400000-0000-4000-8000-${n.padStart(12, '0')}`;
-const U = { ADMIN: id('a1'), REP: id('b1'), REP_B: id('b2'), DRIVER: id('d1') };
+const U = { ADMIN: id('a1'), REP: id('b1'), REP_B: id('b2'), DRIVER: id('d1'), APPLICATOR: id('e1') };
 
 // ------------------------------------------------------------------------------------------------
 // Container plumbing (the shared real-schema harness).
@@ -175,13 +181,14 @@ function buildContainer() {
 // The pins were read from live (read-only pg_proc queries, 2026-10-14); this checks the replay matches.
 function fidelity() {
   const sql = lf(CANDIDATE).split('$preflight$')[1];
-  // The two wrappers' contract checks, in order: single, then split.
-  const wrappers = [...sql.matchAll(/md5\(p\.prosrc\) = '([0-9a-f]{32})'/g)].map((m) => m[1]);
-  assert.equal(wrappers.length, 2, 'the preflight pins the two wrapper bodies');
+  // The three contract checks, in order: single wrapper, split wrapper, complete_delivery.
+  const contracts = [...sql.matchAll(/md5\(p\.prosrc\) = '([0-9a-f]{32})'/g)].map((m) => m[1]);
+  assert.equal(contracts.length, 3, 'the preflight pins the two wrappers and complete_delivery by contract');
   const pins = [
-    ['public.create_invoice_from_order(uuid,uuid,text,text)', wrappers[0]],
-    ['public.create_split_invoices_from_order(uuid,uuid,text,text)', wrappers[1]],
-    // The dependency list: role helpers, complete_delivery and the three private implementations.
+    ['public.create_invoice_from_order(uuid,uuid,text,text)', contracts[0]],
+    ['public.create_split_invoices_from_order(uuid,uuid,text,text)', contracts[1]],
+    ['public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', contracts[2]],
+    // The dependency list: role helpers and the three private implementations.
     ...[...sql.matchAll(/\('(public\.[^']+\))', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2]]),
   ];
   assert.equal(pins.length, 8, 'the preflight pins eight bodies');
@@ -193,14 +200,20 @@ function fidelity() {
 
 // ------------------------------------------------------------------------------------------------
 function seed() {
-  const users = [[U.ADMIN, 'admin', 'Admin', 9], [U.REP, 'sales_rep', 'Rep', 8], [U.REP_B, 'sales_rep', 'Rep B', 7], [U.DRIVER, 'driver', 'Driver', 6]];
+  const users = [[U.ADMIN, 'admin', 'Admin', 9], [U.REP, 'sales_rep', 'Rep', 8], [U.REP_B, 'sales_rep', 'Rep B', 7], [U.DRIVER, 'driver', 'Driver', 6], [U.APPLICATOR, 'applicator', 'Applicator', 5]];
+  // Auth columns and tables the hosted project has and the image lacks (the financial-scope chain
+  // deactivates a user), as in the other real-schema provers.
+  psql(`ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
+    CREATE TABLE IF NOT EXISTS auth.refresh_tokens (id bigserial PRIMARY KEY, user_id varchar(255));
+    CREATE TABLE IF NOT EXISTS auth.sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid);
+    GRANT ALL ON auth.refresh_tokens, auth.sessions TO postgres;`, { user: 'supabase_admin' });
   psql(`BEGIN;
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
       ${users.map(([u, role, label]) => `('${u}', 'own-name-${u.slice(-2)}@example.invalid', '{"full_name":"[PROVER] ${label}","role":"${role}"}'::jsonb)`).join(',\n      ')};
     ${users.map(([u, , , minutes]) => `UPDATE public.profiles SET created_at = now() - interval '${minutes} minutes' WHERE id = '${u}';`).join('\n    ')}
     COMMIT;`);
   assert.equal(scalar(`SELECT string_agg(role || ':' || is_active, ',' ORDER BY created_at) FROM public.profiles WHERE id::text LIKE '7a400000-%';`),
-    'admin:true,sales_rep:true,sales_rep:true,driver:true', 'the seeded roles are not what the proof needs');
+    'admin:true,sales_rep:true,sales_rep:true,driver:true,applicator:true', 'the seeded roles are not what the proof needs');
 }
 
 /** Run a chain file; `prefix` runs first in the same transaction (a mutation). */
@@ -229,10 +242,10 @@ function candidateBody(fn) {
   const a = sql.indexOf('AS $function$', start) + 'AS $function$'.length;
   return { header: sql.slice(start, a), body: sql.slice(a, sql.indexOf('$function$;', a)) };
 }
-function without(fn, hunk, label) {
+function mutate(fn, find, replacement, label) {
   const { header, body } = candidateBody(fn);
-  assert.equal(body.split(hunk).length - 1, 1, `mutation "${label}": hunk not found exactly once`);
-  return `${header}${body.replace(hunk, '')}$function$;`;
+  assert.equal(body.split(find).length - 1, 1, `mutation "${label}": hunk not found exactly once`);
+  return `${header}${body.replace(find, replacement)}$function$;`;
 }
 
 function main() {
@@ -283,20 +296,33 @@ ROLLBACK;`,
   assert.match(again.output, /PREFLIGHT_ORDER_INVOICE_WRAPPER_DRIFT/, `second apply refused for the wrong reason:\n${again.output}`);
   console.log('[prover] RE-APPLY: refused by the preflight, nothing changed');
 
-  // 6. MUTATION: each split-wrapper hunk is what its chain step proves.
+  // 6. MUTATION: each hunk is what its chain step proves.
+  const SPLIT = 'create_split_invoices_from_order';
+  const SINGLE = 'create_invoice_from_order';
+  const COMPLETE = '_complete_delivery_authorized_impl';
+  const exemption = "\n     AND NOT (p_salesman_id IS NULL\n              AND current_setting('crx.order_invoice_autosplit', true) IS NOT DISTINCT FROM p_order_id::text)";
   const mutations = [
-    ['own name', "  IF p_salesman_id IS NOT NULL\n     AND p_salesman_id IS DISTINCT FROM v_actor\n     AND NOT public.is_admin() THEN\n    RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n  END IF;\n",
+    ['split own name', SPLIT,
+      "  IF NOT public.is_admin()\n     AND COALESCE(p_salesman_id, (SELECT o.salesman_id FROM public.orders o WHERE o.id = p_order_id), v_actor)\n         IS DISTINCT FROM v_actor" + exemption + " THEN\n    RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n  END IF;\n", '',
       /SMOKE_FAIL: a sales rep created split invoices under another rep's name/],
-    ['type gate', "  IF p_invoice_type IS NULL OR p_invoice_type NOT IN ('chemical_sale', 'misc_charge') THEN\n    RAISE EXCEPTION 'ORDER_INVOICE_TYPE_NOT_ALLOWED: an invoice created from an order must be chemical_sale or misc_charge'\n      USING ERRCODE = 'check_violation';\n  END IF;\n",
+    ['single NULL resolves to the order (Sol on #928)', SINGLE,
+      'COALESCE(p_salesman_id, (SELECT o.salesman_id FROM public.orders o WHERE o.id = p_order_id), auth.uid())', 'COALESCE(p_salesman_id, auth.uid())',
+      /SMOKE_FAIL: a NULL salesperson let a rep invoice under another rep's name/],
+    ['split autosplit exemption', SPLIT, exemption, '',
+      /SMOKE_FAIL: completing the delivery did not auto-create governed split drafts/],
+    ['complete_delivery autosplit marker', COMPLETE,
+      "            PERFORM set_config('crx.order_invoice_autosplit', v_delivery.order_id::text, true);\n", '',
+      /SMOKE_FAIL: completing the delivery did not auto-create governed split drafts/],
+    ['split type gate', SPLIT, "  IF p_invoice_type IS NULL OR p_invoice_type NOT IN ('chemical_sale', 'misc_charge') THEN\n    RAISE EXCEPTION 'ORDER_INVOICE_TYPE_NOT_ALLOWED: an invoice created from an order must be chemical_sale or misc_charge'\n      USING ERRCODE = 'check_violation';\n  END IF;\n", '',
       /SMOKE_FAIL: (a refused field_application split drew an invoice number|wrong split type refusal)/],
-    ['key required', "  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN\n    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_split_invoices_from_order'\n      USING ERRCODE = '22023';\n  END IF;\n",
+    ['split key required', SPLIT, "  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' THEN\n    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_split_invoices_from_order'\n      USING ERRCODE = '22023';\n  END IF;\n", '',
       /SMOKE_FAIL: (create_split_invoices_from_order accepted a missing key|wrong split missing-key refusal)/],
   ];
-  for (const [label, hunk, expected] of mutations) {
-    const r = chain(OWN_NAME_CHAIN, without('create_split_invoices_from_order', hunk, label));
+  for (const [label, fn, find, replacement, expected] of mutations) {
+    const r = chain(OWN_NAME_CHAIN, mutate(fn, find, replacement, label));
     assert.ok(!r.pass, `MUTATION ${label}: the chain still passed without the hunk`);
     assert.match(r.fail, expected, `MUTATION ${label}: wrong failure: ${r.fail}`);
-    console.log(`[prover] MUTATION: without the split wrapper's ${label} hunk the chain fails: ${r.fail}`);
+    console.log(`[prover] MUTATION: without the ${label} hunk the chain fails: ${r.fail}`);
   }
 
   console.log('ORDER_INVOICE_OWN_NAME_PROOF_PASS');

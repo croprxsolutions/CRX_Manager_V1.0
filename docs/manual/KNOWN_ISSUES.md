@@ -723,20 +723,23 @@ archive. They are listed here so the open part of this file shows them. None was
   `20261014210000_order_invoices_rep_own_name` (Mason chose it 2026-10-14). It applies live with its
   PR, before the merge; `docs/reference/migration-history.md` row 945 is the apply record, and it is
   not in force until that row says APPLIED.** Both public wrappers refuse a non-admin caller whose
-  non-null `p_salesman_id` is not `auth.uid()` with `SALESMAN_SCOPE_DENIED`. A NULL salesperson
-  keeps `orders.salesman_id` (Mason, 2026-10-14, "Option A"): `complete_delivery`'s automatic split
-  sends NULL, and the app always sends the signed-in profile. The split wrapper also gained the
+  effective salesperson, `COALESCE(p_salesman_id, orders.salesman_id)`, is someone else, with
+  `SALESMAN_SCOPE_DENIED`; a NULL salesperson is accepted only on the caller's own order or one with
+  no salesperson (Sol on PR #928). The one exception (Mason, 2026-10-14, "Option A"):
+  `complete_delivery`'s automatic split marks its own NULL-salesperson call with the transaction-local
+  setting `crx.order_invoice_autosplit`, so a rep completing another rep's delivery still gets split
+  drafts under the order's salesperson. The app always sends the signed-in profile. The split wrapper also gained the
   CRX-LIFE-001 type allow-list before its claim (a refused `field_application` split no longer draws
   an invoice number) and now requires its idempotency key. Remaining, not fixed here:
-  - **Order and blend-ticket salesperson (accepted residual, Mason 2026-10-14; OPEN follow-up for
-    Goal 2's "own-name everywhere").** Read live 2026-10-14: the `orders` INSERT policy is
+  - **Order and blend-ticket salesperson (OPEN follow-up for Goal 2's "own-name everywhere").** Read live 2026-10-14: the `orders` INSERT policy is
     `is_admin() OR is_sales_rep()` with no salesperson condition, and `blend_tickets_office_update`
     lets any active rep UPDATE `blend_tickets.salesman_id` (authenticated holds UPDATE on that
     column); `create_order_from_blend_ticket` copies it onto the order, and
-    `create_invoice_from_blend_ticket` writes it onto the invoice with no own-name test. So a rep can
-    still get an invoice under another salesperson's name through an order or blend ticket naming
-    them plus a direct NULL call, or through the blend-ticket invoice path. The fix belongs on the
-    order and blend-ticket writers (a rep names only themselves), not in the NULL fallback.
+    `create_invoice_from_blend_ticket` writes it onto the invoice with no own-name test. The order
+    RPCs no longer accept a rep's NULL on another rep's order, but a rep can still record another
+    salesperson on an order or blend ticket (where commissions read it), and the blend-ticket invoice
+    path still invoices under the ticket's salesperson. The fix belongs on the order and blend-ticket
+    writers (a rep names only themselves).
   - The split wrapper still passes a NULL key to its implementation, so on an order with no field
     allocations it still raises `IDEMPOTENCY_KEY_REQUIRED` (pre-existing, unreachable from the app).
 

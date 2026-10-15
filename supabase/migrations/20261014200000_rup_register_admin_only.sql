@@ -65,7 +65,7 @@ BEGIN
   WHERE p.oid = 'public.get_rup_sales_register(date,date,uuid,uuid,text,boolean)'::regprocedure;
   -- The live body of 2026-10-14, or this file's own body (a re-run).
   IF md5(replace(v_src, chr(13), '')) NOT IN ('e7c680dd7aef368f9b2e9bc926328d47', '01a56f57845ccc8fcc0bc91cfd114045') THEN
-    RAISE EXCEPTION 'RUP_REGISTER_PREFLIGHT: get_rup_sales_register drifted from the 2026-10-14 body (md5 %)', md5(v_src);
+    RAISE EXCEPTION 'RUP_REGISTER_PREFLIGHT: get_rup_sales_register drifted from the 2026-10-14 body (md5 %)', md5(replace(v_src, chr(13), ''));
   END IF;
 
   -- The live policy of 2026-10-14 (admin or sales rep), or this file's own (a re-run).

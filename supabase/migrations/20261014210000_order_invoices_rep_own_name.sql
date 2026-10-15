@@ -181,8 +181,10 @@ BEGIN
   END IF;
   -- Own name (Mason, 2026-10-06, narrowed 2026-10-13): a sales rep bills any customer but only
   -- under their own name; an admin may name anyone. The salesperson the invoice will carry is
-  -- COALESCE(p_salesman_id, orders.salesman_id) (orders.salesman_id is admin-only to UPDATE), so a
-  -- non-admin may pass NULL only when that resolves to them or to no one (Sol on PR #928).
+  -- COALESCE(p_salesman_id, orders.salesman_id), so a non-admin may pass NULL only when that
+  -- resolves to them or to no one (Sol on PR #928). The order is locked first, so an admin
+  -- reassigning it cannot change that salesperson between this test and the insert (Luna r2).
+  PERFORM 1 FROM public.orders o WHERE o.id = p_order_id FOR UPDATE;
   IF NOT public.is_admin()
      AND COALESCE(p_salesman_id, (SELECT o.salesman_id FROM public.orders o WHERE o.id = p_order_id), auth.uid())
          IS DISTINCT FROM auth.uid() THEN
@@ -234,11 +236,13 @@ BEGIN
   END IF;
   -- Own name (Mason, 2026-10-06, narrowed 2026-10-13): a sales rep bills any customer but only
   -- under their own name; an admin may name anyone. The salesperson the invoice will carry is
-  -- COALESCE(p_salesman_id, orders.salesman_id) (orders.salesman_id is admin-only to UPDATE), so a
-  -- non-admin may pass NULL only when that resolves to them or to no one (Sol on PR #928).
+  -- COALESCE(p_salesman_id, orders.salesman_id), so a non-admin may pass NULL only when that
+  -- resolves to them or to no one (Sol on PR #928). The order is locked first, so an admin
+  -- reassigning it cannot change that salesperson between this test and the insert (Luna r2).
   -- complete_delivery's automatic split (Mason, 2026-10-14, "Option A") keeps the order's
   -- salesperson: it marks its own NULL-salesperson call for exactly this order with the
   -- transaction-local setting crx.order_invoice_autosplit, which no Data API request can set.
+  PERFORM 1 FROM public.orders o WHERE o.id = p_order_id FOR UPDATE;
   IF NOT public.is_admin()
      AND COALESCE(p_salesman_id, (SELECT o.salesman_id FROM public.orders o WHERE o.id = p_order_id), v_actor)
          IS DISTINCT FROM v_actor
@@ -960,7 +964,7 @@ BEGIN
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) =
           'p_order_id uuid, p_salesman_id uuid DEFAULT NULL::uuid, p_invoice_type text DEFAULT ''chemical_sale''::text, p_idempotency_key text DEFAULT NULL::text'
-        AND md5(p.prosrc) = '98a12deef7ce6bc65e1d8235d114319f'
+        AND md5(p.prosrc) = 'c97b2be8bee9dd8baaaab92bc24b92e7'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[]
@@ -975,7 +979,7 @@ BEGIN
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) =
           'p_order_id uuid, p_salesman_id uuid DEFAULT NULL::uuid, p_invoice_type text DEFAULT ''chemical_sale''::text, p_idempotency_key text DEFAULT NULL::text'
-        AND md5(p.prosrc) = 'b898c2a322e362cb94b2dc9376c3993b'
+        AND md5(p.prosrc) = '0f1e36e8536fc56f08fcf6071ea76da8'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[]

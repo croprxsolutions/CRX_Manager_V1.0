@@ -283,6 +283,28 @@ ROLLBACK;`,
   return /UNBOUND_RECEIPT_ACCEPTED/.test(out) ? 'accepted' : (/ERROR:[^\n]*/.exec(out)?.[0] ?? out.trim().slice(-300));
 }
 
+/**
+ * An unbound receipt queued by the owner, then COMMITted while the session role is authenticated
+ * (as after a browser RPC returns). On PostgreSQL 17 the deferred guard runs under that role, which
+ * row-level security blinds to idempotency_keys, so only a SECURITY DEFINER guard can see the row.
+ */
+function unboundReceiptCommittedAsAuthenticated(prefix = '') {
+  const key = `prover-unbound-as-authenticated-${Date.now()}`;
+  const r = docker([...psqlArgs()], {
+    input: `${prefix}
+BEGIN;
+INSERT INTO public.idempotency_keys (idempotency_key, operation, result)
+VALUES ('${key}', 'apply_write_off', '{"id":"x"}'::jsonb);
+SELECT set_config('request.jwt.claims', json_build_object('sub', '${U.ADMIN}', 'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+COMMIT;`,
+    allowFailure: true,
+  });
+  const committed = scalar(`SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = '${key}';`);
+  psql(`DELETE FROM public.idempotency_keys WHERE idempotency_key = '${key}';`);
+  return { refused: /REPLAY_RECEIPT_UNBOUND/.test(`${r.stdout}\n${r.stderr}`), committed };
+}
+
 function candidateBody(fn) {
   const sql = lf(CANDIDATE);
   const start = sql.search(new RegExp(`CREATE FUNCTION public\\.${fn}\\(`));
@@ -385,6 +407,10 @@ ROLLBACK;`,
   const strippedOut = `${stripped.stdout}\n${stripped.stderr}`;
   assert.ok(!/STRIPPED_RECEIPT_ACCEPTED/.test(strippedOut) && /REPLAY_RECEIPT_UNBOUND/.test(strippedOut),
     `AFTER: an UPDATE that stripped a receipt's binding was not refused:\n${strippedOut.slice(-400)}`);
+  // At a COMMIT made under the authenticated role (the guard runs with that role on PostgreSQL 17).
+  const asAuth = unboundReceiptCommittedAsAuthenticated();
+  assert.ok(asAuth.refused && asAuth.committed === '0',
+    `AFTER: an unbound receipt committed under the authenticated role was not refused: ${JSON.stringify(asAuth)}`);
   // The same, left to the real COMMIT (no SET CONSTRAINTS): the deferred guard fires there and the
   // whole transaction, receipt included, is rolled back.
   const strippedAtCommit = docker([...psqlArgs()], {
@@ -460,6 +486,16 @@ COMMIT;`,
     "    RAISE EXCEPTION 'REPLAY_RECEIPT_UNBOUND'\n", "    RAISE NOTICE 'REPLAY_RECEIPT_UNBOUND'\n", 'commit-time guard'));
   assert.equal(noGuard, 'accepted', `MUTATION commit-time guard: the unbound receipt was still refused: ${noGuard}`);
   console.log('[prover] MUTATION: without the commit-time guard an unbound receipt is accepted');
+  // Without SECURITY DEFINER the guard is blind under the authenticated role at COMMIT. The
+  // mutation is committed (as a function replace) and restored right after.
+  const guardDef = candidateBody('_require_bound_replay_receipt_20261015');
+  const invoker = `${guardDef.header.replace('SECURITY DEFINER\n', '')}${guardDef.body}${guardDef.tag};`;
+  assert.notEqual(invoker, `${guardDef.header}${guardDef.body}${guardDef.tag};`, 'MUTATION guard SECURITY DEFINER: hunk not found');
+  const blind = unboundReceiptCommittedAsAuthenticated(invoker);
+  psql(`${guardDef.header}${guardDef.body}${guardDef.tag};`);
+  assert.ok(!blind.refused && blind.committed === '1',
+    `MUTATION guard SECURITY DEFINER: an invoker guard still refused the receipt: ${JSON.stringify(blind)}`);
+  console.log('[prover] MUTATION: without SECURITY DEFINER the guard lets an unbound receipt commit under the authenticated role');
 
   console.log('MONEY_REPLAY_BINDING_BATCH1_PROOF_PASS');
 }

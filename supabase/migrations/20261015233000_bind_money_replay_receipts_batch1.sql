@@ -279,11 +279,15 @@ REVOKE ALL ON FUNCTION public._bind_replay_receipt_20261015(text, text, text) FR
 -- cleared a binding column would otherwise turn a good receipt into a refused legacy one). The wrappers insert through the renamed body and bind right
 -- after, so the check is DEFERRED to commit. It refuses an old body still running across the apply,
 -- and any other writer, from committing an unbound receipt. A receipt deleted before commit (the
--- expiry clean-up) is ignored. Not SECURITY DEFINER: every writer of idempotency_keys is a definer
--- function owned by postgres, so it runs with that owner's rights and lends none.
+-- expiry clean-up) is ignored. SECURITY DEFINER on purpose: a deferred trigger runs at COMMIT under
+-- the role active then (on PostgreSQL 17, the caller's session role, e.g. authenticated, after the
+-- definer RPC has returned), and that role cannot see idempotency_keys rows (RLS USING (false)), so
+-- an invoker guard would find nothing and let an unbound receipt commit. It reads one row by id and
+-- writes nothing.
 CREATE FUNCTION public._require_bound_replay_receipt_20261015()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $require_bound$
 BEGIN
@@ -875,9 +879,13 @@ BEGIN
          AND (t.tgtype::int & 4) <> 0     -- INSERT
          AND (t.tgtype::int & 16) <> 0    -- UPDATE
      ) <> 1
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p
+                     WHERE p.oid = to_regprocedure('public._require_bound_replay_receipt_20261015()')
+                       AND p.prosecdef AND p.proowner = 'postgres'::regrole
+                       AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[])
      OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS api_role
                  WHERE has_function_privilege(api_role, 'public._require_bound_replay_receipt_20261015()', 'EXECUTE')) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_RECEIPT_GUARD_CONTRACT: the deferred bound-receipt guard is not installed as reviewed';
+    RAISE EXCEPTION 'POSTFLIGHT_RECEIPT_GUARD_CONTRACT: the deferred bound-receipt guard (a postgres-owned SECURITY DEFINER function no API role may call) is not installed as reviewed';
   END IF;
 
   -- The private batch impl is callable only by postgres now.

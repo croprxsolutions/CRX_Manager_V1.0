@@ -172,7 +172,10 @@ an indented "stop" would no longer latch. Sol's direction, which Mason chose: de
 origin, not text. The session transcript records it (`"origin":{"kind":"peer"}` on a hand-back,
 `{"kind":"human"}` on Mason's messages).
 
-**Trusted origin checked 2026-10-15: not readable when the hook runs, so no fix was built.**
+**Trusted origin checked 2026-10-15: not shown to be reliably readable when the hook runs, so no fix
+was built.** The hook input carries no origin, and the one timed case found the transcript record
+missing; between-turn hand-back timing is still untested (see below), so a transcript check keyed on
+`prompt_id` remains possible for that case.
 - Reproduced live again at 3:12 PM Central: a background helper's report listing "Stop, StopFailure"
   latched the main checkout's `hold.json`, and the latched text began at `<agent-message from="…">`
   with no preamble line. Mason's next message cleared it.

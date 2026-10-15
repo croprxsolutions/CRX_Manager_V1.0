@@ -1,9 +1,11 @@
-## 2026-10-15 — Hold latch: trusted message origin is not readable at hook time (no code change)
+## 2026-10-15 — Hold latch: trusted message origin not yet shown readable at hook time (no code change)
 
 Follow-up to the open issue "a helper agent's report can latch, or clear, the hold" in
 `docs/manual/KNOWN_ISSUES.md`. Mason chose to fix it by trusted message origin instead of by text
 shape (Sol blocked the text-shape fix on PR #940). Before any code was written, a probe checked
-whether the hook can read that origin when it runs. It cannot do so reliably, so no fix was built.
+whether the hook can read that origin when it runs. The hook input carries no origin, and the one
+timed case found the transcript record missing, so reliability was not shown and no fix was built.
+Hand-back timing between turns is still untested and may yet allow a check keyed on `prompt_id`.
 
 - **Reproduced live.** A background helper's report listing "Stop, StopFailure" latched the main
   checkout's `hold.json` at 3:12 PM Central. The latched text began at `<agent-message from="…">` with

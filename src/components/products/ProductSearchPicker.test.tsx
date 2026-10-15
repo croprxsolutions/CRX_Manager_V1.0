@@ -20,6 +20,7 @@ function product(n: number) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.limit.mockReset();
   const builder: Record<string, unknown> = {};
   for (const m of ['select', 'eq', 'order']) builder[m] = vi.fn(() => builder);
   builder.or = mocks.or.mockImplementation(() => builder);
@@ -61,6 +62,18 @@ describe('ProductSearchPicker', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Product search failed');
     expect(screen.queryByText('No matching active products')).not.toBeInTheDocument();
     expect(mocks.toast).toHaveBeenCalledWith('error', 'Failed to search Products');
+  });
+
+  it('drops the previous search results as soon as the text changes', async () => {
+    mocks.limit.mockResolvedValueOnce({ data: [product(1)], error: null });
+    const { input } = renderPicker();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'Atrazine' } });
+    expect(await screen.findByRole('option', { name: /Product 1/ })).toBeInTheDocument();
+    mocks.limit.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.change(input, { target: { value: 'Zoom' } });
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(screen.getByText('Searching...')).toBeInTheDocument();
   });
 
   it('says when results stop at the limit instead of hiding the rest', async () => {

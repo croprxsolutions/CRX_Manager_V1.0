@@ -13,7 +13,7 @@ import { Plus, Copy, Pencil, Trash2, Sprout, Save, X, ChevronDown, ChevronUp } f
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
-import ProductSearchPicker, { type ProductSearchResult } from '../components/products/ProductSearchPicker';
+import ProductSearchPicker from '../components/products/ProductSearchPicker';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import SplitHeading from '../components/ui/SplitHeading';
@@ -26,7 +26,7 @@ import { logActivity } from '../lib/activityLogger';
 import HelpTip from '../components/ui/HelpTip';
 import { computeSeason } from '../utils/season';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
-import type { UnitConversion } from '../types';
+import type { ProductSearchResult, UnitConversion } from '../types';
 
 interface ProgramItem {
   product_id: string;

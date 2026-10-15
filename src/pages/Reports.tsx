@@ -222,7 +222,8 @@ export default function Reports() {
   const [inventoryCostData, setInventoryCostData] = useState<InventoryCostRow[]>([]);
   const [priceListData, setPriceListData] = useState<Record<string, unknown>[]>([]);
   const [priceListError, setPriceListError] = useState(false);
-  const priceListExportReady = !loading && !priceListError && priceListData.length > 0;
+  const [priceListLoaded, setPriceListLoaded] = useState(false);
+  const priceListExportReady = !loading && !priceListError && priceListLoaded;
   const [postedAppsData, setPostedAppsData] = useState<Record<string, unknown>[]>([]);
 
   // ─── YEAR-END data ────────────────────────────────────────
@@ -460,19 +461,39 @@ export default function Reports() {
         .order('product_name')
         .order('id')
         .range(from, to));
-      if (result.error) Sentry.captureException(new Error(result.error.message), { extra: { context: 'price_list_load' } });
-      else data = result.data;
+      if (result.error) {
+        Sentry.captureException(new Error(result.error.message), { extra: { context: 'price_list_load' } });
+      } else {
+        // The pages are separate reads, so a product added, renamed or deactivated between them
+        // can shift the offsets. Accept the list only if no product repeats and the total still
+        // matches the database's own count.
+        const rows = result.data ?? [];
+        const { count, error: countError } = await supabase
+          .from('products')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_active', true);
+        const uniqueIds = new Set(rows.map((r) => r.id)).size;
+        if (countError || count !== rows.length || uniqueIds !== rows.length) {
+          Sentry.captureException(new Error('Price list read was not a complete snapshot'), {
+            extra: { context: 'price_list_load', rows: rows.length, uniqueIds, count, countError: countError?.message },
+          });
+        } else {
+          data = rows;
+        }
+      }
     } catch (err) {
       Sentry.captureException(err, { extra: { context: 'price_list_load' } });
     }
     if (!data) {
       setPriceListData([]);
+      setPriceListLoaded(false);
       setPriceListError(true);
       toast('error', 'Failed to load price list.');
       return;
     }
     setPriceListError(false);
     setPriceListData(data);
+    setPriceListLoaded(true);
   }, [toast]);
 
   const fetchPostedApplications = useCallback(async () => {
@@ -1368,7 +1389,7 @@ export default function Reports() {
               The price list could not be loaded completely, so it is not shown and cannot be exported. Refresh the page to try again.
             </div>
           )}
-          {operationalTab === 'price_list' && !priceListError && !loading && priceListData.length > 0 && (
+          {operationalTab === 'price_list' && priceListExportReady && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
               <span className="font-semibold">Active products:</span> {priceListData.length}
             </div>

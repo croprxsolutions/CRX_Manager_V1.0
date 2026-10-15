@@ -3,13 +3,8 @@ import { Search, X } from 'lucide-react';
 import { supabase } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
-import { ProductOptionDetails, type ProductOptionPresentationModel } from './ProductOptionPresentation';
-
-export interface ProductSearchResult extends ProductOptionPresentationModel {
-  product_name: string;
-  rate_unit?: string | null;
-  rate_per_acre?: number | null;
-}
+import { ProductOptionDetails } from './ProductOptionPresentation';
+import type { ProductSearchResult } from '../../types';
 
 const PRODUCT_SEARCH_SELECT =
   'id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, rate_unit, rate_per_acre, product_family:product_families(name)';
@@ -59,7 +54,10 @@ export default function ProductSearchPicker({
   const [searching, setSearching] = useState(false);
   const [searchFailed, setSearchFailed] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  // The text the shown results (or failure) belong to; until it matches, the list says "Searching...".
+  const [searchedTerm, setSearchedTerm] = useState('');
   const requestRef = useRef(0);
+  const failureToastShownRef = useRef(false);
 
   useEffect(() => {
     setQuery(selectedLabel);
@@ -87,12 +85,17 @@ export default function ProductSearchPicker({
       if (error) throw error;
       setResults((data || []) as unknown as ProductSearchResult[]);
       setSearchFailed(false);
+      setSearchedTerm(q);
+      failureToastShownRef.current = false;
     } catch (error) {
       if (requestId !== requestRef.current) return;
       Sentry.captureException(error, { extra: { context: 'product_search_picker' } });
-      toast('error', 'Failed to search Products');
+      // One toast per run of failures; the inline alert covers each later keystroke.
+      if (!failureToastShownRef.current) toast('error', 'Failed to search Products');
+      failureToastShownRef.current = true;
       setResults([]);
       setSearchFailed(true);
+      setSearchedTerm(q);
     } finally {
       if (requestId === requestRef.current) setSearching(false);
     }
@@ -134,7 +137,7 @@ export default function ProductSearchPicker({
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setIsOpen(true);
-      setHighlightedIndex((i) => Math.min(i + 1, results.length - 1));
+      setHighlightedIndex((i) => Math.max(0, Math.min(i + 1, results.length - 1)));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setHighlightedIndex((i) => Math.max(i - 1, 0));
@@ -163,7 +166,15 @@ export default function ProductSearchPicker({
           aria-autocomplete="list"
           aria-activedescendant={showList && results[highlightedIndex] ? `${listId}-option-${highlightedIndex}` : undefined}
           value={query}
-          onChange={(e) => { setQuery(e.target.value); setIsOpen(true); setHighlightedIndex(0); }}
+          onChange={(e) => {
+            // Drop the previous query's results at once so none can be picked for the new text.
+            requestRef.current += 1;
+            setResults([]);
+            setSearchFailed(false);
+            setQuery(e.target.value);
+            setIsOpen(true);
+            setHighlightedIndex(0);
+          }}
           onFocus={() => setIsOpen(true)}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
@@ -188,7 +199,7 @@ export default function ProductSearchPicker({
           role="listbox"
           className="absolute z-30 w-full min-w-[280px] mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"
         >
-          {searching && results.length === 0 ? (
+          {searching || term !== searchedTerm ? (
             <div className="px-3 py-2 text-sm text-secondary">Searching...</div>
           ) : searchFailed ? (
             <div role="alert" className="px-3 py-2 text-sm text-red-600">Product search failed. Try again.</div>

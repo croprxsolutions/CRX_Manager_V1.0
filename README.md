@@ -113,8 +113,8 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 ### Field Application
 - **Field Mapping** — Mapbox satellite maps, draw-your-own boundaries (including multi-part fields), one-click USDA field boundaries, shapefile/KML/GeoJSON import, legal-description (PLSS) lookup, and obstacle markers
 - **Field Dashboard** — Per-field history: season stats, every application with weather, billing splits, and FSA details
-- **Jobs** — Spray-job editor with a map-based field picker, chemicals, vehicle and applicator, customer-supplied chemicals, application fees, and transfer to invoice
-- **Dispatch** — Map-based dispatch board with applicator assignment and route-order numbers
+- **Jobs** — Spray-job editor with a map-based field picker, route-order numbers on the job's field map, chemicals, vehicle and applicator, customer-supplied chemicals, application fees, and transfer to invoice
+- **Dispatch** — Map-based dispatch board with applicator assignment
 - **Loader & Applicator Sheets** — Multiple saved loader worksheets per job, satellite map pages and previous-application history on printed applicator sheets
 - **Blend Tickets & Recipes** — Upload a ticket photo for OCR (Google Vision AI) or enter it by hand, pick units from a list, and build reusable tank-mix recipes that start a job
 - **Application Records** — The legal record of every application: actual application date, applicator name and license captured at the time, and products used

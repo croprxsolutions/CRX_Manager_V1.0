@@ -43,6 +43,8 @@ on to do this is next section of work."
     each quote line.
   - **Margin targets and floors are set per product,** with no company-wide default.
   - **Supplier-quote cost rollout and Early Bird committed prices are parked** for a later, separate plan.
+  - **Field jobs from a never-sent planned quote stay as today:** they may be scheduled and billed at the
+    draft's price. The sent-price rule applies once a quote has been sent.
 
 **Iteration 2 (2026-10-14).** Merged the findings of three sessions ("CRX pricing updates and history",
 "Missing pricing and cost tracking features" and the branch-cleanup session that wrote this draft), with a Codex
@@ -166,6 +168,9 @@ Small slices, each its own change. Building starts only when Mason says so; slic
      `create_job_from_quote_section` (it accepts `revised` quotes and copies the live
      `quote_items.price_per_unit` into `job_chemicals`, which `transfer_job_to_invoice` later bills). Each
      route gets the re-send gate and a price-changing-revision proof.
+     **Exception (Mason, 2026-10-14):** a field job may still be scheduled from a planned quote that was never
+     sent, and billed at that draft's price, as today (`QuoteBuilder.tsx` allows scheduling a draft). The
+     sent-price rule applies once a quote has been sent.
    - **Mason's lock rules (2026-10-14):** the lock covers prices only; staff can still revise products,
      quantities and notes. Planned bookings and partly drawn quotes stay locked until staff close them.
      Editing a sent quote no longer moves its expiry date (today every save resets it; see section 5); only a
@@ -468,8 +473,11 @@ $900 typed for $90. The method needs a tighter review step and a few small produ
 
 **Conflicts with other parts of this plan:**
 - **The quote lock must come first (Sol's only BLOCKER).** Under today's code a mid-month workbook change
-  re-prices every sent quote on its next save and on Convert (section 7, finding 1). Slice 2 should land
-  before Mason relies on sent quotes keeping their prices.
+  re-prices every sent quote on its next save and on Convert (section 7, finding 1). **Rollout gate
+  (CodeRabbit on PR #926):** slice 0 may be built alongside slices 1-2, but it is not switched on for live price
+  changes until slice 2 is live. Until then the current workbook keeps working as today, and before applying a
+  price change an admin checks the Quotes list for open sent or revised quotes that contain a changed product
+  and handles them by hand, because those quotes will re-price.
 - **Other ways to change a price still exist.** Inline editing on the Products page and the product page's
   pricing card change prices without the workbook's review. Mason keeps them for one-off fixes (2026-10-14).
 - **Stale costs.** 600 of 602 cost bases are still the original load, so margins in the sheet are measured
@@ -484,7 +492,7 @@ recheck the arithmetic independently. Mason or an admin resolves every exception
 supplier message.
 
 **Monthly / mid-month routine** (confirmed by Mason as written, 2026-10-14; it becomes the working checklist
-once slice 0 is built):
+once slice 0 is live, which waits for slice 2, as described in the rollout gate above):
 1. Save the supplier message (PDF, email or text) and note its effective date.
 2. Download a fresh full price sheet. Keep the original download unedited as the dated "before" record.
 3. In a working copy, find the products the supplier changed, check the package and unit, enter the new

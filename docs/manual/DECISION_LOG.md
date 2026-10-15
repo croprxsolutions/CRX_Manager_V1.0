@@ -10,20 +10,9 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 ## 2026-10-14 — Pricing plan finished: the remaining quote-lock, cost and margin questions answered
 
-**Decision (Mason, in chat: "I want to finish the plan and goal"; each answer picked from recommended options).**
-- **The quote lock covers prices only.** Staff may still revise a sent quote's products, quantities and notes.
-- **A price-changing revision must be re-sent** before it becomes an order or is partly drawn, and there is no admin unlock that skips the re-send.
-- **Planned bookings and partly drawn quotes stay locked until staff close them.**
-- **Expiry:** editing a sent quote no longer moves its expiry date, and an expired quote must be updated to today's prices and re-sent.
-- **Cost spikes:** if cost rises above a locked price, Convert honors the price but needs an admin's below-cost approval with a reason.
-- **Workbook warnings:** the workbook flags moves over 10%, below-cost prices and margins under the product's floor, and each flagged row needs a reasoned acknowledgement.
-- **Cost visibility:** sales reps never see cost or margin, and admins see quote-time and today's cost side by side.
-- **Margins:** targets and floors are set per product, with no company default.
-- **Parked:** supplier-quote cost rollout and Early Bird go to a later, separate plan.
-- **Monthly routine:** the plan's six-step monthly price routine is confirmed as written.
-
-**Why.** Customers are billed only prices they were sent, without freezing quotes against legitimate edits. Cost stays with admins.
-**What this forbids/implies:** every route from a quote to something billable (Convert, `draw_down_quote`, `create_job_from_quote_section` through `transfer_job_to_invoice`, and any other) must take prices from the sent version, enforced in the database. Section 5 of `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md` holds the full question list with answers. The plan is finished but not started; building waits for Mason's go-ahead.
+**Decision (Mason, in chat: "I want to finish the plan and goal"; each answer picked from recommended options).** The quote lock covers prices only. A price change must be re-sent before it is billed, with no admin bypass. Bookings stay locked until closed, and edits don't move the expiry date. A cost spike needs admin below-cost approval at Convert. The workbook flags moves over 10%, below-cost prices and margins under the product's own floor. Reps never see cost or margin. Margins are set per product. Supplier-cost rollout and Early Bird are parked. Field jobs from a never-sent planned quote stay as today.
+**Why.** Customers are billed only prices they were sent, without freezing legitimate edits; cost stays with admins.
+**What this forbids/implies:** once a quote is sent, every route from it to something billable takes prices from the sent version, enforced in the database. Details and the full answer list are in sections 4-5 of `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`. The plan is finished but not started.
 
 ## 2026-10-14 — Clarification: the 6e and 6g rules leave field-application billing as it is
 

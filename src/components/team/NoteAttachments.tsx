@@ -52,19 +52,9 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
       // never delete that photo (the row itself is still removed).
       const storagePath = teamNotePhotoPath(attachment);
 
-      // Delete from storage first
-      if (storagePath) {
-        const { error: storageErr } = await supabase.storage
-          .from('team-note-attachments')
-          .remove([storagePath]);
-
-        if (storageErr) {
-          Sentry.captureException(storageErr instanceof Error ? storageErr : new Error(String(storageErr)), { extra: { context: 'Storage delete error' } });
-          // Continue to delete DB record even if storage delete fails
-        }
-      }
-
-      // Delete from database
+      // The row first: if it is refused or the connection drops, the photo and its file are both
+      // still there. Once the row is gone, a failed file removal leaves only an unlisted file,
+      // never a row pointing at a missing photo.
       const result = await supabase
         .from('team_note_attachments')
         .delete()
@@ -72,8 +62,20 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
         .select();
 
       checkMutationResult(result, 'Delete note attachment');
-      toast('success', 'Photo deleted');
       setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+
+      if (storagePath) {
+        try {
+          const { error: storageErr } = await supabase.storage
+            .from('team-note-attachments')
+            .remove([storagePath]);
+          if (storageErr) throw storageErr;
+        } catch (storageErr) {
+          // The photo is already gone from the note; the leftover file is reported, not shown.
+          Sentry.captureException(storageErr instanceof Error ? storageErr : new Error(String(storageErr)), { extra: { context: 'Storage delete error' } });
+        }
+      }
+      toast('success', 'Photo deleted');
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Delete attachment error' } });
       toast('error', 'Failed to delete photo');

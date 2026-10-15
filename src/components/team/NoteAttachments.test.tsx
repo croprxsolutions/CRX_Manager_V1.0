@@ -10,6 +10,7 @@ const H = vi.hoisted(() => ({
   profile: { current: { id: 'me', role: 'driver', is_active: true } as { id: string; role: string; is_active: boolean } },
   remove: vi.fn(),
   ops: [] as string[],
+  refuseRowDelete: false,
 }));
 
 const URL_BASE = 'https://x.supabase.co/storage/v1/object/public/team-note-attachments/team-note-attachments';
@@ -24,7 +25,10 @@ vi.mock('../../lib/db', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   const builder: Record<string, unknown> = new Proxy({}, {
     get(_target, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve({ data: ROWS, error: null });
+      if (prop === 'then') {
+        const refused = H.refuseRowDelete && H.ops.includes('delete');
+        return (resolve: (v: unknown) => unknown) => resolve(refused ? { data: null, error: { message: 'permission denied' } } : { data: ROWS, error: null });
+      }
       return () => { H.ops.push(String(prop)); return builder; };
     },
   });
@@ -32,7 +36,7 @@ vi.mock('../../lib/db', async (importOriginal) => {
     ...actual,
     supabase: {
       from: () => builder,
-      storage: { from: () => ({ download: () => new Promise(() => {}), remove: (paths: string[]) => { H.remove(paths); return Promise.resolve({ data: [], error: null }); } }) },
+      storage: { from: () => ({ download: () => new Promise(() => {}), remove: (paths: string[]) => { H.ops.push('remove'); H.remove(paths); return Promise.resolve({ data: [], error: null }); } }) },
     },
   };
 });
@@ -51,6 +55,7 @@ beforeEach(() => {
   H.profile.current = { id: 'me', role: 'driver', is_active: true };
   H.remove.mockClear();
   H.ops.length = 0;
+  H.refuseRowDelete = false;
   STABLE_TOAST.toast.mockClear();
 });
 afterEach(cleanup);
@@ -88,10 +93,23 @@ describe('NoteAttachments delete control', () => {
 });
 
 describe('NoteAttachments delete', () => {
-  it('removes the file of a row in its uploader\'s own folder, then the row', async () => {
+  it('removes the row, then the file in its uploader\'s own folder', async () => {
     await deleteAsAdmin('theirs.jpg');
     expect(H.remove).toHaveBeenCalledWith(['team-note-attachments/someone-else/2.jpg']);
-    expect(H.ops).toContain('delete');
+    expect(H.ops.indexOf('delete')).toBeGreaterThan(-1);
+    expect(H.ops.indexOf('remove')).toBeGreaterThan(H.ops.indexOf('delete'));
+  });
+
+  it('keeps the file when the row delete is refused, and says the delete failed', async () => {
+    H.refuseRowDelete = true;
+    H.profile.current = { id: 'boss', role: 'admin', is_active: true };
+    render(<NoteAttachments noteId="n1" />);
+    await screen.findByText('theirs.jpg');
+    fireEvent.click(deleteButtonFor('theirs.jpg')!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(STABLE_TOAST.toast).toHaveBeenCalledWith('error', 'Failed to delete photo'));
+    expect(H.remove).not.toHaveBeenCalled();
+    expect(screen.getByText('theirs.jpg')).toBeTruthy();
   });
 
   it('never removes another uploader\'s file through a row that names it; only the row goes', async () => {

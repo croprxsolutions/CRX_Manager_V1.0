@@ -29,7 +29,9 @@ to all three. The customer receipt email embedded the photo links.
   `DeliveryDetail.tsx`, `FieldStop.tsx` and `NoteAttachments.tsx` use it. A note owner sees Delete
   only on photos they uploaded (or as admin), matching the storage and table rules. A delete removes
   a file only when it lies in that row's uploader's own folder (`teamNotePhotoPath`); otherwise only
-  the row goes. Uploads keep the file extension to letters and digits, so they pass the row rule.
+  the row goes. The row is deleted before the file (Codex on PR #929): a refused or dropped row delete
+  leaves the photo intact, and a failed file removal afterwards leaves only an unlisted file (reported
+  to Sentry), never a row pointing at a missing photo. Uploads keep the file extension to letters and digits, so they pass the row rule.
 - The customer receipt email (shared helper and both inline copies in `DeliveryDetail.tsx`) no
   longer has a photo section, and the delivery screen's help text says so (Mason, 2026-10-14).
 - `DECISION_LOG.md` records Mason's Goal 1 answers, including option A: a staff member allowed to

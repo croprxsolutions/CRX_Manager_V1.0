@@ -320,10 +320,10 @@ export default function PrepaymentManagerPanel() {
     // customer/reference and submits check B, both calls share the same
     // page-scoped key and the server replays A's cached success without
     // creating check B's credits or updating B's customer balance.
-    // Reset-on-open means each modal-open starts a fresh idempotency
-    // intent. Retries of THE SAME submission still reuse the key correctly
-    // because resetKey() is only called here and in the onSuccess path.
-    splitCheckIdem.resetKey();
+    // Superseded 2026-10-15 (20261015233000): the server now binds each receipt to the actor and
+    // the exact request, so check B under A's retained key is refused (and the key retired) rather
+    // than replayed. The key is therefore NOT reset on open: an unresolved check A reopened and
+    // resubmitted unchanged replays its receipt instead of creating its credits twice.
     setCheckForm({ customer_id: '', reference_number: '', total: '' });
     setBucketSplits([{ label: '', amount: '' }]);
     setShowNewCheck(true);

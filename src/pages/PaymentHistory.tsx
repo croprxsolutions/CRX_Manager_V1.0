@@ -138,7 +138,8 @@ export default function PaymentHistory() {
   const openVoid = (payment: AllocationSet) => {
     setVoidPayment(payment);
     setVoidReason('');
-    voidPaymentIdem.resetKey(); // new void intent — fresh key per target
+    // The key is kept across opens: the server binds it to this payment and reason, so another
+    // payment is refused rather than replayed, and an unresolved void retried unchanged replays.
   };
 
   const handleVoid = async () => {

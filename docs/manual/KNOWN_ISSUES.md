@@ -149,6 +149,8 @@ rollback-only live smoke.
 `(SELECT role … AND is_active) != 'admin'` and `mark_inventory_row_verified`'s `v_role != 'admin'`
 both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through. Batch 1 closes it for `reverse_write_off` (its wrapper requires an active admin); `mark_inventory_row_verified` stays open.
 
+**Screen side (CodeRabbit on PR #942), fixed in batch 1.** The split-check, reverse-write-off and void-payment dialogs used to mint a fresh key on every open (to stop the old cross-record replay), so reopening one after an uncertain response threw away the unresolved key. With the server binding, a retained key used for a different request is refused and then retired, so those three dialogs now keep their key across opens and an unchanged resubmit replays instead of running twice. Other screens in the 2026-09-03 F1 entry keep their existing behavior.
+
 ## OPEN 2026-10-15 (LOW, proof tooling only) — the Phase 3 return-policy concurrency prover no longer reaches its chain
 
 `scripts/smoke/prove-supplier-pricing-phase3-return-policy-concurrency.mjs` stops during its own

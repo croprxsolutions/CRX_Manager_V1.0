@@ -261,7 +261,7 @@ SELECT set_config('request.jwt.claim.sub', '${U.ADMIN}', true);
 UPDATE public.profiles SET is_active = false WHERE id = '${U.ADMIN_B}';
 SELECT set_config('request.jwt.claims', json_build_object('sub', '${U.ADMIN_B}', 'role', 'authenticated')::text, true);
 SELECT set_config('request.jwt.claim.sub', '${U.ADMIN_B}', true);
-SELECT public.reverse_write_off(gen_random_uuid(), 'prover reason', NULL, NULL);
+SELECT public.reverse_write_off(gen_random_uuid(), 'prover reason', NULL, 'prover-deactivated-' || gen_random_uuid());
 ROLLBACK;`,
     allowFailure: true,
   });
@@ -460,6 +460,15 @@ COMMIT;`,
     ['batch_void_invoices set normalization', 'batch_void_invoices',
       'to_jsonb(ARRAY(SELECT DISTINCT u.id FROM unnest(p_invoice_ids) AS u(id) ORDER BY u.id))', 'to_jsonb(p_invoice_ids)',
       /SMOKE_FAIL: wrong batch_void_invoices refusal: IDEMPOTENCY_INTENT_MISMATCH|ERROR:  IDEMPOTENCY_INTENT_MISMATCH/],
+    // The key requirement, and the batch marker that lets only the batch path call apply_prepay
+    // without a key.
+    ['apply_write_off key requirement', 'apply_write_off',
+      "    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: apply_write_off requires p_idempotency_key' USING ERRCODE = '22023';\n",
+      "    RETURN public._apply_write_off_replay_impl_20261015(p_invoice_id, p_amount_cents, p_reason, p_performed_by, NULL);\n",
+      /SMOKE_FAIL: apply_write_off ran without an idempotency key/],
+    ['batch prepay marker', 'batch_apply_prepayments',
+      "  PERFORM set_config('crx.batch_apply_prepayments_internal', '1', true);\n", '',
+      /IDEMPOTENCY_KEY_REQUIRED: apply_prepay_to_invoice requires p_idempotency_key/],
     // The binder: a receipt left unbound is a legacy receipt, so even the exact retry is refused.
     ['receipt binder stamp', '_bind_replay_receipt_20261015',
       '     SET request_actor_id = v_actor,\n         request_fingerprint = p_fingerprint\n',

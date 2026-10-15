@@ -222,10 +222,23 @@ BEGIN
   END;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-  -- No key: unchanged behavior, a second write-off on the same invoice.
-  v_wo_2 := public.apply_write_off(v_inv[3], 1000, '[SMOKE] write-off without key', v_admin, NULL);
+  -- No key: refused before anything is written (a keyless call would leave no receipt to replay).
+  BEGIN
+    v_id := public.apply_write_off(v_inv[3], 1000, '[SMOKE] write-off without key', v_admin, NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: apply_write_off ran without an idempotency key: %', v_id;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong keyless apply_write_off refusal: %', SQLERRM;
+    END IF;
+  END;
+  IF EXISTS (SELECT 1 FROM public.write_offs WHERE invoice_id = v_inv[3]) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a keyless apply_write_off wrote a write-off';
+  END IF;
+  -- A second write-off (for step 5), with its own key.
+  v_wo_2 := public.apply_write_off(v_inv[3], 1000, '[SMOKE] second write-off', v_admin, 'smk-rpb-' || v_suffix || '-write-off-2');
   IF v_wo_2 IS NULL OR v_wo_2 = v_wo_1 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: apply_write_off without a key did not write a new write-off';
+    RAISE EXCEPTION 'SMOKE_FAIL: the second write-off was not written';
   END IF;
 
   -- --------------------------------------------------------------------------------------------
@@ -363,8 +376,8 @@ BEGIN
                        'reverse_write_off', 'apply_prepay_to_invoice', 'create_prepay_check_splits',
                        'batch_apply_prepayments', 'batch_void_invoices')
      AND request_actor_id = v_admin AND request_fingerprint ~ '^[0-9a-f]{64}$';
-  IF v_n <> 9 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: % of the 9 receipts are bound to the admin with a fingerprint', v_n;
+  IF v_n <> 10 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: % of the 10 receipts are bound to the admin with a fingerprint', v_n;
   END IF;
   v_key := 'smk-rpb-' || v_suffix || '-legacy';
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result)

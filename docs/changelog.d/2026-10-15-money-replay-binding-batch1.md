@@ -18,7 +18,7 @@ twice; the harm was a false success. This change:
   returns the original answer. Also in the same file: `reverse_write_off`, `delete_prepay_credit`
   and `edit_prepay_credit` now require an ACTIVE admin (a deactivated admin could still reverse a
   write-off); a commit-time guard refuses any receipt for the nine actions that is not bound to
-  its caller; the file refuses to apply while a recent receipt for them exists; and the private
+  its caller; the nine now require a retry key (every screen already sends one); the file refuses to apply while a recent receipt for them exists; and the private
   batch-prepay helper is no longer callable by the server role. It narrows access, so it applies
   only on Mason's owner approval.
 - **App:** the eight screens that call these functions drop a retry key refused as another request's or another person's (and keep it when the database cannot confirm an earlier outcome) so the next

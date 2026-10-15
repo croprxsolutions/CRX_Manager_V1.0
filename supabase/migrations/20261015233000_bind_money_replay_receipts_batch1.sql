@@ -31,8 +31,13 @@
 --     4. after a fresh run, stamps request_actor_id (auth.uid()) and request_fingerprint onto the
 --        receipt the body just wrote, inside the same transaction, and refuses (rolls the whole call
 --        back) if the body wrote none.
---   Without a key the wrapper calls the body directly, as today (apply_prepay_to_invoice is called
---   that way, by name, from _batch_apply_prepayments_impl).
+--   A key is REQUIRED (IDEMPOTENCY_KEY_REQUIRED, 22023, the house form from 20260721145936): a
+--   keyless call would run with no receipt, so a lost-response retry could repeat the money action
+--   (Codex P1 on PR #942). Every app call site already sends one. The one internal exception:
+--   _batch_apply_prepayments_impl applies each allocation through apply_prepay_to_invoice with no
+--   key, under the batch's own bound key; batch_apply_prepayments marks that call with the
+--   transaction-local setting crx.batch_apply_prepayments_internal (no Data API request can set
+--   it), and apply_prepay_to_invoice accepts a keyless call only while it is set.
 --
 --   Why a body's own key-only lookup cannot return ANOTHER operation's receipt on an exact match:
 --   idempotency_keys has a UNIQUE index on idempotency_key (idempotency_keys_idempotency_key_key,
@@ -101,7 +106,7 @@
 -- caller-analysis: edit_prepay_credit :: src/components/prepay/PrepaymentManagerPanel.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: apply_write_off :: src/components/invoices/WriteOffModal.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: reverse_write_off :: src/pages/InvoiceDetail.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
--- caller-analysis: apply_prepay_to_invoice :: no UI caller; _batch_apply_prepayments_impl calls it by name with no key and reaches the wrapper, which delegates; only the renamed body loses EXECUTE
+-- caller-analysis: apply_prepay_to_invoice :: no UI caller; _batch_apply_prepayments_impl calls it by name with no key under the batch marker and reaches the wrapper, which delegates; only the renamed body loses EXECUTE
 -- caller-analysis: create_prepay_check_splits :: src/components/prepay/PrepaymentManagerPanel.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: batch_apply_prepayments :: src/components/prepay/PrepayWorkspacePanel.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: batch_void_invoices :: src/pages/Invoices.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
@@ -333,7 +338,7 @@ DECLARE
   v_result jsonb;
 BEGIN
   IF p_idempotency_key IS NULL THEN
-    RETURN public._void_payment_replay_impl_20261015(p_allocation_set_id, p_reason, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: void_payment requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
@@ -391,7 +396,7 @@ BEGIN
     RAISE EXCEPTION 'Admin access required to delete prepay credits';
   END IF;
   IF p_idempotency_key IS NULL THEN
-    RETURN public._delete_prepay_credit_replay_impl_20261015(p_credit_id, p_reason, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: delete_prepay_credit requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -447,7 +452,7 @@ BEGIN
     RAISE EXCEPTION 'Admin access required to edit prepay credits';
   END IF;
   IF p_idempotency_key IS NULL THEN
-    RETURN public._edit_prepay_credit_replay_impl_20261015(p_credit_id, p_new_balance_cents, p_reference_number, p_bucket_label, p_notes, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: edit_prepay_credit requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -496,7 +501,7 @@ DECLARE
   v_result uuid;
 BEGIN
   IF p_idempotency_key IS NULL THEN
-    RETURN public._apply_write_off_replay_impl_20261015(p_invoice_id, p_amount_cents, p_reason, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: apply_write_off requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
@@ -554,7 +559,7 @@ BEGIN
     RAISE EXCEPTION 'Admin access required to reverse write-offs';
   END IF;
   IF p_idempotency_key IS NULL THEN
-    RETURN public._reverse_write_off_replay_impl_20261015(p_write_off_id, p_reason, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: reverse_write_off requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -600,6 +605,10 @@ DECLARE
   v_result uuid;
 BEGIN
   IF p_idempotency_key IS NULL THEN
+    -- Only the batch path may call without a key; it runs under its own bound key.
+    IF current_setting('crx.batch_apply_prepayments_internal', true) IS DISTINCT FROM '1' THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: apply_prepay_to_invoice requires p_idempotency_key' USING ERRCODE = '22023';
+    END IF;
     RETURN public._apply_prepay_to_invoice_replay_impl_20261015(p_prepay_credit_id, p_invoice_id, p_amount_cents, p_performed_by, NULL);
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -652,7 +661,7 @@ DECLARE
   v_result jsonb;
 BEGIN
   IF p_idempotency_key IS NULL THEN
-    RETURN public._create_prepay_check_splits_replay_impl_20261015(p_customer_id, p_reference_number, p_splits, p_performed_by, NULL, p_expected_total_cents);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_prepay_check_splits requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
@@ -703,7 +712,7 @@ DECLARE
   v_result jsonb;
 BEGIN
   IF p_idempotency_key IS NULL THEN
-    RETURN public._batch_apply_prepayments_replay_impl_20261015(p_allocations, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: batch_apply_prepayments requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   -- Same codes and strictness as the renamed body: the caller must name itself (NULL refused).
   IF v_actor IS NULL THEN
@@ -729,7 +738,11 @@ BEGIN
     -- Exact actor + intent match: the stored receipt is exactly what the body returned.
     RETURN v_replay -> 'result';
   END IF;
+  -- Its body applies each allocation through apply_prepay_to_invoice with no key; mark this
+  -- transaction so that wrapper accepts those (and only those) keyless calls.
+  PERFORM set_config('crx.batch_apply_prepayments_internal', '1', true);
   v_result := public._batch_apply_prepayments_replay_impl_20261015(p_allocations, p_performed_by, p_idempotency_key);
+  PERFORM set_config('crx.batch_apply_prepayments_internal', '', true);
   IF v_replay IS NULL THEN
     PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'batch_apply_prepayments', v_fingerprint);
   END IF;
@@ -766,7 +779,7 @@ DECLARE
   v_result integer;
 BEGIN
   IF p_idempotency_key IS NULL THEN
-    RETURN public._batch_void_invoices_replay_impl_20261015(p_invoice_ids, p_void_reason, p_performed_by, NULL);
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: batch_void_invoices requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
@@ -835,6 +848,7 @@ BEGIN
           AND strpos(p.prosrc, 'check_idempotency_intent(p_idempotency_key, ''' || pin.name || ''',') > 0
           AND strpos(p.prosrc, '_bind_replay_receipt_20261015(p_idempotency_key, ''' || pin.name || ''',') > 0
           AND strpos(p.prosrc, '_' || pin.name || '_replay_impl_20261015(') > 0
+          AND strpos(p.prosrc, 'IDEMPOTENCY_KEY_REQUIRED: ' || pin.name || ' requires p_idempotency_key') > 0
           AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                       FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
               IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[])

@@ -29,6 +29,8 @@ import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
 import { sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
+import PrivatePhoto from '../components/ui/PrivatePhoto';
+import { deliveryPhotoPath } from '../lib/privatePhotos';
 
 interface StopItem {
   id: string;
@@ -39,6 +41,7 @@ interface StopItem {
 
 interface StopPhoto {
   id: string;
+  storage_path: string | null;
   image_url: string;
   caption: string | null;
 }
@@ -93,7 +96,7 @@ export default function FieldStop() {
     if (!id) return;
     const { data } = await supabase
       .from('delivery_photos')
-      .select('id, image_url, caption')
+      .select('id, storage_path, image_url, caption')
       .eq('delivery_id', id)
       .order('sort_order');
     if (activeStopIdRef.current !== id) return; // stale guard (H3)
@@ -405,7 +408,6 @@ export default function FieldStop() {
           items: emailItems,
           isPartial,
           signedBy,
-          photos: photos.map((p) => ({ image_url: p.image_url, caption: p.caption })),
         });
       }
 
@@ -578,7 +580,7 @@ export default function FieldStop() {
             {photos.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-3">
                 {photos.map((p) => (
-                  <img key={p.id} src={p.image_url} alt={p.caption || 'Delivery photo'} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                  <PrivatePhoto key={p.id} bucket="delivery-photos" path={deliveryPhotoPath(p)} alt={p.caption || 'Delivery photo'} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
                 ))}
               </div>
             )}

@@ -1,0 +1,41 @@
+/**
+ * Staff photos (delivery, receiving and team-note photos) are private (Goal 1, Mason 2026-10-13).
+ * The app never shows a storage URL: it downloads each file with the signed-in user's session
+ * (the bucket's storage policy decides, per request, against the live profile) and shows a
+ * blob: URL that exists only inside this tab (src/hooks/usePrivatePhoto.ts,
+ * src/components/ui/PrivatePhoto.tsx).
+ *
+ * Deploy order: those downloads need the storage read policies of migration 20261014230000, so
+ * the migration is applied before this code ships (ship.md applies it before the merge). The
+ * buckets stay public until a later migration makes them private.
+ *
+ * Accepted limitation (Mason, 2026-10-14, option A): a staff member who may view a photo can
+ * still deliberately mint a temporary signed link to it through the storage API. That is no more
+ * than saving and forwarding the file itself; ordinary app use never creates such a link.
+ */
+
+export type PrivatePhotoBucket = 'delivery-photos' | 'receiving-photos' | 'team-note-attachments';
+
+/**
+ * The object path inside `bucket` for a row that stored only the old public URL
+ * (team_note_attachments.file_url). Returns null when the URL is not a public object URL of
+ * that bucket.
+ */
+export function storagePathFromPublicUrl(url: string | null | undefined, bucket: PrivatePhotoBucket): string | null {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const at = url.indexOf(marker);
+  if (at === -1) return null;
+  const path = url.slice(at + marker.length).split(/[?#]/)[0];
+  if (!path) return null;
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return null;
+  }
+}
+
+/** A delivery photo's object path: storage_path, or the old public URL for a row without one. */
+export function deliveryPhotoPath(photo: { storage_path?: string | null; image_url?: string | null }): string | null {
+  return photo.storage_path || storagePathFromPublicUrl(photo.image_url, 'delivery-photos');
+}

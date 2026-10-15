@@ -3,7 +3,10 @@ import { X, Loader2, Image } from 'lucide-react';
 import { supabase, checkMutationResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../../contexts/AuthContext';
 import ConfirmModal from '../ui/ConfirmModal';
+import { PrivatePhotoButton } from '../ui/PrivatePhoto';
+import { storagePathFromPublicUrl } from '../../lib/privatePhotos';
 import type { TeamNoteAttachment } from '../../types';
 
 interface NoteAttachmentsProps {
@@ -14,6 +17,10 @@ interface NoteAttachmentsProps {
 
 export default function NoteAttachments({ noteId, canDelete, refreshKey }: NoteAttachmentsProps) {
   const { toast } = useToast();
+  const { profile } = useAuth();
+  // The photo file and its row may be deleted only by their uploader or an admin (storage and
+  // table policies), so a note owner sees Delete only on their own photos.
+  const isAdmin = profile?.role === 'admin' && profile.is_active;
   const [attachments, setAttachments] = useState<TeamNoteAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -42,13 +49,7 @@ export default function NoteAttachments({ noteId, canDelete, refreshKey }: NoteA
     setDeletingId(attachment.id);
 
     try {
-      // Extract storage path from the public URL
-      const url = attachment.file_url;
-      const bucketSegment = '/team-note-attachments/';
-      const pathIndex = url.indexOf(bucketSegment);
-      const storagePath = pathIndex !== -1
-        ? url.substring(pathIndex + bucketSegment.length)
-        : null;
+      const storagePath = storagePathFromPublicUrl(attachment.file_url, 'team-note-attachments');
 
       // Delete from storage first
       if (storagePath) {
@@ -95,25 +96,21 @@ export default function NoteAttachments({ noteId, canDelete, refreshKey }: NoteA
     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
       {attachments.map((attachment) => (
         <div key={attachment.id} className="group relative">
-          <button
-            type="button"
-            onClick={() => window.open(attachment.file_url, '_blank')}
-            className="w-full aspect-square rounded-lg overflow-hidden bg-gray-100 focus:outline-none focus:ring-2 focus:ring-crx-green"
-          >
-            {attachment.file_type.startsWith('image/') ? (
-              <img
-                src={attachment.file_url}
-                alt={attachment.file_name}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <Image className="w-8 h-8 text-gray-400" />
-              </div>
-            )}
-          </button>
+          {attachment.file_type.startsWith('image/') ? (
+            <PrivatePhotoButton
+              bucket="team-note-attachments"
+              path={storagePathFromPublicUrl(attachment.file_url, 'team-note-attachments')}
+              alt={attachment.file_name}
+              viewerTitle={attachment.file_name}
+              className="w-full aspect-square rounded-lg object-cover"
+            />
+          ) : (
+            <div className="w-full aspect-square rounded-lg bg-gray-100 flex items-center justify-center">
+              <Image className="w-8 h-8 text-gray-400" />
+            </div>
+          )}
 
-          {canDelete && (
+          {canDelete && (isAdmin || attachment.uploaded_by === profile?.id) && (
             <button
               type="button"
               onClick={(e) => {

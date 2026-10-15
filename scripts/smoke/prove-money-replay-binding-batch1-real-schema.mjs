@@ -37,7 +37,10 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261015233000_bind_money_replay_receipts_batch1.sql');
 // Live but not replayable here (storage.objects policies); it must not touch what this proves.
-const PARKED = new Set(['20260914100700_customer_document_bytes_server_only.sql']);
+const PARKED = new Set([
+  '20260914100700_customer_document_bytes_server_only.sql',
+  '20261015230000_staff_photo_storage_access.sql',
+]);
 // PR #889's data migrations rewrite live rows this disposable database does not have; they are
 // recorded in the ledger (as live has them) instead of replayed.
 const LEDGER_ONLY = new Set([

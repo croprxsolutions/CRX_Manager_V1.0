@@ -611,8 +611,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   installed-app copies have updated, sets the three buckets private so old public links stop working. Until step 2
   applies, anyone holding a URL can still open those photos, and the rows still store public URLs
   (`delivery_photos.image_url`, `team_note_attachments.file_url`). Type/size are capped (`20260615182721`); paths are
-  not guessable from outside, but once step 1 applies, staff who may view a bucket can also list its paths, so keep the
-  step 1 to step 2 window short. **Accepted limitation (Mason, 2026-10-14, option A):** a staff member who may view a
+  built from an ID, an upload timestamp and a per-upload counter, which is not a reliable secrecy safeguard, and once
+  step 1 applies, staff who may view a bucket can also list its paths, so keep the step 1 to step 2 window short. **Accepted limitation (Mason, 2026-10-14, option A):** a staff member who may view a
   photo can deliberately mint a temporary signed link to it through the Storage API (Storage checks only the read
   policy); ordinary app use never creates one, and it is no more than saving and forwarding the file. Closing it
   would mean serving photo bytes through an Edge Function, as customer documents are. Found while proving step 1:

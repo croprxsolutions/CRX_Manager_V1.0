@@ -144,7 +144,12 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
+  // Later-stamped migrations (authored after this one, not yet applied live) are not replayed: the
+  // candidate applies before them, as on live. None may touch what this proof covers.
+  for (const file of all.slice(at + 1)) {
+    assert.ok(!/delivery-photos|receiving-photos|team-note-attachments|delivery_photos|team_note_attachments|storage\.objects/i.test(lf(file)),
+      `${path.basename(file)} is stamped after the candidate and touches what this proof covers; re-think the order`);
+  }
   const before = all.slice(0, at);
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);

@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 const H = vi.hoisted(() => ({
   rpc: vi.fn(),
   role: { current: 'admin' as string },
+  active: { current: true },
   toast: vi.fn(),
 }));
 
@@ -33,7 +34,7 @@ vi.mock('../lib/db', async (importOriginal) => {
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     role: H.role.current,
-    profile: { id: 'u', full_name: 'Test', role: H.role.current, is_active: true },
+    profile: { id: 'u', full_name: 'Test', role: H.role.current, is_active: H.active.current },
     user: { id: 'u' },
     loading: false,
   }),
@@ -59,6 +60,7 @@ beforeEach(() => {
   H.rpc.mockResolvedValue({ data: [], error: null });
   H.toast.mockReset();
   H.role.current = 'admin';
+  H.active.current = true;
 });
 afterEach(cleanup);
 
@@ -69,6 +71,14 @@ describe('Compliance RUP Sales Register gating', () => {
     await screen.findByRole('button', { name: /Applicator Licenses/ });
     expect(screen.getByRole('button', { name: /RUP Products/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Field Listing/ })).toBeTruthy();
+    expect(registerTab()).toBeNull();
+    expect(H.rpc).not.toHaveBeenCalledWith('get_rup_sales_register', expect.anything());
+  });
+
+  it('hides the register tab from an inactive admin profile and never calls the register', async () => {
+    H.active.current = false;
+    await renderPage();
+    await screen.findByRole('button', { name: /Applicator Licenses/ });
     expect(registerTab()).toBeNull();
     expect(H.rpc).not.toHaveBeenCalledWith('get_rup_sales_register', expect.anything());
   });

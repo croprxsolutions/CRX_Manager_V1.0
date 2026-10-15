@@ -19,9 +19,9 @@ register held 0 rows on 2026-10-14, so nothing had been exposed.
   `migration-history.md`.
 
 **Proof.** `scripts/smoke/prove-rup-register-admin-only-real-schema.mjs` builds the production
-schema in a disposable database and runs 16 role cases before and after: before, every signed-in
+schema in a disposable database and runs 18 role cases before and after: before, every signed-in
 role pulled the register; after, only the admin does, and the rep, deactivated rep, driver,
-applicator, commission-recipient profile and signed-out visitor are refused. It also proves the
+applicator, commission-recipient profile, deactivated admin and signed-out visitor are refused. It also proves the
 preflight refuses a drifted body, the file re-applies cleanly, and the refusal comes from the
 admin gate (mutation check). New live chain `scripts/smoke/smoke-rup_register_admin_only.sql`
 (spec `get_rup_sales_register`) checks the same per role on live after apply, rolled back; it was

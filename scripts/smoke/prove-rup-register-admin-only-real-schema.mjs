@@ -11,7 +11,7 @@
  * (a signed-out visitor). Every call is one transaction that always rolls back.
  *   1. BEFORE: every signed-in profile, of any role and even deactivated, pulls the register
  *      through get_rup_sales_register; admins and sales reps read the table directly.
- *   2. AFTER: only an active admin pulls it, through the function or the table. A sales rep,
+ *   2. AFTER: only an active admin pulls it, through the function or the table. A deactivated admin, a sales rep,
  *      deactivated rep, driver, applicator and commission-recipient profile are refused by the
  *      function ('Permission denied: requires admin role') and see 0 rows in the table; a
  *      signed-out visitor is refused both.
@@ -65,7 +65,7 @@ const LIVE_IS_ADMIN_MD5 = 'f76bf61116c3bd52bd9c6ea125079b73';
 
 const id = (n) => `7a400000-0000-4000-8000-${n.padStart(12, '0')}`;
 const U = {
-  ADMIN: id('a1'), REP: id('b1'), REP_OFF: id('b3'),
+  ADMIN: id('a1'), ADMIN_OFF: id('a3'), REP: id('b1'), REP_OFF: id('b3'),
   DRIVER: id('d1'), APPLICATOR: id('e1'), ENTITY: id('f9'),
 };
 const CUST = id('c1');
@@ -204,7 +204,7 @@ SELECT set_config('request.jwt.claim.sub', '${uid}', true);`;
 function asUser(uid) { return uid === 'anon' ? 'SET LOCAL ROLE anon;' : `${claims(uid)}\nSET LOCAL ROLE authenticated;`; }
 function seed() {
   const users = [
-    [U.ADMIN, 'admin', 'Admin', 9], [U.REP, 'sales_rep', 'Rep', 8], [U.REP_OFF, 'sales_rep', 'Deactivated Rep', 7],
+    [U.ADMIN, 'admin', 'Admin', 9], [U.REP, 'sales_rep', 'Rep', 8], [U.REP_OFF, 'sales_rep', 'Deactivated Rep', 7], [U.ADMIN_OFF, 'admin', 'Deactivated Admin', 3],
     [U.DRIVER, 'driver', 'Driver', 6], [U.APPLICATOR, 'applicator', 'Applicator', 5], [U.ENTITY, 'driver', 'Commission Entity', 4],
   ];
   psql(`ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
@@ -216,7 +216,7 @@ function seed() {
       ${users.map(([u, role, label]) => `('${u}', 'rup-reg-${u.slice(-2)}@example.invalid', '{"full_name":"[PROVER] ${label}","role":"${role}"}'::jsonb)`).join(',\n      ')};
     ${users.map(([u, , , minutes]) => `UPDATE public.profiles SET created_at = now() - interval '${minutes} minutes' WHERE id = '${u}';`).join('\n    ')}
     ${claims(U.ADMIN)}
-    UPDATE public.profiles SET is_active = false WHERE id = '${U.REP_OFF}';
+    UPDATE public.profiles SET is_active = false WHERE id IN ('${U.REP_OFF}', '${U.ADMIN_OFF}');
     UPDATE public.profiles SET role = 'entity_recipient' WHERE id = '${U.ENTITY}';
     INSERT INTO public.customers (id, farm_name, is_active, email) VALUES ('${CUST}', '[PROVER] RUP Buyer Farm', true, 'c1@example.invalid');
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
@@ -229,7 +229,7 @@ function seed() {
         1000, 2000, '[PROVER] RUP Buyer Farm', 'PROVER-LIC-1', 'compliant', 2027);
     COMMIT;`);
   assert.equal(scalar(`SELECT string_agg(role || ':' || is_active, ',' ORDER BY created_at) FROM public.profiles WHERE id::text LIKE '7a400000-%';`),
-    'admin:true,sales_rep:true,sales_rep:false,driver:true,applicator:true,entity_recipient:true', 'the seeded roles are not what the proof needs');
+    'admin:true,sales_rep:true,sales_rep:false,driver:true,applicator:true,entity_recipient:true,admin:false', 'the seeded roles are not what the proof needs');
   assert.equal(scalar('SELECT count(*) FROM public.rup_sales_records;'), '1', 'the register row was not seeded');
 }
 
@@ -275,6 +275,7 @@ const CASES = [
   ['admin pulls the register', U.ADMIN, REGISTER, PULLED, 'same'],
   ['rep pulls the register', U.REP, REGISTER, PULLED, REFUSED],
   ['deactivated rep pulls the register', U.REP_OFF, REGISTER, PULLED, REFUSED],
+  ['deactivated admin pulls the register', U.ADMIN_OFF, REGISTER, PULLED, REFUSED],
   ['driver pulls the register', U.DRIVER, REGISTER, PULLED, REFUSED],
   ['applicator pulls the register', U.APPLICATOR, REGISTER, PULLED, REFUSED],
   ['commission-recipient profile pulls the register', U.ENTITY, REGISTER, PULLED, REFUSED],
@@ -283,6 +284,7 @@ const CASES = [
   ['admin reads the table', U.ADMIN, TABLE, /^ok\|1$/, 'same'],
   ['rep reads the table', U.REP, TABLE, /^ok\|1$/, /^ok\|0$/],
   ['deactivated rep reads the table', U.REP_OFF, TABLE, /^ok\|0$/, 'same'],
+  ['deactivated admin reads the table', U.ADMIN_OFF, TABLE, /^ok\|0$/, 'same'],
   ['driver reads the table', U.DRIVER, TABLE, /^ok\|0$/, 'same'],
   ['applicator reads the table', U.APPLICATOR, TABLE, /^ok\|0$/, 'same'],
   ['commission-recipient profile reads the table', U.ENTITY, TABLE, /^ok\|0$/, 'same'],

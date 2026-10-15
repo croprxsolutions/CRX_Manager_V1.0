@@ -68,6 +68,9 @@ export interface DeliveryProductLine {
   quantity: number;
 }
 
+/** Ignores binary-float noise from summing decimal quantities (0.1 + 0.2 > 0.3). */
+const QUANTITY_TOLERANCE = 1e-9;
+
 /**
  * Which deliveries the delivery list should flag as short on stock.
  *
@@ -78,7 +81,8 @@ export interface DeliveryProductLine {
  * (Mason, 2026-10-14: "flag shared shortages"). The flag does not decide which
  * delivery gets the stock first. Because the combined need includes the
  * delivery's own need, a delivery that is short on its own is always flagged.
- * A product missing from `onHand` counts as zero stock.
+ * A product missing from `onHand`, or with a non-finite stock value, counts as
+ * zero stock, so bad data shows the warning instead of hiding it.
  */
 export function findShortDeliveries(
   lines: readonly DeliveryProductLine[],
@@ -98,7 +102,9 @@ export function findShortDeliveries(
   const short = new Set<string>();
   for (const [deliveryId, products] of productsByDelivery) {
     for (const productId of products) {
-      if ((combinedNeed.get(productId) ?? 0) > (onHand[productId] ?? 0)) {
+      const stock = onHand[productId];
+      const available = Number.isFinite(stock) ? stock : 0;
+      if ((combinedNeed.get(productId) ?? 0) - available > QUANTITY_TOLERANCE) {
         short.add(deliveryId);
         break;
       }

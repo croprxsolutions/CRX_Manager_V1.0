@@ -13,7 +13,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 **Decision (Mason, in chat, after an item-by-item walkthrough checked against `7cd781f77`).** Goals 2 and 3 are settled as follows:
 - **Cost and margin are admin-only**, even on a rep's own invoices and quotes. This supersedes the 2026-10-14 Goal 1 answer that reps keep them.
 - **Commission splits:** only an admin sets a new customer's split. Admins get a job/order split editor that recalculates unpaid commissions.
-- **Order and delivery split billing must work now**: landlord, partial delivery, and the "Bill Split" card. **Future work:** field-application split billing and blend-ticket quote-line pricing.
+- **Order and delivery split billing must work now**: landlord, partial delivery, and the "Bill Split" card. This supersedes the 2026-07-17 operative rule ("do not extend or newly depend on the order-side engine") for order and delivery billing. The live per-line field-app split billing stays as it is. **Future work:** further field-application split billing and blend-ticket quote-line pricing.
 - **Completing a delivery needs a signal**, with a paper-ticket fallback; offline queueing of *new* completions is dropped. Completions already queued when this ships are synced safely or shown to the office, never discarded. **No Chem Man features**, only a narrow block on CRX credits for the 53 Chem Man-billed deliveries.
 - **No sales tax is charged on anything.** **Commission already paid on a returned or credited sale is deducted from the next payout.**
 - **Also agreed**, including every change from an advisory Codex `gpt-6.1-sol` review: no billing before delivery, posted invoices credited and never cancelled, recorded refunds, typed charge lines, an admin-only field-invoice credit, a November–December real trial and a pilot emergency brake. Full list: section 4 of `docs/plans/2026-10-13-direction-and-goals.md`.
@@ -3621,6 +3621,7 @@ build on; the order-side engine (`order_shares` / `order_item_field_allocations`
 `create_split_invoices_from_order`) is **unproven (0 live rows), NOT dead — retire it LATER** in a
 separate cleanup after confirming zero real executions, and `order_line_allocations` (dead twin,
 only ever DELETEd) can't be dropped standalone until `_update_order_items_impl`'s delete refs go.
+*(Superseded 2026-10-15 for orders and deliveries: Mason requires order and delivery split billing now, so the "do not extend the order-side engine" part of the rule below is historical for that work. See the 2026-10-15 Goals 2 and 3 entry.)*
 **Operative rule:** new split-billing work targets the field-app path; do not extend or newly
 depend on the order-side engine; the full build spec (3 advisor passes — gpt-5.6-terra design +
 xhigh plan-review, claude-fable-5 money-math) is `docs/plans/per-line-item-split-billing-spec-2026-07-17.md`.

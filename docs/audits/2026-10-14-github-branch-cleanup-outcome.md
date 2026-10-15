@@ -26,8 +26,9 @@ may run the remaining batch:
 - **helper v3:** `53e250ca48eb05d2e1de0a79905b6146a0bffaecc8e7163532565a5e972a0574`
   (`C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs`; v2 kept beside it as
   `branch-cleanup-2026-10-13.v2-e80f52bf.mjs`)
-- **baseline:** `920b7b3eb3ec62d34459aaf29e4360c40ae5c1d2ad909a398cbff73946d83bd3`, measured at `main`
-  `133416234` (PR #913's merge); earlier baselines are kept beside it as `.at-<commit>.json`, including
+- **baseline:** `b64e7097c0b6065e0945836df1ad22c40e79bf5e073830be54e43e1ac1cfa921`, measured at `main`
+  `76b1227d1` (PR #920's merge); earlier baselines are kept beside it as `.at-<commit>.json`, including
+  `920b7b3eb3ec62d34459aaf29e4360c40ae5c1d2ad909a398cbff73946d83bd3` at `133416234` (PR #913's merge),
   `8967eb601e6c572a80efb612b60f4d86ac4b8d308b616823aba12a887eecac11` at `ab3600c9f` (PR #917's merge) and
   `4e26e807fd67897e2ef053799759d4468127049ae8f91be7ca0f18485d2caef4` at `641a62a5f` (PR #901's merge)
 - **bundle:** unchanged, `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
@@ -45,7 +46,12 @@ one difference is `claude/docs-cleanup-1-corrections-v12`, already deleted in th
 PR #821 intact): it now also counts `docs/reference/database-schema.md` as unlanded only because #921
 edited `main`'s copy of that file. Because this is a branch gaining an unlanded path, the rewrite stopped
 for Mason, who accepted it ("Accept", 2026-10-14). The baseline was rewritten at `133416234` with only that
-entry changed, giving the hash above, which was reported to Mason before the batch.
+entry changed (`920b7b3e…`).
+
+**Re-measured after PR #920.** PR #920 (rule-page documentation) then landed on `main`. Every branch was
+re-measured at `76b1227d1`: all 185 match, no watched-document line naming any branch changed, and all 22
+rescue markers are present. The baseline was rewritten there with no branch entry changed, giving the
+hash above, which was reported to Mason before the batch.
 
 **This baseline stays valid when this record merges.** Merging it moves `main`, but only by adding this
 file and its changelog note. Neither exists at the approved #901 head, and none of the 16 branches

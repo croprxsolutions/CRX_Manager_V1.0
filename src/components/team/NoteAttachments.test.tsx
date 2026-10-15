@@ -10,7 +10,9 @@ const H = vi.hoisted(() => ({
   profile: { current: { id: 'me', role: 'driver', is_active: true } as { id: string; role: string; is_active: boolean } },
   remove: vi.fn(),
   ops: [] as string[],
-  refuseRowDelete: false,
+  // What the row delete and the follow-up "is the row still there?" read return.
+  deleteResult: null as unknown,
+  recheckResult: null as unknown,
 }));
 
 const URL_BASE = 'https://x.supabase.co/storage/v1/object/public/team-note-attachments/team-note-attachments';
@@ -23,19 +25,26 @@ const ROWS = [
 
 vi.mock('../../lib/db', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const builder: Record<string, unknown> = new Proxy({}, {
-    get(_target, prop) {
-      if (prop === 'then') {
-        const refused = H.refuseRowDelete && H.ops.includes('delete');
-        return (resolve: (v: unknown) => unknown) => resolve(refused ? { data: null, error: { message: 'permission denied' } } : { data: ROWS, error: null });
-      }
-      return () => { H.ops.push(String(prop)); return builder; };
-    },
-  });
+  // One query chain per from(); it answers by what the chain did.
+  const chain = () => {
+    const calls: string[] = [];
+    const builder: Record<string, unknown> = new Proxy({}, {
+      get(_target, prop) {
+        if (prop === 'then') {
+          const result = calls.includes('delete') ? H.deleteResult
+            : calls.includes('maybeSingle') ? H.recheckResult
+            : { data: ROWS, error: null };
+          return (resolve: (v: unknown) => unknown) => resolve(result);
+        }
+        return () => { calls.push(String(prop)); H.ops.push(String(prop)); return builder; };
+      },
+    });
+    return builder;
+  };
   return {
     ...actual,
     supabase: {
-      from: () => builder,
+      from: chain,
       storage: { from: () => ({ download: () => new Promise(() => {}), remove: (paths: string[]) => { H.ops.push('remove'); H.remove(paths); return Promise.resolve({ data: [], error: null }); } }) },
     },
   };
@@ -55,7 +64,8 @@ beforeEach(() => {
   H.profile.current = { id: 'me', role: 'driver', is_active: true };
   H.remove.mockClear();
   H.ops.length = 0;
-  H.refuseRowDelete = false;
+  H.deleteResult = { data: [ROWS[0]], error: null };
+  H.recheckResult = { data: null, error: null };
   STABLE_TOAST.toast.mockClear();
 });
 afterEach(cleanup);
@@ -100,9 +110,9 @@ describe('NoteAttachments delete', () => {
     expect(H.ops.indexOf('remove')).toBeGreaterThan(H.ops.indexOf('delete'));
   });
 
-  it('keeps the file when the row delete is refused, and says the delete failed', async () => {
-    H.refuseRowDelete = true;
+  async function refusedDelete() {
     H.profile.current = { id: 'boss', role: 'admin', is_active: true };
+    H.recheckResult = { data: { id: 'a2' }, error: null }; // the row is still there
     render(<NoteAttachments noteId="n1" />);
     await screen.findByText('theirs.jpg');
     fireEvent.click(deleteButtonFor('theirs.jpg')!);
@@ -110,6 +120,24 @@ describe('NoteAttachments delete', () => {
     await waitFor(() => expect(STABLE_TOAST.toast).toHaveBeenCalledWith('error', 'Failed to delete photo'));
     expect(H.remove).not.toHaveBeenCalled();
     expect(screen.getByText('theirs.jpg')).toBeTruthy();
+  }
+
+  it('keeps the file when the row delete is refused with an error, and says the delete failed', async () => {
+    H.deleteResult = { data: null, error: { message: 'permission denied' } };
+    await refusedDelete();
+  });
+
+  it('keeps the file when the row delete is refused silently (no rows, no error)', async () => {
+    H.deleteResult = { data: [], error: null };
+    await refusedDelete();
+  });
+
+  it('still removes the file when the delete committed but its response was lost', async () => {
+    H.deleteResult = { data: null, error: { message: 'TypeError: Failed to fetch' } };
+    H.recheckResult = { data: null, error: null }; // the row is gone
+    await deleteAsAdmin('theirs.jpg');
+    expect(H.remove).toHaveBeenCalledWith(['team-note-attachments/someone-else/2.jpg']);
+    expect(screen.queryByText('theirs.jpg')).toBeNull();
   });
 
   it('never removes another uploader\'s file through a row that names it; only the row goes', async () => {

@@ -52,16 +52,21 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
       // never delete that photo (the row itself is still removed).
       const storagePath = teamNotePhotoPath(attachment);
 
-      // The row first: if it is refused or the connection drops, the photo and its file are both
-      // still there. Once the row is gone, a failed file removal leaves only an unlisted file,
-      // never a row pointing at a missing photo.
-      const result = await supabase
-        .from('team_note_attachments')
-        .delete()
-        .eq('id', attachment.id)
-        .select();
-
-      checkMutationResult(result, 'Delete note attachment');
+      // The row first: if it is refused, the photo and its file are both still there. Once the row
+      // is gone, a failed file removal leaves only an unlisted file, never a row pointing at a
+      // missing photo.
+      let result: { data: unknown[] | null; error: unknown };
+      try {
+        result = await supabase.from('team_note_attachments').delete().eq('id', attachment.id).select();
+      } catch (err) {
+        result = { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+      }
+      if (result.error || !result.data?.length) {
+        // A refusal, or a response lost after the delete committed: look again before deciding,
+        // so a committed delete still removes its file.
+        const recheck = await supabase.from('team_note_attachments').select('id').eq('id', attachment.id).maybeSingle();
+        if (recheck.error || recheck.data) checkMutationResult(result, 'Delete note attachment');
+      }
       setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
 
       if (storagePath) {
@@ -71,8 +76,11 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
             .remove([storagePath]);
           if (storageErr) throw storageErr;
         } catch (storageErr) {
-          // The photo is already gone from the note; the leftover file is reported, not shown.
-          Sentry.captureException(storageErr instanceof Error ? storageErr : new Error(String(storageErr)), { extra: { context: 'Storage delete error' } });
+          // The photo is already gone from the note; the leftover file is reported with its path
+          // so it can be removed later, and is never shown.
+          Sentry.captureException(storageErr instanceof Error ? storageErr : new Error(String(storageErr)), {
+            extra: { context: 'Storage delete error: orphaned team-note file', storagePath },
+          });
         }
       }
       toast('success', 'Photo deleted');

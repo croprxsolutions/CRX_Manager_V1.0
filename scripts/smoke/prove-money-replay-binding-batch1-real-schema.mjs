@@ -382,7 +382,21 @@ ROLLBACK;`,
   const strippedOut = `${stripped.stdout}\n${stripped.stderr}`;
   assert.ok(!/STRIPPED_RECEIPT_ACCEPTED/.test(strippedOut) && /REPLAY_RECEIPT_UNBOUND/.test(strippedOut),
     `AFTER: an UPDATE that stripped a receipt's binding was not refused:\n${strippedOut.slice(-400)}`);
-  console.log('[prover] AFTER: a deactivated admin is refused by reverse_write_off, and an unbound receipt for a wrapped operation never commits (inserted or stripped by an UPDATE)');
+  // The same, left to the real COMMIT (no SET CONSTRAINTS): the deferred guard fires there and the
+  // whole transaction, receipt included, is rolled back.
+  const strippedAtCommit = docker([...psqlArgs()], {
+    input: `BEGIN;
+INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+VALUES ('prover-strip-binding-at-commit', 'apply_write_off', '{"id":"x"}'::jsonb, '${U.ADMIN}', repeat('a', 64));
+UPDATE public.idempotency_keys SET request_actor_id = NULL WHERE idempotency_key = 'prover-strip-binding-at-commit';
+COMMIT;`,
+    allowFailure: true,
+  });
+  assert.match(`${strippedAtCommit.stdout}\n${strippedAtCommit.stderr}`, /REPLAY_RECEIPT_UNBOUND/,
+    `AFTER: COMMIT of a stripped receipt was not refused:\n${strippedAtCommit.stderr}`);
+  assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = 'prover-strip-binding-at-commit';"), '0',
+    'AFTER: the stripped receipt was committed');
+  console.log('[prover] AFTER: a deactivated admin is refused by reverse_write_off, and an unbound receipt for a wrapped operation never commits (inserted, or stripped by an UPDATE, checked both immediately and at a real COMMIT)');
 
   // 5. RE-APPLY.
   const again = apply('candidate.sql');

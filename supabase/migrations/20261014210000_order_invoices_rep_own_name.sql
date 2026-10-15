@@ -416,7 +416,7 @@ CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl(p_delivery_
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
+ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_delivery record;

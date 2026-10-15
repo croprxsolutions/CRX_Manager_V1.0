@@ -176,8 +176,18 @@ Small slices, each its own change. Building starts only when Mason says so; slic
      Editing a sent quote no longer moves its expiry date (today every save resets it; see section 5); only a
      re-send sets a new date, and an expired quote must be updated to today's prices and re-sent, never
      re-priced on its own. If cost rises above a locked price, Convert honors the price but needs an admin's
-     below-cost approval with a reason. Manual price overrides and below-cost approvals made before sending
-     are part of the locked line and carry through unchanged.
+     below-cost approval with a reason. Manual price overrides made before sending are part of the locked
+     line and carry through unchanged. A below-cost approval made before sending stays on record, but it
+     does not authorize a larger loss: when Convert or a draw-down finds the price below the cost at that
+     moment, it needs a fresh, signed-in admin approval (the earlier reason may be reused as its text)
+     (Codex on PR #926).
+   - **Build details from review (Codex on PR #926):**
+     - Expired quotes: `auto_expire_quotes()` sets `expired`, which `_enforce_quote_status_transition()` and
+       `save_quote()` treat as final. "Update and re-send" therefore needs a renew route (a database
+       transition from `expired` to `revised`, or a renew-as-copy), with an expired-to-sent proof.
+     - Field jobs from a never-sent planned quote (the exception above): `transfer_job_to_invoice` takes no
+       approval reason, so once cost rises above the draft price, `_enforce_below_cost_line` refuses the
+       invoice line. Add an admin approval with a reason at scheduling or invoicing, with a cost-rise proof.
    - A revision keeps the locked prices. Add an **"Update to today's prices"** action on a revised quote, both
      per line and for the whole quote, that shows each line's locked price beside today's price and applies
      only what the user picks.

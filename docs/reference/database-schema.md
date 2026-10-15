@@ -428,7 +428,7 @@ Live postflight: catalog 604 Products → `no_return`=21, `returnable`=2, `unkno
 | vendors | Admin / Sales Rep (not soft-deleted) / Admin (soft-deleted) | - (no write policy) | - (no write policy) | - (no write policy) |
 | vendor_bills | Admin (not soft-deleted) | Admin | Admin | Admin |
 | vendor_payments | Admin | Admin | - | Admin |
-| rup_sales_records | Admin / Sales Rep | Admin | - | - |
+| rup_sales_records | Admin | Admin | - | - |
 | email_log | Admin / Own created_by | Admin | - | - |
 | ar_reminder_tracking | Admin | Admin | - | - |
 | failed_notifications | Admin | Admin | Admin | Admin |

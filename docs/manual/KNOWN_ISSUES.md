@@ -178,8 +178,9 @@ when it runs, since the hook receives only `transcript_path`.
 **Partly fixed 2026-10-15.** The Vercel rules are now spelled with the connector's real name
 (`mcp__0fb370f6-…`), so promote, rollback, create-deployment and env edits are denied, and Supabase
 secret creation, project pause/restore/create and branch operations now ask first on both Supabase
-connections. Still open: the email connector's `send_message`, any connector added later under a new
-name, and the hook's explicit allow described below. See
+connections. Still open: the email connector's `send_message`; any connector, including one added
+later under a new name, whose tools match no `ask` or `deny` rule, because those tools run with no
+prompt; and the hook's explicit allow described below, which is why. See
 `docs/changelog.d/2026-10-15-vercel-supabase-permission-rule-real-names.md`.
 
 **What happens.** `.claude/hooks/migration-apply-guard.mjs` runs on every `mcp__.*` call and, for any

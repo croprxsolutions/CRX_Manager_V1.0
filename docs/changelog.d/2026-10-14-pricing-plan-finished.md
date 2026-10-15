@@ -10,8 +10,8 @@ Documentation only. No code or database changed, and nothing is built.
     margin for reps, and per-product margins.
   - Slice 2 now requires every route from a quote to something billable to use the sent prices.
   - Supplier-cost rollout (slice 7) and Early Bird (slice 9) are parked.
-  - The monthly price routine is confirmed. Slice 0 is not switched on for live changes until slice 2 is
-    live.
+  - The monthly price routine is confirmed. Slice 0 is not switched on for live changes until slices 2 and
+    8 are live.
   - Field jobs from a never-sent planned quote stay as today (Mason).
 - **`docs/plans/2026-10-13-direction-and-goals.md`:** two decision rows record the quote lock and the pricing
   visibility and intake rules.

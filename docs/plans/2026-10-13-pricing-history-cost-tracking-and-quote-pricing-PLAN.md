@@ -187,7 +187,13 @@ Small slices, each its own change. Building starts only when Mason says so; slic
        transition from `expired` to `revised`, or a renew-as-copy), with an expired-to-sent proof.
      - Field jobs from a never-sent planned quote (the exception above): `transfer_job_to_invoice` takes no
        approval reason, so once cost rises above the draft price, `_enforce_below_cost_line` refuses the
-       invoice line. Add an admin approval with a reason at scheduling or invoicing, with a cost-rise proof.
+       invoice line. At invoicing, `transfer_job_to_invoice` rechecks cost at that moment and needs a fresh
+       admin approval with a reason whenever the line is below cost, for jobs from sent and never-sent quotes
+       alike, with a cost-rise proof. An approval given at scheduling does not cover a later rise.
+     - Changing the customer: a sent snapshot records its customer, and `save_quote` overwrites
+       `quotes.customer_id` on a revision. A revision that changes the customer must be re-sent before it is
+       billed, even if the prices match. The price authority compares customer as well as prices, with a
+       customer-change proof.
    - A revision keeps the locked prices. Add an **"Update to today's prices"** action on a revised quote, both
      per line and for the whole quote, that shows each line's locked price beside today's price and applies
      only what the user picks.
@@ -485,7 +491,8 @@ $900 typed for $90. The method needs a tighter review step and a few small produ
 - **The quote lock must come first (Sol's only BLOCKER).** Under today's code a mid-month workbook change
   re-prices every sent quote on its next save and on Convert (section 7, finding 1). **Rollout gate
   (CodeRabbit on PR #926):** slice 0 may be built alongside slices 1-2, but it is not switched on for live price
-  changes until slice 2 is live. Until then the current workbook keeps working as today, and before applying a
+  changes until slice 2 is live and slice 8 has given products their margin floors (otherwise every product
+  would skip the low-margin warning; Codex on PR #926). Until then the current workbook keeps working as today, and before applying a
   price change an admin checks the Quotes list for open sent or revised quotes that contain a changed product
   and handles them by hand, because those quotes will re-price.
 - **Other ways to change a price still exist.** Inline editing on the Products page and the product page's
@@ -502,7 +509,7 @@ recheck the arithmetic independently. Mason or an admin resolves every exception
 supplier message.
 
 **Monthly / mid-month routine** (confirmed by Mason as written, 2026-10-14; it becomes the working checklist
-once slice 0 is live, which waits for slice 2, as described in the rollout gate above):
+once slice 0 is live, which waits for slices 2 and 8, as described in the rollout gate above):
 1. Save the supplier message (PDF, email or text) and note its effective date.
 2. Download a fresh full price sheet. Keep the original download unedited as the dated "before" record.
 3. In a working copy, find the products the supplier changed, check the package and unit, enter the new

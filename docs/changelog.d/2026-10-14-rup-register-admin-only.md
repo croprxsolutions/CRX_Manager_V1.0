@@ -9,7 +9,7 @@ buyer's license number. Sales reps could also read the `rup_sales_records` table
 register held 0 rows on 2026-10-14, so nothing had been exposed.
 
 **The fix.**
-- Migration `20261014200000_rup_register_admin_only.sql`: the function first calls
+- Migration `20261014220000_rup_register_admin_only.sql`: the function first calls
   `require_admin()` (active admin only); `rup_sales_select` becomes `is_admin()`; anon loses its
   unused table privileges. Posting invoices still writes register rows for reps (the writer is
   unchanged).

@@ -1,4 +1,4 @@
--- Smoke chain: the RUP sales register is admin-only (REQUIRES 20261014200000).
+-- Smoke chain: the RUP sales register is admin-only (REQUIRES 20261014220000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the probe row below is never kept.
 -- Proves, as a real signed-in browser session (role authenticated with each live profile's claims)
 -- and as a signed-out visitor (role anon):
@@ -25,9 +25,9 @@ DECLARE
 BEGIN
   -- Shape.
   SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = v_proc;
-  -- The exact gated body 20261014200000 installs.
+  -- The exact gated body 20261014220000 installs.
   IF md5(replace(v_src, chr(13), '')) <> '01a56f57845ccc8fcc0bc91cfd114045' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: get_rup_sales_register is not the gated body of 20261014200000';
+    RAISE EXCEPTION 'SMOKE_FAIL: get_rup_sales_register is not the gated body of 20261014220000';
   END IF;
   IF has_function_privilege('anon', v_proc, 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: anon can execute get_rup_sales_register';

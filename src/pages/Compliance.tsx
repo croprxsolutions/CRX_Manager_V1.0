@@ -47,7 +47,7 @@ interface RUPProduct {
 export default function Compliance() {
   const { profile } = useAuth();
   // The RUP sales register is admin-only: get_rup_sales_register refuses every
-  // other caller in the database (20261014200000_rup_register_admin_only).
+  // other caller in the database (20261014220000_rup_register_admin_only).
   const canViewRupRegister = profile?.role === 'admin' && profile.is_active;
   const { toast } = useToast();
   const [selectedTab, setTab] = useState<TabKey>('licenses');

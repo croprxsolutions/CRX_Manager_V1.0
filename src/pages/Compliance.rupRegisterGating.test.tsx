@@ -1,7 +1,7 @@
 /**
  * Compliance.rupRegisterGating.test.tsx — the RUP Sales Register tab is admin-only.
  *
- * Migration 20261014200000_rup_register_admin_only makes get_rup_sales_register refuse every
+ * Migration 20261014220000_rup_register_admin_only makes get_rup_sales_register refuse every
  * caller who is not an active admin. The database refusal is the protection; this guards the
  * screen half: a sales rep never sees the tab or fires the guaranteed-refused call, an admin
  * still opens the register, and an admin demoted while on the register falls back to Licenses

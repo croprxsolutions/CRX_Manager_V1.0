@@ -255,7 +255,7 @@
         "get_rup_sales_register",
         "rup_sales_records"
       ],
-      "description": "REQUIRES 20261014200000. The RUP sales register is admin-only: as each live role (authenticated with real profile claims), an active admin pulls a rolled-back probe row through get_rup_sales_register and the table, while an active sales rep, driver, applicator, commission-recipient profile and an id with no active profile are refused by the function and see 0 table rows; a signed-out visitor (anon) is refused both.",
+      "description": "REQUIRES 20261014220000. The RUP sales register is admin-only: as each live role (authenticated with real profile claims), an active admin pulls a rolled-back probe row through get_rup_sales_register and the table, while an active sales rep, driver, applicator, commission-recipient profile and an id with no active profile are refused by the function and see 0 table rows; a signed-out visitor (anon) is refused both.",
       "area": [
         "security"
       ]

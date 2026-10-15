@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261014200000 candidate: the RUP sales register is admin-only
+ * Full-chain proof for the 20261014220000 candidate: the RUP sales register is admin-only
  * (Goal 1, docs/plans/2026-10-13-direction-and-goals.md).
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
@@ -37,7 +37,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261014200000_rup_register_admin_only.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261014220000_rup_register_admin_only.sql');
 // Live but not replayable here (storage.objects policies); it does not touch the register.
 const PARKED = new Set(['20260914100700_customer_document_bytes_server_only.sql']);
 // PR #889's data migrations rewrite live rows this disposable database does not have; they are

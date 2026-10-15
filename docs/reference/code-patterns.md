@@ -176,7 +176,7 @@ The Team Board was decomposed from a monolith (`TeamBoard.tsx`) into reusable co
 
 **Photo Upload Pattern (Supabase Storage):**
 - Bucket: `team-note-attachments`. Read: active staff (admin, sales rep, driver, applicator) through the storage read
-  policy (`20261015170000`); the bucket is still public until step 2 makes it private. Write: active staff, into
+  policy (`20261015230000`); the bucket is still public until step 2 makes it private. Write: active staff, into
   their own folder.
 - Upload path: `team-note-attachments/{userId}/{timestamp}_{index}.{ext}` (folder 2 is the uploader)
 - 10MB max per file, client-side compression before upload

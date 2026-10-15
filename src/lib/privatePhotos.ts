@@ -5,7 +5,7 @@
  * blob: URL that exists only inside this tab (src/hooks/usePrivatePhoto.ts,
  * src/components/ui/PrivatePhoto.tsx).
  *
- * Deploy order: those downloads need the storage read policies of migration 20261015170000, so
+ * Deploy order: those downloads need the storage read policies of migration 20261015230000, so
  * the migration is applied before this code ships (ship.md applies it before the merge). The
  * buckets stay public until a later migration makes them private.
  *
@@ -39,7 +39,7 @@ const TEAM_NOTE_PHOTO_ROLES: readonly string[] = ['admin', 'sales_rep', 'driver'
 
 /**
  * Whether this profile may view and add team-note photos: the same active-staff roles the
- * team-note-attachments storage rules allow (migration 20261015170000). Anyone else, such as an
+ * team-note-attachments storage rules allow (migration 20261015230000). Anyone else, such as an
  * entity_recipient service login or a deactivated account, would only ever be refused, so the
  * screen hides the photos and the Add Photos button from them.
  */
@@ -53,7 +53,7 @@ const TEAM_NOTE_FILE_NAME = /^[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,10}$/;
 /**
  * A team-note photo's object path, only when it lies in its uploader's own folder
  * (team-note-attachments/<uploaded_by>/<file>). The app deletes the file a row names, so a row
- * pointing at another uploader's photo must never resolve to it (migration 20261015170000 refuses
+ * pointing at another uploader's photo must never resolve to it (migration 20261015230000 refuses
  * such rows; this also covers one written before it).
  */
 export function teamNotePhotoPath(attachment: { file_url?: string | null; uploaded_by?: string | null }): string | null {

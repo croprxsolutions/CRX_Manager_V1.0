@@ -1,4 +1,4 @@
--- Smoke chain: staff photo storage access (REQUIRES 20261015170000). One DO block; it always ends
+-- Smoke chain: staff photo storage access (REQUIRES 20261015230000). One DO block; it always ends
 -- in SMOKE_PASS_ROLLBACK, so none of the probe objects below is kept (they are catalog rows only;
 -- no file is uploaded).
 -- Proves, as real signed-in sessions (role authenticated with each live profile's claims) and as a

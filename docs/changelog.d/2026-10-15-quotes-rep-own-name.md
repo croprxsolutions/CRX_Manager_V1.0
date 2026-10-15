@@ -1,6 +1,6 @@
 ## 2026-10-15 — Quotes: a sales rep records only their own name as salesperson; season rollover keeps the original rep
 
-Migration `20261015200000_quotes_rep_own_name` (migration-history row 949; not applied when written).
+Migration `20261015200000_quotes_rep_own_name` (migration-history row 948; not applied when written).
 
 - New trigger `quotes_guard_rep_salesman_20261015` (function `guard_rep_quote_salesman_20261015`,
   runs with the caller's rights, callable by no API role), BEFORE INSERT OR UPDATE OF `salesman_id`

@@ -18,8 +18,11 @@ while the live database had 595. Products from "Storen - Bulk" onward could not 
   `fetchAllRows` helper, shows the product count, and the CSV exports that full list. If any page
   fails, the list is cleared, a red error explains it, and Export CSV is disabled, so a partial
   price list never looks complete. Because the pages are separate reads, the list is then checked
-  against a second read of the active product ids: any repeat, or any product added, removed or
-  deactivated during the read, also shows the error. Only the newest load may update the screen.
+  against a second read of the active product ids: a repeated product, or a difference between the
+  two sets of products (a product activated or deactivated before the second read ran), also shows
+  the error. The reads are not one transactional snapshot: a product switched off and back on
+  between them leaves the sets equal and is not detected. Only the newest load may update the
+  screen.
 - The picker shows and accepts only results for the text currently typed, treats a typed `%` or
   `_` literally, keeps result buttons out of the Tab order, and announces status messages.
   `ProductSearchResult` lives in `src/types/index.ts`.

@@ -470,7 +470,9 @@ export default function Reports() {
         // The pages are separate reads, so a product added, renamed or deactivated during them
         // can shift the offsets and skip or repeat a row. Read the active ids again afterwards:
         // the list is accepted only if it has no repeats and exactly the same products as that
-        // second read, so any change during the first read shows as an error.
+        // second read, so a membership change still in effect when the second read runs shows as
+        // an error. This is not a transactional snapshot (an off-then-on flip between the reads
+        // is not seen).
         const rows = result.data ?? [];
         const recheck = await fetchAllRows<{ id: string }>((from, to) => supabase
           .from('products')

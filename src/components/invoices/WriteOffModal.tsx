@@ -77,7 +77,9 @@ export default function WriteOffModal({
       });
       if (error) {
         // Refused as another request's retry key: nothing was written off, so start the next try fresh.
-        if (getIdempotencyBindingRejection(error)) writeOffIdem.resetKey();
+        // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+        const bindingRejection = getIdempotencyBindingRejection(error);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') writeOffIdem.resetKey();
         throw error;
       }
       assertRpcResult<string>(data, 'apply_write_off');

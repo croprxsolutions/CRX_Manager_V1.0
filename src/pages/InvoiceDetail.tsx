@@ -1291,7 +1291,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       });
       if (error) {
         // Refused as another request's retry key: nothing was reversed, so start the next try fresh.
-        if (getIdempotencyBindingRejection(error)) reverseWoIdem.resetKey();
+        // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+        const bindingRejection = getIdempotencyBindingRejection(error);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') reverseWoIdem.resetKey();
         throw error;
       }
       assertRpcResult(data, 'reverse_write_off');

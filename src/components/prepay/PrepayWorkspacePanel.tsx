@@ -210,7 +210,9 @@ export default function PrepayWorkspacePanel() {
         });
         if (error) {
           // Refused as another batch's retry key: nothing was applied, so start the next try fresh.
-          if (getIdempotencyBindingRejection(error)) batchApplyIdem.resetKey();
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchApplyIdem.resetKey();
           throw error;
         }
         batchApplyIdem.resetKey();

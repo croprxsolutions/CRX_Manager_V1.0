@@ -157,7 +157,9 @@ export default function PaymentHistory() {
         });
         if (error) {
           // Refused as another request's retry key: nothing was voided, so start the next try fresh.
-          if (getIdempotencyBindingRejection(error)) voidPaymentIdem.resetKey();
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') voidPaymentIdem.resetKey();
           throw error;
         }
         const result = assertRpcResult<{ success: boolean; reversed_cents: number; invoices_affected: number }>(data, 'void_payment');

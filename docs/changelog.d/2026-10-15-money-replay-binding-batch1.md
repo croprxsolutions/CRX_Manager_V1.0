@@ -21,7 +21,7 @@ twice; the harm was a false success. This change:
   its caller; the file refuses to apply while a recent receipt for them exists; and the private
   batch-prepay helper is no longer callable by the server role. It narrows access, so it applies
   only on Mason's owner approval.
-- **App:** the eight screens that call these functions drop the refused retry key so the next
+- **App:** the eight screens that call these functions drop a retry key refused as another request's or another person's (and keep it when the database cannot confirm an earlier outcome) so the next
   click starts fresh, and the refusal codes now show plain-English messages
   (`src/lib/errorSanitizer.ts`).
 - **Proof:** `node scripts/smoke/prove-money-replay-binding-batch1-real-schema.mjs`

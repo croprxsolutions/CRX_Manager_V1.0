@@ -363,7 +363,9 @@ export default function Invoices() {
         });
         if (error) {
           // Refused as another batch's retry key: nothing was voided, so start the next try fresh.
-          if (getIdempotencyBindingRejection(error)) batchVoidIdem.resetKey();
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchVoidIdem.resetKey();
           throw error;
         }
         batchVoidIdem.resetKey();

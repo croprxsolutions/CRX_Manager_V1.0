@@ -227,7 +227,9 @@ export default function PrepaymentManagerPanel() {
         });
         if (error) {
           // Refused as another request's retry key: nothing was edited, so start the next try fresh.
-          if (getIdempotencyBindingRejection(error)) resetScopedKey(editKeysRef.current, editCredit.id);
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') resetScopedKey(editKeysRef.current, editCredit.id);
           throw error;
         }
         const result = assertRpcResult<{ success: boolean }>(data, 'edit_prepay_credit');
@@ -269,7 +271,9 @@ export default function PrepaymentManagerPanel() {
         });
         if (error) {
           // Refused as another request's retry key: nothing was deleted, so start the next try fresh.
-          if (getIdempotencyBindingRejection(error)) resetScopedKey(deleteKeysRef.current, deleteCredit.id);
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') resetScopedKey(deleteKeysRef.current, deleteCredit.id);
           throw error;
         }
         const result = assertRpcResult<{ success: boolean }>(data, 'delete_prepay_credit');
@@ -375,7 +379,9 @@ export default function PrepaymentManagerPanel() {
         });
         if (error) {
           // Refused as another request's retry key: no credit was created, so start the next try fresh.
-          if (getIdempotencyBindingRejection(error)) splitCheckIdem.resetKey();
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') splitCheckIdem.resetKey();
           throw new Error(error.message);
         }
         const result = assertRpcResult<{ success: boolean; credit_ids: string[]; total_cents: number; split_count: number }>(data, 'create_prepay_check_splits');

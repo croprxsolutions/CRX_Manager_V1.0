@@ -29,8 +29,8 @@ container. Three later, deliberate rules had overtaken its fixtures:
   (without the pricing setup it stops at `COST_BASIS_REQUIRED`; without the deliveries at
   `RETURN_SOURCE_NOT_DELIVERED`).
 
-**Proof.** The new prover, 2026-10-15, on merge commit `6bf5c545a` (base `dd2bda843`): replayed
-110 post-baseline migrations through `20261014220000` (the parked customer-document file skipped,
+**Proof.** The new prover, 2026-10-15, on merge commit `42e663b20` (base `9b6eb8607`): replayed
+111 post-baseline migrations through `20261015130000` (the parked customer-document file skipped,
 the two withheld spring data migrations recorded in the ledger only), both controls failed at the
 expected code, and the chain reached
 `PHASE3_UNRELATED_CREDIT_MEMO_UNAPPLY_PASS` and `SMOKE_PASS_ROLLBACK` with no `[SMOKE]` row left.

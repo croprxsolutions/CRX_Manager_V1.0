@@ -24,7 +24,7 @@ to all three. The customer receipt email embedded the photo links.
   never a storage URL. For field signal: a dropped download, or one stalled for 30 seconds, ends in a tap-to-retry tile (not an
   endless spinner), retries by itself when the phone is back online, and is cancelled when the photo
   leaves the screen. Downloads bypass the browser cache (and new uploads are stored with `max-age=0`, so any cached copy is immediately stale and revalidated), so
-  the read policy decides every view, even on a shared device. A full-size in-app viewer (with zoom) replaces opening the URL in a new window
+  the read policy decides every in-app view, even on a shared device; a direct public URL still opens until step 2 makes the buckets private. A full-size in-app viewer (with zoom) replaces opening the URL in a new window
   and reuses the thumbnail's download; Escape closes only the viewer, not the note it was opened from.
   `DeliveryDetail.tsx`, `FieldStop.tsx` and `NoteAttachments.tsx` use it. A note owner sees Delete
   only on photos they uploaded (or as admin), matching the storage and table rules. A delete removes

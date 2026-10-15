@@ -190,7 +190,7 @@ missing; between-turn hand-back timing is still untested (see below), so a trans
   `origin.kind: "peer"` and a `promptId` (which should equal the hook's `prompt_id`), but its text
   includes the preamble, so it never equals the hook's `prompt`. One that arrives mid-turn is a
   `queued_command` attachment with `origin.kind: "peer"` and no `promptId`, so it cannot be matched to
-  the prompt at all.
+  the prompt by ID; whether another reliable correlation exists (for example by its text) is untested.
 - So a transcript-based fix could silently do nothing, and matching "the last user record" could read
   an earlier hand-back's origin and swallow a real stop typed by Mason.
 
@@ -200,7 +200,8 @@ missing; between-turn hand-back timing is still untested (see below), so a trans
    `prompt_id` can cover between-turn hand-backs. A probe can only show this is likely, not certain,
    so the check must fall back to today's text rules whenever the record is missing (a missed origin
    then latches exactly as now; it never swallows a stop). Mid-turn hand-backs have no `promptId`
-   and stay on the text rules, so this route does not close the issue.
+   and stay on the text rules unless another reliable correlation is found, so this route alone
+   does not close the issue.
 2. **Complete.** Claude Code adds the message origin to the UserPromptSubmit input, which covers
    both delivery shapes.
 

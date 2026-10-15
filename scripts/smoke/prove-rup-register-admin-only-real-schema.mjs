@@ -131,8 +131,12 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
+  // Replay only what sorts before the candidate; later migrations are not part of its proof.
   const before = all.slice(0, at);
+  const later = all.slice(at + 1).map((f) => path.basename(f));
+  for (const name of later) {
+    assert.ok(!/rup_sales|get_rup_sales_register/i.test(lf(path.join(MIGRATIONS, name))), `${name} sorts after the candidate and touches the register; re-think this proof`);
+  }
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);

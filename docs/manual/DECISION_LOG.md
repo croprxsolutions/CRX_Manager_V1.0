@@ -14,8 +14,9 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 - **Cost and margin are admin-only**, even on a rep's own invoices and quotes. This supersedes the 2026-10-14 Goal 1 answer that reps keep them.
 - **Commission splits:** only an admin sets a new customer's split. Admins get a job/order split editor that recalculates unpaid commissions.
 - **Order and delivery split billing must work now**: landlord, partial delivery, and the "Bill Split" card. **Future work:** field-application split billing and blend-ticket quote-line pricing.
-- **Completing a delivery needs a signal**; offline sync is dropped. **No Chem Man work.**
-- **Explicitly agreed:** no billing before delivery, a quick-delivery counter-sale upgrade, a from-scratch charge line, and an admin-only field-invoice credit. The recommendations Mason accepted are listed under Goals 2 and 3 in `docs/plans/2026-10-13-direction-and-goals.md`.
+- **Completing a delivery needs a signal**, with a paper-ticket fallback; offline sync is dropped. **No Chem Man features**, only a narrow block on CRX credits for the 53 Chem Man-billed deliveries.
+- **No sales tax is charged on anything.** **Commission already paid on a returned or credited sale is deducted from the next payout.**
+- **Also agreed**, including every change from an advisory Codex `gpt-6.1-sol` review: no billing before delivery, posted invoices credited and never cancelled, recorded refunds, typed charge lines, an admin-only field-invoice credit, a November–December real trial and a pilot emergency brake. Full list: section 4 of `docs/plans/2026-10-13-direction-and-goals.md`.
 
 **Why / implies:** Mason wanted to agree to every change before it is built. Goal 1 refuses cost to reps too. Goal 3 builds order split billing and none of the deferred items. Goal 5 builds a signal check. Do not re-ask.
 

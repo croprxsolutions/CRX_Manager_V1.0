@@ -467,18 +467,26 @@ export default function Reports() {
       if (result.error) {
         Sentry.captureException(new Error(result.error.message), { extra: { context: 'price_list_load' } });
       } else {
-        // The pages are separate reads, so a product added, renamed or deactivated between them
-        // can shift the offsets. Accept the list only if no product repeats and the total still
-        // matches the database's own count.
+        // The pages are separate reads, so a product added, renamed or deactivated during them
+        // can shift the offsets and skip or repeat a row. Read the active ids again afterwards:
+        // the list is accepted only if it has no repeats and exactly the same products as that
+        // second read, so any change during the first read shows as an error.
         const rows = result.data ?? [];
-        const { count, error: countError } = await supabase
+        const recheck = await fetchAllRows<{ id: string }>((from, to) => supabase
           .from('products')
-          .select('id', { count: 'exact', head: true })
-          .eq('is_active', true);
-        const uniqueIds = new Set(rows.map((r) => r.id)).size;
-        if (countError || count !== rows.length || uniqueIds !== rows.length) {
+          .select('id')
+          .eq('is_active', true)
+          .order('id')
+          .range(from, to));
+        const listIds = new Set(rows.map((r) => r.id as string));
+        const recheckIds = new Set((recheck.data ?? []).map((r) => r.id));
+        const sameProducts = !recheck.error
+          && listIds.size === rows.length
+          && recheckIds.size === listIds.size
+          && [...listIds].every((id) => recheckIds.has(id));
+        if (!sameProducts) {
           Sentry.captureException(new Error('Price list read was not a complete snapshot'), {
-            extra: { context: 'price_list_load', rows: rows.length, uniqueIds, count, countError: countError?.message },
+            extra: { context: 'price_list_load', rows: rows.length, uniqueIds: listIds.size, recheckRows: recheckIds.size, recheckError: recheck.error?.message },
           });
         } else {
           data = rows;

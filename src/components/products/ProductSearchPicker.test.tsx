@@ -54,6 +54,26 @@ describe('ProductSearchPicker', () => {
     expect(await screen.findByText('No matching active products')).toBeInTheDocument();
   });
 
+  it('treats a typed % as a literal character, not a wildcard', async () => {
+    mocks.limit.mockResolvedValue({ data: [], error: null });
+    const { input } = renderPicker();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '34%' } });
+    await waitFor(() => expect(mocks.or).toHaveBeenCalled());
+    expect(mocks.or).toHaveBeenCalledWith('product_name.ilike."%34\\\\%%",sku.ilike."%34\\\\%%"');
+  });
+
+  it('keeps showing results when only a trailing space is typed', async () => {
+    mocks.limit.mockResolvedValue({ data: [product(7)], error: null });
+    const { input } = renderPicker();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'Zoom' } });
+    expect(await screen.findByRole('option', { name: /Product 7/ })).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'Zoom ' } });
+    expect(screen.getByRole('option', { name: /Product 7/ })).toBeInTheDocument();
+    expect(screen.queryByText('Searching...')).not.toBeInTheDocument();
+  });
+
   it('shows a failed search as an error, not as no matches', async () => {
     mocks.limit.mockResolvedValue({ data: null, error: { message: 'boom' } });
     const { input } = renderPicker();

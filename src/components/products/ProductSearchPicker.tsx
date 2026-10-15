@@ -14,11 +14,13 @@ const MIN_QUERY_LENGTH = 2;
 /**
  * Quote a search term for a PostgREST `or=(...)` filter. Product names such as
  * "2,4-D" contain commas and parentheses, which would otherwise end the filter
- * early. Inside the quotes only `\` and `"` need escaping.
+ * early. Typed `%`, `_` and `\` are first escaped for ILIKE (so "100%" matches
+ * literally), then `\` and `"` are escaped for the PostgREST quotes.
  */
 function productSearchPattern(q: string): string {
-  const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return `"%${escaped}%"`;
+  const likeEscaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const quoted = likeEscaped.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"%${quoted}%"`;
 }
 
 interface ProductSearchPickerProps {
@@ -133,25 +135,28 @@ export default function ProductSearchPicker({
     setIsOpen(false);
   };
 
+  const showList = isOpen && term.length >= MIN_QUERY_LENGTH;
+  // Results count only for the text now in the box; earlier results are never shown or pickable.
+  const resultsCurrent = !searching && term === searchedTerm;
+  const options = resultsCurrent && !searchFailed ? results : [];
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setIsOpen(true);
-      setHighlightedIndex((i) => Math.max(0, Math.min(i + 1, results.length - 1)));
+      setHighlightedIndex((i) => Math.max(0, Math.min(i + 1, options.length - 1)));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setHighlightedIndex((i) => Math.max(i - 1, 0));
     } else if (event.key === 'Enter') {
-      if (!isOpen || !results[highlightedIndex]) return;
+      if (!showList || !options[highlightedIndex]) return;
       event.preventDefault();
-      select(results[highlightedIndex]);
+      select(options[highlightedIndex]);
     } else if (event.key === 'Escape') {
       setQuery(selectedLabel);
       setIsOpen(false);
     }
   };
-
-  const showList = isOpen && term.length >= MIN_QUERY_LENGTH;
 
   return (
     <div className={`relative ${className}`.trim()}>
@@ -164,17 +169,9 @@ export default function ProductSearchPicker({
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={showList && results[highlightedIndex] ? `${listId}-option-${highlightedIndex}` : undefined}
+          aria-activedescendant={showList && options[highlightedIndex] ? `${listId}-option-${highlightedIndex}` : undefined}
           value={query}
-          onChange={(e) => {
-            // Drop the previous query's results at once so none can be picked for the new text.
-            requestRef.current += 1;
-            setResults([]);
-            setSearchFailed(false);
-            setQuery(e.target.value);
-            setIsOpen(true);
-            setHighlightedIndex(0);
-          }}
+          onChange={(e) => { setQuery(e.target.value); setIsOpen(true); setHighlightedIndex(0); }}
           onFocus={() => setIsOpen(true)}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
@@ -194,20 +191,18 @@ export default function ProductSearchPicker({
         )}
       </div>
       {showList && (
-        <div
-          id={listId}
-          role="listbox"
-          className="absolute z-30 w-full min-w-[280px] mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"
-        >
-          {searching || term !== searchedTerm ? (
+        <div className="absolute z-30 w-full min-w-[280px] mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          {/* Status messages sit outside the listbox, which holds only options. */}
+          {!resultsCurrent ? (
             <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">Searching...</div>
           ) : searchFailed ? (
             <div role="alert" className="px-3 py-2 text-sm text-red-600">Product search failed. Try again.</div>
-          ) : results.length === 0 ? (
+          ) : options.length === 0 ? (
             <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">No matching active products</div>
           ) : (
             <>
-              {results.map((product, index) => (
+              <div id={listId} role="listbox" aria-label={ariaLabel}>
+              {options.map((product, index) => (
                 <button
                   id={`${listId}-option-${index}`}
                   key={product.id}
@@ -223,8 +218,9 @@ export default function ProductSearchPicker({
                   <ProductOptionDetails product={product} />
                 </button>
               ))}
-              {results.length === PRODUCT_SEARCH_LIMIT && (
-                <div className="px-3 py-2 text-xs text-secondary border-t border-gray-100">
+              </div>
+              {options.length === PRODUCT_SEARCH_LIMIT && (
+                <div role="status" className="px-3 py-2 text-xs text-secondary border-t border-gray-100">
                   Showing the first {PRODUCT_SEARCH_LIMIT} matches. Keep typing to narrow the list.
                 </div>
               )}

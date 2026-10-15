@@ -5,7 +5,7 @@
 -- only for the exact same request. A retry that reuses a key for a different record, different
 -- amounts, or from a different person is refused (IDEMPOTENCY_INTENT_MISMATCH /
 -- IDEMPOTENCY_ACTOR_MISMATCH) and changes nothing; an exact retry still returns the original
--- answer and is never done twice; a call with no key behaves as before.
+-- answer and is never done twice; a call with no key is refused (IDEMPOTENCY_KEY_REQUIRED).
 --
 -- Covers the nine wrapped money RPCs: void_payment, delete_prepay_credit, edit_prepay_credit,
 -- apply_write_off, reverse_write_off, apply_prepay_to_invoice, create_prepay_check_splits,

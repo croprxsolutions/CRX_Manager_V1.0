@@ -124,8 +124,10 @@ function plan() {
   }
   return all;
 }
+let started = false;  // cleanup removes only the container this run created
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  started = true;
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -220,4 +222,12 @@ function main() {
 }
 
 try { main(); }
-finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally {
+  if (started && !KEEP) {
+    const r = docker(['rm', '-f', NAME], { allowFailure: true });
+    if (r.status !== 0) {
+      console.error(`could not remove container ${NAME}: ${(r.stderr || r.stdout).trim()}`);
+      process.exitCode = 1;
+    }
+  }
+}

@@ -109,6 +109,31 @@ describe('PrivatePhoto', () => {
     expect(H.download).toHaveBeenCalledTimes(2);
   });
 
+  it('gives up on a stalled download after 30 seconds, aborts it and offers a retry', async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      H.download
+        .mockImplementationOnce((_p: string, _o: unknown, params: { signal: AbortSignal }) => {
+          signal = params.signal;
+          return new Promise(() => {}); // never settles, like a stalled mobile connection
+        })
+        .mockResolvedValue({ data: blob(), error: null });
+      render(<PrivatePhoto bucket="delivery-photos" path="delivery-photos/d1/1.jpg" alt="Delivery photo" />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+      expect(screen.queryByRole('img', { name: 'Delivery photo unavailable' })).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(screen.getByRole('img', { name: 'Delivery photo unavailable' })).toBeTruthy();
+      expect(signal?.aborted).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Retry loading Delivery photo' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByRole('img', { name: 'Delivery photo' }).getAttribute('src')).toMatch(/^blob:/);
+      expect(H.download).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('retries by itself when the device comes back online', async () => {
     H.download.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValue({ data: blob(), error: null });
     render(<PrivatePhoto bucket="delivery-photos" path="delivery-photos/d1/1.jpg" alt="Delivery photo" />);

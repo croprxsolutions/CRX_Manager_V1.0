@@ -1,6 +1,6 @@
 /**
  * Download one private staff photo with the signed-in user's session and expose it as a
- * tab-local blob: URL (see src/lib/privatePhotos.ts for why). Field-safe: a dropped connection
+ * tab-local blob: URL (see src/lib/privatePhotos.ts for why). Field-safe: a dropped or stalled connection
  * ends in a retryable error (never an endless spinner), the photo retries by itself when the
  * device comes back online, an unmount aborts the download, and the blob URL is released when
  * the photo leaves the screen.
@@ -25,6 +25,10 @@ export interface PrivatePhoto {
 // Sentry event per thumbnail per mount.
 const reported = new Set<string>();
 
+// Long enough for a compressed photo on one bar of signal; short enough that a stalled request
+// does not leave a spinner up indefinitely.
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+
 export function usePrivatePhoto(bucket: PrivatePhotoBucket, path: string | null | undefined): PrivatePhoto {
   const key = path ? `${bucket}/${path}` : '';
   const [attempt, setAttempt] = useState(0);
@@ -37,8 +41,10 @@ export function usePrivatePhoto(bucket: PrivatePhotoBucket, path: string | null 
     if (!path) return undefined;
     const controller = new AbortController();
     let objectUrl: string | null = null;
+    let settled = false;
     const fail = (error: unknown) => {
-      if (controller.signal.aborted) return;
+      if (settled || controller.signal.aborted) return;
+      settled = true;
       setLoaded({ tag, state: { status: 'error' } });
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       if (!offline && !reported.has(key)) {
@@ -49,22 +55,31 @@ export function usePrivatePhoto(bucket: PrivatePhotoBucket, path: string | null 
         });
       }
     };
+    // A stalled connection on weak field signal may never reject: give up after a while and offer
+    // a retry instead of spinning forever.
+    const timer = setTimeout(() => {
+      if (settled) return;
+      fail(new Error('Private photo download timed out'));
+      controller.abort();
+    }, DOWNLOAD_TIMEOUT_MS);
     // no-store: every view asks Storage again, so the read policy decides each time; a cached copy
     // must not outlive a sign-out, deactivation or reassignment on a shared device.
     supabase.storage.from(bucket).download(path, {}, { signal: controller.signal, cache: 'no-store' })
       .then(({ data, error }) => {
-        if (controller.signal.aborted) return;
+        if (settled || controller.signal.aborted) return;
         if (error || !data) {
           // A refusal (signed out, deactivated, not allowed) or a missing file.
           fail(error ?? new Error('empty photo download'));
           return;
         }
+        settled = true;
         objectUrl = URL.createObjectURL(data);
         setLoaded({ tag, state: { status: 'ready', url: objectUrl } });
       })
       // A connection dropped mid-download rejects instead of returning an error.
       .catch(fail);
     return () => {
+      clearTimeout(timer);
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };

@@ -6,7 +6,7 @@ import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import ConfirmModal from '../ui/ConfirmModal';
 import { PrivatePhotoButton } from '../ui/PrivatePhoto';
-import { storagePathFromPublicUrl } from '../../lib/privatePhotos';
+import { teamNotePhotoPath } from '../../lib/privatePhotos';
 import type { TeamNoteAttachment } from '../../types';
 
 interface NoteAttachmentsProps {
@@ -48,7 +48,9 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
     setDeletingId(attachment.id);
 
     try {
-      const storagePath = storagePathFromPublicUrl(attachment.file_url, 'team-note-attachments');
+      // Only a file in this row's uploader's own folder: a row naming someone else's photo must
+      // never delete that photo (the row itself is still removed).
+      const storagePath = teamNotePhotoPath(attachment);
 
       // Delete from storage first
       if (storagePath) {
@@ -98,7 +100,7 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
           {attachment.file_type.startsWith('image/') ? (
             <PrivatePhotoButton
               bucket="team-note-attachments"
-              path={storagePathFromPublicUrl(attachment.file_url, 'team-note-attachments')}
+              path={teamNotePhotoPath(attachment)}
               alt={attachment.file_name}
               viewerTitle={attachment.file_name}
               className="w-full aspect-square rounded-lg object-cover"

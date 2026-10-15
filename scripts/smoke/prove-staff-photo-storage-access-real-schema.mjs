@@ -17,7 +17,9 @@
  *      delivery's photos and team-note photos; an applicator only team-note photos; a deactivated
  *      account, a commission-recipient profile and a signed-out visitor nothing. Uploads and
  *      deletes follow the same roles; a team-note uploader deletes their own file.
- *   3. The delivery_photos row policy refuses a deactivated driver.
+ *   3. The delivery_photos row policy refuses a deactivated driver, and a team_note_attachments row
+ *      may name only a file in its uploader's own folder (an admin deleting a row that named another
+ *      uploader's photo would otherwise delete that file).
  *   4. The preflight refuses a drifted policy and a second apply; the buckets stay public.
  *   5. MUTATION: with is_driver() forced true, the applicator downloads a delivery photo of a
  *      delivery assigned to them, so the driver gate is what refuses it.
@@ -61,6 +63,7 @@ const LIVE_POLICY_PINS = [
   ['storage', 'objects', 'Authenticated users can upload team note attachments', '337aa4234a96ed605abe30dad6c03540'],
   ['storage', 'objects', 'Users can delete own team note attachments', '52637a7ec8666536e0ea383b5c8d5f9f'],
   ['public', 'delivery_photos', 'del_photos_select', '8ddd08ccd87e7e3ab2a24a4346aa3411'],
+  ['public', 'team_note_attachments', 'Authenticated users can insert own attachments', 'de7e8786d42d0ec62c9c4bb896ae700e'],
 ];
 
 const id = (n) => `7a500000-0000-4000-8000-${n.padStart(12, '0')}`;
@@ -82,6 +85,7 @@ const OBJ = {
   NOTE_DRIVER: `team-note-attachments/${U.DRIVER}/1_0.jpg`,
 };
 const PHOTO_ROW = id('9001'); // public.delivery_photos row on D_OFF
+const NOTE = id('9101'); // public.team_notes row the attachment probes hang off
 
 // ------------------------------------------------------------------------------------------------
 // Container plumbing (the shared real-schema harness).
@@ -249,6 +253,7 @@ function seed() {
       ('${D_OTHER}', 'PROVER-PH-2', '${id('0e2')}', '${id('0c1')}', '${U.ADMIN}', '${U.DRIVER_B}'),
       ('${D_OFF}', 'PROVER-PH-3', '${id('0e3')}', '${id('0c1')}', '${U.ADMIN}', '${U.DRIVER_OFF}'),
       ('${D_APPL}', 'PROVER-PH-4', '${id('0e4')}', '${id('0c1')}', '${U.ADMIN}', '${U.APPLICATOR}');
+    INSERT INTO public.team_notes (id, title, created_by) VALUES ('${NOTE}', '[PROVER] note', '${U.ADMIN}');
     INSERT INTO public.delivery_photos (id, delivery_id, storage_path, image_url, uploaded_by, sort_order)
       VALUES ('${PHOTO_ROW}', '${D_OFF}', '${OBJ.OFF}', 'https://example.invalid/x.jpg', '${U.DRIVER_OFF}', 0);
     INSERT INTO storage.objects (bucket_id, name) VALUES
@@ -301,6 +306,9 @@ const newMine = `delivery-photos/${D_MINE}/9_9.jpg`;
 const newOther = `delivery-photos/${D_OTHER}/9_9.jpg`;
 const newRecv = 'receiving-photos/po-1/9_9.jpg';
 const newNote = (uid) => `team-note-attachments/${uid}/9_9.jpg`;
+// An attachment row as NotePhotoUpload writes it: the public URL of the file, uploaded_by = caller.
+const PUBLIC_NOTE_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co/storage/v1/object/public/team-note-attachments/';
+const noteRow = (uid, url) => `INSERT INTO public.team_note_attachments (note_id, file_url, file_name, file_type, file_size_bytes, uploaded_by) VALUES ('${NOTE}', '${url}', 'p.jpg', 'image/jpeg', 1, '${uid}')`;
 
 /** [label, uid, call, opts, before, after]; 'same' = identical before and after. */
 const CASES = [
@@ -358,6 +366,14 @@ const CASES = [
   // The delivery_photos row a deactivated driver could still read.
   ['deactivated driver reads own delivery\'s photo row', U.DRIVER_OFF, `(SELECT count(*) FROM public.delivery_photos WHERE id = '${PHOTO_ROW}')`, {}, SEEN, HIDDEN],
   ['admin reads the photo row', U.ADMIN, `(SELECT count(*) FROM public.delivery_photos WHERE id = '${PHOTO_ROW}')`, {}, SEEN, 'same'],
+
+  // Team-note attachment rows: the file a row names, which the app deletes before the row.
+  ['rep records a photo in own folder', U.REP, noteRow(U.REP, PUBLIC_NOTE_URL + OBJ.NOTE_REP), { statement: true }, SEEN, 'same'],
+  ['driver records a photo in own folder', U.DRIVER, noteRow(U.DRIVER, PUBLIC_NOTE_URL + newNote(U.DRIVER)), { statement: true }, SEEN, 'same'],
+  ['rep records the driver photo as theirs', U.REP, noteRow(U.REP, PUBLIC_NOTE_URL + OBJ.NOTE_DRIVER), { statement: true }, SEEN, DENIED],
+  ['rep records a URL naming the driver photo before own folder', U.REP, noteRow(U.REP, `${PUBLIC_NOTE_URL}${OBJ.NOTE_DRIVER}?/team-note-attachments/${U.REP}/1_0.jpg`), { statement: true }, SEEN, DENIED],
+  ['rep records an escaped path out of own folder', U.REP, noteRow(U.REP, `${PUBLIC_NOTE_URL}team-note-attachments/${U.REP}/..%2F${U.DRIVER}%2F1_0.jpg`), { statement: true }, SEEN, DENIED],
+  ['rep records a photo as the driver', U.REP, noteRow(U.DRIVER, PUBLIC_NOTE_URL + OBJ.NOTE_DRIVER), { statement: true }, DENIED, 'same'],
 ];
 
 function runMatrix(phase) {

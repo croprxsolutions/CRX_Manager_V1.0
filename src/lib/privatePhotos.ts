@@ -47,6 +47,29 @@ export function canUseTeamNotePhotos(profile: { role?: string | null; is_active?
   return !!profile?.is_active && TEAM_NOTE_PHOTO_ROLES.includes(profile.role ?? '');
 }
 
+// <epoch ms>_<n>.<ext>, as NotePhotoUpload names a file; the row insert policy requires the same.
+const TEAM_NOTE_FILE_NAME = /^[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,10}$/;
+
+/**
+ * A team-note photo's object path, only when it lies in its uploader's own folder
+ * (team-note-attachments/<uploaded_by>/<file>). The app deletes the file a row names, so a row
+ * pointing at another uploader's photo must never resolve to it (migration 20261015170000 refuses
+ * such rows; this also covers one written before it).
+ */
+export function teamNotePhotoPath(attachment: { file_url?: string | null; uploaded_by?: string | null }): string | null {
+  const path = storagePathFromPublicUrl(attachment.file_url, 'team-note-attachments');
+  if (!path || !attachment.uploaded_by) return null;
+  const [bucketFolder, owner, file, ...rest] = path.split('/');
+  if (bucketFolder !== 'team-note-attachments' || owner !== attachment.uploaded_by || rest.length > 0) return null;
+  return file && TEAM_NOTE_FILE_NAME.test(file) ? path : null;
+}
+
+/** A team-note photo file extension safe to store: letters and digits only, else jpg. */
+export function teamNotePhotoExtension(fileName: string): string {
+  const ext = fileName.includes('.') ? fileName.split('.').pop() ?? '' : '';
+  return /^[A-Za-z0-9]{1,10}$/.test(ext) ? ext : 'jpg';
+}
+
 /** A delivery photo's object path: storage_path, or the old public URL for a row without one. */
 export function deliveryPhotoPath(photo: { storage_path?: string | null; image_url?: string | null }): string | null {
   return photo.storage_path || storagePathFromPublicUrl(photo.image_url, 'delivery-photos');

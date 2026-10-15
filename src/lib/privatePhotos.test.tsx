@@ -15,7 +15,7 @@ vi.mock('./db', () => ({
 }));
 vi.mock('./sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 
-import { storagePathFromPublicUrl, deliveryPhotoPath, canUseTeamNotePhotos } from './privatePhotos';
+import { storagePathFromPublicUrl, deliveryPhotoPath, canUseTeamNotePhotos, teamNotePhotoPath, teamNotePhotoExtension } from './privatePhotos';
 import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto';
 import Modal from '../components/ui/Modal';
 
@@ -39,6 +39,25 @@ describe('storagePathFromPublicUrl', () => {
   it('prefers a delivery photo\'s storage_path and falls back to its old URL', () => {
     expect(deliveryPhotoPath({ storage_path: 'delivery-photos/d1/1.jpg', image_url: 'ignored' })).toBe('delivery-photos/d1/1.jpg');
     expect(deliveryPhotoPath({ storage_path: null, image_url: `${PUBLIC}/delivery-photos/delivery-photos/d1/2.jpg` })).toBe('delivery-photos/d1/2.jpg');
+  });
+});
+
+describe('teamNotePhotoPath', () => {
+  const NOTE = `${PUBLIC}/team-note-attachments/team-note-attachments`;
+  it('returns the path of a file in the row\'s uploader\'s own folder', () => {
+    expect(teamNotePhotoPath({ uploaded_by: 'u1', file_url: `${NOTE}/u1/1729_0.jpg` })).toBe('team-note-attachments/u1/1729_0.jpg');
+  });
+  it('refuses a row that names another uploader\'s file, a nested or escaped path, or an odd name', () => {
+    expect(teamNotePhotoPath({ uploaded_by: 'u2', file_url: `${NOTE}/u1/1729_0.jpg` })).toBeNull();
+    expect(teamNotePhotoPath({ uploaded_by: 'u2', file_url: `${NOTE}/u2/x/../../u1/1729_0.jpg` })).toBeNull();
+    expect(teamNotePhotoPath({ uploaded_by: 'u2', file_url: `${NOTE}/u2/..%2Fu1%2F1729_0.jpg` })).toBeNull();
+    expect(teamNotePhotoPath({ uploaded_by: 'u2', file_url: `${NOTE}/u2/a b.jpg` })).toBeNull();
+    expect(teamNotePhotoPath({ uploaded_by: null, file_url: `${NOTE}/u1/1729_0.jpg` })).toBeNull();
+  });
+  it('keeps upload extensions to letters and digits', () => {
+    expect(teamNotePhotoExtension('IMG_1.HEIC')).toBe('HEIC');
+    expect(teamNotePhotoExtension('no-extension')).toBe('jpg');
+    expect(teamNotePhotoExtension('weird.j p/g')).toBe('jpg');
   });
 });
 

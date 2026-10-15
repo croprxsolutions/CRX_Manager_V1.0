@@ -14,7 +14,9 @@ to all three. The customer receipt email embedded the photo links.
   team-note photos: active staff, not commission-recipient profiles); uploads and deletes narrowed to
   the same roles (a delivery photo's file is deleted by an admin only, like its record); the
   team-note delete now reads the right folder; the delivery-photo row policy
-  requires an active driver. It locks with a 5-second timeout, pins every policy it changes before
+  requires an active driver; a team-note attachment row may name only a file in its uploader's own
+  folder (Codex Sol on PR #929: once deletes take effect, an admin deleting a hand-made row that named
+  another uploader's photo would have deleted that file). It locks with a 5-second timeout, pins every policy it changes before
   and after (exact text), and refuses any storage policy that does not test a bucket.
 - The app shows photos through `src/hooks/usePrivatePhoto.ts` and `src/components/ui/PrivatePhoto.tsx`:
   it downloads each photo with the signed-in user's session and shows a tab-local `blob:` address,
@@ -24,7 +26,9 @@ to all three. The customer receipt email embedded the photo links.
   the read policy decides every view, even on a shared device. A full-size in-app viewer (with zoom) replaces opening the URL in a new window
   and reuses the thumbnail's download; Escape closes only the viewer, not the note it was opened from.
   `DeliveryDetail.tsx`, `FieldStop.tsx` and `NoteAttachments.tsx` use it. A note owner sees Delete
-  only on photos they uploaded (or as admin), matching the storage and table rules.
+  only on photos they uploaded (or as admin), matching the storage and table rules. A delete removes
+  a file only when it lies in that row's uploader's own folder (`teamNotePhotoPath`); otherwise only
+  the row goes. Uploads keep the file extension to letters and digits, so they pass the row rule.
 - The customer receipt email (shared helper and both inline copies in `DeliveryDetail.tsx`) no
   longer has a photo section, and the delivery screen's help text says so (Mason, 2026-10-14).
 - `DECISION_LOG.md` records Mason's Goal 1 answers, including option A: a staff member allowed to
@@ -41,7 +45,7 @@ small migration sets the three buckets private so old public links stop working.
 
 **Proof.** `scripts/smoke/prove-staff-photo-storage-access-real-schema.mjs` builds the production
 schema in a disposable database (storage modeled as live, including `storage.protect_delete`) and
-runs 44 role cases (download, upload, delete) before and after, plus a drifted-policy refusal, a
+runs 50 cases (download, upload, delete, attachment rows) before and after, plus a drifted-policy refusal, a
 re-apply refusal and a mutation check; it also runs the new live chain
 `scripts/smoke/smoke-staff_photo_storage_access.sql` (spec `staff_photo_storage_access`), which fails
 before the migration and passes after. Live read-only checks 2026-10-14: every storage policy names a

@@ -19,6 +19,8 @@
 --     admin's (proven in the disposable-database prover with live's storage.protect_delete). The
 --     team-note delete policy also read folder 1 (always the bucket name) as the user.
 --   * Every storage.objects policy names a bucket (no bucket-agnostic policy exists).
+--   * public.team_note_attachments: the insert policy checks only uploaded_by, so a row may name any
+--     file_url, including another uploader's photo; 0 rows live.
 --   * public.delivery_photos del_photos_select lets a driver read the photo rows of their assigned
 --     deliveries without an active-profile check.
 --   * Objects: delivery-photos 15 (every name is 'delivery-photos/<delivery id>/<file>'; 13 match a
@@ -35,6 +37,9 @@
 --     the commission-recipient profiles); upload = active staff, into their own folder 2; delete =
 --     the active uploader (folder 2) or an active admin.
 --   * del_photos_select: the driver branch requires an active driver profile.
+--   * team_note_attachments insert: file_url must be the public URL of a file in the inserting
+--     uploader's own folder. Without it, once deletes take effect, an admin deleting a row that
+--     names someone else's photo would delete that photo's file (Codex Sol on PR #929).
 --
 -- Behavior change to note: once applied, the delete policies take effect, so an admin's
 -- delete of a delivery photo, an admin's delete of a receiving photo and an uploader's delete of
@@ -44,7 +49,7 @@
 -- SELECT policy). Ordinary app use never creates one.
 --
 -- Non-destructive: no row, object or bucket setting changes. Access-changing (storage policies and
--- an existing table policy), so it needs Mason's own approval of this file.
+-- existing table policies), so it needs Mason's own approval of this file.
 -- Rollback: revert the app first (it downloads through these read policies; without them every
 -- photo shows as unavailable), then restore each policy's 2026-10-14 definition (preflight pins below):
 --   DROP POLICY the three new *_select storage policies;
@@ -54,13 +59,15 @@
 --   ((bucket_id = 'team-note-attachments') AND (((storage.foldername(name))[1] = ((SELECT auth.uid()))::text)
 --   OR EXISTS (SELECT 1 FROM public.profiles WHERE id = (SELECT auth.uid()) AND role = 'admin' AND is_active)));
 --   del_photos_select USING (is_admin() OR is_sales_rep() OR EXISTS (SELECT 1 FROM deliveries d
---   WHERE d.id = delivery_photos.delivery_id AND d.assigned_driver = (SELECT auth.uid()))).
+--   WHERE d.id = delivery_photos.delivery_id AND d.assigned_driver = (SELECT auth.uid())));
+--   "Authenticated users can insert own attachments" ON public.team_note_attachments WITH CHECK
+--   (uploaded_by = (SELECT auth.uid())).
 
 -- Lock first so nothing changes between the preflight and the policy changes. The timeout keeps a
 -- long-running storage transaction from parking every storage read behind this file: it fails fast
 -- and can be re-run.
 SET LOCAL lock_timeout = '5s';
-LOCK TABLE storage.objects, public.delivery_photos IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE storage.objects, public.delivery_photos, public.team_note_attachments IN SHARE ROW EXCLUSIVE MODE;
 
 -- Preflight: refuse to run against policies that drifted since they were read, or with a bucket
 -- already private (step 2 must not run before step 1).
@@ -76,7 +83,8 @@ BEGIN
     ('storage', 'objects', 'recv_photos_storage_delete', '3ec914b0679a6c38a12d17a61ade6d10'),
     ('storage', 'objects', 'Authenticated users can upload team note attachments', '337aa4234a96ed605abe30dad6c03540'),
     ('storage', 'objects', 'Users can delete own team note attachments', '52637a7ec8666536e0ea383b5c8d5f9f'),
-    ('public', 'delivery_photos', 'del_photos_select', '8ddd08ccd87e7e3ab2a24a4346aa3411')
+    ('public', 'delivery_photos', 'del_photos_select', '8ddd08ccd87e7e3ab2a24a4346aa3411'),
+    ('public', 'team_note_attachments', 'Authenticated users can insert own attachments', 'de7e8786d42d0ec62c9c4bb896ae700e')
   ) AS t(schema_name, table_name, policy_name, pin) LOOP
     SELECT md5(cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''))
       INTO v_md5
@@ -196,6 +204,18 @@ USING (
   )
 );
 
+-- team_note_attachments rows: a row names only a file in its uploader's own folder ----------------
+-- The app deletes the file a row names before the row, so an unbound file_url would let a staff
+-- member point a row at another uploader's photo and have an admin's delete remove that file. The
+-- uploader id is a uuid (no regex metacharacters); the file name matches what NotePhotoUpload writes
+-- (<epoch ms>_<n>.<ext>), and nothing may follow it, so the path the app reads is the path checked.
+ALTER POLICY "Authenticated users can insert own attachments" ON public.team_note_attachments
+WITH CHECK (
+  uploaded_by = (SELECT auth.uid())
+  AND file_url ~ ('^https?://[^/?#]+/storage/v1/object/public/team-note-attachments/team-note-attachments/'
+                  || uploaded_by::text || '/[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,10}$')
+);
+
 -- delivery_photos rows: the driver branch requires an active driver ------------------------------
 ALTER POLICY "del_photos_select" ON public.delivery_photos
 USING (
@@ -230,7 +250,8 @@ BEGIN
     ('storage', 'objects', 'recv_photos_storage_delete', '11e5f2acbee2538208d484c955df1aae'),
     ('storage', 'objects', 'Authenticated users can upload team note attachments', '2591f94e1b2b6a55126914a4868fecf1'),
     ('storage', 'objects', 'Users can delete own team note attachments', '23557263186d9cbcd1d27ae89d184e04'),
-    ('public', 'delivery_photos', 'del_photos_select', '106bd925a2a96c428f96a21261d44410')
+    ('public', 'delivery_photos', 'del_photos_select', '106bd925a2a96c428f96a21261d44410'),
+    ('public', 'team_note_attachments', 'Authenticated users can insert own attachments', '5c30ffc8fc80002944e161c929b63b7e')
   ) AS t(schema_name, table_name, policy_name, pin) LOOP
     SELECT md5(cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''))
       INTO v_md5

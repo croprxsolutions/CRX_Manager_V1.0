@@ -68,11 +68,12 @@ BEGIN
     RAISE EXCEPTION 'RUP_REGISTER_PREFLIGHT: get_rup_sales_register drifted from the 2026-10-14 body (md5 %)', md5(v_src);
   END IF;
 
-  SELECT qual INTO v_qual
+  -- The live policy of 2026-10-14 (admin or sales rep), or this file's own (a re-run).
+  SELECT md5(cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')) INTO v_qual
   FROM pg_policies
   WHERE schemaname = 'public' AND tablename = 'rup_sales_records' AND policyname = 'rup_sales_select';
-  IF v_qual IS NULL THEN
-    RAISE EXCEPTION 'RUP_REGISTER_PREFLIGHT: policy rup_sales_select is missing';
+  IF v_qual IS NULL OR v_qual NOT IN ('d382425513fedb4d62d8adba408cea49', '470addb13f16dc0be2235f1027a560db') THEN
+    RAISE EXCEPTION 'RUP_REGISTER_PREFLIGHT: policy rup_sales_select is missing or drifted from the 2026-10-14 definition (md5 %)', v_qual;
   END IF;
 
   -- The gate is only as strong as these two helpers: pin them to the live bodies read
@@ -183,6 +184,10 @@ BEGIN
     AND cmd = 'SELECT' AND permissive = 'PERMISSIVE' AND roles = '{authenticated}'::name[];
   IF v_qual IS DISTINCT FROM '( SELECT is_admin() AS is_admin)' THEN
     RAISE EXCEPTION 'RUP_REGISTER_VERIFY: rup_sales_select is not the admin-only SELECT policy: %', v_qual;
+  END IF;
+  -- A policy only binds while row-level security is on for the table.
+  IF NOT (SELECT c.relrowsecurity FROM pg_class c WHERE c.oid = 'public.rup_sales_records'::regclass) THEN
+    RAISE EXCEPTION 'RUP_REGISTER_VERIFY: row-level security is not enabled on rup_sales_records';
   END IF;
   -- Permissive policies add up: no other read policy may widen the table again.
   IF EXISTS (

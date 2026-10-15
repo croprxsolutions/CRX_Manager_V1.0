@@ -323,6 +323,17 @@ ROLLBACK;`,
   assert.notEqual(r.status, 0, 'the candidate applied over a drifted body');
   assert.match(r.stderr, /RUP_REGISTER_PREFLIGHT: get_rup_sales_register drifted/, `wrong refusal:\n${r.stderr}`);
   console.log('[prover] PREFLIGHT: a drifted body aborts the candidate before any change');
+
+  // A drifted read policy, and row-level security switched off: each must abort the file.
+  for (const [setup, refusal] of [
+    ["ALTER POLICY rup_sales_select ON public.rup_sales_records USING ((SELECT public.is_admin()) AND season > 2000);", /RUP_REGISTER_PREFLIGHT: policy rup_sales_select is missing or drifted/],
+    ['ALTER TABLE public.rup_sales_records DISABLE ROW LEVEL SECURITY;', /RUP_REGISTER_VERIFY: row-level security is not enabled/],
+  ]) {
+    const d = docker([...psqlArgs()], { input: `BEGIN;\n${setup}\n\\i /tmp/cand.sql\nROLLBACK;`, allowFailure: true });
+    assert.notEqual(d.status, 0, `the candidate applied over: ${setup}`);
+    assert.match(d.stderr, refusal, `wrong refusal for ${setup}:\n${d.stderr}`);
+  }
+  console.log('[prover] PREFLIGHT/VERIFY: a drifted read policy and disabled row-level security each abort the candidate');
 }
 
 function main() {

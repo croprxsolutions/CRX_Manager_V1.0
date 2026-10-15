@@ -35,6 +35,18 @@ export function storagePathFromPublicUrl(url: string | null | undefined, bucket:
   }
 }
 
+const TEAM_NOTE_PHOTO_ROLES: readonly string[] = ['admin', 'sales_rep', 'driver', 'applicator'];
+
+/**
+ * Whether this profile may view and add team-note photos: the same active-staff roles the
+ * team-note-attachments storage rules allow (migration 20261014230000). Anyone else, such as an
+ * entity_recipient service login or a deactivated account, would only ever be refused, so the
+ * screen hides the photos and the Add Photos button from them.
+ */
+export function canUseTeamNotePhotos(profile: { role?: string | null; is_active?: boolean | null } | null | undefined): boolean {
+  return !!profile?.is_active && TEAM_NOTE_PHOTO_ROLES.includes(profile.role ?? '');
+}
+
 /** A delivery photo's object path: storage_path, or the old public URL for a row without one. */
 export function deliveryPhotoPath(photo: { storage_path?: string | null; image_url?: string | null }): string | null {
   return photo.storage_path || storagePathFromPublicUrl(photo.image_url, 'delivery-photos');

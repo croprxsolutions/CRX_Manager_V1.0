@@ -49,3 +49,8 @@ bucket, the role helpers are hardened, and all 12 `delivery_photos.storage_path`
 object. Unit tests: `src/lib/privatePhotos.test.tsx` (path parsing, session download, blob release,
 abort on unmount, refusal placeholder, dropped-connection retry, back-online retry, viewer reuse,
 Escape inside a dialog) and `src/lib/deliveryCompletionEmail.test.ts` (no image or storage link).
+
+The team board shows a note's photos and its Add Photos button only to active admins, sales reps,
+drivers and applicators, the same set the team-note storage rules allow
+(`canUseTeamNotePhotos` in `src/lib/privatePhotos.ts`). An entity-recipient service login no
+longer sees an upload button that would always be refused.

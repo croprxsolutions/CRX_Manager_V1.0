@@ -15,7 +15,7 @@ vi.mock('./db', () => ({
 }));
 vi.mock('./sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 
-import { storagePathFromPublicUrl, deliveryPhotoPath } from './privatePhotos';
+import { storagePathFromPublicUrl, deliveryPhotoPath, canUseTeamNotePhotos } from './privatePhotos';
 import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto';
 import Modal from '../components/ui/Modal';
 
@@ -39,6 +39,17 @@ describe('storagePathFromPublicUrl', () => {
   it('prefers a delivery photo\'s storage_path and falls back to its old URL', () => {
     expect(deliveryPhotoPath({ storage_path: 'delivery-photos/d1/1.jpg', image_url: 'ignored' })).toBe('delivery-photos/d1/1.jpg');
     expect(deliveryPhotoPath({ storage_path: null, image_url: `${PUBLIC}/delivery-photos/delivery-photos/d1/2.jpg` })).toBe('delivery-photos/d1/2.jpg');
+  });
+});
+
+describe('canUseTeamNotePhotos', () => {
+  it('matches the team-note storage rules: active staff only', () => {
+    for (const role of ['admin', 'sales_rep', 'driver', 'applicator']) {
+      expect(canUseTeamNotePhotos({ role, is_active: true })).toBe(true);
+      expect(canUseTeamNotePhotos({ role, is_active: false })).toBe(false);
+    }
+    expect(canUseTeamNotePhotos({ role: 'entity_recipient', is_active: true })).toBe(false);
+    expect(canUseTeamNotePhotos(null)).toBe(false);
   });
 });
 

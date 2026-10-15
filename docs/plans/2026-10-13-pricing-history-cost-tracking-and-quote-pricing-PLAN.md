@@ -171,12 +171,18 @@ Small slices, each its own change. Order and scope are open for discussion.
      sent. The proof covers an added line, a removed line, a product
      swapped on an existing line, a duplicate added in the revision, and a quote sent with two differently
      priced lines of the same product followed by a quantity-only revision.
-   - Rewind breaks ID matching (Codex on PR #917, confirmed live 2026-10-14). An ordinary save keeps each
-     line's ID: `_save_quote_below_cost_impl_20260810` deletes and re-inserts the lines but writes the same
-     `id`. A rewind does not: `_restore_quote_version_owner_impl` deletes the quote's sections, which cascades
-     to the lines, and re-inserts them without `id`, so every restored line gets a new ID. Under ID matching,
-     rewinding to the sent version and then converting would be refused even though nothing changed. Restore
-     must keep the snapshot's line IDs or record an old-to-new ID map that Convert uses. Snapshots saved
+   - Line IDs are not stable today, so ID matching has a prerequisite (Codex on PRs #917 and #923, checked
+     2026-10-14).
+     - **Ordinary saves:** `_save_quote_below_cost_impl_20260810` keeps a line's `id` only when the save
+       sends it, but the quote screen's save payload (`src/pages/QuoteBuilder.tsx`, about lines 1742-1764)
+       sends neither `id` nor `client_key` and does not install the returned `item_ids`. So the screen's saves
+       do not keep line identity, and a quote with two lines of the same product at different recorded costs
+       is refused with `QUOTE_ITEM_AMBIGUOUS_COST`. Before ID matching, slice 2 must make the screen send each
+       line's ID and install the returned IDs, with a proof that a duplicate-product quote saves cleanly.
+     - **Rewinds:** `_restore_quote_version_owner_impl` deletes the quote's sections, which cascades to the
+       lines, and re-inserts them without `id`, so every restored line gets a new ID. Under ID matching,
+       rewinding to the sent version and then converting would be refused even though nothing changed.
+       Restore must keep the snapshot's line IDs or record an old-to-new ID map that Convert uses. Snapshots saved
      before slice 2 carry no line IDs (Codex on PR #923) and come in two kinds:
      - **Untrusted** (`restore_trusted_at` is null, from before the
        `20260826220000_quote_version_restore_trust_boundary` migration): the live restore refuses them with

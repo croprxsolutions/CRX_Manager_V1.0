@@ -3,9 +3,11 @@
 Documentation only. No code or database changed, and nothing is built.
 
 - **`docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`:** slice 2 records the
-  review note deferred from PR #917, confirmed against the live database. An ordinary quote save keeps each
-  line's ID, but a rewind (`_restore_quote_version_owner_impl`) re-creates every line with a new ID. So restore
-  must keep the snapshot's line IDs or record an old-to-new map, and the proof adds rewind-then-convert. It
+  review note deferred from PR #917, checked against the live database and the quote screen. Line IDs are
+  not stable today: the quote screen's saves send no line IDs, and a rewind
+  (`_restore_quote_version_owner_impl`) re-creates every line with a new ID. So slice 2 must first make saves
+  carry line IDs, restore must keep the snapshot's line IDs or record an old-to-new map, and the proof adds
+  rewind-then-convert. Untrusted older versions cannot be rewound at all and must be re-sent. It
   also states the price authority after a price change: a revision that changes any price must be re-sent
   before Convert, which then bills the newly sent prices.
 - **`docs/plans/2026-10-13-direction-and-goals.md`:** gap 2 now names the live problem that accepting a sent

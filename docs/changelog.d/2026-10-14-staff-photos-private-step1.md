@@ -11,9 +11,10 @@ to all three. The customer receipt email embedded the photo links.
 (the new screens download through its read policies), so the old app and the new one both work.
 - Migration `20261015170000_staff_photo_storage_access.sql`: storage read policies by role
   (delivery photos: admins, reps, the assigned active driver; receiving photos: admins and reps;
-  team-note photos: active staff, not commission-recipient profiles); uploads and deletes narrowed to
-  the same roles (a delivery photo's file is deleted by an admin only, like its record); the
-  team-note delete now reads the right folder; the delivery-photo row policy
+  team-note photos: active staff, not commission-recipient profiles); uploads narrowed to the same
+  roles (team-note uploads into the uploader's own folder); deletes narrower still: delivery and
+  receiving photo files by an active admin only (like a delivery photo's record), team-note files by
+  their active uploader or an active admin; the team-note delete now reads the right folder; the delivery-photo row policy
   requires an active driver; a team-note attachment row may name only a file in its uploader's own
   folder (Codex Sol on PR #929: once deletes take effect, an admin deleting a hand-made row that named
   another uploader's photo would have deleted that file). It locks with a 5-second timeout, pins every policy it changes before

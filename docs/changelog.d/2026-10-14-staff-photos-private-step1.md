@@ -45,7 +45,7 @@ small migration sets the three buckets private so old public links stop working.
 
 **Proof.** `scripts/smoke/prove-staff-photo-storage-access-real-schema.mjs` builds the production
 schema in a disposable database (storage modeled as live, including `storage.protect_delete`) and
-runs 50 cases (download, upload, delete, attachment rows) before and after, plus a drifted-policy refusal, a
+runs 50 cases before and after (44 role cases for download, upload and delete, plus 6 team-note attachment row checks), plus a drifted-policy refusal, a
 re-apply refusal and a mutation check; it also runs the new live chain
 `scripts/smoke/smoke-staff_photo_storage_access.sql` (spec `staff_photo_storage_access`), which fails
 before the migration and passes after. Live read-only checks 2026-10-14: every storage policy names a

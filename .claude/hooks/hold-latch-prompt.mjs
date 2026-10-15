@@ -35,10 +35,6 @@ if (/^\s*Automation: [^\n]*\n\s*Automation ID: /.test(rawPrompt)) emit();
 // turn the report is removed NON-strictly (closed or truncated) before the
 // usual stripping, so the report's own words cannot latch while a stop Mason
 // typed after it still does (Codex review, PR #874). It never clears a hold.
-// A hand-back with NO preamble (2026-10-15) deliberately stays on the normal
-// path: authoredByMason() strips a closed one and keeps a truncated one (the
-// fail-safe side), and hasAuthoredText() strips it strictly, so it cannot
-// clear a hold.
 const isPeerTurn = /^\s*Another Claude session sent a message:/.test(rawPrompt);
 
 // Strip the spans of THIS prompt that Mason did not author — peer-session

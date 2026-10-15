@@ -2913,7 +2913,7 @@ draft/unposted-invoice writer can still beat close's invoice-completeness scan.
 
 ## 0e. OPEN OWNER DECISIONS — application-service cost follow-ups
 
-- Sales reps can still recover internal application-service cost for invoices assigned to them from `invoice_items.cost_cents` plus acres or `invoices.total_cost_cents`. Drivers cannot. Narrowing sales-rep visibility on their own invoices is a product decision for Mason, not a grant-only correction.
+- Sales reps can still recover internal application-service cost for invoices assigned to them from `invoice_items.cost_cents` plus acres or `invoices.total_cost_cents`. Drivers cannot. **Owner decision resolved 2026-10-15:** cost and margin are admin-only, and reps are refused even on their own invoices and quotes (`docs/plans/2026-10-13-direction-and-goals.md`, Goal 1; `DECISION_LOG.md` 2026-10-15). The gap stays open until Goal 1's cost work ships, and it is a server-side change, not a grant-only one.
 - `admin_set_application_service_cost` was deliberately retained through the atomic-save rollout so browsers on the previous bundle would not fail between migration apply and deployment. Retire that compatibility RPC after the one-release transition window, with a forward-only migration and caller check.
 
 ---

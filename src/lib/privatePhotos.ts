@@ -5,7 +5,7 @@
  * blob: URL that exists only inside this tab (src/hooks/usePrivatePhoto.ts,
  * src/components/ui/PrivatePhoto.tsx).
  *
- * Deploy order: those downloads need the storage read policies of migration 20261014230000, so
+ * Deploy order: those downloads need the storage read policies of migration 20261015170000, so
  * the migration is applied before this code ships (ship.md applies it before the merge). The
  * buckets stay public until a later migration makes them private.
  *
@@ -39,7 +39,7 @@ const TEAM_NOTE_PHOTO_ROLES: readonly string[] = ['admin', 'sales_rep', 'driver'
 
 /**
  * Whether this profile may view and add team-note photos: the same active-staff roles the
- * team-note-attachments storage rules allow (migration 20261014230000). Anyone else, such as an
+ * team-note-attachments storage rules allow (migration 20261015170000). Anyone else, such as an
  * entity_recipient service login or a deactivated account, would only ever be refused, so the
  * screen hides the photos and the Add Photos button from them.
  */

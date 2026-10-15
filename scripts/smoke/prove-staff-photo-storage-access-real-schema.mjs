@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261014230000 candidate: staff photo storage access (Goal 1, step 1 of 2).
+ * Full-chain proof for the 20261015170000 candidate: staff photo storage access (Goal 1, step 1 of 2).
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
  * PostgreSQL 17 container (storage.objects stubbed as live has it: owned apart from the app roles,
@@ -39,7 +39,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261014230000_staff_photo_storage_access.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261015170000_staff_photo_storage_access.sql');
 // Live but not replayable here (customer-documents storage policies); it does not touch photo buckets.
 const PARKED = new Set(['20260914100700_customer_document_bytes_server_only.sql']);
 const LEDGER_ONLY = new Set([

@@ -9,7 +9,7 @@ to all three. The customer receipt email embedded the photo links.
 
 **Step 1 (this change).** The buckets stay public. The migration is applied before the app ships
 (the new screens download through its read policies), so the old app and the new one both work.
-- Migration `20261014230000_staff_photo_storage_access.sql`: storage read policies by role
+- Migration `20261015170000_staff_photo_storage_access.sql`: storage read policies by role
   (delivery photos: admins, reps, the assigned active driver; receiving photos: admins and reps;
   team-note photos: active staff, not commission-recipient profiles); uploads and deletes narrowed to
   the same roles (a delivery photo's file is deleted by an admin only, like its record); the

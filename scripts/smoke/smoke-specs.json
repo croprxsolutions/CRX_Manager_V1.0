@@ -227,7 +227,7 @@
         "staff_photo_storage_access",
         "delivery_photos"
       ],
-      "description": "REQUIRES 20261014230000. Staff photo Storage access by role, as live sessions (authenticated with real profile claims) and a signed-out visitor, through the storage.objects queries Storage runs for download, upload and delete: delivery photos for admins, reps and the assigned active driver only; receiving photos for admins and reps; team-note photos for active staff but not commission-recipient profiles; uploads scoped to the same rules (a driver cannot upload into another driver's delivery or another user's team-note folder); a rep cannot delete a receiving photo, an admin can; an uploader deletes their own team-note photo. Probe objects are catalog rows only and roll back.",
+      "description": "REQUIRES 20261015170000. Staff photo Storage access by role, as live sessions (authenticated with real profile claims) and a signed-out visitor, through the storage.objects queries Storage runs for download, upload and delete: delivery photos for admins, reps and the assigned active driver only; receiving photos for admins and reps; team-note photos for active staff but not commission-recipient profiles; uploads scoped to the same rules (a driver cannot upload into another driver's delivery or another user's team-note folder); a rep cannot delete a receiving photo, an admin can; an uploader deletes their own team-note photo. Probe objects are catalog rows only and roll back.",
       "area": [
         "security"
       ]
@@ -242,6 +242,22 @@
         "create_split_invoices_from_order",
         "complete_delivery",
         "_complete_delivery_authorized_impl"
+      ],
+      "area": [
+        "billing",
+        "lifecycle",
+        "security"
+      ]
+    },
+    "orders_blend_tickets_rep_own_name": {
+      "chain": "smoke-orders-blend-tickets-rep-own-name.sql",
+      "container_only": true,
+      "container_prover": "prove-orders-blend-tickets-rep-own-name-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-orders-blend-tickets-rep-own-name-real-schema.mjs, never through run-smoke.mjs against the live database: the chain creates orders and invoices, which draw customer-visible order and invoice numbers from non-transactional sequences that a rollback does not return. 20261015130000: a sales rep records only themselves (or no one) as salesperson on orders and blend tickets and bills or converts a blend ticket only when it is theirs or unassigned; admins are unrestricted. Trigger guard_rep_salesman_20261015 refuses, with SALESMAN_SCOPE_DENIED and nothing written, a rep inserting an order or blend ticket naming someone else (as the owner and as the authenticated role through RLS), replacing or clearing another rep's name on an order or ticket (even with their own), clearing their own, or filling a blank with someone else's name; a rep inserts under their own name or none, fills a blank with their own, and updates that leave the salesperson alone (even with the column in the SET list) work on another rep's rows. create_invoice_from_blend_ticket refuses a rep billing another rep's ticket before any invoice is written, and bills the rep's own (replays exactly) and an unassigned ticket; create_order_from_blend_ticket refuses a rep converting another rep's ticket and converts an unassigned one. An admin bills and converts another rep's tickets under that rep's name and reassigns orders and tickets. Fail-first: step 1 fails before the guard exists. Uses an active admin and two active sales reps; prices its own [E2E] product through the governed pricing RPCs; terminal rollback.",
+      "covers": [
+        "create_invoice_from_blend_ticket",
+        "create_order_from_blend_ticket",
+        "guard_rep_salesman_20261015"
       ],
       "area": [
         "billing",

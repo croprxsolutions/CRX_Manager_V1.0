@@ -84,6 +84,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 ## Features
 
 ### Daily Command Centers
+
 - **Today (Office Cockpit)** — One exception screen for the office: unbilled jobs, jobs needing dispatch, bookings needing attention, invoices ready to post, deliveries not yet invoiced, watchdog flags, the next 7 days of jobs, expiring licenses, overdue field-application AR, and inventory shortfalls
 - **To-Ship** — What needs to go out, by product and by customer, alongside low stock, overdue or unassigned deliveries, and inbound purchase orders, with one-click Schedule and Reorder
 - **Watchdog** — Standing list of flagged jobs and invoices, with one-tap dismiss and an on-demand re-check
@@ -91,6 +92,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Getting Started** — Walkthrough of the Quote → Order → Deliver cycle for office staff, and of the delivery steps for drivers
 
 ### Customers & Sales
+
 - **Customers** — Customer 360 profile: addresses, farm fields, crops, credit limit, pricing tier, finance-charge settings, season summary, purchase history, and stored customer documents
 - **Call Lists (CRM)** — Seasonal worklists: prepay prospects, customers with no recent contact, stale quotes, lapsed products, and unassigned accounts, with a call-prep summary and call logging on each row
 - **Products** — Catalog with 3-tier pricing, EPA registration and restricted-use flags, container sizes, unit conversions, application rates, and cost history
@@ -102,6 +104,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Brand vs Generic** — Map branded products to their generic equivalents by active ingredient
 
 ### Inventory, Purchasing & Delivery
+
 - **Inventory** — Live stock levels, vendor-grouped reorder alerts, holds, batch adjustments, a full transaction ledger, cost valuation, and cycle counts with variance tracking
 - **Purchase Orders** — Vendor POs from the catalog, with a two-step receive and receiving history
 - **Receiving** — One screen with three tabs: a hub of open PO lines across all vendors, a Quick Receive wizard that matches products to the oldest open POs, and a searchable receiving log
@@ -111,6 +114,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Returns** — Return requests through approval, receipt, restock, and credit memo
 
 ### Field Application
+
 - **Field Mapping** — Mapbox satellite maps, draw-your-own boundaries (including multi-part fields), one-click USDA field boundaries, shapefile/KML/GeoJSON import, legal-description (PLSS) lookup, and obstacle markers
 - **Field Dashboard** — Per-field history: season stats, every application with weather, billing splits, and FSA details
 - **Jobs** — Spray-job editor with a map-based field picker, route-order numbers on the job's field map, chemicals, vehicle and applicator, customer-supplied chemicals, application fees, and transfer to invoice
@@ -121,6 +125,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Vehicles & Application Services** — Ground and air equipment, and application-fee pricing with per-customer rate overrides
 
 ### Billing & Money
+
 - **Chemical Invoicing** — Invoices from orders and deliveries, payment-terms picker, batch print, posting rights and a Ready-to-Post queue, unpost, void, and write-off
 - **Field-Application Invoices** — As-applied billing with tabs for unbilled work, drafts, posted, and a per-customer summary; quantities and customer shares are figured from the job
 - **Split Billing** — Divide a spray job or chemical order between the co-owners of a field, each on their own invoice, rounded to the exact cent
@@ -133,12 +138,14 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Financial Dashboard** — AR aging, revenue, payments, prepay balances, and finance charges at a glance
 
 ### Compliance & Data Quality
+
 - **Compliance** — Applicator license tracking with expiry alerts, the restricted-use product list, and an admin-only RUP Sales Register built from invoices, with CSV export
 - **Lot Trace** — Enter a lot number and see every application that used it: field, date, customer, applicator, record, and invoice, for recalls and audits
 - **Label Data** — EPA registration lookup, a label data-quality screen that flags missing EPA numbers with inline fixes, and a review queue where no label value reaches a product without a person accepting it
 - **Integrity** — Admin data-integrity report (order totals, inventory ledger, payments, commissions, delivery-to-invoice parity, and more) and cleanup tools for the problems it finds
 
 ### Reports, Team & Mobile
+
 - **Reports** — Profitability, field-level profitability (margin per acre), application logbook, financial and operational reports, year-end summaries, and sales and chemical history by product, customer, month, or sales rep, with a customer view that hides cost; CSV and PDF export
 - **Team Board** — Notes, to-dos, and announcements linked to customers, orders, deliveries, jobs, POs, and quotes, with photos, comments, today's deliveries, and yesterday's recap, updated in real time
 - **Notifications** — Real-time alerts for low stock, expiring quotes, order status, dispatch, and more

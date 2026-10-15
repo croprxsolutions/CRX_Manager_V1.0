@@ -177,6 +177,7 @@ describe('LoaderWorksheetsPanel', () => {
     fireEvent.change(acresInputs[3], { target: { value: '40' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save load acres' }));
 
+    expect(await screen.findByText('Load acres must total 344.67 acres.')).toBeInTheDocument();
     expect(mockFrom).toHaveBeenCalledTimes(1);
   });
 

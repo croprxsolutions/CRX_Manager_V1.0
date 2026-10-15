@@ -26,4 +26,5 @@ re-run. Each now has a found cause and a fix that keeps what the test checks:
   wait.
 
 Each fix was checked by temporarily breaking the app behavior its test guards and confirming the
-test then fails. The pattern is recorded in `docs/reference/gotchas.md` › React & UI.
+test then fails. The four changed files then passed repeated full runs three at a time on a loaded
+machine, and the loader file passed 20 runs under `--coverage` (CI-style instrumentation). The pattern is recorded in `docs/reference/gotchas.md` › React & UI.

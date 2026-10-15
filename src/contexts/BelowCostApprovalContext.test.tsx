@@ -77,6 +77,7 @@ describe('BelowCostApprovalProvider', () => {
     fireEvent.change(screen.getByLabelText('Approval reason (required)'), {
       target: { value: '  approved competitor match  ' },
     });
+    expect(confirm).toBeEnabled();
     fireEvent.click(confirm);
 
     await waitFor(() => expect(screen.getByText('saved')).toBeInTheDocument());

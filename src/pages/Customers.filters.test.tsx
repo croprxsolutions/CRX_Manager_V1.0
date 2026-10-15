@@ -197,7 +197,7 @@ describe('Customers list filters', () => {
   // and get a timeout sized for the render instead of the 5s default.
   const FULL_PAGE_TIMEOUT_MS = 20_000;
   const waitForFullPage = () =>
-    waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(1000));
+    waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(1000), { timeout: FULL_PAGE_TIMEOUT_MS });
 
   it('warns instead of silently truncating when there are more customers than the cap', async () => {
     const capped = Array.from({ length: 1000 }, (_, i) => customer({ id: `c-${i}`, farm_name: `Farm ${i}` }));

@@ -2824,7 +2824,9 @@ describe('QuoteBuilder', () => {
     // that effect can still be queued when the box first appears, and a reason
     // typed before it runs is wiped — Approve stays disabled and the click sends
     // nothing (CI, PR #930). The dialog moves focus inside itself only after that
-    // effect has run, so type once it has.
+    // effect has run (Modal focuses from a frame its own open effect schedules, and
+    // nothing in the dialog uses autoFocus), so type once it has. The enabled check
+    // turns any wipe this misses into a plain failure rather than a short count.
     await waitFor(() => expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement));
     fireEvent.change(reasonBox, { target: { value: 'matched a competitor quote' } });
     const approve = screen.getByRole('button', { name: /Approve and Retry/i });

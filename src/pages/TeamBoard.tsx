@@ -1461,7 +1461,7 @@ export default function TeamBoard() {
             <TagsManager noteId={selectedNote.id} onTagsChange={fetchNotes} />
 
             {canUseNotePhotos && (
-              <NoteAttachments noteId={selectedNote.id} canDelete={canEdit(selectedNote)} refreshKey={attachmentRefresh} />
+              <NoteAttachments noteId={selectedNote.id} refreshKey={attachmentRefresh} />
             )}
             {canUseNotePhotos && !selectedNote.is_completed && (
               <NotePhotoUpload noteId={selectedNote.id} onUploadComplete={() => setAttachmentRefresh(prev => prev + 1)} />

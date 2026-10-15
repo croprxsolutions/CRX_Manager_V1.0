@@ -11,15 +11,14 @@ import type { TeamNoteAttachment } from '../../types';
 
 interface NoteAttachmentsProps {
   noteId: string;
-  canDelete: boolean;
   refreshKey?: number;
 }
 
-export default function NoteAttachments({ noteId, canDelete, refreshKey }: NoteAttachmentsProps) {
+export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
   // The photo file and its row may be deleted only by their uploader or an admin (storage and
-  // table policies), so a note owner sees Delete only on their own photos.
+  // table policies), so Delete shows on exactly those photos, whoever owns the note.
   const isAdmin = profile?.role === 'admin' && profile.is_active;
   const [attachments, setAttachments] = useState<TeamNoteAttachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,7 +109,7 @@ export default function NoteAttachments({ noteId, canDelete, refreshKey }: NoteA
             </div>
           )}
 
-          {canDelete && (isAdmin || attachment.uploaded_by === profile?.id) && (
+          {(isAdmin || attachment.uploaded_by === profile?.id) && (
             <button
               type="button"
               onClick={(e) => {

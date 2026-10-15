@@ -48,6 +48,13 @@
 --   hunks above. No rows change. No GRANT or REVOKE: CREATE OR REPLACE keeps each OID, owner and exact
 --   ACL, and the postflight proves it. Remaining gap (KNOWN_ISSUES.md): blend tickets.
 --
+-- OVERLOADS: each re-emitted function has exactly one overload, so CREATE OR REPLACE replaces the
+--   live OID (read-only on live, 2026-10-15 06:5x UTC: create_invoice_from_order(uuid,uuid,text,text),
+--   create_split_invoices_from_order(uuid,uuid,text,text) and _complete_delivery_authorized_impl(uuid,
+--   text,uuid,jsonb,text,text,text,timestamptz), one row each). The 2026-02-13 three-argument
+--   create_invoice_from_order(uuid, uuid, text) was dropped by 20260311200000_wave2_audit_fixes.sql:1164.
+--   The preflight and postflight refuse any second overload of the three names.
+--
 -- ORDERING: strict. Apply after every older pending migration.
 
 SET LOCAL lock_timeout = '5s';

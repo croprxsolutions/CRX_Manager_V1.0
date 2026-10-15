@@ -183,7 +183,9 @@ function chain(text) {
   stageText('chain.sql', text);
   const r = docker([...psqlArgs()], { input: 'BEGIN;\n\\i /tmp/chain.sql\nROLLBACK;\n', allowFailure: true });
   const out = `${r.stdout}\n${r.stderr}`;
-  const pass = /SMOKE_PASS_ROLLBACK/.test(out);
+  // ON_ERROR_STOP: the run's one error must be the chain's own terminal marker, nothing else.
+  const errors = out.split(/\r?\n/).filter((l) => /\bERROR:/.test(l));
+  const pass = r.status !== 0 && errors.length === 1 && /ERROR:\s+SMOKE_PASS_ROLLBACK\s*$/.test(errors[0]);
   const fail = /SMOKE_FAIL[^\n]*/.exec(out)?.[0] ?? (pass ? '' : (/ERROR:[^\n]*/.exec(out)?.[0] ?? out.trim().slice(-400)));
   return { pass, fail, out };
 }

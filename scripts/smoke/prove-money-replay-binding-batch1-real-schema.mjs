@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261015190000 candidate: nine money RPCs replay a stored idempotency
+ * Full-chain proof for the 20261015210000 candidate: nine money RPCs replay a stored idempotency
  * receipt only for the same person and the exact same request (batch 1 of the replay-binding fix,
  * KNOWN_ISSUES.md; follow-up of PR #933).
  *
@@ -35,7 +35,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261015190000_bind_money_replay_receipts_batch1.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261015210000_bind_money_replay_receipts_batch1.sql');
 // Live but not replayable here (storage.objects policies); it must not touch what this proves.
 const PARKED = new Set(['20260914100700_customer_document_bytes_server_only.sql']);
 // PR #889's data migrations rewrite live rows this disposable database does not have; they are
@@ -248,11 +248,43 @@ function documentNumberSequences() {
   }).stdout.trim().split(/\r?\n/).filter(Boolean));
 }
 
+/** A deactivated admin asks reverse_write_off to reverse a write-off that does not exist. */
+function deactivatedAdminReverse(prefix = '') {
+  const r = docker([...psqlArgs()], {
+    input: `BEGIN;
+${prefix}
+SELECT set_config('request.jwt.claims', json_build_object('sub', '${U.ADMIN}', 'role', 'authenticated')::text, true);
+SELECT set_config('request.jwt.claim.sub', '${U.ADMIN}', true);
+UPDATE public.profiles SET is_active = false WHERE id = '${U.ADMIN_B}';
+SELECT set_config('request.jwt.claims', json_build_object('sub', '${U.ADMIN_B}', 'role', 'authenticated')::text, true);
+SELECT set_config('request.jwt.claim.sub', '${U.ADMIN_B}', true);
+SELECT public.reverse_write_off(gen_random_uuid(), 'prover reason', NULL, NULL);
+ROLLBACK;`,
+    allowFailure: true,
+  });
+  return /ERROR:[^\n]*/.exec(`${r.stdout}\n${r.stderr}`)?.[0] ?? 'no error';
+}
+/** Insert an unbound receipt for a wrapped operation and force the deferred guard to run now. */
+function unboundReceipt(prefix = '') {
+  const r = docker([...psqlArgs()], {
+    input: `BEGIN;
+${prefix}
+INSERT INTO public.idempotency_keys (idempotency_key, operation, result)
+VALUES ('prover-unbound-' || gen_random_uuid(), 'apply_write_off', '{"id":"x"}'::jsonb);
+SET CONSTRAINTS ALL IMMEDIATE;
+SELECT 'UNBOUND_RECEIPT_ACCEPTED';
+ROLLBACK;`,
+    allowFailure: true,
+  });
+  const out = `${r.stdout}\n${r.stderr}`;
+  return /UNBOUND_RECEIPT_ACCEPTED/.test(out) ? 'accepted' : (/ERROR:[^\n]*/.exec(out)?.[0] ?? out.trim().slice(-300));
+}
+
 function candidateBody(fn) {
   const sql = lf(CANDIDATE);
   const start = sql.search(new RegExp(`CREATE FUNCTION public\\.${fn}\\(`));
   assert.ok(start >= 0, `${fn} is not created by the candidate`);
-  const tag = /AS (\$[a-z]*\$)/.exec(sql.slice(start))[1];
+  const tag = /AS (\$[a-z_]*\$)/.exec(sql.slice(start))[1];
   const a = sql.indexOf(`AS ${tag}`, start) + `AS ${tag}`.length;
   const header = sql.slice(start, a).replace(/^CREATE FUNCTION/, 'CREATE OR REPLACE FUNCTION');
   return { header, body: sql.slice(a, sql.indexOf(`${tag};`, a)), tag };
@@ -274,6 +306,11 @@ function main() {
   assert.match(before.fail, /SMOKE_FAIL: void_payment replayed another payment's receipt as success for payment 2/, `BEFORE: wrong first failure: ${before.fail}`);
   console.log(`[prover] BEFORE: the chain fails first at step 1: ${before.fail}`);
   const passedBefore = covering('BEFORE');
+  // reverse_write_off's own role test is NULL for a deactivated admin, so today it lets the call
+  // through to the write-off lookup.
+  const beforeGate = deactivatedAdminReverse();
+  assert.match(beforeGate, /Write-off not found/, `BEFORE: a deactivated admin was stopped before the lookup: ${beforeGate}`);
+  console.log(`[prover] BEFORE: a deactivated admin gets past reverse_write_off's role test: ${beforeGate}`);
 
   // 2. AUTOCOMMIT and PREFLIGHT.
   stageText('candidate.sql', lf(CANDIDATE));
@@ -291,7 +328,17 @@ ROLLBACK;`,
   assert.notEqual(drift.status, 0, 'PREFLIGHT: the candidate applied over a drifted body');
   assert.match(drift.stderr, /PREFLIGHT_MONEY_REPLAY_BODY_DRIFT: [^\n]*void_payment/, `PREFLIGHT: wrong refusal:\n${drift.stderr}`);
   assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname LIKE '%_replay_impl_20261015' OR proname LIKE '%replay%20261015';"), '0', 'a refused apply left a change behind');
-  console.log('[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, or over a drifted body, the candidate stops before any change');
+  // An unexpired receipt for one of the nine operations (an old body's, unbound) blocks the apply.
+  const pending = docker([...psqlArgs()], {
+    input: `BEGIN;
+INSERT INTO public.idempotency_keys (idempotency_key, operation, result) VALUES ('prover-pending-receipt', 'void_payment', to_jsonb(gen_random_uuid()));
+\\i /tmp/candidate.sql
+ROLLBACK;`,
+    allowFailure: true,
+  });
+  assert.notEqual(pending.status, 0, 'PREFLIGHT: the candidate applied with an unexpired receipt for a wrapped operation');
+  assert.match(pending.stderr, /PREFLIGHT_UNEXPIRED_RECEIPTS/, `PREFLIGHT: wrong refusal for a pending receipt:\n${pending.stderr}`);
+  console.log('[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, over a drifted body, or with an unexpired receipt for a wrapped operation, the candidate stops before any change');
 
   // 3. APPLY.
   const a = apply('candidate.sql');
@@ -310,6 +357,17 @@ ROLLBACK;`,
   assert.deepEqual(movedDoc, [], `AFTER: the chain consumed a document-number sequence value, so it is not safe to run against live: ${movedDoc.join(', ')}`);
   console.log(`[prover] AFTER: the chain passes, rolls back, and moves no document-number sequence (${docNumbers.size} checked; surrogate id sequences moved: ${moved.join(', ') || 'none'})`);
   covering('AFTER', passedBefore);
+  const afterGate = deactivatedAdminReverse();
+  assert.match(afterGate, /Admin access required to reverse write-offs/, `AFTER: a deactivated admin was not refused: ${afterGate}`);
+  const guard = unboundReceipt();
+  assert.match(guard, /REPLAY_RECEIPT_UNBOUND/, `AFTER: an unbound receipt for a wrapped operation was not refused at commit: ${guard}`);
+  const autocommit = docker([...psqlArgs()], {
+    input: "INSERT INTO public.idempotency_keys (idempotency_key, operation, result) VALUES ('prover-unbound-autocommit', 'apply_write_off', '{\"id\":\"x\"}'::jsonb);",
+    allowFailure: true,
+  });
+  assert.match(autocommit.stderr, /REPLAY_RECEIPT_UNBOUND/, `AFTER: an autocommit unbound receipt was not refused:\n${autocommit.stderr}`);
+  assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = 'prover-unbound-autocommit';"), '0', 'AFTER: the refused unbound receipt was committed');
+  console.log('[prover] AFTER: a deactivated admin is refused by reverse_write_off, and an unbound receipt for a wrapped operation never commits');
 
   // 5. RE-APPLY.
   const again = apply('candidate.sql');
@@ -360,6 +418,16 @@ ROLLBACK;`,
     assert.match(r.fail, expected, `MUTATION ${label}: wrong failure: ${r.fail}`);
     console.log(`[prover] MUTATION: without the ${label} hunk the chain fails: ${r.fail}`);
   }
+
+  // The active-admin gate and the commit-time guard, each removed in turn.
+  const noGate = deactivatedAdminReverse(mutate('reverse_write_off',
+    "  IF NOT public.is_admin() THEN\n    RAISE EXCEPTION 'Admin access required to reverse write-offs';\n  END IF;\n", '', 'reverse_write_off admin gate'));
+  assert.match(noGate, /Write-off not found/, `MUTATION reverse_write_off admin gate: a deactivated admin was still refused: ${noGate}`);
+  console.log(`[prover] MUTATION: without the reverse_write_off admin gate a deactivated admin gets through: ${noGate}`);
+  const noGuard = unboundReceipt(mutate('_require_bound_replay_receipt_20261015',
+    "    RAISE EXCEPTION 'REPLAY_RECEIPT_UNBOUND'\n", "    RAISE NOTICE 'REPLAY_RECEIPT_UNBOUND'\n", 'commit-time guard'));
+  assert.equal(noGuard, 'accepted', `MUTATION commit-time guard: the unbound receipt was still refused: ${noGuard}`);
+  console.log('[prover] MUTATION: without the commit-time guard an unbound receipt is accepted');
 
   console.log('MONEY_REPLAY_BINDING_BATCH1_PROOF_PASS');
 }

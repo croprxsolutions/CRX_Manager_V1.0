@@ -18,19 +18,40 @@
 --   with the identical signature, defaults, return type, owner, search_path and grants takes its
 --   place. With a key, the wrapper
 --     1. requires auth.uid() (AUTH_REQUIRED) and refuses a p_performed_by naming someone else
---        (ACTOR_MISMATCH), exactly as every renamed body already does first;
+--        (ACTOR_MISMATCH), the same tests (and codes) every renamed body makes;
 --     2. computes a SHA-256 fingerprint of the actor, the target id(s) and every editable argument;
---     3. calls check_idempotency_intent(key, op, auth.uid(), fingerprint) under the same per-key
---        advisory lock the bodies use. No receipt: run the body. Exact actor + intent match: run the
---        body, which replays its own stored answer exactly as before. Anything else is refused with
---        IDEMPOTENCY_ACTOR_MISMATCH or IDEMPOTENCY_INTENT_MISMATCH, which the app already maps to
---        plain English (src/lib/idempotency.ts getIdempotencyBindingRejection);
+--     3. calls check_idempotency_intent(key, op, auth.uid(), fingerprint), which takes the per-key
+--        advisory lock (crx:idempotency:<key>) that check_idempotency and the receipt insert trigger
+--        also take; void_payment, delete/edit_prepay_credit and reverse_write_off read receipts
+--        without that lock today, so for them this is new serialization. No receipt: run the body.
+--        Exact actor + intent match: run the body, which replays its own stored answer exactly as
+--        before. Anything else is refused with IDEMPOTENCY_ACTOR_MISMATCH or
+--        IDEMPOTENCY_INTENT_MISMATCH, which the app maps to plain English (src/lib/idempotency.ts
+--        getIdempotencyBindingRejection, src/lib/errorSanitizer.ts);
 --     4. after a fresh run, stamps request_actor_id (auth.uid()) and request_fingerprint onto the
 --        receipt the body just wrote, inside the same transaction, and refuses (rolls the whole call
---        back) if the body wrote none, so no unbound receipt for these nine operations can ever be
---        committed again.
+--        back) if the body wrote none.
 --   Without a key the wrapper calls the body directly, as today (apply_prepay_to_invoice is called
 --   that way, by name, from _batch_apply_prepayments_impl).
+--
+--   Why a body's own key-only lookup cannot return ANOTHER operation's receipt on an exact match:
+--   idempotency_keys has a UNIQUE index on idempotency_key (idempotency_keys_idempotency_key_key,
+--   read live 2026-10-15), so a key has at most one row, and check_idempotency_intent has already
+--   refused it (IDEMPOTENCY_CROSS_OP_KEY_REUSE) unless that row is this operation's, under the lock.
+--
+--   Three more pieces (review round 1, 2026-10-15):
+--   * ACTIVE-ADMIN GATE on reverse_write_off, delete_prepay_credit and edit_prepay_credit, on every
+--     path: after the auth and actor tests, NOT is_admin() raises the body's own message.
+--     reverse_write_off's body tests (SELECT role ... AND is_active) != 'admin', which is NULL for a
+--     deactivated or missing profile and lets the call through; delete/edit replay a receipt before
+--     their role test. Every admin who can call them today still can; a deactivated admin cannot.
+--   * COMMIT-TIME GUARD: deferred constraint trigger require_bound_replay_receipt_20261015 refuses
+--     (REPLAY_RECEIPT_UNBOUND) any receipt for the nine operations still unbound at commit, so an
+--     old body running across the apply, or any other writer, cannot commit one. With the
+--     preflight's refusal of unexpired receipts (under an ACCESS EXCLUSIVE lock on idempotency_keys
+--     held to commit), no legacy receipt exists for the screen to trip over after the apply.
+--   * _batch_apply_prepayments_impl loses its leftover service_role EXECUTE (it has no
+--     authorization of its own and its key-only replay sits below the wrapper).
 --
 -- WHAT DOES NOT CHANGE: no money logic is retyped (the bodies are renamed, pinned by md5 below);
 --   no table, row, policy or receipt changes; every legitimate call (first call, exact retry, no
@@ -40,14 +61,16 @@
 --
 -- RECEIPT DISCLOSURE: check_idempotency_intent puts the stored result in the error DETAIL only on an
 --   INTENT mismatch by the SAME actor (who already received that result), or for a legacy receipt
---   with neither binding column. Read live 2026-10-15: there is no receipt at all for any of the nine
---   operations, and step 4 means none can be written unbound again, so the legacy path has nothing
---   to disclose. A receipt written by an old body in flight during apply is refused, never replayed.
+--   with neither binding column. The preflight refuses to apply while any unexpired receipt exists
+--   for the nine operations (none existed when read live on 2026-10-15) and the commit-time guard
+--   keeps an unbound one from ever committing, so the legacy path has nothing to disclose.
 --
--- NOT IN THIS BATCH: the other ~65 unbound functions (batches 2-4 in KNOWN_ISSUES.md), and the two
---   NULL-role holes found in passing (reverse_write_off's role test lets a deactivated admin
---   through); the renamed reverse_write_off body is unchanged, hole included, on purpose: that is a
---   permissions change with its own review.
+-- ACCESS: this file narrows access, so it applies only on Mason's owner approval
+--   (scripts/owner-approve-migration.mjs): the renamed bodies and _batch_apply_prepayments_impl lose
+--   EXECUTE, and three wrappers add an active-admin test. It widens nothing.
+--
+-- NOT IN THIS BATCH: the other ~65 unbound functions (batches 2-4 in KNOWN_ISSUES.md), and
+--   mark_inventory_row_verified's NULL-role test (found in passing; not one of the nine).
 --
 -- OVERLOADS: each of the nine has exactly one overload (read-only on live 2026-10-15); the preflight
 --   refuses a second one and the postflight proves exactly one wrapper and one body per name.
@@ -76,6 +99,7 @@
 -- caller-analysis: create_prepay_check_splits :: src/components/prepay/PrepaymentManagerPanel.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: batch_apply_prepayments :: src/components/prepay/PrepayWorkspacePanel.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: batch_void_invoices :: src/pages/Invoices.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
+-- caller-analysis: _batch_apply_prepayments_impl :: no UI or Edge Function caller; its only caller is the renamed batch_apply_prepayments body, a postgres-owned definer function, which keeps calling it
 
 SET LOCAL lock_timeout = '5s';
 
@@ -150,10 +174,43 @@ BEGIN
   IF to_regprocedure('extensions.digest(bytea,text)') IS NULL OR to_regprocedure('auth.uid()') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_DEPENDENCY_MISSING: extensions.digest(bytea, text) and auth.uid() are required';
   END IF;
+  -- The active-admin gate the three gated wrappers add (reviewed live body, 2026-10-15).
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'is_admin') <> 1
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = 'is_admin'
+          AND pg_get_function_identity_arguments(p.oid) = ''
+          AND md5(replace(p.prosrc, chr(13), '')) = 'f76bf61116c3bd52bd9c6ea125079b73') THEN
+    RAISE EXCEPTION 'PREFLIGHT_IS_ADMIN_DRIFT: is_admin() differs from its reviewed body';
+  END IF;
+  -- The private impl batch_apply_prepayments delegates to: exactly the live ACL this file narrows.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname = '_batch_apply_prepayments_impl'
+       AND pg_get_function_identity_arguments(p.oid) = 'p_allocations jsonb, p_performed_by uuid, p_idempotency_key text'
+       AND md5(replace(p.prosrc, chr(13), '')) = 'e4c54a1cc435b2e14d59bea571eb18b6'
+       AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                   FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+           IS NOT DISTINCT FROM ARRAY['postgres', 'service_role']::text[]) THEN
+    RAISE EXCEPTION 'PREFLIGHT_BATCH_APPLY_IMPL_DRIFT: _batch_apply_prepayments_impl differs from its reviewed body or ACL';
+  END IF;
+  -- Cutover: a receipt written by an old body carries no binding, and the intent check refuses it
+  -- (the screen then retires the key, so a lost-response retry could run the action again). So
+  -- apply only while no unexpired receipt exists for the nine operations; this transaction's
+  -- ACCESS EXCLUSIVE lock below keeps a new one from appearing before the guard trigger exists.
+  LOCK TABLE public.idempotency_keys IN ACCESS EXCLUSIVE MODE;
+  IF EXISTS (SELECT 1 FROM public.idempotency_keys k
+              WHERE k.operation IN ('void_payment', 'delete_prepay_credit', 'edit_prepay_credit', 'apply_write_off', 'reverse_write_off', 'apply_prepay_to_invoice', 'create_prepay_check_splits', 'batch_apply_prepayments', 'batch_void_invoices')
+                AND (k.expires_at IS NULL OR k.expires_at >= now())) THEN
+    RAISE EXCEPTION 'PREFLIGHT_UNEXPIRED_RECEIPTS: an unexpired receipt exists for one of the nine operations; wait for it to expire (24 hours) and apply again';
+  END IF;
   -- Not re-runnable: the helpers must not exist yet.
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
               WHERE n.nspname = 'public'
-                AND p.proname IN ('_replay_fingerprint_20261015', '_bind_replay_receipt_20261015')) THEN
+                AND p.proname IN ('_replay_fingerprint_20261015', '_bind_replay_receipt_20261015',
+                                  '_require_bound_replay_receipt_20261015'))
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'require_bound_replay_receipt_20261015') THEN
     RAISE EXCEPTION 'PREFLIGHT_HELPERS_EXIST: the batch-1 replay-binding helpers are already installed';
   END IF;
 END
@@ -210,6 +267,36 @@ BEGIN
 END;
 $bind$;
 REVOKE ALL ON FUNCTION public._bind_replay_receipt_20261015(text, text, text) FROM PUBLIC, anon, authenticated, service_role;
+
+-- Commit-time guard: a receipt for one of the nine operations must be bound (actor and fingerprint)
+-- by the time its transaction commits. The wrappers insert through the renamed body and bind right
+-- after, so the check is DEFERRED to commit. It refuses an old body still running across the apply,
+-- and any other writer, from committing an unbound receipt. A receipt deleted before commit (the
+-- expiry clean-up) is ignored. Not SECURITY DEFINER: every writer of idempotency_keys is a definer
+-- function owned by postgres, so it runs with that owner's rights and lends none.
+CREATE FUNCTION public._require_bound_replay_receipt_20261015()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $require_bound$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.idempotency_keys k
+              WHERE k.id = NEW.id
+                AND (k.request_actor_id IS NULL OR k.request_fingerprint IS NULL)) THEN
+    RAISE EXCEPTION 'REPLAY_RECEIPT_UNBOUND'
+      USING DETAIL = format('a %s receipt was not bound to its caller and request before commit', NEW.operation);
+  END IF;
+  RETURN NULL;
+END;
+$require_bound$;
+REVOKE ALL ON FUNCTION public._require_bound_replay_receipt_20261015() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE CONSTRAINT TRIGGER require_bound_replay_receipt_20261015
+  AFTER INSERT ON public.idempotency_keys
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW
+  WHEN (NEW.operation IN ('void_payment', 'delete_prepay_credit', 'edit_prepay_credit', 'apply_write_off', 'reverse_write_off', 'apply_prepay_to_invoice', 'create_prepay_check_splits', 'batch_apply_prepayments', 'batch_void_invoices'))
+  EXECUTE FUNCTION public._require_bound_replay_receipt_20261015();
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. void_payment
@@ -284,12 +371,16 @@ DECLARE
   v_replay jsonb;
   v_result jsonb;
 BEGIN
-  IF p_idempotency_key IS NULL THEN
-    RETURN public._delete_prepay_credit_replay_impl_20261015(p_credit_id, p_reason, p_performed_by, NULL);
-  END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+  -- An ACTIVE admin only. The renamed body's own role test is weaker (see the header).
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Admin access required to delete prepay credits';
+  END IF;
+  IF p_idempotency_key IS NULL THEN
+    RETURN public._delete_prepay_credit_replay_impl_20261015(p_credit_id, p_reason, p_performed_by, NULL);
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -336,12 +427,16 @@ DECLARE
   v_replay jsonb;
   v_result jsonb;
 BEGIN
-  IF p_idempotency_key IS NULL THEN
-    RETURN public._edit_prepay_credit_replay_impl_20261015(p_credit_id, p_new_balance_cents, p_reference_number, p_bucket_label, p_notes, p_performed_by, NULL);
-  END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+  -- An ACTIVE admin only. The renamed body's own role test is weaker (see the header).
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Admin access required to edit prepay credits';
+  END IF;
+  IF p_idempotency_key IS NULL THEN
+    RETURN public._edit_prepay_credit_replay_impl_20261015(p_credit_id, p_new_balance_cents, p_reference_number, p_bucket_label, p_notes, p_performed_by, NULL);
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -439,12 +534,16 @@ DECLARE
   v_replay jsonb;
   v_result jsonb;
 BEGIN
-  IF p_idempotency_key IS NULL THEN
-    RETURN public._reverse_write_off_replay_impl_20261015(p_write_off_id, p_reason, p_performed_by, NULL);
-  END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+  -- An ACTIVE admin only. The renamed body's own role test is weaker (see the header).
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Admin access required to reverse write-offs';
+  END IF;
+  IF p_idempotency_key IS NULL THEN
+    RETURN public._reverse_write_off_replay_impl_20261015(p_write_off_id, p_reason, p_performed_by, NULL);
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -620,6 +719,9 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public.batch_apply_prepayments(jsonb, uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.batch_apply_prepayments(jsonb, uuid, text) TO authenticated, service_role;
+COMMENT ON FUNCTION public.batch_apply_prepayments(jsonb, uuid, text) IS
+  'Admin-only prepay batch application. Binds a keyed replay to auth.uid() and the exact allocation list (20261015210000), then delegates to _batch_apply_prepayments_replay_impl_20261015, which enforces AUTH_REQUIRED, ACTOR_MISMATCH and is_admin() before _batch_apply_prepayments_impl.';
+REVOKE ALL ON FUNCTION public._batch_apply_prepayments_impl(jsonb, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- 9. batch_void_invoices
@@ -688,25 +790,27 @@ BEGIN
 
   SELECT string_agg(pin.name, ', ' ORDER BY pin.name) INTO v_bad
     FROM (VALUES
-      ('void_payment', '70fd746c15f4a6629680a724f3588967'),
-      ('delete_prepay_credit', 'bcb90bd23619af6f1e45c69bb2db4169'),
-      ('edit_prepay_credit', '366db16a403a0f508b28aadc8862475c'),
-      ('apply_write_off', '00e8d020f9faf6276de8ddaf4f1411fc'),
-      ('reverse_write_off', '70ef11ccad193eb6ef5ee88dcba6f8cd'),
-      ('apply_prepay_to_invoice', 'c9377dab8f2534a03af2c27a6e1d510c'),
-      ('create_prepay_check_splits', '6a164940dfac7afd05d06612e702bb52'),
-      ('batch_apply_prepayments', '15624992c9375e08a0ec1914437e6e40'),
-      ('batch_void_invoices', '32fa9718f29e18c8eff4539e36ac84b3')
-    ) AS pin(name, body_md5)
+      ('void_payment', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', '70fd746c15f4a6629680a724f3588967'),
+      ('delete_prepay_credit', 'p_credit_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', 'bcb90bd23619af6f1e45c69bb2db4169'),
+      ('edit_prepay_credit', 'p_credit_id uuid, p_new_balance_cents bigint DEFAULT NULL::bigint, p_reference_number text DEFAULT NULL::text, p_bucket_label text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', '366db16a403a0f508b28aadc8862475c'),
+      ('apply_write_off', 'p_invoice_id uuid, p_amount_cents bigint, p_reason text, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'uuid', '00e8d020f9faf6276de8ddaf4f1411fc'),
+      ('reverse_write_off', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', '70ef11ccad193eb6ef5ee88dcba6f8cd'),
+      ('apply_prepay_to_invoice', 'p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'uuid', 'c9377dab8f2534a03af2c27a6e1d510c'),
+      ('create_prepay_check_splits', 'p_customer_id uuid, p_reference_number text, p_splits jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text, p_expected_total_cents bigint DEFAULT NULL::bigint', 'jsonb', '6a164940dfac7afd05d06612e702bb52'),
+      ('batch_apply_prepayments', 'p_allocations jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', '15624992c9375e08a0ec1914437e6e40'),
+      ('batch_void_invoices', 'p_invoice_ids uuid[], p_void_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'integer', '32fa9718f29e18c8eff4539e36ac84b3')
+    ) AS pin(name, args, ret, body_md5)
    WHERE
-     -- Exactly one public wrapper: definer, pinned search_path, it routes through the intent check,
-     -- the receipt binder and its renamed body, and is callable by authenticated and service_role
-     -- but never by anon or PUBLIC.
+     -- Exactly one public wrapper with the live signature, defaults and return type: definer,
+     -- pinned search_path, it routes through the intent check, the receipt binder and its renamed
+     -- body, and is callable by authenticated and service_role but never by anon or PUBLIC.
      (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public' AND p.proname = pin.name) <> 1
      OR NOT EXISTS (
        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public' AND p.proname = pin.name
+          AND pg_get_function_arguments(p.oid) = pin.args
+          AND p.prorettype = pin.ret::regtype AND NOT p.proretset AND p.provolatile = 'v'
           AND p.proowner = 'postgres'::regrole AND p.prosecdef
           AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
           AND strpos(p.prosrc, 'check_idempotency_intent(p_idempotency_key, ''' || pin.name || ''',') > 0
@@ -742,6 +846,31 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._bind_replay_receipt_20261015(text,text,text)') AND p.prosecdef
   ) THEN
     RAISE EXCEPTION 'POSTFLIGHT_HELPER_CONTRACT: both replay-binding helpers must exist, callable by no API role, and the binder must not be SECURITY DEFINER';
+  END IF;
+
+  -- The commit-time guard: one enabled, deferred AFTER INSERT row trigger on idempotency_keys,
+  -- running the guard function, which no API role may call.
+  IF (SELECT count(*) FROM pg_trigger t
+       WHERE t.tgrelid = 'public.idempotency_keys'::regclass
+         AND t.tgname = 'require_bound_replay_receipt_20261015'
+         AND t.tgfoid = to_regprocedure('public._require_bound_replay_receipt_20261015()')
+         AND t.tgenabled = 'O' AND t.tgconstraint <> 0 AND t.tgdeferrable AND t.tginitdeferred
+         AND (t.tgtype::int & 1) = 1      -- ROW level
+         AND (t.tgtype::int & 2) = 0      -- AFTER
+         AND (t.tgtype::int & 4) <> 0     -- INSERT
+     ) <> 1
+     OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS api_role
+                 WHERE has_function_privilege(api_role, 'public._require_bound_replay_receipt_20261015()', 'EXECUTE')) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_RECEIPT_GUARD_CONTRACT: the deferred bound-receipt guard is not installed as reviewed';
+  END IF;
+
+  -- The private batch impl is callable only by postgres now.
+  IF ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+             FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+            WHERE p.oid = to_regprocedure('public._batch_apply_prepayments_impl(jsonb,uuid,text)')
+              AND a.privilege_type = 'EXECUTE' ORDER BY 1)
+       IS DISTINCT FROM ARRAY['postgres']::text[] THEN
+    RAISE EXCEPTION 'POSTFLIGHT_BATCH_APPLY_IMPL_ACL: _batch_apply_prepayments_impl must be callable only by postgres';
   END IF;
 
   RAISE NOTICE 'POSTFLIGHT_OK: nine money RPCs now replay a stored result only for the same person and the exact same request';

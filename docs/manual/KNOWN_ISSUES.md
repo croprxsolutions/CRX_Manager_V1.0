@@ -60,7 +60,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-15 (HIGH on money paths; batch 1 in progress) — about 75 live functions replay a saved result matched on the retry key alone
+## OPEN 2026-10-15 (HIGH on money paths; batch 1 written, migration 20261015210000 not applied) — about 75 live functions replay a saved result matched on the retry key alone
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions
@@ -142,9 +142,9 @@ container prover (fails first on today's bodies; an exact retry still replays; e
 refused; mutating each comparison turns it red), then a live read-only postcondition check and a
 rollback-only live smoke.
 
-**Found in passing — not replay binding, tracked separately.** `reverse_write_off`'s role test
+**Found in passing — not replay binding.** `reverse_write_off`'s role test
 `(SELECT role … AND is_active) != 'admin'` and `mark_inventory_row_verified`'s `v_role != 'admin'`
-both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through.
+both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through. Batch 1 closes it for `reverse_write_off` (its wrapper requires an active admin); `mark_inventory_row_verified` stays open.
 
 ## OPEN 2026-10-14 (MED; pre-existing) — a sales rep can write RUP register rows for an invoice that was never posted
 

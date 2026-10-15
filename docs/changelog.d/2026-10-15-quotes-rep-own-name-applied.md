@@ -19,8 +19,9 @@ brings the records in line with the live database.
 - `.claude/schema-registry.json`: delta refresh only (the applied name and `migrations_high_water`
   `20261015193420`). The migration changed a function body and added a trigger, which the registry
   does not track.
-- `src/lib/rpcFixtureLiveDiff.test.ts`: the live `pg_proc` name snapshot is refreshed (638 → 651
-  names, last taken 2026-10-02). The 13 new names include `guard_rep_quote_salesman_20261015`; the
+- `src/lib/rpcFixtureLiveDiff.test.ts`: the live `pg_proc` name snapshot is refreshed from live on
+  2026-10-15 at 19:36 UTC, after the apply (638 → 651 names; the previous snapshot dated from
+  2026-10-02). The 13 new names include `guard_rep_quote_salesman_20261015`; the
   snapshot's md5 equals the live `string_agg` md5.
 
 **Proof.** Live read-only queries, 2026-10-15 19:36 UTC: the ledger row; `rollover_quote_to_season`

@@ -16,7 +16,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
    - the product filters on Reports and Sales Reports;
    - the Price List report;
    - Crop Programs.
-4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 200, 500 or 1,000, and nobody can search past that. There are **65 such findings**. Most are dropdowns that load the first N records instead of searching.
+4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 200, 500 or 1,000, and nobody can search past that. There are **67 such findings**. Most are dropdowns that load the first N records instead of searching.
 5. **Compliance records can be incomplete.** These would silently drop records past 1,000:
    - the restricted-use pesticide sales register;
    - the application logbooks (including FAA);
@@ -139,6 +139,8 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | M63 | `pages/Reports.tsx:372`, RPC `get_customer_balance_listing` *(live)* | Reports, Customer Balance listing and its CSV (`:872`). The screen shows each customer's balance but sums no total (was H17; moved after the Codex review) | 1,000 customers (server) | Silent | C+X |
 | M64 | `components/customers/CustomerContacts.tsx:197` | Customer interaction history. The type and outcome filters run over the 50 loaded, so "No interactions match" can appear when older matches exist (was L8) | 50 newest | Silent | C+X |
 | M65 | `pages/ToShip.tsx:116` (deliveries), `:125` (purchase orders) | To Ship page, Deliveries and Inbound tabs: scheduled or in-progress deliveries, and open POs, soonest first (added after the PR's GitHub Codex review) | 500 each | Silent | C+X |
+| M66 | `pages/FieldRoute.tsx:76` | My Route: every open delivery stop (a driver sees their own; admins and reps see all), shown as if complete (added after the PR's second GitHub Codex review) | 1,000 (server) | Silent | C+X |
+| M67 | `lib/notificationTriggers.ts:91` | Low-stock alerts: reads every inventory row with a reorder point, so items past the cap never raise an alert | 1,000 (server) | Silent | C |
 
 ### Pickers (dropdowns) that can't reach every record
 
@@ -195,6 +197,8 @@ None of these has a server search behind it, and every one is silent.
 | L17 | `hooks/useGuardrails.ts:45` | Credit-limit check over one customer's open invoices | 1,000 (server). Money, but only past 1,000 open invoices for one customer |
 | L18 | `hooks/useOCRProcessor.ts:27`, `lib/applicatorSheetPrintData.ts:76`, import file-size guards (`BulkCustomerImport`, `BulkProductImport`, `fieldImportParser`, workbook loaders) | Background queue batch, print option, import limits | Signalled or by design |
 | L19 | `pages/Vendors.tsx:71`, `pages/BlendRecipes.tsx:100`, `pages/ApplicationServices.tsx:52`, `pages/Compliance.tsx:157` (found by Codex) | Vendor, recipe, application-service and restricted-use product lists | 1,000 (server), silent. These are small reference lists that are unlikely to reach 1,000 |
+| L20 | `pages/CustomerDetail.tsx:531`, `:538`, `:553`, `:576` (one customer's quotes, orders, order lines, deliveries); `pages/CycleCounts.tsx:146`; `lib/openBookings.ts:18`; `lib/lotRpc.ts:63` (lot recall trace for one lot) | Reads scoped to one customer, one lot, or count history | 1,000 (server), silent. Only a very large customer or lot would reach it |
+| L21 | `pages/Deliveries.tsx:836`, `pages/TeamBoard.tsx:876`, `:1022`, `pages/SupplierPricing.tsx:1050`, `components/fields/FieldCustomerAssignment.tsx:38`, `components/layout/Sidebar.tsx:367`, `pages/DeliveryDetail.tsx:1079`, plus the 3-item chip lists on Jobs and Field Dashboard | Display-only trims of rows already loaded (10, 5, 20 or 6 items) | Short on purpose; several show "+N more" or "View all" |
 
 ## Already correct (checked, no fix needed)
 
@@ -225,7 +229,7 @@ These read every row: they keep asking for the next page until none are left.
    - the bulk imports in M48 and M49, and the Edge Function in M51, should match names in the database, not against a downloaded list;
    - the Label Data Quality report in M49 needs a full read;
    - the category, vendor and manufacturer choices (M60) should come from a database query of distinct values.
-5. **List pages (M5–M28, M52, M54–M58, M61–M65).** Real paging and search. For the Jobs list's billed-customer column (M52), read the billed customers for each page of jobs, so none are cut off. Show a lasting "more records" message wherever a list is still capped.
+5. **List pages (M5–M28, M52, M54–M58, M61–M67).** Real paging and search. For the Jobs list's billed-customer column (M52), read the billed customers for each page of jobs, so none are cut off. Show a lasting "more records" message wherever a list is still capped.
 6. **LOW items** last. Most need nothing, or just a "+ more" note.
 
 Across all of these, the Goal 4 rule applies: a failed or partial read must never show a zero or a complete-looking total.

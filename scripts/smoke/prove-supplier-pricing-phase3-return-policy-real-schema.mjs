@@ -20,7 +20,7 @@
  * Prints PHASE3_RETURN_POLICY_CHAIN_PROOF_PASS on success.
  */
 import assert from 'node:assert/strict';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -117,6 +117,11 @@ function plan() {
   if (r.status !== 0) throw new Error(r.stderr);
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   assert.ok(all.length > 0, 'the post-baseline replay plan is empty');
+  // A ledger-only row stands in for a real file: it must still exist and still be withheld.
+  for (const name of LEDGER_ONLY) {
+    assert.ok(existsSync(path.join(MIGRATIONS, name)), `${name} is gone or renamed (re-check the LEDGER_ONLY list)`);
+    assert.ok(!all.some((f) => path.basename(f) === name), `${name} is now in the replay plan (replay it instead)`);
+  }
   for (const name of PARKED) {
     const file = all.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);

@@ -36,6 +36,7 @@ DECLARE
   v_n int;
   v_priced uuid;
   v_pricing jsonb;
+  v_meta jsonb;
 BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role='admin' AND is_active ORDER BY created_at LIMIT 1;
   SELECT id INTO v_sales FROM public.profiles WHERE role='sales_rep' AND is_active ORDER BY created_at LIMIT 1;
@@ -76,6 +77,8 @@ BEGIN
   -- Order lines need a positive cost basis (COST_BASIS_REQUIRED) and a product is born
   -- pricing-free, so price each order-line product through the governed preview/apply path.
   -- Pricing changes no Phase 3 metadata; the policy assertions below still see each default.
+  SELECT jsonb_agg(jsonb_build_array(id,product_family_id,return_policy,packaging_variant,is_full_tote_only) ORDER BY id) INTO v_meta
+    FROM public.products WHERE id IN (v_unknown,v_returnable,v_blocked,v_other);
   FOREACH v_priced IN ARRAY ARRAY[v_unknown,v_returnable,v_blocked,v_other] LOOP
     v_pricing:=public.preview_product_pricing_changes(
       'product_page',NULL,
@@ -93,9 +96,9 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_SETUP: governed product pricing apply did not price %',v_priced;
     END IF;
   END LOOP;
-  SELECT count(*) INTO v_n FROM public.products WHERE id IN (v_unknown,v_other) AND product_family_id IS NULL AND return_policy='unknown' AND packaging_variant IS NULL AND is_full_tote_only=false;
-  IF v_n<>2 OR (SELECT return_policy FROM public.products WHERE id=v_returnable) IS DISTINCT FROM 'returnable'
-     OR (SELECT return_policy FROM public.products WHERE id=v_blocked) IS DISTINCT FROM 'no_return' THEN
+  IF (SELECT jsonb_agg(jsonb_build_array(id,product_family_id,return_policy,packaging_variant,is_full_tote_only) ORDER BY id)
+        FROM public.products WHERE id IN (v_unknown,v_returnable,v_blocked,v_other)) IS DISTINCT FROM v_meta
+     OR jsonb_array_length(v_meta)<>4 THEN
     RAISE EXCEPTION 'SMOKE_SETUP: governed pricing changed Phase3 return metadata';
   END IF;
   -- A returned line needs delivered quantity behind it (create_return: RETURN_SOURCE_NOT_DELIVERED)

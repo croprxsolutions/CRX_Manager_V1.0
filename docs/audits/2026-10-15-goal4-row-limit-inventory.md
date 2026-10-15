@@ -10,13 +10,13 @@ Code baseline: `origin/main` at `9b6eb8607`.
 
 **What it means for you:**
 
-1. **Money totals will be wrong at volume, with no warning.** **28 places** add up money from a list that gets cut off, so their totals would come out too low. Examples: Payment History's "Active Payments" card (stops at 200 payments), Commission Payments (200), the Invoices and Field Invoices totals, the To Ship dollar value, every profitability tab on Reports, Sales Reports, AR and AP Aging, and the Unused Prepay and Open Credit cards. Today the business is small, so **none of these totals is wrong yet**. Live row estimates (`pg_stat_user_tables`, 2026-10-15) put every table behind them under 150 rows, except order lines (about 289) and delivery lines (about 400). Each is below the smallest cap that applies to it. The totals start going wrong as soon as a season's volume passes the cut-off.
+1. **Money totals will be wrong at volume, with no warning.** **28 places** add up money from a list that gets cut off, so their totals would come out too low. Examples: Payment History's "Active Payments" card (stops at 200 payments), Commission Payments (200), the Invoices and Field Invoices totals, the To Ship dollar value, every profitability tab on Reports, Sales Reports, AR and AP Aging, and the Unused Prepay and Open Credit cards. Today the business is small, so **none of these totals is wrong yet**. Live row estimates (`pg_stat_user_tables`, 2026-10-15) put every table behind them under 150 rows, except order lines (about 289), delivery lines (about 400) and products (604, counted exactly; this is what the Inventory Cost report lists). Each is below the smallest cap that applies to it. These are whole-table counts, so a filtered screen reads at most that many rows. The totals start going wrong as soon as a season's volume passes the cut-off.
 2. **Some integrity checks would miss problems.** **Nine checks** read only part of the data: four on the Integrity Report (commission splits, quote holds, returns, customer balances), four on the Integrity cleanup panel (unbilled deliveries, open alerts, negative stock, stock made at delivery), and the dashboard action queue. A clean result could just mean the check never looked at the problem rows.
 3. **One problem is already happening today.** You have **595 active products**. Four product lists load only the first 500 alphabetically, so about 95 products (the end of the alphabet) are missing:
    - the product filters on Reports and Sales Reports;
    - the Price List report;
    - Crop Programs.
-4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 200, 500 or 1,000, and nobody can search past that. There are **64 such findings**. Most are dropdowns that load the first N records instead of searching.
+4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 200, 500 or 1,000, and nobody can search past that. There are **65 such findings**. Most are dropdowns that load the first N records instead of searching.
 5. **Compliance records can be incomplete.** These would silently drop records past 1,000:
    - the restricted-use pesticide sales register;
    - the application logbooks (including FAA);
@@ -60,7 +60,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | H14 | `pages/SalesReports.tsx:176`, RPC `get_sales_summary_report` *(live)* | Sales Reports summary tabs (by customer, product, month or rep): totals (`:198`) | 1,000 groups (server) | Silent | Yes, once there are more than 1,000 customers or products | C+X |
 | H15 | `pages/AccountsReceivable.tsx:46`, RPC `get_ar_aging` *(live)*; also `pages/ARaging.tsx:99` | AR hub "Total Owed" and the AR Aging grid. Sorted by balance, so the smallest balances drop first | 1,000 customers with a balance (server) | Silent | Yes | C+X |
 | H16 | `pages/AccountsReceivable.tsx:52` | AR hub "Unused Prepay" card and Net Position. Reads every prepay row, including zero-balance ones | 1,000 (server) | Silent | Yes | C+X |
-| H18 | `pages/Reports.tsx:450`, RPC `get_inventory_cost_report` *(live)* | Reports, Inventory Cost total (`:1354`) | 1,000 inventory rows (server) | Silent | Yes (today about 604 products, so not hit yet) | C+X |
+| H18 | `pages/Reports.tsx:450`, RPC `get_inventory_cost_report` *(live)* | Reports, Inventory Cost total (`:1354`). The function returns one row per product | 1,000 products (server) | Silent | Yes (604 products today, so not hit yet) | C+X |
 | H19 | `pages/FieldProfitability.tsx:78`, RPC `get_field_profitability` *(live)* | Field Profitability totals (`:115`) | 1,000 field-seasons (server) | Silent | Yes | C+X |
 | H20 | `components/prepay/PrepaymentManagerPanel.tsx:128` | Prepay manager: "Total Prepay Credits" and "Total Unpaid Invoices" cards, Apply-All preview, CSV. The apply itself runs in the database and isn't capped | 500 customers with prepay | Silent | Yes: the preview totals | C+X |
 | H21 | `pages/PurchaseOrders.tsx:97` | Purchase Orders, Outstanding Items: total value on order (`:184`) | 1,000 lines (server) | Silent | Yes (money owed to suppliers) | C+X |
@@ -138,6 +138,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | M62 | `pages/Orders.tsx:342`, `pages/OrderDetail.tsx:410` | Pick-list PDFs read the whole inventory table to show stock available and short. Rows past the cap read as no stock | 1,000 inventory rows (server) | Silent | C+X |
 | M63 | `pages/Reports.tsx:372`, RPC `get_customer_balance_listing` *(live)* | Reports, Customer Balance listing and its CSV (`:872`). The screen shows each customer's balance but sums no total (was H17; moved after the Codex review) | 1,000 customers (server) | Silent | C+X |
 | M64 | `components/customers/CustomerContacts.tsx:197` | Customer interaction history. The type and outcome filters run over the 50 loaded, so "No interactions match" can appear when older matches exist (was L8) | 50 newest | Silent | C+X |
+| M65 | `pages/ToShip.tsx:116` (deliveries), `:125` (purchase orders) | To Ship page, Deliveries and Inbound tabs: scheduled or in-progress deliveries, and open POs, soonest first (added after the PR's GitHub Codex review) | 500 each | Silent | C+X |
 
 ### Pickers (dropdowns) that can't reach every record
 
@@ -220,11 +221,11 @@ These read every row: they keep asking for the next page until none are left.
 1. **Money totals into the database (H1–H16, H18–H24, H37–H40, H43).** Replace each on-screen sum with a database function that returns the exact total in cents, and page the list separately. Start with Payment History (H1), Commission Payments (H2, H3), Invoices and Field Invoices (H4–H7), AR (H15, H16, H38), and Reports and Sales Reports (H9–H14, H39). Goal 4's own test (5,000 invoices, more than 5,000 lines, a 200+ payment history) exercises exactly these. Where a screen also **acts** on its rows, a correct total is not enough. That covers the commission payout picker (H3), commission quick-pay (H12), the finance charge preview (H24), "Post all" and "Unpost all" (H6, H7) and check allocation (H43). For these, the action must select its targets in the database, or page through every eligible row, so nothing past the cap is skipped.
 2. **Integrity and compliance checks (H25–H30, H32–H34, H36, H41, H42).** Move Integrity Report checks 5, 6, 9 and 10 onto the existing `fetchAllRows` pattern, or into the database. Page the cleanup panel, the pesticide register, the logbooks, Application Records, Posted Applications and the license register. Fix the over-received PO check and the 20-page document-scan limit alongside them.
 3. **Product lists already short today (M1–M4).** Switch the three filters (M1–M3) to search-as-you-type (the L15 pattern). The Price List (M4) is a report and export, so it needs full paging and an export that reads every row, not a search box. Together that brings back the roughly 95 products missing now.
-4. **The remaining pickers (M29–M50, M52, M53, M59).** Search-as-you-type. Do the invoice customer picker (M29) first, because it also feeds the PDF address and email. Some rows here need a different fix:
+4. **The remaining pickers (M29–M50, M53, M59).** Search-as-you-type. Do the invoice customer picker (M29) first, because it also feeds the PDF address and email. Some rows here need a different fix:
    - the bulk imports in M48 and M49, and the Edge Function in M51, should match names in the database, not against a downloaded list;
    - the Label Data Quality report in M49 needs a full read;
    - the category, vendor and manufacturer choices (M60) should come from a database query of distinct values.
-5. **List pages (M5–M28, M54–M58, M61–M64).** Real paging and search. Show a lasting "more records" message wherever a list is still capped.
+5. **List pages (M5–M28, M52, M54–M58, M61–M65).** Real paging and search. For the Jobs list's billed-customer column (M52), read the billed customers for each page of jobs, so none are cut off. Show a lasting "more records" message wherever a list is still capped.
 6. **LOW items** last. Most need nothing, or just a "+ more" note.
 
 Across all of these, the Goal 4 rule applies: a failed or partial read must never show a zero or a complete-looking total.

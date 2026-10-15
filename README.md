@@ -109,7 +109,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Purchase Orders** — Vendor POs from the catalog, with a two-step receive and receiving history
 - **Receiving** — One screen with three tabs: a hub of open PO lines across all vendors, a Quick Receive wizard that matches products to the oldest open POs, and a searchable receiving log
 - **Deliveries** — Driver assignment, signature capture, photos, issues, partial deliveries with remainder tracking, load sheets, backdated entry, a completion email to the customer, and a shortage badge when deliveries compete for the same stock
-- **Field Mode (My Route)** — Phone-first route for drivers: today's stops in order, complete a delivery on site with signature, photos, and quantities
+- **Field Mode (My Route)** — Phone-first route for drivers: every open delivery assigned to them, in-progress first and then by scheduled date; complete a delivery on site with signature, photos, and quantities
 - **My Day (applicators)** — Phone view of an applicator's dispatched jobs: start a job, then complete it with weather, gallons applied, acres applied per field, and notes
 - **Returns** — Return requests through approval, receipt, restock, and credit memo
 

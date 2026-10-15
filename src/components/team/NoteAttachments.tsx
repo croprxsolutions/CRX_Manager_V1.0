@@ -65,6 +65,13 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
         // A refusal, or a response lost after the delete committed: look again before deciding,
         // so a committed delete still removes its file.
         const recheck = await supabase.from('team_note_attachments').select('id').eq('id', attachment.id).maybeSingle();
+        if (recheck.error && storagePath) {
+          // Neither the delete nor the re-read answered: the row may be gone with its file left
+          // behind. Report the path so that file can be found and removed later.
+          Sentry.captureException(new Error('Team-note photo delete unconfirmed'), {
+            extra: { context: 'Delete attachment unconfirmed: possible orphaned team-note file', storagePath },
+          });
+        }
         if (recheck.error || recheck.data) checkMutationResult(result, 'Delete note attachment');
       }
       setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));

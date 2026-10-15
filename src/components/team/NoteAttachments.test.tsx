@@ -132,6 +132,22 @@ describe('NoteAttachments delete', () => {
     await refusedDelete();
   });
 
+  it('reports the file path when neither the delete nor the re-read answers, and keeps the photo listed', async () => {
+    const { Sentry } = await import('../../lib/sentry');
+    H.deleteResult = { data: null, error: { message: 'TypeError: Failed to fetch' } };
+    H.recheckResult = { data: null, error: { message: 'TypeError: Failed to fetch' } };
+    H.profile.current = { id: 'boss', role: 'admin', is_active: true };
+    render(<NoteAttachments noteId="n1" />);
+    await screen.findByText('theirs.jpg');
+    fireEvent.click(deleteButtonFor('theirs.jpg')!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(STABLE_TOAST.toast).toHaveBeenCalledWith('error', 'Failed to delete photo'));
+    expect(H.remove).not.toHaveBeenCalled();
+    expect(Sentry.captureException).toHaveBeenCalledWith(expect.any(Error), {
+      extra: expect.objectContaining({ storagePath: 'team-note-attachments/someone-else/2.jpg' }),
+    });
+  });
+
   it('still removes the file when the delete committed but its response was lost', async () => {
     H.deleteResult = { data: null, error: { message: 'TypeError: Failed to fetch' } };
     H.recheckResult = { data: null, error: null }; // the row is gone

@@ -32,8 +32,9 @@ to all three. The customer receipt email embedded the photo links.
   the row goes. The row is deleted before the file (Codex on PR #929), so a refused row delete (an
   error or a silent no-rows result) leaves the photo intact. When the delete's response is lost, the
   app re-reads the row: if it is gone, the delete committed and the file is removed too. A file whose
-  removal still fails (or whose re-read cannot run) is left unlisted, never shown, and reported to
-  Sentry with its path for later cleanup; until step 2 makes the buckets private it stays reachable
+  removal still fails is left unlisted, never shown, and reported to Sentry with its path for later
+  cleanup. If the re-read cannot run either, the app cannot tell whether the row was deleted: it says
+  the delete failed, keeps the photo on screen, and reports the path as a possible orphaned file. Until step 2 makes the buckets private it stays reachable
   by its old public link, as every team-note file was before this change. Uploads keep the file extension to letters and digits, so they pass the row rule.
 - The customer receipt email (shared helper and both inline copies in `DeliveryDetail.tsx`) no
   longer has a photo section, and the delivery screen's help text says so (Mason, 2026-10-14).

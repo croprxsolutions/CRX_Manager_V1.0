@@ -60,7 +60,6 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-<<<<<<< HEAD
 ## OPEN 2026-10-15 (HIGH on money paths; batch 1 written, migration 20261015210000 not applied) — about 75 live functions replay a saved result matched on the retry key alone
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
@@ -146,7 +145,7 @@ rollback-only live smoke.
 **Found in passing — not replay binding.** `reverse_write_off`'s role test
 `(SELECT role … AND is_active) != 'admin'` and `mark_inventory_row_verified`'s `v_role != 'admin'`
 both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through. Batch 1 closes it for `reverse_write_off` (its wrapper requires an active admin); `mark_inventory_row_verified` stays open.
-=======
+
 ## OPEN 2026-10-15 (LOW, proof tooling only) — the Phase 3 return-policy concurrency prover no longer reaches its chain
 
 `scripts/smoke/prove-supplier-pricing-phase3-return-policy-concurrency.mjs` stops during its own
@@ -157,7 +156,6 @@ replay set-up, not in the schema. The rollback matrix chain it also ran is prove
 `prove-supplier-pricing-phase3-return-policy-real-schema.mjs` (2026-10-15, see
 `docs/changelog.d/2026-10-15-phase3-return-policy-chain-fixture.md`). Next step: align the runner's
 replay with the shared real-schema harness, then re-run its races.
->>>>>>> origin/main
 
 ## OPEN 2026-10-14 (MED; pre-existing) — a sales rep can write RUP register rows for an invoice that was never posted
 

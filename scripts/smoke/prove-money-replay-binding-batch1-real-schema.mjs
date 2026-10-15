@@ -367,7 +367,22 @@ ROLLBACK;`,
   });
   assert.match(autocommit.stderr, /REPLAY_RECEIPT_UNBOUND/, `AFTER: an autocommit unbound receipt was not refused:\n${autocommit.stderr}`);
   assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = 'prover-unbound-autocommit';"), '0', 'AFTER: the refused unbound receipt was committed');
-  console.log('[prover] AFTER: a deactivated admin is refused by reverse_write_off, and an unbound receipt for a wrapped operation never commits');
+  // An UPDATE that strips the binding from a bound receipt is refused at commit too.
+  const stripped = docker([...psqlArgs()], {
+    input: `BEGIN;
+INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+VALUES ('prover-strip-binding', 'apply_write_off', '{"id":"x"}'::jsonb, '${U.ADMIN}', repeat('a', 64));
+SET CONSTRAINTS ALL IMMEDIATE;
+UPDATE public.idempotency_keys SET request_actor_id = NULL WHERE idempotency_key = 'prover-strip-binding';
+SET CONSTRAINTS ALL IMMEDIATE;
+SELECT 'STRIPPED_RECEIPT_ACCEPTED';
+ROLLBACK;`,
+    allowFailure: true,
+  });
+  const strippedOut = `${stripped.stdout}\n${stripped.stderr}`;
+  assert.ok(!/STRIPPED_RECEIPT_ACCEPTED/.test(strippedOut) && /REPLAY_RECEIPT_UNBOUND/.test(strippedOut),
+    `AFTER: an UPDATE that stripped a receipt's binding was not refused:\n${strippedOut.slice(-400)}`);
+  console.log('[prover] AFTER: a deactivated admin is refused by reverse_write_off, and an unbound receipt for a wrapped operation never commits (inserted or stripped by an UPDATE)');
 
   // 5. RE-APPLY.
   const again = apply('candidate.sql');

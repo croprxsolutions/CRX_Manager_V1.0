@@ -274,7 +274,8 @@ $bind$;
 REVOKE ALL ON FUNCTION public._bind_replay_receipt_20261015(text, text, text) FROM PUBLIC, anon, authenticated, service_role;
 
 -- Commit-time guard: a receipt for one of the nine operations must be bound (actor and fingerprint)
--- by the time its transaction commits. The wrappers insert through the renamed body and bind right
+-- by the time its transaction commits, whether it was inserted or later updated (an UPDATE that
+-- cleared a binding column would otherwise turn a good receipt into a refused legacy one). The wrappers insert through the renamed body and bind right
 -- after, so the check is DEFERRED to commit. It refuses an old body still running across the apply,
 -- and any other writer, from committing an unbound receipt. A receipt deleted before commit (the
 -- expiry clean-up) is ignored. Not SECURITY DEFINER: every writer of idempotency_keys is a definer
@@ -297,7 +298,7 @@ $require_bound$;
 REVOKE ALL ON FUNCTION public._require_bound_replay_receipt_20261015() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE CONSTRAINT TRIGGER require_bound_replay_receipt_20261015
-  AFTER INSERT ON public.idempotency_keys
+  AFTER INSERT OR UPDATE ON public.idempotency_keys
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW
   WHEN (NEW.operation IN ('void_payment', 'delete_prepay_credit', 'edit_prepay_credit', 'apply_write_off', 'reverse_write_off', 'apply_prepay_to_invoice', 'create_prepay_check_splits', 'batch_apply_prepayments', 'batch_void_invoices'))
@@ -853,7 +854,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_HELPER_CONTRACT: both replay-binding helpers must exist, callable by no API role, and the binder must not be SECURITY DEFINER';
   END IF;
 
-  -- The commit-time guard: one enabled, deferred AFTER INSERT row trigger on idempotency_keys,
+  -- The commit-time guard: one enabled, deferred AFTER INSERT OR UPDATE row trigger on idempotency_keys,
   -- running the guard function, which no API role may call.
   IF (SELECT count(*) FROM pg_trigger t
        WHERE t.tgrelid = 'public.idempotency_keys'::regclass
@@ -863,6 +864,7 @@ BEGIN
          AND (t.tgtype::int & 1) = 1      -- ROW level
          AND (t.tgtype::int & 2) = 0      -- AFTER
          AND (t.tgtype::int & 4) <> 0     -- INSERT
+         AND (t.tgtype::int & 16) <> 0    -- UPDATE
      ) <> 1
      OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS api_role
                  WHERE has_function_privilege(api_role, 'public._require_bound_replay_receipt_20261015()', 'EXECUTE')) THEN

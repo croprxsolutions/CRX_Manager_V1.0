@@ -72,6 +72,8 @@ export default function SalesReports() {
   const [endDate, setEndDate] = useState('');
   const [productId, setProductId] = useState('');
   const [productName, setProductName] = useState('');
+  // Bumped by Clear All to remount the product picker, so unselected typed text is cleared too.
+  const [productPickerKey, setProductPickerKey] = useState(0);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
   const [salesRepId, setSalesRepId] = useState('');
   const [category, setCategory] = useState('');
@@ -211,7 +213,7 @@ export default function SalesReports() {
 
   // ── Clear all filters ──
   const clearFilters = () => {
-    setStartDate(''); setEndDate(''); setProductId(''); setProductName('');
+    setStartDate(''); setEndDate(''); setProductId(''); setProductName(''); setProductPickerKey((k) => k + 1);
     setSelectedCustomerIds([]); setSalesRepId('');
     setCategory(''); setSeason(''); setIncludeFarmGroup(false);
     setCustomerSearch('');
@@ -447,6 +449,7 @@ export default function SalesReports() {
             <div>
               <label className="block text-xs font-medium text-secondary mb-1">Product</label>
               <ProductSearchPicker
+                key={productPickerKey}
                 value={productId}
                 selectedLabel={productName}
                 onSelect={p => { setProductId(p?.id ?? ''); setProductName(p?.product_name ?? ''); }}

@@ -200,11 +200,11 @@ export default function ProductSearchPicker({
           className="absolute z-30 w-full min-w-[280px] mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"
         >
           {searching || term !== searchedTerm ? (
-            <div className="px-3 py-2 text-sm text-secondary">Searching...</div>
+            <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">Searching...</div>
           ) : searchFailed ? (
             <div role="alert" className="px-3 py-2 text-sm text-red-600">Product search failed. Try again.</div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-secondary">No matching active products</div>
+            <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">No matching active products</div>
           ) : (
             <>
               {results.map((product, index) => (
@@ -213,6 +213,7 @@ export default function ProductSearchPicker({
                   key={product.id}
                   type="button"
                   role="option"
+                  tabIndex={-1}
                   aria-selected={product.id === value}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => select(product)}

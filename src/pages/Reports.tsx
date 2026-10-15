@@ -223,6 +223,7 @@ export default function Reports() {
   const [priceListData, setPriceListData] = useState<Record<string, unknown>[]>([]);
   const [priceListError, setPriceListError] = useState(false);
   const [priceListLoaded, setPriceListLoaded] = useState(false);
+  const priceListRequestId = useRef(0);
   const priceListExportReady = !loading && !priceListError && priceListLoaded;
   const [postedAppsData, setPostedAppsData] = useState<Record<string, unknown>[]>([]);
 
@@ -452,6 +453,8 @@ export default function Reports() {
   // A failed page clears the list and shows an error, so a partial price list
   // never appears, or exports, as if it were complete.
   const fetchPriceList = useCallback(async () => {
+    // Only the newest load may set state; an older one finishing late is ignored.
+    const requestId = ++priceListRequestId.current;
     let data: Record<string, unknown>[] | null = null;
     try {
       const result = await fetchAllRows<Record<string, unknown>>((from, to) => supabase
@@ -484,6 +487,7 @@ export default function Reports() {
     } catch (err) {
       Sentry.captureException(err, { extra: { context: 'price_list_load' } });
     }
+    if (requestId !== priceListRequestId.current) return;
     if (!data) {
       setPriceListData([]);
       setPriceListLoaded(false);

@@ -29,8 +29,8 @@ chain catches it. `smoke-backfill-refuse-split-billing.sql` now accepts the earl
 well as the table CHECK. `smoke-govern-invoice-order-money-lifecycle.sql` had rotted against
 `20261007150050` (a deleted order's lines are locked, and only a cancelled order may be deleted): its
 legacy deleted-fulfilled-order fixture now builds the order first and soft-deletes it last, with
-triggers bypassed for that one statement, which only a superuser can do, so the prover runs that chain
-as `supabase_admin`. The chains are not run on live: each draws customer-visible invoice numbers.
+triggers bypassed for that one statement, which only a superuser can do: the prover runs that chain as
+`supabase_admin`, and a non-superuser run skips the deleted-order recovery section (CodeRabbit on #928). The chains are not run on live: each draws customer-visible invoice numbers.
 
 **Docs.** `docs/reference/migration-history.md` (row 945), `docs/reference/rpc-functions.md`,
 `docs/manual/KNOWN_ISSUES.md`, `docs/manual/DECISION_LOG.md`, `docs/plans/2026-10-13-direction-and-goals.md`,

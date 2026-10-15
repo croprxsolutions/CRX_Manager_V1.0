@@ -336,7 +336,7 @@ leave these open:
   invoice with no order or delivery behind it (the New Invoice page's two types)
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
-  (`DECISION_LOG.md`), and so do credit memos such as orderless return credits. Still open until Goal 3
+  (`DECISION_LOG.md`), and so do credit memos (return credits). Still open until Goal 3
   of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or

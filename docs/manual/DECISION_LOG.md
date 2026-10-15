@@ -10,7 +10,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 ## 2026-10-15 — Goals 2 and 3 settled item by item; cost and margin are admin-only; order split billing is in, field split billing and blend pricing are future work
 
-**Decision (Mason, in chat, after an item-by-item walkthrough checked against `7cd781f77`).**
+**Decision (Mason, in chat, after an item-by-item walkthrough checked against `7cd781f77`).** Goals 2 and 3 are settled as follows:
 - **Cost and margin are admin-only**, even on a rep's own invoices and quotes. This supersedes the 2026-10-14 Goal 1 answer that reps keep them.
 - **Commission splits:** only an admin sets a new customer's split. Admins get a job/order split editor that recalculates unpaid commissions.
 - **Order and delivery split billing must work now**: landlord, partial delivery, and the "Bill Split" card. **Future work:** field-application split billing and blend-ticket quote-line pricing.
@@ -18,7 +18,8 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 - **No sales tax is charged on anything.** **Commission already paid on a returned or credited sale is deducted from the next payout.**
 - **Also agreed**, including every change from an advisory Codex `gpt-6.1-sol` review: no billing before delivery, posted invoices credited and never cancelled, recorded refunds, typed charge lines, an admin-only field-invoice credit, a November–December real trial and a pilot emergency brake. Full list: section 4 of `docs/plans/2026-10-13-direction-and-goals.md`.
 
-**Why / implies:** Mason wanted to agree to every change before it is built. Goal 1 refuses cost to reps too. Goal 3 builds order split billing and none of the deferred items. Goal 5 builds a signal check. Do not re-ask.
+**Why.** Mason wanted to agree to every change before it is built.
+**What this forbids/implies:** the Goal 1 cost work refuses reps too; Goal 3 builds order split billing but none of the deferred items; Goal 5 is a signal check, not offline sync. Do not re-ask these questions.
 
 ## 2026-10-14 — Order invoices carry only the rep's own name; a completed delivery's automatic split keeps the order's salesperson
 

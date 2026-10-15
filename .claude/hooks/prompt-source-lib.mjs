@@ -206,18 +206,14 @@ function nextNonBlank(lines, from) {
 // frame, so a tag Mason mentions or types mid-message is still his text.
 const HANDBACK_FRAME_RE = /^\[Subagent hand-back\] The text below is the final report of a subagent\b/;
 
+// Recognition only: the caller (stripSubagentReports) still keeps a truncated
+// report for the latch and ends a report at Mason's first column-zero line.
 function handbackOpensPrompt(lines, i) {
-  if (i !== nextNonBlank(lines, 0)) return false;
+  if (i >= lines.length || i !== nextNonBlank(lines, 0)) return false;
   const line = lines[i].replace(/\r$/, "");
   if (/^[ \t]/.test(line) || !AGENT_OPEN_RE.test(line.trim())) return false;
   const frame = nextNonBlank(lines, i + 1);
   return frame < lines.length && HANDBACK_FRAME_RE.test(lines[frame]);
-}
-
-// True when the prompt opens with a framed hand-back and no preamble line.
-export function startsWithSubagentReport(prompt) {
-  const lines = String(prompt || "").split("\n");
-  return handbackOpensPrompt(lines, nextNonBlank(lines, 0));
 }
 
 // Index of a hand-back's open-tag line when line i is its preamble (or, with no

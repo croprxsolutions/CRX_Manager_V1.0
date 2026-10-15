@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { isHoldPhrase, isResumePhrase } from "./hold-latch-lib.mjs";
-import { isMachineGenerated, authoredByMason, hasAuthoredText, withoutSubagentReports, startsWithSubagentReport } from "./prompt-source-lib.mjs";
+import { isMachineGenerated, authoredByMason, hasAuthoredText, withoutSubagentReports } from "./prompt-source-lib.mjs";
 
 function emit(extra) {
   if (extra) {
@@ -35,9 +35,11 @@ if (/^\s*Automation: [^\n]*\n\s*Automation ID: /.test(rawPrompt)) emit();
 // turn the report is removed NON-strictly (closed or truncated) before the
 // usual stripping, so the report's own words cannot latch while a stop Mason
 // typed after it still does (Codex review, PR #874). It never clears a hold.
-// A hand-back can also arrive with no preamble, starting at its open tag
-// (2026-10-15, see startsWithSubagentReport): the same turn, the same rules.
-const isPeerTurn = /^\s*Another Claude session sent a message:/.test(rawPrompt) || startsWithSubagentReport(rawPrompt);
+// A hand-back with NO preamble (2026-10-15) deliberately stays on the normal
+// path: authoredByMason() strips a closed one and keeps a truncated one (the
+// fail-safe side), and hasAuthoredText() strips it strictly, so it cannot
+// clear a hold.
+const isPeerTurn = /^\s*Another Claude session sent a message:/.test(rawPrompt);
 
 // Strip the spans of THIS prompt that Mason did not author — peer-session
 // <cross-session-message> blocks, subagent <~agent-message> hand-backs and the

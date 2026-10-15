@@ -20,7 +20,8 @@ Found in a harness review Mason asked for (2026-10-15).
   other sessions that share it, and the same report could also clear a hold Mason had set.
   `prompt-source-lib.mjs` now treats a prompt that opens with a column-zero open tag followed by
   the harness's exact "[Subagent hand-back] The text below is the final report of a subagent" frame
-  as a report; `hold-latch-prompt.mjs` treats it as a peer turn. Proof: the two real hand-backs
+  as a report. A closed one is stripped; a truncated one is still kept for the latch (fail-safe), and
+  Mason's own column-zero line after it still counts (Luna review, 2026-10-15). Proof: the two real hand-backs
   that latched holds today latch under the old code and not under the new; new assertions in
   `prompt-hooks.test.mjs` fail on the old code and pass on the new.
 - Mason's personal `autoCompactWindow` was set to 800,000 (it was 1,000,000, at the 1M ceiling, against

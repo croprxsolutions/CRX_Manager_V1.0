@@ -732,6 +732,16 @@ rmSync(tmpProj, { recursive: true, force: true });
   ok(isHoldPhrase(authoredByMason('<agent-message from="x">\n[Subagent hand-back] all done\n  stop')),
     "a frame that is not the harness's wording is not a report");
   ok(isHoldPhrase(authoredByMason(`ok stop\n${NO_PREAMBLE}`)), "an open tag that is not first in the prompt is Mason's text above it");
+  // Luna review (2026-10-15): Mason's halt must survive the new recognition.
+  const TRUNC = `<agent-message from="x">\n${FRAME}\n  all done`;
+  ok(isHoldPhrase(authoredByMason(`${TRUNC}\nstop now`)), "Mason's column-zero stop after a truncated report latches");
+  ok(isHoldPhrase(authoredByMason(`${TRUNC}\n  stop now`)), "Mason's indented stop under a truncated report latches (kept, fail-safe)");
+  ok(!hasAuthoredText(`${TRUNC}\n  carry on`), "a truncated preamble-less report still cannot clear a hold");
+  // Luna review (2026-10-15): empty and blank prompts must not throw.
+  for (const blank of ["", "   ", "\n\n", "\r\n"]) {
+    eq(authoredByMason(blank).trim(), "", `blank prompt ${JSON.stringify(blank)}: no text, no throw`);
+    eq(withoutSubagentReports(blank), "", `blank prompt ${JSON.stringify(blank)}: reminders see nothing`);
+  }
 
   // End to end through the hook, which writes hold.json.
   const dir = mkdtempSync(path.join(tmpdir(), "crx-handback-nopreamble-"));

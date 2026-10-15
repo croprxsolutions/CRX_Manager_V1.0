@@ -221,6 +221,20 @@
         "security"
       ]
     },
+    "order_invoice_rep_own_name": {
+      "chain": "smoke-order-invoice-rep-own-name.sql",
+      "description": "20261014210000: a sales rep turning an order into invoices names only themselves as salesperson; admins name anyone. create_invoice_from_order and create_split_invoices_from_order refuse a rep naming another rep or an admin with SALESMAN_SCOPE_DENIED and nothing written, even on a key that already replays; a rep naming themselves works on another rep's customer and replays exactly; a NULL salesperson keeps the order's salesperson; an admin names another rep. The split wrapper also requires its key (IDEMPOTENCY_KEY_REQUIRED, 22023) and refuses field_application (ORDER_INVOICE_TYPE_NOT_ALLOWED, 23514) before any invoice number is drawn and with no claim left behind. complete_delivery's automatic split, completed by a rep, still creates governed split drafts under the order's salesperson. Fail-first against the pre-fix wrappers. Uses two existing active sales reps; prices its own [E2E] product through the governed pricing RPCs; terminal rollback. Draws invoice numbers, so it is not run on live without Mason's REAL-DATA-OK. Companion container proof: prove-order-invoice-rep-own-name-real-schema.mjs.",
+      "covers": [
+        "create_invoice_from_order",
+        "create_split_invoices_from_order",
+        "complete_delivery"
+      ],
+      "area": [
+        "billing",
+        "lifecycle",
+        "security"
+      ]
+    },
     "delivery_signature_storage_access": {
       "chain": "smoke-delivery_signature_storage_access.sql",
       "covers": [

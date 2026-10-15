@@ -84,6 +84,17 @@ function renderPanel({
   );
 }
 
+// The panel fills the load-acre boxes with the automatic split in an effect that
+// runs after the loads first render. Under React 19 that effect can still be
+// queued when "Selected worksheet loads" appears, and when it lands after the
+// first keystroke it overwrites it with the automatic acres (CI, PR #923). Type
+// only once the boxes hold those values — an empty number input reads as null.
+async function loadAcresInputsReadyToEdit() {
+  await screen.findByText('Selected worksheet loads');
+  await waitFor(() => expect(screen.getAllByLabelText(/Load \d+ acres/)[0]).not.toHaveValue(null));
+  return screen.getAllByLabelText(/Load \d+ acres/);
+}
+
 describe('LoaderWorksheetsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -158,10 +169,8 @@ describe('LoaderWorksheetsPanel', () => {
   it('does not persist manual load acres that do not total the job acres', async () => {
     queryResults.push({ data: [worksheets[1]], error: null });
     renderPanel();
-    await screen.findByText('Selected worksheet loads');
 
-    const acresInputs = screen.getAllByLabelText(/Load \d+ acres/);
-    await waitFor(() => expect(acresInputs[0]).not.toHaveValue(''));
+    const acresInputs = await loadAcresInputsReadyToEdit();
     fireEvent.change(acresInputs[0], { target: { value: '100' } });
     fireEvent.change(acresInputs[1], { target: { value: '100' } });
     fireEvent.change(acresInputs[2], { target: { value: '100' } });
@@ -202,9 +211,8 @@ describe('LoaderWorksheetsPanel', () => {
       { data: [selectedWorksheet], error: null },
     );
     renderPanel();
-    await screen.findByText('Selected worksheet loads');
 
-    const acresInputs = screen.getAllByLabelText(/Load \d+ acres/);
+    const acresInputs = await loadAcresInputsReadyToEdit();
     fireEvent.change(acresInputs[0], { target: { value: '130' } });
     fireEvent.change(acresInputs[1], { target: { value: '130' } });
     fireEvent.change(acresInputs[2], { target: { value: '84.67' } });
@@ -217,9 +225,8 @@ describe('LoaderWorksheetsPanel', () => {
     const selectedWorksheet = { ...worksheets[0], is_selected: true };
     queryResults.push({ data: [selectedWorksheet], error: null });
     renderPanel();
-    await screen.findByText('Selected worksheet loads');
 
-    const acresInputs = screen.getAllByLabelText(/Load \d+ acres/);
+    const acresInputs = await loadAcresInputsReadyToEdit();
     fireEvent.change(acresInputs[0], { target: { value: '140' } });
     fireEvent.change(acresInputs[1], { target: { value: '100' } });
     fireEvent.change(acresInputs[2], { target: { value: '104.67' } });

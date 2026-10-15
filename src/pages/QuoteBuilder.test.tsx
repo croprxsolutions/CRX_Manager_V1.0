@@ -2820,8 +2820,16 @@ describe('QuoteBuilder', () => {
 
   async function approveBelowCost() {
     const reasonBox = await screen.findByLabelText(/Approval reason/i);
+    // The dialog clears its reason in an effect when it opens. Under React 19
+    // that effect can still be queued when the box first appears, and a reason
+    // typed before it runs is wiped — Approve stays disabled and the click sends
+    // nothing (CI, PR #930). The dialog moves focus inside itself only after that
+    // effect has run, so type once it has.
+    await waitFor(() => expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement));
     fireEvent.change(reasonBox, { target: { value: 'matched a competitor quote' } });
-    fireEvent.click(screen.getByRole('button', { name: /Approve and Retry/i }));
+    const approve = screen.getByRole('button', { name: /Approve and Retry/i });
+    expect(approve).toBeEnabled();
+    fireEvent.click(approve);
     await flushPendingWork();
   }
 

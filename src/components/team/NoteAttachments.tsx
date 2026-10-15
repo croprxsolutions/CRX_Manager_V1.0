@@ -73,6 +73,8 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
           });
         }
         if (recheck.error || recheck.data) checkMutationResult(result, 'Delete note attachment');
+      } else {
+        checkMutationResult(result, 'Delete note attachment');
       }
       setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
 

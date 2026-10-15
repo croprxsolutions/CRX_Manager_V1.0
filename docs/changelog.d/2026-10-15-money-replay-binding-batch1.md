@@ -9,7 +9,7 @@ twice; the harm was a false success. This change:
   replay a saved answer: about 95 are already bound to the caller and the exact request, and about
   75 are not, ranked into four batches. Gauntlet row 3.5 (commission payments) was re-verified as
   fixed live since 2026-08-11.
-- **Fixes batch 1, the nine money actions** (migration `20261015210000`, not applied when written):
+- **Fixes batch 1, the nine money actions** (migration `20261015233000`, not applied when written):
   `void_payment`, `delete_prepay_credit`, `edit_prepay_credit`, `apply_write_off`,
   `reverse_write_off`, `apply_prepay_to_invoice`, `create_prepay_check_splits`,
   `batch_apply_prepayments`, `batch_void_invoices`. Each live body is renamed unchanged, and a

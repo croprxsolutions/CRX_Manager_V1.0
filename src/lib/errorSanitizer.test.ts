@@ -117,7 +117,7 @@ describe('sanitizeError', () => {
       .toBe("Only an admin or this customer's assigned sales rep can change its default commission split");
     expect(sanitizeError('SALESMAN_SCOPE_DENIED')).toBe("Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work");
     expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices under your own name');
-    // Replay-binding refusals (20261015210000): nothing changed, and the operator is told why.
+    // Replay-binding refusals (20261015233000): nothing changed, and the operator is told why.
     expect(sanitizeError({ message: 'IDEMPOTENCY_INTENT_MISMATCH', details: '{"result":{"id":"x"}}' }))
       .toBe('Nothing was changed. This retry belonged to a different, earlier request. Refresh the page to see what that request did, then try again');
     expect(sanitizeError('IDEMPOTENCY_ACTOR_MISMATCH')).toBe('Nothing was changed. This retry belongs to another user. Reload the page and try again');

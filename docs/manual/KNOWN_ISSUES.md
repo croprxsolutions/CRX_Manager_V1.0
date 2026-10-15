@@ -63,7 +63,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-15 (HIGH on money paths; batch 1 written, migration 20261015210000 not applied) — about 75 live functions replay a saved result matched on the retry key alone
+## OPEN 2026-10-15 (HIGH on money paths; batch 1 written, migration 20261015233000 not applied) — about 75 live functions replay a saved result matched on the retry key alone
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions
@@ -242,7 +242,32 @@ changed both copies; only the QuoteBuilder copy matters.
   approval markers from notes). Its header says it preserves access, yet it revokes `service_role`, so
   re-review it before any apply.
 
+## OPEN 2026-10-15 (MED) — a helper agent's report can latch, or clear, the hold
+
+**What happens.** The UserPromptSubmit hook payload for a subagent hand-back can start at its
+`<agent-message>` tag, without the "Another Claude session sent a message:" line the transcript shows.
+`prompt-source-lib.mjs` only recognises a hand-back after that line, so the report body is read as
+Mason's words. On 2026-10-15 two reports containing "Stop" (a list of hook events) latched
+`hold.json` in the main checkout, which every session whose hooks run from there shares; the same
+report shape also counts as Mason speaking and can clear a hold he set. Reproduced by replaying both
+real reports minus the preamble line through `origin/main`'s hooks.
+
+**Why not fixed yet.** A text-shape fix (recognise the exact harness frame at the start of the prompt)
+was tried on PR #940 and removed: Sol blocked it because a user-typed message of the same shape with
+an indented "stop" would no longer latch. Sol's direction, which Mason chose: decide by trusted
+origin, not text. The session transcript records it (`"origin":{"kind":"peer"}` on a hand-back,
+`{"kind":"human"}` on Mason's messages); not yet verified is whether the hook can read that record
+when it runs, since the hook receives only `transcript_path`.
+
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
+
+**Partly fixed 2026-10-15.** The Vercel rules are now spelled with the connector's real name
+(`mcp__0fb370f6-…`), so promote, rollback, create-deployment and env edits are denied, and Supabase
+secret creation, project pause/restore/create and branch operations now ask first on both Supabase
+connections. Still open: the email connector's `send_message`; any connector, including one added
+later under a new name, whose tools match no `ask` or `deny` rule, because those tools run with no
+prompt; and the hook's explicit allow described below, which is why. See
+`docs/changelog.d/2026-10-15-vercel-supabase-permission-rule-real-names.md`.
 
 **What happens.** `.claude/hooks/migration-apply-guard.mjs` runs on every `mcp__.*` call and, for any
 tool whose name does not contain `apply_migration`, returns an explicit `permissionDecision: "allow"`
@@ -662,12 +687,25 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   and `FieldStop` silently skips the customer receipt email. Fix: widen the driver branch for assigned open
   stops, or fetch receipt data through a SECURITY DEFINER RPC. (Sources: `docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md`),
   `docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md`).)
-- **Public photo buckets (owner security decision, open since 2026-06-15).** `delivery-photos`,
-  `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-09-27). Delivery and
-  team-note photos are served through `getPublicUrl` (`DeliveryDetail.tsx`, `FieldStop.tsx`,
-  `NotePhotoUpload.tsx`); `receiving-photos` has no app reference but is still publicly readable by URL. So
-  anyone holding a URL has permanent unauthenticated access to those photos. Paths are non-enumerable and type/size are capped
-  (`20260615182721`). Decide: keep public, or make private and switch to `createSignedUrl`.
+- **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 in progress 2026-10-14, Goal 1).** `delivery-photos`,
+  `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-10-14). Mason decided on
+  2026-10-13 that viewing them needs an active staff sign-in every time; an expiring signed URL does not meet that,
+  so `createSignedUrl` is not the fix. Step 1 (`20261015230000_staff_photo_storage_access` plus the app's
+  `src/hooks/usePrivatePhoto.ts` / `src/components/ui/PrivatePhoto.tsx`): per-request storage read policies by role,
+  tightened uploads and deletes, the screens download photos with the user's session instead of the public URL, and
+  receipt emails carry no photos (Mason, 2026-10-14). Step 2, a separate migration once step 1 is live and old
+  installed-app copies have updated, sets the three buckets private so old public links stop working. Until step 2
+  applies, anyone holding a URL can still open those photos, and the rows still store public URLs
+  (`delivery_photos.image_url`, `team_note_attachments.file_url`). Type/size are capped (`20260615182721`); paths are
+  built from an ID, an upload timestamp and a per-upload counter, which is not a reliable secrecy safeguard, and once
+  step 1 applies, staff who may view a bucket can also list its paths, so keep the step 1 to step 2 window short. **Accepted limitation (Mason, 2026-10-14, option A):** a staff member who may view a
+  photo can deliberately mint a temporary signed link to it through the Storage API (Storage checks only the read
+  policy); ordinary app use never creates one, and it is no more than saving and forwarding the file. Closing it
+  would mean serving photo bytes through an Edge Function, as customer documents are. Found while proving step 1:
+  Storage deletes as the signed-in user, and a DELETE only reaches rows that user may also read, so with no storage
+  read policy no delete in these buckets removed anything, even an admin's (proven in the disposable-database prover,
+  which models live's `storage.protect_delete`); that is why "deleted" team-note photos left orphan files. Step 1 fixes
+  it.
   (Source: `docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md`).)
 - **Field-app access-scope lows (June 2026 parity ledger).** (1) `fields_select` (`20260214210000`) lets every
   active applicator read all customers' fields, not only dispatched ones; (2) `job_chemicals_select_location_dispatchee`

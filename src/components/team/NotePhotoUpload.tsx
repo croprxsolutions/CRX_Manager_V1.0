@@ -43,7 +43,7 @@ export default function NotePhotoUpload({ noteId, onUploadComplete }: NotePhotoU
 
         const { error: uploadErr } = await supabase.storage
           .from('team-note-attachments')
-          .upload(storagePath, file, { contentType: file.type });
+          .upload(storagePath, file, { contentType: file.type, cacheControl: '0' });
 
         if (uploadErr) {
           toast('error', `Upload failed: ${uploadErr.message}`);

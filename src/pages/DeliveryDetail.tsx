@@ -786,7 +786,7 @@ export default function DeliveryDetail() {
 
         const { error: uploadErr } = await supabase.storage
           .from('delivery-photos')
-          .upload(storagePath, file, { contentType: file.type });
+          .upload(storagePath, file, { contentType: file.type, cacheControl: '0' });
 
         if (uploadErr) {
           toast('error', `Upload failed: ${uploadErr.message}`);

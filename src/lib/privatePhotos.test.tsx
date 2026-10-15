@@ -63,7 +63,7 @@ describe('PrivatePhoto', () => {
     const img = await screen.findByRole('img', { name: 'Delivery photo' });
     expect(img.getAttribute('src')).toBe('blob:tab-local-1');
     expect(H.from).toHaveBeenCalledWith('delivery-photos');
-    expect(H.download).toHaveBeenCalledWith('delivery-photos/d1/1.jpg', {}, { signal: expect.any(AbortSignal) });
+    expect(H.download).toHaveBeenCalledWith('delivery-photos/d1/1.jpg', {}, { signal: expect.any(AbortSignal), cache: 'no-store' });
     view.unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:tab-local-1');
   });

@@ -49,7 +49,9 @@ export function usePrivatePhoto(bucket: PrivatePhotoBucket, path: string | null 
         });
       }
     };
-    supabase.storage.from(bucket).download(path, {}, { signal: controller.signal })
+    // no-store: every view asks Storage again, so the read policy decides each time; a cached copy
+    // must not outlive a sign-out, deactivation or reassignment on a shared device.
+    supabase.storage.from(bucket).download(path, {}, { signal: controller.signal, cache: 'no-store' })
       .then(({ data, error }) => {
         if (controller.signal.aborted) return;
         if (error || !data) {

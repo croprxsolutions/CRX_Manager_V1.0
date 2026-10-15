@@ -20,7 +20,7 @@ to all three. The customer receipt email embedded the photo links.
   it downloads each photo with the signed-in user's session and shows a tab-local `blob:` address,
   never a storage URL. For field signal: a dropped download ends in a tap-to-retry tile (not an
   endless spinner), retries by itself when the phone is back online, and is cancelled when the photo
-  leaves the screen. Downloads bypass the browser cache (and new uploads are stored uncacheable), so
+  leaves the screen. Downloads bypass the browser cache (and new uploads are stored with `max-age=0`, so any cached copy is immediately stale and revalidated), so
   the read policy decides every view, even on a shared device. A full-size in-app viewer (with zoom) replaces opening the URL in a new window
   and reuses the thumbnail's download; Escape closes only the viewer, not the note it was opened from.
   `DeliveryDetail.tsx`, `FieldStop.tsx` and `NoteAttachments.tsx` use it. A note owner sees Delete

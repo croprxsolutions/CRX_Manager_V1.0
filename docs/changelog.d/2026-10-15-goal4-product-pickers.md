@@ -17,7 +17,18 @@ while the live database had 595. Products from "Storen - Bulk" onward could not 
 - M4 Reports › Price List reads every active product page by page through the existing
   `fetchAllRows` helper, shows the product count, and the CSV exports that full list. If any page
   fails, the list is cleared, a red error explains it, and Export CSV is disabled, so a partial
-  price list never looks complete.
+  price list never looks complete. Because the pages are separate reads, the list is then checked
+  against a second read of the active product ids: any repeat, or any product added, removed or
+  deactivated during the read, also shows the error. Only the newest load may update the screen.
+- The picker shows and accepts only results for the text currently typed, treats a typed `%` or
+  `_` literally, keeps result buttons out of the Tab order, and announces status messages.
+  `ProductSearchResult` lives in `src/types/index.ts`.
+
+**Review.** Codex Luna (4 rounds) and the compliance reviewer; every BLOCKER/HIGH fixed. Deferred,
+with reason: a price edited during the sub-second read can appear at its new value beside rows
+read just before (every row is still a real current price; a frozen snapshot needs a database
+function, out of scope). Noted, not changed: the Price List's cost column is visible to sales reps,
+as before; that belongs to the Goal 1 admin-only cost decision.
 
 **Proof (2026-10-15, dev server against live data, read-only).** Live `SELECT count(*)` of active
 products: 595; #500 is "Storen - Bulk". Price List on screen: "Active products: 595"; its CSV: 595

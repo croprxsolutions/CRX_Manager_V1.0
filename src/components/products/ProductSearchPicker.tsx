@@ -167,7 +167,7 @@ export default function ProductSearchPicker({
           role="combobox"
           aria-label={ariaLabel}
           aria-expanded={showList}
-          aria-controls={listId}
+          aria-controls={showList && options.length > 0 ? listId : undefined}
           aria-autocomplete="list"
           aria-activedescendant={showList && options[highlightedIndex] ? `${listId}-option-${highlightedIndex}` : undefined}
           value={query}
@@ -196,7 +196,7 @@ export default function ProductSearchPicker({
           {!resultsCurrent ? (
             <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">Searching...</div>
           ) : searchFailed ? (
-            <div role="alert" className="px-3 py-2 text-sm text-red-600">Product search failed. Try again.</div>
+            <div role="alert" className="px-3 py-2 text-sm text-red-600">Product search failed. Edit the search text to try again.</div>
           ) : options.length === 0 ? (
             <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">No matching active products</div>
           ) : (

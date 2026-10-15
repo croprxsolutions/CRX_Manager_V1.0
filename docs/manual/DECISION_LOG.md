@@ -156,7 +156,7 @@ line-writing path must join the server-side wall, and an unrecognized below-cost
 
 ## 2026-10-06 — CRX-LIFE-001 lands as scoped; rep scoping of the order-invoice RPCs is the next change
 
-**Superseded 2026-10-13** by "Sales reps work with ANY customer" above: the customer-scope half is dropped (reps may bill any customer); the salesperson half (reps bill only under their own name) still stands; on the order-invoice RPCs it ships in `20261014210000_order_invoices_rep_own_name.sql`. Kept below as history.
+**Superseded 2026-10-13** by "Sales reps work with ANY customer" above: the customer-scope half is dropped (reps may bill any customer); the salesperson half (a rep may name only themselves as salesperson; on an invoice made from an order a blank salesperson keeps the order's salesperson) still stands; on the order-invoice RPCs it ships in `20261014210000_order_invoices_rep_own_name.sql`. Kept below as history.
 
 **Decision (Mason, in chat: "Land it then lock down rep scoping next").** PR #885 lands the CRX-LIFE-001 fix (order invoices may only be `chemical_sale` or `misc_charge`; a `field_application` invoice can never carry an order) without widening it. Codex Luna round 3 rated two pre-existing gaps in the same RPCs HIGH: they check neither that the order's customer is assigned to the calling rep nor that the salesperson the caller names is themselves. Those are deferred by this decision, not by an agent, and are the next job.
 **Why.** Closing them touches delivery completion and split billing (`complete_delivery` calls the split RPC), so it needs its own reviewed change; the CRX-LIFE-001 fix stands on its own and is proven.

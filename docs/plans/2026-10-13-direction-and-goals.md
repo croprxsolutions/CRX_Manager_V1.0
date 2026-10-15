@@ -121,7 +121,7 @@ PR #907 merged and its migration (`20261013220000_reps_work_any_customer`) was a
 **Done when:** a rep account does all of the following for two customers, one with no assigned rep and one assigned to a different rep. Every step that saves, posts, emails, unposts, changes a split or touches a document runs on the isolated test system (Goal 6), including the attempts that are expected to be refused: if a guard were missing, a "refused" attempt on live would really change customer balances, commissions or documents. The live system is used only for read-only checks, unless Mason approves a specific live test in that conversation.
 - finds the customer when invoicing;
 - saves, posts and emails both a single invoice and an invoice group (split invoice) to them;
-- is refused when naming someone else as salesperson, through the screens **and** direct server calls, on repeat requests, and on an invoice group with mixed owners. A blank or missing salesperson is filled in with the rep's own name, not refused (shipped behavior);
+- is refused when naming someone else as salesperson, through the screens **and** direct server calls, on repeat requests, and on an invoice group with mixed owners. A blank or missing salesperson is not refused: on a manual invoice it is filled in with the rep's own name (shipped behavior); on an invoice made from an order it keeps the order's salesperson (`20261014210000`, Mason 2026-10-14);
 - is refused when changing any commission split, while an admin can;
 - can read another rep's invoice but cannot change it, unpost it, or alter its split set;
 - can upload, download and remove a document for a customer assigned to another rep, while a deactivated account is refused;

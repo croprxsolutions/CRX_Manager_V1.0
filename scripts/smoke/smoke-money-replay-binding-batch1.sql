@@ -50,6 +50,7 @@ DECLARE
   v_cents bigint;
   v_status text;
   v_err text;
+  v_sql text;
 BEGIN
   -- --------------------------------------------------------------------------------------------
   -- 0. Preconditions, two real admins, fixtures.
@@ -365,6 +366,33 @@ BEGIN
   IF v_n <> 2 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the exact batch_void_invoices retry (same set, other order) did not replay: %', v_n;
   END IF;
+
+  -- --------------------------------------------------------------------------------------------
+  -- 9b. Every other wrapper refuses a keyless call too (apply_write_off was step 4), including a
+  --     direct keyless apply_prepay_to_invoice outside the batch path's transaction marker.
+  -- --------------------------------------------------------------------------------------------
+  FOREACH v_sql IN ARRAY ARRAY[
+    format('SELECT public.void_payment(%L::uuid, %L, %L::uuid, NULL)', v_set_2, '[SMOKE] keyless', v_admin),
+    format('SELECT public.delete_prepay_credit(%L::uuid, %L, %L::uuid, NULL)', v_credit_2, '[SMOKE] keyless', v_admin),
+    format('SELECT public.edit_prepay_credit(%L::uuid, 1000, NULL, NULL, NULL, %L::uuid, NULL)', v_credit_2, v_admin),
+    format('SELECT public.reverse_write_off(%L::uuid, %L, %L::uuid, NULL)', v_wo_2, '[SMOKE] keyless', v_admin),
+    format('SELECT public.apply_prepay_to_invoice(%L::uuid, %L::uuid, 100, %L::uuid, NULL)', v_credit_3, v_inv[7], v_admin),
+    format('SELECT public.create_prepay_check_splits(%L::uuid, %L, %L::jsonb, %L::uuid, NULL, 100)',
+           v_customer, '[SMOKE]-RPB-KEYLESS-' || v_suffix, '[{"label":"A","amount_cents":100}]', v_admin),
+    format('SELECT public.batch_apply_prepayments(%L::jsonb, %L::uuid, NULL)',
+           jsonb_build_array(jsonb_build_object('prepay_credit_id', v_credit_3, 'invoice_id', v_inv[7], 'amount_cents', 100)), v_admin),
+    format('SELECT public.batch_void_invoices(ARRAY[%L::uuid], %L, %L::uuid, NULL)', v_inv[7], '[SMOKE] keyless', v_admin)
+  ] LOOP
+    BEGIN
+      EXECUTE v_sql;
+      RAISE EXCEPTION 'SMOKE_FAIL: a keyless call ran: %', v_sql;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+      IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong keyless refusal for %: %', v_sql, SQLERRM;
+      END IF;
+    END;
+  END LOOP;
 
   -- --------------------------------------------------------------------------------------------
   -- 10. Every receipt written above is bound to the admin and carries a fingerprint, and a legacy

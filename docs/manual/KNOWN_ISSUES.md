@@ -196,7 +196,8 @@ missing; between-turn hand-back timing is still untested (see below), so a trans
 
 **Next step.** Two routes:
 1. **Partial.** Repeated probes from a non-worktree session, across many turns, find the record
-   carrying the hook's `prompt_id` on disk every time the hook runs. Then an origin check keyed on
+   carrying the hook's `prompt_id` on disk every time the hook runs for a between-turn hand-back
+   (other prompts, such as a session's first typed prompt, need not have one). Then an origin check keyed on
    `prompt_id` can cover between-turn hand-backs. A probe can only show this is likely, not certain,
    so the check must fall back to today's text rules whenever the record is missing (a missed origin
    then latches exactly as now; it never swallows a stop). Mid-turn hand-backs have no `promptId`

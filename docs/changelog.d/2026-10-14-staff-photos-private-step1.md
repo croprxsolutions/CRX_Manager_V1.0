@@ -12,7 +12,8 @@ to all three. The customer receipt email embedded the photo links.
 - Migration `20261014230000_staff_photo_storage_access.sql`: storage read policies by role
   (delivery photos: admins, reps, the assigned active driver; receiving photos: admins and reps;
   team-note photos: active staff, not commission-recipient profiles); uploads and deletes narrowed to
-  the same roles; the team-note delete now reads the right folder; the delivery-photo row policy
+  the same roles (a delivery photo's file is deleted by an admin only, like its record); the
+  team-note delete now reads the right folder; the delivery-photo row policy
   requires an active driver. It locks with a 5-second timeout, pins every policy it changes before
   and after (exact text), and refuses any storage policy that does not test a bucket.
 - The app shows photos through `src/hooks/usePrivatePhoto.ts` and `src/components/ui/PrivatePhoto.tsx`:
@@ -39,7 +40,7 @@ small migration sets the three buckets private so old public links stop working.
 
 **Proof.** `scripts/smoke/prove-staff-photo-storage-access-real-schema.mjs` builds the production
 schema in a disposable database (storage modeled as live, including `storage.protect_delete`) and
-runs 43 role cases (download, upload, delete) before and after, plus a drifted-policy refusal, a
+runs 44 role cases (download, upload, delete) before and after, plus a drifted-policy refusal, a
 re-apply refusal and a mutation check; it also runs the new live chain
 `scripts/smoke/smoke-staff_photo_storage_access.sql` (spec `staff_photo_storage_access`), which fails
 before the migration and passes after. Live read-only checks 2026-10-14: every storage policy names a

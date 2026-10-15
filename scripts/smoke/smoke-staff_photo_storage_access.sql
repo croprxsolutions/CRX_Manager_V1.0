@@ -6,7 +6,8 @@
 -- download (SELECT), an upload (INSERT) and a delete (DELETE):
 --   * delivery-photos: an admin uploads a probe into a delivery assigned to an active driver; that
 --     driver and a sales rep see it; another driver, an applicator, a commission-recipient profile
---     and a signed-out visitor do not; the driver cannot upload into another driver's delivery.
+--     and a signed-out visitor do not; the driver cannot upload into another driver's delivery;
+--     a rep's delete of it removes nothing, an admin's removes it (matching the admin-only row policy).
 --   * receiving-photos: a rep sees an admin's probe; a driver and an applicator do not; a rep's
 --     delete removes nothing, an admin's removes it.
 --   * team-note-attachments: a driver uploads into their own folder and an applicator sees it; a
@@ -106,6 +107,9 @@ BEGIN
   DELETE FROM storage.objects WHERE name = v_recv_obj;
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   IF v_rows <> 0 THEN RAISE EXCEPTION 'SMOKE_FAIL: a sales rep deleted a receiving photo'; END IF;
+  DELETE FROM storage.objects WHERE name = v_del_obj;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN RAISE EXCEPTION 'SMOKE_FAIL: a sales rep deleted a delivery photo file (its row is admin-only)'; END IF;
   EXECUTE 'RESET ROLE';
 
   -- Another driver: none of the delivery probe; the team-note probe yes.
@@ -158,6 +162,9 @@ BEGIN
   DELETE FROM storage.objects WHERE name = v_recv_obj;
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   IF v_rows <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: an admin cannot delete a receiving photo'; END IF;
+  DELETE FROM storage.objects WHERE name = v_del_obj;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: an admin cannot delete a delivery photo'; END IF;
   EXECUTE 'RESET ROLE';
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';

@@ -349,7 +349,9 @@ const CASES = [
   ['rep deletes own team-note photo', U.REP, remove(OBJ.NOTE_REP), { statement: true }, HIDDEN, SEEN],
   ['driver deletes the rep\'s team-note photo', U.DRIVER, remove(OBJ.NOTE_REP), { statement: true }, HIDDEN, 'same'],
   ['admin deletes a team-note photo', U.ADMIN, remove(OBJ.NOTE_DRIVER), { statement: true }, HIDDEN, SEEN],
-  ['rep deletes a delivery photo', U.REP, remove(OBJ.MINE), { statement: true }, HIDDEN, SEEN],
+  // Admin only, as the delivery_photos row policy (a rep could otherwise strand an undeletable row).
+  ['rep deletes a delivery photo', U.REP, remove(OBJ.MINE), { statement: true }, HIDDEN, 'same'],
+  ['admin deletes a delivery photo', U.ADMIN, remove(OBJ.MINE), { statement: true }, HIDDEN, SEEN],
   ['driver deletes own delivery photo', U.DRIVER, remove(OBJ.MINE), { statement: true }, HIDDEN, 'same'],
   ['admin deletes directly, outside Storage', U.ADMIN, directRemove(OBJ.RECV), { statement: true }, /^42501\|Direct deletion from storage tables is not allowed/, 'same'],
 

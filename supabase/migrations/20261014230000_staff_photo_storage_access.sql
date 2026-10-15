@@ -28,14 +28,15 @@
 -- Rules (Mason 2026-10-14). They follow the matching table policies, except that team-note photos
 -- leave out the commission-recipient profiles (the table read policy, is_active_profile(), lets them in):
 --   * delivery-photos: view and upload = active admin or sales rep, or the active driver assigned to
---     the delivery in folder 2. Delete unchanged (active admin or sales rep).
+--     the delivery in folder 2. Delete = active admin (was admin or sales rep), matching the
+--     delivery_photos row policy so the file and its row can only be removed together.
 --   * receiving-photos: view and upload = active admin or sales rep; delete = active admin.
 --   * team-note-attachments: view = any active staff role (admin, sales rep, driver, applicator; not
 --     the commission-recipient profiles); upload = active staff, into their own folder 2; delete =
 --     the active uploader (folder 2) or an active admin.
 --   * del_photos_select: the driver branch requires an active driver profile.
 --
--- Behavior change to note: once applied, the delete policies take effect, so an admin's or rep's
+-- Behavior change to note: once applied, the delete policies take effect, so an admin's
 -- delete of a delivery photo, an admin's delete of a receiving photo and an uploader's delete of
 -- their own team-note photo really remove the file.
 -- Accepted limitation (Mason, 2026-10-14, option A): a staff member who may view a photo can still
@@ -136,6 +137,16 @@ WITH CHECK (
   )
 );
 
+-- Delete matches the delivery_photos row policy (del_photos_delete: admin only). Left at admin or
+-- rep, a rep could remove a photo's file once the read policy above makes deletes effective,
+-- leaving a row only an admin can delete pointing at nothing (Codex on PR #929). No screen lets a
+-- rep delete a delivery photo.
+ALTER POLICY "delivery_photos_delete" ON storage.objects
+USING (
+  bucket_id = 'delivery-photos'
+  AND public.is_admin()
+);
+
 -- receiving-photos --------------------------------------------------------------------------------
 CREATE POLICY "staff_photos_receiving_select"
 ON storage.objects
@@ -207,14 +218,14 @@ DECLARE
   v_md5 text;
 BEGIN
   -- Each policy is exactly the text this file writes (md5 of cmd|roles|qual|with_check as
-  -- PostgreSQL 17 prints it, read from the disposable-database prover after apply; the unchanged
-  -- delivery_photos_delete pin equals its live value), and each is PERMISSIVE.
+  -- PostgreSQL 17 prints it, read from the disposable-database prover after apply; the seven
+  -- preflight pins of untouched text matched live in the same prover), and each is PERMISSIVE.
   FOR v_pin IN SELECT * FROM (VALUES
     ('storage', 'objects', 'staff_photos_delivery_select', '90f32dc6545185303ce7388cef4c2df1'),
     ('storage', 'objects', 'staff_photos_receiving_select', '8f1d00d9e18358df1e9a6238ff96538f'),
     ('storage', 'objects', 'staff_photos_team_note_select', '27cfe714de7b43154732c07162393db4'),
     ('storage', 'objects', 'delivery_photos_insert', '77226f37b06516baf3fa3d72b43b2b80'),
-    ('storage', 'objects', 'delivery_photos_delete', '23825b9adb39d1bc99987a641368945b'),
+    ('storage', 'objects', 'delivery_photos_delete', '18eaabc7bfae3c43d6b922f8b24c6ac4'),
     ('storage', 'objects', 'recv_photos_storage_upload', '49d68cd4f3a03332c5658e15ab30d8c6'),
     ('storage', 'objects', 'recv_photos_storage_delete', '11e5f2acbee2538208d484c955df1aae'),
     ('storage', 'objects', 'Authenticated users can upload team note attachments', '2591f94e1b2b6a55126914a4868fecf1'),

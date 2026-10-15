@@ -30,8 +30,12 @@
 --      ticket's salesman_id onto every invoice it creates with no own-name test, and
 --      invoices.salesman_id is a read-access key. It now refuses a non-admin caller whose ticket
 --      names someone else, with SALESMAN_SCOPE_DENIED, after locking the ticket row and before its
---      replay lookup, so no invoice number is drawn. Re-emitted as its verbatim live body plus that
---      one hunk (pre md5 CR-insensitive c520a7301f88f3e96ed7bbc33101c4ef, post 9a4f9baff8e1f68b46c08603eb2bec33).
+--      replay lookup, so no invoice number is drawn. Its replay lookup (check_idempotency) matches
+--      on the key alone, so a stored result is now returned only when every invoice in it belongs
+--      to this ticket and was created by this caller; otherwise IDEMPOTENCY_INTENT_MISMATCH (a
+--      reused key can no longer return another ticket's or another person's invoices). Re-emitted
+--      as its verbatim live body plus those two hunks (pre md5 CR-insensitive
+--      c520a7301f88f3e96ed7bbc33101c4ef, post 7be2aeab29bcd4ef50e74dd7a63bcfbc).
 --
 -- WHY (Mason): the own-name rule since 2026-10-06, narrowed 2026-10-13 to "reps bill any customer,
 --   but only under their own name; admins unrestricted"; 2026-10-15 in chat: "do the docs follow up
@@ -59,6 +63,11 @@
 --   20260714230200_blend_ticket_order_lifecycle.sql.
 --
 -- ORDERING: strict. Apply after every older pending migration.
+--
+-- actor-binding-check: exempt. create_invoice_from_blend_ticket does bind p_created_by: its
+--   verbatim live body sets v_actor := auth.uid() and raises 'p_created_by does not match
+--   authenticated user' when they differ, before any write. Only the wording differs from the
+--   ACTOR_MISMATCH code, and this migration keeps the live wording.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -259,7 +268,24 @@ BEGIN
       p_idempotency_key,
       'create_invoice_from_blend_ticket'
     );
-    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+    IF v_existing IS NOT NULL THEN
+      -- The receipt is keyed by the key alone. Replay it only to the person who billed this
+      -- ticket under that key, so a reused key never returns another ticket's or another
+      -- person's invoices.
+      IF jsonb_typeof(v_existing->'invoice_ids') IS DISTINCT FROM 'array'
+         OR jsonb_array_length(v_existing->'invoice_ids') = 0
+         OR EXISTS (
+           SELECT 1
+             FROM jsonb_array_elements_text(v_existing->'invoice_ids') AS r(invoice_id)
+             LEFT JOIN public.invoices i ON i.id = r.invoice_id::uuid
+            WHERE i.id IS NULL
+               OR i.blend_ticket_id IS DISTINCT FROM p_blend_ticket_id
+               OR i.created_by IS DISTINCT FROM v_actor
+         ) THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';
+      END IF;
+      RETURN v_existing;
+    END IF;
   END IF;
 
   SELECT * INTO v_ticket
@@ -701,7 +727,7 @@ BEGIN
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) =
           'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text'
-        AND md5(p.prosrc) = '9a4f9baff8e1f68b46c08603eb2bec33'
+        AND md5(p.prosrc) = '7be2aeab29bcd4ef50e74dd7a63bcfbc'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[]

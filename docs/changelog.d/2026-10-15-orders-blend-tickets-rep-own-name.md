@@ -10,7 +10,7 @@ written).** The rest of Goal 2's "own-name everywhere" after the order-invoice f
   update that leaves the salesperson alone is never refused, so every server function that updates
   another rep's order or ticket for other reasons keeps working. Admins are unrestricted.
 - `create_invoice_from_blend_ticket` refuses a rep billing a ticket that names someone else, after
-  locking the ticket and before the replay lookup or any invoice number. `create_order_from_blend_ticket`
+  locking the ticket and before the replay lookup or any invoice number. A replayed result is returned only when every invoice in it belongs to that ticket and was created by the caller (otherwise `IDEMPOTENCY_INTENT_MISMATCH`), because the replay lookup matches on the key alone. `create_order_from_blend_ticket`
   is not edited: it copies the ticket's salesperson onto the new order, so the trigger refuses a rep
   converting another rep's ticket.
 
@@ -35,5 +35,5 @@ read 2026-10-15, shows the new chain `smoke-orders-blend-tickets-rep-own-name.sq
 before the change and passing after, runs three other chains before and after (two more that touch
 these tables cannot run there: one already fails on main at its own fixture, one needs live
 data), refuses an autocommit,
-drifted or repeated apply, and proves each hunk with a mutation (six; one moves the billing test below the replay lookup, which matches on the key alone). Live chains are not run:
+drifted or repeated apply, and proves each hunk with a mutation (nine; one moves the billing test below the replay lookup, and three remove the replay binding or one of its two tests). Live chains are not run:
 they draw customer-visible order and invoice numbers.

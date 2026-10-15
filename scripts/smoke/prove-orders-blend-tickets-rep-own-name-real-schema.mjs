@@ -319,10 +319,29 @@ ROLLBACK;`,
     '      p_idempotency_key,',
     "      'create_invoice_from_blend_ticket'",
     '    );',
-    '    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;',
+    '    IF v_existing IS NOT NULL THEN',
+    '      -- The receipt is keyed by the key alone. Replay it only to the person who billed this',
+    '      -- ticket under that key, so a reused key never returns another ticket\'s or another',
+    '      -- person\'s invoices.',
+    "      IF jsonb_typeof(v_existing->'invoice_ids') IS DISTINCT FROM 'array'",
+    "         OR jsonb_array_length(v_existing->'invoice_ids') = 0",
+    '         OR EXISTS (',
+    '           SELECT 1',
+    "             FROM jsonb_array_elements_text(v_existing->'invoice_ids') AS r(invoice_id)",
+    '             LEFT JOIN public.invoices i ON i.id = r.invoice_id::uuid',
+    '            WHERE i.id IS NULL',
+    '               OR i.blend_ticket_id IS DISTINCT FROM p_blend_ticket_id',
+    '               OR i.created_by IS DISTINCT FROM v_actor',
+    '         ) THEN',
+    "        RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';",
+    '      END IF;',
+    '      RETURN v_existing;',
+    '    END IF;',
     '  END IF;',
     '',
   ].join('\n');
+  const BILL_REPLAY_BINDING = BILL_REPLAY_BLOCK.slice(
+    BILL_REPLAY_BLOCK.indexOf("      IF jsonb_typeof"), BILL_REPLAY_BLOCK.indexOf('      RETURN v_existing;'));
   const mutations = [
     ['guard INSERT test', GUARD,
       "    IF NEW.salesman_id IS NOT NULL AND NEW.salesman_id IS DISTINCT FROM (SELECT auth.uid()) THEN\n      RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n    END IF;\n", '',
@@ -346,7 +365,16 @@ ROLLBACK;`,
     // The replay lookup is keyed by the key alone, so the own-name test must run before it.
     ['blend-ticket billing test before the replay lookup', BLEND_INVOICE,
       BILL_OWN_NAME_HUNK + '\n' + BILL_REPLAY_BLOCK, BILL_REPLAY_BLOCK + '\n' + BILL_OWN_NAME_HUNK,
-      /SMOKE_FAIL: a sales rep replayed an admin's billing of another rep's blend ticket/],
+      /SMOKE_FAIL: wrong blend-ticket replay refusal: IDEMPOTENCY_INTENT_MISMATCH/],
+    // The replay binding as a whole, then each of its two tests on its own.
+    ['blend-ticket replay binding', BLEND_INVOICE, BILL_REPLAY_BINDING, '',
+      /SMOKE_FAIL: a sales rep replayed an admin's billing key on another ticket/],
+    ['blend-ticket replay bound to its ticket', BLEND_INVOICE,
+      '               OR i.blend_ticket_id IS DISTINCT FROM p_blend_ticket_id\n', '',
+      /SMOKE_FAIL: a billing key replayed onto a different blend ticket/],
+    ['blend-ticket replay bound to its caller', BLEND_INVOICE,
+      '               OR i.created_by IS DISTINCT FROM v_actor\n', '',
+      /SMOKE_FAIL: a sales rep replayed an admin's billing key on their own ticket/],
   ];
   for (const [label, fn, find, replacement, expected] of mutations) {
     const r = chain(OWN_NAME_CHAIN, mutate(fn, find, replacement, label));

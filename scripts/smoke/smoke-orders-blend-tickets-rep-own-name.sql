@@ -333,6 +333,22 @@ BEGIN
   IF (SELECT count(*) FROM public.invoices) <> v_count THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused blend-ticket replay wrote something';
   END IF;
+  -- The same key on an unassigned ticket passes the own-name test, so the replay itself must
+  -- refuse to hand back the admin's invoices for ticket 1.
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_tickets[3], v_rep, 'e2e-rsn-bill-admin-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep replayed an admin''s billing key on another ticket: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err IS DISTINCT FROM 'IDEMPOTENCY_INTENT_MISMATCH' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong cross-ticket replay refusal: %', v_err;
+    END IF;
+  END;
+  IF (SELECT count(*) FROM public.invoices) <> v_count
+     OR (SELECT payment_status FROM public.blend_tickets WHERE id = v_tickets[3]) IS DISTINCT FROM 'unbilled' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused cross-ticket replay wrote something';
+  END IF;
   v_res := public.create_invoice_from_blend_ticket(v_tickets[2], v_rep, 'e2e-rsn-bill-own-' || v_suffix);
   IF (SELECT salesman_id FROM public.invoices WHERE id = (v_res->'invoice_ids'->>0)::uuid) IS DISTINCT FROM v_rep THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a sales rep could not bill their own blend ticket under their name: %', v_res;
@@ -341,6 +357,36 @@ BEGIN
   IF public.create_invoice_from_blend_ticket(v_tickets[2], v_rep, 'e2e-rsn-bill-own-' || v_suffix) IS DISTINCT FROM v_res THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the rep''s own blend-ticket billing did not replay';
   END IF;
+  -- The rep's own key on a different ticket is refused (the receipt is bound to its ticket).
+  BEGIN
+    v_json := public.create_invoice_from_blend_ticket(v_tickets[3], v_rep, 'e2e-rsn-bill-own-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a billing key replayed onto a different blend ticket: %', v_json;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err IS DISTINCT FROM 'IDEMPOTENCY_INTENT_MISMATCH' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong other-ticket replay refusal: %', v_err;
+    END IF;
+  END;
+  -- An admin's key on the rep's own ticket is refused to the rep (the receipt is bound to its
+  -- caller): the admin bills ticket 6, which names the rep, and the rep retries that key.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  PERFORM public.create_invoice_from_blend_ticket(v_tickets[6], v_admin, 'e2e-rsn-bill-admin6-' || v_suffix);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  BEGIN
+    v_json := public.create_invoice_from_blend_ticket(v_tickets[6], v_rep, 'e2e-rsn-bill-admin6-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep replayed an admin''s billing key on their own ticket: %', v_json;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err IS DISTINCT FROM 'IDEMPOTENCY_INTENT_MISMATCH' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong other-caller replay refusal: %', v_err;
+    END IF;
+  END;
   v_res := public.create_invoice_from_blend_ticket(v_tickets[3], v_rep, 'e2e-rsn-bill-none-' || v_suffix);
   IF NOT EXISTS (SELECT 1 FROM public.invoices WHERE id = (v_res->'invoice_ids'->>0)::uuid AND salesman_id IS NULL) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a sales rep could not bill an unassigned blend ticket: %', v_res;

@@ -11,11 +11,15 @@ ledger at the approved PR #901 head, so anything that happened afterwards is rec
   ("yes delete the 157"). The helper's sweep reported all 157 gone with every restore source intact. Each
   row is listed below and was re-verified live when this file was written: the branch is absent and its
   restore source (PR ref or archive tag) still points at the ledger commit.
-- **16 "after this PR" rows: APPROVED, NOT YET DELETED.** Mason approved them ("yes delete the 16",
-  2026-10-14) in the same conversation. They run only after this record merges, with helper version 3
-  below. Any other session needs a fresh yes from Mason first (`AGENTS.md`: approval must be in the
-  current conversation).
-- **12 kept branches: unchanged** at the commits in the ledger, checked live after the 157.
+- **16 "after this PR" rows: DELETED 2026-10-15 (02:51-02:55 UTC).** Mason approved them ("yes delete
+  the 16", 2026-10-14) in the same conversation, and they ran with helper version 3 below. This record was
+  first meant to merge before them, but other pull requests kept landing on `main` faster than it could be
+  re-reviewed, so Mason chose to delete first and record after ("Flip it"). The helper does not depend on
+  this record: its gates use PR #901 and a fresh re-measure. Each row is listed below and was re-verified
+  live: the branch is absent and its restore source still points at the ledger commit.
+- **12 kept branches: unchanged** at the commits in the ledger, checked live after the 157 and again after
+  the 16. 15 branches remain on GitHub: `main`, the 12 kept branches,
+  `claude/invoicing-admin-only-db-20261010` (never in scope), and this record's own branch.
 
 ## Helper version 3 (supersedes the ledger's recorded helper hash)
 
@@ -26,9 +30,10 @@ may run the remaining batch:
 - **helper v3:** `53e250ca48eb05d2e1de0a79905b6146a0bffaecc8e7163532565a5e972a0574`
   (`C:/Users/mason/CRX_branch_archive/branch-cleanup-2026-10-13.mjs`; v2 kept beside it as
   `branch-cleanup-2026-10-13.v2-e80f52bf.mjs`)
-- **baseline:** `b64e7097c0b6065e0945836df1ad22c40e79bf5e073830be54e43e1ac1cfa921`, measured at `main`
-  `76b1227d1` (PR #920's merge); earlier baselines are kept beside it as `.at-<commit>.json`, including
-  `920b7b3eb3ec62d34459aaf29e4360c40ae5c1d2ad909a398cbff73946d83bd3` at `133416234` (PR #913's merge),
+- **baseline used for the 16:** `f5cc7f151050e87f63f4090fca530734fca9dd0c932b6245431adfe68ae78a43`,
+  measured at `main` `fa086edc6` (PR #918's merge); earlier baselines are kept beside it as
+  `.at-<commit>.json`, including `b64e7097c0b6065e0945836df1ad22c40e79bf5e073830be54e43e1ac1cfa921` at
+  `76b1227d1` (PR #920's merge), `920b7b3eb3ec62d34459aaf29e4360c40ae5c1d2ad909a398cbff73946d83bd3` at `133416234` (PR #913's merge),
   `8967eb601e6c572a80efb612b60f4d86ac4b8d308b616823aba12a887eecac11` at `ab3600c9f` (PR #917's merge) and
   `4e26e807fd67897e2ef053799759d4468127049ae8f91be7ca0f18485d2caef4` at `641a62a5f` (PR #901's merge)
 - **bundle:** unchanged, `dd0a305b3531e418d5a5ab4633c3c16b08dab41c35ff28536f08e997faf98b1d`
@@ -41,8 +46,8 @@ no branch entry changed (`8967eb60…`).
 
 **Re-measured after PRs #921 and #913.** Both then landed on `main` (database and smoke-test
 documentation). They edit shared manual files that 11 of the 16 also edit, so every branch was re-measured
-at `133416234`: 184 of 185 match, including all 16 and all 12 kept branches, no watched-document line naming any branch changed, and all 22 rescue markers are present. The
-one difference is `claude/docs-cleanup-1-corrections-v12`, already deleted in the 157 (restore source
+at `133416234`: 184 of 185 match, including all 16 and all 12 kept branches, no watched-document line
+naming any branch changed, and all 22 rescue markers are present. The one difference is `claude/docs-cleanup-1-corrections-v12`, already deleted in the 157 (restore source
 PR #821 intact): it now also counts `docs/reference/database-schema.md` as unlanded only because #921
 edited `main`'s copy of that file. Because this is a branch gaining an unlanded path, the rewrite stopped
 for Mason, who accepted it ("Accept", 2026-10-14). The baseline was rewritten at `133416234` with only that
@@ -50,17 +55,21 @@ entry changed (`920b7b3e…`).
 
 **Re-measured after PR #920.** PR #920 (rule-page documentation) then landed on `main`. Every branch was
 re-measured at `76b1227d1`: all 185 match, no watched-document line naming any branch changed, and all 22
-rescue markers are present. The baseline was rewritten there with no branch entry changed, giving the
-hash above, which was reported to Mason before the batch.
+rescue markers are present. The baseline was rewritten there with no branch entry changed
+(`b64e7097…`, reported to Mason).
 
-**This baseline stays valid when this record merges.** Merging it moves `main`, but only by adding this
-file and its changelog note. Neither exists at the approved #901 head, and none of the 16 branches
-touches either. The helper's refresh gate therefore finds no batch branch overlapping a moved path, and no
-watched-document line naming one of them changes. So the batch runs against this exact baseline, with no
-rewrite. If anything else lands on `main` first, the audit's re-measure procedure applies unchanged:
-re-measure every branch, rewrite only if no branch gains an unlanded path and none of the 16 changes, and
-otherwise stop and ask Mason. A rewritten baseline's hash is reported to Mason before the batch runs and
-recorded with the 16's outcome.
+**Re-measured after PRs #923, #924, #925 and #918, then the batch.** Those four then landed (`main`
+`fa086edc6`). Every branch was re-measured there: all 185 match, no watched-document line naming any branch
+changed, and all 22 rescue markers are present; Mason was told the result before approving "Flip it". The
+baseline was rewritten there with no branch entry changed (`f5cc7f15…`; this hash was reported to Mason
+with the batch result, not before it). Then, with `main` still at `fa086edc6`:
+- the helper's `plan` dry run exited 0 with 16 deletes, one push of 5 archive tags, and no kept branch,
+  `main` or open-pull-request branch named; it matched the earlier dry run line for line;
+- the 5 archive tags were pushed and `verify-tags` confirmed all 16 restore sources and the bundle;
+- the first deletion ran alone as a canary, then the other 15 in three chunks, each line stopping at the
+  first refusal; none refused;
+- the `sweep` reported all 16 gone with every restore source intact, and all 12 kept branches were at their
+  ledger commits.
 
 **Why it changed.** PR #901 merged at exactly its approved head `64a7250dd` (CodeRabbit APPROVED, every
 required check green), but GitHub squash-merged it onto a `main` that already held PR #910. #910 had edited
@@ -257,3 +266,24 @@ documents now name is named exactly as at the approved #901 head.
 | `claude/deps-audit-fix-20260930` | `1f7449f79` | PR #846 | Deleted 2026-10-14; restore source verified |
 | `claude/deps-audit-fix-20260930-v2` | `1f7449f79` | PR #849 | Deleted 2026-10-14; restore source verified |
 | `claude/js-yaml-high-advisory-20260908` | `cf28a8601` | PR #644 | Deleted 2026-10-14; restore source verified |
+
+## Outcome of the 16 "after this PR" rows
+
+| Branch | Commit | Restore from | Outcome |
+|---|---|---|---|
+| `claude/recover-applied-migrations-20260812` | `27817c2a5` | PR #395 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/bind-adjust-inventory-receipt-delivery-20260917` | `965089215` | PR #711 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/customer-document-rep-remove-page` | `fda25d4a6` | tag archive/2026-10-13/claude/customer-document-rep-remove-page (created 2026-10-15) | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/customer-document-rep-remove-page-v2` | `aee5c0c1f` | tag archive/2026-10-13/claude/customer-document-rep-remove-page-v2 (created 2026-10-15) | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/customer-document-rep-remove-page-v3` | `812174bc0` | tag archive/2026-10-13/claude/customer-document-rep-remove-page-v3 (created 2026-10-15) | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/review-proof-guard-read-only-narrowing` | `e02709981` | PR #612 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/bash-safety-opacity-cleanup` | `bf54a52c9` | PR #527 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/live-data-guard-comment-aware` | `b326461e0` | PR #639 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/inventory-hold-retry-delivery-3` | `08cc28a41` | PR #672 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `codex/idempotency-reset-order-hardening-20260802` | `9049efc80` | tag archive/2026-10-13/codex/idempotency-reset-order-hardening-20260802 (created 2026-10-15) | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `codex/pr-comment-remediation-20260903` | `5dbad8a3f` | PR #591 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `codex/section1-security-hardening-20260725` | `53f6177eb` | tag preserve/2026-07-29/codex-section1-security-hardening-20260725 (exists) | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/bulk-import-retry-scopes` | `ed62508e2` | tag archive/2026-10-13/claude/bulk-import-retry-scopes (created 2026-10-15) | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/product-plan-rev12-followup` | `74ccba0f7` | PR #507 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `codex/defer-return-credit-rollout-20260831` | `ac695f499` | PR #532 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |
+| `claude/loosen-claude-permissions-20260905` | `d5cc21353` | PR #605 | Deleted 2026-10-15 (02:51-02:55 UTC); restore source verified |

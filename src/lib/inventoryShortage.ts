@@ -58,3 +58,51 @@ export function sumNeedByProduct(
   }
   return [...byProduct.values()];
 }
+
+export interface DeliveryProductLine {
+  /** Delivery the line belongs to. */
+  deliveryId: string;
+  /** Product the line draws from. */
+  productId: string;
+  /** Units this line needs. Non-positive lines are ignored. */
+  quantity: number;
+}
+
+/**
+ * Which deliveries the delivery list should flag as short on stock.
+ *
+ * Deliveries compete for the same shelf: two deliveries that each fit the stock
+ * on hand can still need more than it together. So the need is summed per
+ * product across EVERY delivery passed in (the active ones), and a delivery is
+ * flagged when it needs any product whose combined need exceeds `onHand`
+ * (Mason, 2026-10-14: "flag shared shortages"). The flag does not decide which
+ * delivery gets the stock first. Because the combined need includes the
+ * delivery's own need, a delivery that is short on its own is always flagged.
+ * A product missing from `onHand` counts as zero stock.
+ */
+export function findShortDeliveries(
+  lines: readonly DeliveryProductLine[],
+  onHand: Readonly<Record<string, number>>
+): Set<string> {
+  const combinedNeed = new Map<string, number>();
+  const productsByDelivery = new Map<string, Set<string>>();
+  for (const line of lines) {
+    if (!line.deliveryId || !line.productId) continue;
+    if (!Number.isFinite(line.quantity) || line.quantity <= 0) continue;
+    combinedNeed.set(line.productId, (combinedNeed.get(line.productId) ?? 0) + line.quantity);
+    const products = productsByDelivery.get(line.deliveryId);
+    if (products) products.add(line.productId);
+    else productsByDelivery.set(line.deliveryId, new Set([line.productId]));
+  }
+
+  const short = new Set<string>();
+  for (const [deliveryId, products] of productsByDelivery) {
+    for (const productId of products) {
+      if ((combinedNeed.get(productId) ?? 0) > (onHand[productId] ?? 0)) {
+        short.add(deliveryId);
+        break;
+      }
+    }
+  }
+  return short;
+}

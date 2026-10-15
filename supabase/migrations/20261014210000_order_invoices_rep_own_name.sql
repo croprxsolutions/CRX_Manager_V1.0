@@ -49,7 +49,7 @@
 --   ACL, and the postflight proves it. Remaining gap (KNOWN_ISSUES.md): blend tickets.
 --
 -- OVERLOADS: each re-emitted function has exactly one overload, so CREATE OR REPLACE replaces the
---   live OID (read-only on live, 2026-10-15 06:5x UTC: create_invoice_from_order(uuid,uuid,text,text),
+--   live OID (read-only on live, 2026-10-15 07:12 UTC, a separate read from the 06:48 UTC ledger capture: create_invoice_from_order(uuid,uuid,text,text),
 --   create_split_invoices_from_order(uuid,uuid,text,text) and _complete_delivery_authorized_impl(uuid,
 --   text,uuid,jsonb,text,text,text,timestamptz), one row each). The 2026-02-13 three-argument
 --   create_invoice_from_order(uuid, uuid, text) was dropped by 20260311200000_wave2_audit_fixes.sql:1164.

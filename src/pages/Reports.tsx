@@ -1435,7 +1435,7 @@ export default function Reports() {
               {operationalTab === 'inventory_cost' && <DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category']} emptyTitle="No inventory data" loading={loading} />}
               {operationalTab === 'chemical_history' && <DataTable data={chemHistoryData as unknown as Record<string, unknown>[]} columns={chemHistoryCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No chemical history" emptyDescription="Select a product and date range" loading={loading} />}
               {operationalTab === 'posted_applications' && <DataTable data={postedAppsData} columns={postedAppsCols} searchable searchKeys={['customer_name', 'record_number']} emptyTitle="No posted applications" loading={loading} />}
-              {operationalTab === 'price_list' && <DataTable data={priceListData} columns={priceListCols} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'vendor']} emptyTitle="No products" loading={loading} />}
+              {operationalTab === 'price_list' && <DataTable data={priceListData} columns={priceListCols} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'vendor']} emptyTitle="No products" loading={loading || priceListPending} />}
             </div>
           </Card>}
         </>

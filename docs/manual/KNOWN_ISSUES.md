@@ -60,6 +60,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
+<<<<<<< HEAD
 ## OPEN 2026-10-15 (HIGH on money paths; batch 1 written, migration 20261015210000 not applied) — about 75 live functions replay a saved result matched on the retry key alone
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
@@ -145,6 +146,18 @@ rollback-only live smoke.
 **Found in passing — not replay binding.** `reverse_write_off`'s role test
 `(SELECT role … AND is_active) != 'admin'` and `mark_inventory_row_verified`'s `v_role != 'admin'`
 both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through. Batch 1 closes it for `reverse_write_off` (its wrapper requires an active admin); `mark_inventory_row_verified` stays open.
+=======
+## OPEN 2026-10-15 (LOW, proof tooling only) — the Phase 3 return-policy concurrency prover no longer reaches its chain
+
+`scripts/smoke/prove-supplier-pricing-phase3-return-policy-concurrency.mjs` stops during its own
+post-baseline replay, at `20260810010308_active_team_note_assignment_actor`, with
+`PREFLIGHT_FAIL: notify_team_note_assignment live base drift`, so none of its concurrency races
+run. The other real-schema provers replay that migration cleanly, so the gap is in this runner's
+replay set-up, not in the schema. The rollback matrix chain it also ran is proven separately by
+`prove-supplier-pricing-phase3-return-policy-real-schema.mjs` (2026-10-15, see
+`docs/changelog.d/2026-10-15-phase3-return-policy-chain-fixture.md`). Next step: align the runner's
+replay with the shared real-schema harness, then re-run its races.
+>>>>>>> origin/main
 
 ## OPEN 2026-10-14 (MED; pre-existing) — a sales rep can write RUP register rows for an invoice that was never posted
 
@@ -860,11 +873,18 @@ archive. They are listed here so the open part of this file shows them. None was
     names someone else. Read live 2026-10-15: no screen writes either column, every order RPC but
     `create_order_from_blend_ticket` inserts it as NULL, all live orders have it NULL, and no blend
     tickets exist, so no screen changes behavior.
-  - **Quote salesperson (OPEN, needs Mason's call).** `quotes_insert`/`quotes_update` do not test
-    `quotes.salesman_id`, so a rep can record another rep on a quote they created. Nothing reads it
-    for access or money today (quote-to-order does not copy it), but `rollover_quote_to_season`
-    copies it to the new season's quote, so an own-name rule there changes rollover of another
-    rep's quote. Not in `20261015130000`.
+  - **Quote salesperson (DECIDED 2026-10-15, fix pending apply).** `quotes_insert`/`quotes_update`
+    do not test `quotes.salesman_id`, so a rep can record another rep on a quote they created.
+    Nothing reads it for access or money today (quote-to-order does not copy it), but
+    `rollover_quote_to_season` copies it to the new season's quote. Mason, 2026-10-15: "quotes
+    follow the own-name rule. On season rollover, keep the original rep on the new quote."
+    `20261015200000_quotes_rep_own_name` (migration-history row 948; in force once that row says
+    APPLIED) adds trigger `quotes_guard_rep_salesman_20261015` with the orders rule, and
+    `rollover_quote_to_season` marks its own insert (`crx.quote_rollover_source` = the source
+    quote), so the new quote keeps the source quote's salesperson and nothing else can claim that.
+    Left as is (pre-existing, no money or access effect today): any rep may roll over any rep's
+    quote, and the new quote's `created_by` is whoever rolled it over, so that rep, not the named
+    one, can then edit its contents under the original rep's name (RLS review, 2026-10-15).
   - The split wrapper still passes a NULL key to its implementation, so on an order with no field
     allocations it still raises `IDEMPOTENCY_KEY_REQUIRED` (pre-existing, unreachable from the app).
 

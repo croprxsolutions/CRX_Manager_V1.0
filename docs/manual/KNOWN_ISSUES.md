@@ -170,8 +170,31 @@ real reports minus the preamble line through `origin/main`'s hooks.
 was tried on PR #940 and removed: Sol blocked it because a user-typed message of the same shape with
 an indented "stop" would no longer latch. Sol's direction, which Mason chose: decide by trusted
 origin, not text. The session transcript records it (`"origin":{"kind":"peer"}` on a hand-back,
-`{"kind":"human"}` on Mason's messages); not yet verified is whether the hook can read that record
-when it runs, since the hook receives only `transcript_path`.
+`{"kind":"human"}` on Mason's messages).
+
+**Trusted origin checked 2026-10-15: not readable when the hook runs, so no fix was built.**
+- Reproduced live again at 3:12 PM Central: a background helper's report listing "Stop, StopFailure"
+  latched the main checkout's `hold.json`, and the latched text began at `<agent-message from="…">`
+  with no preamble line. Mason's next message cleared it.
+- The hook input has no origin field. A real Claude Code 2.1.251 run with a diagnostic
+  UserPromptSubmit hook captured exactly these keys: `session_id`, `transcript_path`, `cwd`,
+  `prompt_id`, `permission_mode`, `hook_event_name`, `prompt`.
+- The transcript record is not guaranteed to be on disk yet. In that run the transcript file did not
+  exist when the hook ran for a typed prompt (the session's first). Later turns and a hand-back could
+  not be timed: that run's sign-in had expired, and a worktree session may not edit the main
+  checkout's hooks to probe there.
+- Records differ by delivery. A hand-back that arrives between turns is a `user` record with
+  `origin.kind: "peer"` and a `promptId` (which should equal the hook's `prompt_id`), but its text
+  includes the preamble, so it never equals the hook's `prompt`. One that arrives mid-turn is a
+  `queued_command` attachment with `origin.kind: "peer"` and no `promptId`, so it cannot be matched to
+  the prompt at all.
+- So a transcript-based fix could silently do nothing, and matching "the last user record" could read
+  an earlier hand-back's origin and swallow a real stop typed by Mason.
+
+**Next step.** The clean fix needs Claude Code to put the message origin in the UserPromptSubmit
+input. Until then this stays open. If a later probe (run from a non-worktree session) shows the record
+with the hook's `prompt_id` is always on disk at hook time, an origin check keyed on `prompt_id`
+becomes possible for between-turn hand-backs only.
 
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
 

@@ -16,7 +16,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
    - the product filters on Reports and Sales Reports;
    - the Price List report;
    - Crop Programs.
-4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 200, 500 or 1,000, and nobody can search past that. There are **67 such findings**. Most are dropdowns that load the first N records instead of searching.
+4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 20, 50, 200, 500 or 1,000, and nobody can search past that. There are **67 such findings**. Most are dropdowns that load the first N records instead of searching.
 5. **Compliance records can be incomplete.** These would silently drop records past 1,000:
    - the restricted-use pesticide sales register;
    - the application logbooks (including FAA);

@@ -194,10 +194,12 @@ missing; between-turn hand-back timing is still untested (see below), so a trans
 - So a transcript-based fix could silently do nothing, and matching "the last user record" could read
   an earlier hand-back's origin and swallow a real stop typed by Mason.
 
-**Next step.** The clean fix needs Claude Code to put the message origin in the UserPromptSubmit
-input. Until then this stays open. If a later probe (run from a non-worktree session) shows the record
-with the hook's `prompt_id` is always on disk at hook time, an origin check keyed on `prompt_id`
-becomes possible for between-turn hand-backs only.
+**Next step.** Two routes, either of which unblocks a fix: (1) a probe run from a non-worktree
+session shows that the record carrying the hook's `prompt_id` is always on disk when the hook runs,
+which makes an origin check keyed on `prompt_id` possible for between-turn hand-backs (mid-turn ones
+have no `promptId` and stay on today's text rules); or (2) Claude Code adds the message origin to the
+UserPromptSubmit input, which would cover both delivery shapes. Until one of them lands this stays
+open.
 
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
 

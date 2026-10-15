@@ -27,3 +27,4 @@ twice; the harm was a false success. This change:
 - **Proof:** `node scripts/smoke/prove-money-replay-binding-batch1-real-schema.mjs`
   (`MONEY_REPLAY_BINDING_BATCH1_PROOF_PASS`) and the rollback-only chain
   `scripts/smoke/smoke-money-replay-binding-batch1.sql` (spec `money_replay_binding_batch1`).
+- **Rollback:** the migration header lists the order to undo it, removing the commit-time guard first.

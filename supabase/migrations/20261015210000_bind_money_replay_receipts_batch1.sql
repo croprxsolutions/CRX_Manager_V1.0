@@ -75,9 +75,14 @@
 -- OVERLOADS: each of the nine has exactly one overload (read-only on live 2026-10-15); the preflight
 --   refuses a second one and the postflight proves exactly one wrapper and one body per name.
 --
--- ROLLBACK (if ever needed, as its own reviewed migration): for each name, DROP the wrapper,
---   ALTER FUNCTION public._<name>_replay_impl_20261015(...) RENAME TO <name>, and restore its grants
---   (EXECUTE to authenticated, service_role); then drop the two helpers.
+-- ROLLBACK (if ever needed, as its own reviewed migration), in this order: FIRST
+--   DROP TRIGGER require_bound_replay_receipt_20261015 ON public.idempotency_keys and DROP FUNCTION
+--   public._require_bound_replay_receipt_20261015() (left behind, it would refuse every receipt the
+--   restored old bodies write, rolling back their money actions); then, for each name, DROP the
+--   wrapper, ALTER FUNCTION public._<name>_replay_impl_20261015(...) RENAME TO <name>, and restore
+--   its grants (EXECUTE to authenticated, service_role); re-grant EXECUTE on
+--   _batch_apply_prepayments_impl to service_role if wanted; then drop _replay_fingerprint_20261015
+--   and _bind_replay_receipt_20261015.
 --
 -- ORDERING: strict. Apply after every older pending migration (20261015170000, PR #929, may land
 --   first; it touches storage policies only and nothing here).

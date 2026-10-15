@@ -18,6 +18,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { parseLocalDate } from '../lib/dateUtils';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { formatCents as fmt } from '../lib/money';
 
 interface AllocationSet {
@@ -154,7 +155,11 @@ export default function PaymentHistory() {
           p_performed_by: profile?.id,
           p_idempotency_key: voidPaymentIdem.getKey(),
         });
-        if (error) throw error;
+        if (error) {
+          // Refused as another request's retry key: nothing was voided, so start the next try fresh.
+          if (getIdempotencyBindingRejection(error)) voidPaymentIdem.resetKey();
+          throw error;
+        }
         const result = assertRpcResult<{ success: boolean; reversed_cents: number; invoices_affected: number }>(data, 'void_payment');
         if (!result?.success) throw new Error('Void failed');
       },

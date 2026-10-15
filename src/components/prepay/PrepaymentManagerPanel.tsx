@@ -22,6 +22,7 @@ import { Sentry } from '../../lib/sentry';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { logActivity } from '../../lib/activityLogger';
 import { formatCents as fmt } from '../../lib/money';
+import { getIdempotencyBindingRejection } from '../../lib/idempotency';
 
 interface CustomerPrepay {
   [k: string]: unknown;
@@ -224,7 +225,11 @@ export default function PrepaymentManagerPanel() {
           p_performed_by: profile?.id,
           p_idempotency_key: editKey,
         });
-        if (error) throw error;
+        if (error) {
+          // Refused as another request's retry key: nothing was edited, so start the next try fresh.
+          if (getIdempotencyBindingRejection(error)) resetScopedKey(editKeysRef.current, editCredit.id);
+          throw error;
+        }
         const result = assertRpcResult<{ success: boolean }>(data, 'edit_prepay_credit');
         if (!result?.success) throw new Error('Edit failed');
         resetScopedKey(editKeysRef.current, editCredit.id);
@@ -262,7 +267,11 @@ export default function PrepaymentManagerPanel() {
           p_performed_by: profile?.id,
           p_idempotency_key: deleteKey,
         });
-        if (error) throw error;
+        if (error) {
+          // Refused as another request's retry key: nothing was deleted, so start the next try fresh.
+          if (getIdempotencyBindingRejection(error)) resetScopedKey(deleteKeysRef.current, deleteCredit.id);
+          throw error;
+        }
         const result = assertRpcResult<{ success: boolean }>(data, 'delete_prepay_credit');
         if (!result?.success) throw new Error('Delete failed');
         resetScopedKey(deleteKeysRef.current, deleteCredit.id);
@@ -364,7 +373,11 @@ export default function PrepaymentManagerPanel() {
           p_performed_by: performedBy,
           p_idempotency_key: splitKey,
         });
-        if (error) throw new Error(error.message);
+        if (error) {
+          // Refused as another request's retry key: no credit was created, so start the next try fresh.
+          if (getIdempotencyBindingRejection(error)) splitCheckIdem.resetKey();
+          throw new Error(error.message);
+        }
         const result = assertRpcResult<{ success: boolean; credit_ids: string[]; total_cents: number; split_count: number }>(data, 'create_prepay_check_splits');
         splitCheckIdem.resetKey();
         // Audit #27: surface prepay creation in activity feed.

@@ -14,7 +14,7 @@ import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { supabase, sanitizeError, assertRpcResult, describePostInvoiceBlock } from '../lib/db';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { generateIdempotencyKey, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
+import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import type { Invoice, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
@@ -1289,7 +1289,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         p_performed_by: profile.id,
         p_idempotency_key: key,
       });
-      if (error) throw error;
+      if (error) {
+        // Refused as another request's retry key: nothing was reversed, so start the next try fresh.
+        if (getIdempotencyBindingRejection(error)) reverseWoIdem.resetKey();
+        throw error;
+      }
       assertRpcResult(data, 'reverse_write_off');
       reverseWoIdem.resetKey();
       await logActivity({ event: 'write_off_reversed', description: `Write-off of ${fmt(reverseWoTarget.amount_cents)} reversed`, performedBy: profile.id, entityType: 'invoice', entityId: id });

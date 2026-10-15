@@ -193,6 +193,11 @@ Admin reassignment still works throughout.
 - **Split billing:** a landlord split, "Bill Split" percentages, partly delivered and per-acre splits, several delivery dates, a short-closed order, final remainders and returns, with every quantity and cent accounted for and the leftover cent on the order's own customer.
 - **What the customer actually receives:** the office and bookkeeper review real printed and emailed invoices, split invoices, credits, statements and delivery receipts. They check recipient, address, product and unit, price, discounts, that no sales tax appears, due date, payment instructions and final balance, including long and corrected documents, season boundaries and aging cutoffs. A failed email stays visible and can be retried without billing twice.
 
+**Notes for the Goal 3 build** (from the PR #932 review; the goal's own PR designs and tests each):
+- **Field-invoice credits are capped cumulatively.** All credits on one invoice together can't exceed what is still creditable. Two credits at once are serialized in PostgreSQL, and repeat and simultaneous credit attempts are tested.
+- **The paid-commission deduction needs a lasting record in CRX.** Today `create_commission_payment` pays pending rows at their full amount, and paid rows stay as history. So the deduction is a negative adjustment that the next payout and the commission reports both include, not just a smaller outside check. A test proves both see it.
+- **The Chem Man credit block needs to know the delivery.** Returns record only the order and order line, while the "billed outside CRX" record is per delivery. A return must therefore name, or be allocated to, its delivery. One test case is an order line delivered partly in a Chem Man-billed delivery and partly in a CRX-billed one, so a legitimate CRX credit isn't blocked and the Chem Man quantity isn't credited.
+
 #### Goal 4: Complete, correct numbers at any volume (about 2–4 weeks)
 - Money reports and the remaining integrity checks are computed in the database.
 - Pickers become search boxes.

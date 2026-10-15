@@ -144,6 +144,13 @@ changed both copies; only the QuoteBuilder copy matters.
 
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
 
+**Partly fixed 2026-10-15.** The Vercel rules are now spelled with the connector's real name
+(`mcp__0fb370f6-…`), so promote, rollback, create-deployment and env edits are denied, and Supabase
+secret creation, project pause/restore/create and branch operations now ask first on both Supabase
+connections. Still open: the email connector's `send_message`, any connector added later under a new
+name, and the hook's explicit allow described below. See
+`docs/changelog.d/2026-10-15-vercel-deny-names-and-preambleless-handback-hold.md`.
+
 **What happens.** `.claude/hooks/migration-apply-guard.mjs` runs on every `mcp__.*` call and, for any
 tool whose name does not contain `apply_migration`, returns an explicit `permissionDecision: "allow"`
 (line 59; it also allows when its input cannot be parsed, line 54). Claude Code's documentation

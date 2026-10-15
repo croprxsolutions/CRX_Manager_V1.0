@@ -707,6 +707,10 @@ BEGIN
   IF p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH' USING ERRCODE = '42501';
   END IF;
+  -- Same check, code and message as the renamed body, made before the receipt is read.
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+  END IF;
   -- p_allocations is fingerprinted as sent: a reordered allocation list is a different request.
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -715,6 +719,10 @@ BEGIN
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'batch_apply_prepayments', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+  END IF;
+  IF v_replay IS NOT NULL THEN
+    -- Exact actor + intent match: the stored receipt is exactly what the body returned.
+    RETURN v_replay -> 'result';
   END IF;
   v_result := public._batch_apply_prepayments_replay_impl_20261015(p_allocations, p_performed_by, p_idempotency_key);
   IF v_replay IS NULL THEN

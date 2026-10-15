@@ -224,7 +224,10 @@ export default function Reports() {
   const [priceListError, setPriceListError] = useState(false);
   const [priceListLoaded, setPriceListLoaded] = useState(false);
   const priceListRequestId = useRef(0);
-  const priceListExportReady = !loading && !priceListError && priceListLoaded;
+  // Its own pending flag: the shared `loading` can be cleared by another report's request
+  // while a Price List load is still running.
+  const [priceListPending, setPriceListPending] = useState(false);
+  const priceListExportReady = !loading && !priceListPending && !priceListError && priceListLoaded;
   const [postedAppsData, setPostedAppsData] = useState<Record<string, unknown>[]>([]);
 
   // ─── YEAR-END data ────────────────────────────────────────
@@ -455,6 +458,7 @@ export default function Reports() {
   const fetchPriceList = useCallback(async () => {
     // Only the newest load may set state; an older one finishing late is ignored.
     const requestId = ++priceListRequestId.current;
+    setPriceListPending(true);
     let data: Record<string, unknown>[] | null = null;
     try {
       const result = await fetchAllRows<Record<string, unknown>>((from, to) => supabase
@@ -498,6 +502,7 @@ export default function Reports() {
       Sentry.captureException(err, { extra: { context: 'price_list_load' } });
     }
     if (requestId !== priceListRequestId.current) return;
+    setPriceListPending(false);
     if (!data) {
       setPriceListData([]);
       setPriceListLoaded(false);

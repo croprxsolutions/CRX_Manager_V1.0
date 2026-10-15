@@ -35,5 +35,5 @@ read 2026-10-15, shows the new chain `smoke-orders-blend-tickets-rep-own-name.sq
 before the change and passing after, runs three other chains before and after (two more that touch
 these tables cannot run there: one already fails on main at its own fixture, one needs live
 data), refuses an autocommit,
-drifted or repeated apply, and proves each hunk with a mutation (five). Live chains are not run:
+drifted or repeated apply, and proves each hunk with a mutation (six; one moves the billing test below the replay lookup, which matches on the key alone). Live chains are not run:
 they draw customer-visible order and invoice numbers.

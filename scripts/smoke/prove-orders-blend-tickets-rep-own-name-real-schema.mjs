@@ -299,6 +299,30 @@ ROLLBACK;`,
   console.log('[prover] RE-APPLY: refused by the preflight, nothing changed');
 
   // 6. MUTATION: each hunk is what its chain step proves.
+  const BILL_OWN_NAME_HUNK = [
+    '  IF NOT public.is_admin() THEN',
+    '    PERFORM 1 FROM public.blend_tickets bt WHERE bt.id = p_blend_ticket_id FOR UPDATE;',
+    '    IF EXISTS (',
+    '      SELECT 1 FROM public.blend_tickets bt',
+    '       WHERE bt.id = p_blend_ticket_id',
+    '         AND bt.salesman_id IS NOT NULL',
+    '         AND bt.salesman_id IS DISTINCT FROM v_actor',
+    '    ) THEN',
+    "      RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';",
+    '    END IF;',
+    '  END IF;',
+    '',
+  ].join('\n');
+  const BILL_REPLAY_BLOCK = [
+    '  IF p_idempotency_key IS NOT NULL THEN',
+    '    v_existing := public.check_idempotency(',
+    '      p_idempotency_key,',
+    "      'create_invoice_from_blend_ticket'",
+    '    );',
+    '    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;',
+    '  END IF;',
+    '',
+  ].join('\n');
   const mutations = [
     ['guard INSERT test', GUARD,
       "    IF NEW.salesman_id IS NOT NULL AND NEW.salesman_id IS DISTINCT FROM (SELECT auth.uid()) THEN\n      RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n    END IF;\n", '',
@@ -319,6 +343,10 @@ ROLLBACK;`,
     ['blend-ticket billing own-name test', BLEND_INVOICE,
       "    IF EXISTS (\n      SELECT 1 FROM public.blend_tickets bt\n       WHERE bt.id = p_blend_ticket_id\n         AND bt.salesman_id IS NOT NULL\n         AND bt.salesman_id IS DISTINCT FROM v_actor\n    ) THEN\n      RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n    END IF;\n", '',
       /SMOKE_FAIL: a sales rep billed another rep's blend ticket under that rep's name/],
+    // The replay lookup is keyed by the key alone, so the own-name test must run before it.
+    ['blend-ticket billing test before the replay lookup', BLEND_INVOICE,
+      BILL_OWN_NAME_HUNK + '\n' + BILL_REPLAY_BLOCK, BILL_REPLAY_BLOCK + '\n' + BILL_OWN_NAME_HUNK,
+      /SMOKE_FAIL: a sales rep replayed an admin's billing of another rep's blend ticket/],
   ];
   for (const [label, fn, find, replacement, expected] of mutations) {
     const r = chain(OWN_NAME_CHAIN, mutate(fn, find, replacement, label));

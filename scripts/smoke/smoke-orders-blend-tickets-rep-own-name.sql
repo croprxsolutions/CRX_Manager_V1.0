@@ -306,6 +306,33 @@ BEGIN
      OR (SELECT payment_status FROM public.blend_tickets WHERE id = v_tickets[1]) IS DISTINCT FROM 'unbilled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused blend-ticket billing wrote something';
   END IF;
+  -- The replay lookup is keyed by the key alone, not by who calls. So an admin bills ticket 1
+  -- under the other rep first, and the rep retrying with the admin's key must still be refused,
+  -- not handed the admin's invoices.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  v_res := public.create_invoice_from_blend_ticket(v_tickets[1], v_admin, 'e2e-rsn-bill-admin-' || v_suffix);
+  IF (SELECT salesman_id FROM public.invoices WHERE id = (v_res->'invoice_ids'->>0)::uuid) IS DISTINCT FROM v_other_rep THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: an admin could not bill another rep''s blend ticket: %', v_res;
+  END IF;
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  SELECT count(*) INTO v_count FROM public.invoices;
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_tickets[1], v_rep, 'e2e-rsn-bill-admin-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep replayed an admin''s billing of another rep''s blend ticket: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err IS DISTINCT FROM 'SALESMAN_SCOPE_DENIED' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong blend-ticket replay refusal: %', v_err;
+    END IF;
+  END;
+  IF (SELECT count(*) FROM public.invoices) <> v_count THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused blend-ticket replay wrote something';
+  END IF;
   v_res := public.create_invoice_from_blend_ticket(v_tickets[2], v_rep, 'e2e-rsn-bill-own-' || v_suffix);
   IF (SELECT salesman_id FROM public.invoices WHERE id = (v_res->'invoice_ids'->>0)::uuid) IS DISTINCT FROM v_rep THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a sales rep could not bill their own blend ticket under their name: %', v_res;
@@ -336,15 +363,11 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a sales rep could not convert an unassigned blend ticket: %', v_json;
   END IF;
 
-  -- 7. An admin is unrestricted: bills and converts another rep's tickets under that rep's name,
-  --    and reassigns orders and tickets.
+  -- 7. An admin is unrestricted: converts another rep's ticket under that rep's name (step 5
+  --    showed an admin billing one), and reassigns orders and tickets.
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-  v_res := public.create_invoice_from_blend_ticket(v_tickets[1], v_admin, 'e2e-rsn-bill-admin-' || v_suffix);
-  IF (SELECT salesman_id FROM public.invoices WHERE id = (v_res->'invoice_ids'->>0)::uuid) IS DISTINCT FROM v_other_rep THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: an admin could not bill another rep''s blend ticket: %', v_res;
-  END IF;
   v_json := public.create_order_from_blend_ticket(v_tickets[4], 'E2E-RSN-7A-' || v_suffix, v_today, NULL, v_admin, 'e2e-rsn-order-admin-' || v_suffix);
   IF NOT EXISTS (SELECT 1 FROM public.orders WHERE order_number = 'E2E-RSN-7A-' || v_suffix AND salesman_id = v_other_rep) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: an admin could not convert another rep''s blend ticket: %', v_json;

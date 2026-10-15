@@ -87,8 +87,8 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Today (Office Cockpit)** — One exception screen for the office: unbilled jobs, jobs needing dispatch, bookings needing attention, invoices ready to post, deliveries not yet invoiced, watchdog flags, the next 7 days of jobs, expiring licenses, overdue field-application AR, and inventory shortfalls
 - **To-Ship** — What needs to go out, by product and by customer, alongside low stock, overdue or unassigned deliveries, and inbound purchase orders, with one-click Schedule and Reorder
 - **Watchdog** — Standing list of flagged jobs and invoices, with one-tap dismiss and an on-demand re-check
-- **Role landing** — Everyone signs in to their own starting screen: office staff to Today, drivers to My Route, applicators to the field view
-- **Getting Started** — Role-aware walkthrough of the Quote → Order → Deliver cycle for new users
+- **Role landing** — Everyone signs in to their own starting screen: office staff to Today, drivers to My Route, applicators to My Day
+- **Getting Started** — Walkthrough of the Quote → Order → Deliver cycle for office staff, and of the delivery steps for drivers
 
 ### Customers & Sales
 - **Customers** — Customer 360 profile: addresses, farm fields, crops, credit limit, pricing tier, finance-charge settings, season summary, purchase history, and stored customer documents
@@ -106,14 +106,15 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 - **Purchase Orders** — Vendor POs from the catalog, with a two-step receive and receiving history
 - **Receiving** — One screen with three tabs: a hub of open PO lines across all vendors, a Quick Receive wizard that matches products to the oldest open POs, and a searchable receiving log
 - **Deliveries** — Driver assignment, signature capture, photos, issues, partial deliveries with remainder tracking, load sheets, backdated entry, a completion email to the customer, and a shortage badge when deliveries compete for the same stock
-- **Field Mode (My Route)** — Phone-first route for drivers and applicators: today's stops in order, complete a delivery or job on site with signature, photos, and quantities
+- **Field Mode (My Route)** — Phone-first route for drivers: today's stops in order, complete a delivery on site with signature, photos, and quantities
+- **My Day (applicators)** — Phone view of an applicator's dispatched jobs: start a job, then complete it with weather, gallons applied, acres applied per field, and notes
 - **Returns** — Return requests through approval, receipt, restock, and credit memo
 
 ### Field Application
 - **Field Mapping** — Mapbox satellite maps, draw-your-own boundaries (including multi-part fields), one-click USDA field boundaries, shapefile/KML/GeoJSON import, legal-description (PLSS) lookup, and obstacle markers
 - **Field Dashboard** — Per-field history: season stats, every application with weather, billing splits, and FSA details
 - **Jobs** — Spray-job editor with a map-based field picker, chemicals, vehicle and applicator, customer-supplied chemicals, application fees, and transfer to invoice
-- **Dispatch** — Map-based dispatch board with applicator assignment and route-order numbers, plus an applicator "My Day" view
+- **Dispatch** — Map-based dispatch board with applicator assignment and route-order numbers
 - **Loader & Applicator Sheets** — Multiple saved loader worksheets per job, satellite map pages and previous-application history on printed applicator sheets
 - **Blend Tickets & Recipes** — Upload a ticket photo for OCR (Google Vision AI) or enter it by hand, pick units from a list, and build reusable tank-mix recipes that start a job
 - **Application Records** — The legal record of every application: actual application date, applicator name and license captured at the time, and products used

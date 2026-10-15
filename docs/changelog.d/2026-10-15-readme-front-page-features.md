@@ -8,7 +8,9 @@ money, compliance and data quality, and reports and mobile. New on the page: Tod
 Cockpit), To-Ship, Watchdog, Field Mode, CRM call lists, Customer 360 and customer documents,
 Supplier Pricing, split billing, field-application invoices, Accounts Receivable and Accounts
 Payable workspaces, rebates, Lot Trace, label data tools, integrity tools, field profitability,
-USDA boundaries, dispatch, loader worksheets, and the mobile layout.
+USDA boundaries, dispatch, loader worksheets, and the mobile layout. Drivers (My Route, with
+signature and photos) and applicators (My Day, with weather, gallons and acres) are described
+separately, because they use different screens.
 
 The sales-rep row of the User Roles table no longer says the two create-invoice-from-order
 functions skip the own-name check; migration `20261014210000_order_invoices_rep_own_name`, live

@@ -16,8 +16,12 @@ change brings the records and the generated types in line with the live database
   `_<name>_replay_impl_20261015` bodies, the helpers `_replay_fingerprint_20261015` and
   `_bind_replay_receipt_20261015`, and `_customer_has_open_invoice_20261013` (live since PR #907,
   missed by the last regeneration). No public function's arguments changed.
-- `.claude/schema-registry.json`: delta only (the applied names `20261016030000_staff_photo_buckets_private`
-  and `20261016060000_bind_money_replay_receipts_batch1`, `migrations_high_water` `20261016121253`).
-  The migration added functions and a trigger, which the registry does not track.
+- `.claude/schema-registry.json`: no net change; PR #949 already recorded both applied names and
+  `migrations_high_water` `20261016121253`. The migration added functions and a trigger, which the
+  registry does not track.
+- `src/lib/rpcContracts.test.ts`: restores the `_bind_replay_receipt_20261015` mutator-inventory
+  exemption that PR #949 pruned. The regenerated types now list the helper, so the inventory finds it
+  again; it is an internal helper with every API-role EXECUTE revoked.
 
-**Still open.** Replay-binding batches 2–4 (KNOWN_ISSUES.md).
+**Still open.** Replay-binding batches 2–4 (KNOWN_ISSUES.md), and a live exact-retry check for
+`edit_prepay_credit` (the batch-1 smoke chain covers the other eight functions).

@@ -90,11 +90,11 @@ ships or quarterly, whichever comes first.
   on PR #921, after `20261014150000`; on 2026-10-15 it was brought to live by delta (the applied names
   `20261014210000_order_invoices_rep_own_name`, `20261014220000_rup_register_admin_only` and
   `20261015130000_orders_blend_tickets_rep_own_name`, `20261015200000_quotes_rep_own_name` and
-  `20261015230000_staff_photo_storage_access`, and on 2026-10-16 `20261016030000_staff_photo_buckets_private`,
-  with `migrations_high_water` `20261016051944`; the registry does not yet list
-  `20261016060000_bind_money_replay_receipts_batch1` (ledger `20261016121253`): listing it makes the
-  RPC idempotency inventory test treat that change as applied, which needs that change's own follow-up;
-  those migrations changed function bodies, grants, RLS and storage policies, bucket flags and one index and three triggers, none of which the
+  `20261015230000_staff_photo_storage_access`, and on 2026-10-16 `20261016030000_staff_photo_buckets_private`
+  and `20261016060000_bind_money_replay_receipts_batch1`, with `migrations_high_water` `20261016121253`
+  from a 2026-10-16 13:07 UTC ledger read (its retired helper `_bind_replay_receipt_20261015` left the
+  RPC idempotency inventory exemptions at the same time);
+  those migrations changed function bodies, grants, RLS and storage policies, bucket flags, one index and four triggers, none of which the
   registry tracks, and the ledger shows no other apply since the full refresh).
   Refresh it after the next live apply.
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on

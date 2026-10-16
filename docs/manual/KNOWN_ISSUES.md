@@ -73,7 +73,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16, batches 2–4 open) — about 75 live functions replay a saved result matched on the retry key alone
+## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16, batches 2–4 open) — about 75 live functions replay a saved result matched on the retry key alone (about 66 left after batch 1)
 
 **Batch 1 shipped live 2026-10-16.** Migration `20261016060000_bind_money_replay_receipts_batch1`
 applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #942 merged as

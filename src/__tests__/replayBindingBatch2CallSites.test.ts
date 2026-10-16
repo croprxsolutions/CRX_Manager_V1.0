@@ -84,7 +84,7 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     it(`${file}: a ${rpc} intent refusal opens the order already created`, () => {
       const source = read(file);
       expect(source).toMatch(new RegExp(
-        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,200}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*return;`,
+        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,200}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*(?:return;|//[^\\n]*\\n\\s*throw new CriticalActionHandledError\\()`,
       ));
     });
   }

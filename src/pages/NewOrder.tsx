@@ -19,7 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { supabase, assertRpcResult } from '../lib/db';
 import { withBelowCostReason } from '../lib/belowCostApproval';
-import { runCriticalAction } from '../lib/criticalAction';
+import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
@@ -501,7 +501,8 @@ export default function NewOrder() {
               clearDraft();
               toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
               navigate(`/orders/${committedOrderId}`);
-              return;
+              // Already reported above: no generic "created" toast on top of it.
+              throw new CriticalActionHandledError('opened the order an earlier attempt created');
             }
             throw error;
           }
@@ -555,7 +556,8 @@ export default function NewOrder() {
             clearDraft();
             toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
             navigate(`/orders/${committedOrderId}`);
-            return;
+            // Already reported above: no generic "created" toast on top of it.
+            throw new CriticalActionHandledError('opened the order an earlier attempt created');
           }
           throw error;
         }

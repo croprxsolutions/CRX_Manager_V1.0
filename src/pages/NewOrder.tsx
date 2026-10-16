@@ -22,6 +22,7 @@ import { withBelowCostReason } from '../lib/belowCostApproval';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { useFormDraft } from '../hooks/useFormDraft';
 import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
@@ -488,7 +489,13 @@ export default function NewOrder() {
             p_performed_by: profile.id,
             p_idempotency_key: rushKey,
           }, reason)));
-          if (error) throw error;
+          if (error) {
+            // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+            // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+            const bindingRejection = getIdempotencyBindingRejection(error);
+            if (bindingRejection === 'intent' || bindingRejection === 'actor') rushOrderIdem.resetKey();
+            throw error;
+          }
           const rushResult = assertRpcResult<{ order_id: string; order_number: string; warnings?: string[] }>(data, 'create_rush_order');
           const rushOrderId = rushResult.order_id;
           rushOrderIdem.resetKey();
@@ -527,7 +534,13 @@ export default function NewOrder() {
           p_customer_po_number: customerPoNumber.trim() || undefined,
         }, reason)));
 
-        if (error) throw error;
+        if (error) {
+          // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKey();
+          throw error;
+        }
 
         createOrderIdem.resetKey();
         const result = assertRpcResult<{ order_id: string; warnings?: string[] }>(data, 'create_direct_order');

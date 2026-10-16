@@ -6,6 +6,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { blockedUnitSaveMessage, type UnitLoadState } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { useAuth } from '../contexts/AuthContext';
 import Button from '../components/ui/Button';
@@ -1016,7 +1017,13 @@ export function BlendTicketDetail() {
         p_performed_by: profile.id,
         p_idempotency_key: createOrderKey,
       });
-      if (error) throw error;
+      if (error) {
+        // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+        // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+        const bindingRejection = getIdempotencyBindingRejection(error);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKey();
+        throw error;
+      }
       createOrderIdem.resetKey();
       const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; order_id?: string; items_created?: number }>(data, 'create_order_from_blend_ticket');
       if (!result.success) throw new Error(result.error);
@@ -1058,7 +1065,13 @@ export function BlendTicketDetail() {
         p_performed_by: profile.id,
         p_idempotency_key: appRecKey,
       });
-      if (error) throw error;
+      if (error) {
+        // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+        // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+        const bindingRejection = getIdempotencyBindingRejection(error);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') appRecordIdem.resetKey();
+        throw error;
+      }
       assertRpcResult(appRecData, 'create_application_record_from_blend_ticket');
       appRecordIdem.resetKey();
       // The record exists before this page is refreshed, so arm the same

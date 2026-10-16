@@ -13,6 +13,7 @@ import { supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db'
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import {
   resolveCycleCountWriteIntent,
   type CycleCountWriteIntent,
@@ -911,6 +912,10 @@ export default function CycleCounts() {
       closeDetail();
       fetchCounts();
     } catch (err: unknown) {
+      // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+      // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') reverseCycleCountIdem.resetKey();
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_cycle_count' } });
       toast('error', err instanceof Error ? err.message : 'Failed to reverse cycle count');
     } finally {

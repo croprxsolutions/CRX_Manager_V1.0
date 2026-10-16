@@ -163,7 +163,9 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   'src/components/deliveries/QuickDeliveryModal.tsx': ['recovery'],
   'src/pages/Returns.tsx': ['recovery'],
   'src/pages/InvoiceDetail.tsx': ['recovery', 'throw-on-error'],
-  'src/pages/CycleCounts.tsx': ['throw-on-error'],
+  // The post-call reset is throw-on-error; the one in the catch is a replay-binding batch 2
+  // (20261016140000) getIdempotencyBindingRejection recovery.
+  'src/pages/CycleCounts.tsx': ['throw-on-error', 'recovery'],
   // Both sites are `if (getIdempotencyBindingRejection(error)) idem.resetKeyFor(scope);`
   // inside an `if (error)` branch that then rethrows — verified in source, not asserted.
   'src/pages/InventoryPage.tsx': ['recovery'],
@@ -177,6 +179,13 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   'src/pages/Invoices.tsx': ['recovery'],
   'src/components/prepay/PrepayWorkspacePanel.tsx': ['recovery'],
   'src/components/prepay/PrepaymentManagerPanel.tsx': ['recovery'],
+  // Replay-binding batch 2 (20261016140000): the same intent/actor recovery reset at each stock
+  // call site. These four stay pinned below for their OTHER sites; 'recovery' excuses only the
+  // binding-rejection reset, which classify() verifies on its own line.
+  'src/pages/BlendTicketDetail.tsx': ['recovery'],
+  'src/pages/NewOrder.tsx': ['recovery'],
+  'src/pages/QuoteBuilder.tsx': ['recovery'],
+  'src/pages/Deliveries.tsx': ['recovery'],
   'src/pages/FieldApplicationInvoice.tsx': ['throw-on-error'],
   'src/pages/Fields.tsx': ['throw-on-error'],
   // Two DIFFERENT sites, two different reasons. The post-call reset is throw-on-error;

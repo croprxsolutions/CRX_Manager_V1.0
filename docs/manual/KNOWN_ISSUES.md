@@ -120,15 +120,16 @@ before any inner plain replay, under the same key lock). 63 receipts existed liv
   source document name/type) outside the fingerprint. (`draw_down_quote`, listed above, is fully bound;
   its `p_below_cost_reason` is approval metadata, deliberately not part of the request identity.)
 
+**Bound by batch 1 (migration `20261016060000`, applied live 2026-10-16, ledger `20261016121253`).**
+The nine HIGH-money functions it covers left the table below: `void_payment`, `delete_prepay_credit`,
+`edit_prepay_credit`, `apply_write_off`, `reverse_write_off`, `create_prepay_check_splits`,
+`apply_prepay_to_invoice`, `batch_apply_prepayments` and `batch_void_invoices`. This record is from the
+ledger; a live behaviour re-check is that change's own follow-up.
+
 **Unbound — ranked, with the batch each is fixed in.**
 
 | Batch | Function (what a mismatched retry does today) | Impact |
 |---|---|---|
-| 1 | `void_payment` answers "payment **B** voided" (it echoes the new id) while B stays active | HIGH money |
-| 1 | `delete_prepay_credit`, `edit_prepay_credit` answer "credit **B** deleted/edited" while B is untouched; the replay runs **before** the login and admin checks | HIGH money |
-| 1 | `apply_write_off`, `reverse_write_off` return write-off A's id or result for invoice or write-off B | HIGH money |
-| 1 | `create_prepay_check_splits`, `apply_prepay_to_invoice`, `batch_apply_prepayments` return A's credits or applications; B's prepay is never created or applied | HIGH money |
-| 1 | `batch_void_invoices` returns A's voided count for a different invoice list; none of the new invoices is voided | HIGH money |
 | 2 | `complete_delivery`, `complete_job` (the latter replays before its role check, with no lock and no expiry): B not completed, no stock deduction, no auto-invoice | HIGH money and stock |
 | 2 | `void_order`, `void_delivery`, `cancel_delivery` (replays before its role check), `unpost_invoice`, `transfer_invoice_to_job`, `price_order`, `update_order_items`, `save_field_app_invoice`, `update_field_app_invoice_billing`, `transition_rebate_claim`, `create_rebate_claim`, `close_accounting_period` | HIGH money |
 | 2 | `apply_credit_memo_to_invoice` is bound before its lock, but its after-lock re-check is plain (race window only) | HIGH (race) |

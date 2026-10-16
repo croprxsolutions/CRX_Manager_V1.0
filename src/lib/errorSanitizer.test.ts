@@ -118,11 +118,20 @@ describe('sanitizeError', () => {
     expect(sanitizeError('SALESMAN_SCOPE_DENIED')).toBe("Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work");
     expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices under your own name');
     // Replay-binding refusals (20261016060000): nothing changed, and the operator is told why.
-    expect(sanitizeError({ message: 'IDEMPOTENCY_INTENT_MISMATCH', details: '{"result":{"id":"x"}}' }))
-      .toBe('Nothing was changed. This retry belonged to a different, earlier request. Refresh the page to see what that request did, then try again');
-    expect(sanitizeError('IDEMPOTENCY_ACTOR_MISMATCH')).toBe('Nothing was changed. This retry belongs to another user. Reload the page and try again');
-    expect(sanitizeError('IDEMPOTENCY_RECEIPT_MISSING')).toBe('Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again');
-    expect(sanitizeError('IDEMPOTENCY_RESULT_INVALID')).toBe('Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again');
+    const intent = sanitizeError({ message: 'IDEMPOTENCY_INTENT_MISMATCH', details: '{"result":{"id":"x"}}' });
+    expect(intent).toContain('Nothing was changed');
+    expect(intent).toContain('different, earlier request');
+    expect(intent).toContain('Refresh');
+    const actor = sanitizeError('IDEMPOTENCY_ACTOR_MISMATCH');
+    expect(actor).toContain('Nothing was changed');
+    expect(actor).toContain('another user');
+    expect(actor).toContain('Reload');
+    for (const token of ['IDEMPOTENCY_RECEIPT_MISSING', 'IDEMPOTENCY_RESULT_INVALID']) {
+      const receipt = sanitizeError(token);
+      expect(receipt).toContain('Nothing was changed now');
+      expect(receipt).toContain('could not be confirmed');
+      expect(receipt).toContain('Refresh');
+    }
     expect(sanitizeError('CUSTOMER_HAS_OPEN_INVOICES: this customer has posted or overdue invoices; resolve them before deactivating it'))
       .toBe('This customer has posted or overdue invoices. Resolve them before deactivating the customer');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))

@@ -59,10 +59,11 @@
 --     authorization of its own and its key-only replay sits below the wrapper).
 --
 -- WHAT DOES NOT CHANGE: no money logic is retyped (the bodies are renamed, pinned by md5 below);
---   no table, row, policy or receipt changes; every legitimate call (first call, exact retry, no
---   key) returns what it returns today. The order of checks changes only for a call that reuses a
---   key with a different actor or intent: it is now refused before the body's own role and
---   validation checks run.
+--   no table, row, policy or receipt changes; every keyed legitimate call (first call, exact
+--   retry) returns what it returns today. A keyless call is now refused (IDEMPOTENCY_KEY_REQUIRED),
+--   except apply_prepay_to_invoice under the batch_apply_prepayments marker. Checks that now run
+--   before the renamed bodies: the key requirement, the active-admin gate on the three gated
+--   wrappers (and batch_apply_prepayments), and the actor/intent binding.
 --
 -- RECEIPT DISCLOSURE: check_idempotency_intent puts the stored result in the error DETAIL only on an
 --   INTENT mismatch by the SAME actor (who already received that result), or for a legacy receipt

@@ -13,8 +13,11 @@ labelled 3, shipped second.
   renamed unchanged and a same-name wrapper replays a saved answer only for the same person and
   the exact same request; a different record, quantity, item list or person is refused and nothing
   changes. An exact retry still returns the original answer. The thirteen now require a retry key
-  (every screen already sends one), except `create_planned_holds`, which `revert_quote_status`
-  calls without one and whose work is a full rebuild. Batch 1's commit-time guard now covers these
+  (every screen already sends one), with no keyless path in any public entry point:
+  `revert_quote_status`, which used to call `create_planned_holds` without one, now rebuilds a
+  reopened planned quote's holds through the private `_create_planned_holds_replay_impl_20261015`
+  and itself requires a key (see `2026-10-16-stock-replay-binding-batch2-planned-holds-key.md`).
+  Batch 1's commit-time guard now covers these
   operations too (the same trigger, recreated with the longer list; no second trigger). The file
   refuses to apply while a recent receipt for them exists, and the private cycle-count reversal
   helper is no longer callable by the server role. It narrows access, so it applies only on

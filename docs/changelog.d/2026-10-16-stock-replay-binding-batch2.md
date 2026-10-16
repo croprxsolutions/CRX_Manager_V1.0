@@ -23,6 +23,10 @@ labelled 3, shipped second.
   another person's, and keep it when the database cannot confirm an earlier outcome.
 - **Proof:** `node scripts/smoke/prove-stock-replay-binding-batch2-real-schema.mjs`
   (`STOCK_REPLAY_BINDING_BATCH2_PROOF_PASS`) and the rollback-only chain
-  `scripts/smoke/smoke-stock-replay-binding-batch2.sql` (spec `stock_replay_binding_batch2`).
+  `scripts/smoke/smoke-stock-replay-binding-batch2.sql` (spec `stock_replay_binding_batch2`,
+  container only: two of the thirteen draw an order number a rollback cannot return). The
+  postflight also proves the two private order worker bodies stay unreachable by any API role,
+  and `smoke-cycle-count-concurrency-guards.sql` now finds its row-lock check in the renamed
+  cycle-count body.
 - **Rollback:** the migration header lists the order to undo it, narrowing the commit-time guard
   back to batch 1's nine first.

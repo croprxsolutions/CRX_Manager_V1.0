@@ -563,7 +563,8 @@ COMMIT;`,
     /SMOKE_FAIL: the exact release_inventory_hold retry was refused: IDEMPOTENCY_INTENT_MISMATCH/],
     ['receipt binder actor', mutateLive(binder, '     SET request_actor_id = v_actor,\n',
       "     SET request_actor_id = '00000000-0000-0000-0000-000000000000'::uuid,\n", 'receipt binder actor'),
-    /SMOKE_FAIL: the exact release_inventory_hold retry was refused: IDEMPOTENCY_ACTOR_MISMATCH/],
+    // Step 1 tries the different-hold call first, which now meets a receipt bound to someone else.
+    /SMOKE_FAIL: wrong release_inventory_hold refusal: IDEMPOTENCY_ACTOR_MISMATCH/],
   ];
   for (const [label, prefix, expected] of binderMutations) {
     const r = chain(CHAIN, prefix);

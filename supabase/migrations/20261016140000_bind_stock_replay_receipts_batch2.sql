@@ -1039,6 +1039,19 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_REVERSE_CYCLE_COUNT_IMPL_ACL: _reverse_completed_cycle_count_impl must be callable only by postgres';
   END IF;
 
+  -- The worker bodies below create_direct_order and create_rush_order keep their own key-only
+  -- replay; no API role may reach them around the wrappers (unchanged by this file, asserted here).
+  IF EXISTS (
+    SELECT 1
+      FROM unnest(ARRAY['public._create_direct_order_below_cost_impl_20260810(uuid,date,text,text,jsonb,uuid,text,text)',
+                        'public._create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)']) AS w(sig)
+      CROSS JOIN unnest(ARRAY['anon', 'authenticated', 'service_role']) AS api_role
+     WHERE to_regprocedure(w.sig) IS NULL
+        OR has_function_privilege(api_role, to_regprocedure(w.sig), 'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_ORDER_WORKER_ACL: the below-cost order worker bodies must exist and be callable by no API role';
+  END IF;
+
   RAISE NOTICE 'POSTFLIGHT_OK: thirteen stock RPCs now replay a stored result only for the same person and the exact same request';
 END
 $postflight$;

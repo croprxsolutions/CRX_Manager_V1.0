@@ -40,6 +40,34 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     });
   }
 
+  // After 20261016140000 twelve of the thirteen refuse a keyless call (IDEMPOTENCY_KEY_REQUIRED);
+  // the generated types still mark the key optional, so pin that every app call sends one.
+  const KEYED_CALLS: Array<[string, string]> = [
+    ['src/pages/InventoryPage.tsx', 'release_inventory_hold'],
+    ['src/pages/InventoryPage.tsx', 'manual_inventory_add'],
+    ['src/pages/InventoryPage.tsx', 'retire_inventory_item'],
+    ['src/components/integrity/IntegrityCleanupPanel.tsx', 'reconcile_negative_inventory'],
+    ['src/pages/BlendTicketDetail.tsx', 'create_order_from_blend_ticket'],
+    ['src/pages/BlendTicketDetail.tsx', 'create_application_record_from_blend_ticket'],
+    ['src/pages/NewOrder.tsx', 'create_rush_order'],
+    ['src/pages/NewOrder.tsx', 'create_direct_order'],
+    ['src/pages/QuoteBuilder.tsx', 'create_planned_holds'],
+    ['src/pages/QuoteBuilder.tsx', 'close_quote_as_applied'],
+    ['src/pages/QuoteBuilder.tsx', 'close_quote_as_short'],
+    ['src/pages/Deliveries.tsx', 'batch_cancel_deliveries'],
+    ['src/pages/CycleCounts.tsx', 'reverse_completed_cycle_count'],
+  ];
+  for (const [file, rpc] of KEYED_CALLS) {
+    it(`${file}: every ${rpc} call sends p_idempotency_key`, () => {
+      const source = read(file);
+      // Each call's argument object runs to its closing line: '})' or, under the below-cost
+      // wrapper, '}, reason)'.
+      const calls = [...source.matchAll(new RegExp(`\\.rpc\\('${rpc}',([\\s\\S]*?)\\n\\s*\\}(?:, reason)?\\)`, 'g'))];
+      expect(calls.length).toBeGreaterThan(0);
+      for (const call of calls) expect(call[1]).toMatch(/p_idempotency_key:\s*\S/);
+    });
+  }
+
   it('the reconcile screen keeps its exact-intent key on any refusal', () => {
     const source = read('src/components/integrity/IntegrityCleanupPanel.tsx');
     expect(source).toContain('const scope = `reconcile:${row.id}:${newQuantity}:${input.reason.trim()}`;');

@@ -1,7 +1,11 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-16 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-16 06:16 UTC: 1032 rows / 1025 names; the one change since the 2026-10-15
+`execute_sql`, 2026-10-16 13:42 UTC: 1033 rows / 1026 names; the one change since the 06:16 UTC read
+is that `20261016060000_bind_money_replay_receipts_batch1` (ledger `20261016121253`, PR #942 merged as
+`982bc0dda`) is now applied, which re-certified the replay-binding entry below: batch 1's nine wrappers,
+nine renamed bodies, three helpers and deferred trigger all read live at 13:42 UTC. In the 06:16 UTC read
+(1032 rows / 1025 names), the one change since the 2026-10-15
 23:12 UTC read is that `20261016030000_staff_photo_buckets_private` (ledger `20261016051944`, PR #947
 merged as `5851eb514`) is now applied, which re-certified the public photo buckets entry below: all three
 buckets read `public = false` live at 06:16 UTC. In the 23:12 UTC read, the one change since the 19:36 UTC read is that
@@ -69,7 +73,14 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-15 (HIGH on money paths; batch 1 written, migration 20261016060000 not applied) — about 75 live functions replay a saved result matched on the retry key alone
+## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16, batches 2–4 open) — about 75 live functions replay a saved result matched on the retry key alone
+
+**Batch 1 shipped live 2026-10-16.** Migration `20261016060000_bind_money_replay_receipts_batch1`
+applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #942 merged as
+`982bc0dda`). The nine batch-1 functions in the table below now refuse a reused key for a different
+caller or request (`IDEMPOTENCY_ACTOR_MISMATCH` / `IDEMPOTENCY_INTENT_MISMATCH`); an exact retry still
+replays. Proof: live postconditions read and the rollback-only live chain
+`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). Batches 2–4 below are still open.
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions

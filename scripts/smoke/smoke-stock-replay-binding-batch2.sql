@@ -832,7 +832,9 @@ BEGIN
   IF v_n <> 13 OR v_qty <> 13 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: % receipts over % operations are bound to the admin with a fingerprint (expected 13 over 13)', v_n, v_qty;
   END IF;
+  -- Among the thirteen operations (revert_quote_status binds its own receipt inside its result).
   IF EXISTS (SELECT 1 FROM public.idempotency_keys WHERE idempotency_key LIKE v_pfx || '%'
+              AND operation = ANY (v_ops)
               AND (request_actor_id IS NULL OR request_fingerprint IS NULL)) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: an unbound receipt was left behind';
   END IF;

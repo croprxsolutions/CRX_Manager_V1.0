@@ -24,7 +24,7 @@ Code baseline: `origin/main` at `9b6eb8607`. Line numbers were rechecked against
 
 **What isn't a problem.** The places listed in "Already correct" below read every row properly. Several dashboard "top 10" lists are short on purpose. These were all checked and need no fix.
 
-**Max rows, confirmed (2026-10-16).** The database's per-request ceiling ("Max rows") is set in the Supabase dashboard and can't be read from the database itself. Mason signed in to the dashboard, and Claude read the setting on the Data API settings page. It is **1,000**, the default, and nothing was changed. So five reads that set their own limit at 2,000 or 5,000 are really capped at 1,000: Invoices, the three Field Invoices panels and To Ship. On the Invoices and Field Invoices screens, the "some may be hidden" warning can never appear. If anyone raises Max rows later, every "1,000 (server)" finding below moves to the new number, and this audit should be updated.
+**Max rows, confirmed (2026-10-16).** The database's per-request ceiling ("Max rows") is set in the Supabase dashboard and can't be read from the database itself. Mason signed in to the dashboard, and Claude read the setting on the Data API settings page. It is **1,000**, the default, and nothing was changed. So six reads that set their own limit at 2,000 or 5,000 are really capped at 1,000: Invoices, the three Field Invoices panels, and To Ship's orders and order lines. On the Invoices and Field Invoices screens, the "some may be hidden" warning can never appear. If anyone raises Max rows later, every "1,000 (server)" finding below moves to the new number, and this audit should be updated.
 
 **Recommended next step:** fix the money totals first by computing them in the database (the fix order is at the end).
 

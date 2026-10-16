@@ -113,8 +113,9 @@ before any inner plain replay, under the same key lock). 63 receipts existed liv
   `reverse_application_record`, `reverse_credit_memo_application`, `unapply_credit_memo`,
   `unpost_invoice_group`, `stamp_job_printed`, `post_invoice_group`, `resolve_offline_action`,
   `save_field_app_split_invoice`, `admin_set_application_service_cost`, `save_customer`,
-  `log_customer_fact` and `log_customer_interaction` (actor not in the fingerprint); `draw_down_quote`
-  and `stage_supplier_price_import` leave one minor field outside the fingerprint.
+  `log_customer_fact` and `log_customer_interaction` (actor not in the fingerprint); `stage_supplier_price_import` leaves one minor field (the
+  source document name/type) outside the fingerprint. (`draw_down_quote`, listed above, is fully bound;
+  its `p_below_cost_reason` is approval metadata, deliberately not part of the request identity.)
 
 **Unbound — ranked, with the batch each is fixed in.**
 

@@ -732,17 +732,18 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   stops, or fetch receipt data through a SECURITY DEFINER RPC. (Sources: `docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md`),
   `docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md`).)
 - **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 APPLIED LIVE 2026-10-15 21:06 UTC as `20261015230000`, PR #929 merged as `cd7b796a4`; step 2 APPLIED LIVE 2026-10-16 05:19 UTC as `20261016030000_staff_photo_buckets_private` (ledger `20261016051944`, migration-history row 950, PR #947 merged as `5851eb514`); all three buckets read `public = false` live 2026-10-16 06:16 UTC, so the step 1 to step 2 window below has closed, Goal 1).** `delivery-photos`,
-  `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-10-14). Mason decided on
+  `receiving-photos` and `team-note-attachments` were `public=true` (checked live 2026-10-14) until step 2. Mason decided on
   2026-10-13 that viewing them needs an active staff sign-in every time; an expiring signed URL does not meet that,
   so `createSignedUrl` is not the fix. Step 1 (`20261015230000_staff_photo_storage_access` plus the app's
   `src/hooks/usePrivatePhoto.ts` / `src/components/ui/PrivatePhoto.tsx`): per-request storage read policies by role,
   tightened uploads and deletes, the screens download photos with the user's session instead of the public URL, and
   receipt emails carry no photos (Mason, 2026-10-14). Step 2, a separate migration once step 1 is live and old
-  installed-app copies have updated, sets the three buckets private so old public links stop working. Until step 2
-  applies, anyone holding a URL can still open those photos, and the rows still store public URLs
-  (`delivery_photos.image_url`, `team_note_attachments.file_url`). Type/size are capped (`20260615182721`); paths are
+  installed-app copies have updated, set the three buckets private so old public links stop working. Before step 2
+  applied, anyone holding a URL could open those photos; the rows store public-style URLs
+  (`delivery_photos.image_url`, `team_note_attachments.file_url`), which no longer open without a sign-in now that
+  the buckets are private. Type/size are capped (`20260615182721`); paths are
   built from an ID, an upload timestamp and a per-upload counter, which is not a reliable secrecy safeguard, and once
-  step 1 applies, staff who may view a bucket can also list its paths, so keep the step 1 to step 2 window short. **Accepted limitation (Mason, 2026-10-14, option A):** a staff member who may view a
+  step 1 applied, staff who may view a bucket can also list its paths, which is why the step 1 to step 2 window was kept short (it closed 2026-10-16). **Accepted limitation (Mason, 2026-10-14, option A):** a staff member who may view a
   photo can deliberately mint a temporary signed link to it through the Storage API (Storage checks only the read
   policy); ordinary app use never creates one, and it is no more than saving and forwarding the file. Closing it
   would mean serving photo bytes through an Edge Function, as customer documents are. Found while proving step 1:

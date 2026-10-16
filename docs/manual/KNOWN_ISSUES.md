@@ -1,10 +1,16 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-15 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-15 17:28 UTC; the two changes since the 12:32 UTC read are that
+`execute_sql`, 2026-10-15 23:12 UTC; the one change since the 19:36 UTC read is that
+`20261015230000_staff_photo_storage_access` (ledger `20261015210630`, PR #929 merged as `cd7b796a4`) is
+now applied, which re-certified the public photo buckets entry below. In the 19:36 UTC read, the one
+change since the 17:28 UTC read was that
+`20261015200000_quotes_rep_own_name` (ledger `20261015193420`, PR #938 merged as `1673d5b58`) had
+applied, which re-certified the quote salesperson entry below. In the 17:28 UTC read, the two changes
+since the 12:32 UTC read were that
 `20261014220000_rup_register_admin_only` (ledger `20261015135505`, PR #927 merged as `dd2bda843`) and
 `20261015130000_orders_blend_tickets_rep_own_name` (ledger `20261015163041`, PR #933 merged as
-`b2203fd82`) are now applied, which re-certified the order and blend-ticket salesperson entry below.
+`b2203fd82`) had applied, which re-certified the order and blend-ticket salesperson entry below.
 In the 12:32 UTC read, the one change since the 2026-10-14 17:28 UTC read was that
 `20261014210000_order_invoices_rep_own_name` (ledger `20261015080515`, PR #928 merged as `7cd781f77`)
 had applied, which re-certified the order-invoice salesperson entry below. The 2026-10-14 17:28 UTC
@@ -153,7 +159,67 @@ changed both copies; only the QuoteBuilder copy matters.
   approval markers from notes). Its header says it preserves access, yet it revokes `service_role`, so
   re-review it before any apply.
 
+## OPEN 2026-10-15 (MED) — a helper agent's report can latch, or clear, the hold
+
+**What happens.** The UserPromptSubmit hook payload for a subagent hand-back can start at its
+`<agent-message>` tag, without the "Another Claude session sent a message:" line the transcript shows.
+`prompt-source-lib.mjs` only recognises a hand-back after that line, so the report body is read as
+Mason's words. On 2026-10-15 two reports containing "Stop" (a list of hook events) latched
+`hold.json` in the main checkout, which every session whose hooks run from there shares; the same
+report shape also counts as Mason speaking and can clear a hold he set. Reproduced by replaying both
+real reports minus the preamble line through `origin/main`'s hooks.
+
+**Why not fixed yet.** A text-shape fix (recognise the exact harness frame at the start of the prompt)
+was tried on PR #940 and removed: Sol blocked it because a user-typed message of the same shape with
+an indented "stop" would no longer latch. Sol's direction, which Mason chose: decide by trusted
+origin, not text. The session transcript records it (`"origin":{"kind":"peer"}` on a hand-back,
+`{"kind":"human"}` on Mason's messages).
+
+**Trusted origin checked 2026-10-15: not shown to be reliably readable when the hook runs, so no fix
+was built.** The hook input carries no origin, and the one timed case found the transcript record
+missing; between-turn hand-back timing is still untested (see below), so a transcript check keyed on
+`prompt_id` remains possible for that case.
+- Reproduced live again at 3:12 PM Central: a background helper's report listing "Stop, StopFailure"
+  latched the main checkout's `hold.json`, and the latched text began at `<agent-message from="…">`
+  with no preamble line. Mason's next message cleared it.
+- The hook input has no origin field. A real Claude Code 2.1.251 run with a diagnostic
+  UserPromptSubmit hook captured exactly these keys: `session_id`, `transcript_path`, `cwd`,
+  `prompt_id`, `permission_mode`, `hook_event_name`, `prompt`.
+- The transcript record is not guaranteed to be on disk yet. In that run the transcript file did not
+  exist when the hook ran for a typed prompt (the session's first). Later turns and a hand-back could
+  not be timed: that run's sign-in had expired, and a worktree session may not edit the main
+  checkout's hooks to probe there.
+- Records differ by delivery. A hand-back that arrives between turns is a `user` record with
+  `origin.kind: "peer"` and a `promptId` (which should equal the hook's `prompt_id`), but its text
+  includes the preamble, so it never equals the hook's `prompt`. One that arrives mid-turn is a
+  `queued_command` attachment with `origin.kind: "peer"` and no `promptId`, so it cannot be matched to
+  the prompt by ID; whether another reliable correlation exists (for example by its text) is untested.
+- So a transcript-based fix could silently do nothing, and matching "the last user record" could read
+  an earlier hand-back's origin and swallow a real stop typed by Mason.
+
+**Next step.** Two routes:
+1. **Partial.** Repeated probes from a non-worktree session, across many turns, find the record
+   carrying the hook's `prompt_id` on disk every time the hook runs for a between-turn hand-back
+   (other prompts, such as a session's first typed prompt, need not have one). Then an origin check keyed on
+   `prompt_id` can cover between-turn hand-backs. A probe can only show this is likely, not certain,
+   so the check must fall back to today's text rules whenever the record is missing (a missed origin
+   then latches exactly as now; it never swallows a stop). Mid-turn hand-backs have no `promptId`
+   and stay on the text rules unless another reliable correlation is found, so this route alone
+   does not close the issue.
+2. **Complete.** Claude Code adds the message origin to the UserPromptSubmit input, which covers
+   both delivery shapes.
+
+This stays open until both delivery shapes are covered.
+
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
+
+**Partly fixed 2026-10-15.** The Vercel rules are now spelled with the connector's real name
+(`mcp__0fb370f6-…`), so promote, rollback, create-deployment and env edits are denied, and Supabase
+secret creation, project pause/restore/create and branch operations now ask first on both Supabase
+connections. Still open: the email connector's `send_message`; any connector, including one added
+later under a new name, whose tools match no `ask` or `deny` rule, because those tools run with no
+prompt; and the hook's explicit allow described below, which is why. See
+`docs/changelog.d/2026-10-15-vercel-supabase-permission-rule-real-names.md`.
 
 **What happens.** `.claude/hooks/migration-apply-guard.mjs` runs on every `mcp__.*` call and, for any
 tool whose name does not contain `apply_migration`, returns an explicit `permissionDecision: "allow"`
@@ -573,12 +639,28 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   and `FieldStop` silently skips the customer receipt email. Fix: widen the driver branch for assigned open
   stops, or fetch receipt data through a SECURITY DEFINER RPC. (Sources: `docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md`),
   `docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md`).)
-- **Public photo buckets (owner security decision, open since 2026-06-15).** `delivery-photos`,
-  `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-09-27). Delivery and
-  team-note photos are served through `getPublicUrl` (`DeliveryDetail.tsx`, `FieldStop.tsx`,
-  `NotePhotoUpload.tsx`); `receiving-photos` has no app reference but is still publicly readable by URL. So
-  anyone holding a URL has permanent unauthenticated access to those photos. Paths are non-enumerable and type/size are capped
-  (`20260615182721`). Decide: keep public, or make private and switch to `createSignedUrl`.
+- **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 APPLIED LIVE 2026-10-15 21:06 UTC as `20261015230000`, PR #929 merged as `cd7b796a4`; step 2 open, Goal 1).** `delivery-photos`,
+  `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-10-14). Mason decided on
+  2026-10-13 that viewing them needs an active staff sign-in every time; an expiring signed URL does not meet that,
+  so `createSignedUrl` is not the fix. Step 1 (`20261015230000_staff_photo_storage_access` plus the app's
+  `src/hooks/usePrivatePhoto.ts` / `src/components/ui/PrivatePhoto.tsx`): per-request storage read policies by role,
+  tightened uploads and deletes, the screens download photos with the user's session instead of the public URL, and
+  receipt emails carry no photos (Mason, 2026-10-14). Step 2, a separate migration once step 1 is live and old
+  installed-app copies have updated, sets the three buckets private so old public links stop working. Until step 2
+  applies, anyone holding a URL can still open those photos, and the rows still store public URLs
+  (`delivery_photos.image_url`, `team_note_attachments.file_url`). Type/size are capped (`20260615182721`); paths are
+  built from an ID, an upload timestamp and a per-upload counter, which is not a reliable secrecy safeguard, and once
+  step 1 applies, staff who may view a bucket can also list its paths, so keep the step 1 to step 2 window short. **Accepted limitation (Mason, 2026-10-14, option A):** a staff member who may view a
+  photo can deliberately mint a temporary signed link to it through the Storage API (Storage checks only the read
+  policy); ordinary app use never creates one, and it is no more than saving and forwarding the file. Closing it
+  would mean serving photo bytes through an Edge Function, as customer documents are. Found while proving step 1:
+  Storage deletes as the signed-in user, and a DELETE only reaches rows that user may also read, so with no storage
+  read policy no delete in these buckets removed anything, even an admin's (proven in the disposable-database prover,
+  which models live's `storage.protect_delete`); that is why "deleted" team-note photos left orphan files. Step 1 fixes
+  it. **Deferred to step 2 (Sol MED on PR #929):** two `team_note_attachments` rows may name the same file in the
+  uploader's own folder, so deleting one row removes the file the other names; only the uploader can create that, the
+  app never does (each upload gets a fresh name), and 0 rows exist live (2026-10-15). Fix: a unique canonical file path
+  or a remaining-reference check before the file is removed.
   (Source: `docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md`).)
 - **Field-app access-scope lows (June 2026 parity ledger).** (1) `fields_select` (`20260214210000`) lets every
   active applicator read all customers' fields, not only dispatched ones; (2) `job_chemicals_select_location_dispatchee`
@@ -785,11 +867,22 @@ archive. They are listed here so the open part of this file shows them. None was
     names someone else. Read live 2026-10-15: no screen writes either column, every order RPC but
     `create_order_from_blend_ticket` inserts it as NULL, all live orders have it NULL, and no blend
     tickets exist, so no screen changes behavior.
-  - **Quote salesperson (OPEN, needs Mason's call).** `quotes_insert`/`quotes_update` do not test
-    `quotes.salesman_id`, so a rep can record another rep on a quote they created. Nothing reads it
-    for access or money today (quote-to-order does not copy it), but `rollover_quote_to_season`
-    copies it to the new season's quote, so an own-name rule there changes rollover of another
-    rep's quote. Not in `20261015130000`.
+  - **Quote salesperson: RESOLVED 2026-10-15 by `20261015200000_quotes_rep_own_name`, applied live
+    19:34 UTC on Mason's approval; PR #938 merged as `1673d5b58`; `docs/reference/migration-history.md`
+    row 948 is the apply record (re-checked read-only 19:36 UTC: rollover md5 matches the post pin,
+    the trigger is enabled, the guard is SECURITY INVOKER with EXECUTE for `postgres` only). The
+    deferred rollover-edit note at the end of this entry is still open.** The record below is kept
+    as history. `quotes_insert`/`quotes_update`
+    do not test `quotes.salesman_id`, so a rep can record another rep on a quote they created.
+    Nothing reads it for access or money today (quote-to-order does not copy it), but
+    `rollover_quote_to_season` copies it to the new season's quote. Mason, 2026-10-15: "quotes
+    follow the own-name rule. On season rollover, keep the original rep on the new quote."
+    `20261015200000_quotes_rep_own_name` (migration-history row 948, applied) adds trigger `quotes_guard_rep_salesman_20261015` with the orders rule, and
+    `rollover_quote_to_season` marks its own insert (`crx.quote_rollover_source` = the source
+    quote), so the new quote keeps the source quote's salesperson and nothing else can claim that.
+    Left as is (pre-existing, no money or access effect today): any rep may roll over any rep's
+    quote, and the new quote's `created_by` is whoever rolled it over, so that rep, not the named
+    one, can then edit its contents under the original rep's name (RLS review, 2026-10-15).
   - The split wrapper still passes a NULL key to its implementation, so on an order with no field
     allocations it still raises `IDEMPOTENCY_KEY_REQUIRED` (pre-existing, unreachable from the app).
 

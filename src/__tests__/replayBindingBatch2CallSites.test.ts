@@ -72,6 +72,23 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     });
   }
 
+  // An edited retry under a key whose first attempt already created an order is refused as
+  // 'intent' with that order's receipt; the order screens open it rather than let the next click,
+  // with a fresh key, create a second order (Codex P1 on PR #951).
+  const ORDER_RECOVERY: Array<[string, string]> = [
+    ['src/pages/NewOrder.tsx', 'create_rush_order'],
+    ['src/pages/NewOrder.tsx', 'create_direct_order'],
+    ['src/pages/BlendTicketDetail.tsx', 'create_order_from_blend_ticket'],
+  ];
+  for (const [file, rpc] of ORDER_RECOVERY) {
+    it(`${file}: a ${rpc} intent refusal opens the order already created`, () => {
+      const source = read(file);
+      expect(source).toMatch(new RegExp(
+        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,200}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*return;`,
+      ));
+    });
+  }
+
   it('the reconcile screen keeps its exact-intent key on any refusal', () => {
     const source = read('src/components/integrity/IntegrityCleanupPanel.tsx');
     expect(source).toContain('const scope = `reconcile:${row.id}:${newQuantity}:${input.reason.trim()}`;');

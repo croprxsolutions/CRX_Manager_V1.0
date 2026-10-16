@@ -735,6 +735,52 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(mockRpc.mock.calls.some(([name]) => name === 'create_order_from_blend_ticket')).toBe(false);
   });
 
+  // Replay-binding batch 2 (20261016140000): an edited retry under a key whose first attempt already
+  // created the order is refused as IDEMPOTENCY_INTENT_MISMATCH, with that order's receipt in the
+  // DETAIL. The screen opens it instead of letting the next click create a second order.
+  async function createOrderWith(rpcError: { message: string; details?: string }) {
+    const matchedProduct = { ...baseProduct, product_id: 'prod-1', product: { id: 'prod-1', is_active: true } };
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'blend_ticket_products') return buildChain({ data: [matchedProduct], error: null });
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'generate_order_number') return Promise.resolve({ data: 'ORD-9001', error: null });
+      if (name === 'create_order_from_blend_ticket') return Promise.resolve({ data: null, error: rpcError });
+      return Promise.resolve({ data: null, error: null });
+    });
+    renderTicket();
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Order from Ticket' }));
+    const submit = await screen.findByRole('button', { name: 'Create Order' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => {
+      expect(mockRpc.mock.calls.some(([name]) => name === 'create_order_from_blend_ticket')).toBe(true);
+    });
+  }
+
+  it('opens the order an earlier attempt already created when the retry is refused as another request', async () => {
+    await createOrderWith({
+      message: 'IDEMPOTENCY_INTENT_MISMATCH',
+      details: JSON.stringify({
+        operation: 'create_order_from_blend_ticket',
+        result: { success: true, order_id: 'order-77', order_number: 'ORD-77' },
+      }),
+    });
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-77'));
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('already created this order'));
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
+  });
+
+  it('opens nothing on an actor refusal, which carries no receipt', async () => {
+    await createOrderWith({ message: 'IDEMPOTENCY_ACTOR_MISMATCH' });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_ACTOR_MISMATCH'));
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('blocks unlink for an unbilled linked ticket with an active invoice', async () => {
     const linkedTicket = { ...baseTicket, order_link_status: 'linked', payment_status: 'unbilled' };
     mockFrom.mockReset();

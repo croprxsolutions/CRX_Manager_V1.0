@@ -6,7 +6,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { blockedUnitSaveMessage, type UnitLoadState } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getIdempotencyBindingRejection } from '../lib/idempotency';
+import { getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { useAuth } from '../contexts/AuthContext';
 import Button from '../components/ui/Button';
@@ -1022,6 +1022,15 @@ export function BlendTicketDetail() {
         // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
         const bindingRejection = getIdempotencyBindingRejection(error);
         if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKey();
+        // An intent refusal carries the order an earlier attempt under this key already created: open it
+        // instead of letting the next click, with a fresh key, create a second order.
+        const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_order_from_blend_ticket');
+        if (committedOrderId) {
+          setShowCreateOrderModal(false);
+          toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
+          navigate(`/orders/${committedOrderId}`);
+          return;
+        }
         throw error;
       }
       createOrderIdem.resetKey();

@@ -22,7 +22,7 @@ import { withBelowCostReason } from '../lib/belowCostApproval';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getIdempotencyBindingRejection } from '../lib/idempotency';
+import { getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { useFormDraft } from '../hooks/useFormDraft';
 import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
@@ -494,6 +494,15 @@ export default function NewOrder() {
             // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
             const bindingRejection = getIdempotencyBindingRejection(error);
             if (bindingRejection === 'intent' || bindingRejection === 'actor') rushOrderIdem.resetKey();
+            // An intent refusal carries the order an earlier attempt under this key already created: open it
+            // instead of letting the next click, with a fresh key, create a second order.
+            const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_rush_order');
+            if (committedOrderId) {
+              clearDraft();
+              toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
+              navigate(`/orders/${committedOrderId}`);
+              return;
+            }
             throw error;
           }
           const rushResult = assertRpcResult<{ order_id: string; order_number: string; warnings?: string[] }>(data, 'create_rush_order');
@@ -539,6 +548,15 @@ export default function NewOrder() {
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
           if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKey();
+          // An intent refusal carries the order an earlier attempt under this key already created: open it
+          // instead of letting the next click, with a fresh key, create a second order.
+          const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_direct_order');
+          if (committedOrderId) {
+            clearDraft();
+            toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
+            navigate(`/orders/${committedOrderId}`);
+            return;
+          }
           throw error;
         }
 

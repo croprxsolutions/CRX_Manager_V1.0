@@ -1,8 +1,12 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-16 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-16 06:16 UTC: 1032 rows / 1025 names; the one change since the 2026-10-15
-23:12 UTC read is that `20261016030000_staff_photo_buckets_private` (ledger `20261016051944`, PR #947
+`execute_sql`, 2026-10-16 13:07 UTC: 1033 rows / 1026 names; the one change since the 06:16 UTC read
+is that `20261016060000_bind_money_replay_receipts_batch1` (ledger `20261016121253`, PR #942 merged as
+`982bc0dda`, applied 12:12:53 UTC by another session) is now applied, which updated the replay-binding
+entry below (its nine batch-1 functions are now bound; recorded from the ledger, live behaviour re-check
+is that change's follow-up). In the 06:16 UTC read (1032 rows / 1025 names), the one change since the
+2026-10-15 23:12 UTC read is that `20261016030000_staff_photo_buckets_private` (ledger `20261016051944`, PR #947
 merged as `5851eb514`) is now applied, which re-certified the public photo buckets entry below: all three
 buckets read `public = false` live at 06:16 UTC. In the 23:12 UTC read, the one change since the 19:36 UTC read is that
 `20261015230000_staff_photo_storage_access` (ledger `20261015210630`, PR #929 merged as `cd7b796a4`) is

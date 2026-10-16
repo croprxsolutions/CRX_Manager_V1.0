@@ -12,7 +12,8 @@ finishes the record.
   the pre-apply record. Row 951's own applied record is left to that change's follow-up.
 - `docs/manual/KNOWN_ISSUES.md`: the duplicate team-note photo fix is applied, and Mason's
   signed-in check (2026-10-16: a delivery photo still shows in the app) is recorded.
-- `docs/manual/CURRENT_STATE.md`: schema-registry line.
+- `docs/manual/CURRENT_STATE.md`: ledger header, effective high-water (now `20261016060000`), applied list
+  and schema-registry line, all from the 13:07 UTC read (Codex on this PR).
 - `.claude/schema-registry.json`: delta only (the two applied names and `migrations_high_water`
   `20261016121253`). Neither migration changed anything the registry tracks.
 

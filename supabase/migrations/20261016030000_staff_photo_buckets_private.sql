@@ -76,6 +76,28 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- Permissive policies combine with OR, so the pins alone would let an added, broader policy keep
+  -- photos readable once private (Codex Luna on this file). Repeat step 1's two exclusivity checks:
+  -- no other storage policy names a photo bucket, and none skips the bucket test altogether.
+  IF EXISTS (
+    SELECT 1 FROM pg_policies p
+    WHERE p.schemaname = 'storage' AND p.tablename = 'objects'
+      AND coalesce(p.qual, '') || coalesce(p.with_check, '') ~ '(delivery-photos|receiving-photos|team-note-attachments)'
+      AND p.policyname NOT IN ('staff_photos_delivery_select', 'staff_photos_receiving_select', 'staff_photos_team_note_select',
+                               'delivery_photos_insert', 'delivery_photos_delete', 'recv_photos_storage_upload',
+                               'recv_photos_storage_delete', 'Authenticated users can upload team note attachments',
+                               'Users can delete own team note attachments')
+  ) THEN
+    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: an unexpected storage policy names a photo bucket';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies p
+    WHERE p.schemaname = 'storage' AND p.tablename = 'objects'
+      AND coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '') !~ 'bucket_id\s*='
+  ) THEN
+    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: a storage.objects policy does not test bucket_id';
+  END IF;
+
   IF (SELECT count(*) FROM storage.buckets
        WHERE id IN ('delivery-photos', 'receiving-photos', 'team-note-attachments') AND public) <> 3 THEN
     RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: the three photo buckets must exist and still be public; this file has already been applied or a bucket changed';

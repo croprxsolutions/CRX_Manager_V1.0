@@ -23,8 +23,9 @@
  *   4. The preflight refuses a drifted policy and a second apply; the buckets stay public.
  *   5. MUTATION: with is_driver() forced true, the applicator downloads a delivery photo of a
  *      delivery assigned to them, so the driver gate is what refuses it.
- *   6. STEP 2 (20261016030000): its preflight refuses two team-note rows naming one file and a
- *      missing step 1 read policy; applied, the three buckets are private, every access case is
+ *   6. STEP 2 (20261016030000): its preflight refuses two team-note rows naming one file, a
+ *      missing step 1 read policy, an extra policy naming a photo bucket and a policy that tests no
+ *      bucket; applied, the three buckets are private, every access case is
  *      unchanged, a second row naming the same file is refused (and only because of the new
  *      index), the live chain still passes, and a second apply is refused.
  *
@@ -450,6 +451,11 @@ function step2(afterStep1) {
   SELECT '${NOTE}', '${PUBLIC_NOTE_URL}${OBJ.NOTE_REP}', 'p.jpg', 'image/jpeg', 1, '${U.REP}' FROM generate_series(1, 2);`, /STAFF_PHOTOS_PRIVATE_PREFLIGHT: two or more team_note_attachments rows name the same file/, 'two rows naming one file');
   step2Refuses('DROP POLICY "staff_photos_receiving_select" ON storage.objects;',
     /STAFF_PHOTOS_PRIVATE_PREFLIGHT: storage\.objects policy "staff_photos_receiving_select" is missing/, 'a missing step 1 read policy');
+  // Permissive policies OR together: an added broad read would keep photos open once private.
+  step2Refuses(`CREATE POLICY "prover_extra_read" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'delivery-photos');`,
+    /STAFF_PHOTOS_PRIVATE_PREFLIGHT: an unexpected storage policy names a photo bucket/, 'an extra policy naming a photo bucket');
+  step2Refuses('CREATE POLICY "prover_any_bucket" ON storage.objects FOR SELECT TO authenticated USING (true);',
+    /STAFF_PHOTOS_PRIVATE_PREFLIGHT: a storage\.objects policy does not test bucket_id/, 'a policy that tests no bucket');
 
   stageText('step2.sql', lf(STEP2));
   const a = apply('step2.sql');

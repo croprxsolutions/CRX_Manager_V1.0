@@ -320,7 +320,7 @@ export default function PrepaymentManagerPanel() {
     // customer/reference and submits check B, both calls share the same
     // page-scoped key and the server replays A's cached success without
     // creating check B's credits or updating B's customer balance.
-    // Superseded 2026-10-15 (20261015233000): the server now binds each receipt to the actor and
+    // Superseded 2026-10-15 (20261016060000): the server now binds each receipt to the actor and
     // the exact request, so check B under A's retained key is refused (and the key retired) rather
     // than replayed. The key is therefore NOT reset on open: an unresolved check A reopened and
     // resubmitted unchanged replays its receipt instead of creating its credits twice.

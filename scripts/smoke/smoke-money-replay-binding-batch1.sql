@@ -1,5 +1,5 @@
 -- ============================================================================
--- SMOKE TEST (rolled back by design) for 20261015233000_bind_money_replay_receipts_batch1.
+-- SMOKE TEST (rolled back by design) for 20261016060000_bind_money_replay_receipts_batch1.
 --
 -- Rule under test: a stored idempotency receipt is replayed only to the person who wrote it, and
 -- only for the exact same request. A retry that reuses a key for a different record, different

@@ -1,5 +1,5 @@
 /**
- * Replay-binding batch 1 (migration 20261015233000): the eight screens that call the nine wrapped
+ * Replay-binding batch 1 (migration 20261016060000): the eight screens that call the nine wrapped
  * money RPCs retire a refused retry key ONLY when the refusal proves nothing committed under it
  * ('intent' = the key belongs to a different request, 'actor' = to another user). A 'receipt'
  * refusal (IDEMPOTENCY_RESULT_INVALID / IDEMPOTENCY_RECEIPT_MISSING) must keep the key: an earlier

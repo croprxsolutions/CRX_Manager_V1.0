@@ -168,7 +168,7 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // inside an `if (error)` branch that then rethrows — verified in source, not asserted.
   'src/pages/InventoryPage.tsx': ['recovery'],
   'src/components/receiving/ReceivingLogPanel.tsx': ['recovery'],
-  // Replay-binding batch 1 (20261015233000): each is `if (getIdempotencyBindingRejection(error))
+  // Replay-binding batch 1 (20261016060000): each is `if (getIdempotencyBindingRejection(error))
   // <key>.resetKey();` inside the `if (error)` branch that then rethrows. Invoices.tsx and
   // PrepayWorkspacePanel.tsx stay pinned below for their OTHER sites; declaring 'recovery' here
   // excuses only the binding-rejection reset, which classify() verifies on its own line.

@@ -89,9 +89,10 @@
 --   _batch_apply_prepayments_impl to service_role if wanted; then drop _replay_fingerprint_20261015
 --   and _bind_replay_receipt_20261015.
 --
--- ORDERING: strict. Live high-water when renumbered: 20261015230000 (PR #929, storage policies
---   only, applied 2026-10-15). Written as 20261015190000 and renumbered twice to sort above
---   20261015200000 and 20261015230000. Re-read the live ledger before applying.
+-- ORDERING: strict. Live high-water when renumbered: 20261016030000 (PR #947, photo buckets
+--   private, applied 2026-10-16 05:19 UTC). Written as 20261015190000 and renumbered three times
+--   to sort above 20261015200000, 20261015230000 and 20261016030000. Re-read the live ledger
+--   before applying.
 --
 -- idempotency-body-check: exempt. Every wrapper reads idempotency_keys through
 --   check_idempotency_intent with its own operation literal and writes it through
@@ -752,7 +753,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.batch_apply_prepayments(jsonb, uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.batch_apply_prepayments(jsonb, uuid, text) TO authenticated, service_role;
 COMMENT ON FUNCTION public.batch_apply_prepayments(jsonb, uuid, text) IS
-  'Admin-only prepay batch application. Binds a keyed replay to auth.uid() and the exact allocation list (20261015233000), then delegates to _batch_apply_prepayments_replay_impl_20261015, which enforces AUTH_REQUIRED, ACTOR_MISMATCH and is_admin() before _batch_apply_prepayments_impl.';
+  'Admin-only prepay batch application. Binds a keyed replay to auth.uid() and the exact allocation list (20261016060000), then delegates to _batch_apply_prepayments_replay_impl_20261015, which enforces AUTH_REQUIRED, ACTOR_MISMATCH and is_admin() before _batch_apply_prepayments_impl.';
 REVOKE ALL ON FUNCTION public._batch_apply_prepayments_impl(jsonb, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------

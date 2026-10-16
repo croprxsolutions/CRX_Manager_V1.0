@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261015233000 candidate: nine money RPCs replay a stored idempotency
+ * Full-chain proof for the 20261016060000 candidate: nine money RPCs replay a stored idempotency
  * receipt only for the same person and the exact same request (batch 1 of the replay-binding fix,
  * KNOWN_ISSUES.md; follow-up of PR #933).
  *
@@ -35,11 +35,12 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261015233000_bind_money_replay_receipts_batch1.sql');
-// Live but not replayable here (storage.objects policies); it must not touch what this proves.
+const CANDIDATE = path.join(MIGRATIONS, '20261016060000_bind_money_replay_receipts_batch1.sql');
+// Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
+  '20261016030000_staff_photo_buckets_private.sql',
 ]);
 // PR #889's data migrations rewrite live rows this disposable database does not have; they are
 // recorded in the ledger (as live has them) instead of replayed.

@@ -16,7 +16,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke, mockResetKey } = vi.hoisted(() => ({
+  mockResetKey: vi.fn(),
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   mockToast: vi.fn(),
@@ -63,7 +64,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: mockResetKey }),
 }));
 
 vi.mock('../hooks/usePageMeta', () => ({ usePageMeta: () => {} }));
@@ -773,12 +774,21 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-77'));
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('already created this order'));
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
+    expect(mockResetKey).toHaveBeenCalled();
   });
 
   it('opens nothing on an actor refusal, which carries no receipt', async () => {
     await createOrderWith({ message: 'IDEMPOTENCY_ACTOR_MISMATCH' });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_ACTOR_MISMATCH'));
     expect(mockNavigate).not.toHaveBeenCalled();
+    expect(mockResetKey).toHaveBeenCalled();
+  });
+
+  it('keeps the retry key on a receipt refusal, since an earlier attempt may have committed', async () => {
+    await createOrderWith({ message: 'IDEMPOTENCY_RECEIPT_MISSING' });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_RECEIPT_MISSING'));
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(mockResetKey).not.toHaveBeenCalled();
   });
 
   it('blocks unlink for an unbilled linked ticket with an active invoice', async () => {

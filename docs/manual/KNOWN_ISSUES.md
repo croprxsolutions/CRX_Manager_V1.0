@@ -130,7 +130,7 @@ The nine HIGH-money functions it covers left the table below: `void_payment`, `d
 `apply_prepay_to_invoice`, `batch_apply_prepayments` and `batch_void_invoices`. This record is from the
 ledger; a live behaviour re-check is that change's own follow-up.
 
-**Unbound — ranked, with the batch each is fixed in.**
+**Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batch 1 list 87 functions (17, 13, 50 and 7; a row can name a function whose create path alone is unbound). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.
 
 | Batch | Function (what a mismatched retry does today) | Impact |
 |---|---|---|

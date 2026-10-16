@@ -1,8 +1,11 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-15 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-15 19:36 UTC; the one change since the 17:28 UTC read is that
-`20261015200000_quotes_rep_own_name` (ledger `20261015193420`, PR #938 merged as `1673d5b58`) is now
+`execute_sql`, 2026-10-15 23:12 UTC; the one change since the 19:36 UTC read is that
+`20261015230000_staff_photo_storage_access` (ledger `20261015210630`, PR #929 merged as `cd7b796a4`) is
+now applied, which re-certified the public photo buckets entry below. In the 19:36 UTC read, the one
+change since the 17:28 UTC read was that
+`20261015200000_quotes_rep_own_name` (ledger `20261015193420`, PR #938 merged as `1673d5b58`) had
 applied, which re-certified the quote salesperson entry below. In the 17:28 UTC read, the two changes
 since the 12:32 UTC read were that
 `20261014220000_rup_register_admin_only` (ledger `20261015135505`, PR #927 merged as `dd2bda843`) and
@@ -258,8 +261,43 @@ real reports minus the preamble line through `origin/main`'s hooks.
 was tried on PR #940 and removed: Sol blocked it because a user-typed message of the same shape with
 an indented "stop" would no longer latch. Sol's direction, which Mason chose: decide by trusted
 origin, not text. The session transcript records it (`"origin":{"kind":"peer"}` on a hand-back,
-`{"kind":"human"}` on Mason's messages); not yet verified is whether the hook can read that record
-when it runs, since the hook receives only `transcript_path`.
+`{"kind":"human"}` on Mason's messages).
+
+**Trusted origin checked 2026-10-15: not shown to be reliably readable when the hook runs, so no fix
+was built.** The hook input carries no origin, and the one timed case found the transcript record
+missing; between-turn hand-back timing is still untested (see below), so a transcript check keyed on
+`prompt_id` remains possible for that case.
+- Reproduced live again at 3:12 PM Central: a background helper's report listing "Stop, StopFailure"
+  latched the main checkout's `hold.json`, and the latched text began at `<agent-message from="…">`
+  with no preamble line. Mason's next message cleared it.
+- The hook input has no origin field. A real Claude Code 2.1.251 run with a diagnostic
+  UserPromptSubmit hook captured exactly these keys: `session_id`, `transcript_path`, `cwd`,
+  `prompt_id`, `permission_mode`, `hook_event_name`, `prompt`.
+- The transcript record is not guaranteed to be on disk yet. In that run the transcript file did not
+  exist when the hook ran for a typed prompt (the session's first). Later turns and a hand-back could
+  not be timed: that run's sign-in had expired, and a worktree session may not edit the main
+  checkout's hooks to probe there.
+- Records differ by delivery. A hand-back that arrives between turns is a `user` record with
+  `origin.kind: "peer"` and a `promptId` (which should equal the hook's `prompt_id`), but its text
+  includes the preamble, so it never equals the hook's `prompt`. One that arrives mid-turn is a
+  `queued_command` attachment with `origin.kind: "peer"` and no `promptId`, so it cannot be matched to
+  the prompt by ID; whether another reliable correlation exists (for example by its text) is untested.
+- So a transcript-based fix could silently do nothing, and matching "the last user record" could read
+  an earlier hand-back's origin and swallow a real stop typed by Mason.
+
+**Next step.** Two routes:
+1. **Partial.** Repeated probes from a non-worktree session, across many turns, find the record
+   carrying the hook's `prompt_id` on disk every time the hook runs for a between-turn hand-back
+   (other prompts, such as a session's first typed prompt, need not have one). Then an origin check keyed on
+   `prompt_id` can cover between-turn hand-backs. A probe can only show this is likely, not certain,
+   so the check must fall back to today's text rules whenever the record is missing (a missed origin
+   then latches exactly as now; it never swallows a stop). Mid-turn hand-backs have no `promptId`
+   and stay on the text rules unless another reliable correlation is found, so this route alone
+   does not close the issue.
+2. **Complete.** Claude Code adds the message origin to the UserPromptSubmit input, which covers
+   both delivery shapes.
+
+This stays open until both delivery shapes are covered.
 
 ## OPEN 2026-10-13 (HIGH; rescued from closed PR #605) — connected MCP tools with no permission rule run without a prompt, including production deploy, rollback and email send
 
@@ -689,7 +727,7 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   and `FieldStop` silently skips the customer receipt email. Fix: widen the driver branch for assigned open
   stops, or fetch receipt data through a SECURITY DEFINER RPC. (Sources: `docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md`),
   `docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md`).)
-- **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 in progress 2026-10-14, Goal 1).** `delivery-photos`,
+- **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 APPLIED LIVE 2026-10-15 21:06 UTC as `20261015230000`, PR #929 merged as `cd7b796a4`; step 2 open, Goal 1).** `delivery-photos`,
   `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-10-14). Mason decided on
   2026-10-13 that viewing them needs an active staff sign-in every time; an expiring signed URL does not meet that,
   so `createSignedUrl` is not the fix. Step 1 (`20261015230000_staff_photo_storage_access` plus the app's
@@ -707,7 +745,10 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   Storage deletes as the signed-in user, and a DELETE only reaches rows that user may also read, so with no storage
   read policy no delete in these buckets removed anything, even an admin's (proven in the disposable-database prover,
   which models live's `storage.protect_delete`); that is why "deleted" team-note photos left orphan files. Step 1 fixes
-  it.
+  it. **Deferred to step 2 (Sol MED on PR #929):** two `team_note_attachments` rows may name the same file in the
+  uploader's own folder, so deleting one row removes the file the other names; only the uploader can create that, the
+  app never does (each upload gets a fresh name), and 0 rows exist live (2026-10-15). Fix: a unique canonical file path
+  or a remaining-reference check before the file is removed.
   (Source: `docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md`).)
 - **Field-app access-scope lows (June 2026 parity ledger).** (1) `fields_select` (`20260214210000`) lets every
   active applicator read all customers' fields, not only dispatched ones; (2) `job_chemicals_select_location_dispatchee`

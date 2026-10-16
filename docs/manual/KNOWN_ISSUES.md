@@ -1,7 +1,10 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-15 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-15 23:12 UTC; the one change since the 19:36 UTC read is that
+**Last verified: 2026-10-16 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-16 06:16 UTC: 1032 rows / 1025 names; the one change since the 2026-10-15
+23:12 UTC read is that `20261016030000_staff_photo_buckets_private` (ledger `20261016051944`, PR #947
+merged as `5851eb514`) is now applied, which re-certified the public photo buckets entry below: all three
+buckets read `public = false` live at 06:16 UTC. In the 23:12 UTC read, the one change since the 19:36 UTC read is that
 `20261015230000_staff_photo_storage_access` (ledger `20261015210630`, PR #929 merged as `cd7b796a4`) is
 now applied, which re-certified the public photo buckets entry below. In the 19:36 UTC read, the one
 change since the 17:28 UTC read was that
@@ -728,7 +731,7 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   and `FieldStop` silently skips the customer receipt email. Fix: widen the driver branch for assigned open
   stops, or fetch receipt data through a SECURITY DEFINER RPC. (Sources: `docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/roadmap/field-mode-build-plan.md`),
   `docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-14-codex-field-mode-prompt.md`).)
-- **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 APPLIED LIVE 2026-10-15 21:06 UTC as `20261015230000`, PR #929 merged as `cd7b796a4`; step 2 written as `20261016030000_staff_photo_buckets_private` (migration-history row 950), not applied, Goal 1).** `delivery-photos`,
+- **Public photo buckets (DECIDED 2026-10-13: make private; step 1 of 2 APPLIED LIVE 2026-10-15 21:06 UTC as `20261015230000`, PR #929 merged as `cd7b796a4`; step 2 APPLIED LIVE 2026-10-16 05:19 UTC as `20261016030000_staff_photo_buckets_private` (ledger `20261016051944`, migration-history row 950, PR #947 merged as `5851eb514`); all three buckets read `public = false` live 2026-10-16 06:16 UTC, so the step 1 to step 2 window below has closed, Goal 1).** `delivery-photos`,
   `receiving-photos` and `team-note-attachments` are `public=true` (checked live 2026-10-14). Mason decided on
   2026-10-13 that viewing them needs an active staff sign-in every time; an expiring signed URL does not meet that,
   so `createSignedUrl` is not the fix. Step 1 (`20261015230000_staff_photo_storage_access` plus the app's

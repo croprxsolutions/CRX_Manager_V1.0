@@ -735,13 +735,13 @@ BEGIN
   BEGIN
     v_res2 := public.revert_quote_status(v_q7, '[SMOKE] reopen a declined planned quote', v_admin, v_pfx || 'revert-q7');
   EXCEPTION WHEN OTHERS THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status (its keyless create_planned_holds path) was refused: %', SQLERRM;
+    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status (its planned-holds rebuild through the private body) was refused: %', SQLERRM;
   END;
   IF (SELECT status FROM public.quotes WHERE id = v_q7) IS DISTINCT FROM 'sent' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status did not reopen the declined quote: %', v_res2;
   END IF;
   IF (SELECT count(*) FROM public.idempotency_keys WHERE operation = 'create_planned_holds') <> v_n THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status''s keyless create_planned_holds wrote a receipt';
+    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status''s planned-holds rebuild wrote a create_planned_holds receipt';
   END IF;
 
   -- --------------------------------------------------------------------------------------------

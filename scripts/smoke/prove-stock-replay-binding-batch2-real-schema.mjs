@@ -68,7 +68,7 @@ const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const CHAIN = path.join(SMOKE, 'smoke-stock-replay-binding-batch2.sql');
 const BATCH1_CHAIN = path.join(SMOKE, 'smoke-money-replay-binding-batch1.sql');
 // Every other non-container-prover chain under scripts/smoke that calls one of the thirteen RPCs
-// (or revert_quote_status, the keyless create_planned_holds caller). Each must keep passing after
+// (or revert_quote_status, which rebuilds planned holds through the private create_planned_holds body). Each must keep passing after
 // the candidate if it passed before it (some need live data this database lacks; those are
 // reported, not required).
 const COVERING_CHAINS = [
@@ -532,7 +532,7 @@ COMMIT;`,
   mutations.push(['revert_quote_status private-body call', 'revert_quote_status',
     '    PERFORM public._create_planned_holds_replay_impl_20261015(p_quote_id, v_actor, NULL);\n',
     '    PERFORM create_planned_holds(p_quote_id, v_actor, NULL);\n',
-    /SMOKE_FAIL: revert_quote_status \(its keyless create_planned_holds path\) was refused/]);
+    /SMOKE_FAIL: revert_quote_status \(its planned-holds rebuild through the private body\) was refused/]);
   // The four no-receipt no-op exemptions: binding them would raise IDEMPOTENCY_RECEIPT_MISSING.
   mutations.push(
     ['release_inventory_hold already_released exemption', 'release_inventory_hold',

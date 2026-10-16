@@ -194,8 +194,14 @@ BEGIN
            OR (a.attname = 'request_fingerprint' AND a.atttypid = 'text'::regtype))) <> 2 THEN
     RAISE EXCEPTION 'PREFLIGHT_RECEIPT_COLUMNS_DRIFT: idempotency_keys.request_actor_id (uuid) and request_fingerprint (text) are required';
   END IF;
-  IF to_regprocedure('auth.uid()') IS NULL THEN
-    RAISE EXCEPTION 'PREFLIGHT_DEPENDENCY_MISSING: auth.uid() is required';
+  -- auth.uid() is the actor every wrapper binds to: pin its live body (read 2026-10-16), not just
+  -- its existence (Luna round 1).
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+     WHERE p.oid = to_regprocedure('auth.uid()')
+       AND NOT p.prosecdef
+       AND md5(replace(p.prosrc, chr(13), '')) = 'cdef18c69c4f4cbbced2eaf81e628b49') THEN
+    RAISE EXCEPTION 'PREFLIGHT_AUTH_UID_DRIFT: auth.uid() is missing or differs from its reviewed live body';
   END IF;
   IF EXISTS (
     SELECT 1 FROM (VALUES

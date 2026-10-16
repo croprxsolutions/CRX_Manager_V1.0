@@ -9,7 +9,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { supabase, assertRpcResult, hasRpcCode, RpcErrorCodes, sanitizeError } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -917,7 +917,8 @@ export default function CycleCounts() {
       const bindingRejection = getIdempotencyBindingRejection(err);
       if (bindingRejection === 'intent' || bindingRejection === 'actor') reverseCycleCountIdem.resetKey();
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_cycle_count' } });
-      toast('error', err instanceof Error ? err.message : 'Failed to reverse cycle count');
+      // sanitizeError maps the replay-binding refusal codes to plain English.
+      toast('error', sanitizeError(err));
     } finally {
       setReversing(false);
     }

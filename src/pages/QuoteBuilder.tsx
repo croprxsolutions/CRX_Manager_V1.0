@@ -1981,7 +1981,8 @@ export default function QuoteBuilder() {
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(holdError);
           if (bindingRejection === 'intent' || bindingRejection === 'actor') plannedHoldsIdem.resetKey();
-          toast('error', 'Failed to create inventory holds');
+          Sentry.captureException(holdError, { tags: { source: 'mutation', action: 'create_planned_holds' } });
+          toast('error', `Failed to create inventory holds: ${sanitizeError(holdError)}`);
         }
         else {
           assertRpcResult(holdData, 'create_planned_holds');

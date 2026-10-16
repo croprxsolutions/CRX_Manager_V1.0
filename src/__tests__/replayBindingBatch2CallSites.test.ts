@@ -64,7 +64,11 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
       // wrapper, '}, reason)'.
       const calls = [...source.matchAll(new RegExp(`\\.rpc\\('${rpc}',([\\s\\S]*?)\\n\\s*\\}(?:, reason)?\\)`, 'g'))];
       expect(calls.length).toBeGreaterThan(0);
-      for (const call of calls) expect(call[1]).toMatch(/p_idempotency_key:\s*\S/);
+      for (const call of calls) {
+        // A real key expression, never undefined/null or an `|| undefined` fallback.
+        expect(call[1]).toMatch(/p_idempotency_key:\s*\S/);
+        expect(call[1]).not.toMatch(/p_idempotency_key:[^,\n]*\b(?:undefined|null)\b/);
+      }
     });
   }
 

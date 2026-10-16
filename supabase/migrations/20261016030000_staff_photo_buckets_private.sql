@@ -21,12 +21,15 @@
 --     are: the app reads only the object path out of them (src/lib/privatePhotos.ts), and
 --     getPublicUrl, which builds that string, makes no network call. No Edge Function reads these
 --     buckets.
---   * public.team_note_attachments: 0 rows; no unique index on file_url.
+--   * public.team_note_attachments: 0 rows; no unique index on file_url or its object path.
 --
 -- Also in this file (Codex Sol MED on PR #929, deferred here): two team_note_attachments rows could
 -- name the same file in the uploader's own folder, and deleting either row removes the file the other
--- still names. A unique index on file_url makes one row per file. Step 1's insert policy already
--- pins file_url to exactly one canonical public URL per object, so one URL means one file.
+-- still names. A unique index on the object path inside file_url (everything after
+-- /storage/v1/object/public/) makes one row per file. Not on file_url itself: step 1's insert policy
+-- accepts any http(s) origin, so two URLs differing only in scheme or host would name one file, and
+-- the app (teamNotePhotoPath) drops the origin (Codex on this PR). A file_url without that marker
+-- indexes as NULL and is not unique-checked; step 1's policy refuses such rows, and none exist.
 --
 -- Behavior change to note: an app copy installed before PR #929 (2026-10-15) still shows photos by
 -- their public URL; after this file those photos show as broken images until that copy reloads the
@@ -35,7 +38,7 @@
 -- Not destructive: no row, object or policy is changed or removed; one bucket flag per bucket and one
 -- new index. Access-changing (bucket visibility), so it needs Mason's own approval of this file.
 -- Rollback: UPDATE storage.buckets SET public = true WHERE id IN ('delivery-photos',
--- 'receiving-photos', 'team-note-attachments'); DROP INDEX public.team_note_attachments_file_url_key;
+-- 'receiving-photos', 'team-note-attachments'); DROP INDEX public.team_note_attachments_object_path_key;
 -- sql-safety: exempt — storage.buckets is a Supabase-managed table (not in the public schema
 -- registry); public is its real column.
 
@@ -97,27 +100,43 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: a storage.objects policy does not test bucket_id';
   END IF;
+  -- The two text checks above cannot see a policy like USING (true OR bucket_id = 'other') (Codex
+  -- Luna on this file), so the whole storage.objects policy set is pinned too: 25 policies, read
+  -- live 2026-10-16 00:5x UTC, each non-photo one a top-level (bucket_id = '<its own bucket>') AND
+  -- ... conjunction (document-uploads, blend-ticket-images, delivery-signatures, job-attachments,
+  -- supplier-price-evidence). Any added, removed or changed storage policy refuses this file until
+  -- it is re-read and re-pinned.
+  IF (SELECT md5(string_agg(policyname || '|' || cmd || '|' || roles::text || '|' || permissive || '|'
+                            || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY policyname))
+        FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects')
+     IS DISTINCT FROM 'd40293d14ae8054e3b88e0dc5525987f' THEN
+    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: the storage.objects policy set changed since it was read; re-read and re-pin it';
+  END IF;
 
   IF (SELECT count(*) FROM storage.buckets
        WHERE id IN ('delivery-photos', 'receiving-photos', 'team-note-attachments') AND public) <> 3 THEN
     RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: the three photo buckets must exist and still be public; this file has already been applied or a bucket changed';
   END IF;
 
-  IF to_regclass('public.team_note_attachments_file_url_key') IS NOT NULL THEN
-    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: team_note_attachments_file_url_key already exists';
+  IF to_regclass('public.team_note_attachments_object_path_key') IS NOT NULL THEN
+    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: team_note_attachments_object_path_key already exists';
   END IF;
 
-  IF EXISTS (SELECT file_url FROM public.team_note_attachments GROUP BY file_url HAVING count(*) > 1) THEN
+  IF EXISTS (SELECT 1 FROM public.team_note_attachments
+              WHERE substring(file_url FROM '/storage/v1/object/public/(.+)$') IS NOT NULL
+              GROUP BY substring(file_url FROM '/storage/v1/object/public/(.+)$') HAVING count(*) > 1) THEN
     RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_PREFLIGHT: two or more team_note_attachments rows name the same file; resolve them first';
   END IF;
 END
 $preflight$;
 
 UPDATE storage.buckets
-   SET public = false
+   SET public = false,
+       updated_at = now()
  WHERE id IN ('delivery-photos', 'receiving-photos', 'team-note-attachments');
 
-CREATE UNIQUE INDEX team_note_attachments_file_url_key ON public.team_note_attachments (file_url);
+CREATE UNIQUE INDEX team_note_attachments_object_path_key
+  ON public.team_note_attachments ((substring(file_url FROM '/storage/v1/object/public/(.+)$')));
 
 -- Verify inside the same transaction; any mismatch rolls the whole file back.
 DO $verify$
@@ -129,14 +148,13 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_index i
-    WHERE i.indexrelid = 'public.team_note_attachments_file_url_key'::regclass
+    WHERE i.indexrelid = 'public.team_note_attachments_object_path_key'::regclass
       AND i.indrelid = 'public.team_note_attachments'::regclass
-      AND i.indisunique AND i.indisvalid AND i.indpred IS NULL AND i.indexprs IS NULL
-      AND i.indnkeyatts = 1
-      AND i.indkey[0] = (SELECT attnum FROM pg_attribute
-                          WHERE attrelid = 'public.team_note_attachments'::regclass AND attname = 'file_url')
+      AND i.indisunique AND i.indisvalid AND i.indpred IS NULL
+      AND i.indnkeyatts = 1 AND i.indkey[0] = 0
+      AND pg_get_expr(i.indexprs, i.indrelid) LIKE '%file_url%/storage/v1/object/public/(.+)$%'
   ) THEN
-    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_VERIFY: team_note_attachments_file_url_key is not a valid unique index on file_url alone';
+    RAISE EXCEPTION 'STAFF_PHOTOS_PRIVATE_VERIFY: team_note_attachments_object_path_key is not a valid unique index on the file_url object path';
   END IF;
 END
 $verify$;

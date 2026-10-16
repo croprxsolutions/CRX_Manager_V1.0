@@ -8,9 +8,11 @@ returns the image). Mason decided on 2026-10-13 that these photos need a staff s
 
 **What changed.**
 - `supabase/migrations/20261016030000_staff_photo_buckets_private.sql`: sets `delivery-photos`,
-  `receiving-photos` and `team-note-attachments` private, and adds a unique index on
-  `team_note_attachments.file_url` (the Sol finding deferred from PR #929: two rows naming one file).
-  Preflight pins step 1's eleven policies; verify checks the buckets and the index.
+  `receiving-photos` and `team-note-attachments` private, and adds a unique index on the
+  storage path inside `team_note_attachments.file_url` (the Sol finding deferred from PR #929: two
+  rows naming one file, even under different URL origins). Preflight pins step 1's eleven policies
+  and the whole storage policy set (so no added or changed policy can keep photos open); verify
+  checks the buckets and the index.
 - `scripts/smoke/prove-staff-photo-storage-access-real-schema.mjs`: proves step 2 on top of step 1
   in the same disposable database.
 - `docs/reference/migration-history.md` row 950, `docs/manual/KNOWN_ISSUES.md` photo entry.

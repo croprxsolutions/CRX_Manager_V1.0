@@ -660,7 +660,7 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   it. **Deferred to step 2 (Sol MED on PR #929):** two `team_note_attachments` rows may name the same file in the
   uploader's own folder, so deleting one row removes the file the other names; only the uploader can create that, the
   app never does (each upload gets a fresh name), and 0 rows exist live (2026-10-15). Fixed in step 2
-  (`20261016030000`, once applied) by a unique index on `file_url`.
+  (`20261016030000`, once applied) by a unique index on the storage path inside `file_url`.
   (Source: `docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md`).)
 - **Field-app access-scope lows (June 2026 parity ledger).** (1) `fields_select` (`20260214210000`) lets every
   active applicator read all customers' fields, not only dispatched ones; (2) `job_chemicals_select_location_dispatchee`

@@ -6,7 +6,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
 
 ## Summary for Mason
 
-**What a "row limit" is.** When a screen asks the database for records, it often says "give me at most 500." The database itself also has a ceiling (Supabase's default is 1,000 rows per request). Once the business has more records than that, the extra ones are quietly left off. Nearly every screen below gives **no warning** when that happens.
+**What a "row limit" is.** When a screen asks the database for records, it often says "give me at most 500." The database itself also has a ceiling (Supabase's default is 1,000 rows per request). Once the business has more records than that, the extra ones are quietly left off. Nearly every screen below gives **no warning** when that happens. Every "1,000" in this summary assumes the database uses that default. The real setting hasn't been read yet (see "Something only you can check" below). If it is higher, the server-ceiling findings start at that number instead.
 
 **What it means for you:**
 
@@ -17,7 +17,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
    - the Price List report;
    - Crop Programs.
 4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 20, 50, 200, 500 or 1,000, and nobody can search past that. There are **66 such findings**. Most are dropdowns that load the first N records instead of searching.
-5. **Compliance records can be incomplete.** These would silently drop records past 1,000:
+5. **Compliance records can be incomplete.** These would silently drop records past the server ceiling (1,000 if it is the default), or past 500 where noted:
    - the restricted-use pesticide sales register;
    - the application logbooks (including FAA);
    - the Application Records export and the Posted Applications report (both stop at 500);

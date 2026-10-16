@@ -16,7 +16,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
    - the product filters on Reports and Sales Reports;
    - the Price List report;
    - Crop Programs.
-4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 20, 50, 200, 500 or 1,000, and nobody can search past that. There are **67 such findings**. Most are dropdowns that load the first N records instead of searching.
+4. **Pickers and lists will lose records** (customers, products, fields, orders, deliveries) at 20, 50, 200, 500 or 1,000, and nobody can search past that. There are **66 such findings**. Most are dropdowns that load the first N records instead of searching.
 5. **Compliance records can be incomplete.** These would silently drop records past 1,000:
    - the restricted-use pesticide sales register;
    - the application logbooks (including FAA);
@@ -120,7 +120,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | M17 | `pages/NewDelivery.tsx:117` | Open-order picker for a new delivery | 1,000 (server) | Silent | C+X |
 | M18 | `components/receiving/ReceivingHubPanel.tsx:120` | Open-PO receiving board (quantities on order) | 500 POs | Silent | C+X |
 | M19 | `components/receiving/ReceivingLogPanel.tsx:94`; RPC `get_receiving_log` *(live)* | Receiving log, vendor filter, CSV and PDF. The function supports paging, but the panel never asks for page 2 | 500 | Silent | C+X |
-| M20 | `pages/OfficeCockpit.tsx:552`, `:562`, `:597`, `:611`, `:631` (`TILE_LIMIT = 50` at `:319`) | Office Cockpit tiles: jobs not invoiced, postable drafts ("Post all clean" acts only on the 50 loaded), expiring licenses, overdue AR, needs dispatch. The tile count tops out at 50 | 50 | Silent | C+X |
+| M20 | `pages/OfficeCockpit.tsx:552`, `:562`, `:597`, `:611`, `:631` (`TILE_LIMIT = 50` at `:319`) | Office Cockpit tiles: jobs not invoiced, postable drafts ("Post all clean" acts only on the 50 loaded), upcoming jobs in the next 7 days (its "+N more" counts only the 50 loaded), expiring licenses, overdue AR, needs dispatch. The tile count tops out at 50 | 50 | Silent | C+X |
 | M21 | `pages/CallLists.tsx:201` to `:235`; five `get_call_list_*` RPCs *(live)*, `supabase/migrations/20260716214423_crm_call_lists.sql:96`, `:183`, `:273`, `:407`, `:481` | Sales call lists. "Showing X of Y" (`:722`) uses the capped Y | 200 each | Silent | C+X |
 | M22 | `pages/Fields.tsx:73`, `lib/fieldsGeojsonCache.ts:30`; RPC `get_fields_with_geojson` *(live)* | Fields list and every map that uses the shared field cache | 1,000 (server) | Silent | C+X |
 | M23 | `components/inventory/TransactionLedgerModal.tsx:131` | One product's stock ledger, oldest first, so the newest movements drop off. The count is wrong too | 1,000 (server) | Silent | C+X |
@@ -140,7 +140,6 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | M64 | `components/customers/CustomerContacts.tsx:197` | Customer interaction history. The type and outcome filters run over the 50 loaded, so "No interactions match" can appear when older matches exist (was L8) | 50 newest | Silent | C+X |
 | M65 | `pages/ToShip.tsx:116` (deliveries), `:125` (purchase orders) | To Ship page, Deliveries and Inbound tabs: scheduled or in-progress deliveries, and open POs, soonest first (added after the PR's GitHub Codex review) | 500 each | Silent | C+X |
 | M66 | `pages/FieldRoute.tsx:76` | My Route: every open delivery stop (a driver sees their own; admins and reps see all), shown as if complete (added after the PR's second GitHub Codex review) | 1,000 (server) | Silent | C+X |
-| M67 | `lib/notificationTriggers.ts:91` | Low-stock alerts: reads every inventory row with a reorder point, so items past the cap never raise an alert | 1,000 (server) | Silent | C |
 
 ### Pickers (dropdowns) that can't reach every record
 
@@ -213,6 +212,8 @@ These read every row: they keep asking for the next page until none are left.
 
 ## Found along the way (not row limits, not fixed here)
 
+- `lib/notificationTriggers.ts:88` (`checkLowStockNotifications`) reads every inventory row with a reorder point in one request. But it is dead code: its only caller, `runPeriodicNotificationChecks` (`:657`), is never called outside tests. Low-stock alerts now come from the database job `run_morning_notification_checks`, which has no cap (see `Dashboard.tsx:314`). It is not a finding; deleting the dead helper is optional cleanup. (Listed as M67 in an earlier revision; removed after the PR's third GitHub Codex review.)
+
 - `lib/documentOCR.ts:47` (`MAX_PAGES = 20`, applied at `:61`): scanning an uploaded PDF in the bulk PO, order, quote and customer imports reads only the first 20 pages. Lines and totals after page 20 are never imported, and the user isn't told (only a Sentry warning at `:88`). This is a page cap, not a row cap, so it sits outside the counts above. It still belongs in Goal 4's fixes. (Listed as H35 in the first draft; moved after the Codex review.)
 
 - `components/integrity/IntegrityCleanupPanel.tsx:152`: the "over-received PO" check compares `quantity_received` to the **text** `'quantity_ordered'`, not to the other column. PostgREST cannot compare two columns this way, so the check almost certainly errors or returns nothing, and the section stays empty. This is a likely broken integrity check (not run to confirm).
@@ -229,7 +230,7 @@ These read every row: they keep asking for the next page until none are left.
    - the bulk imports in M48 and M49, and the Edge Function in M51, should match names in the database, not against a downloaded list;
    - the Label Data Quality report in M49 needs a full read;
    - the category, vendor and manufacturer choices (M60) should come from a database query of distinct values.
-5. **List pages (M5–M28, M52, M54–M58, M61–M67).** Real paging and search. For the Jobs list's billed-customer column (M52), read the billed customers for each page of jobs, so none are cut off. Show a lasting "more records" message wherever a list is still capped.
+5. **List pages (M5–M28, M52, M54–M58, M61–M66).** Real paging and search. For the Jobs list's billed-customer column (M52), read the billed customers for each page of jobs, so none are cut off. Show a lasting "more records" message wherever a list is still capped.
 6. **LOW items** last. Most need nothing, or just a "+ more" note.
 
 Across all of these, the Goal 4 rule applies: a failed or partial read must never show a zero or a complete-looking total.

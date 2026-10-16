@@ -14,8 +14,9 @@ finishes the record.
   signed-in check (2026-10-16: a delivery photo still shows in the app) is recorded.
 - `docs/manual/CURRENT_STATE.md`: ledger header, effective high-water (now `20261016060000`), applied list
   and schema-registry line, all from the 13:07 UTC read (Codex on this PR).
-- `.claude/schema-registry.json`: delta only (the two applied names and `migrations_high_water`
-  `20261016121253`). Neither migration changed anything the registry tracks.
+- `.claude/schema-registry.json`: delta only (the applied name and `migrations_high_water`
+  `20261016051944`). It does not list `20261016060000` yet: doing so makes the RPC idempotency
+  inventory test treat that money change as applied, which is that change's own follow-up.
 
 **Still open.** The live chain `scripts/smoke/smoke-staff_photo_storage_access.sql` waits on Mason's
 REAL-DATA-OK marker.

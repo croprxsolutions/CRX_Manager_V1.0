@@ -80,7 +80,9 @@ applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #94
 `982bc0dda`). The nine batch-1 functions in the table below now refuse a reused key for a different
 caller or request (`IDEMPOTENCY_ACTOR_MISMATCH` / `IDEMPOTENCY_INTENT_MISMATCH`); an exact retry still
 replays. Proof: live postconditions read and the rollback-only live chain
-`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). Batches 2–4 below are still open.
+`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). Gap (CodeRabbit on PR #950): that chain
+checks an exact retry for eight of the nine functions; for `edit_prepay_credit` it checks only the
+mismatch refusal, so its exact-retry replay is not yet proven live. Batches 2–4 below are still open.
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions
@@ -133,13 +135,13 @@ before any inner plain replay, under the same key lock). 63 receipts existed liv
 
 **Unbound — ranked, with the batch each is fixed in.**
 
-| Batch | Function (what a mismatched retry does today) | Impact |
+| Batch | Function (what a mismatched retry does today; for batch 1, what it did before 2026-10-16) | Impact |
 |---|---|---|
-| 1 | `void_payment` answers "payment **B** voided" (it echoes the new id) while B stays active | HIGH money |
-| 1 | `delete_prepay_credit`, `edit_prepay_credit` answer "credit **B** deleted/edited" while B is untouched; the replay runs **before** the login and admin checks | HIGH money |
-| 1 | `apply_write_off`, `reverse_write_off` return write-off A's id or result for invoice or write-off B | HIGH money |
-| 1 | `create_prepay_check_splits`, `apply_prepay_to_invoice`, `batch_apply_prepayments` return A's credits or applications; B's prepay is never created or applied | HIGH money |
-| 1 | `batch_void_invoices` returns A's voided count for a different invoice list; none of the new invoices is voided | HIGH money |
+| 1 (FIXED live 2026-10-16) | `void_payment` answered "payment **B** voided" (it echoes the new id) while B stays active | HIGH money |
+| 1 (FIXED live 2026-10-16) | `delete_prepay_credit`, `edit_prepay_credit` answered "credit **B** deleted/edited" while B is untouched; the replay runs **before** the login and admin checks | HIGH money |
+| 1 (FIXED live 2026-10-16) | `apply_write_off`, `reverse_write_off` returned write-off A's id or result for invoice or write-off B | HIGH money |
+| 1 (FIXED live 2026-10-16) | `create_prepay_check_splits`, `apply_prepay_to_invoice`, `batch_apply_prepayments` returned A's credits or applications; B's prepay is never created or applied | HIGH money |
+| 1 (FIXED live 2026-10-16) | `batch_void_invoices` returned A's voided count for a different invoice list; none of the new invoices is voided | HIGH money |
 | 2 | `complete_delivery`, `complete_job` (the latter replays before its role check, with no lock and no expiry): B not completed, no stock deduction, no auto-invoice | HIGH money and stock |
 | 2 | `void_order`, `void_delivery`, `cancel_delivery` (replays before its role check), `unpost_invoice`, `transfer_invoice_to_job`, `price_order`, `update_order_items`, `save_field_app_invoice`, `update_field_app_invoice_billing`, `transition_rebate_claim`, `create_rebate_claim`, `close_accounting_period` | HIGH money |
 | 2 | `apply_credit_memo_to_invoice` is bound before its lock, but its after-lock re-check is plain (race window only) | HIGH (race) |

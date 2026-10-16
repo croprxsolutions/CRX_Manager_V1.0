@@ -7,6 +7,6 @@ For each one, the audit gives the file and line, the cap, whether the screen war
 The main findings:
 - 28 money totals are summed from a list that gets cut off.
 - 9 integrity checks read only part of the data, along with several compliance records.
-- One problem is live today: 595 active products, but four product lists load only 500.
+- One problem was live: four product lists loaded only 500 of the 595 active products. PR #944 has since fixed it.
 
-Nothing was fixed. The live database was read with SELECT only, and Codex (`gpt-6-luna`, xhigh) cross-checked the list as an advisor. The fixes come in later Goal 4 pull requests.
+This PR fixes nothing itself. The live database was read with SELECT only, and Codex (`gpt-6-luna`, xhigh) cross-checked the list as an advisor. The fixes come in later Goal 4 pull requests.

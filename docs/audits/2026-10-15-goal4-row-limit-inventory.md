@@ -2,7 +2,7 @@
 
 This is the first step of Goal 4 in `docs/plans/2026-10-13-direction-and-goals.md`, "Complete, correct numbers at any volume." The step is to list every list, picker, report, export and integrity check that stops at a row limit before fixing any of them. Nothing was changed. The live database was only read (SELECT).
 
-Code baseline: `origin/main` at `9b6eb8607`.
+Code baseline: `origin/main` at `9b6eb8607`. Line numbers were rechecked against `origin/main` at `a07062cb2`, and the cited lines in the five app files that changed in between (Reports, Sales Reports, Crop Programs, Team Board, Delivery Detail) were updated to match.
 
 ## Summary for Mason
 
@@ -12,11 +12,10 @@ Code baseline: `origin/main` at `9b6eb8607`.
 
 1. **Money totals will be wrong at volume, with no warning.** **28 places** add up money from a list that gets cut off, so their totals would come out too low. Examples: Payment History's "Active Payments" card (stops at 200 payments), Commission Payments (200), the Invoices and Field Invoices totals, the To Ship dollar value, every profitability tab on Reports, Sales Reports, AR and AP Aging, and the Unused Prepay and Open Credit cards. Today the business is small, so **none of these totals is wrong yet**. Live row estimates (`pg_stat_user_tables`, 2026-10-15) put every table behind them under 150 rows, except order lines (about 289), delivery lines (about 400) and products (604, counted exactly; this is what the Inventory Cost report lists). Each is below the smallest cap that applies to it. These are whole-table counts, so a filtered screen reads at most that many rows. The totals start going wrong as soon as a season's volume passes the cut-off.
 2. **Some integrity checks would miss problems.** **Nine checks** read only part of the data: four on the Integrity Report (commission splits, quote holds, returns, customer balances), four on the Integrity cleanup panel (unbilled deliveries, open alerts, negative stock, stock made at delivery), and the dashboard action queue. A clean result could just mean the check never looked at the problem rows.
-3. **One problem is already happening today.** You have **595 active products**. Four product lists load only the first 500 alphabetically, so about 95 products (the end of the alphabet) are missing:
-   - the product filters on Reports and Sales Reports;
-   - the Price List report;
-   - Crop Programs.
-4. **Pickers and lists without a database search will lose records** (customers, products, fields, orders, deliveries) at 20, 50, 200, 500 or 1,000. The search-as-you-type pickers in L15 are the exception: they can find any record. There are **66 such findings**. Most are dropdowns that load the first N records instead of searching.
+3. **One problem was already happening, and it is now fixed.** There are **595 active products**, but four product lists loaded only the first 500, so about 95 products were missing. PR #944 (merged 2026-10-15) fixed all four (M1–M4):
+   - the product filters on Reports and Sales Reports, and Crop Programs, now search as you type;
+   - the Price List now reads every product.
+4. **Pickers and lists without a database search will lose records** (customers, products, fields, orders, deliveries) at 20, 50, 200, 500 or 1,000. The search-as-you-type pickers in L15 are the exception: they can find any record. There are **62 such open findings**, plus the 4 already fixed (M1–M4). Most are dropdowns that load the first N records instead of searching.
 5. **Compliance records can be incomplete.** These would silently drop records past the server ceiling (1,000 if it is the default), or past 500 where noted:
    - the restricted-use pesticide sales register;
    - the application logbooks (including FAA);
@@ -55,12 +54,12 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | H9 | `pages/Reports.tsx:243` | Reports, Customer Profitability tab | 1,000 (server) | Silent | Yes: revenue, profit and margin per customer | C+X |
 | H10 | `pages/Reports.tsx:271` | Reports, Product Profitability tab (all order lines in range) | 1,000 (server) | Silent | Yes | C+X |
 | H11 | `pages/Reports.tsx:321` | Reports, Revenue by month | 1,000 (server) | Silent | Yes | C+X |
-| H12 | `pages/Reports.tsx:304` | Reports, Commissions tab: unpaid total (`:1084`) and quick-pay selection | 1,000 (server) | Silent | Yes | C+X |
-| H13 | `pages/SalesReports.tsx:168`, RPC `get_sales_detail_report` *(live)* | Sales Reports, Detail tab (one row per order line): revenue, profit and quantity totals (`:191`), CSV and PDF | 1,000 (server) | Silent. The PDF footer prints the capped count as if complete | Yes | C+X |
-| H14 | `pages/SalesReports.tsx:176`, RPC `get_sales_summary_report` *(live)* | Sales Reports summary tabs (by customer, product, month or rep): totals (`:198`) | 1,000 groups (server) | Silent | Yes, once there are more than 1,000 customers or products | C+X |
+| H12 | `pages/Reports.tsx:304` | Reports, Commissions tab: unpaid total (`:1140`) and quick-pay selection | 1,000 (server) | Silent | Yes | C+X |
+| H13 | `pages/SalesReports.tsx:169`, RPC `get_sales_detail_report` *(live)* | Sales Reports, Detail tab (one row per order line): revenue, profit and quantity totals (`:192`), CSV and PDF | 1,000 (server) | Silent. The PDF footer prints the capped count as if complete | Yes | C+X |
+| H14 | `pages/SalesReports.tsx:177`, RPC `get_sales_summary_report` *(live)* | Sales Reports summary tabs (by customer, product, month or rep): totals (`:199`) | 1,000 groups (server) | Silent | Yes, once there are more than 1,000 customers or products | C+X |
 | H15 | `pages/AccountsReceivable.tsx:46`, RPC `get_ar_aging` *(live)*; also `pages/ARaging.tsx:99` | AR hub "Total Owed" and the AR Aging grid. Sorted by balance, so the smallest balances drop first | 1,000 customers with a balance (server) | Silent | Yes | C+X |
 | H16 | `pages/AccountsReceivable.tsx:52` | AR hub "Unused Prepay" card and Net Position. Reads every prepay row, including zero-balance ones | 1,000 (server) | Silent | Yes | C+X |
-| H18 | `pages/Reports.tsx:450`, RPC `get_inventory_cost_report` *(live)* | Reports, Inventory Cost total (`:1354`). The function returns one row per product | 1,000 products (server) | Silent | Yes (604 products today, so not hit yet) | C+X |
+| H18 | `pages/Reports.tsx:450`, RPC `get_inventory_cost_report` *(live)* | Reports, Inventory Cost total (`:1422`). The function returns one row per product | 1,000 products (server) | Silent | Yes (604 products today, so not hit yet) | C+X |
 | H19 | `pages/FieldProfitability.tsx:78`, RPC `get_field_profitability` *(live)* | Field Profitability totals (`:115`) | 1,000 field-seasons (server) | Silent | Yes | C+X |
 | H20 | `components/prepay/PrepaymentManagerPanel.tsx:128` | Prepay manager: "Total Prepay Credits" and "Total Unpaid Invoices" cards, Apply-All preview, CSV. The apply itself runs in the database and isn't capped | 500 customers with prepay | Silent | Yes: the preview totals | C+X |
 | H21 | `pages/PurchaseOrders.tsx:97` | Purchase Orders, Outstanding Items: total value on order (`:184`) | 1,000 lines (server) | Silent | Yes (money owed to suppliers) | C+X |
@@ -69,7 +68,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | H24 | `components/invoices/FinanceChargePreviewModal.tsx:50`, RPC `preview_finance_charges` *(live)* | Finance charge preview. Every row is pre-selected, so customers past the cap are never charged | 1,000 overdue customers (server) | Silent | Yes (unlikely at CRX's size) | C+X |
 | H37 | `pages/AccountsPayable.tsx:43`, RPC `get_ap_aging` *(live)* | AP aging grid and its totals (`:63`) | 1,000 vendors (server) | Silent | Yes (unlikely: needs more than 1,000 vendors with a balance) | X |
 | H38 | `pages/AccountsReceivable.tsx:58` | AR hub "Open Credit" in Net Position: posted credit memos with unapplied balance (sum `:66`) | 1,000 (server) | Silent | Yes | X |
-| H39 | `pages/Reports.tsx:361`, RPC `get_gross_sales_report` *(live)* | Reports, Gross Sales table and CSV (`:863`); each row is a money total for one group | 1,000 groups (server) | Silent | Yes: groups past the cap are missing | X |
+| H39 | `pages/Reports.tsx:361`, RPC `get_gross_sales_report` *(live)* | Reports, Gross Sales table and CSV (`:915`); each row is a money total for one group | 1,000 groups (server) | Silent | Yes: groups past the cap are missing | X |
 | H40 | `pages/CustomerTransactionReview.tsx:43`, RPC `get_customer_transaction_review` *(live)* | Customer Transaction Review: total debits, credits and ending balance (`:63` to `:65`), CSV and PDF | 1,000 rows for one customer and date range (server) | Silent. The ending balance is taken from the last row returned | Yes, only for a long range on a very active customer | X |
 | H43 | `pages/PaymentAllocation.tsx:161` | Allocating a check: one customer's open invoices, oldest first. Invoices past 200 can't be paid against, and the "outstanding" sum (`:536`) is low (was L16; raised after the Codex review) | 200 | Silent | Yes, only for a customer with more than 200 open invoices | C+X |
 
@@ -87,19 +86,21 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | H33 | `components/reports/LogbookReport.tsx:88`, `:95`, `:102`, `:114`; RPCs `get_logbook_by_customer`, `get_logbook_by_applicator`, `get_logbook_by_field`, `get_logbook_faa` *(live)* | Application logbook and FAA logbook, plus their exports | 1,000 (server) | Silent | A regulatory record missing applications. FAA over a season is most at risk | C+X |
 | H34 | `pages/ApplicationRecords.tsx:86` | Application Records list and its CSV export (`:158`) | 500 newest | Silent | The compliance export is missing older records | C+X |
 | H36 | `components/dashboard/ActionQueue.tsx:194`; RPC `get_dashboard_action_items` *(live)*, latest at `supabase/migrations/20261007150000_record_deliveries_billed_outside_crx.sql:281` | Dashboard action queue. Each category's "(N)" count (`:281`) tops out at 10, including unbilled deliveries and cancelled-but-posted invoices | 10 per category | Silent for the count. "+N more" covers only the 5 shown out of the 10 loaded | Billing problems past the 10th never appear, and the badge reads "(10)" | C+X |
-| H41 | `pages/Reports.tsx:478` | Reports, Posted Applications report (applications already invoiced) | 500 newest | Silent | A compliance report missing older applications | X |
+| H41 | `pages/Reports.tsx:530` | Reports, Posted Applications report (applications already invoiced) | 500 newest | Silent | A compliance report missing older applications | X |
 | H42 | `pages/Compliance.tsx:120` | Applicator license register: the expired and expiring counts (`:241`, `:242`) | 1,000 (server). Sorted by expiry, so the licenses expiring last drop off | Silent | Expiring licenses past the cap are never flagged | X |
 
 ## Findings: MED (a record missing from a picker or list)
 
-### Already happening today (595 active products, more than 500)
+### Were happening (595 active products, more than 500): FIXED by PR #944
 
-| ID | Where (file:line) | Picker | Cap | Found by |
-|---|---|---|---|---|
-| M1 | `pages/Reports.tsx:233` | Chemical History product filter | 500 | C+X |
-| M2 | `pages/SalesReports.tsx:114` | Sales Reports product filter | 500 | C+X |
-| M3 | `pages/CropPrograms.tsx:121` | Crop Programs product select | 500 | C+X |
-| M4 | `pages/Reports.tsx:461` | Price List report and its CSV (`:921`) | 500 | C+X |
+These four were live when the audit started (`9b6eb8607`). PR #944 (`a07062cb2`) fixed them on 2026-10-15. They stay here as a record. The lines below are from the original baseline.
+
+| ID | Where (file:line at `9b6eb8607`) | Picker | Cap | Now | Found by |
+|---|---|---|---|---|---|
+| M1 | `pages/Reports.tsx:233` | Chemical History product filter | 500 | FIXED: `ProductSearchPicker` searches as you type (`Reports.tsx:1214`) | C+X |
+| M2 | `pages/SalesReports.tsx:114` | Sales Reports product filter | 500 | FIXED: `ProductSearchPicker` (`SalesReports.tsx:451`) | C+X |
+| M3 | `pages/CropPrograms.tsx:121` | Crop Programs product select | 500 | FIXED: `ProductSearchPicker` (`CropPrograms.tsx:487`) | C+X |
+| M4 | `pages/Reports.tsx:461` | Price List report and its CSV | 500 | FIXED: reads every product with `fetchAllRows` (`Reports.tsx:470`) | C+X |
 
 ### Lists that drop records
 
@@ -136,7 +137,7 @@ Code baseline: `origin/main` at `9b6eb8607`.
 | M58 | `pages/Reports.tsx:440`, RPC `get_chemical_history` *(live)* | Chemical History report and CSV for one product | 1,000 rows (server) | Silent | X |
 | M61 | `components/field-invoices/UnbilledApplicationsPanel.tsx:169` (jobs), `:177` (blend tickets) | Unbilled work backlog. The count cards show 500 with no "+" (was H31; moved after the Codex review) | 500 each | Banner at `:448` ("Showing the first 500 — open “View all” for the full list") while 500 are returned | C |
 | M62 | `pages/Orders.tsx:342`, `pages/OrderDetail.tsx:410` | Pick-list PDFs read the whole inventory table to show stock available and short. Rows past the cap read as no stock | 1,000 inventory rows (server) | Silent | C+X |
-| M63 | `pages/Reports.tsx:372`, RPC `get_customer_balance_listing` *(live)* | Reports, Customer Balance listing and its CSV (`:872`). The screen shows each customer's balance but sums no total (was H17; moved after the Codex review) | 1,000 customers (server) | Silent | C+X |
+| M63 | `pages/Reports.tsx:372`, RPC `get_customer_balance_listing` *(live)* | Reports, Customer Balance listing and its CSV (`:924`). The screen shows each customer's balance but sums no total (was H17; moved after the Codex review) | 1,000 customers (server) | Silent | C+X |
 | M64 | `components/customers/CustomerContacts.tsx:197` | Customer interaction history. The type and outcome filters run over the 50 loaded, so "No interactions match" can appear when older matches exist (was L8) | 50 newest | Silent | C+X |
 | M65 | `pages/ToShip.tsx:116` (deliveries), `:125` (purchase orders) | To Ship page, Deliveries and Inbound tabs: scheduled or in-progress deliveries, and open POs, soonest first (added after the PR's GitHub Codex review) | 500 each | Silent | C+X |
 | M66 | `pages/FieldRoute.tsx:76` | My Route: every open delivery stop (a driver sees their own; admins and reps see all), shown as if complete (added after the PR's second GitHub Codex review) | 1,000 (server) | Silent | C+X |
@@ -157,7 +158,7 @@ None of these has a server search behind it, and every one is silent.
 | M36 | `pages/OrderDetail.tsx:290`, `:291` | Field-split preview: the fields list and the whole field-billing-defaults table, so owners and split % can show wrong | 1,000 (server) |
 | M37 | `pages/OrderDetail.tsx:791` | Bill-split share customer select | 500 |
 | M38 | `pages/FieldAppSplitInvoiceEditor.tsx:286`, `:287`, `:297` | Split invoice field, product and job pickers. An existing line whose product is past the cap shows blank | 1,000, 1,000, 200 |
-| M39 | `pages/Reports.tsx:534`, `pages/SalesReports.tsx:116` | Year-end single-customer select; Sales Reports customer filter | 1,000 |
+| M39 | `pages/Reports.tsx:586`, `pages/SalesReports.tsx:117` | Year-end single-customer select; Sales Reports customer filter | 1,000 |
 | M40 | `components/reports/LogbookReport.tsx:59`, `:64`, `:68` | Logbook customer, applicator and field pickers | 500, 200, 500 |
 | M41 | `pages/CustomerTransactionReview.tsx:37` | Customer select (and the name label for a deep link) | 500 |
 | M42 | `pages/Deliveries.tsx:237` | Deliveries customer filter | 500 |
@@ -167,7 +168,7 @@ None of these has a server search behind it, and every one is silent.
 | M46 | `pages/Rebates.tsx:128`, `:129`, `:130` | Rebate claim product, customer and order selects | 1,000, 1,000, 200 |
 | M47 | `pages/NewVendorBill.tsx:121` | Link-to-PO select | 200 |
 | M48 | Customer lists with no limit (1,000, server): `pages/ARaging.tsx:87`, `components/field-invoices/CustomerInvoiceSummaryPanel.tsx:74`, `pages/Compliance.tsx:151`, `pages/Jobs.tsx:330`, `pages/ApplicationRecords.tsx:64`, `pages/Returns.tsx:243`, `pages/InventoryPage.tsx:420`, `components/prepay/PrepaymentManagerPanel.tsx:296`, `components/field-app/SelectLocationsModal.tsx:70`, `pages/ApplicationServiceDetail.tsx:79`, `components/quotes/BulkQuoteImport.tsx:440` | Customer pickers and filters. In bulk import, customers past the cap fail to match | 1,000 (server) |
-| M49 | Product lists with no limit (1,000, server): `components/blendtickets/ManualTicketCreate.tsx:292`, `components/deliveries/QuickDeliveryModal.tsx:98`, `components/orders/BulkOrderImport.tsx:390`, `components/purchase-orders/BulkPOImport.tsx:206`, `components/quotes/BulkQuoteImport.tsx:441`, `components/receiving/QuickReceivePanel.tsx:148`, `pages/BlendRecipes.tsx:138`, `pages/BrandVsGeneric.tsx:49`, `pages/InventoryPage.tsx:406`, `pages/NewPurchaseOrder.tsx:88`, `pages/SalesReports.tsx:121`, `pages/LabelDataQuality.tsx:385`, `:391` | Product pickers, imports, the category list and the label-quality report. At 595 products these are close to the line | 1,000 (server) |
+| M49 | Product lists with no limit (1,000, server): `components/blendtickets/ManualTicketCreate.tsx:292`, `components/deliveries/QuickDeliveryModal.tsx:98`, `components/orders/BulkOrderImport.tsx:390`, `components/purchase-orders/BulkPOImport.tsx:206`, `components/quotes/BulkQuoteImport.tsx:441`, `components/receiving/QuickReceivePanel.tsx:148`, `pages/BlendRecipes.tsx:138`, `pages/BrandVsGeneric.tsx:49`, `pages/InventoryPage.tsx:406`, `pages/NewPurchaseOrder.tsx:88`, `pages/SalesReports.tsx:122`, `pages/LabelDataQuality.tsx:385`, `:391` | Product pickers, imports, the category list and the label-quality report. At 595 products these are close to the line | 1,000 (server) |
 | M50 | Field lists with no limit (1,000, server): `components/field-app/SelectLocationsModal.tsx:39`, `pages/Compliance.tsx:188` (total acres at `:803`), `pages/Fields.tsx:84` | Field pickers and the fields acre listing | 1,000 (server) |
 | M51 | Edge Function `supabase/functions/process-blend-ticket/index.ts:1073` (products), `:1078` (customers) | Scanned blend tickets match products and customers against these lists. Anything past the cap silently fails to match | 1,000 (server) |
 | M52 | `pages/Jobs.tsx:572`; RPC `get_jobs_billed_customers` *(live)* | Billed-customer column on the jobs list | 1,000 (server) |
@@ -187,7 +188,7 @@ None of these has a server search behind it, and every one is silent.
 | L6 | `pages/OfflineWorkReview.tsx:63`; RPC `get_offline_action_review_queue` *(live)* | Offline work review | 100 (max 200); shows the true "Matching total" but has no page 2 |
 | L7 | `components/compliance/ExpiringLicensesCard.tsx:43` | Dashboard expiring-licenses card | 6, silent; the full list is on Compliance |
 | L9 | `components/team/NotificationsPanel.tsx:39` | Bell dropdown; unread badge counted from the 20 loaded | 20, silent |
-| L10 | `pages/Notifications.tsx:33`, `pages/TeamBoard.tsx:216`, `pages/TeamBoard.tsx:130`, `components/team/ActivityFeed.tsx:33` | Notifications, activity log, team notes, note feed | 200, 100, 1,000 (server), 20. The activity log says "Showing most recent 100 entries" (`:1283`); the others are silent |
+| L10 | `pages/Notifications.tsx:33`, `pages/TeamBoard.tsx:218`, `pages/TeamBoard.tsx:132`, `components/team/ActivityFeed.tsx:33` | Notifications, activity log, team notes, note feed | 200, 100, 1,000 (server), 20. The activity log says "Showing most recent 100 entries" (`:1285`); the others are silent |
 | L11 | `pages/CustomerDetail.tsx:660`, `pages/ProductDetail.tsx:361`, `pages/BlendTicketDetail.tsx:848`, `pages/Deliveries.tsx:493` | Timeline, cost history, link-to-order modal, unassigned deliveries to claim | 50, 20, 50, 20; silent |
 | L12 | `pages/MonthEndClose.tsx:145` | Period history | 36 months; only matters if periods are created far ahead |
 | L13 | `pages/FieldSetup.tsx:203`, `components/jobs/jobFieldPicker.ts:4` | Map pins | 300; the picker says "Map shows the first 300" |
@@ -195,9 +196,9 @@ None of these has a server search behind it, and every one is silent.
 | L15 | Server search pickers: `components/deliveries/QuickDeliveryModal.tsx:167`, `components/field-app/FieldAppChemicalEntry.tsx:171`, `pages/PaymentAllocation.tsx:126`, `pages/InvoiceDetail.tsx:636`, `pages/PurchaseOrderDetail.tsx:917`, `components/ui/CommandPalette.tsx:251` | These show 5 to 20 results but search the database as you type, so any record can be found | Fine; this is the pattern Goal 4 wants |
 | L17 | `hooks/useGuardrails.ts:45` | Credit-limit check over one customer's open invoices | 1,000 (server). Money, but only past 1,000 open invoices for one customer |
 | L18 | `hooks/useOCRProcessor.ts:27`, `lib/applicatorSheetPrintData.ts:76`, import file-size guards (`BulkCustomerImport`, `BulkProductImport`, `fieldImportParser`, workbook loaders) | Background queue batch, print option, import limits | Signalled or by design |
-| L19 | `pages/Vendors.tsx:71`, `pages/BlendRecipes.tsx:100`, `pages/ApplicationServices.tsx:52`, `pages/Compliance.tsx:157` (found by Codex) | Vendor, recipe, application-service and restricted-use product lists | 1,000 (server), silent. These are small reference lists that are unlikely to reach 1,000 |
+| L19 | `pages/Vendors.tsx:71`, `pages/BlendRecipes.tsx:100`, `pages/ApplicationServices.tsx:52`, `pages/Compliance.tsx:157`, `pages/Vehicles.tsx:43` (found by Codex; Vehicles added after the PR GitHub review) | Vendor, recipe, application-service, restricted-use product and vehicle lists. On Vehicles, select-all, export and bulk delete act on the rows loaded | 1,000 (server), silent. These are small reference lists that are unlikely to reach 1,000 |
 | L20 | `pages/CustomerDetail.tsx:531`, `:538`, `:553`, `:576` (one customer's quotes, orders, order lines, deliveries); `pages/CycleCounts.tsx:146`; `lib/openBookings.ts:18`; `lib/lotRpc.ts:63` (lot recall trace for one lot); `components/jobs/AppliedRecordsManager.tsx:180` (one job's applied-acres history, which also drives its Applied and Remaining figures); `components/team/RelatedNotes.tsx:48` (RPC `get_notes_for_entity` *(live)*, the notes on one order, job, customer, delivery or PO) | Reads scoped to one customer, lot, job or record, or count history (the last two were added after the PR's GitHub Codex review) | 1,000 (server), silent. Only an unusually large customer, lot, job or record would reach it |
-| L21 | `pages/Deliveries.tsx:836`, `pages/TeamBoard.tsx:876`, `:1022`, `pages/SupplierPricing.tsx:1050`, `components/fields/FieldCustomerAssignment.tsx:38`, `components/layout/Sidebar.tsx:367`, `pages/DeliveryDetail.tsx:1079`, plus the 3-item chip lists on Jobs and Field Dashboard | Display-only trims of rows already loaded (10, 5, 20 or 6 items) | Short on purpose; several show "+N more" or "View all" |
+| L21 | `pages/Deliveries.tsx:836`, `pages/TeamBoard.tsx:878`, `:1024`, `pages/SupplierPricing.tsx:1050`, `components/fields/FieldCustomerAssignment.tsx:38`, `components/layout/Sidebar.tsx:367`, plus the 3-item chip lists on Jobs and Field Dashboard | Display-only trims of rows already loaded (10, 5 or 20 items) | Short on purpose; several show "+N more" or "View all" |
 
 ## Already correct (checked, no fix needed)
 
@@ -225,7 +226,7 @@ These read every row: they keep asking for the next page until none are left.
 
 1. **Money totals into the database (H1–H16, H18–H24, H37–H40, H43).** Replace each on-screen sum with a database function that returns the exact total in cents, and page the list separately. Start with Payment History (H1), Commission Payments (H2, H3), Invoices and Field Invoices (H4–H7), AR (H15, H16, H38), and Reports and Sales Reports (H9–H14, H39). Goal 4's own test (5,000 invoices, more than 5,000 lines, a 200+ payment history) exercises exactly these. Where a screen also **acts** on its rows, a correct total is not enough. That covers the commission payout picker (H3), commission quick-pay (H12), the finance charge preview (H24), "Post all" and "Unpost all" (H6, H7) and check allocation (H43). For these, the action must select its targets in the database, or page through every eligible row, so nothing past the cap is skipped.
 2. **Integrity and compliance checks (H25–H30, H32–H34, H36, H41, H42).** Move Integrity Report checks 5, 6, 9 and 10 onto the existing `fetchAllRows` pattern, or into the database. Page the cleanup panel, the pesticide register, the logbooks, Application Records, Posted Applications and the license register. Fix the over-received PO check and the 20-page document-scan limit alongside them.
-3. **Product lists already short today (M1–M4).** Switch the three filters (M1–M3) to search-as-you-type (the L15 pattern). The Price List (M4) is a report and export, so it needs full paging and an export that reads every row, not a search box. Together that brings back the roughly 95 products missing now.
+3. **Product lists that were already short (M1–M4).** Done by PR #944: the three filters now search as you type, and the Price List reads every row. The shared `ProductSearchPicker` from that PR is the pattern for step 4.
 4. **The remaining pickers (M29–M50, M53, M59).** Search-as-you-type. Do the invoice customer picker (M29) first, because it also feeds the PDF address and email. Some rows here need a different fix:
    - the bulk imports in M48 and M49, and the Edge Function in M51, should match names in the database, not against a downloaded list;
    - the Label Data Quality report in M49 needs a full read;

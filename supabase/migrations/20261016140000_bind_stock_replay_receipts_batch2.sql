@@ -43,8 +43,8 @@
 --   sends one. The one internal keyless caller, revert_quote_status (already bound, body pinned
 --   below), rebuilds a reopened planned quote's holds; it now calls the private renamed body
 --   _create_planned_holds_replay_impl_20261015 directly instead of the public name (its live body is
---   recreated below with that one line changed, md5 pinned before and after), so no public entry
---   point accepts a keyless call (CodeRabbit pre-merge check on PR #951).
+--   recreated below with that call retargeted and a required-key check added, md5 pinned before and
+--   after), so no public entry point accepts a keyless call (CodeRabbit on PR #951).
 --
 --   Why a body's own key-only lookup cannot return ANOTHER operation's receipt on an exact match:
 --   idempotency_keys has a UNIQUE index on idempotency_key, so a key has at most one row, and
@@ -62,7 +62,7 @@
 --     replay of its own, below the wrapper; its only caller is the renamed body).
 --
 -- WHAT DOES NOT CHANGE: no stock or order logic is retyped (the bodies are renamed, pinned by md5
---   below; revert_quote_status is recreated from its pinned live body with one call retargeted); no
+--   below; revert_quote_status is recreated from its pinned live body with one call retargeted and a key required); no
 --   table, row, policy or receipt changes; every keyed legitimate call (first call, exact retry)
 --   returns what it returns today. A keyless call is now refused (IDEMPOTENCY_KEY_REQUIRED) by all
 --   thirteen. revert_quote_status behaves exactly as before (same checks, same receipts); only its
@@ -966,9 +966,10 @@ REVOKE ALL ON FUNCTION public.create_planned_holds(uuid, uuid, text) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.create_planned_holds(uuid, uuid, text) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
--- 14. revert_quote_status: its live body (pinned above) with ONE line changed, so its keyless rebuild
---     of a reopened planned quote's holds calls the private body instead of the public wrapper
---     (which now requires a key). CREATE OR REPLACE keeps its grants and COMMENT.
+-- 14. revert_quote_status: its live body (pinned above) with two changes: its rebuild of a reopened
+--     planned quote's holds calls the private body instead of the public wrapper (which now requires a
+--     key), and a keyless call is refused (IDEMPOTENCY_KEY_REQUIRED) before anything else. CREATE OR
+--     REPLACE keeps its grants and COMMENT.
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.revert_quote_status(p_quote_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
@@ -987,6 +988,11 @@ DECLARE
   v_fingerprint        text;
   v_contract CONSTANT text := 'revert_quote_status_v1';
 BEGIN
+  -- A key is required (20261016140000): every caller sends one, and a keyless call would skip the
+  -- replay binding below and reach the quote and audit writes.
+  IF p_idempotency_key IS NULL THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: revert_quote_status requires p_idempotency_key' USING ERRCODE = '22023';
+  END IF;
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
@@ -1317,7 +1323,7 @@ BEGIN
           AND pg_get_function_arguments(p.oid) = 'p_quote_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'
           AND p.prorettype = 'jsonb'::regtype AND p.prosecdef AND p.proowner = 'postgres'::regrole
           AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
-          AND md5(replace(p.prosrc, chr(13), '')) = 'ca5e6c7acd662df2047593b3271f0614'
+          AND md5(replace(p.prosrc, chr(13), '')) = 'e038d6568f6f0294045bf662eceb02bd'
           AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                       FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
               IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[])

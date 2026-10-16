@@ -8,10 +8,11 @@ point, so the final fix removes it:
 
 - `create_planned_holds` refuses every keyless call with `IDEMPOTENCY_KEY_REQUIRED`. The app's own
   call already sends a key.
-- `revert_quote_status` is recreated from its pinned live body with ONE line changed: its rebuild of
-  a reopened planned quote's holds calls the private `_create_planned_holds_replay_impl_20261015`
-  instead of the public name. Every other line, its checks, its receipts, its grants and its
-  COMMENT are unchanged (body md5 `fb0cc5def3766270b13c401810b61f3e` before, `ca5e6c7acd662df2047593b3271f0614` after).
+- `revert_quote_status` is recreated from its pinned live body with two changes: its rebuild of a
+  reopened planned quote's holds calls the private `_create_planned_holds_replay_impl_20261015`
+  instead of the public name, and a keyless call is refused first (`IDEMPOTENCY_KEY_REQUIRED`;
+  CodeRabbit, since this migration now recreates it; every caller already sends a key). Every other
+  line, its checks, its receipts, its grants and its COMMENT are unchanged (body md5 `fb0cc5def3766270b13c401810b61f3e` before, `e038d6568f6f0294045bf662eceb02bd` after).
 - Proof: the rollback-only chain reopens a declined planned quote through `revert_quote_status`
   (its rebuild runs and writes no `create_planned_holds` receipt) and shows a keyless
   `create_planned_holds` is refused; the container prover gives the wrapper a keyless path back,

@@ -528,6 +528,11 @@ COMMIT;`,
     "    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_planned_holds requires p_idempotency_key' USING ERRCODE = '22023';\n",
     '    RETURN public._create_planned_holds_replay_impl_20261015(p_quote_id, p_performed_by, NULL);\n',
     /SMOKE_FAIL: a keyless create_planned_holds ran/]);
+  // revert_quote_status' key requirement: without it, a keyless revert runs.
+  mutations.push(['revert_quote_status key requirement', 'revert_quote_status',
+    "    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: revert_quote_status requires p_idempotency_key' USING ERRCODE = '22023';\n",
+    '    NULL;\n',
+    /SMOKE_FAIL: (a keyless revert_quote_status ran|wrong keyless revert_quote_status refusal)/]);
   // revert_quote_status' retargeted call: pointed back at the public wrapper, its rebuild is refused.
   mutations.push(['revert_quote_status private-body call', 'revert_quote_status',
     '    PERFORM public._create_planned_holds_replay_impl_20261015(p_quote_id, v_actor, NULL);\n',

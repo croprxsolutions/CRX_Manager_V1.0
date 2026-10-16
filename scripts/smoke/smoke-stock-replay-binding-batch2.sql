@@ -732,6 +732,19 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong keyless create_planned_holds refusal: %', SQLERRM;
     END IF;
   END;
+  -- revert_quote_status itself requires a key now (recreated by this migration).
+  BEGIN
+    v_res2 := public.revert_quote_status(v_q7, '[SMOKE] keyless revert', v_admin, NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: a keyless revert_quote_status ran: %', v_res2;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong keyless revert_quote_status refusal: %', SQLERRM;
+    END IF;
+  END;
+  IF (SELECT status FROM public.quotes WHERE id = v_q7) IS DISTINCT FROM 'declined' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused keyless revert_quote_status changed the quote';
+  END IF;
   BEGIN
     v_res2 := public.revert_quote_status(v_q7, '[SMOKE] reopen a declined planned quote', v_admin, v_pfx || 'revert-q7');
   EXCEPTION WHEN OTHERS THEN

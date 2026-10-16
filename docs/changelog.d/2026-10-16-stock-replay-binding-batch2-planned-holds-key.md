@@ -1,19 +1,21 @@
-## 2026-10-16 — replay-binding batch 2: `create_planned_holds` requires a retry key from the browser
+## 2026-10-16 — replay-binding batch 2: `create_planned_holds` requires a retry key on every call
 
 CodeRabbit's pre-merge check on PR #951 ("Mutating RPC without idempotency key") was right:
-migration `20261016140000` still let any signed-in caller run `create_planned_holds` with no key,
-because `revert_quote_status` calls it that way. The migration now closes it the way batch 1
-handled its one internal keyless call:
+migration `20261016140000` still let a caller run `create_planned_holds` with no key, because
+`revert_quote_status` calls it that way. A first fix gated the keyless call behind a
+transaction-local marker; the check still (correctly) flagged a keyless path in a public entry
+point, so the final fix removes it:
 
-- `revert_quote_status` gets a same-signature pass-through wrapper. Its body is renamed unchanged
-  (`_revert_quote_status_impl_20261016`, callable only by the database owner) and keeps every
-  check and receipt it has today. The wrapper sets the transaction-local marker
-  `crx.revert_quote_status_internal` around the call.
-- `create_planned_holds` accepts a keyless call only while that marker is set; any other keyless
-  call is refused with `IDEMPOTENCY_KEY_REQUIRED`. The app's own call already sends a key.
-- Proof: the rollback-only chain now reopens a declined planned quote through
-  `revert_quote_status` (its keyless rebuild runs, writes no receipt, and the marker does not
-  outlive the call) and shows a keyless call from outside is refused; the container prover
-  mutates the marker gate, the keyless path and the marker itself, and each turns the chain red.
+- `create_planned_holds` refuses every keyless call with `IDEMPOTENCY_KEY_REQUIRED`. The app's own
+  call already sends a key.
+- `revert_quote_status` is recreated from its pinned live body with ONE line changed: its rebuild of
+  a reopened planned quote's holds calls the private `_create_planned_holds_replay_impl_20261015`
+  instead of the public name. Every other line, its checks, its receipts, its grants and its
+  COMMENT are unchanged (body md5 `fb0cc5def3766270b13c401810b61f3e` before, `ca5e6c7acd662df2047593b3271f0614` after).
+- Proof: the rollback-only chain reopens a declined planned quote through `revert_quote_status`
+  (its rebuild runs and writes no `create_planned_holds` receipt) and shows a keyless
+  `create_planned_holds` is refused; the container prover gives the wrapper a keyless path back,
+  and points `revert_quote_status` at the public name again, and each turns the chain red. Two older
+  chains (`smoke-draw-ledger-reversal.sql`, `smoke-planned-holds-drawn-sync.sql`) now pass a key.
 - The order screens also stop showing "Order created successfully" on top of the warning when
   they open an order an earlier attempt already created (Codex P2 on PR #951).

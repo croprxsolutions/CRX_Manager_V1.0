@@ -6,7 +6,8 @@
 -- or from a different person, is refused (IDEMPOTENCY_INTENT_MISMATCH /
 -- IDEMPOTENCY_ACTOR_MISMATCH) and changes nothing; an exact retry still returns the original
 -- answer and is never done twice; a call with no key is refused (IDEMPOTENCY_KEY_REQUIRED),
--- except create_planned_holds when revert_quote_status makes its keyless call (under its marker).
+-- for all thirteen; revert_quote_status's own planned-holds rebuild (it calls the private body)
+-- still runs.
 --
 -- Covers the thirteen wrapped stock RPCs: release_inventory_hold, retire_inventory_item,
 -- reconcile_negative_inventory, manual_inventory_add, create_order_from_blend_ticket,
@@ -695,8 +696,9 @@ BEGIN
 
   -- --------------------------------------------------------------------------------------------
   -- 13. create_planned_holds: the same key for a DIFFERENT quote is refused; the exact retry gets
-  --     the body's own duplicate answer; a keyless call from outside is refused, while
-  --     revert_quote_status's own keyless call (under its marker) runs and writes no receipt.
+  --     the body's own duplicate answer; a keyless call is refused, while revert_quote_status's
+  --     own rebuild of a reopened planned quote (it calls the private body) runs and writes no
+  --     create_planned_holds receipt.
   -- --------------------------------------------------------------------------------------------
   v_key := v_pfx || 'planned-holds';
   v_res := public.create_planned_holds(v_q5, v_admin, v_key);
@@ -723,7 +725,7 @@ BEGIN
   SELECT count(*) INTO v_n FROM public.idempotency_keys WHERE operation = 'create_planned_holds';
   BEGIN
     v_res2 := public.create_planned_holds(v_q6, v_admin, NULL);
-    RAISE EXCEPTION 'SMOKE_FAIL: a keyless create_planned_holds from outside revert_quote_status ran: %', v_res2;
+    RAISE EXCEPTION 'SMOKE_FAIL: a keyless create_planned_holds ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' THEN
@@ -740,9 +742,6 @@ BEGIN
   END IF;
   IF (SELECT count(*) FROM public.idempotency_keys WHERE operation = 'create_planned_holds') <> v_n THEN
     RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status''s keyless create_planned_holds wrote a receipt';
-  END IF;
-  IF COALESCE(current_setting('crx.revert_quote_status_internal', true), '') <> '' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: the revert_quote_status marker outlived its call';
   END IF;
 
   -- --------------------------------------------------------------------------------------------

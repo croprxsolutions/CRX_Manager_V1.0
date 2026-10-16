@@ -337,7 +337,7 @@ COMMIT;`,
 
 function candidateBody(fn) {
   const sql = lf(CANDIDATE);
-  const start = sql.search(new RegExp(`CREATE FUNCTION public\\.${fn}\\(`));
+  const start = sql.search(new RegExp(`CREATE (?:OR REPLACE )?FUNCTION public\\.${fn}\\(`));
   assert.ok(start >= 0, `${fn} is not created by the candidate`);
   const tag = /AS (\$[a-z_]*\$)/.exec(sql.slice(start))[1];
   const a = sql.indexOf(`AS ${tag}`, start) + `AS ${tag}`.length;
@@ -517,25 +517,21 @@ COMMIT;`,
     [...fp('reverse_completed_cycle_count', 'cycle_count_id', true), /SMOKE_FAIL: reverse_completed_cycle_count replayed count 1's reversal/],
     [...fp('create_planned_holds', 'quote_id', true), /SMOKE_FAIL: create_planned_holds replayed quote 5's receipt/],
   ];
-  // Each key requirement (twelve here; create_planned_holds' marker-gated one is mutated below).
+  // Each key requirement (twelve here; create_planned_holds' is mutated below, with step 13).
   for (const fn of WRAPPED.filter((w) => w !== 'create_planned_holds')) {
     mutations.push([`${fn} key requirement`, fn,
       `    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: ${fn} requires p_idempotency_key' USING ERRCODE = '22023';\n`, '    NULL;\n',
       new RegExp(`SMOKE_FAIL: (a keyless call ran|wrong keyless refusal for) SELECT public\\.${fn}\\(`)]);
   }
-  // create_planned_holds' marker gate: without it any keyless caller runs; with the keyless path
-  // removed, or with revert_quote_status no longer setting the marker, its own call is refused.
-  mutations.push(['create_planned_holds marker gate', 'create_planned_holds',
-    "    IF current_setting('crx.revert_quote_status_internal', true) IS DISTINCT FROM '1' THEN\n",
-    "    IF false THEN\n",
-    /SMOKE_FAIL: a keyless create_planned_holds from outside revert_quote_status ran/]);
-  mutations.push(['create_planned_holds keyless path', 'create_planned_holds',
-    '    RETURN public._create_planned_holds_replay_impl_20261015(p_quote_id, p_performed_by, NULL);\n',
+  // create_planned_holds' key requirement: with a keyless path back, an outside keyless call runs.
+  mutations.push(['create_planned_holds key requirement', 'create_planned_holds',
     "    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_planned_holds requires p_idempotency_key' USING ERRCODE = '22023';\n",
-    /SMOKE_FAIL: revert_quote_status \(its keyless create_planned_holds path\) was refused/]);
-  mutations.push(['revert_quote_status marker', 'revert_quote_status',
-    "  PERFORM set_config('crx.revert_quote_status_internal', '1', true);\n",
-    '',
+    '    RETURN public._create_planned_holds_replay_impl_20261015(p_quote_id, p_performed_by, NULL);\n',
+    /SMOKE_FAIL: a keyless create_planned_holds ran/]);
+  // revert_quote_status' retargeted call: pointed back at the public wrapper, its rebuild is refused.
+  mutations.push(['revert_quote_status private-body call', 'revert_quote_status',
+    '    PERFORM public._create_planned_holds_replay_impl_20261015(p_quote_id, v_actor, NULL);\n',
+    '    PERFORM create_planned_holds(p_quote_id, v_actor, NULL);\n',
     /SMOKE_FAIL: revert_quote_status \(its keyless create_planned_holds path\) was refused/]);
   // The four no-receipt no-op exemptions: binding them would raise IDEMPOTENCY_RECEIPT_MISSING.
   mutations.push(

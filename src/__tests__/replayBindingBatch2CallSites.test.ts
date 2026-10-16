@@ -75,16 +75,19 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
   // An edited retry under a key whose first attempt already created an order is refused as
   // 'intent' with that order's receipt; the order screens open it rather than let the next click,
   // with a fresh key, create a second order (Codex P1 on PR #951).
-  const ORDER_RECOVERY: Array<[string, string]> = [
-    ['src/pages/NewOrder.tsx', 'create_rush_order'],
-    ['src/pages/NewOrder.tsx', 'create_direct_order'],
-    ['src/pages/BlendTicketDetail.tsx', 'create_order_from_blend_ticket'],
+  // NewOrder runs inside runCriticalAction, so it must exit with the handled signal (a plain return
+  // would add the generic success toast); BlendTicketDetail shows its own toasts and returns.
+  const HANDLED_EXIT = '//[^\\n]*\\n\\s*throw new CriticalActionHandledError\\(';
+  const ORDER_RECOVERY: Array<[string, string, string]> = [
+    ['src/pages/NewOrder.tsx', 'create_rush_order', HANDLED_EXIT],
+    ['src/pages/NewOrder.tsx', 'create_direct_order', HANDLED_EXIT],
+    ['src/pages/BlendTicketDetail.tsx', 'create_order_from_blend_ticket', 'return;'],
   ];
-  for (const [file, rpc] of ORDER_RECOVERY) {
+  for (const [file, rpc, exit] of ORDER_RECOVERY) {
     it(`${file}: a ${rpc} intent refusal opens the order already created`, () => {
       const source = read(file);
       expect(source).toMatch(new RegExp(
-        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,200}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*(?:return;|//[^\\n]*\\n\\s*throw new CriticalActionHandledError\\()`,
+        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,200}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*${exit}`,
       ));
     });
   }

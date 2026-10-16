@@ -23,7 +23,7 @@
  *      operation never commits (autocommit insert, a real COMMIT of a stripped binding, and a
  *      COMMIT under the authenticated role);
  *   5. RE-APPLY: refused by the preflight's own pins;
- *   6. MUTATION: with each wrapper's target or payload taken out of its fingerprint, its key
+ *   6. MUTATION: with each wrapper's target (and reconcile's quantity) taken out of its fingerprint, its key
  *      requirement removed, its no-op exemption or binder call removed, batch 1's binder broken,
  *      or one batch-2 operation dropped from the commit-time guard's list, the new chain fails at
  *      the step that proves it.
@@ -488,8 +488,10 @@ COMMIT;`,
   assert.match(again.output, /PREFLIGHT_STOCK_REPLAY_BODY_DRIFT/, `second apply refused for the wrong reason:\n${again.output}`);
   console.log('[prover] RE-APPLY: refused by the preflight, nothing changed');
 
-  // 6. MUTATION: each fingerprint field, key requirement, no-op exemption, binder call and guard
-  // entry is what its chain step proves.
+  // 6. MUTATION: each wrapper's TARGET field (plus reconcile's new_quantity), key requirement,
+  // no-op exemption, binder call and guard entry is what its chain step proves. The other payload
+  // fields (notes, items, dates, PO numbers, reasons) are not mutated one by one; the drift and
+  // security reviews checked each fingerprint lists every argument.
   const fp = (fn, field, last = false) => (last
     ? [`${fn} ${field}`, fn, `,\n    '${field}', p_${field}\n`, '\n']
     : [`${fn} ${field}`, fn, `    '${field}', p_${field},\n`, '']);

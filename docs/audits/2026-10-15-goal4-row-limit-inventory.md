@@ -6,7 +6,7 @@ Code baseline: `origin/main` at `9b6eb8607`. Line numbers were rechecked against
 
 ## Summary for Mason
 
-**What a "row limit" is.** When a screen asks the database for records, it often says "give me at most 500." The database itself also has a ceiling of 1,000 rows per request. That is Supabase's default, and it was confirmed in the dashboard on 2026-10-16 (see "Max rows, confirmed" below). Once the business has more records than that, the extra ones are quietly left off. Nearly every screen below gives **no warning** when that happens.
+**What a "row limit" is.** When a screen asks the database for records, it often says "give me at most 500." The Supabase Data API, the layer the app uses to read the database, also caps every response at 1,000 rows. That is Supabase's default, and it was confirmed in the dashboard on 2026-10-16 (see "Max rows, confirmed" below). Once the business has more records than that, the extra ones are quietly left off. Nearly every screen below gives **no warning** when that happens.
 
 **What it means for you:**
 

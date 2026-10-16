@@ -40,11 +40,13 @@
 --        A retry of one of them simply gets the same no-op answer again.
 --   A key is REQUIRED (IDEMPOTENCY_KEY_REQUIRED, 22023), as in batch 1: a keyless call would run with
 --   no receipt, so a lost-response retry could repeat the stock action. Every app call site already
---   sends one. The one exception is create_planned_holds: revert_quote_status (already bound, body
---   pinned below) calls it by name with a NULL key, and its work is a from-scratch rebuild of the
---   quote's planned holds (_sync_planned_holds), so running it twice leaves the same holds. Its
---   wrapper passes a keyless call straight to the renamed body, exactly as today (no receipt is
---   read or written on that path).
+--   sends one. The one internal keyless call: revert_quote_status (already bound, body pinned
+--   below) rebuilds a quote's planned holds through create_planned_holds with a NULL key. As in
+--   batch 1, revert_quote_status gets a same-signature pass-through wrapper (its body renamed
+--   unchanged to _revert_quote_status_impl_20261016, postgres-only) that marks the transaction with
+--   the transaction-local setting crx.revert_quote_status_internal (no Data API request can set it),
+--   and create_planned_holds accepts a keyless call only while it is set (CodeRabbit pre-merge check
+--   on PR #951). That path reads and writes no receipt, as today.
 --
 --   Why a body's own key-only lookup cannot return ANOTHER operation's receipt on an exact match:
 --   idempotency_keys has a UNIQUE index on idempotency_key, so a key has at most one row, and
@@ -64,7 +66,8 @@
 -- WHAT DOES NOT CHANGE: no stock or order logic is retyped (the bodies are renamed, pinned by md5
 --   below); no table, row, policy or receipt changes; every keyed legitimate call (first call, exact
 --   retry) returns what it returns today. A keyless call is now refused (IDEMPOTENCY_KEY_REQUIRED),
---   except create_planned_holds. Checks that now run before the renamed bodies: the key
+--   except create_planned_holds under the revert_quote_status marker. revert_quote_status behaves
+--   exactly as before (same checks, same receipts); only the marker is added around it. Checks that now run before the renamed bodies: the key
 --   requirement, the auth/actor test (same messages), and the actor/intent binding. The body's role
 --   test still runs inside the renamed body; the binding refuses a mismatch before it, which reveals
 --   nothing a caller did not send (the stored result is disclosed only to the same actor).
@@ -74,8 +77,9 @@
 --   keeps an unbound one from ever committing.
 --
 -- ACCESS: this file narrows access, so it applies only on Mason's owner approval
---   (scripts/owner-approve-migration.mjs): the renamed bodies and _reverse_completed_cycle_count_impl
---   lose EXECUTE. It widens nothing.
+--   (scripts/owner-approve-migration.mjs): the renamed bodies (and revert_quote_status's) and
+--   _reverse_completed_cycle_count_impl lose EXECUTE, and a keyless create_planned_holds from the
+--   browser is now refused. It widens nothing.
 --
 -- NOT IN THIS BATCH: the inventory's other unbound groups (complete_delivery/void_order/... and the
 --   MED/LOW group). batch_cancel_deliveries calls cancel_delivery (not yet bound) per delivery with
@@ -90,8 +94,10 @@
 --   require_bound_replay_receipt_20261015 with the batch-1 nine only (left covering these thirteen,
 --   it would refuse every receipt the restored old bodies write); then, for each name, DROP the
 --   wrapper, ALTER FUNCTION public.<impl>(...) RENAME TO <name>, and restore its grants (EXECUTE to
---   authenticated, service_role); re-grant EXECUTE on _reverse_completed_cycle_count_impl to
---   service_role if wanted. Batch 1's helpers stay (batch 1 still uses them).
+--   authenticated, service_role); do the same for revert_quote_status (DROP the wrapper, RENAME
+--   _revert_quote_status_impl_20261016 back, restore EXECUTE to authenticated, service_role and its
+--   COMMENT); re-grant EXECUTE on _reverse_completed_cycle_count_impl to service_role if wanted.
+--   Batch 1's helpers stay (batch 1 still uses them).
 --
 -- ORDERING: strict. Live high-water when written: 20261016060000 (PR #942, replay-binding batch 1,
 --   ledger 20261016121253). Re-read the live ledger before applying.
@@ -117,7 +123,8 @@
 -- caller-analysis: create_application_record_from_blend_ticket :: src/pages/BlendTicketDetail.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: batch_cancel_deliveries :: src/pages/Deliveries.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
 -- caller-analysis: reverse_completed_cycle_count :: src/pages/CycleCounts.tsx calls the same name and signature; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
--- caller-analysis: create_planned_holds :: src/pages/QuoteBuilder.tsx calls the same name and signature, and revert_quote_status calls it by name with a NULL key, which the wrapper passes through; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
+-- caller-analysis: create_planned_holds :: src/pages/QuoteBuilder.tsx calls the same name and signature with a key; revert_quote_status's renamed body calls it by name with a NULL key under the revert_quote_status marker, which the wrapper accepts; the new wrapper keeps EXECUTE for authenticated; only the renamed body loses it
+-- caller-analysis: revert_quote_status :: src/pages/QuoteBuilder.tsx calls the same name and signature; the new pass-through wrapper keeps EXECUTE for authenticated; only the renamed body _revert_quote_status_impl_20261016 loses it
 -- caller-analysis: _reverse_completed_cycle_count_impl :: no UI or Edge Function caller; its only caller is the renamed reverse_completed_cycle_count body, a postgres-owned definer function, which keeps calling it
 
 SET LOCAL lock_timeout = '5s';
@@ -231,11 +238,23 @@ BEGIN
      ) <> 1 THEN
     RAISE EXCEPTION 'PREFLIGHT_RECEIPT_GUARD_DRIFT: require_bound_replay_receipt_20261015 differs from the batch-1 trigger';
   END IF;
-  -- The one keyless internal caller of create_planned_holds, and the private impl this file narrows.
-  IF NOT EXISTS (
+  -- The one keyless internal caller of create_planned_holds (wrapped below, so pinned like the
+  -- thirteen), and the private impl this file narrows.
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'revert_quote_status') <> 1
+     OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'public' AND p.proname = '_revert_quote_status_impl_20261016')
+     OR NOT EXISTS (
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.proname = 'revert_quote_status'
-       AND pg_get_function_identity_arguments(p.oid) = 'p_quote_id uuid, p_reason text, p_performed_by uuid, p_idempotency_key text'
+       AND p.proowner = 'postgres'::regrole AND p.prosecdef AND p.provolatile = 'v'
+       AND NOT p.proisstrict AND NOT p.proretset AND p.prokind = 'f'
+       AND p.prorettype = 'jsonb'::regtype
+       AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+       AND pg_get_function_arguments(p.oid) = 'p_quote_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'
+       AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                   FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+           IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[]
        AND md5(replace(p.prosrc, chr(13), '')) = 'fb0cc5def3766270b13c401810b61f3e') THEN
     RAISE EXCEPTION 'PREFLIGHT_REVERT_QUOTE_STATUS_DRIFT: revert_quote_status differs from its reviewed body (it calls create_planned_holds with a NULL key)';
   END IF;
@@ -901,7 +920,7 @@ GRANT EXECUTE ON FUNCTION public.reverse_completed_cycle_count(uuid, uuid, text)
 REVOKE ALL ON FUNCTION public._reverse_completed_cycle_count_impl(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
--- 13. create_planned_holds (a keyless call, as revert_quote_status makes, passes straight through)
+-- 13. create_planned_holds (a keyless call is accepted only under the revert_quote_status marker)
 -- ---------------------------------------------------------------------------------------------
 ALTER FUNCTION public.create_planned_holds(uuid, uuid, text) RENAME TO _create_planned_holds_replay_impl_20261015;
 REVOKE ALL ON FUNCTION public._create_planned_holds_replay_impl_20261015(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
@@ -923,8 +942,11 @@ DECLARE
   v_result jsonb;
 BEGIN
   IF p_idempotency_key IS NULL THEN
-    -- Keyless (revert_quote_status calls it so): the body reads and writes no receipt, and its work
-    -- is a from-scratch rebuild of the quote's planned holds, so a repeat leaves the same holds.
+    -- Only revert_quote_status's body calls without a key, under its wrapper's marker; that path reads
+    -- and writes no receipt, and its work is a from-scratch rebuild of the quote's planned holds.
+    IF current_setting('crx.revert_quote_status_internal', true) IS DISTINCT FROM '1' THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_planned_holds requires p_idempotency_key' USING ERRCODE = '22023';
+    END IF;
     RETURN public._create_planned_holds_replay_impl_20261015(p_quote_id, p_performed_by, NULL);
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -949,6 +971,41 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public.create_planned_holds(uuid, uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.create_planned_holds(uuid, uuid, text) TO authenticated, service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- 14. revert_quote_status: a pass-through wrapper that marks its keyless create_planned_holds call
+--     (its body is renamed unchanged; it is already replay-bound and is not added to the guard)
+-- ---------------------------------------------------------------------------------------------
+ALTER FUNCTION public.revert_quote_status(uuid, text, uuid, text) RENAME TO _revert_quote_status_impl_20261016;
+REVOKE ALL ON FUNCTION public._revert_quote_status_impl_20261016(uuid, text, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE FUNCTION public.revert_quote_status(
+  p_quote_id uuid,
+  p_reason text,
+  p_performed_by uuid DEFAULT NULL::uuid,
+  p_idempotency_key text DEFAULT NULL::text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_result jsonb;
+BEGIN
+  -- Its body rebuilds a planned quote's holds through create_planned_holds with no key; mark this
+  -- transaction so that wrapper accepts that (and only that) keyless call. The setting is
+  -- transaction-local, and rolls back with the call if the body raises.
+  PERFORM set_config('crx.revert_quote_status_internal', '1', true);
+  v_result := public._revert_quote_status_impl_20261016(p_quote_id, p_reason, p_performed_by, p_idempotency_key);
+  PERFORM set_config('crx.revert_quote_status_internal', '', true);
+  RETURN v_result;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.revert_quote_status(uuid, text, uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.revert_quote_status(uuid, text, uuid, text) TO authenticated, service_role;
+COMMENT ON FUNCTION public.revert_quote_status(uuid, text, uuid, text) IS
+  'Admin-only revert of a declined/expired/cancelled/accepted quote back to "sent". Accepted quotes blocked if an order has been created. Wave A.6 explicit rewrite. Since 20261016140000 a pass-through wrapper over _revert_quote_status_impl_20261016 that marks its keyless create_planned_holds call.';
 
 -- ---------------------------------------------------------------------------------------------
 -- Postflight
@@ -979,7 +1036,7 @@ BEGIN
       ('create_application_record_from_blend_ticket', 'create_app_record_from_bt', '_create_app_record_from_bt_replay_impl_20261015', 'p_blend_ticket_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'uuid[]', '0ad9a78b900cb953e0aa7d2a0d87bda0', true),
       ('batch_cancel_deliveries', 'batch_cancel_deliveries', '_batch_cancel_deliveries_replay_impl_20261015', 'p_delivery_ids uuid[], p_cancel_reason text DEFAULT ''Batch cancelled''::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'integer', '25d34db60f098a22a62db53780742eee', true),
       ('reverse_completed_cycle_count', 'reverse_completed_cycle_count', '_reverse_completed_cycle_count_replay_impl_20261015', 'p_cycle_count_id uuid, p_reversed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'void', '76ac5389d5541ab4a7b3a96388165c5b', true),
-      ('create_planned_holds', 'create_planned_holds', '_create_planned_holds_replay_impl_20261015', 'p_quote_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', '810d772cbd0b5669fd22412067b9ddaa', false)
+      ('create_planned_holds', 'create_planned_holds', '_create_planned_holds_replay_impl_20261015', 'p_quote_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'jsonb', '810d772cbd0b5669fd22412067b9ddaa', true)
     ) AS pin(name, op, impl, args, ret, body_md5, key_required)
    WHERE
      -- Exactly one public wrapper with the live signature, defaults and return type: definer,
@@ -1043,6 +1100,37 @@ BEGIN
               AND a.privilege_type = 'EXECUTE' ORDER BY 1)
        IS DISTINCT FROM ARRAY['postgres']::text[] THEN
     RAISE EXCEPTION 'POSTFLIGHT_REVERSE_CYCLE_COUNT_IMPL_ACL: _reverse_completed_cycle_count_impl must be callable only by postgres';
+  END IF;
+
+  -- revert_quote_status: one pass-through wrapper (live signature, ACL, the marker around its
+  -- renamed body) and one byte-identical renamed body callable only by postgres; create_planned_holds
+  -- accepts a keyless call only under that marker.
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'revert_quote_status') <> 1
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = 'revert_quote_status'
+          AND pg_get_function_arguments(p.oid) = 'p_quote_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'
+          AND p.prorettype = 'jsonb'::regtype AND p.prosecdef AND p.proowner = 'postgres'::regrole
+          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+          AND strpos(p.prosrc, 'set_config(''crx.revert_quote_status_internal'', ''1'', true)') > 0
+          AND strpos(p.prosrc, '_revert_quote_status_impl_20261016(') > 0
+          AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                      FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+              IS NOT DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[])
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = '_revert_quote_status_impl_20261016'
+          AND p.proowner = 'postgres'::regrole AND p.prosecdef
+          AND md5(replace(p.prosrc, chr(13), '')) = 'fb0cc5def3766270b13c401810b61f3e'
+          AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                      FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+              IS NOT DISTINCT FROM ARRAY['postgres']::text[])
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p
+        WHERE p.oid = to_regprocedure('public.create_planned_holds(uuid,uuid,text)')
+          AND strpos(p.prosrc, 'current_setting(''crx.revert_quote_status_internal'', true) IS DISTINCT FROM ''1''') > 0) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_REVERT_QUOTE_STATUS_CONTRACT: the revert_quote_status marker wrapper, its renamed body or create_planned_holds'' marker check is not installed as reviewed';
   END IF;
 
   -- The worker bodies below create_direct_order and create_rush_order keep their own key-only

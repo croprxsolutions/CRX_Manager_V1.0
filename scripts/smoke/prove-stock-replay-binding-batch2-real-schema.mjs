@@ -517,17 +517,26 @@ COMMIT;`,
     [...fp('reverse_completed_cycle_count', 'cycle_count_id', true), /SMOKE_FAIL: reverse_completed_cycle_count replayed count 1's reversal/],
     [...fp('create_planned_holds', 'quote_id', true), /SMOKE_FAIL: create_planned_holds replayed quote 5's receipt/],
   ];
-  // Each key requirement (twelve; create_planned_holds is the documented keyless exception).
+  // Each key requirement (twelve here; create_planned_holds' marker-gated one is mutated below).
   for (const fn of WRAPPED.filter((w) => w !== 'create_planned_holds')) {
     mutations.push([`${fn} key requirement`, fn,
       `    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: ${fn} requires p_idempotency_key' USING ERRCODE = '22023';\n`, '    NULL;\n',
       new RegExp(`SMOKE_FAIL: (a keyless call ran|wrong keyless refusal for) SELECT public\\.${fn}\\(`)]);
   }
-  // create_planned_holds' keyless pass-through (revert_quote_status relies on it).
-  mutations.push(['create_planned_holds keyless pass-through', 'create_planned_holds',
+  // create_planned_holds' marker gate: without it any keyless caller runs; with the keyless path
+  // removed, or with revert_quote_status no longer setting the marker, its own call is refused.
+  mutations.push(['create_planned_holds marker gate', 'create_planned_holds',
+    "    IF current_setting('crx.revert_quote_status_internal', true) IS DISTINCT FROM '1' THEN\n",
+    "    IF false THEN\n",
+    /SMOKE_FAIL: a keyless create_planned_holds from outside revert_quote_status ran/]);
+  mutations.push(['create_planned_holds keyless path', 'create_planned_holds',
     '    RETURN public._create_planned_holds_replay_impl_20261015(p_quote_id, p_performed_by, NULL);\n',
     "    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_planned_holds requires p_idempotency_key' USING ERRCODE = '22023';\n",
-    /SMOKE_FAIL: a keyless create_planned_holds \(the revert_quote_status path\) was refused/]);
+    /SMOKE_FAIL: revert_quote_status \(its keyless create_planned_holds path\) was refused/]);
+  mutations.push(['revert_quote_status marker', 'revert_quote_status',
+    "  PERFORM set_config('crx.revert_quote_status_internal', '1', true);\n",
+    '',
+    /SMOKE_FAIL: revert_quote_status \(its keyless create_planned_holds path\) was refused/]);
   // The four no-receipt no-op exemptions: binding them would raise IDEMPOTENCY_RECEIPT_MISSING.
   mutations.push(
     ['release_inventory_hold already_released exemption', 'release_inventory_hold',

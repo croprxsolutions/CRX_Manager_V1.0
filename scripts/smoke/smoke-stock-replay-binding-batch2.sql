@@ -6,7 +6,7 @@
 -- or from a different person, is refused (IDEMPOTENCY_INTENT_MISMATCH /
 -- IDEMPOTENCY_ACTOR_MISMATCH) and changes nothing; an exact retry still returns the original
 -- answer and is never done twice; a call with no key is refused (IDEMPOTENCY_KEY_REQUIRED),
--- except create_planned_holds, whose keyless call (revert_quote_status makes one) still runs.
+-- except create_planned_holds when revert_quote_status makes its keyless call (under its marker).
 --
 -- Covers the thirteen wrapped stock RPCs: release_inventory_hold, retire_inventory_item,
 -- reconcile_negative_inventory, manual_inventory_add, create_order_from_blend_ticket,
@@ -96,6 +96,7 @@ DECLARE
   v_q4 uuid;
   v_q5 uuid;
   v_q6 uuid;
+  v_q7 uuid;
   v_setup_order uuid;
   v_d1 uuid;
   v_d2 uuid;
@@ -228,6 +229,9 @@ BEGIN
   VALUES ('[SMOKE]-SRB-Q5-' || v_suffix, v_cust_a, v_admin, 'sent', true, '{"splits": []}'::jsonb) RETURNING id INTO v_q5;
   INSERT INTO public.quotes (quote_number, customer_id, created_by, status, is_planned, commission_split)
   VALUES ('[SMOKE]-SRB-Q6-' || v_suffix, v_cust_a, v_admin, 'sent', true, '{"splits": []}'::jsonb) RETURNING id INTO v_q6;
+  -- A declined planned quote: revert_quote_status reopens it and rebuilds its holds keylessly.
+  INSERT INTO public.quotes (quote_number, customer_id, created_by, status, is_planned, commission_split)
+  VALUES ('[SMOKE]-SRB-Q7-' || v_suffix, v_cust_a, v_admin, 'declined', true, '{"splits": []}'::jsonb) RETURNING id INTO v_q7;
 
   -- One confirmed order (explicit number, no lines) carrying three scheduled deliveries.
   INSERT INTO public.orders (order_number, customer_id, status, order_date)
@@ -691,7 +695,8 @@ BEGIN
 
   -- --------------------------------------------------------------------------------------------
   -- 13. create_planned_holds: the same key for a DIFFERENT quote is refused; the exact retry gets
-  --     the body's own duplicate answer; a keyless call still runs and writes no receipt.
+  --     the body's own duplicate answer; a keyless call from outside is refused, while
+  --     revert_quote_status's own keyless call (under its marker) runs and writes no receipt.
   -- --------------------------------------------------------------------------------------------
   v_key := v_pfx || 'planned-holds';
   v_res := public.create_planned_holds(v_q5, v_admin, v_key);
@@ -718,14 +723,26 @@ BEGIN
   SELECT count(*) INTO v_n FROM public.idempotency_keys WHERE operation = 'create_planned_holds';
   BEGIN
     v_res2 := public.create_planned_holds(v_q6, v_admin, NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: a keyless create_planned_holds from outside revert_quote_status ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a keyless create_planned_holds (the revert_quote_status path) was refused: %', SQLERRM;
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong keyless create_planned_holds refusal: %', SQLERRM;
+    END IF;
   END;
-  IF v_res2->>'status' IS DISTINCT FROM 'created' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a keyless create_planned_holds did not run: %', v_res2;
+  BEGIN
+    v_res2 := public.revert_quote_status(v_q7, '[SMOKE] reopen a declined planned quote', v_admin, v_pfx || 'revert-q7');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status (its keyless create_planned_holds path) was refused: %', SQLERRM;
+  END;
+  IF (SELECT status FROM public.quotes WHERE id = v_q7) IS DISTINCT FROM 'sent' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status did not reopen the declined quote: %', v_res2;
   END IF;
   IF (SELECT count(*) FROM public.idempotency_keys WHERE operation = 'create_planned_holds') <> v_n THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a keyless create_planned_holds wrote a receipt';
+    RAISE EXCEPTION 'SMOKE_FAIL: revert_quote_status''s keyless create_planned_holds wrote a receipt';
+  END IF;
+  IF COALESCE(current_setting('crx.revert_quote_status_internal', true), '') <> '' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the revert_quote_status marker outlived its call';
   END IF;
 
   -- --------------------------------------------------------------------------------------------

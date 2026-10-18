@@ -16,6 +16,7 @@ import { notifyApplicatorDispatched, notifyApplicatorRescheduled, notifyApplicat
 import { supabase, checkMutationResult, assertRpcResult, assertTransferDataPresent, assertTransferResultForJob, hasRpcCode, isTransferInvoiceResultInvalid, RpcErrorCodes, sanitizeError, transferInvoiceErrorMessage } from '../lib/db';
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
 import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
@@ -3103,11 +3104,17 @@ export default function JobDetail() {
         await fetchJob();
       }
     } catch (err: unknown) {
+      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
+      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
+      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeJobIdem.resetKey();
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'complete_job' } });
       // U12 Codex R5 #2: same translation as FieldView — a dispatch-only
       // applicator on a SPLIT job gets the RPC's raw authorization rejection;
-      // explain the business reason instead.
-      const completeMsg = err instanceof Error ? err.message : 'Failed to complete job';
+      // explain the business reason instead. sanitizeError reads PostgREST's plain error
+      // objects too, and maps the replay-binding refusal codes to plain English.
+      const completeMsg = sanitizeError(err);
       toast('error', completeMsg.includes('Not authorized to complete this job')
         ? 'This job is split with another applicator or crew — the office will complete and close it.'
         : completeMsg);

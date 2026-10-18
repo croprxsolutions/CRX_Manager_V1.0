@@ -17,6 +17,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
@@ -952,16 +953,14 @@ export default function DeliveryDetail() {
     try {
       const { data: completeResult, error } = await supabase.rpc('complete_delivery', rpcParams);
       if (error) throw error;
-      // F1 DELIBERATELY NOT FIXED HERE — left in main's (defective) order, and this is
-      // the strongest case on the page. complete_delivery sends p_signed_by,
-      // p_quantities, p_issue_type and p_issue_notes, all live UI state the driver can
-      // change before retrying. check_idempotency returns the cached result by key and
-      // operation WITHOUT looking at the new payload, so a retained key after an
-      // ambiguous reply would apply the first payload's quantities and signature while
-      // the screen reports the edited ones — silently wrong stock and a wrong signer on
-      // a delivery record. This is the same payload-binding defect that invalidated the
-      // FieldStop fix; it needs fingerprintIntentPayload, not a reorder (Codex round-4
-      // HIGH).
+      // complete_delivery sends p_signed_by, p_quantities, p_issue_type and p_issue_notes,
+      // all live UI state the driver can change before retrying. Since 20261018230000 the
+      // database binds the retained key to the person and the exact request, so a retry
+      // with edited values is refused (IDEMPOTENCY_INTENT_MISMATCH, reset in the catch
+      // below) instead of replaying the first payload's quantities and signer as success.
+      // The success-path reset below still runs BEFORE assertRpcResult (F1, pinned in
+      // idempotency-reset-order.test.ts): an empty reply retires the key, and the next try
+      // is then refused by the body if the first attempt had completed the delivery.
       completeIdem.resetKey();
       assertRpcResult(completeResult, 'complete_delivery');
 
@@ -1137,6 +1136,11 @@ export default function DeliveryDetail() {
 
       fetchDelivery();
     } catch (error: unknown) {
+      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
+      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
+      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
+      const bindingRejection = getIdempotencyBindingRejection(error);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
       toast('error', sanitizeError(error));
     }

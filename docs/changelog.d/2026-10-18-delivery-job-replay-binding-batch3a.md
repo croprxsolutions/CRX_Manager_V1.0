@@ -1,0 +1,33 @@
+## 2026-10-18 — delivery and job completions can no longer report success for the wrong record (replay-binding batch 3a)
+
+When a completion is retried, `complete_delivery` and `complete_job` hand back the first attempt's
+saved answer matched on the retry key alone. A retry that reused a key for a different delivery or
+job, or after a driver edited quantities or the signer, therefore got the first answer as success,
+and the new request was never carried out (no stock moved, no invoice draft). Nothing was ever done
+twice; the harm was a false success. This change:
+
+- **Splits the money group** (KNOWN_ISSUES.md, the table's row 2) into smaller PRs and fixes the
+  first cut, the two field completions that move money and stock (migration `20261018230000`, not
+  applied when written). Each live body is renamed unchanged, and a same-name wrapper replays a saved
+  answer only for the same person and the exact same request (delivery or job, quantities, signer,
+  issue type and notes, completion time, applied info). Anything else is refused and nothing
+  changes. An exact retry still returns the original answer, and the offline queue replays a
+  saved action as before (one whose delivery or job changed since it was saved still goes to office
+  review first, before this check). Both now require a retry key (every screen and the offline queue already send one). The
+  commit-time guard that refuses an unbound receipt now covers both, whether or not the stock batch
+  (PR #951) lands first. The file narrows access, so it applies only on Mason's owner approval.
+- **App:** the five completion screens (Deliveries, Delivery detail, Field stop, Field view, Job
+  detail) drop a retry key refused as another request's or another person's, and keep it when the
+  database cannot confirm an earlier outcome. Job detail now shows the plain-English refusal
+  instead of "Failed to complete job". The nine browser-test calls to `complete_delivery` now send
+  a key.
+- **Proof:** `node scripts/smoke/prove-delivery-job-replay-binding-batch3a-real-schema.mjs`
+  (`DELIVERY_JOB_REPLAY_BINDING_BATCH3A_PROOF_PASS`, Docker) and its chain
+  `scripts/smoke/smoke-delivery-job-replay-binding-batch3a.sql`, which is CONTAINER ONLY: a delivery
+  completion draws a customer-visible invoice number that a rollback does not return, so the chain
+  never runs against live (after the apply, live proof is a read-only check of the deployed bodies);
+  `src/__tests__/replayBindingBatch3aCallSites.test.ts` pins the screen and browser-test call sites.
+  `smoke-delivery-accounting-period-guard.sql` now accepts either refusal for another person's
+  retry key.
+- **Rollback:** the migration header lists the order to undo it, narrowing the commit-time guard
+  first.

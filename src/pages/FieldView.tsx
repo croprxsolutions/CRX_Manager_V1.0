@@ -90,6 +90,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { Sentry } from '../lib/sentry';
@@ -586,6 +587,11 @@ export default function FieldView() {
       setCompleteForm(emptyCompleteForm());
       await fetchCards();
     } catch (err) {
+      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
+      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
+      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
       Sentry.captureException(err, { tags: { source: 'critical_action', action: 'field_view_complete_job' } });
       // U12 Codex R5 #2: a dispatch-only applicator on a SPLIT job (other
       // locations dispatched to someone else) sees Complete, but complete_job

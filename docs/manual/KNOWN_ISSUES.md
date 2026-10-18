@@ -1,7 +1,7 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-16 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-16 13:42 UTC: 1033 rows / 1026 names; the one change since the 06:16 UTC read
+**Last verified: 2026-10-18 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-18 21:22 UTC: unchanged since the 2026-10-16 13:42 UTC read, 1033 rows / 1026 names, `max(version)` `20261016121253`; the same day a read-only `pg_proc` read found `complete_delivery` and `complete_job` still unbound, as the replay-binding entry below says. The 2026-10-16 13:42 UTC read: 1033 rows / 1026 names; the one change since the 06:16 UTC read
 is that `20261016060000_bind_money_replay_receipts_batch1` (ledger `20261016121253`, PR #942 merged as
 `982bc0dda`) is now applied, which re-certified the replay-binding entry below: batch 1's nine wrappers,
 nine renamed bodies, three helpers and deferred trigger all read live at 13:42 UTC. In the 06:16 UTC read
@@ -148,7 +148,17 @@ The nine HIGH-money functions it covers left the table below: `void_payment`, `d
 `apply_prepay_to_invoice`, `batch_apply_prepayments` and `batch_void_invoices`. The live re-check is
 recorded in the batch-1 paragraph above.
 
-**Unbound — ranked, with the batch each is fixed in.**
+**Batch 3a written, NOT applied (2026-10-18).** The table's row-2 money group is split into smaller
+PRs. The first cut, migration `20261018230000_bind_delivery_job_replay_receipts_batch3a`, binds
+`complete_delivery` and `complete_job` (the first row below) and extends the same commit-time guard
+trigger, accepting it with or without the stock batch (PR #951, `20261016140000`, also not applied).
+It is access-changing, so it applies only on Mason's owner approval. Until it is applied, both
+functions still replay by key alone. `cancel_delivery` waits for PR #951: `batch_cancel_deliveries`
+calls it per delivery with no key.
+
+**Unbound — ranked, with the batch each is fixed in.** The Batch column is this table's own
+numbering: its row-2 money group ships as batch 3a and later cuts, and its row-3 stock group is
+PR #951's "batch 2".
 
 | Batch | Function (what a mismatched retry does today) | Impact |
 |---|---|---|

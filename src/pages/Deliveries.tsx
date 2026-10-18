@@ -33,6 +33,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
@@ -424,8 +425,8 @@ export default function Deliveries() {
           confirmed = true;
         }
 
-        // completeIdem is intentionally retained until onSuccess, so a retry after a
-        // lost response replays the same complete_delivery request idempotently.
+        // completeIdem is retained until onSuccess (or a binding refusal below), so a retry
+        // after a lost response replays the same complete_delivery request idempotently.
         const { data, error } = await supabase.rpc('complete_delivery', {
           p_delivery_id: target.id,
           p_signed_by: signedBy.trim(),
@@ -436,7 +437,14 @@ export default function Deliveries() {
             ? { p_completed_at: new Date(deliveredOnDate + 'T12:00:00').toISOString() }
             : {}),
         });
-        if (error) throw error;
+        if (error) {
+          // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
+          // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
+          // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
+          throw error;
+        }
         assertRpcResult(data, 'complete_delivery');
         return true;
       },
@@ -464,7 +472,8 @@ export default function Deliveries() {
 
     if (!completed && confirmed) {
       // Confirm succeeded so the delivery is now in_progress; keep the modal open
-      // with the SAME retained complete-key (completeIdem only resets on success)
+      // with the SAME retained complete-key (completeIdem resets only on success or an
+      // intent/actor binding refusal)
       // so a retry replays idempotently. If the failed call actually committed
       // server-side, the replay returns the cached result and onSuccess (including
       // the completion notification) still fires.

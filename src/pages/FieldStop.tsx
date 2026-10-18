@@ -23,6 +23,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { compressImage } from '../lib/imageCompression';
 import { logActivity } from '../lib/activityLogger';
@@ -413,6 +414,11 @@ export default function FieldStop() {
 
       setStep('done');
     } catch (error: unknown) {
+      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
+      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
+      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
+      const bindingRejection = getIdempotencyBindingRejection(error);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
       toast('error', sanitizeError(error));
     }

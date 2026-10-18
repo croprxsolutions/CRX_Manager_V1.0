@@ -22,6 +22,12 @@ Sol final review of PR #951 (HIGH, fixed before landing):
   they test. Each now sends its own fresh key, and the call-site test fails if an e2e call to any
   of the thirteen leaves the key out. The blend-ticket chain's container proof still passes; the
   direct-order chain needs live data the container lacks, so it runs live after the apply.
+- **The gauntlet chain asserts the new contract (Codex).** `smoke-gauntlet-core-blend-guards.sql`
+  reused a committed blend-ticket order's key with a different order number and notes and
+  expected the cached result; the wrapper now refuses that. The chain retries with the exact
+  arguments (cached result), then proves the changed request is refused with
+  `IDEMPOTENCY_INTENT_MISMATCH` and creates no order. It needs live data, so it runs live after
+  the apply.
 - **Proof:** `src/__tests__/replayBindingBatch2CallSites.test.ts` fails if either recovery block
   clears the draft or skips the immediate save, or if either order call stops sending exactly
   the arguments its key's change check covers; `src/hooks/useFormDraft.test.ts` proves the

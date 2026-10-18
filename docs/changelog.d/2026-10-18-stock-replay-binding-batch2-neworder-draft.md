@@ -19,7 +19,9 @@ Sol final review of PR #951 (HIGH, fixed before landing):
   `smoke-blend-ticket-fractional-cents.sql`, and 19 browser-test calls in `tests/e2e/` (18 to
   `create_direct_order`, one to `create_planned_holds`), called these functions without a retry
   key; once the migration is live they would hit `IDEMPOTENCY_KEY_REQUIRED` instead of the gate
-  they test. Each now sends its own fresh key, and the call-site test fails if an e2e call to any
+  they test. Each now sends its own fresh key (and the direct-order chain expects the wrapper's
+  `AUTH_REQUIRED` and `ACTOR_MISMATCH`, which it raises before the renamed body's own messages;
+  CodeRabbit), and the call-site test fails if an e2e call to any
   of the thirteen leaves the key out. The blend-ticket chain's container proof still passes; the
   direct-order chain needs live data the container lacks, so it runs live after the apply.
 - **A below-cost retry matches its approved request (Codex).** Approving a below-cost order

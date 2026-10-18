@@ -132,7 +132,9 @@ BEGIN
 
   -- Each probe sends its own fresh retry key: since 20261016140000 a keyless call is refused
   -- with IDEMPOTENCY_KEY_REQUIRED before the gate under test is reached.
-  -- ===== AUTH PROBE A: no auth (== anon key) -> Authentication required =====
+  -- The public create_direct_order is the batch-2 wrapper, which raises AUTH_REQUIRED and
+  -- ACTOR_MISMATCH before the renamed body's own 'Authentication required' / 'Actor mismatch'.
+  -- ===== AUTH PROBE A: no auth (== anon key) -> AUTH_REQUIRED =====
   PERFORM set_config('request.jwt.claims', '{}', true);
   BEGIN
     PERFORM create_direct_order(p_customer_id := v_cust, p_order_date := CURRENT_DATE,
@@ -140,8 +142,8 @@ BEGIN
                                 p_idempotency_key := 'smk-po-noauth-' || gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: no-auth call did not raise';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'Authentication required%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: no-auth expected Authentication required, got: %', SQLERRM;
+    IF SQLERRM NOT LIKE 'AUTH_REQUIRED%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: no-auth expected AUTH_REQUIRED, got: %', SQLERRM;
     END IF;
   END;
 
@@ -161,7 +163,7 @@ BEGIN
     END;
   END IF;
 
-  -- ===== AUTH PROBE C: forged p_performed_by -> Actor mismatch =====
+  -- ===== AUTH PROBE C: forged p_performed_by -> ACTOR_MISMATCH =====
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_sales, 'role', 'authenticated')::text, true);
   BEGIN
@@ -170,8 +172,8 @@ BEGIN
                                 p_idempotency_key := 'smk-po-forge-' || gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: forged-actor call did not raise';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'Actor mismatch%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: forged-actor expected Actor mismatch, got: %', SQLERRM;
+    IF SQLERRM NOT LIKE 'ACTOR_MISMATCH%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: forged-actor expected ACTOR_MISMATCH, got: %', SQLERRM;
     END IF;
   END;
 

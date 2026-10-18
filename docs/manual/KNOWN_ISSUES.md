@@ -86,7 +86,7 @@ mismatch refusal, so its exact-retry replay is not yet proven live. **Live body 
 11:56 UTC** (read-only `pg_proc` read, migration-history row 951): all nine live wrappers bind the
 caller (`auth.uid()`, forged `p_performed_by` refused) and the request fingerprint through
 `check_idempotency_intent` before any saved result can come back (eight call their saved-result body;
-`batch_apply_prepayments` returns the committed receipt itself on an exact retry). The one keyless call
+`batch_apply_prepayments` returns the stored result from the committed receipt on an exact retry). The one keyless call
 left is `apply_prepay_to_invoice` inside `batch_apply_prepayments`, covered by the batch's own bound
 key. `_bind_replay_receipt_20261015`,
 the other batch-1 helpers and the nine renamed bodies have no EXECUTE for anon, authenticated,

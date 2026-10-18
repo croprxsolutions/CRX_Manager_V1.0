@@ -43,7 +43,7 @@ Read-only investigation. Nothing was changed in the database, storage, secrets, 
 ## Ordered plan
 
 **Only Mason can do:**
-1. Upgrade Supabase to Pro and enable PITR (billing click; minutes). *Do this first: PITR only covers time from the moment it is on.* Tell an agent when done so it can re-check live.
+1. Upgrade Supabase to Pro and enable PITR (billing clicks; minutes). PITR is a separate paid add-on and needs at least Small compute, so budget for all three. *Do this first: PITR only covers time from the moment it is on.* Tell an agent when done so it can re-check live.
 2. Name the recovery person and a backup (and decide where the backup passphrase is also kept, e.g. a second password manager entry for that person).
 3. (Later) Approve the throwaway project used for restore drills and staging, since a second Supabase project may cost money.
 **Agents can build (in this order):**

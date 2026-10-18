@@ -90,7 +90,8 @@ caller (`auth.uid()`, forged `p_performed_by` refused) and the request fingerpri
 left is `apply_prepay_to_invoice` inside `batch_apply_prepayments`, covered by the batch's own bound
 key. `_bind_replay_receipt_20261015`,
 the other batch-1 helpers and the nine renamed bodies have no EXECUTE for anon, authenticated,
-service_role or PUBLIC. No function was found unbound. Batches 2–4 below are still open.
+service_role or PUBLIC. None of the nine public functions was found unbound on a keyed call. This is a
+read of the deployed source, not an exercised retry, so the `edit_prepay_credit` gap above stays open. Batches 2–4 below are still open.
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions

@@ -85,7 +85,10 @@ checks an exact retry for eight of the nine functions; for `edit_prepay_credit` 
 mismatch refusal, so its exact-retry replay is not yet proven live. **Live body re-check 2026-10-18
 11:56 UTC** (read-only `pg_proc` read, migration-history row 951): all nine live wrappers bind the
 caller (`auth.uid()`, forged `p_performed_by` refused) and the request fingerprint through
-`check_idempotency_intent` before they call the saved-result body, and `_bind_replay_receipt_20261015`,
+`check_idempotency_intent` before any saved result can come back (eight call their saved-result body;
+`batch_apply_prepayments` returns the committed receipt itself on an exact retry). The one keyless call
+left is `apply_prepay_to_invoice` inside `batch_apply_prepayments`, covered by the batch's own bound
+key. `_bind_replay_receipt_20261015`,
 the other batch-1 helpers and the nine renamed bodies have no EXECUTE for anon, authenticated,
 service_role or PUBLIC. No function was found unbound. Batches 2–4 below are still open.
 

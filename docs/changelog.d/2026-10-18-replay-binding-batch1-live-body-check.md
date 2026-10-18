@@ -6,8 +6,10 @@ binding happens before any saved result can replay.
 
 **What changed.**
 - `docs/reference/migration-history.md`: row 951 records the 2026-10-18 11:56 UTC read-only check.
-  All nine live wrappers require a key and a signed-in caller, refuse a forged `p_performed_by`,
-  fingerprint the request and call `check_idempotency_intent` before their saved-result body.
+  On every keyed call, all nine live wrappers require a signed-in caller, refuse a forged
+  `p_performed_by`, fingerprint the request and call `check_idempotency_intent` before any saved
+  result can come back. The one keyless call left is `apply_prepay_to_invoice` inside
+  `batch_apply_prepayments`, covered by the batch's own bound key.
   `_bind_replay_receipt_20261015`, the other helpers and the nine renamed bodies have no API-role
   EXECUTE; the bound-receipt trigger is live and deferred.
 - `docs/manual/KNOWN_ISSUES.md`: the replay-binding entry records the same result.

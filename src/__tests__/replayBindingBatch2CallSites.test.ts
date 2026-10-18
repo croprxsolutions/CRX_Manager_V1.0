@@ -11,7 +11,7 @@
  * there, and its unresolved-intent guard must keep a refused scope frozen rather than mint a fresh
  * key for an absolute stock write.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 // File -> number of batch-2 call sites in it.
@@ -133,5 +133,45 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     expect(good.match(INTENT_OR_ACTOR_RESET)?.length).toBe(1);
     expect(BARE_HELPER_RESET.test(good)).toBe(false);
     expect(BARE_HELPER_RESET.test(bad)).toBe(true);
+  });
+});
+
+// The thirteen refuse a keyless call, so a browser test that leaves the key out fails once the
+// migration is live (Codex, PR #951). Every e2e call to one of them must send a key.
+describe('replay-binding batch 2 e2e callers send a retry key', () => {
+  const WRAPPED = [
+    'release_inventory_hold', 'retire_inventory_item', 'reconcile_negative_inventory', 'manual_inventory_add',
+    'create_order_from_blend_ticket', 'create_direct_order', 'create_rush_order', 'close_quote_as_applied',
+    'close_quote_as_short', 'create_application_record_from_blend_ticket', 'batch_cancel_deliveries',
+    'reverse_completed_cycle_count', 'create_planned_holds',
+  ];
+  const CALL = new RegExp(`(?:supabaseRpc|rpc)\\(\\s*page,\\s*'(${WRAPPED.join('|')})',\\s*\\{`, 'g');
+  const argsOf = (source: string, open: number) => {
+    let depth = 1;
+    let i = open;
+    while (depth > 0 && i < source.length) {
+      if (source[i] === '{') depth++;
+      else if (source[i] === '}') depth--;
+      i++;
+    }
+    return source.slice(open, i);
+  };
+  const keylessCalls = (source: string) =>
+    [...source.matchAll(CALL)].filter((m) => !/p_idempotency_key/.test(argsOf(source, m.index + m[0].length)));
+
+  it('no e2e spec calls a wrapped RPC without p_idempotency_key', () => {
+    const specs = readdirSync('tests/e2e').filter((f) => f.endsWith('.ts'));
+    let calls = 0;
+    for (const spec of specs) {
+      const source = read(`tests/e2e/${spec}`);
+      calls += [...source.matchAll(CALL)].length;
+      expect(keylessCalls(source).map((m) => `${spec}: ${m[1]}`)).toEqual([]);
+    }
+    expect(calls).toBeGreaterThanOrEqual(19);
+  });
+
+  it('the check tells a keyless call from a keyed one', () => {
+    expect(keylessCalls("await supabaseRpc(page, 'create_direct_order', { p_customer_id: c, p_items: [{ a: 1 }] });")).toHaveLength(1);
+    expect(keylessCalls("await supabaseRpc(page, 'create_direct_order', { p_items: [{ a: 1 }], p_idempotency_key: k });")).toHaveLength(0);
   });
 });

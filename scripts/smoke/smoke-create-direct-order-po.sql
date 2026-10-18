@@ -130,11 +130,14 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: whitespace PO not normalized to NULL (got %)', v_po;
   END IF;
 
+  -- Each probe sends its own fresh retry key: since 20261016140000 a keyless call is refused
+  -- with IDEMPOTENCY_KEY_REQUIRED before the gate under test is reached.
   -- ===== AUTH PROBE A: no auth (== anon key) -> Authentication required =====
   PERFORM set_config('request.jwt.claims', '{}', true);
   BEGIN
     PERFORM create_direct_order(p_customer_id := v_cust, p_order_date := CURRENT_DATE,
-                                p_items := v_items, p_customer_po_number := 'x');
+                                p_items := v_items, p_customer_po_number := 'x',
+                                p_idempotency_key := 'smk-po-noauth-' || gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: no-auth call did not raise';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'Authentication required%' THEN
@@ -148,7 +151,8 @@ BEGIN
       json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
     BEGIN
       PERFORM create_direct_order(p_customer_id := v_cust, p_order_date := CURRENT_DATE,
-                                  p_items := v_items, p_performed_by := v_driver, p_customer_po_number := 'x');
+                                  p_items := v_items, p_performed_by := v_driver, p_customer_po_number := 'x',
+                                  p_idempotency_key := 'smk-po-role-' || gen_random_uuid()::text);
       RAISE EXCEPTION 'SMOKE_FAIL: driver call did not raise';
     EXCEPTION WHEN OTHERS THEN
       IF SQLERRM NOT LIKE 'INSUFFICIENT_ROLE%' THEN
@@ -162,7 +166,8 @@ BEGIN
     json_build_object('sub', v_sales, 'role', 'authenticated')::text, true);
   BEGIN
     PERFORM create_direct_order(p_customer_id := v_cust, p_order_date := CURRENT_DATE,
-                                p_items := v_items, p_performed_by := v_admin, p_customer_po_number := 'x');
+                                p_items := v_items, p_performed_by := v_admin, p_customer_po_number := 'x',
+                                p_idempotency_key := 'smk-po-forge-' || gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: forged-actor call did not raise';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'Actor mismatch%' THEN

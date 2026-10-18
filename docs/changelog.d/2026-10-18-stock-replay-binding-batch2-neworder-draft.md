@@ -15,6 +15,13 @@ Sol final review of PR #951 (HIGH, fixed before landing):
   retry after a lost response could create a second order.
 - **The kept draft is current (CodeRabbit).** The draft saves half a second after typing; the
   recovery now writes it immediately before opening the earlier order.
+- **Older tests send a key (Codex).** Six gate probes in `smoke-create-direct-order-po.sql` and
+  `smoke-blend-ticket-fractional-cents.sql`, and 19 browser-test calls in `tests/e2e/` (18 to
+  `create_direct_order`, one to `create_planned_holds`), called these functions without a retry
+  key; once the migration is live they would hit `IDEMPOTENCY_KEY_REQUIRED` instead of the gate
+  they test. Each now sends its own fresh key, and the call-site test fails if an e2e call to any
+  of the thirteen leaves the key out. The blend-ticket chain's container proof still passes; the
+  direct-order chain needs live data the container lacks, so it runs live after the apply.
 - **Proof:** `src/__tests__/replayBindingBatch2CallSites.test.ts` fails if either recovery block
   clears the draft or skips the immediate save, or if either order call stops sending exactly
   the arguments its key's change check covers; `src/hooks/useFormDraft.test.ts` proves the

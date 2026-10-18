@@ -17,6 +17,7 @@ import {
   List,
   CalendarDays,
   PanelRightOpen,
+  WifiOff,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import CustomerDrawer from '../components/customers/CustomerDrawer';
@@ -30,6 +31,8 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
+import { hasSignal, NO_SIGNAL_AFTER_START_MESSAGE, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -114,6 +117,7 @@ export default function Deliveries() {
   const batchCancelIdem = useIdempotencyKey('batch_cancel_deliveries', profile?.id || '');
   const batchRescheduleIdem = useIdempotencyKey('batch_reschedule_deliveries', profile?.id || '');
   const reassignIdem = useIdempotencyKey('reassign_delivery', profile?.id || '');
+  const isOnline = useOnlineStatus();
   // F3 act-from-list: complete an in_progress delivery in place (signed-by popup).
   const confirmIdem = useIdempotencyKey('confirm_delivery', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_delivery', profile?.id || '');
@@ -404,6 +408,8 @@ export default function Deliveries() {
   // F3 act-from-list: complete a delivery in full, in place. Scheduled deliveries
   // are confirmed first; p_quantities omitted = deliver in full. Partial deliveries,
   // signature image, and issue flags stay on the detail page.
+  // Goal 5: completing needs a signal. It is checked before the start step and again
+  // between start and complete, so a lost signal stops before anything else changes.
   const handleCompleteConfirm = async () => {
     if (!completeTarget || !profile) return;
     if (!signedBy.trim()) { toast('error', 'Please enter a signature name'); return; }
@@ -411,8 +417,9 @@ export default function Deliveries() {
     const idemKey = completeIdem.getKey();
     let confirmed = false;
     // Route through runCriticalAction for parity with this page's other mutations.
-    const completed = await runCriticalAction({
+    const outcome = await runCriticalAction<'completed' | 'no_signal'>({
       action: async () => {
+        if (!(await hasSignal())) return 'no_signal';
         if (target.status === 'scheduled') {
           const { data, error } = await supabase.rpc('confirm_delivery', {
             p_delivery_id: target.id,
@@ -422,6 +429,7 @@ export default function Deliveries() {
           assertRpcResult(data, 'confirm_delivery');
           confirmIdem.resetKey();
           confirmed = true;
+          if (!(await hasSignal())) return 'no_signal';
         }
 
         // completeIdem is intentionally retained until onSuccess, so a retry after a
@@ -438,13 +446,17 @@ export default function Deliveries() {
         });
         if (error) throw error;
         assertRpcResult(data, 'complete_delivery');
-        return true;
+        return 'completed';
       },
       toast,
       setLoading: setCompleting,
-      successMessage: `Delivery ${target.delivery_number} completed`,
       sentryTag: 'complete_delivery',
-      onSuccess: () => {
+      onSuccess: (result) => {
+        if (result !== 'completed') {
+          toast('error', confirmed ? NO_SIGNAL_AFTER_START_MESSAGE : NO_SIGNAL_MESSAGE);
+          return;
+        }
+        toast('success', `Delivery ${target.delivery_number} completed`);
         completeIdem.resetKey();
         // Fire the same in-app completion notification the detail page sends
         // (driver/admins/sales) — once per delivery so a same-key RPC replay after
@@ -462,7 +474,7 @@ export default function Deliveries() {
       },
     });
 
-    if (!completed && confirmed) {
+    if (outcome !== 'completed' && confirmed) {
       // Confirm succeeded so the delivery is now in_progress; keep the modal open
       // with the SAME retained complete-key (completeIdem only resets on success)
       // so a retry replays idempotently. If the failed call actually committed
@@ -1524,6 +1536,12 @@ export default function Deliveries() {
           {completeTarget?.status === 'scheduled' && (
             <p className="text-sm text-secondary">
               This will confirm and complete the delivery in one step. Inventory is deducted and a draft invoice is created.
+            </p>
+          )}
+          {!isOnline && (
+            <p role="alert" className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <WifiOff className="w-4 h-4 mt-0.5 shrink-0" />
+              No signal. A delivery can only be completed with signal; nothing is saved offline.
             </p>
           )}
           <div>

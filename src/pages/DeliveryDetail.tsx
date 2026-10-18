@@ -26,7 +26,8 @@ import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notific
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
+import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
+import { hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -104,6 +105,7 @@ export default function DeliveryDetail() {
   const reassignIdem = useIdempotencyKey('reassign_delivery', profile?.id || '');
   const createInvoiceIdem = useIdempotencyKey('create_invoice_for_unbilled_delivery', profile?.id || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const paperTicketInputRef = useRef<HTMLInputElement>(null);
 
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [items, setItems] = useState<DeliveryItem[]>([]);
@@ -131,6 +133,8 @@ export default function DeliveryDetail() {
   // Driver completion state
   const [signedBy, setSignedBy] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
+  const [usePaperTicket, setUsePaperTicket] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
@@ -766,7 +770,7 @@ export default function DeliveryDetail() {
 
   // ── Photo Upload ───────────────────────────────────────────────────────
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, caption?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0 || !profile || !delivery) return;
 
@@ -804,6 +808,7 @@ export default function DeliveryDetail() {
           uploaded_by: profile.id,
           file_size: file.size,
           sort_order: photos.length + uploadCount,
+          ...(caption ? { caption } : {}),
         }).select();
         if (photoResult.error) {
           toast('error', `Photo saved to storage but DB record failed: ${photoResult.error.message}`);
@@ -824,6 +829,7 @@ export default function DeliveryDetail() {
     }
     setUploadingPhoto(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (paperTicketInputRef.current) paperTicketInputRef.current.value = '';
   };
 
   // ── Follow-up Delivery ─────────────────────────────────────────────────
@@ -893,6 +899,10 @@ export default function DeliveryDetail() {
       toast('error', 'At least one item must have a quantity greater than 0');
       return;
     }
+    if (usePaperTicket && !hasPaperTicketPhoto(photos)) {
+      toast('error', 'Take a photo of the signed paper ticket before completing');
+      return;
+    }
     setCompleteConfirmOpen(true);
   };
 
@@ -906,13 +916,11 @@ export default function DeliveryDetail() {
       : null;
 
     const idemKey = completeIdem.getKey();
-    const completedAt = new Date().toISOString();
     const rpcParams: {
       p_delivery_id: string;
       p_signed_by: string;
       p_performed_by?: string;
       p_idempotency_key?: string;
-      p_completed_at?: string;
       p_quantities?: Json;
       p_issue_type?: string;
       p_issue_notes?: string;
@@ -926,25 +934,10 @@ export default function DeliveryDetail() {
       ...(driverIssueNotes.trim() ? { p_issue_notes: driverIssueNotes.trim() } : {}),
     };
 
-    if (!isOnline) {
-      try {
-        const offlineRpcParams = { ...rpcParams, p_completed_at: completedAt };
-        await queueAction({
-          operation: 'complete_delivery',
-          params: offlineRpcParams,
-          createdAt: new Date().toISOString(),
-          retryCount: 0,
-          ownerUserId: profile.id,
-          status: 'pending',
-          entityTable: 'deliveries',
-          entityId: delivery.id,
-          snapshotAt: delivery.updated_at ?? undefined,
-        });
-        completeIdem.resetKey();
-        toast('success', 'Delivery saved offline — it will retry when connected and remain saved if it needs attention');
-      } catch (error) {
-        toast('error', getOfflineStorageErrorMessage(error));
-      }
+    // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
+    // without a reachable server the delivery stays exactly as it was.
+    if (!(await hasSignal())) {
+      toast('error', NO_SIGNAL_MESSAGE);
       setCompleting(false);
       return;
     }
@@ -969,7 +962,7 @@ export default function DeliveryDetail() {
       // (complete_delivery succeeded above), so a failed upload must NOT abort
       // the success flow — track it and warn accurately instead.
       let signatureUploadFailed = false;
-      if (signatureDataUrl) {
+      if (signatureDataUrl && !usePaperTicket) {
         try {
           const base64Data = signatureDataUrl.split(',')[1];
           const byteCharacters = atob(base64Data);
@@ -1029,7 +1022,7 @@ export default function DeliveryDetail() {
         // that says the delivery completed — skip the redundant success toast.
         toast('success', isPartialDelivery ? 'Delivery completed (partial quantities)' : 'Delivery completed');
       }
-      logActivity({ event: 'delivery_completed', description: `Delivery ${delivery.delivery_number} completed${isPartialDelivery ? ' (partial)' : ''}${invoiceNum ? ` — draft invoice ${invoiceNum} auto-created` : ''}`, performedBy: profile.id, entityType: 'delivery', entityId: delivery.id, customerId: delivery.customer_id });
+      logActivity({ event: 'delivery_completed', description: `Delivery ${delivery.delivery_number} completed${isPartialDelivery ? ' (partial)' : ''}${usePaperTicket ? ' (signed paper ticket photo)' : ''}${invoiceNum ? ` — draft invoice ${invoiceNum} auto-created` : ''}`, performedBy: profile.id, entityType: 'delivery', entityId: delivery.id, customerId: delivery.customer_id });
 
       // F15: Notify about delivery remainders
       if (isPartialDelivery) {
@@ -1289,6 +1282,23 @@ export default function DeliveryDetail() {
   // ═══════════════════════════════════════════════════════════════════════
   // DRIVER VIEW (dark mobile UI)
   // ═══════════════════════════════════════════════════════════════════════
+
+  // Shared by both layouts. The driver layout used to omit it, so a driver's
+  // Complete Delivery tap opened nothing (found during the Goal 5 offline check).
+  const completeConfirmModal = (
+    <ConfirmModal
+      open={completeConfirmOpen}
+      onClose={() => setCompleteConfirmOpen(false)}
+      onConfirm={handleComplete}
+      title="Complete Delivery"
+      message={isPartialDelivery
+        ? 'Complete this delivery with partial quantities? This will update inventory and cannot be undone.'
+        : 'Complete this delivery? This will update inventory and cannot be undone.'}
+      confirmLabel="Complete Delivery"
+      variant="warning"
+      loading={completing}
+    />
+  );
 
   if (isDriver) {
     return (
@@ -1586,17 +1596,61 @@ export default function DeliveryDetail() {
                   className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green"
                 />
               </div>
-              <div className="flex items-center gap-1 mb-1">
-                <span className="text-sm font-medium text-gray-400">Customer Signature</span>
-                <HelpTip text="Have the customer sign with their finger or mouse. This saves as part of the delivery record for your files." className="ml-1" />
-              </div>
-              <div className="bg-gray-700 rounded-lg p-3">
-                <SignatureCanvas
-                  onSignatureChange={setSignatureDataUrl}
-                  label=""
-                  height={120}
+              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={usePaperTicket}
+                  onChange={(e) => {
+                    setUsePaperTicket(e.target.checked);
+                    if (e.target.checked) setSignatureDataUrl(null);
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green bg-gray-700"
                 />
-              </div>
+                Customer signed a paper ticket (no signal at the site)
+                <HelpTip text="Use this when there was no signal at the customer and they signed a paper delivery ticket. Take a photo of the signed ticket instead of an on-screen signature." className="ml-1" />
+              </label>
+              {usePaperTicket ? (
+                <div className="bg-gray-700 rounded-lg p-3 space-y-2">
+                  <input
+                    ref={paperTicketInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)}
+                    className="hidden"
+                  />
+                  {hasPaperTicketPhoto(photos) ? (
+                    <p className="flex items-center gap-2 text-sm text-green-300">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
+                    </p>
+                  ) : (
+                    <p className="text-sm text-yellow-300">A photo of the signed paper ticket is required.</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => paperTicketInputRef.current?.click()}
+                    disabled={uploadingPhoto || photos.length >= 10}
+                    className="w-full py-3 flex items-center justify-center gap-2 text-white border border-gray-600 rounded-lg active:bg-gray-600 disabled:opacity-50 transition-colors"
+                  >
+                    <Camera className="w-5 h-5" />
+                    {uploadingPhoto ? 'Uploading...' : 'Take Photo of Signed Ticket'}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1 mb-1">
+                    <span className="text-sm font-medium text-gray-400">Customer Signature</span>
+                    <HelpTip text="Have the customer sign with their finger or mouse. This saves as part of the delivery record for your files." className="ml-1" />
+                  </div>
+                  <div className="bg-gray-700 rounded-lg p-3">
+                    <SignatureCanvas
+                      onSignatureChange={setSignatureDataUrl}
+                      label=""
+                      height={120}
+                    />
+                  </div>
+                </>
+              )}
               {customer?.email && (
                 <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                   <input
@@ -1612,7 +1666,7 @@ export default function DeliveryDetail() {
               {!isOnline && (
                 <div className="flex items-center gap-2 p-3 bg-yellow-900/30 border border-yellow-700 rounded-lg text-yellow-300 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
-                  <span>You are offline. Delivery will be saved locally and synced when you reconnect.</span>
+                  <span>No signal. A delivery can only be completed with signal; nothing is saved offline. If the customer is signing now, use a paper ticket and complete it here once you have signal.</span>
                 </div>
               )}
               <button
@@ -1620,13 +1674,14 @@ export default function DeliveryDetail() {
                 disabled={completing}
                 className="w-full py-4 bg-crx-green text-white text-lg font-semibold rounded-xl active:bg-crx-green-hover disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
               >
-                {!isOnline && <WifiOff className="w-5 h-5" />}
                 <CheckCircle2 className="w-6 h-6" />
-                {completing ? 'Saving...' : isOnline ? 'Complete Delivery' : 'Save Offline'}
+                {completing ? 'Completing...' : 'Complete Delivery'}
               </button>
             </div>
           )}
         </div>
+
+        {completeConfirmModal}
 
         {/* Start Delivery Modal (driver view) */}
         <StartDeliveryModal
@@ -2372,6 +2427,13 @@ export default function DeliveryDetail() {
             </label>
           )}
 
+          {!isOnline && (
+            <p role="alert" className="flex items-start gap-2 mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <WifiOff className="w-4 h-4 mt-0.5 shrink-0" />
+              No signal. A delivery can only be completed with signal; nothing is saved offline.
+            </p>
+          )}
+
           <div className="flex justify-end">
             <Button
               onClick={requestComplete}
@@ -2669,19 +2731,7 @@ export default function DeliveryDetail() {
         loading={reassigning}
       />
 
-      {/* Complete delivery confirm modal */}
-      <ConfirmModal
-        open={completeConfirmOpen}
-        onClose={() => setCompleteConfirmOpen(false)}
-        onConfirm={handleComplete}
-        title="Complete Delivery"
-        message={isPartialDelivery
-          ? 'Complete this delivery with partial quantities? This will update inventory and cannot be undone.'
-          : 'Complete this delivery? This will update inventory and cannot be undone.'}
-        confirmLabel="Complete Delivery"
-        variant="warning"
-        loading={completing}
-      />
+      {completeConfirmModal}
     </div>
   );
 }

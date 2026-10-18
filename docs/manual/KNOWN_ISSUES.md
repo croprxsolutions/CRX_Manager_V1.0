@@ -73,6 +73,20 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
+## OPEN 2026-10-18 (MED) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
+
+Goal 5 (completing a delivery needs a signal) shipped as an app-only change. The Deliveries list's
+**Mark Delivered** on a *scheduled* delivery makes two server calls: `confirm_delivery` (scheduled →
+in_progress) and then `complete_delivery`. The app checks for a real connection before the first and
+again between them, but signal lost in the instant after the first call answers still leaves the
+delivery **In Progress**. Stock and billing are unchanged (only `complete_delivery` deducts stock and
+creates the draft invoice) and the driver is told exactly that ("Signal dropped after this delivery
+was started…"); the dialog stays open as **Mark Complete** for the retry. Seen in the browser preview
+against a local test database on 2026-10-18. **Fix:** one server call that starts and completes in a
+single transaction. That touches `complete_delivery`, which replay-binding batch 2 (PR #951) owns, so
+it waits for that batch. Source: `src/pages/Deliveries.tsx` `handleCompleteConfirm`,
+`src/lib/connectivity.ts`.
+
 ## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16, batches 2–4 open) — about 75 live functions replay a saved result matched on the retry key alone (about 66 left after batch 1)
 
 **Batch 1 shipped live 2026-10-16.** Migration `20261016060000_bind_money_replay_receipts_batch1`

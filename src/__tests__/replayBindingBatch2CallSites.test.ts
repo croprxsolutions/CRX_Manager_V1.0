@@ -117,7 +117,7 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
       const source = read('src/pages/NewOrder.tsx');
       expect(source).toContain(`const ${hash} = JSON.stringify(${args});`);
       expect(source).toMatch(new RegExp(`useEffect\\(\\(\\) => \\{\\s*${idem}\\.resetKey\\(\\);[^}]*\\}, \\[${hash}\\]\\);`));
-      expect(source).toMatch(new RegExp(`supabase\\.rpc\\('${rpc}', withBelowCostReason\\('${rpc}', \\{\\s*\\.\\.\\.${args},\\s*p_performed_by: profile\\.id,\\s*p_idempotency_key: \\w+,\\s*\\}, reason\\)`));
+      expect(source).toMatch(new RegExp(`supabase\\.rpc\\('${rpc}', withBelowCostReason\\('${rpc}', \\{\\s*\\.\\.\\.${args},\\s*p_performed_by: profile\\.id,\\s*p_idempotency_key: (\\w+),\\s*\\}, belowCostReasonFor\\(\\1, reason\\)\\)`));
     });
   }
 

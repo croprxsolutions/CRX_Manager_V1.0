@@ -22,6 +22,12 @@ Sol final review of PR #951 (HIGH, fixed before landing):
   they test. Each now sends its own fresh key, and the call-site test fails if an e2e call to any
   of the thirteen leaves the key out. The blend-ticket chain's container proof still passes; the
   direct-order chain needs live data the container lacks, so it runs live after the apply.
+- **A below-cost retry matches its approved request (Codex).** Approving a below-cost order
+  adds the reason to that attempt's notes (direct) or items (rush). A retry under the same key
+  sent the request without it, so after a lost response the replay was refused and the kept draft
+  could later be resubmitted as a duplicate order. New Order now remembers the reason approved
+  under each key (`createBelowCostReasonMemo`) and sends it again on a retry under that key; keys
+  rotate when the form changes, so a reason never reaches a different request.
 - **The gauntlet chain asserts the new contract (Codex).** `smoke-gauntlet-core-blend-guards.sql`
   reused a committed blend-ticket order's key with a different order number and notes and
   expected the cached result; the wrapper now refuses that. The chain retries with the exact

@@ -18,7 +18,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { supabase, assertRpcResult } from '../lib/db';
-import { withBelowCostReason } from '../lib/belowCostApproval';
+import { createBelowCostReasonMemo, withBelowCostReason } from '../lib/belowCostApproval';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -149,6 +149,11 @@ export default function NewOrder() {
     p_notes: notes || undefined,
     p_customer_po_number: customerPoNumber.trim() || undefined,
   };
+  // The below-cost reason approved under each retry key is sent again on a retry under that key:
+  // without it the retry no longer matches the committed request, the replay is refused, and a
+  // later resubmit could duplicate the order (Codex, PR #951). Keys live only while this page is
+  // mounted and rotate whenever the form changes, so a reason never reaches a different request.
+  const [belowCostReasonFor] = useState(createBelowCostReasonMemo);
   const directOrderIntentHash = JSON.stringify(directOrderArgs);
   const rushOrderIntentHash = JSON.stringify(rushOrderArgs);
   useEffect(() => {
@@ -507,7 +512,7 @@ export default function NewOrder() {
             ...rushOrderArgs,
             p_performed_by: profile.id,
             p_idempotency_key: rushKey,
-          }, reason)));
+          }, belowCostReasonFor(rushKey, reason))));
           if (error) {
             // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
             // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
@@ -551,7 +556,7 @@ export default function NewOrder() {
           ...directOrderArgs,
           p_performed_by: profile.id,
           p_idempotency_key: idemKey,
-        }, reason)));
+        }, belowCostReasonFor(idemKey, reason))));
 
         if (error) {
           // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.

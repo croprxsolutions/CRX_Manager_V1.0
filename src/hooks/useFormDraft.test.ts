@@ -73,6 +73,21 @@ describe('useFormDraft', () => {
     expect(stored.data).toEqual({ name: 'New Data' });
   });
 
+  it('flushNow writes at once and a pending debounced save cannot overwrite it', () => {
+    const { result } = renderHook(() => useFormDraft<{ name: string }>('flush-test'));
+
+    act(() => {
+      result.current.saveDraft({ name: 'Older' });
+      result.current.flushNow({ name: 'Latest' });
+    });
+    expect(JSON.parse(localStorage.getItem(`${DRAFT_PREFIX}flush-test`)!).data).toEqual({ name: 'Latest' });
+
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(JSON.parse(localStorage.getItem(`${DRAFT_PREFIX}flush-test`)!).data).toEqual({ name: 'Latest' });
+  });
+
   it('clearDraft removes from localStorage', () => {
     const envelope = { savedAt: Date.now(), data: { name: 'To Delete' } };
     localStorage.setItem(`${DRAFT_PREFIX}clear-test`, JSON.stringify(envelope));

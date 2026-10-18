@@ -8,6 +8,14 @@ Sol final review of PR #951 (HIGH, fixed before landing):
   must stay recoverable. The warning says the form was kept.
 - **Two different forms no longer share a retry key.** The form's change check joined free-text
   fields with `|`, so an order name `A|B` with notes `C` looked the same as name `A` with notes
-  `B|C`. It is now JSON-encoded, so any change to any field starts a fresh key.
+  `B|C`. It is now JSON-encoded.
+- **A true retry keeps its key (CodeRabbit).** Each order type's change check is now exactly the
+  arguments that order sends, built once and sent as built. Before, a field the order never sends
+  (a rush order's date or name, or a space after the PO number) gave a retry a fresh key, so a
+  retry after a lost response could create a second order.
+- **The kept draft is current (CodeRabbit).** The draft saves half a second after typing; the
+  recovery now writes it immediately before opening the earlier order.
 - **Proof:** `src/__tests__/replayBindingBatch2CallSites.test.ts` fails if either recovery block
-  clears the draft or the hash goes back to a delimiter join.
+  clears the draft or skips the immediate save, or if either order call stops sending exactly
+  the arguments its key's change check covers; `src/hooks/useFormDraft.test.ts` proves the
+  immediate save cancels a pending one.

@@ -38,6 +38,8 @@ export function useFormDraft<T extends object>(
   draft: T | null;
   saveDraft: (state: T) => void;
   clearDraft: () => void;
+  /** Write state now, cancelling any pending debounced write. */
+  flushNow: (state: T) => void;
 } {
   const storageKey = DRAFT_PREFIX + key;
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -73,6 +75,7 @@ export function useFormDraft<T extends object>(
   /** Write state to localStorage immediately (no debounce). */
   const flushNow = useCallback(
     (state: T) => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
       try {
         const envelope: DraftEnvelope<T> = { savedAt: Date.now(), data: state };
         localStorage.setItem(storageKey, JSON.stringify(envelope));
@@ -133,5 +136,5 @@ export function useFormDraft<T extends object>(
     };
   }, []);
 
-  return { draft, saveDraft, clearDraft };
+  return { draft, saveDraft, clearDraft, flushNow };
 }

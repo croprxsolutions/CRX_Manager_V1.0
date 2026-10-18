@@ -98,16 +98,28 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     const source = read('src/pages/NewOrder.tsx');
     const blocks = source.match(/if \(committedOrderId\) \{[\s\S]*?throw new CriticalActionHandledError\(/g) ?? [];
     expect(blocks).toHaveLength(2);
-    for (const block of blocks) expect(block).not.toContain('clearDraft');
+    for (const block of blocks) {
+      expect(block).not.toContain('clearDraft');
+      // The debounced save may not have run yet, so the recovery writes the draft before leaving (CodeRabbit).
+      expect(block).toMatch(/flushDraft\(draftState\);[\s\S]*navigate\(/);
+    }
   });
 
-  // The form's key resets whenever the request changes; a delimiter-joined hash let two
-  // different forms ("A|B" + "C" vs "A" + "B|C") keep one key (Sol, 2026-10-18).
-  it('NewOrder: the order intent hash is JSON-encoded, not delimiter-joined', () => {
-    const source = read('src/pages/NewOrder.tsx');
-    expect(source).toMatch(/const orderIntentHash = JSON\.stringify\(\[/);
-    expect(source).not.toMatch(/orderIntentHash = \[[\s\S]{0,400}?\]\.join\('\|'\)/);
-  });
+  // Each key resets exactly when its RPC's arguments change: the intent is the argument object
+  // the call sends, JSON-encoded. A delimiter join let two different forms keep one key (Sol), and
+  // a field the RPC never sees must not retire a key whose attempt may have committed (CodeRabbit).
+  const ORDER_INTENT: Array<[string, string, string, string]> = [
+    ['create_direct_order', 'directOrderArgs', 'directOrderIntentHash', 'createOrderIdem'],
+    ['create_rush_order', 'rushOrderArgs', 'rushOrderIntentHash', 'rushOrderIdem'],
+  ];
+  for (const [rpc, args, hash, idem] of ORDER_INTENT) {
+    it(`NewOrder: ${rpc} sends exactly the arguments its key's intent hashes`, () => {
+      const source = read('src/pages/NewOrder.tsx');
+      expect(source).toContain(`const ${hash} = JSON.stringify(${args});`);
+      expect(source).toMatch(new RegExp(`useEffect\\(\\(\\) => \\{\\s*${idem}\\.resetKey\\(\\);[^}]*\\}, \\[${hash}\\]\\);`));
+      expect(source).toMatch(new RegExp(`supabase\\.rpc\\('${rpc}', withBelowCostReason\\('${rpc}', \\{\\s*\\.\\.\\.${args},\\s*p_performed_by: profile\\.id,\\s*p_idempotency_key: \\w+,\\s*\\}, reason\\)`));
+    });
+  }
 
   it('the reconcile screen keeps its exact-intent key on any refusal', () => {
     const source = read('src/components/integrity/IntegrityCleanupPanel.tsx');

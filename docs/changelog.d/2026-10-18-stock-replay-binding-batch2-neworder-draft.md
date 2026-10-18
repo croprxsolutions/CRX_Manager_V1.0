@@ -14,7 +14,8 @@ Sol final review of PR #951 (HIGH, fixed before landing):
   (a rush order's date or name, or a space after the PO number) gave a retry a fresh key, so a
   retry after a lost response could create a second order.
 - **The kept draft is current (CodeRabbit).** The draft saves half a second after typing; the
-  recovery now writes it immediately before opening the earlier order.
+  recovery now writes it immediately before opening the earlier order, from the latest form state
+  (`flushLatest`), so an edit made while the request was pending is kept too (Codex).
 - **Older tests send a key (Codex).** Six gate probes in `smoke-create-direct-order-po.sql` and
   `smoke-blend-ticket-fractional-cents.sql`, and 19 browser-test calls in `tests/e2e/` (18 to
   `create_direct_order`, one to `create_planned_holds`), called these functions without a retry

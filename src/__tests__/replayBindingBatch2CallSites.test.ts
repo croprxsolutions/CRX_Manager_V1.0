@@ -100,8 +100,10 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     expect(blocks).toHaveLength(2);
     for (const block of blocks) {
       expect(block).not.toContain('clearDraft');
-      // The debounced save may not have run yet, so the recovery writes the draft before leaving (CodeRabbit).
-      expect(block).toMatch(/flushDraft\(draftState\);[\s\S]*navigate\(/);
+      // The debounced save may not have run yet, so the recovery writes the draft before leaving
+      // (CodeRabbit), from the latest form state rather than the click-time snapshot (Codex).
+      expect(block).toMatch(/flushLatestDraft\(\);[\s\S]*navigate\(/);
+      expect(block).not.toMatch(/flush\w*\(draftState\)/);
     }
   });
 

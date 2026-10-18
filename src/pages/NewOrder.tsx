@@ -170,7 +170,7 @@ export default function NewOrder() {
   // Codex round-7 P2: include priceLater so a reload doesn't silently downgrade a
   // rush (price-later) order back to a normal priced order on submit.
   const draftState = { customerId, orderName, orderDate, customerPoNumber, notes, items, priceLater };
-  const { draft, clearDraft, flushNow: flushDraft } = useFormDraft<typeof draftState>('new-order', draftState);
+  const { draft, clearDraft, flushLatest: flushLatestDraft } = useFormDraft<typeof draftState>('new-order', draftState);
 
   // Restore draft on mount (runs once after loading completes)
   const [draftRestored, setDraftRestored] = useState(false);
@@ -524,8 +524,8 @@ export default function NewOrder() {
             if (committedOrderId) {
               // The refusal means this form differs from the order that committed, so keep the
               // draft: the edits are not in that order and must stay recoverable (Sol, 2026-10-18).
-              // Written now: the debounced save may not have run before the page unmounts (CodeRabbit).
-              flushDraft(draftState);
+              // Written now, from the latest form state (an edit made while the request was pending counts).
+              flushLatestDraft();
               toast('warning', 'An earlier attempt with this retry already created an order. Nothing new was created — opening that order now. Your current form is kept as a draft.');
               navigate(`/orders/${committedOrderId}`);
               // Already reported above: no generic "created" toast on top of it.
@@ -569,8 +569,8 @@ export default function NewOrder() {
           if (committedOrderId) {
             // The refusal means this form differs from the order that committed, so keep the
             // draft: the edits are not in that order and must stay recoverable (Sol, 2026-10-18).
-            // Written now: the debounced save may not have run before the page unmounts (CodeRabbit).
-            flushDraft(draftState);
+            // Written now, from the latest form state (an edit made while the request was pending counts).
+            flushLatestDraft();
             toast('warning', 'An earlier attempt with this retry already created an order. Nothing new was created — opening that order now. Your current form is kept as a draft.');
             navigate(`/orders/${committedOrderId}`);
             // Already reported above: no generic "created" toast on top of it.

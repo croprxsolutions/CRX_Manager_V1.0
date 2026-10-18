@@ -87,10 +87,27 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     it(`${file}: a ${rpc} intent refusal opens the order already created`, () => {
       const source = read(file);
       expect(source).toMatch(new RegExp(
-        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,200}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*${exit}`,
+        `const committedOrderId = getCommittedOrderIdFromMismatch\\(error, '${rpc}'\\);\\s*\\n\\s*if \\(committedOrderId\\) \\{[\\s\\S]{0,600}?navigate\\(\`/orders/\\$\\{committedOrderId\\}\`\\);\\s*\\n\\s*${exit}`,
       ));
     });
   }
+
+  // An intent refusal means the current form differs from the order that committed, so the
+  // recovery must keep the draft: clearing it would lose edits that are in no order (Sol, 2026-10-18).
+  it('NewOrder: the order recovery keeps the edited form as a draft', () => {
+    const source = read('src/pages/NewOrder.tsx');
+    const blocks = source.match(/if \(committedOrderId\) \{[\s\S]*?throw new CriticalActionHandledError\(/g) ?? [];
+    expect(blocks).toHaveLength(2);
+    for (const block of blocks) expect(block).not.toContain('clearDraft');
+  });
+
+  // The form's key resets whenever the request changes; a delimiter-joined hash let two
+  // different forms ("A|B" + "C" vs "A" + "B|C") keep one key (Sol, 2026-10-18).
+  it('NewOrder: the order intent hash is JSON-encoded, not delimiter-joined', () => {
+    const source = read('src/pages/NewOrder.tsx');
+    expect(source).toMatch(/const orderIntentHash = JSON\.stringify\(\[/);
+    expect(source).not.toMatch(/orderIntentHash = \[[\s\S]{0,400}?\]\.join\('\|'\)/);
+  });
 
   it('the reconcile screen keeps its exact-intent key on any refusal', () => {
     const source = read('src/components/integrity/IntegrityCleanupPanel.tsx');

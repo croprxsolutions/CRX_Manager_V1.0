@@ -122,13 +122,14 @@ export default function NewOrder() {
   // Hash MUST cover every submitted field (RPC sends customer/date/name/notes
   // + items[product_id,product_name,quantity,price,cost,unit_size]). Codex
   // 2026-05-16 follow-up: omitting any field replays prior success silently.
-  const orderIntentHash = [
+  // JSON-encoded, not joined with a delimiter: free-text fields may contain any
+  // character, so "A|B" + "C" and "A" + "B|C" must not hash alike (Sol, 2026-10-18).
+  const orderIntentHash = JSON.stringify([
     customerId, orderDate, orderName, notes, customerPoNumber,
     items
-      .map((i) => `${i.product_id}:${i.product_name || ''}:${i.quantity}:${i.price_per_unit}:${i.unit_cost}:${i.unit_size || ''}`)
-      .sort()
-      .join(','),
-  ].join('|');
+      .map((i) => JSON.stringify([i.product_id, i.product_name || '', i.quantity, i.price_per_unit, i.unit_cost, i.unit_size || '']))
+      .sort(),
+  ]);
   useEffect(() => {
     createOrderIdem.resetKey();
     // Codex P2: the rush-order path shares this form, so reset its key too —
@@ -498,8 +499,9 @@ export default function NewOrder() {
             // instead of letting the next click, with a fresh key, create a second order.
             const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_rush_order');
             if (committedOrderId) {
-              clearDraft();
-              toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
+              // The refusal means this form differs from the order that committed, so keep the
+              // draft: the edits are not in that order and must stay recoverable (Sol, 2026-10-18).
+              toast('warning', 'An earlier attempt with this retry already created an order. Nothing new was created — opening that order now. Your current form is kept as a draft.');
               navigate(`/orders/${committedOrderId}`);
               // Already reported above: no generic "created" toast on top of it.
               throw new CriticalActionHandledError('opened the order an earlier attempt created');
@@ -553,8 +555,9 @@ export default function NewOrder() {
           // instead of letting the next click, with a fresh key, create a second order.
           const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_direct_order');
           if (committedOrderId) {
-            clearDraft();
-            toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
+            // The refusal means this form differs from the order that committed, so keep the
+            // draft: the edits are not in that order and must stay recoverable (Sol, 2026-10-18).
+            toast('warning', 'An earlier attempt with this retry already created an order. Nothing new was created — opening that order now. Your current form is kept as a draft.');
             navigate(`/orders/${committedOrderId}`);
             // Already reported above: no generic "created" toast on top of it.
             throw new CriticalActionHandledError('opened the order an earlier attempt created');

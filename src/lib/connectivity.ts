@@ -15,7 +15,7 @@
 import { supabase } from './db';
 
 export const NO_SIGNAL_MESSAGE =
-  'No signal. This delivery was NOT completed and nothing was saved. Move to where you have signal, then tap Complete again.';
+  'No signal. This delivery was NOT completed and nothing was saved. Move to where you have signal, then try again.';
 
 // The Deliveries list starts a scheduled delivery (confirm_delivery) and then completes
 // it as two server calls. If signal drops between them, the start has already happened.
@@ -27,16 +27,30 @@ const PROBE_TIMEOUT_MS = 6000;
 export async function hasSignal(timeoutMs: number = PROBE_TIMEOUT_MS): Promise<boolean> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // The timer races the whole probe, not just the request: before sending, the client
+  // may try to renew an expired sign-in, and that renewal has its own longer retries.
+  const timedOut = new Promise<false>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(false);
+    }, timeoutMs);
+  });
+  const probe = (async () => {
+    try {
+      const { status } = await supabase
+        .from('deliveries')
+        .select('id', { head: true })
+        .limit(1)
+        .retry(false)
+        .abortSignal(controller.signal);
+      return status > 0;
+    } catch {
+      return false;
+    }
+  })();
   try {
-    const { status } = await supabase
-      .from('deliveries')
-      .select('id', { head: true })
-      .limit(1)
-      .abortSignal(controller.signal);
-    return status > 0;
-  } catch {
-    return false;
+    return await Promise.race([probe, timedOut]);
   } finally {
     clearTimeout(timer);
   }

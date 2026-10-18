@@ -93,6 +93,8 @@ export default function FieldStop() {
   const [noOnePresent, setNoOnePresent] = useState(false);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
+  // Stop-to-stop navigation reuses this page; never carry paper mode onto the next stop.
+  useEffect(() => { setUsePaperTicket(false); }, [id]);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   const [emailOnComplete, setEmailOnComplete] = useState(true);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
@@ -319,6 +321,8 @@ export default function FieldStop() {
       setCompleting(false);
       return;
     }
+    // The signal check can take a few seconds; re-check the stop did not change meanwhile.
+    if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); setCompleting(false); return; }
 
     try {
       const { data: result, error } = await supabase.rpc('complete_delivery', rpcParams);
@@ -383,7 +387,8 @@ export default function FieldStop() {
 
       await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
 
-      if (emailOnComplete && delivery.customer?.email) {
+      // The paper-ticket path always sends the receipt (Goal 5: it is still required there).
+      if ((emailOnComplete || usePaperTicket) && delivery.customer?.email) {
         const emailItems = items
           .map((it) => ({ name: it.product?.product_name || 'Product', qty: isPartial ? (deliveryQtys[it.id] ?? it.quantity) : it.quantity }))
           .filter((r) => r.qty > 0);
@@ -571,7 +576,7 @@ export default function FieldStop() {
               ) : (
                 <p className="text-sm text-amber-700">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
               )}
-              <button type="button" disabled={uploadingPhoto || photos.length >= 10} onClick={() => paperTicketInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
+              <button type="button" disabled={uploadingPhoto || photos.length >= 10 || !isOnline} onClick={() => paperTicketInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
                 <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
               </button>
             </div>
@@ -617,7 +622,7 @@ export default function FieldStop() {
 
           {delivery.customer?.email && (
             <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
-              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className="w-4 h-4" />
+              <input type="checkbox" checked={emailOnComplete || usePaperTicket} disabled={usePaperTicket} onChange={(e) => setEmailOnComplete(e.target.checked)} className="w-4 h-4" />
               Email a receipt to the customer
             </label>
           )}

@@ -6,7 +6,8 @@ every delivery completion path follow that rule. It is an app-only change: no mi
 
 - **New `src/lib/connectivity.ts`.** `hasSignal()` checks the phone's offline flag and then makes one
   tiny database read, so farm Wi-Fi with no internet behind it also counts as no signal. Any HTTP
-  answer counts as signal; a dropped or timed-out request (6 seconds) does not.
+  answer counts as signal; a dropped request (no automatic retries) or one still unanswered after
+  6 seconds does not.
 - **Delivery page (`DeliveryDetail.tsx`) and field stop (`FieldStop.tsx`).** The "Save Offline" path is
   removed. Without signal, Complete shows "No signal. This delivery was NOT completed and nothing was
   saved…" and changes nothing. The offline notices now say a delivery can only be completed with
@@ -14,12 +15,18 @@ every delivery completion path follow that rule. It is an app-only change: no mi
 - **Deliveries list (`Deliveries.tsx`).** Mark Delivered / Mark Complete checks for signal before the
   start step and again between start and complete. If signal drops between them, the driver is told
   the delivery is now In Progress but not completed, with no stock taken and nothing billed. The
-  remaining instant between the two server calls is recorded in `docs/manual/KNOWN_ISSUES.md`.
+  remaining instant between the two server calls is recorded in `docs/manual/KNOWN_ISSUES.md`;
+  Mason chose to ship with it and close it later with one combined server call.
 - **Paper-ticket fallback (new `src/lib/paperTicket.ts`).** On the delivery page's driver layout and
   the field stop, "Customer signed a paper ticket (no signal at the site)" replaces the on-screen
   signature with a required photo of the signed ticket. The photo is an ordinary delivery photo
-  captioned "Signed paper delivery ticket"; the signer's name is still required, and no signature
-  image is saved.
+  captioned "Signed paper delivery ticket"; the signer's name is still required, no signature
+  image is saved, and the customer receipt is always sent when the customer has an email on file.
+  The Deliveries list dialog sends paper-ticket deliveries to the delivery page. The ticket photo
+  is required only when the driver ticks the paper-ticket box.
+- **Photo upload no longer resets edited quantities.** On the delivery page, a photo upload used to
+  reload the whole delivery, putting short quantities back to full. It now refreshes only the
+  photos, so taking the ticket photo after marking items short can't record a full delivery.
 - **Pre-existing bug fixed.** On the delivery page's driver layout, Complete Delivery opened a
   confirmation box that was never drawn, so a driver's tap did nothing. Both layouts now share it.
 - **Not changed.** Completions already queued offline before this ships still sync, or go to Offline

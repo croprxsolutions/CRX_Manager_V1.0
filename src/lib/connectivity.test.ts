@@ -21,9 +21,19 @@ describe('hasSignal (Goal 5: completing a delivery needs a signal)', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('is false when the phone says online but the request cannot reach the server', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+  it('is false quickly when the phone says online but the request cannot reach the server', async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.stubGlobal('fetch', fetchSpy);
+    const started = Date.now();
     expect(await hasSignal(2000)).toBe(false);
+    // No automatic retries: one attempt, refused well inside the timeout.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('is false at the timeout even if the probe itself never settles', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => { /* ignores abort */ })));
+    expect(await hasSignal(50)).toBe(false);
   });
 
   it('is false when the server never answers before the timeout', async () => {
@@ -54,7 +64,11 @@ describe('no delivery completion is queued offline', () => {
     (path) => {
       const source = readFileSync(path, 'utf8');
       expect(source).not.toMatch(/queueAction/);
-      expect(source).toMatch(/hasSignal\(\)/);
+      // The check must be real code that runs before the completion call, not a mention.
+      const check = source.indexOf('if (!(await hasSignal()))');
+      const complete = source.indexOf("supabase.rpc('complete_delivery'");
+      expect(check).toBeGreaterThan(-1);
+      expect(complete).toBeGreaterThan(check);
     },
   );
 });

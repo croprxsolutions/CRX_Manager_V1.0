@@ -84,7 +84,8 @@ creates the draft invoice) and the driver is told exactly that ("Signal dropped 
 was started…"); the dialog stays open as **Mark Complete** for the retry. Seen in the browser preview
 against a local test database on 2026-10-18. **Fix:** one server call that starts and completes in a
 single transaction. That touches `complete_delivery`, which replay-binding batch 2 (PR #951) owns, so
-it waits for that batch. Source: `src/pages/Deliveries.tsx` `handleCompleteConfirm`,
+it waits for that batch. Mason chose 2026-10-18 to ship Goal 5 with this gap and build the combined call
+after #951 lands. Source: `src/pages/Deliveries.tsx` `handleCompleteConfirm`,
 `src/lib/connectivity.ts`.
 
 ## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16, batches 2–4 open) — about 75 live functions replay a saved result matched on the retry key alone (about 66 left after batch 1)

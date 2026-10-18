@@ -481,7 +481,8 @@ export default function Deliveries() {
       // server-side, the replay returns the cached result and onSuccess (including
       // the completion notification) still fires.
       setCompleteTarget((prev) => (prev && prev.id === target.id ? { ...prev, status: 'in_progress' } : prev));
-      await fetchDeliveries();
+      // Without signal the reload would only add a second "failed to load" message.
+      if (outcome !== 'no_signal') await fetchDeliveries();
     }
   };
 
@@ -1531,7 +1532,8 @@ export default function Deliveries() {
           <p className="text-sm text-secondary">
             Complete delivery <span className="font-medium text-nav-dark">{completeTarget?.delivery_number}</span> for{' '}
             <span className="font-medium text-nav-dark">{completeTarget?.customer_name}</span> — all items delivered in full.
-            For a partial delivery, or to email the customer their receipt, open the delivery instead.
+            For a partial delivery, to email the customer their receipt, or if the customer signed a
+            paper ticket (it needs a photo of the signed ticket), open the delivery instead.
           </p>
           {completeTarget?.status === 'scheduled' && (
             <p className="text-sm text-secondary">

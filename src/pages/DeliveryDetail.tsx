@@ -135,6 +135,8 @@ export default function DeliveryDetail() {
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
+  // A follow-up delivery reuses this page; never carry paper mode onto it.
+  useEffect(() => { setUsePaperTicket(false); }, [id]);
   const [completing, setCompleting] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
@@ -825,7 +827,18 @@ export default function DeliveryDetail() {
 
     if (uploadCount > 0) {
       toast('success', `${uploadCount} photo${uploadCount > 1 ? 's' : ''} uploaded`);
-      fetchDelivery();
+      // Refresh only the photos. A full fetchDelivery() resets the driver's edited
+      // partial quantities to full, and the paper-ticket photo is taken right before
+      // Complete, so a short delivery would be recorded as full.
+      const uploadDeliveryId = id;
+      const { data: refreshedPhotos, error: photosErr } = await supabase
+        .from('delivery_photos').select('*').eq('delivery_id', uploadDeliveryId!).order('sort_order');
+      if (photosErr) {
+        Sentry.captureException(photosErr, { extra: { context: 'Refresh delivery photos after upload' } });
+        toast('error', 'Photo saved, but the photo list could not refresh. Reopen the delivery to see it.');
+      } else if (signatureRouteIdRef.current === uploadDeliveryId) {
+        setPhotos((refreshedPhotos || []) as DeliveryPhoto[]);
+      }
     }
     setUploadingPhoto(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1056,7 +1069,8 @@ export default function DeliveryDetail() {
       );
 
       // === Email customer when delivery is completed (opt-out via checkbox) ===
-      if (emailOnComplete && customer?.email) {
+      // The paper-ticket path always sends the receipt (Goal 5: it is still required there).
+      if ((emailOnComplete || usePaperTicket) && customer?.email) {
         try {
           const deliveredItems = items
             .map((item) => {
@@ -1629,7 +1643,7 @@ export default function DeliveryDetail() {
                   <button
                     type="button"
                     onClick={() => paperTicketInputRef.current?.click()}
-                    disabled={uploadingPhoto || photos.length >= 10}
+                    disabled={uploadingPhoto || photos.length >= 10 || !isOnline}
                     className="w-full py-3 flex items-center justify-center gap-2 text-white border border-gray-600 rounded-lg active:bg-gray-600 disabled:opacity-50 transition-colors"
                   >
                     <Camera className="w-5 h-5" />
@@ -1655,7 +1669,8 @@ export default function DeliveryDetail() {
                 <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={emailOnComplete}
+                    checked={emailOnComplete || usePaperTicket}
+                    disabled={usePaperTicket}
                     onChange={(e) => setEmailOnComplete(e.target.checked)}
                     className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green bg-gray-700"
                   />

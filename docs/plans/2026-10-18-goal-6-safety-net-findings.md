@@ -4,7 +4,7 @@ Read-only investigation. Nothing was changed in the database, storage, secrets, 
 
 ## The one thing Mason must do
 
-**Upgrade the Supabase organization "Crop RX Solutions" to Pro and turn on point-in-time recovery (PITR).** Live check today: the plan is `free` (`get_organization` → `plan: free`). On Free there is no PITR and no Supabase daily backup, so the only recovery copy today is a weekly dump, up to 7 days old. That does not meet the 2026-10-14 target ("lose minutes, not a day"). Everything else in this note can be built by agents.
+**Upgrade the Supabase organization "Crop RX Solutions" to Pro and turn on point-in-time recovery (PITR).** Live check today: the plan is `free` (`get_organization` → `plan: free`). On Free there is no PITR and no Supabase daily backup, so the only recovery copy today is a weekly dump, up to 7 days old. That does not meet the 2026-10-14 target ("lose minutes, not a day"). Pro alone does not turn PITR on: Supabase bills PITR as a separate add-on and, per its backup documentation, also requires at least Small compute, so the monthly cost is Pro plus the add-on plus any compute upgrade (check the exact figures on the billing page before clicking, and confirm afterwards that PITR shows as enabled). This is the one immediate step. Later steps also need Mason, and he should expect them: naming two recovery people and sharing passphrase access, approving a possibly paid throwaway/staging project, and authorizing a new storage-backup secret in `CRX_Backups`. Everything else in this note can be built by agents.
 
 ## Findings
 

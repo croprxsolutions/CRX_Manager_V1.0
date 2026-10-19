@@ -12,7 +12,8 @@ first answered left the delivery **In Progress** (nothing deducted or billed, dr
   the server's now(); an earlier date completes at 17:00 UTC of that date (noon CDT, 11 AM CST; the same instant the app
   already sent for a past date). So a "today" completion whose request reaches the server just
   after Chicago midnight keeps the chosen day. A date after today, more than a year back, or not
-  a real date is refused. (Such a just-after-midnight completion is dated the previous day, so for
+  a real date is refused; the one-year bound is checked after the retry receipt lookup, so an exact
+  retry of a completion saved on the oldest allowed date still replays after midnight (Codex). (Such a just-after-midnight completion is dated the previous day, so for
   an order with field allocations it is handled like any backdated completion: the split drafts are
   flagged for the office instead of created automatically.)
 - **Authorization before any saved answer.** It runs `complete_delivery`'s own test (active admin or

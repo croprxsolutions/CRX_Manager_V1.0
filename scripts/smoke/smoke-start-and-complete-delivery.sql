@@ -17,6 +17,8 @@
 --   c. the same key for a DIFFERENT delivery is refused (IDEMPOTENCY_INTENT_MISMATCH), and that
 --      delivery stays scheduled;
 --   d. the same key from a different person is refused (IDEMPOTENCY_ACTOR_MISMATCH);
+--   d2. an exact retry whose date has since passed the one-year bound still replays (the bound runs
+--       after the receipt lookup);
 --   e. no key: IDEMPOTENCY_KEY_REQUIRED; no date: DELIVERED_ON_REQUIRED; a forged p_performed_by:
 --      ACTOR_MISMATCH; tomorrow: DELIVERED_ON_IN_FUTURE; one day past a calendar year back, or -infinity:
 --      DELIVERED_ON_TOO_OLD (-infinity: DELIVERED_ON_INVALID); each leaves the delivery scheduled;
@@ -57,6 +59,7 @@ DECLARE
   v_fp text;
   v_actor uuid;
   v_closed_start date;
+  v_aged date;
 BEGIN
   -- 0. Preconditions, two admins, fixtures.
   IF EXISTS (SELECT 1 FROM public.accounting_periods
@@ -202,6 +205,25 @@ BEGIN
   END;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
+  -- d2. An exact retry of a completion whose date has since passed the one-year bound (it was the
+  -- oldest allowed date when it committed, and the retry lands after Chicago midnight) replays the
+  -- saved result instead of being refused DELIVERED_ON_TOO_OLD. The clock cannot move inside the
+  -- chain, so the saved receipt is planted exactly as the function writes and binds it.
+  v_aged := (v_today - interval '1 year')::date - 1;
+  v_fp := public._replay_fingerprint_20261015(jsonb_build_object(
+    'actor_id', v_admin, 'delivery_id', v_del[1], 'signed_by', '[SMOKE] Receiver', 'delivered_on', v_aged,
+    'quantities', NULL::jsonb, 'issue_type', NULL::text, 'issue_notes', NULL::text));
+  PERFORM public.save_idempotency(v_prefix || 'aged', 'start_and_complete_delivery', v_res);
+  PERFORM public._bind_replay_receipt_20261015(v_prefix || 'aged', 'start_and_complete_delivery', v_fp);
+  BEGIN
+    v_res2 := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_aged, v_admin, NULL, NULL, NULL, v_prefix || 'aged');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: an exact retry of an aged-out date was refused: %', SQLERRM;
+  END;
+  IF v_res2 IS DISTINCT FROM v_res THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: an exact retry of an aged-out date did not replay: % vs %', v_res2, v_res;
+  END IF;
 
   -- e. Refusals before any change.
   BEGIN

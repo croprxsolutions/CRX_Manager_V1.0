@@ -15,9 +15,9 @@
 --        messages;
 --     2. requires p_delivered_on, the business date the person chose (America/Chicago), and refuses
 --        one that is not a real date (DELIVERED_ON_INVALID), after today's Chicago date
---        (DELIVERED_ON_IN_FUTURE), or more than a
---        year back (DELIVERED_ON_TOO_OLD: -infinity or a typo year would date the invoice outside
---        any accounting period);
+--        (DELIVERED_ON_IN_FUTURE), or (checked in step 4, after the receipt lookup, because the
+--        bound moves with the clock) more than a calendar year back (DELIVERED_ON_TOO_OLD: a typo
+--        year would date the invoice outside any accounting period);
 --     3. locks the delivery row and runs complete_delivery's authorization test (active admin or
 --        sales_rep, or the assigned driver) BEFORE the receipt lookup, as complete_delivery's own
 --        body authorizes before replaying, so a driver taken off the delivery or a deactivated
@@ -27,7 +27,7 @@
 --        returns the saved result; a different person or request is refused
 --        (IDEMPOTENCY_ACTOR_MISMATCH / IDEMPOTENCY_INTENT_MISMATCH). The fingerprint carries the
 --        chosen DATE, not a derived timestamp, so an exact retry across Chicago midnight replays.
---        Then, if the delivery is scheduled, starts it by calling confirm_delivery keyless
+--        Only a call that is not a replay then meets the one-year bound. Then, if the delivery is scheduled, starts it by calling confirm_delivery keyless
 --        (unchanged: same status change, activity row, driver notification and authorization);
 --     5. completes it by calling complete_delivery under a derived key (<key>:complete), which
 --        binds its own receipt as before. completed_at: NULL (the server's now()) when the chosen
@@ -142,10 +142,9 @@ BEGIN
     RAISE EXCEPTION 'DELIVERED_ON_IN_FUTURE: the delivery date % is after today (%)', p_delivered_on, v_today
       USING ERRCODE = '22023';
   END IF;
-  IF p_delivered_on < (v_today - interval '1 year')::date THEN
-    RAISE EXCEPTION 'DELIVERED_ON_TOO_OLD: the delivery date % is more than a year before today (%)', p_delivered_on, v_today
-      USING ERRCODE = '22023';
-  END IF;
+  -- The one-year bound moves with the clock, so it runs after the receipt lookup below: an exact
+  -- retry of a completion saved on the oldest allowed date, landing after Chicago midnight, still
+  -- replays instead of being refused. A date valid when sent never becomes a future date.
 
   -- complete_delivery's own test, run BEFORE the receipt lookup, so a driver taken off the
   -- delivery or a deactivated account gets neither a replayed completion nor a refusal that
@@ -181,6 +180,11 @@ BEGIN
       RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
     END IF;
     RETURN v_replay -> 'result';
+  END IF;
+
+  IF p_delivered_on < (v_today - interval '1 year')::date THEN
+    RAISE EXCEPTION 'DELIVERED_ON_TOO_OLD: the delivery date % is more than a year before today (%)', p_delivered_on, v_today
+      USING ERRCODE = '22023';
   END IF;
 
   IF v_status = 'scheduled' THEN

@@ -28,14 +28,14 @@ const SITES: Array<[string, string]> = [
 // The reset runs on any binding refusal (the helper returns 'intent', 'actor' or 'receipt', else null),
 // first in a block that then reloads the record (CodeRabbit on PR #954).
 const anyBindingReset = (hook: string) => new RegExp(
-  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) \\{\\n\\s*${hook}\\.resetKey\\(\\);`,
+  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) \\{\\n\\s*${hook}\\.resetKey(?:For\\(completeScope\\))?\\(?\\)?;`,
   'g',
 );
 // Each screen's reload in that block (the next 1-4 lines).
 const RELOADS: Record<string, RegExp> = {
-  'src/pages/Deliveries.tsx': /bindingRejected = true;[\s\S]*?if \(!completed && bindingRejected\) \{[\s\S]{0,500}?await fetchDeliveries\(\);/,
-  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKey\(\);\n\s*fetchDelivery\(\);/,
-  'src/pages/FieldStop.tsx': /completeIdem\.resetKey\(\);\n\s*fetchStop\(\);/,
+  'src/pages/Deliveries.tsx': /bindingRejected = true;[\s\S]*?if \(outcome !== 'completed' && bindingRejected\) \{[\s\S]{0,500}?closeCompleteDialog\(\);\n\s*await fetchDeliveries\(\);/,
+  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*fetchDelivery\(\);/,
+  'src/pages/FieldStop.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*fetchStop\(\);/,
   'src/pages/FieldView.tsx': /completeIdem\.resetKey\(\);\n\s*setCompleteFormOpenFor\(null\);\n\s*fetchCards\(\);/,
   'src/pages/JobDetail.tsx': /completeJobIdem\.resetKey\(\);\n\s*if \(stillOnThisJob\(\)\) \{\n\s*setShowCompleteModal\(false\);\n\s*fetchJob\(\);/,
 };
@@ -67,17 +67,19 @@ describe('replay-binding batch 3a call sites retire the key on any binding refus
     it(`${file}: every ${rpc} call sends p_idempotency_key`, () => {
       const source = read(file);
       // Inline argument objects run to their closing '})'; DeliveryDetail, FieldStop and FieldView
-      // pass a named rpcParams object built just above the call.
+      // pass (or spread) a named rpcParams object built just above the call.
       const inline = [...source.matchAll(new RegExp(`\\.rpc\\('${rpc}', \\{([\\s\\S]*?)\\n\\s*\\}\\)`, 'g'))];
       const named = [...source.matchAll(new RegExp(`\\.rpc\\('${rpc}', rpcParams\\)`, 'g'))];
       expect(inline.length + named.length).toBeGreaterThan(0);
+      let usesRpcParams = named.length > 0;
       for (const call of inline) {
+        if (/^\s*\.\.\.rpcParams,/.test(call[1])) { usesRpcParams = true; continue; }
         expect(call[1]).toMatch(/p_idempotency_key:\s*\S/);
         expect(call[1]).not.toMatch(/p_idempotency_key:[^,\n]*\b(?:undefined|null)\b/);
       }
-      if (named.length > 0) {
-        const params = /const rpcParams[^=]*= \{([\s\S]*?)\n\s*\};/.exec(source);
-        expect(params?.[1]).toMatch(/p_idempotency_key:\s*(?:idemKey|completeIdem\.getKey\(\))/);
+      if (usesRpcParams) {
+        const params = /const rpcParams[^=]*= \{([^;]*?)\};/.exec(source);
+        expect(params?.[1]).toMatch(/p_idempotency_key:\s*(?:idemKey|completeIdem\.getKey(?:\(\)|For\(completeScope\)))/);
       }
     });
   }

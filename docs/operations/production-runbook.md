@@ -189,17 +189,23 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 ### 4.6 Restore the newest dump into a new project
 
 1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
-2. Clone `masonwells1/CRX_Backups` and take the newest `backups/crx-backup-YYYY-MM-DD.dump.gpg`.
+2. Clone `masonwells1/CRX_Backups` and choose the archive `backups/crx-backup-YYYY-MM-DD.dump.gpg`:
+   the **newest** when the project is lost; for **corruption**, the newest archive taken **before the bad
+   change began** (the newest one may already contain the damage). The repo keeps 8, so corruption older
+   than about 8 weeks cannot be undone this way. Say which you chose and why in the drill log.
 3. Decrypt with the passphrase from Mason's password manager. Never paste it into chat or a file.
-4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Do not recreate
-   `cron` jobs: confirm `cron.job` in the new project is empty or inactive before the app is pointed at it.
+4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Keep
+   scheduled jobs **off during reconciliation**: confirm `cron.job` in the new project is empty or inactive
+   before the app is pointed at it. They are put back at the end (4.7, last item), not forgotten.
 5. Validate. **Future (once the alert design is built):** compare against the baseline file
    `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists**, so use this fallback:
    read live row counts for `customers`, `invoices`, `orders`, `inventory_transactions`, `allocation_sets` and `prepay_credits` (the live payment tables; the old `payments` table is dead and must not be used)
-   just before the drill and note the dump date. For **append-only** data (`inventory_transactions`, `allocation_sets`,
-   `prepay_credits`; count voided rows too, since voiding changes status, not row count) the restored count must be at or below live and close to it (rows written since the dump
-   are missing, never extra). For tables where deletes are allowed (`customers`, `orders`, `invoices`)
-   the restored count may be above live if records were deleted after the dump: list the difference and
+   just before the drill and note the dump date. Treat a table as **append-only** only if no one can delete from it; today
+   that is just `inventory_transactions` (confirm against the delete rules at drill time). For it, the restored
+   count must be at or below live and close to it (rows written since the dump are missing, never extra).
+   Everything else, including `allocation_sets` and `prepay_credits` (admins can delete from both; count
+   voided rows too, since voiding changes status, not row count), `customers`, `orders` and `invoices`,
+   is mutable: the restored count may be above live if records were deleted after the dump: list the difference and
    explain it from the activity log rather than failing the drill. In every table the newest `created_at`
    must not be after the dump time. Spot-check a few known recent invoices by number. Record the numbers
    in the drill log.
@@ -217,7 +223,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    `customer-document-files`, `epa-lookup`, `setup-blend-tickets-storage`; the directory listing is
    authoritative). The Content Security Policy in `vercel.json` allows connections only to the current project's host
    (`rhyzpcqhnizqbxphqdkr.supabase.co`), so the new project's host must be added there and deployed through
-   the normal PR path first, or browsers will block every request after cutover. Only then repoint the
+   the normal PR path first, or browsers will block every request after cutover. Also set the new project's
+   Auth **Site URL** to `https://croprxsolutions.app` and add `https://croprxsolutions.app/reset-password`
+   (and any other redirect the app uses) to its redirect allow list, then test a password reset; otherwise
+   password recovery fails after cutover. Only then repoint the
    Vercel environment variables to the new project and redeploy.
    Deploying functions, installing secrets and changing production configuration each need Mason's
    explicit approval in the current conversation.
@@ -233,6 +242,12 @@ the real world already did after the restore point:
 - **Email:** the Resend logs (30 days) show what was already sent. Do not re-send invoices or receipts customers already got.
 - **Deliveries and stock:** drivers may have completed deliveries after the restore time. Re-apply them from the tickets through the normal screens.
 - **Commissions and payouts:** compare any payout paid after the restore time.
+- **Scheduled jobs (last):** only after everything above is reconciled, put the `pg_cron` jobs back. The
+  logical dump path leaves `cron.job` empty and nothing recreates it by itself. Compare against the job list
+  in the repository's migrations (for example `mark-overdue-invoices`, `auto-expire-quotes`,
+  `check-unpriced-orders`, `data-integrity-sweep`, `weekly-db-backup`; the migrations are authoritative),
+  re-create them through a reviewed migration, and verify the live `cron.job` list matches before calling
+  recovery complete.
 
 Goal 7 completes the payment and QuickBooks lines; keep this section in step with it.
 

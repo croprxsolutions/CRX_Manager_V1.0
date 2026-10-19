@@ -15,6 +15,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { completedAtForKey } from '../lib/paperTicket';
 
 // File -> the key hook of its completion call.
 const SITES: Array<[string, string]> = [
@@ -131,4 +132,34 @@ describe('replay-binding batch 3a e2e callers send a retry key', () => {
     expect(keylessCalls("await supabaseRpc(page, 'complete_delivery', { p_delivery_id: d, p_quantities: { a: 1 } });")).toHaveLength(1);
     expect(keylessCalls("await supabaseRpc(page, 'complete_delivery', { p_quantities: { a: 1 }, p_idempotency_key: k });")).toHaveLength(0);
   });
+});
+
+// complete_delivery's fingerprint includes p_completed_at, so a retry must resend the first send's
+// completion time: a 'today' completion sends none, but after midnight 'today' is a past date that
+// would send one, and that retry would be refused instead of replaying the saved result (Codex, PR #954).
+describe('replay-binding batch 3a: a retry resends the completion time its key first sent', () => {
+  it('completedAtForKey keeps the first value per key, even across midnight', () => {
+    const sent = new Map<string, string | undefined>();
+    // Before midnight: delivered 'today', so no p_completed_at.
+    expect(completedAtForKey(sent, 'key-1', () => undefined)).toBeUndefined();
+    // After midnight the same choice would compute a past-date timestamp; the retry keeps undefined.
+    expect(completedAtForKey(sent, 'key-1', () => '2026-10-18T17:00:00.000Z')).toBeUndefined();
+    // A fresh key computes its own value, and keeps it.
+    expect(completedAtForKey(sent, 'key-2', () => '2026-10-17T17:00:00.000Z')).toBe('2026-10-17T17:00:00.000Z');
+    expect(completedAtForKey(sent, 'key-2', () => undefined)).toBe('2026-10-17T17:00:00.000Z');
+  });
+
+  for (const [file, key] of [
+    ['src/pages/Deliveries.tsx', 'idemKey'],
+    ['src/pages/DeliveryDetail.tsx', 'idemKey'],
+    ['src/pages/FieldStop.tsx', 'rpcParams.p_idempotency_key'],
+  ] as const) {
+    it(`${file}: p_completed_at goes through completedAtForKey under the sent key`, () => {
+      const source = read(file);
+      expect(source).toContain('const sentCompletedAt = useRef(new Map<string, string | undefined>());');
+      expect(source).toContain(`p_completed_at: completedAtForKey(sentCompletedAt.current, ${key}, () =>`);
+      // No send computes the completion time directly any more.
+      expect(source).not.toMatch(/p_completed_at: (?:usePaperTicket \?|deliveredOnDate &&)/);
+    });
+  }
 });

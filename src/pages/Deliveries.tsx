@@ -38,7 +38,7 @@ import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
-import { completedAtForDeliveredOn, isValidDeliveredOn } from '../lib/paperTicket';
+import { completedAtForDeliveredOn, completedAtForKey, isValidDeliveredOn } from '../lib/paperTicket';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
@@ -126,6 +126,8 @@ export default function Deliveries() {
   // F3 act-from-list: complete an in_progress delivery in place (signed-by popup).
   const confirmIdem = useIdempotencyKey('confirm_delivery', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_delivery', profile?.id || '');
+  // Retry key -> the p_completed_at its first send carried (see completedAtForKey).
+  const sentCompletedAt = useRef(new Map<string, string | undefined>());
   const [completeTarget, setCompleteTarget] = useState<DeliveryRow | null>(null);
   const completeTargetRef = useLatestRef(completeTarget);
   // Bumped on every open and close of the complete dialog, so a request started in an
@@ -496,9 +498,11 @@ export default function Deliveries() {
         // during them, a ticket dated "today" is now a past date and must carry its own timestamp.
         const { data, error } = await supabase.rpc('complete_delivery', {
           ...completeParams,
-          p_completed_at: deliveredOnDate && deliveredOnDate !== businessToday()
-            ? completedAtForDeliveredOn(deliveredOnDate)
-            : undefined,
+          // A retry of this key resends the first send's value (completedAtForKey).
+          p_completed_at: completedAtForKey(sentCompletedAt.current, idemKey, () => (
+            deliveredOnDate && deliveredOnDate !== businessToday()
+              ? completedAtForDeliveredOn(deliveredOnDate)
+              : undefined)),
           p_idempotency_key: idemKey,
         });
         if (error) {

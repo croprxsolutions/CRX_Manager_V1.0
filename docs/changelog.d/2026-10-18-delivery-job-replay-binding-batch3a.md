@@ -21,7 +21,7 @@ twice; the harm was a false success. This change:
   receipt that can never be used), which is safe because the database refuses a second completion
   of the same delivery or job. Each screen then reloads the delivery or job (closing its completion
   modal or form where it has one), so a completion an earlier attempt already saved shows at once
-  instead of a stale form. Job detail now shows the plain-English refusal
+  instead of a stale form. The three delivery screens resend the completion time a retry key first carried, so a retry across midnight still replays instead of being refused. Job detail now shows the plain-English refusal
   instead of "Failed to complete job". The nine browser-test calls to `complete_delivery` now send
   a key.
 - **Proof:** `node scripts/smoke/prove-delivery-job-replay-binding-batch3a-real-schema.mjs`

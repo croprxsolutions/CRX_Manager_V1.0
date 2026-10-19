@@ -521,7 +521,8 @@
       "reviewed_contracts": {
         "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
         "public._complete_delivery_period_preflight_impl(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "9f7bf84ab636a8f7971cfa76b1244f95",
-        "public.complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "56d34c7ffcb9b80c42d492c0e5b59f55"
+        "public.complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "56d34c7ffcb9b80c42d492c0e5b59f55",
+        "public._complete_delivery_replay_impl_20261015(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "2d068d077de57dbbb22f338492d8389f"
       }
     },
     {

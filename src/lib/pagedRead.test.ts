@@ -17,7 +17,11 @@ function server(initial: Row[], before: (call: number, rows: Row[]) => Row[] = (
       call += 1;
       rows = before(call, rows);
       ranges.push([from, to]);
-      // Like the server: never more than 1,000 rows, whatever range is asked for.
+      // Like a strict server: a range starting at or past the end of a non-empty
+      // list is refused (PGRST103), and never more than 1,000 rows come back.
+      if (from > 0 && from >= rows.length) {
+        return { data: null, error: { message: 'Requested range not satisfiable' }, count: null };
+      }
       return { data: rows.slice(from, Math.min(to, from + 999) + 1), error: null, count: rows.length };
     },
   };
@@ -82,6 +86,16 @@ describe('fetchAllRows', () => {
     const result = await fetchAllRows<Row>(s.page);
     expect(result).toEqual({ data: null, error: { message: LIST_CHANGED_WHILE_LOADING } });
     expect(s.ranges.length).toBeLessThan(100);
+  });
+
+  it('never asks for a range starting at the end of a small or exact-multiple list', async () => {
+    for (const size of [1, 34, 50, 1000, 2000]) {
+      const s = server(ids(size));
+      const result = await fetchAllRows<Row>(s.page);
+      expect(result.error, `size ${size}`).toBeNull();
+      expect(result.data, `size ${size}`).toHaveLength(size);
+      expect(s.ranges.every(([from]) => from === 0 || from < size), `size ${size}`).toBe(true);
+    }
   });
 
   it('stops after the overlap-only page at the end', async () => {

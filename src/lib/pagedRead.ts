@@ -5,7 +5,7 @@ import { chunkIds } from './dispatchDisplay';
 type PageResult<T> = { data: T[] | null; error: { message: string } | null; count?: number | null };
 type ReadResult<T> = { data: T[] | null; error: { message: string } | null };
 
-const PAGE_SIZE = 1000;
+export const PAGE_SIZE = 1000;
 // Rows re-read at each page seam when every row has an id (see fetchAllRows).
 const SEAM_OVERLAP = 50;
 // Whole reads tried before a list that keeps changing is reported as an error.
@@ -89,6 +89,9 @@ async function readOnce<T>(
     // burst of inserts, only looks like it has; the count check catches that).
     if (newRows === 0) break;
     from += everyRowHasId && page.length > SEAM_OVERLAP ? page.length - SEAM_OVERLAP : page.length;
+    // A range starting at or past the server's count can be refused outright
+    // (PostgREST PGRST103 / 416), so stop here rather than ask for it.
+    if (serverCount !== null && from >= serverCount) break;
   }
   return { rows, serverCount, error: null };
 }

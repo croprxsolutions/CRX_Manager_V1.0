@@ -9,7 +9,7 @@ Screen-only change; no database change.
   below every cap (58 orders, 34 purchase orders, 151 active customers), so nothing was being lost yet.
 - **The fix.** `src/lib/pagedRead.ts` holds the shared pager. `fetchAllRows` (moved from
   `reconciliation.ts`, which re-exports it) reads 1,000 rows at a time until the end. Each paged
-  query adds `id` as its last sort key, so pages never overlap. `fetchAllRowsForIds` sends a long id
+  query adds `id` as its last sort key, so the row order is stable between pages. `fetchAllRowsForIds` sends a long id
   list in chunks of 200 and pages each chunk. Any failed page returns the error, so a page never shows
   a short list as if it were complete. The old "Showing first N" toasts are gone.
 - **Pages:** Invoices, Orders (including its print and pick-list reads), Quotes, Blend Tickets,

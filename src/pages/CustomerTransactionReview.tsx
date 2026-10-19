@@ -11,7 +11,7 @@ import Badge from '../components/ui/Badge';
 import ReportShell from '../components/reports/ReportShell';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, PAGE_SIZE } from '../lib/pagedRead';
 import { isLedgerContinuous, isSameTransaction } from '../lib/transactionLedger';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
@@ -81,7 +81,7 @@ export default function CustomerTransactionReview() {
       // A read that took more than one page could still keep a transaction
       // deleted after its page was read and stop before the real last row, with
       // the chain intact. The server's current last row must be ours.
-      if (rows.length >= 1000) {
+      if (rows.length > PAGE_SIZE) {
         const tail = await supabase
           .rpc('get_customer_transaction_review', {
             p_customer_id: customerId,

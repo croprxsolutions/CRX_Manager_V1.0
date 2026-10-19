@@ -129,6 +129,11 @@ export function buildInMemoryQuery(rows: Row[], log?: InMemoryQueryLog) {
     // Like PostgREST: a requested count is every matching row, not just the
     // page, and no count is sent unless the select asked for one.
     const count = countRequested ? matched.length : null;
+    // PostgREST can refuse a counted range that starts at or past the end of a
+    // non-empty result (PGRST103 / 416); model that so a pager that asks for it fails here.
+    if (countRequested && rangeEnd !== null && offset > 0 && offset >= matched.length) {
+      return { data: null, error: { message: 'Requested range not satisfiable', code: 'PGRST103' }, count: null };
+    }
     if (rangeEnd !== null) matched = matched.slice(offset, rangeEnd + 1);
     if (limit !== null) matched = matched.slice(0, limit);
     return headCount

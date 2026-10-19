@@ -248,7 +248,7 @@ export default function CommissionPayments() {
       if (!quiet) toast('error', 'Failed to load commission payments');
       return false;
     } finally {
-      setLoading(false);
+      if (seq === fetchPaymentsSeq.current) setLoading(false);
     }
   }, [toast]);
 

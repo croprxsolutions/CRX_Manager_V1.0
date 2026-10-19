@@ -108,8 +108,10 @@ ships or quarterly, whichever comes first.
   with `migrations_high_water` `20261019010324`;
   those migrations changed function bodies, grants, RLS and storage policies, bucket flags, one index and
   four triggers, none of which the
-  registry tracks, and the ledger shows no other apply since the full refresh).
-  Refresh it after the next live apply.
+  registry tracks). **Stale since 2026-10-19 18:27 UTC:** `20261019010000_cost_margin_admin_only_rpc_leaks`
+  (ledger `20261019182757`) applied after that delta and is not in the registry yet (it changed function bodies
+  and grants only, none of which the registry tracks). Bring it to live next, then drop the temporary
+  `_enforce_below_cost_line` exemption in `src/lib/rpcContracts.test.ts`.
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on
   2026-09-22 UTC, the Documents tab that calls it merged in PR #764 (2026-09-23 UTC, the evening
   of 2026-09-22 Chicago), and migration

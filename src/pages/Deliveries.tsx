@@ -36,7 +36,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getIdempotencyBindingRejection } from '../lib/idempotency';
+import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
@@ -415,7 +415,20 @@ export default function Deliveries() {
     if (!completeTarget || !profile) return;
     if (!signedBy.trim()) { toast('error', 'Please enter a signature name'); return; }
     const target = completeTarget;
-    const idemKey = completeIdem.getKey();
+    const completeParams = {
+      p_delivery_id: target.id,
+      p_signed_by: signedBy.trim(),
+      p_performed_by: profile.id,
+      // Use local midday so the ISO timestamp stays on the selected delivery date.
+      ...(deliveredOnDate && deliveredOnDate !== today()
+        ? { p_completed_at: new Date(deliveredOnDate + 'T12:00:00').toISOString() }
+        : {}),
+    };
+    // check_idempotency replays by key and operation only: bind the key to this exact
+    // payload so a retry with an edited signer or date mints a fresh key instead of
+    // replaying an earlier attempt's receipt (complete_delivery refuses a completed delivery).
+    const completeScope = `complete:${fingerprintIntentPayload(completeParams)}`;
+    const idemKey = completeIdem.getKeyFor(completeScope);
     let confirmed = false;
     // Route through runCriticalAction for parity with this page's other mutations.
     const outcome = await runCriticalAction<'completed' | 'no_signal'>({
@@ -436,14 +449,8 @@ export default function Deliveries() {
         // completeIdem is intentionally retained until onSuccess, so a retry after a
         // lost response replays the same complete_delivery request idempotently.
         const { data, error } = await supabase.rpc('complete_delivery', {
-          p_delivery_id: target.id,
-          p_signed_by: signedBy.trim(),
-          p_performed_by: profile.id,
+          ...completeParams,
           p_idempotency_key: idemKey,
-          // Use local midday so the ISO timestamp stays on the selected delivery date.
-          ...(deliveredOnDate && deliveredOnDate !== today()
-            ? { p_completed_at: new Date(deliveredOnDate + 'T12:00:00').toISOString() }
-            : {}),
         });
         if (error) throw error;
         assertRpcResult(data, 'complete_delivery');
@@ -458,7 +465,7 @@ export default function Deliveries() {
           return;
         }
         toast('success', `Delivery ${target.delivery_number} completed`);
-        completeIdem.resetKey();
+        completeIdem.resetKeyFor(completeScope);
         // Fire the same in-app completion notification the detail page sends
         // (driver/admins/sales) — once per delivery so a same-key RPC replay after
         // a lost response can't duplicate it. The customer EMAIL receipt is sent

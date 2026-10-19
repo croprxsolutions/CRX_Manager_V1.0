@@ -48,7 +48,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   and get the saved result back; changed inputs get a fresh key, which the server refuses because
   the delivery is already completed, so no receipt with the wrong date is sent. The key is also
   retired only after the server's reply checks out. Proven in the preview with a test server that
-  saved the completion and dropped its replies (Sol final review).
+  saved the completion and dropped its replies (Sol final review). The Deliveries list dialog binds
+  its key the same way (signer and date), so an edited retry there is refused the same way (Luna
+  review).
 - **Pre-existing race fixed: a slow load can no longer leak onto the next delivery.** The delivery
   page is reused when moving from one delivery to another. A slow load for the previous delivery used
   to finish late and put its items, quantities and photos on the new delivery's screen, so the wrong

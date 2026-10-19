@@ -8,6 +8,12 @@ settled calls. Newest first, roughly — a few entries from the same week sit sl
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 
+## 2026-10-19 — PRs open as drafts; review fixes and documentation records are batched to save CodeRabbit reviews
+
+**Decision (Mason, in chat: "add the drafts-until-done and batch-the-docs-PRs rule to the project instructions and ship it").** Every PR opens as a draft and is marked ready (`gh pr ready`) once, when its head is frozen and its checks are green. All fixes for one review round go in one push. The documentation-only records one session produces go in one PR.
+**Why.** A read of the 200 PRs merged from 2026-09-02 to 2026-10-18 found about 846 CodeRabbit review events, roughly 125 a week. That use dropped the Essentials plan's allowance to 1 review an hour. PRs that hit the limit took a median of about 25 hours to merge, against about 4 hours for the rest. The 42 documentation-only PRs alone used 213 review events. CodeRabbit stays required: in that period it found about 28 Major issues in app and migration code, including a missing `SECURITY DEFINER` on a money migration helper (#942) and floating-point cents on invoices (#908).
+**What this forbids/implies:** CodeRabbit is not excluded from `docs/`, because the 2026-09 review of PR #441 found automation-read files there and GitHub's `protect-main` ruleset needs an approving review to merge. Agents cut review volume instead. The procedure is in `.claude/commands/ship.md` Step 8.
+
 ## 2026-10-15 — Quotes follow the own-name rule; season rollover keeps the original rep
 
 **Decision (Mason, in chat: "Yes — quotes follow the own-name rule. On season rollover, keep the original rep on the new quote.").** A sales rep records only themselves, or no one, as a quote's salesperson; admins name anyone. Rolling a quote over to the next season keeps the source quote's salesperson, even when another rep runs the rollover.

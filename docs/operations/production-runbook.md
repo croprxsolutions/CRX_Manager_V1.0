@@ -163,7 +163,8 @@ access and Vercel access. Replace the backup person with a second human the day 
 
 **First, always:** stop the damage and tell Mason in plain words what is wrong. Pause anything that
 writes (scheduled jobs, imports) if the cause is unknown. Write down the clock time you noticed
-it; it decides how far back to restore.
+it for the incident timeline. Discovery time is not the restore point: the restore point is the last
+moment **before the bad change began** (4.5), which may be earlier than when anyone noticed.
 
 ### 4.4 Compensating fix from a snapshot (table intact)
 
@@ -248,8 +249,9 @@ per step, whether validation matched, whether logins were present, and problems.
 
 ### 4.11 Backup health alerting
 
-Design: `docs/operations/backup-health-alert-design.md`. Today the only signal that a Sunday backup
-failed or did not run is a GitHub email.
+Design: `docs/operations/backup-health-alert-design.md`. Today a **failed** Sunday run sends a GitHub
+email, but a run that **never starts has no alert at all**: the missed-run watchdog is designed, not built.
+Until it is, check the date of the newest file in `CRX_Backups/backups/` every Monday.
 
 ---
 

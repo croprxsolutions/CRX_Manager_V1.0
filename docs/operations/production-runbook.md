@@ -191,6 +191,16 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 > **UNPROVEN.** This procedure has never been run. Every review pass has found real gaps in it, so treat
 > it as a checklist to be corrected by the first supervised drill (4.9), not as a tested recipe. Do not
 > rely on it alone in an emergency; stop and escalate at any step that does not match what you see.
+>
+> **Known open review items (Mason chose to merge and settle these in the first drill, 2026-10-19):**
+> (1) While the replacement is reconciled, put the *old* application in read-only or maintenance mode (or
+> capture and replay every write made after the freeze), or staff writes to the old project are silently lost
+> at cutover. (2) A fresh Supabase project already has platform objects, so a plain `pg_restore` can show
+> expected "already exists" and ownership errors: use the roles/schema/data split restore in Supabase's
+> restore guide, or list the known platform conflicts while still failing on any COPY or data error. Step 5's
+> "no errors" wording means no *data* errors. (3) Resend keeps only 30 days of email events, but a corruption
+> archive can be about 8 weeks old: export the live `email_log` before cutover while the damaged project is
+> still reachable, or stop and use another durable record when the interval exceeds 30 days.
 
 1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
 2. Clone `masonwells1/CRX_Backups` and choose the archive `backups/crx-backup-YYYY-MM-DD.dump.gpg`:

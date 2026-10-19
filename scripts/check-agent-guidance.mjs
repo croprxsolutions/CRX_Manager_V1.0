@@ -426,6 +426,10 @@ while (gateQueue.length) {
 const promptedGateFiles = [...gateClosure]
   .filter((relative) => ask.has(`Edit(${relative})`) || ask.has(`Write(${relative})`))
   .sort();
+// Any Edit/Write ask entry at all, wildcard included (`Edit(.claude/hooks/**)`),
+// would quietly restore a prompt, so none may remain (CodeRabbit, PR #956).
+const editWriteAsk = [...ask].filter((rule) => /^(?:Edit|Write|MultiEdit|NotebookEdit)\(/.test(rule)).sort();
+record(editWriteAsk.length === 0, "no Edit/Write ask entries remain (Mason, 2026-10-18)", editWriteAsk.join(", "));
 record(
   gateClosure.size > 0 && promptedGateFiles.length === 0,
   `production-gate files are edited without an ask prompt (Mason, 2026-10-18; ${gateClosure.size} files)`,

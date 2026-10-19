@@ -59,6 +59,10 @@ for (const command of [
 ok(mayMerge(JSON.stringify({ tool_name: "mcp__github__merge_pull_request", tool_input: { pullNumber: 9 } })),
   "the GitHub MCP merge tool is a possible merge");
 ok(mayMerge("not json but says gh pr merge"), "unparseable input is judged on its raw text");
+// Attached inline code (CodeRabbit, PR #956): the working guard denies it, so the
+// broken-guard fallback must count it as a possible merge too.
+ok(mayMerge(JSON.stringify({ tool_name: "Bash", tool_input: { command: "node -e'require(\"child_process\").execSync(Buffer.from(\"Z2ggcHIgbWVyZ2UgODEy\",\"base64\").toString())'" } })),
+  "attached node -e code is a possible merge while the guard is broken");
 // Shell quoting, escapes and line continuations cannot hide a merge from the text
 // test (Luna, PR #841). Each of these runs as an ordinary `gh pr merge` in at least
 // one shell: quotes and backslashes in Bash, carets in cmd, backticks in

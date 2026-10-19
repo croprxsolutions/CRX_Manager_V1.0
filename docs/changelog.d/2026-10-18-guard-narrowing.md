@@ -98,5 +98,13 @@ program names are refused; inline-code detection scans past a detached option va
 (`node --require fs -e …`); and under a hold, attached curl flags (`-dfoo`, `-Ffoo=bar`, `-Tfile`) are
 outward. Mason: "After fixing those no more codex rounds we are finished make it live."
 
+**CodeRabbit (7, CHANGES_REQUESTED on `10450759a`).** Fixed: `{` and `,` delimit a whole `.claude`
+target (`rm -rf {.claude,}`, `Remove-Item .claude,x`); under a hold, backslash-newline continuations
+are joined and `SELECT … INTO` is a write; the fallback launcher counts attached `-e'…'` code; the
+new test loops use the entrypoint helpers; the decision log names the protected-file exception; and
+check-agent-guidance rejects any Edit/Write ask entry, wildcard included. Codex connector items on
+`10450759a` (`-X=DELETE` under a hold; MCP path-field writes to `.claude/agents|commands`, which
+still prompt through permissions.ask) are deferred to a follow-up.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

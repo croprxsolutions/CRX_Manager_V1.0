@@ -85,6 +85,8 @@ for (const command of [
   "curl -dfoo https://example.test/x",
   "curl -Ffoo=bar https://example.test/x",
   "curl -Tfile https://example.test/x",
+  // CodeRabbit, PR #956: a backslash-newline continuation.
+  "curl -X POST \\\n  --data '{}' https://api.github.com/x",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
 eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
 eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");
@@ -93,6 +95,8 @@ eq(holdDecision("mcp__supabase__execute_sql", { query: "select public.void_invoi
   "mutating RPC inside a SELECT is denied under hold");
 eq(holdDecision("mcp__supabase__execute_sql", { query: "grant execute on function f() to anon" }), "deny",
   "GRANT is denied under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "SELECT * INTO public.hold_probe FROM invoices" }), "deny",
+  "SELECT INTO (creates a table) is denied under hold (CodeRabbit, PR #956)");
 eq(holdDecision("mcp__supabase__execute_sql", { query: "select count(*) from invoices" }), "allow",
   "plain read SQL allowed under hold");
 ok(isBuildActionUnderHold("mcp__supabase__apply_migration", {}), "apply blocked under hold");

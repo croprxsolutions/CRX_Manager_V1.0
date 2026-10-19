@@ -27,8 +27,9 @@ proposal), then "Change permissions to not always prompt me allow it" and "I app
    `package.json` no longer prompt before an Edit/Write. Deploy, secret and other outward tools
    keep their prompts.
 
-**Operative rule.** A guard hard-blocks only what is irreversible or outward-facing. Everything
-else warns. Detail: `docs/reference/agent-guardrails.md`, "Guard narrowing and no guard-file edit
+**Operative rule.** A guard hard-blocks only what is irreversible or outward-facing, plus shell
+writes to the protected review-proof, approval and guard files (the review-proof guard refuses
+those even though they are local, because a forged proof would open a gate). Everything else warns. Detail: `docs/reference/agent-guardrails.md`, "Guard narrowing and no guard-file edit
 prompts".
 
 ## 2026-10-15 — Quotes follow the own-name rule; season rollover keeps the original rep

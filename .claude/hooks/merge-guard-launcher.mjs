@@ -112,7 +112,7 @@ export function mayMerge(input) {
     // Inline code given as an argument (`node -e`, `python -c`, `php -r`): the working
     // guard now judges that code (inlineCodeReachesGatedAction, PR #956), so while the
     // guard is broken any such launch is a possible merge.
-    || /\b(?:node|nodejs|python\d*|py|deno|bun|perl|ruby|php)(?:\.exe)?\b[^|;&\n]*?\s(?:-[epcrE]|--eval|--print|--command|--run)(?:[\s=]|$)/i.test(text);
+    || /\b(?:node|nodejs|python\d*|py|deno|bun|perl|ruby|php)(?:\.exe)?\b[^|;&\n]*?\s(?:-[epcrE]\S*|(?:--eval|--print|--command|--run)(?:[\s=]|$))/i.test(text);
 }
 
 // Every key and string value in a tool call's input, in order.

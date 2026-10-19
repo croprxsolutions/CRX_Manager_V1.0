@@ -69,7 +69,8 @@ const ALLOW_WRITE_PATH_RE = /(\.claude[\\/]session-state|scratchpad|SCOPE\.md$|P
 // so any psql/pg_restore launch counts as outward while a stop is latched.
 const OUTWARD_BASH_RE = /(supabase\s+db|\b(?:psql|pg_restore)(?:\.exe)?\b|apply_migration|apply-migration-file|deploy|npm\s+publish|vercel\s|\bgh(?:\.\w+)?["']?\s+(?:\S+\s+)*?(?:pr\s+(?:create|ready|close|reopen|comment|review|edit|update-branch|lock|unlock)|release\s+(?:create|upload|delete|edit)|issue\s+(?:create|close|reopen|comment|edit|delete|transfer|lock|unlock)|repo\s+(?:create|edit|delete|rename|archive|unarchive|sync|fork)|workflow\s+(?:run|enable|disable)|run\s+(?:rerun|cancel|delete)|(?:secret|variable)\s+(?:set|delete)|label\s+(?:create|edit|delete)|gist\s+(?:create|edit|delete))\b|\bgh(?:\.\w+)?["']?\s+(?:-\S+(?:\s+[^\s-]\S*)?\s+)*api\b[^\n]*?(?:\s-X\s*(?:POST|PUT|PATCH|DELETE)|--method[=\s]+(?:POST|PUT|PATCH|DELETE)|\s-[fF]\S*|\s--(?:field|raw-field|input)(?:\s|=))|\b(?:curl|wget|invoke-restmethod|invoke-webrequest|irm|iwr)\b[^\n]*?(?:\s-X\s*(?:POST|PUT|PATCH|DELETE)|\s--request[=\s]+(?:POST|PUT|PATCH|DELETE)|\s-method\s+(?:post|put|patch|delete)|\s--method[=\s]+(?:POST|PUT|PATCH|DELETE)|\s-[dFT]\S*|\s(?:--data(?:-raw|-binary|-urlencode)?|--json|--form|--upload-file|--post-data|--post-file|--body-data|--body-file|-body|-infile)(?:\s|=)))/i;
 const LOCAL_GIT_RE = /\bgit\b[^\n]*?\b(commit|merge|rebase|cherry-pick|tag)\b/i;
-const SQL_WRITE_RE = /\b(insert|update|delete|create|alter|drop|truncate|grant|revoke|copy|call|do|merge|refresh|vacuum|reindex|cluster|comment\s+on|security\s+label|lock|set\s+role|reset\s+role)\b/i;
+// `SELECT … INTO new_table` creates and fills a table in plain PostgreSQL (CodeRabbit, PR #956).
+const SQL_WRITE_RE = /\b(insert|update|delete|create|alter|drop|truncate|grant|revoke|copy|call|do|merge|refresh|vacuum|reindex|cluster|comment\s+on|security\s+label|lock|set\s+role|reset\s+role)\b|\bselect\b[^;]*?\binto\b/i;
 
 // hold-latch's mutate-tool set must be a SUPERSET of autopilot's deny set (2026-07-13
 // audit, FIX 3): a "stop" from Mason should pause at least every tool autopilot
@@ -96,7 +97,10 @@ export function holdDecision(toolName, toolInput) {
     return "warn";
   }
 
-  const cmd = typeof input.command === "string" ? input.command : "";
+  // A backslash-newline continuation (and the indentation after it) joins two lines
+  // into one command, so `curl -X POST \<newline>  --data …` is read joined
+  // (CodeRabbit, PR #956).
+  const cmd = typeof input.command === "string" ? input.command.replace(/\\\r?\n[^\S\r\n]*/g, " ") : "";
   if (cmd) {
     if (OUTWARD_BASH_RE.test(cmd) || DENY_BASH_RES.some((re) => re.test(cmd))) return "deny";
     if (LOCAL_GIT_RE.test(cmd)) return "warn";

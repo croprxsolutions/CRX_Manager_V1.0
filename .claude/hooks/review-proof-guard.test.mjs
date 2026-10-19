@@ -911,7 +911,7 @@ for (const command of [
   "cat .claude/hooks/a.mjs | grep -c rd",
   "cat > /tmp/note.txt <<'EOF'\nsee .claude/launch.json and rm the old one\nEOF",
 ]) {
-  assert.equal(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `narrowed rule allows: ${command}`);
+  assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `narrowed rule allows: ${command}`);
 }
 // …while the state dir, the whole `.claude` folder, globs that can reach it, and
 // every worktree stay protected.
@@ -940,6 +940,10 @@ for (const command of [
   "find .claude/s$(printf ession-state) -delete",
   "rsync --delete /tmp/empty/ .claude/s$(printf ession-state)/",
   "rm -rf .claude/$X",
+  // Brace expansion and PowerShell arrays name the whole folder (CodeRabbit, PR #956).
+  "rm -rf {.claude,}",
+  "rm -rf {.claude,x}",
+  "Remove-Item .claude,x -Recurse -Force",
   // Trusted files a plain copy or tee could forge before (reviewer probes).
   "cp /tmp/x.json .claude/session-state/migration-review-x.json",
   "echo {} | tee .claude/session-state/owner-approval-x.json",
@@ -952,7 +956,7 @@ for (const command of [
   "cp /tmp/x .claude/agents/rls-security-reviewer.md",
   "echo x > .claude/commands/ship.md",
 ]) {
-  assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);
+  assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /./, `still denied: ${command}`);
 }
 // KNOWN OVER-BLOCK kept on purpose: a command that names the state dir ITSELF
 // and also contains a destructive word anywhere still denies, even as a read.

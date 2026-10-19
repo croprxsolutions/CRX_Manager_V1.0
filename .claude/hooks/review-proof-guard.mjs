@@ -442,7 +442,9 @@ if (shellTool) {
   // The home exclusion is anchored: `Users`/`home` must be the FIRST path component
   // (after an optional drive letter), so `/tmp/Users/alice/.claude` is not mistaken for a
   // home folder (Luna, PR #956 round 1).
-  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:(]|(?<!(?:(?:^|[\s"'=(])(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%)|(?:^|[\s"'=(]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>])|[/\\]+worktrees(?![\w-]))/i;
+  // `{` and `,` delimit a whole target too: Bash brace expansion `rm -rf {.claude,}`
+  // and a PowerShell array `Remove-Item .claude,x` (CodeRabbit, PR #956).
+  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:({,]|(?<!(?:(?:^|[\s"'=({,])(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%)|(?:^|[\s"'=({,]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>,}])|[/\\]+worktrees(?![\w-]))/i;
   // The same narrowing for a component split: a `.claude` segment alone no longer
   // counts (that is the ancestor rule's job); `session-state` and a glob that
   // could expand to a protected name still do.

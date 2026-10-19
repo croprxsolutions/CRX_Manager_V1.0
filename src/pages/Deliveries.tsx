@@ -617,7 +617,13 @@ export default function Deliveries() {
           p_performed_by: profile.id,
           p_idempotency_key: cancelKey,
         });
-        if (error) throw error;
+        if (error) {
+          // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchCancelIdem.resetKey();
+          throw error;
+        }
         batchCancelIdem.resetKey();
         logActivity({ event: 'batch_cancel_deliveries', description: `Batch cancelled ${ids.length} delivery(ies). Reason: ${reason}`, performedBy: profile.id });
         return assertRpcResult(data, 'batch_cancel_deliveries');

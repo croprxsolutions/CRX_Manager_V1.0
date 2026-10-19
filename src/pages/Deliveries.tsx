@@ -428,6 +428,11 @@ export default function Deliveries() {
   const handleCompleteConfirm = async () => {
     if (!completeTarget || !profile) return;
     if (!signedBy.trim()) { toast('error', 'Please enter a signature name'); return; }
+    // The date is required: an empty date would silently date the delivery and invoice to today.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliveredOnDate) || deliveredOnDate > businessToday()) {
+      toast('error', 'Enter the delivery date (today or earlier)');
+      return;
+    }
     const target = completeTarget;
     const completeParams = {
       p_delivery_id: target.id,

@@ -23,7 +23,7 @@ import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, buildEmailHtml } from '../lib/emailService';
-import { RECEIPT_NOT_SENT_MESSAGE } from '../lib/deliveryCompletionEmail';
+import { RECEIPT_NO_EMAIL_MESSAGE, RECEIPT_NOT_SENT_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -1216,6 +1216,8 @@ export default function DeliveryDetail() {
           // The delivery already succeeded; say plainly that the receipt did not go out.
           toast('warning', RECEIPT_NOT_SENT_MESSAGE);
         }
+      } else if (usePaperTicket) {
+        toast('warning', RECEIPT_NO_EMAIL_MESSAGE);
       }
 
       fetchDelivery();

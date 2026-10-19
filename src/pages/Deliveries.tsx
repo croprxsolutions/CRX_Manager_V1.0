@@ -38,7 +38,7 @@ import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
-import { completedAtForDeliveredOn } from '../lib/paperTicket';
+import { completedAtForDeliveredOn, isValidDeliveredOn } from '../lib/paperTicket';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
@@ -429,7 +429,7 @@ export default function Deliveries() {
     if (!completeTarget || !profile) return;
     if (!signedBy.trim()) { toast('error', 'Please enter a signature name'); return; }
     // The date is required: an empty date would silently date the delivery and invoice to today.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliveredOnDate) || deliveredOnDate > businessToday()) {
+    if (!isValidDeliveredOn(deliveredOnDate)) {
       toast('error', 'Enter the delivery date (today or earlier)');
       return;
     }

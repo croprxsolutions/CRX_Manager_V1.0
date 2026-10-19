@@ -15,8 +15,19 @@ export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
 // records the day it really happened. That day becomes the delivery and invoice date.
 // The ticket date is required on the paper path and can never be in the future.
 // "Today" is the business day in America/Chicago, the day the server dates the delivery.
+// A real calendar date (2026-02-31 is refused), today or earlier in Chicago.
+export function isValidDeliveredOn(deliveredOn: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(deliveredOn);
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const isRealDate =
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return isRealDate && deliveredOn <= todayInBusinessTz();
+}
+
 export function isValidPaperDeliveredOn(deliveredOn: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(deliveredOn) && deliveredOn <= todayInBusinessTz();
+  return isValidDeliveredOn(deliveredOn);
 }
 
 // The server takes the delivery and invoice date from the completion time in

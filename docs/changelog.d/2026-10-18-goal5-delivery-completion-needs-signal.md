@@ -72,7 +72,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   that the office can send it. Reading the recipient through the server is recorded as open in
   `docs/manual/KNOWN_ISSUES.md`.
 - **The Deliveries list requires its "Delivered on" date.** An emptied date used to complete the
-  delivery dated today; it is now refused before anything is sent.
+  delivery dated today; it is now refused before anything is sent. One shared check
+  (`isValidDeliveredOn`) also refuses dates that do not exist, such as 2026-02-31, on the list and
+  on both paper-ticket screens.
 - **Pre-existing race fixed: a slow load can no longer leak onto the next delivery.** The delivery
   page is reused when moving from one delivery to another. A slow load for the previous delivery used
   to finish late and put its items, quantities and photos on the new delivery's screen, so the wrong

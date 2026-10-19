@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasSignal } from './connectivity';
-import { countOrdinaryPhotos, hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from './paperTicket';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, isValidDeliveredOn, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from './paperTicket';
 import { todayInBusinessTz } from './dateUtils';
 
 function setOnline(value: boolean) {
@@ -67,6 +67,17 @@ describe('paper ticket photo', () => {
       new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date(iso));
     expect(chicagoDay(paperDeliveredAt('2026-10-17') as string)).toBe('2026-10-17'); // CDT
     expect(chicagoDay(paperDeliveredAt('2026-01-15') as string)).toBe('2026-01-15'); // CST
+  });
+
+  it('accepts only real calendar dates, today or earlier', () => {
+    expect(isValidDeliveredOn('2026-02-28')).toBe(true);
+    expect(isValidDeliveredOn('2024-02-29')).toBe(true); // leap day
+    expect(isValidDeliveredOn('2026-02-31')).toBe(false);
+    expect(isValidDeliveredOn('2026-13-01')).toBe(false);
+    expect(isValidDeliveredOn('2026-04-31')).toBe(false);
+    expect(isValidDeliveredOn('')).toBe(false);
+    expect(isValidDeliveredOn('9999-12-31')).toBe(false); // future
+    expect(isValidDeliveredOn(todayInBusinessTz())).toBe(true);
   });
 
   it('does not count toward the 10-photo limit', () => {

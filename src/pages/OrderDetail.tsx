@@ -361,6 +361,8 @@ export default function OrderDetail() {
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_product_costs_for_order_edit' } });
       toast('error', 'Failed to load product costs. Please refresh.');
+      // Never offer an admin a product list without cost (Luna round 1).
+      productRows = [];
     }
     setProducts(productRows);
 
@@ -1530,12 +1532,12 @@ export default function OrderDetail() {
           {isAdmin && (<>
             <div>
               <p className="text-xs text-secondary">Profit</p>
-              <p className="text-sm font-medium text-crx-green">{fmt(order.total_profit ?? 0)}</p>
+              <p className="text-sm font-medium text-crx-green">{order.total_profit == null ? '—' : fmt(order.total_profit)}</p>
             </div>
             <div>
               <p className="text-xs text-secondary">Margin</p>
               <p className="text-sm font-medium text-nav-dark">
-                {(order.total_margin_pct ?? 0).toFixed(1)}%
+                {order.total_margin_pct == null ? '—' : `${order.total_margin_pct.toFixed(1)}%`}
               </p>
             </div>
           </>)}

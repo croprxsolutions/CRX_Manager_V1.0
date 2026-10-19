@@ -170,7 +170,7 @@ function pins() {
   const renamed = [...sql.matchAll(/\('(public\.[a-z_]+\([^']*\))', '([a-z_]+)', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[3]]);
   const relied = [...sql.matchAll(/^\s*\('(public\.[a-z_0-9]+\([^']*\))', '([0-9a-f]{32})'\)/gm)].map((m) => [m[1], m[2]]);
   assert.equal(renamed.length, 6, 'the preflight pins the six renamed bodies');
-  assert.equal(relied.length, 7, 'the preflight pins the seven bodies the rewrites rely on');
+  assert.equal(relied.length, 10, 'the preflight pins the ten bodies the rewrites and set_purchase_order_item_costs rely on');
   return [...renamed, ...relied];
 }
 function fidelity() {
@@ -423,7 +423,9 @@ const SCENARIOS = [
   { name: '5a. set_purchase_order_item_costs', steps: [
     ['rep refused', U.REP, setCosts(U.REP, [{ id: POI3, unit_cost_cents: 700 }], 'k-rep'), MISSING_FN, DENIED],
     ['driver refused', U.DRIVER, setCosts(U.DRIVER, [{ id: POI3, unit_cost_cents: 700 }], 'k-drv'), MISSING_FN, DENIED],
-    ['admin duplicate ids', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }, { id: POI3, unit_cost_cents: 700 }], 'k-dup'), MISSING_FN, /^P0001\|PO_ITEM_ID_DUPLICATE$/],
+    ['admin duplicate ids', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }, { id: POI3, unit_cost_cents: 700 }], 'k-dup'), MISSING_FN, /^P0001\|PO_ITEM_ID_DUPLICATE/],
+    // Luna round 1: the same line spelled in upper and lower case is still one line.
+    ['admin duplicate ids differing only in case', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }, { id: POI3.toUpperCase(), unit_cost_cents: 800 }], 'k-dup-case'), MISSING_FN, /^P0001\|PO_ITEM_ID_DUPLICATE/],
     ['admin no key', U.ADMIN, `public.set_purchase_order_item_costs('${PO3}', ${j([{ id: POI3, unit_cost_cents: 700 }])}, '${U.ADMIN}', NULL)`, MISSING_FN, /^P0001\|IDEMPOTENCY_KEY_REQUIRED/],
     ['admin fills the 0-cost line', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }], 'k1'), MISSING_FN, `ok|{"po_id": "${PO3}", "status": "saved", "lines_changed": 1}`],
     ['stored after fill', 'owner', PO3_STORED, 'ok|0,800|4000', 'ok|700,800|7500'],

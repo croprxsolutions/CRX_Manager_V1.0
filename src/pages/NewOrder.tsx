@@ -243,6 +243,8 @@ export default function NewOrder() {
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_product_costs' } });
       toast('error', 'Failed to load product costs. Please refresh.');
+      // Never offer an admin a product list without cost (Luna round 1).
+      productRows = [];
     }
 
     setCustomers((customersRes.data || []) as Customer[]);

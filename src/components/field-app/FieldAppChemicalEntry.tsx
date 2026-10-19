@@ -161,8 +161,12 @@ export default function FieldAppChemicalEntry({
     });
   }, []);
   const searchRef = useRef<HTMLDivElement>(null);
+  // Only the newest search may install results: the admin cost read adds a second await, so an
+  // older search can now finish after a newer one (Luna round 1).
+  const searchSeqRef = useRef(0);
 
   const searchProducts = useCallback(async (q: string) => {
+    const seq = ++searchSeqRef.current;
     if (q.length < 2) { setSearchResults([]); setSearching(false); setSearchError(false); return; }
     setSearching(true);
     setSearchError(false);
@@ -185,6 +189,7 @@ export default function FieldAppChemicalEntry({
         loadError = costError;
       }
     }
+    if (seq !== searchSeqRef.current) return;
     setSearching(false);
 
     if (loadError) {

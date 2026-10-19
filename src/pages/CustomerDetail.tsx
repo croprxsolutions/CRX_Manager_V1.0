@@ -1680,7 +1680,7 @@ export default function CustomerDetail() {
                       </td>
                       <td className="px-4 py-3">T{q.tier}</td>
                       <td className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
-                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{(q.total_margin_pct ?? 0).toFixed(1)}%</td>}
+                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
                       <td className="px-4 py-3 text-secondary">
                         {new Date(q.created_at).toLocaleDateString()}
                       </td>
@@ -1736,7 +1736,7 @@ export default function CustomerDetail() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
-                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{fmt(o.total_profit ?? 0)}</td>}
+                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
                       <td className="px-4 py-3 text-secondary">
                         {new Date(o.order_date + 'T00:00:00').toLocaleDateString()}
                       </td>

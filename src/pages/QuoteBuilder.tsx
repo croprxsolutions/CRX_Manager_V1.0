@@ -821,6 +821,8 @@ export default function QuoteBuilder() {
     } catch (costErr) {
       Sentry.captureException(costErr, { tags: { source: 'fetch', page: 'quote_builder', action: 'load_product_costs' } });
       toast('error', 'Failed to load product costs.');
+      // Never offer an admin a product list without cost (Luna round 1).
+      productRows = [];
     }
 
     setCustomers((custRes.data || []) as Customer[]);

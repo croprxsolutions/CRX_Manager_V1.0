@@ -110,6 +110,11 @@ BEGIN
            WHERE p.oid = to_regproc('public._' || r.name || '_cost_step2_impl')) IS DISTINCT FROM r.md5 THEN
         RAISE EXCEPTION 'COST_STEP2_PREFLIGHT: public._%_cost_step2_impl exists but is not the pinned body', r.name;
       END IF;
+      -- A re-run: the public name is this file's wrapper, and must still be the only overload.
+      IF (SELECT count(*) FROM pg_proc p
+           WHERE p.pronamespace = 'public'::regnamespace AND p.proname = r.name) > 1 THEN
+        RAISE EXCEPTION 'COST_STEP2_PREFLIGHT: expected at most one public.% overload', r.name;
+      END IF;
       CONTINUE;
     END IF;
     IF (SELECT count(*) FROM pg_proc p
@@ -135,7 +140,11 @@ BEGIN
       ('public.field_app_priced_quantity(numeric,text,text,text)', 'bc91a52577840973f18f1710e47edf2b'),
       ('public.is_admin()', 'f76bf61116c3bd52bd9c6ea125079b73'),
       ('public.is_sales_rep()', 'fcb3133010fe3f4f56e3be31f709d102'),
-      ('public.require_admin()', '83dbda095d67a37031d5cd093a605a78')
+      ('public.require_admin()', '83dbda095d67a37031d5cd093a605a78'),
+      -- set_purchase_order_item_costs: operation-scoped, actor-bound receipts and the PO cent parser
+      ('public.check_idempotency_intent(text,text,uuid,text)', 'edc73be809069669e8441eba7acf443d'),
+      ('public.save_idempotency(text,text,jsonb)', 'f600171c426e48c995f204c4dac3ff8b'),
+      ('public._purchase_order_item_unit_cost_cents(jsonb)', '0fa4a7fee34fc8d76ef605e44a0bebfa')
     ) AS v(sig, md5)
   LOOP
     IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
@@ -144,13 +153,24 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- The new names must be free (or this file's own, on a re-run).
+  -- The new names must be free on a first run; on a re-run (this file's renamed bodies exist)
+  -- each may be only this file's own function, with exactly its signature.
   FOR r IN
-    SELECT * FROM (VALUES ('get_admin_cost_fields'), ('get_quote_versions'), ('set_purchase_order_item_costs')) AS v(name)
+    SELECT * FROM (VALUES
+      ('get_admin_cost_fields', 'get_admin_cost_fields(text,uuid[])'),
+      ('get_quote_versions', 'get_quote_versions(uuid)'),
+      ('set_purchase_order_item_costs', 'set_purchase_order_item_costs(uuid,jsonb,uuid,text)')
+    ) AS v(name, sig)
   LOOP
-    IF (SELECT count(*) FROM pg_proc p
-         WHERE p.pronamespace = 'public'::regnamespace AND p.proname = r.name) > 1 THEN
-      RAISE EXCEPTION 'COST_STEP2_PREFLIGHT: public.% already has more than one overload', r.name;
+    IF to_regproc('public._save_job_cost_step2_impl') IS NULL THEN
+      IF EXISTS (SELECT 1 FROM pg_proc p
+                  WHERE p.pronamespace = 'public'::regnamespace AND p.proname = r.name) THEN
+        RAISE EXCEPTION 'COST_STEP2_PREFLIGHT: public.% already exists', r.name;
+      END IF;
+    ELSIF EXISTS (SELECT 1 FROM pg_proc p
+                   WHERE p.pronamespace = 'public'::regnamespace AND p.proname = r.name
+                     AND p.oid IS DISTINCT FROM to_regprocedure('public.' || r.sig)) THEN
+      RAISE EXCEPTION 'COST_STEP2_PREFLIGHT: public.% has an overload this file did not create', r.name;
     END IF;
   END LOOP;
 END
@@ -615,8 +635,11 @@ BEGIN
   IF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items) = 0 THEN
     RAISE EXCEPTION 'PO_ITEMS_REQUIRED';
   END IF;
-  IF (SELECT count(*) <> count(DISTINCT e.value->>'id') FROM jsonb_array_elements(p_items) AS e(value)) THEN
-    RAISE EXCEPTION 'PO_ITEM_ID_DUPLICATE';
+  -- Compared as uuids: the same line spelled in upper and lower case is one line.
+  IF (SELECT count(*) <> count(DISTINCT public._cost_step2_try_uuid(e.value->>'id'))
+        OR bool_or(public._cost_step2_try_uuid(e.value->>'id') IS NULL)
+        FROM jsonb_array_elements(p_items) AS e(value)) THEN
+    RAISE EXCEPTION 'PO_ITEM_ID_DUPLICATE: each line must appear once, by a valid id';
   END IF;
 
   -- The same advisory lock save_purchase_order takes, in the same order (before the key lock).

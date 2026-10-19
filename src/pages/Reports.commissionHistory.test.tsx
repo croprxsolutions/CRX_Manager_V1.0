@@ -14,10 +14,11 @@ const H = vi.hoisted(() => ({
     deniedPages: [] as string[],
   },
   rpcHandler: null as RpcHandler | null,
+  selects: [] as Array<{ table: string; columns: string }>,
 }));
 
 type QueryBuilder = {
-  select: () => QueryBuilder;
+  select: (columns?: string) => QueryBuilder;
   eq: (...args: unknown[]) => QueryBuilder;
   order: (...args: unknown[]) => QueryBuilder;
   limit: (...args: unknown[]) => QueryBuilder;
@@ -31,9 +32,9 @@ type QueryBuilder = {
 
 vi.mock('../lib/db', () => ({
   supabase: {
-    from: () => {
+    from: (table: string) => {
       const builder: QueryBuilder = {
-        select: () => builder,
+        select: (columns = '*') => { H.selects.push({ table, columns }); return builder; },
         eq: () => builder,
         order: () => builder,
         limit: () => builder,
@@ -116,6 +117,7 @@ const renderReports = () => render(<MemoryRouter><Reports /></MemoryRouter>);
 beforeEach(() => {
   cleanup();
   H.rpc = [];
+  H.selects = [];
   H.toast.mockReset();
   H.rpcHandler = null;
   H.auth.role = 'admin';
@@ -170,6 +172,37 @@ describe('Reports commission history', () => {
       expect(called).not.toContain('get_bottom_line_pnl');
       expect(called).not.toContain('get_gross_sales_report');
       expect(called).not.toContain('get_inventory_cost_report');
+    });
+  });
+
+  it('never asks for product cost or order profit on a sales rep\'s Price List or Commissions', async () => {
+    H.auth.role = 'sales_rep';
+    H.auth.profile = { id: 'sales-rep-1', role: 'sales_rep' };
+    H.rpcHandler = () => Promise.resolve({ data: [], error: null });
+    renderReports();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Price List' }));
+
+    await waitFor(() => {
+      expect(H.selects.some(({ table }) => table === 'products')).toBe(true);
+      expect(H.selects.some(({ table }) => table === 'commissions')).toBe(true);
+    });
+    for (const { table, columns } of H.selects) {
+      if (table === 'products') expect(columns).not.toMatch(/current_cost|\*/);
+      if (table === 'commissions') expect(columns).not.toMatch(/order_profit|\*/);
+    }
+  });
+
+  it('still asks for cost on an admin\'s Price List', async () => {
+    H.rpcHandler = () => Promise.resolve({ data: [], error: null });
+    renderReports();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Price List' }));
+
+    await waitFor(() => {
+      expect(H.selects.some(({ table, columns }) => table === 'products' && columns.includes('current_cost'))).toBe(true);
     });
   });
 

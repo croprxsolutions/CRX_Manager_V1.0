@@ -9,7 +9,7 @@ refusal put the exact product cost in its error message, so a rep could type a o
   admins; five cost reports (gross sales, inventory cost, field profitability, profitability, bottom-line P&L) are
   admin-only, as is `dashboard_summary` (it gave every signed-in account company-wide profit and margin); the sales reports send NULL cost/profit/margin to non-admins; inventory position drops `current_cost` for
   non-admins; `save_quote`'s reply drops the cost totals for non-admins; anon loses `get_chemical_history`.
-- Screens: Reports hides profit by customer, product and month, P&L, Gross Sales and Inventory Cost from non-admins (a rep keeps their own commissions, without order profit); Sales Reports shows cost columns, the Total
+- Screens: Reports hides profit by customer, product and month, P&L, Gross Sales and Inventory Cost from non-admins (a rep keeps their own commissions, without order profit, and their Price List never asks for cost); Sales Reports shows cost columns, the Total
   Profit card and cost export columns only to admins and never prints a missing value as $0; `/field-profitability` is
   admin-only.
 - Proof: `scripts/smoke/prove-cost-margin-admin-only-rpc-leaks-real-schema.mjs` (disposable copy of the production

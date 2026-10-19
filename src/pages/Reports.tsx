@@ -43,6 +43,9 @@ const ADMIN_ONLY_OPERATIONAL_TABS: ReadonlySet<OperationalTab> = new Set(['inven
 // Profit by customer / product / month is profit; a rep keeps only their own commissions.
 const ADMIN_ONLY_PROFIT_TABS: ReadonlySet<ProfitTab> = new Set(['customer', 'product', 'revenue']);
 // A rep's own commission rows, without order_profit (profit is admin-only).
+// Price list columns; only an admin's list carries current_cost (cost is admin-only).
+const PRICE_LIST_COLUMNS = 'id, product_name, sku, category, vendor, tier1_price, tier2_price, tier3_price, product_form, container_type, container_size, unit_size';
+const PRICE_LIST_COLUMNS_ADMIN = 'id, product_name, sku, category, vendor, tier1_price, tier2_price, tier3_price, current_cost, product_form, container_type, container_size, unit_size';
 const REP_COMMISSION_COLUMNS = 'id, recipient, order_id, job_id, commission_amount, split_percentage, order_date, status, paid_date';
 
 // ─── Existing profitability interfaces (unchanged) ─────────────
@@ -487,7 +490,8 @@ export default function Reports() {
     try {
       const result = await fetchAllRows<Record<string, unknown>>((from, to) => supabase
         .from('products')
-        .select('id, product_name, sku, category, vendor, tier1_price, tier2_price, tier3_price, current_cost, product_form, container_type, container_size, unit_size')
+        // Cost is admin-only (Mason, 2026-10-15): a non-admin's price list never asks for it.
+        .select<string, Record<string, unknown>>(isAdmin ? PRICE_LIST_COLUMNS_ADMIN : PRICE_LIST_COLUMNS)
         .eq('is_active', true)
         .order('product_name')
         .order('id')
@@ -537,7 +541,7 @@ export default function Reports() {
     setPriceListError(false);
     setPriceListData(data);
     setPriceListLoaded(true);
-  }, [toast]);
+  }, [isAdmin, toast]);
 
   const fetchPostedApplications = useCallback(async () => {
     // PR-07 follow-up: dropped `applicator:profiles(full_name)` embed; applicator
@@ -1003,7 +1007,7 @@ export default function Reports() {
         { key: 'sku', header: 'SKU' },
         { key: 'category', header: 'Category' },
         { key: 'vendor', header: 'Vendor' },
-        { key: 'current_cost', header: 'Cost', format: fmtCSV },
+        ...(isAdmin ? [{ key: 'current_cost', header: 'Cost', format: fmtCSV }] : []),
         { key: 'tier1_price', header: 'Tier 1', format: fmtCSV },
         { key: 'tier2_price', header: 'Tier 2', format: fmtCSV },
         { key: 'tier3_price', header: 'Tier 3', format: fmtCSV },
@@ -1144,7 +1148,7 @@ export default function Reports() {
     { key: 'sku', header: 'SKU' },
     { key: 'category', header: 'Category', sortable: true },
     { key: 'vendor', header: 'Vendor', sortable: true },
-    { key: 'current_cost', header: 'Cost', render: (r) => <span className="font-mono">{r.current_cost != null ? fmt(r.current_cost as number) : '-'}</span> },
+    ...(isAdmin ? [{ key: 'current_cost', header: 'Cost', render: (r: Record<string, unknown>) => <span className="font-mono">{r.current_cost != null ? fmt(r.current_cost as number) : '-'}</span> } as Column<Record<string, unknown>>] : []),
     { key: 'tier1_price', header: 'Tier 1', render: (r) => <span className="font-mono">{r.tier1_price != null ? fmt(r.tier1_price as number) : '-'}</span> },
     { key: 'tier2_price', header: 'Tier 2', render: (r) => <span className="font-mono">{r.tier2_price != null ? fmt(r.tier2_price as number) : '-'}</span> },
     { key: 'tier3_price', header: 'Tier 3', render: (r) => <span className="font-mono">{r.tier3_price != null ? fmt(r.tier3_price as number) : '-'}</span> },

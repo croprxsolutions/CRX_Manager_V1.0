@@ -4062,9 +4062,14 @@ const CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*
 // needs to build the name of the program it runs, so a run-time program name next
 // to a variable assignment is refused outright, whatever words the command shows.
 const SHELL_ASSIGNMENT_RE = /(?:^|[;&|\r\n(`]|\s)(?:export\s+|local\s+|declare\s+(?:-\w+\s+)*|readonly\s+|set\s+)?[A-Za-z_]\w*\+?=|\$(?:env:)?[A-Za-z_][\w:]*\s*[+]?=(?!=)|\b(?:set-variable|new-variable|sv|nv|set-item\s+env:)\b|\bread\s+(?:-\w+\s+)*[A-Za-z_]/i;
+// Widened (Codex connector, PR #956 second pass): a program word built by a plain
+// command substitution (`$(printf g)h pr m$(printf er)ge 951`) needs no assignment at
+// all, so ANY run-time-built top-level program name is refused. Running a program
+// from a variable (`node "$f"`) or handing a shell run-time text (`bash -c "$CMD"`,
+// `eval "$(fnm env)"`) is a different shape and is not affected.
 export function programAssembledAtRuntime(command) {
   const text = String(command || "");
-  return SHELL_ASSIGNMENT_RE.test(text) && programBuiltAtRuntime(text, /\$/);
+  return programBuiltAtRuntime(text, /\$/) || (SHELL_ASSIGNMENT_RE.test(text) && programBuiltAtRuntime(text, /\$/));
 }
 
 // Inline program code handed to a runtime as an ARGUMENT (`node -e "…"`,

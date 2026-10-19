@@ -89,5 +89,9 @@ obfuscation (`printf 'g%s pr m%s 951' h erge | bash`); a path below `.claude` bu
 (`.claude/s$(printf ession-state)`, `.claude/$X`) counts as the state dir; and under a hold,
 `gh <global options> api … -f` is outward.
 
+**Codex connector on `4f51aa4fc` (2 P1).** Fixed: any top-level program name built at run time is
+refused, including a plain command substitution (`$(printf g)h pr m$(printf er)ge 951`); and under
+a hold, an attached short `gh api` field flag (`-fbody=x`) is outward.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

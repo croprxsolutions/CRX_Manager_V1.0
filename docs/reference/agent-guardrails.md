@@ -341,8 +341,8 @@ separately, the permission change.
    allowed, so these refusals never were a boundary. Every readable `gh pr merge`, REST/GraphQL
    merge, `--admin`, and the existing composition, alias and depth checks are unchanged. A file-fed
    interpreter with no gated word (`bash < payload.txt`, `Get-Content payload.txt | iex`) now passes,
-   like `bash payload.sh`. Two refusals run whatever words the command shows: a program
-   name assembled from shell variables in the same command (`programAssembledAtRuntime`), and
+   like `bash payload.sh`. Two refusals run whatever words the command shows: any top-level
+   program name built at run time, by a variable or a command substitution (`programAssembledAtRuntime`), and
    inline code (`node -e`, `python -c`, `perl -e`, `ruby -e`, `php -r`) whose CODE could reach a gated
    action (`inlineCodeReachesGatedAction`). main allowed both; only the code argument is judged, so
    `gh … | node -e "…"` still passes. **Residual, stated:** a merge hidden inside code that a runtime

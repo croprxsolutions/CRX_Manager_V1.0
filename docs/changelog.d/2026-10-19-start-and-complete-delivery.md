@@ -9,7 +9,7 @@ first answered left the delivery **In Progress** (nothing deducted or billed, dr
   calling `complete_delivery`, unchanged) in one transaction: the delivery ends completed or
   nothing changed. No stock, invoice or period logic is retyped.
 - **It takes the chosen business date** (`p_delivered_on`, America/Chicago). "Today" completes at
-  the server's now(); an earlier date completes at midday of that date (the same instant the app
+  the server's now(); an earlier date completes at 17:00 UTC of that date (noon CDT, 11 AM CST; the same instant the app
   already sent for a past date). So a "today" completion whose request reaches the server just
   after Chicago midnight keeps the chosen day. A date after today, more than a year back, or not
   a real date is refused. (Such a just-after-midnight completion is dated the previous day, so for

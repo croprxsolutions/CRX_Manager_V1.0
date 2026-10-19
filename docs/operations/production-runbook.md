@@ -196,16 +196,24 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 5. Validate. **Future (once the alert design is built):** compare against the baseline file
    `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists**, so use this fallback:
    read live row counts for `customers`, `invoices`, `orders`, `inventory_transactions` and `payments`
-   just before the drill and note the dump date. The restored counts must be at or below live and close
-   to it (rows written since the dump are expected to be missing, never extra), and the newest
-   `created_at` in each table must not be after the dump time. Spot-check a few known recent invoices by
-   number. Record the numbers in the drill log.
+   just before the drill and note the dump date. For **append-only** data (`inventory_transactions`,
+   `payments`) the restored count must be at or below live and close to it (rows written since the dump
+   are missing, never extra). For tables where deletes are allowed (`customers`, `orders`, `invoices`)
+   the restored count may be above live if records were deleted after the dump: list the difference and
+   explain it from the activity log rather than failing the drill. In every table the newest `created_at`
+   must not be after the dump time. Spot-check a few known recent invoices by number. Record the numbers
+   in the drill log.
 6. Check logins: confirm users exist in `auth.users` in the restored copy. If the dump lacks them,
    logins must be re-created and users told to reset passwords. Record which case applied.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
-8. Going live on the restored copy means repointing the Vercel environment variables to the new project,
-   redeploying, and re-checking Edge Functions and secrets. That changes production configuration, so it
-   needs Mason's explicit approval.
+8. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
+   live on the restored copy: deploy every function directory under `supabase/functions/` to it, install
+   every required secret (from the password manager, never pasted into chat), and smoke-test each function
+   (`send-email`, `create-user`, `reset-user-password`, `process-document`, `process-blend-ticket`,
+   `customer-document-files`, `epa-lookup`, `setup-blend-tickets-storage`; the directory listing is
+   authoritative). Only then repoint the Vercel environment variables to the new project and redeploy.
+   Deploying functions, installing secrets and changing production configuration each need Mason's
+   explicit approval in the current conversation.
 9. Run the post-restore checklist (4.7).
 
 ### 4.7 After any restore: nothing may happen twice

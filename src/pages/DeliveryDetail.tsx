@@ -18,7 +18,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { fingerprintIntentPayload } from '../lib/idempotency';
+import { digestIntentPayload } from '../lib/idempotency';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
@@ -1003,7 +1003,9 @@ export default function DeliveryDetail() {
     // Fingerprint the date the driver chose, not the completion time derived from it:
     // "today" sends no p_completed_at but becomes a past date after midnight, and an
     // exact retry across midnight must keep its key to replay the saved result.
-    const completeScope = `complete:${fingerprintIntentPayload({
+    // complete_delivery replays on the key alone, so the scope uses the collision-resistant
+    // SHA-256 digest (digestIntentPayload), never the 64-bit FNV fingerprint (see idempotency.ts).
+    const completeScope = `complete:${await digestIntentPayload({
       ...intentParams,
       p_completed_at: undefined,
       delivered_on: usePaperTicket ? paperDeliveredOn : null,

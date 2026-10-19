@@ -25,7 +25,7 @@ import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { fingerprintIntentPayload } from '../lib/idempotency';
+import { digestIntentPayload } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt } from '../lib/paperTicket';
 import { compressImage } from '../lib/imageCompression';
@@ -342,7 +342,9 @@ export default function FieldStop() {
     // Fingerprint the date the driver chose, not the completion time derived from it:
     // "today" sends no p_completed_at but becomes a past date after midnight, and an
     // exact retry across midnight must keep its key to replay the saved result.
-    const completeScope = `complete:${fingerprintIntentPayload({
+    // complete_delivery replays on the key alone, so the scope uses the collision-resistant
+    // SHA-256 digest (digestIntentPayload), never the 64-bit FNV fingerprint (see idempotency.ts).
+    const completeScope = `complete:${await digestIntentPayload({
       ...intentParams,
       p_completed_at: undefined,
       delivered_on: usePaperTicket ? paperDeliveredOn : null,

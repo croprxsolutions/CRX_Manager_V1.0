@@ -6,6 +6,10 @@
  *
  * The ticket photo is an ordinary delivery photo carrying this caption, so it is
  * stored, protected and shown exactly like every other delivery photo.
+ *
+ * The photo requirement is enforced by the app only, at parity with the on-screen
+ * signature: complete_delivery requires no completion evidence on either path. A
+ * server-enforced link is open in the Goal 5 plan (it needs a complete_delivery change).
  */
 import { todayInBusinessTz } from './dateUtils';
 

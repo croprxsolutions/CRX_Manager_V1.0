@@ -37,7 +37,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { completedAtForDeliveredOn, isValidDeliveredOn } from '../lib/paperTicket';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
@@ -436,6 +436,8 @@ export default function Deliveries() {
       return;
     }
     const target = completeTarget;
+    // Captured before any await, so a cancel during the hashing or a signal check is seen.
+    const dialogGen = completeDialogGenRef.current;
     const completeParams = {
       p_delivery_id: target.id,
       p_signed_by: signedBy.trim(),
@@ -451,7 +453,9 @@ export default function Deliveries() {
     // Fingerprint the date the driver chose, not the completion time derived from it:
     // "today" sends no p_completed_at but becomes a past date after midnight, and an
     // exact retry across midnight must keep its key to replay the saved result.
-    const completeScope = `complete:${fingerprintIntentPayload({
+    // complete_delivery replays on the key alone, so the scope uses the collision-resistant
+    // SHA-256 digest (digestIntentPayload), never the 64-bit FNV fingerprint (see idempotency.ts).
+    const completeScope = `complete:${await digestIntentPayload({
       ...completeParams,
       p_completed_at: undefined,
       delivered_on: deliveredOnDate,
@@ -460,7 +464,6 @@ export default function Deliveries() {
     let confirmed = false;
     // The signal checks take a few seconds; if the dialog was cancelled or switched to
     // another delivery meanwhile, stop before sending the next server call.
-    const dialogGen = completeDialogGenRef.current;
     const stillOpenForTarget = () =>
       completeDialogGenRef.current === dialogGen && completeTargetRef.current?.id === target.id;
     // An edit to the signer or date during a check must not be dropped in favour of the old values.

@@ -46,7 +46,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   helper (`completedAtForDeliveredOn`).
   The Deliveries list dialog (office staff only) says the assigned driver completes a paper-ticket
   delivery from their own delivery screen, since only the driver layout has the ticket controls. The ticket photo
-  is required only when the driver ticks the paper-ticket box. Ticket photos do not count toward
+  is required only when the driver ticks the paper-ticket box, and that check is in the app only:
+  `complete_delivery` requires no completion evidence on either path (an on-screen signature is not
+  server-required either), so a server-enforced link to the ticket photo is recorded as open. Ticket photos do not count toward
   the 10-photo limit (they have their own limit of 2), and on the field stop a saved ticket photo
   stays on screen even if the photo list fails to reload. Moving to another stop clears the photo
   list first, so one stop's ticket photo can never satisfy the next stop's check.

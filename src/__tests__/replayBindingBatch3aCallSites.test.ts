@@ -1,14 +1,14 @@
 /**
  * Replay-binding batch 3a (migration 20261018230000): the five screens that call complete_delivery
- * or complete_job retire a refused retry key ONLY when the refusal proves nothing committed under it
- * ('intent' = the key belongs to a different request, 'actor' = to another user). A 'receipt'
- * refusal (IDEMPOTENCY_RESULT_INVALID / IDEMPOTENCY_RECEIPT_MISSING) must keep the key: an earlier
- * attempt may have committed, and the key is the only way to replay it instead of completing again.
- * Same rule and form as batches 1 and 2 (replayBindingBatch1CallSites.test.ts).
+ * or complete_job retire a refused retry key on ANY replay-binding refusal: 'intent' (the key
+ * belongs to a different request), 'actor' (to another user) and 'receipt' (IDEMPOTENCY_RESULT_INVALID
+ * / IDEMPOTENCY_RECEIPT_MISSING, a receipt that can never be used, so keeping the key would repeat
+ * the same refusal forever; Codex on PR #954).
  *
- * After an 'intent' refusal the next click runs under a fresh key. If the first attempt had in fact
- * completed the delivery or job, that fresh call is refused by the body itself (the delivery or job
- * is no longer in_progress), so a retired key can never complete the same record twice.
+ * This differs from batches 1 and 2, which keep the key on 'receipt' because a fresh key could
+ * repeat a money action. A completion cannot repeat: the next try runs under a fresh key and the
+ * body refuses a delivery or job that is no longer in_progress, so a retired key can never complete
+ * the same record twice.
  *
  * Each check names the screen's own key hook, so it counts only the completion call site and is
  * unaffected by other batches' sites in the same file (Deliveries.tsx also cancels deliveries).
@@ -25,21 +25,22 @@ const SITES: Array<[string, string]> = [
   ['src/pages/JobDetail.tsx', 'completeJobIdem'],
 ];
 
-const intentOrActorReset = (hook: string) => new RegExp(
-  `const bindingRejection = getIdempotencyBindingRejection\\(\\w+\\);\\s*\\n\\s*if \\(bindingRejection === 'intent' \\|\\| bindingRejection === 'actor'\\) ${hook}\\.resetKey\\(\\);`,
+// The reset runs on any binding refusal (the helper returns 'intent', 'actor' or 'receipt', else null).
+const anyBindingReset = (hook: string) => new RegExp(
+  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) ${hook}\\.resetKey\\(\\);`,
   'g',
 );
-// Any reset guarded by the bare helper result (truthy for 'receipt' too).
-const BARE_HELPER_RESET = /if\s*\(\s*getIdempotencyBindingRejection\([^)]*\)\s*\)\s*\{?\s*\S*reset\S*\(/;
+// The narrower batch-1/2 form, which would leave a completion stuck on a 'receipt' refusal.
+const INTENT_OR_ACTOR_ONLY = /bindingRejection === 'intent' \|\| bindingRejection === 'actor'\) complete(?:Job)?Idem\.resetKey/;
 
 const read = (file: string) => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 
-describe('replay-binding batch 3a call sites keep the key on a receipt refusal', () => {
+describe('replay-binding batch 3a call sites retire the key on any binding refusal', () => {
   for (const [file, hook] of SITES) {
-    it(`${file}: the completion retires ${hook} only for intent or actor`, () => {
+    it(`${file}: the completion retires ${hook} on intent, actor or receipt`, () => {
       const source = read(file);
-      expect(source.match(intentOrActorReset(hook))?.length ?? 0).toBe(1);
-      expect(BARE_HELPER_RESET.test(source)).toBe(false);
+      expect(source.match(anyBindingReset(hook))?.length ?? 0).toBe(1);
+      expect(INTENT_OR_ACTOR_ONLY.test(source)).toBe(false);
     });
   }
 
@@ -77,11 +78,12 @@ describe('replay-binding batch 3a call sites keep the key on a receipt refusal',
   });
 
   it('the patterns tell the two forms apart', () => {
-    const good = "const bindingRejection = getIdempotencyBindingRejection(error);\n    if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();";
-    const bad = 'if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();';
-    expect(good.match(intentOrActorReset('completeIdem'))?.length).toBe(1);
-    expect(BARE_HELPER_RESET.test(good)).toBe(false);
-    expect(BARE_HELPER_RESET.test(bad)).toBe(true);
+    const good = 'if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();';
+    const narrow = "const bindingRejection = getIdempotencyBindingRejection(error);\n    if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();";
+    expect(good.match(anyBindingReset('completeIdem'))?.length).toBe(1);
+    expect(narrow.match(anyBindingReset('completeIdem'))).toBeNull();
+    expect(INTENT_OR_ACTOR_ONLY.test(narrow)).toBe(true);
+    expect(INTENT_OR_ACTOR_ONLY.test(good)).toBe(false);
   });
 });
 

@@ -414,11 +414,10 @@ export default function FieldStop() {
 
       setStep('done');
     } catch (error: unknown) {
-      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
-      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
-      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
-      const bindingRejection = getIdempotencyBindingRejection(error);
-      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
+      // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
+      // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
+      // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
+      if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
       toast('error', sanitizeError(error));
     }

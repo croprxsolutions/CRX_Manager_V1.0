@@ -587,11 +587,10 @@ export default function FieldView() {
       setCompleteForm(emptyCompleteForm());
       await fetchCards();
     } catch (err) {
-      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
-      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
-      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
-      const bindingRejection = getIdempotencyBindingRejection(err);
-      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
+      // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
+      // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
+      // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
+      if (getIdempotencyBindingRejection(err)) completeIdem.resetKey();
       Sentry.captureException(err, { tags: { source: 'critical_action', action: 'field_view_complete_job' } });
       // U12 Codex R5 #2: a dispatch-only applicator on a SPLIT job (other
       // locations dispatched to someone else) sees Complete, but complete_job

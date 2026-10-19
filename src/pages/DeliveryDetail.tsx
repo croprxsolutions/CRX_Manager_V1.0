@@ -958,7 +958,7 @@ export default function DeliveryDetail() {
       // database binds the retained key to the person and the exact request, so a retry
       // with edited values is refused (IDEMPOTENCY_INTENT_MISMATCH, reset in the catch
       // below) instead of replaying the first payload's quantities and signer as success.
-      // The success-path reset below still runs BEFORE assertRpcResult (F1, pinned in
+      // The success-path reset below still runs BEFORE the result assertion (F1, pinned in
       // idempotency-reset-order.test.ts): an empty reply retires the key, and the next try
       // is then refused by the body if the first attempt had completed the delivery.
       completeIdem.resetKey();
@@ -1136,11 +1136,10 @@ export default function DeliveryDetail() {
 
       fetchDelivery();
     } catch (error: unknown) {
-      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
-      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
-      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
-      const bindingRejection = getIdempotencyBindingRejection(error);
-      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();
+      // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
+      // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
+      // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
+      if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
       toast('error', sanitizeError(error));
     }

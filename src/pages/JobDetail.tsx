@@ -3104,11 +3104,10 @@ export default function JobDetail() {
         await fetchJob();
       }
     } catch (err: unknown) {
-      // Refused as another request's or another person's retry key: nothing ran for THIS request, so the next
-      // try starts fresh (if the earlier request completed this record, the body refuses a second completion).
-      // A 'receipt' refusal keeps the key: an earlier attempt may have committed.
-      const bindingRejection = getIdempotencyBindingRejection(err);
-      if (bindingRejection === 'intent' || bindingRejection === 'actor') completeJobIdem.resetKey();
+      // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
+      // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
+      // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
+      if (getIdempotencyBindingRejection(err)) completeJobIdem.resetKey();
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'complete_job' } });
       // U12 Codex R5 #2: same translation as FieldView — a dispatch-only
       // applicator on a SPLIT job gets the RPC's raw authorization rejection;

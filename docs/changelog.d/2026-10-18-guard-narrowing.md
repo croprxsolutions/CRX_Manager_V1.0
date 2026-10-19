@@ -106,5 +106,8 @@ check-agent-guidance rejects any Edit/Write ask entry, wildcard included. Codex 
 `10450759a` (`-X=DELETE` under a hold; MCP path-field writes to `.claude/agents|commands`, which
 still prompt through permissions.ask) are deferred to a follow-up.
 
+**CodeRabbit on `2cbc992f6` (1).** Fixed: `SELECT … INTO` counts as a write across a `;` inside a
+string literal (`SELECT ';' INTO t`).
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

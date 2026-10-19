@@ -97,6 +97,8 @@ eq(holdDecision("mcp__supabase__execute_sql", { query: "grant execute on functio
   "GRANT is denied under hold");
 eq(holdDecision("mcp__supabase__execute_sql", { query: "SELECT * INTO public.hold_probe FROM invoices" }), "deny",
   "SELECT INTO (creates a table) is denied under hold (CodeRabbit, PR #956)");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "SELECT ';' INTO public.hold_probe" }), "deny",
+  "SELECT INTO behind a semicolon inside a string literal is denied under hold (CodeRabbit, PR #956)");
 eq(holdDecision("mcp__supabase__execute_sql", { query: "select count(*) from invoices" }), "allow",
   "plain read SQL allowed under hold");
 ok(isBuildActionUnderHold("mcp__supabase__apply_migration", {}), "apply blocked under hold");

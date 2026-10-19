@@ -77,10 +77,11 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-19 (MED) — a driver's paper-ticket receipt can be skipped when the customer row is hidden from them
+## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
 
-Goal 5's paper-ticket path always sends the customer receipt when the customer has an email on file,
-but the delivery page and the field stop read the customer through the client. Under the current
+The customer receipt email after a delivery (including Goal 5's paper-ticket path, where it follows the
+same opt-in as an on-screen signature) is sent by the phone, and the delivery page and the field stop
+read the customer through the client. Under the current
 `customers_select` policy, an assigned driver may not see the customer of a stop whose
 `scheduled_date` is NULL or older than yesterday, so the page has no email and no receipt is sent.
 Since PR #955 the driver is told no receipt was sent from the phone and that the office can send it

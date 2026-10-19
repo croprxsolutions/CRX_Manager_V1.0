@@ -423,8 +423,9 @@ export default function FieldStop() {
 
       await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
 
-      // The paper-ticket path always sends the receipt (Goal 5: it is still required there).
-      if ((emailOnComplete || usePaperTicket) && delivery.customer?.email) {
+      // Same opt-in as an on-screen signature. The customer keeps the signed paper ticket; a
+      // guaranteed email needs a server-side receipt queue (open in the Goal 5 plan).
+      if (emailOnComplete && delivery.customer?.email) {
         const emailItems = items
           .map((it) => ({ name: it.product?.product_name || 'Product', qty: isPartial ? (deliveryQtys[it.id] ?? it.quantity) : it.quantity }))
           .filter((r) => r.qty > 0);
@@ -673,7 +674,7 @@ export default function FieldStop() {
 
           {delivery.customer?.email && (
             <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
-              <input type="checkbox" checked={emailOnComplete || usePaperTicket} disabled={usePaperTicket} onChange={(e) => setEmailOnComplete(e.target.checked)} className="w-4 h-4" />
+              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className="w-4 h-4" />
               Email a receipt to the customer
             </label>
           )}

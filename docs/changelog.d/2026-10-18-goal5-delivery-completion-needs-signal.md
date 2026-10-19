@@ -32,7 +32,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   the field stop, "Customer signed a paper ticket (no signal at the site)" replaces the on-screen
   signature with a required photo of the signed ticket. The photo is an ordinary delivery photo
   captioned "Signed paper delivery ticket"; the signer's name is still required, no signature
-  image is saved, and the customer receipt is always sent when the customer has an email on file.
+  image is saved. The customer receipt email follows the same "email a receipt" choice as an
+  on-screen signature (the customer keeps the signed paper ticket); a guaranteed receipt needs a
+  server-side receipt queue, recorded as open.
   The driver also enters the "Delivered on" date from the ticket (today by default, never in the
   future); a past date is sent as the completion time, so the delivery and its invoice land on the
   day the delivery really happened, not the day it was entered. The date is required (an empty
@@ -66,7 +68,7 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   review). The key uses the date the driver picked, not the completion time worked out from it,
   so an exact retry that crosses midnight (when "today" becomes yesterday) keeps its key and gets
   the saved result back.
-- **The paper-ticket receipt is never skipped silently.** If the phone has no customer email for a
+- **A paper-ticket receipt is never skipped silently.** If the phone has no customer email for a
   paper-ticket delivery (none on file, or the customer record is hidden from that driver by the
   current `customers_select` policy), the driver is told no receipt was sent from the phone and
   that the office can send it. Reading the recipient through the server is recorded as open in

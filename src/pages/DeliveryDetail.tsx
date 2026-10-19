@@ -1140,8 +1140,9 @@ export default function DeliveryDetail() {
       );
 
       // === Email customer when delivery is completed (opt-out via checkbox) ===
-      // The paper-ticket path always sends the receipt (Goal 5: it is still required there).
-      if ((emailOnComplete || usePaperTicket) && customer?.email) {
+      // Same opt-in as an on-screen signature. The customer keeps the signed paper ticket; a
+      // guaranteed email needs a server-side receipt queue (open in the Goal 5 plan).
+      if (emailOnComplete && customer?.email) {
         try {
           const deliveredItems = items
             .map((item) => {
@@ -1761,8 +1762,7 @@ export default function DeliveryDetail() {
                 <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={emailOnComplete || usePaperTicket}
-                    disabled={usePaperTicket}
+                    checked={emailOnComplete}
                     onChange={(e) => setEmailOnComplete(e.target.checked)}
                     className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green bg-gray-700"
                   />

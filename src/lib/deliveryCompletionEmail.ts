@@ -48,8 +48,8 @@ export interface DeliveryCompletionEmailParams {
 export const RECEIPT_NOT_SENT_MESSAGE =
   'Delivery completed, but the customer receipt email did not send. Ask the office to send it with Email Confirmation on this delivery.';
 
-// Paper-ticket path: the receipt is required, but this phone had no customer email to send it to
-// (none on file, or the customer record is not visible to this driver). Never skip it silently.
+// Paper-ticket path: this phone had no customer email to send a receipt to (none on file, or the
+// customer record is not visible to this driver). Say so rather than skip it silently.
 export const RECEIPT_NO_EMAIL_MESSAGE =
   'Delivery completed, but no customer receipt was sent from this phone (no customer email available here). Ask the office to send it with Email Confirmation on this delivery.';
 

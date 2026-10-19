@@ -455,7 +455,9 @@ if (shellTool) {
   // without spelling either, so it counts too (Codex connector, PR #956).
   const segmentsHitStateDirNarrow = (value) => {
     const text = String(value || "").replace(/\\/g, "/");
-    if (/(?:^|[\s"'=:(/])\.claude\/+[^\s/"';&|<>]*[*?[\]{}]/i.test(text)) return true;
+    // Bash extglob `@(…)`, `+(…)`, `!(…)` (`.claude/s@(ession-)state`) expands the
+    // same way under `shopt -s extglob` / `bash -O extglob` (Codex connector, PR #956).
+    if (/(?:^|[\s"'=:(/])\.claude\/+[^\s/"';&|<>]*(?:[*?[\]{}]|[@!+]\()/i.test(text)) return true;
     if (/(?:^|[\s"'=:(/])\.claude\/+(?:[^\s/"';&|<>]+\/+)*\.{1,2}(?=\/|$|[\s"';&|<>])/i.test(text)) return true;
     // A path below `.claude` built at run time (`.claude/s$(printf ession-state)`,
     // `.claude/$X`, a backtick, `%X%`) may BE the state dir (Codex connector, PR #956).

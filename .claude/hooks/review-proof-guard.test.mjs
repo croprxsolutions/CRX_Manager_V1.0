@@ -921,6 +921,10 @@ for (const command of [
   "mv C:/CRX_Manager/.claude /tmp/x",
   "rm -rf .claude/*",
   "rm -rf .claude/s*",
+  // Bash extglob aliases of the state dir (Codex connector, PR #956).
+  "bash -O extglob -c 'rm -rf .claude/s@(ession-)state'",
+  "rm -rf .claude/+(session-state)",
+  "rm -rf .claude/!(hooks)",
   "rm -rf .claude/session-state",
   "echo x > .claude/session-state/anything.json",
   "rm -rf .claude/worktrees/wt-a/src",

@@ -122,5 +122,9 @@ file before a PR diff shows it. Mason: "Split it." `.claude/settings.json` and
 prompt removal moves to its own PR for Mason to merge himself. Sol's MED (a hold warns, not denies,
 on local edits) is the approved design and stays.
 
+**Codex connector on `8cdd865dc` (1 P1, a regression).** Fixed: Bash extglob below `.claude`
+(`bash -O extglob -c 'rm -rf .claude/s@(ession-)state'`, `+(…)`, `!(…)`) counts as a glob that may
+expand to the state dir. main denied it; the narrowed matcher had missed it.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

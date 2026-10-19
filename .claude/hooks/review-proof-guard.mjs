@@ -460,11 +460,13 @@ if (shellTool) {
     const text = String(value || "").replace(/\\/g, "/");
     // Bash extglob `@(…)`, `+(…)`, `!(…)` (`.claude/s@(ession-)state`) expands the
     // same way under `shopt -s extglob` / `bash -O extglob` (Codex connector, PR #956).
-    if (/(?:^|[\s"'=:(/])\.claude\/+[^\s/"';&|<>]*(?:[*?[\]{}]|[@!+]\()/i.test(text)) return true;
-    if (/(?:^|[\s"'=:(/])\.claude\/+(?:[^\s/"';&|<>]+\/+)*\.{1,2}(?=\/|$|[\s"';&|<>])/i.test(text)) return true;
+    // `{` and `,` start a path too: Bash brace expansion `{.claude/s@(ession-)state,x}`
+    // (CodeRabbit, PR #956), as in STATE_DIR_ANCESTOR_RE.
+    if (/(?:^|[\s"'=:(/{,])\.claude\/+[^\s/"';&|<>]*(?:[*?[\]{}]|[@!+]\()/i.test(text)) return true;
+    if (/(?:^|[\s"'=:(/{,])\.claude\/+(?:[^\s/"';&|<>,{}]+\/+)*\.{1,2}(?=\/|$|[\s"';&|<>,}])/i.test(text)) return true;
     // A path below `.claude` built at run time (`.claude/s$(printf ession-state)`,
     // `.claude/$X`, a backtick, `%X%`) may BE the state dir (Codex connector, PR #956).
-    if (/(?:^|[\s"'=:(/])\.claude\/+[^\s;&|<>]*[$`%]/i.test(text)) return true;
+    if (/(?:^|[\s"'=:(/{,])\.claude\/+[^\s;&|<>]*[$`%]/i.test(text)) return true;
     const segs = text.split(/[\s"'=:/(){}|;&<>]+/);
     return segs.some((s) => /^session-state$/i.test(s) || globSegCouldTargetProtected(s));
   };

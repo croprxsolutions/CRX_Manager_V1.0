@@ -384,6 +384,21 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
 r = runHook("codex-push-guard.mjs", { tool_name: "Bash", tool_input: { command: "git status" } });
 eq(r.status, 0, "codex-push-guard exits 0 on non-push command");
 eq(r.stdout.trim(), "", "codex-push-guard silent on non-push command");
+// A program name assembled inside a NESTED command is refused by both gates, not
+// only an outer one (Codex connector, PR #956).
+for (const command of [
+  "bash -c '$(printf g)h pr m$(printf er)ge 951 --squash'",
+  "bash -c 'g$(printf i)t pu$(printf sh) origin HEAD'",
+]) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    ok(res.stdout.includes("deny"), `${hook} denies a nested assembled program name: ${command}`);
+  }
+}
+for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+  const res = runHook(hook, { tool_name: "Bash", tool_input: { command: "bash -c 'echo $(date)'" } });
+  eq(res.stdout.trim(), "", `${hook} silent on a nested substitution that builds no program name`);
+}
 
 // codex-push-guard: a configured mirror remote denies EVERY push form, not just
 // a main-bound one. Regression test for a placement bug found on 2026-08-05:

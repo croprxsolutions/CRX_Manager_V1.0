@@ -128,5 +128,12 @@ expand to the state dir. main denied it; the narrowed matcher had missed it. The
 check now reads extglob too, so an obscured ancestor (`.clau@(de)`, `.c+(laude)/s@(ession-)state`,
 `.clau!(x)/s*`) is denied; main allowed those.
 
+**Codex connector and CodeRabbit on `a7f1a5077` / `21514d6e9` (2 regressions).** Fixed: a program
+name glued from a substitution and letters INSIDE a computed nested command
+(`bash -c '$(printf g)h pr m$(printf er)ge 951'`, the `git push` twin) is refused by both gates
+(`nestedProgramNameGlued`); main refused these, the narrowed gates had missed them.
+`eval "$(fnm env)"` and `$((i+1))` still pass. Brace expansion `{.claude/s@(ession-)state,x}` counts
+as a path below `.claude`. The decision log now says unmatched actions are allowed, not warned.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

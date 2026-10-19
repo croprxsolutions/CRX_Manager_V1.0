@@ -928,6 +928,8 @@ for (const command of [
   "rm -rf .clau@(de)",
   "rm -rf .c+(laude)/s@(ession-)state",
   "find .clau!(x)/s* -delete",
+  "rm -rf {.claude/s@(ession-)state,x}",
+  "rm -rf {x,.claude/x/..}",
   "rm -rf .claude/session-state",
   "echo x > .claude/session-state/anything.json",
   "rm -rf .claude/worktrees/wt-a/src",

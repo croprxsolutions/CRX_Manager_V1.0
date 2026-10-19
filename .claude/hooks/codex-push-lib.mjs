@@ -4074,6 +4074,21 @@ export function programAssembledAtRuntime(command) {
   return programBuiltAtRuntime(text, /[$`]/);
 }
 
+// A NESTED command's program name glued from a substitution or variable AND
+// literal letters (`$(printf g)h`, `g$(printf i)t`, `` `printf g`h ``, `g${X}t`):
+// a shell inside `bash -c '…'` assembles it, and the outer scan never reads it
+// (Codex connector, PR #956). A whole-word substitution (`eval "$(fnm env)"`'s
+// `$(fnm env)`) is not glued and stays allowed, as on the outer command.
+export function nestedProgramNameGlued(command) {
+  // Mark substitutions and variables first, so a space inside `$(fnm env)` does
+  // not split the word, then judge the first word alone.
+  const marked = String(command || "")
+    .trim()
+    .replace(/\$\([^()]*\)|`[^`]*`|\$\{[^}]*\}|\$\w+/g, "\u0000");
+  const first = (marked.split(/[\s;&|]+/)[0] || "").replace(/["']/g, "");
+  return first.includes("\u0000") && first.replace(/\u0000/g, "").length > 0;
+}
+
 // Inline program code handed to a runtime as an ARGUMENT (`node -e "…"`,
 // `python -c "…"`, `perl -e`, `ruby -e`, `php -r`) is not fed input, so the fed-
 // interpreter refusal never saw it, on main or here: `node -e "…execSync(Buffer

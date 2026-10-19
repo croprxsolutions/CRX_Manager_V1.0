@@ -1,7 +1,16 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-16 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-16 13:42 UTC: 1033 rows / 1026 names; the one change since the 06:16 UTC read
+**Last verified: 2026-10-19 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-19 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
+replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
+replay-binding entry below (both wrappers, both renamed bodies and the 24-operation guard read live); at 18:35 UTC:
+1035 rows / 1028 names; the one change since the 12:50 UTC read is that the
+cost/margin step-1 migration `20261019010000` (ledger `20261019182757`, PR #957 merged as `8124ae21c`) is now applied,
+which re-certified the cost/margin entry below with a live per-role check; at 01:08 UTC: 1034 rows / 1027 names; the one change since the 2026-10-16 13:42 UTC read
+is that `20261016140000_bind_stock_replay_receipts_batch2` (ledger `20261019010324`, PR #951 merged as
+`d51d67c0b`) is now applied, which re-certified the replay-binding entry below: batch 2's thirteen wrappers,
+thirteen renamed bodies and the widened deferred trigger all read live at 01:05 UTC. In the 13:42 UTC read
+(1033 rows / 1026 names), the one change since the 06:16 UTC read
 is that `20261016060000_bind_money_replay_receipts_batch1` (ledger `20261016121253`, PR #942 merged as
 `982bc0dda`) is now applied, which re-certified the replay-binding entry below: batch 1's nine wrappers,
 nine renamed bodies, three helpers and deferred trigger all read live at 13:42 UTC. In the 06:16 UTC read
@@ -73,7 +82,67 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16; batch 2 (the stock row) written as migration 20261016140000, not applied; batches 3–4 open) — about 75 live functions replay a saved result matched on the retry key alone (about 66 left after batch 1)
+## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; steps 2–3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
+
+Mason decided on 2026-10-15 that cost and margin are admin-only, including on a rep's own quotes and invoices
+(`docs/plans/2026-10-13-direction-and-goals.md`, Goal 1). A read-only live inventory on 2026-10-18 found three kinds of
+exposure (full list in the PR for step 1):
+- **Table columns** that non-admins can read through the Data API: `products` (current cost, tier margins: every active
+  profile, drivers and applicators included), `quotes`/`quote_items`, `quote_versions.snapshot_data`, `orders`/`order_items`,
+  `invoices`/`invoice_items` (the rep's own), `jobs`/`job_chemicals` (reps, the assigned applicator, a dispatched crew),
+  `purchase_orders`/`purchase_order_items`, `blend_ticket_products` and `commissions.order_profit`. Row security cannot hide a
+  column, so this needs column-level grants (the `application_services` pattern, `20260729015706`).
+- **Functions** that hand cost to non-admins: five cost reports, `dashboard_summary` (company-wide profit and margin to any signed-in account), the sales reports, `get_inventory_position`, `save_quote`'s
+  reply, and the below-cost refusal message, which carried the exact cost (a rep could type a one-cent price to read it).
+  **Step 1 (`20261019010000`, LIVE 2026-10-19 18:27 UTC; the report and inventory reads passed a read-only live per-role check, while the quote-save reply and below-cost message need a write and were proven only in the disposable test database) closes all of these** except purchase-order cost (`get_chemical_history`,
+  `match_quick_receive_items`). Mason decided on 2026-10-18 that reps keep purchase orders and receiving but cannot see or
+  enter unit cost (an admin enters it later); that is built in steps 2 and 3.
+- **Saves that trust the browser's cost:** `save_job` (job chemical cost), the field-application invoice save and field lines
+  in `save_invoice` take cost from the screen. Once a rep's screen can no longer read cost, these must derive it on the server
+  or job and field-invoice profit (and the commission paid on it) would be wrong.
+
+**Order of work.** Step 2: the screens stop reading whole rows on those tables (about 80 call sites in 40 files would break
+under a column lock, admins included), admin screens read cost through an admin-only function, and the three saves above derive
+cost on the server for non-admins. Step 3: the column lock, applied only after step 2's screens are live, then live per-role
+refusal checks. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
+refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
+logged or limited).
+
+## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
+
+The customer receipt email after a delivery (including Goal 5's paper-ticket path, where it follows the
+same opt-in as an on-screen signature) is sent by the phone, and the delivery page and the field stop
+read the customer through the client. Under the current
+`customers_select` policy, an assigned driver may not see the customer of a stop whose
+`scheduled_date` is NULL or older than yesterday, so the page has no email and no receipt is sent.
+Since PR #955, on a **paper-ticket** completion the driver is told no receipt was sent from the phone
+and that the office can send it with **Email Confirmation**. A normal on-screen-signature completion
+still skips the receipt without a warning in this case (unchanged from before Goal 5). **Fix:** read the receipt recipient through an
+authorized RPC (or widen the policy for an assigned driver's open delivery); a server-side receipt
+queue would also cover it. Found by the Codex GitHub review on #955. Source:
+`src/pages/DeliveryDetail.tsx`, `src/pages/FieldStop.tsx` (receipt send after completion).
+
+## OPEN 2026-10-18 (MED) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
+
+Goal 5 (completing a delivery needs a signal) shipped as an app-only change. The Deliveries list's
+**Mark Delivered** on a *scheduled* delivery makes two server calls: `confirm_delivery` (scheduled →
+in_progress) and then `complete_delivery`. The app checks for a real connection before the first and
+again between them, but signal lost in the instant after the first call answers still leaves the
+delivery **In Progress**. Stock and billing are unchanged (only `complete_delivery` deducts stock and
+creates the draft invoice) and the driver is told exactly that ("Signal dropped after this delivery
+was started…"); the dialog stays open as **Mark Complete** for the retry. Seen in the browser preview
+against a local test database on 2026-10-18. **Fix:** one server call that starts and completes in a
+single transaction. That touches `complete_delivery`, which replay-binding batch 2 (PR #951) owned, so
+it waited for that batch. Mason chose 2026-10-18 to ship Goal 5 with this gap and build the combined
+call after #951 lands; batch 2 went live 2026-10-19, so the combined call is now unblocked. That call
+should also take the chosen business date, so a "today" completion whose request reaches the server
+just after Chicago midnight keeps the chosen day (today the app omits `p_completed_at` for "today",
+and sending a client timestamp would either stamp completions at noon or fail on a fast phone clock).
+Source:
+`src/pages/Deliveries.tsx` `handleCompleteConfirm`, `src/lib/connectivity.ts`.
+
+## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16; batch 2 (the stock row) LIVE 2026-10-19; batches 3–4 open) — about 75 live functions replay a saved result matched on the retry key alone (74 left after batches 1 and 2, counted from the table below)
 
 **Batch 1 shipped live 2026-10-16.** Migration `20261016060000_bind_money_replay_receipts_batch1`
 applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #942 merged as
@@ -91,7 +160,7 @@ left is `apply_prepay_to_invoice` inside `batch_apply_prepayments`, covered by t
 key. `_bind_replay_receipt_20261015`,
 the other batch-1 helpers and the nine renamed bodies have no EXECUTE for anon, authenticated,
 service_role or PUBLIC. None of the nine public functions was found unbound on a keyed call. This is a
-read of the deployed source, not an exercised retry, so the `edit_prepay_credit` gap above stays open. Batches 2–4 below are still open.
+read of the deployed source, not an exercised retry, so the `edit_prepay_credit` gap above stays open. Batches 3–4 below are still open.
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions
@@ -148,15 +217,20 @@ The nine HIGH-money functions it covers left the table below: `void_payment`, `d
 `apply_prepay_to_invoice`, `batch_apply_prepayments` and `batch_void_invoices`. The live re-check is
 recorded in the batch-1 paragraph above.
 
-**Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batch 1 list 87 functions (17, 13, 50 and 7; a row can name a function whose create path alone is unbound). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.
+**Bound by batch 3a (migration `20261019200000`, applied live 2026-10-19 20:52:46 UTC (3:52 PM Central), ledger `20261019205246`).** The table's batch-3 money group is
+split into smaller PRs; this first cut bound `complete_delivery` and `complete_job`, which left the table below, and
+extended the same commit-time guard (24 operations). Both now require a retry key, and a retry replays a saved
+result only for the same person and the exact same request. `cancel_delivery` goes in a later cut.
+
+**Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
+
+**Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batches 1, 2 and 3a list 72 functions (15 in batch 3, then 50 and 7 in batch 4; a row can name a function whose create path alone is unbound; after batches 1 and 2 they listed 74, after batch 1 alone 87). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.
 
 | Batch | Function (what a mismatched retry does today) | Impact |
 |---|---|---|
-| 2 | `complete_delivery`, `complete_job` (the latter replays before its role check, with no lock and no expiry): B not completed, no stock deduction, no auto-invoice | HIGH money and stock |
-| 2 | `void_order`, `void_delivery`, `cancel_delivery` (replays before its role check), `unpost_invoice`, `transfer_invoice_to_job`, `price_order`, `update_order_items`, `save_field_app_invoice`, `update_field_app_invoice_billing`, `transition_rebate_claim`, `create_rebate_claim`, `close_accounting_period` | HIGH money |
-| 2 | `apply_credit_memo_to_invoice` is bound before its lock, but its after-lock re-check is plain (race window only) | HIGH (race) |
-| 2 | `record_job_pre_notifications`, `record_job_post_notifications` return job A's recipients; `JobDetail.tsx:607-640` then emails job A's customers about job B and overwrites A's audit text | MED, customer-facing |
-| 3 | `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count`, `create_planned_holds` | HIGH stock; **shipped second, as "batch 2"** (migration `20261016140000`, written 2026-10-16, not applied; see below) |
+| 3 | `void_order`, `void_delivery`, `cancel_delivery` (replays before its role check), `unpost_invoice`, `transfer_invoice_to_job`, `price_order`, `update_order_items`, `save_field_app_invoice`, `update_field_app_invoice_billing`, `transition_rebate_claim`, `create_rebate_claim`, `close_accounting_period` | HIGH money |
+| 3 | `apply_credit_memo_to_invoice` is bound before its lock, but its after-lock re-check is plain (race window only) | HIGH (race) |
+| 3 | `record_job_pre_notifications`, `record_job_post_notifications` return job A's recipients; `JobDetail.tsx:607-640` then emails job A's customers about job B and overwrites A's audit text | MED, customer-facing |
 | 4 | MED: `admin_update_profile` (a role change or deactivation silently skipped), `assign_job_applicator`, `batch_reschedule_deliveries`, `cancel_cycle_count`, `cancel_purchase_order`, `delete_purchase_order`, `submit_purchase_order`, `save_purchase_order` (create path), `confirm_delivery` (replays before its role check), `consolidate_draft_invoices`, `create_blend_ticket`, `create_delivery_with_items`, `create_followup_delivery`, `admin_save_application_service` (create path), `delete_vendor`, `reactivate_vendor`, `save_vendor`, `dispatch_job_locations`, `undispatch_job_locations`, `duplicate_quote`, `generate_rup_sales_records`, `link_blend_ticket_to_order`, `unlink_blend_ticket_from_order`, `link_fields_to_parent`, `unlink_field_from_parent`, `load_recipe_into_job`, `reassign_delivery`, `review_customer_fact`, `supersede_customer_fact`, `save_blend_recipe` (replays before its edit check), `save_blend_ticket`, `save_blend_ticket_fields`, `save_field`, `save_field_polygons`, `set_application_record_lots`, `set_field_boundary`, `set_field_override_acres`, `update_blend_ticket_billing_status`, `update_field_app_applied_info`, `batch_approve_blend_tickets`, `batch_reject_blend_tickets`, `commit_label_draft`, `create_job_from_quote_section`, `create_quote_from_template`, `edit_delivery`, `mark_inventory_row_verified` (replays before login), `reopen_accounting_period`, `reverse_blend_ticket_approval`, `rollover_quote_to_season` (a replay returns `{status: duplicate}` with no quote id, so `QuoteBuilder.tsx:2054` navigates to `/quotes/undefined`; a concurrent first call gets a raw unique violation; when fixed, start from the post-PR #938 body, md5 `eb9b65e556f3054d0751f3a7c08dce3f`, and keep its two `crx.quote_rollover_source` marker lines), `start_job` (replays before its job check) | MED |
 | 4 | LOW: `confirm_job_notification_sent`, `save_field_crop_history`, `save_field_geometry`, `log_failed_notification` (no role check at all), `bulk_create_label_drafts`, `dismiss_watchdog_flag`, `save_quote_template` | LOW |
 
@@ -164,7 +238,7 @@ Disabled today (their first statement raises `PREPAY_BULK_APPLY_DISABLED`):
 `apply_remaining_prepayments` and `batch_apply_all_prepayments`. Both are unbound; fix them only if
 they are re-enabled.
 
-**Batch 2 (the stock row above, written 2026-10-16, migration `20261016140000`, not applied).** Same wrapper pattern and helpers as batch 1; batch 1's commit-time guard trigger is recreated covering both batches. Differences found reading the live bodies: `create_application_record_from_blend_ticket` stores receipts under the operation `create_app_record_from_bt`; four bodies answer a no-op without a receipt (an already-released hold, an already-closed booking, a blend ticket that cannot become an order), and the wrapper returns those unbound; `create_planned_holds` requires a key on every call; `revert_quote_status`, its one keyless caller, now calls the private body directly and itself requires a key (its live body recreated with those two changes). The reconcile screen keeps its exact-intent key on a refusal (its key is already scoped to the row, quantity and reason). Proof: `prove-stock-replay-binding-batch2-real-schema.mjs` and the rollback-only chain `smoke-stock-replay-binding-batch2.sql`. `batch_cancel_deliveries` cancels through `cancel_delivery` (still unbound, a batch-2 row of the table) with no key: whichever batch binds `cancel_delivery` must keep that internal keyless call working. **Apply window:** the preflight refuses while any unexpired receipt (`expires_at IS NULL OR expires_at >= now()`) exists for the thirteen operations (an old unbound receipt would be refused and its key retired, so a lost-response retry could run twice), and `create_direct_order` / `create_planned_holds` write one on every order or planned-quote save, so the apply may need a quiet day; a receipt with a NULL `expires_at` also blocks it and never clears by waiting, so someone must look at that row before deciding; re-read the receipt count right before applying (security review M2, 2026-10-16).
+**Batch 2 (the thirteen stock functions listed above the table, migration `20261016140000`, APPLIED LIVE 2026-10-19 01:03 UTC, ledger `20261019010324`, PR #951 merged as `d51d67c0b`).** Read live after apply: each of the thirteen public functions is one SECURITY DEFINER wrapper calling `check_idempotency_intent`, executable by `authenticated` and not `anon`; each renamed body (`_create_app_record_from_bt_replay_impl_20261015` for the long name) is callable by neither; the guard trigger covers both batches; `revert_quote_status` refuses a keyless call; the in-transaction postflight passed. The rollback-only smoke chains were not run live (the LIVE-DATA guard refuses their fixture INSERTs without owner REAL-DATA-OK); their container proofs passed before apply. Post-apply read-only sweeps (2026-10-19): 27 of 29 PASS, no row from batch 2; `quote-versions-rpc-owned` was declined (not run), and `actor-forgery`, which used to time out, now completes and flags one batch-1 row, `apply_prepay_to_invoice(p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid, p_idempotency_key text)`: its keyless internal-batch branch (`crx.batch_apply_prepayments_internal` = 1) passes `p_performed_by` to the private body before the wrapper's own `ACTOR_MISMATCH` check. Likely a false positive (the private body re-checks the actor against `auth.uid()`, and `authenticated` cannot execute it), but OPEN until it gets a fingerprint-bound allowlist entry or the wrapper checks the actor first. Written 2026-10-16. Same wrapper pattern and helpers as batch 1; batch 1's commit-time guard trigger is recreated covering both batches. Differences found reading the live bodies: `create_application_record_from_blend_ticket` stores receipts under the operation `create_app_record_from_bt`; four bodies answer a no-op without a receipt (an already-released hold, an already-closed booking, a blend ticket that cannot become an order), and the wrapper returns those unbound; `create_planned_holds` requires a key on every call; `revert_quote_status`, its one keyless caller, now calls the private body directly and itself requires a key (its live body recreated with those two changes). The reconcile screen keeps its exact-intent key on a refusal (its key is already scoped to the row, quantity and reason). Proof: `prove-stock-replay-binding-batch2-real-schema.mjs` and the rollback-only chain `smoke-stock-replay-binding-batch2.sql`. `batch_cancel_deliveries` cancels through `cancel_delivery` (still unbound, a batch-3 row of the table) with no key: whichever batch binds `cancel_delivery` must keep that internal keyless call working. **Apply window:** the preflight refuses while any unexpired receipt (`expires_at IS NULL OR expires_at >= now()`) exists for the thirteen operations (an old unbound receipt would be refused and its key retired, so a lost-response retry could run twice), and `create_direct_order` / `create_planned_holds` write one on every order or planned-quote save, so the apply may need a quiet day; a receipt with a NULL `expires_at` also blocks it and never clears by waiting, so someone must look at that row before deciding; re-read the receipt count right before applying (security review M2, 2026-10-16).
 
 **Fix shape (each batch).** The commission 3.5 pattern. Rename the live body unchanged to an internal
 `_<name>_replay_impl_20261015` (no `authenticated` EXECUTE) and put a public wrapper with the same
@@ -817,18 +891,25 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   cancelled; open ones show from every season, see `src/lib/invoiceSeasonWindow.ts` — so the UTC cut can
   only move a closed invoice on or off the list.)
   (Source: `docs/archive/2026-spring/2026-05-25-14-domain-review-supplement.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-spring/2026-05-25-14-domain-review-supplement.md`).)
-- **List-page row caps (scale limit).** `DataTable` has no pagination, so most list pages load a fixed
-  number of rows and filter in the browser.
-  - Main list query caps (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`):
-    - 2000: Invoices.
-    - 1000: Customers.
-    - 500: Orders, Deliveries, Application Records (the compliance history), Blend Tickets, Jobs, Quotes,
-      Purchase Orders, Field Setup, Delivery Remainders and Customer Transaction Review.
-    - 200: Payment History and Notifications.
+- **List-page row caps (scale limit).** `DataTable` has no pagination, so most list pages load all
+  their rows and filter in the browser.
+  - **Fixed 2026-10-18 (Goal 4, part 1):** these pages now read every row, page by page, through
+    `src/lib/pagedRead.ts` (`fetchAllRows`; `fetchAllRowsForIds` for follow-up lookups keyed on the
+    list's ids, sent in chunks of 200), and a failed page shows the error instead of a short list:
+    Invoices, Orders, Quotes, Blend Tickets, Purchase Orders (and its outstanding items), Vendor Bills,
+    Returns, Vendors, Application Records, Delivery Remainders, Customer Transaction Review,
+    Commission Payments (payments and unpaid commissions), Payment History, To Ship and Rebates.
+  - **Deliberately left for a follow-up PR — do not forget:** Deliveries (`Deliveries.tsx`, 500) and
+    Reports (`Reports.tsx` and `SalesReports.tsx`: the 500-row price list and posted applications, and
+    the 500-product and 1,000-customer pickers). Open PRs #954, #955 and #957 were changing those files
+    on 2026-10-18, so they get the same fix once those land.
+  - Still capped (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`; the pages
+    fixed above are removed):
+    - 1000: Customers (shows a banner).
+    - 500: Deliveries, Jobs (shows a banner) and Field Setup.
+    - 200: Notifications.
   - Pages that cap one of several queries:
     - Crop Programs: its product list, 500.
-    - Commission Payments: payment history 200 and unpaid commissions 500.
-    - To Ship: deliveries and purchase orders 500, open orders 2,000, order lines 5,000.
     - Dispatch Board: the job list is capped at 500, but its dispatch and chemical rows are paged with
       `.range()` and are not capped.
     - Reports: the price list and posted-applications datasets each stop at 500 (`fetchPriceList`,
@@ -842,8 +923,32 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
     200 most recent completed jobs. Past those counts a record silently cannot be chosen there.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
-  - Orders and Invoices show a warning toast and Jobs shows a banner when capped. Deliveries and
-    Application Records stop silently, and the other pages were not checked for a warning.
+  - Jobs and Customers show a banner when capped. Deliveries stops silently.
+  - Paging is by position, so records changing during a long load are handled three ways:
+    - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
+    - every list read asks the server for its exact count (`{ count: 'exact' }`, enforced by
+      `src/lib/pagedReadCallSites.test.ts`). A read whose distinct rows differ from the count changed
+      mid-read, so it is repeated up to three times and then shown as an error, never as a wrong
+      list. This covers a record whose sort date is edited into the part already read, and a burst
+      of inserts;
+    - Customer Transaction Review's function rows have no `id`, so its running-balance chain is also
+      checked (`src/lib/transactionLedger.ts`).
+  - A list that keeps growing as fast as it is read stops after twice its starting size plus one
+    page and is reported as changed. Customer Transaction Review also checks that the server's
+    current last row is its own last row whenever it read more than one page.
+  - **Still open (accepted residual, 2026-10-18; both review models rated it HIGH):** an insert and
+    a delete landing between two page reads of the same load can keep the count equal while
+    swapping one row, so the list can show a just-deleted record and miss a just-added one until the
+    next refresh. This needs more than 1,000 rows in the list plus both changes in that window.
+    Live volumes on 2026-10-18 were at most 151 rows. The fix is a consistent snapshot (cursor
+    paging or a database-side read), which is the later Goal 4 step along with server-side search.
+  - Deferred from the same reviews:
+    - Every page asks for an exact count, which costs one counting pass per page. That is fine at
+      today's sizes, but loading around 100,000 rows would count the table about 100 times. Server
+      paging replaces full-list loads.
+    - On Commission Payments, a refresh overtaken by a newer one reports success even if the newer
+      one then fails; the newer refresh still reports its own failure. Its loader is pinned by
+      `commissionPayoutIntentBindingMigration.test.ts`.
   - On a capped query, records past the cap are missing from that page and its browser-side filters.
     Revisit before volumes near the caps.
   `SelectLocationsModal` still splits map and list 50/50 on tablets.

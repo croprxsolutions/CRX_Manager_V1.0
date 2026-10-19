@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { FlaskConical, Plus, Pencil, Trash2 } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -44,7 +44,11 @@ export default function BrandVsGeneric() {
   const [deleteTarget, setDeleteTarget] = useState<MappingRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Only the newest load may install rows: a role change re-runs the loader while an older
+  // (possibly cost-less) load is still in flight (Luna round 2).
+  const loadSeqRef = useRef(0);
   const fetchData = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     const [prodRes, mapRes] = await Promise.all([
       supabase.from('products').select(PRODUCT_COLUMNS).eq('is_active', true).order('product_name'),
@@ -76,6 +80,7 @@ export default function BrandVsGeneric() {
       setLoading(false);
       return;
     }
+    if (seq !== loadSeqRef.current) return;
     setProducts(loadedProducts);
     setMappings(loadedMappings);
     setLoading(false);

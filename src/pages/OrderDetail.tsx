@@ -163,12 +163,15 @@ export default function OrderDetail() {
   // #4 billing cockpit: post-all-drafts / consolidate-drafts actions.
   const [postingAll, setPostingAll] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
+  // An admin whose line costs failed to load must not edit lines: the edit would start from
+  // cost-less rows (Luna round 2). Cleared by the next successful load.
+  const [itemCostsFailed, setItemCostsFailed] = useState(false);
 
   const isAdmin = role === 'admin';
   // Draw-created orders (booking_draw) mirror their booking's draw ledger —
   // items are locked server-side (BOOKING_DRAW_ORDER_LOCKED); void/cancel the
   // order to return quantity to the booking, then draw again.
-  const canEdit = (role === 'admin' || role === 'sales_rep') && order?.status !== 'fulfilled' && order?.status !== 'cancelled' && order?.status !== 'partially_fulfilled' && !order?.booking_draw;
+  const canEdit = (role === 'admin' || role === 'sales_rep') && order?.status !== 'fulfilled' && order?.status !== 'cancelled' && order?.status !== 'partially_fulfilled' && !order?.booking_draw && !itemCostsFailed;
 
   const fetchOrder = useCallback(async () => {
     // Stale-route guard (M6): on rapid order-to-order navigation an older in-flight
@@ -215,13 +218,16 @@ export default function OrderDetail() {
         .eq('order_id', id!)
         .order('section_name');
       let itemsList = (itemsData || []) as OrderItem[];
+      let costsFailed = false;
       try {
         itemsList = await withAdminCosts('order_items', itemsList, isAdmin);
       } catch (err) {
         Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_order_item_costs' } });
         toast('error', 'Failed to load order item costs. Please refresh.');
+        costsFailed = true;
       }
       if (isStale()) return;
+      setItemCostsFailed(costsFailed);
       setItems(itemsList);
       setEditItems(itemsList.map((i) => ({ ...i })));
       // Ship-now/price-later (#2): seed price inputs from each pending line's tier snapshot.

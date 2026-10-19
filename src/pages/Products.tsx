@@ -101,7 +101,11 @@ export default function Products() {
   const canBulkAction = role === 'admin' || role === 'sales_rep';
   const isAdmin = role === 'admin';
 
+  // Only the newest load may install rows: a role change re-runs the loader while an older
+  // (possibly cost-less) load is still in flight (Luna round 2).
+  const loadSeqRef = useRef(0);
   const fetchProducts = useCallback(async (reportError = true): Promise<boolean> => {
+    const seq = ++loadSeqRef.current;
     // Paginate so the master catalog never silently truncates as the catalog grows.
     // PostgREST caps a single response (default 1000), so we page through with .range().
     const PAGE_SIZE = 1000;
@@ -133,6 +137,7 @@ export default function Products() {
       setLoading(false);
       return false;
     }
+    if (seq !== loadSeqRef.current) return false;
     setProducts(prods);
 
     const cats = [...new Set(prods.map((p) => p.category).filter(Boolean))] as string[];

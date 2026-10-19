@@ -341,6 +341,9 @@ export default function ProductDetail() {
       setLoading(false);
       return false;
     }
+    // The admin cost read is a second await: if the route moved to another product meanwhile,
+    // this older load must not install its product on the new page (Luna round 2).
+    if (productIdRef.current !== id) return false;
     if (withCost) {
       const loadedProduct = withCost;
       setProduct(loadedProduct);
@@ -356,7 +359,7 @@ export default function ProductDetail() {
     }
     setLoading(false);
     return data !== null;
-  }, [id, isAdmin, toast]);
+  }, [id, isAdmin, productIdRef, toast]);
 
   const fetchCostHistory = useCallback(async (reportError = true): Promise<boolean> => {
     // cost_history is admin-only under RLS; a non-admin fetch would just be a

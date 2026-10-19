@@ -197,6 +197,12 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Keep
    scheduled jobs **off during reconciliation**: confirm `cron.job` in the new project is empty or inactive
    before the app is pointed at it. They are put back at the end (4.7, last item), not forgotten.
+   **Then apply the access lockdown** from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
+   Supabase project gives the anonymous (signed-out) role full read/write on every table and the right to
+   run every function, and a restore only adds grants, never removes those. Reset the privileges and
+   default privileges to production's, then **verify** with a query that the `anon` role holds no table
+   or function privileges it should not, and that a signed-out request to the new project's API is refused.
+   Do this before the project is exposed to anyone.
 5. Validate. **Future (once the alert design is built):** compare against the baseline file
    `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists.** If the project
    is **lost** (no live database to count), validate without live counts: the restore finishes with no
@@ -236,6 +242,13 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    never run the files directly with `psql`, which skips the migration ledger), review the dry run in an
    isolated Supabase CLI work directory, then push that exact filtered set through the normal gates.
    Confirm the restored `supabase_migrations.schema_migrations` ledger matches the repository before going on.
+   **One-shot migrations need special care.** That script deliberately withholds the entries in
+   `supabase/baselines/one-shot-migrations.json` (data rewrites specific to production). If the archive is
+   older than any of them, the restored data lacks that correction, and neither replaying it nor marking it
+   applied in the ledger is safe on its own (marking it applied would leave the old, wrong rows in place).
+   Compare the restored ledger with that registry, list every entry newer than the archive, and for each
+   one require a reviewed, data-specific recovery plan with Mason's approval before cutover. If a plan is
+   not ready, choose a newer archive or stop and escalate.
    Applying migrations to the new project needs Mason's approval in the current conversation.
 9. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install

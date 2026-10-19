@@ -144,6 +144,8 @@ export default function Deliveries() {
   const notifiedCompletionFor = useRef<Set<string>>(new Set());
   const [signedBy, setSignedBy] = useState('');
   const [deliveredOnDate, setDeliveredOnDate] = useState(businessToday());
+  // The dialog's editable inputs, compared after each signal check (see handleCompleteConfirm).
+  const completeInputsRef = useLatestRef(JSON.stringify([signedBy.trim(), deliveredOnDate]));
   const [completing, setCompleting] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -461,11 +463,15 @@ export default function Deliveries() {
     const dialogGen = completeDialogGenRef.current;
     const stillOpenForTarget = () =>
       completeDialogGenRef.current === dialogGen && completeTargetRef.current?.id === target.id;
+    // An edit to the signer or date during a check must not be dropped in favour of the old values.
+    const inputsAtSubmit = JSON.stringify([signedBy.trim(), deliveredOnDate]);
+    const inputsUnchanged = () => completeInputsRef.current === inputsAtSubmit;
     // Route through runCriticalAction for parity with this page's other mutations.
-    const outcome = await runCriticalAction<'completed' | 'no_signal' | 'cancelled'>({
+    const outcome = await runCriticalAction<'completed' | 'no_signal' | 'cancelled' | 'changed'>({
       action: async () => {
         if (!(await hasSignal())) return 'no_signal';
         if (!stillOpenForTarget()) return 'cancelled';
+        if (!inputsUnchanged()) return 'changed';
         if (target.status === 'scheduled') {
           const { data, error } = await supabase.rpc('confirm_delivery', {
             p_delivery_id: target.id,
@@ -477,6 +483,7 @@ export default function Deliveries() {
           confirmed = true;
           if (!(await hasSignal())) return 'no_signal';
           if (!stillOpenForTarget()) return 'cancelled';
+          if (!inputsUnchanged()) return 'changed';
         }
 
         // completeIdem is intentionally retained until onSuccess, so a retry after a
@@ -498,6 +505,12 @@ export default function Deliveries() {
       setLoading: setCompleting,
       sentryTag: 'complete_delivery',
       onSuccess: (result) => {
+        if (result === 'changed') {
+          toast('warning', confirmed
+            ? `Details changed while checking for signal. Delivery ${target.delivery_number} is now In Progress but was NOT completed: check the details and tap Mark Complete again.`
+            : 'Details changed while checking for signal. Nothing was changed; check them and tap again.');
+          return;
+        }
         if (result === 'cancelled') {
           toast('warning', confirmed
             ? `Cancelled. Delivery ${target.delivery_number} was started and is now In Progress, but it was NOT completed: no stock was taken and nothing was billed.`

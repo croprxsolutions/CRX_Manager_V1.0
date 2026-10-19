@@ -17,6 +17,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { fingerprintIntentPayload } from '../lib/idempotency';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
@@ -535,6 +536,10 @@ export default function DeliveryDetail() {
   };
 
   const isPartialDelivery = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) < item.quantity);
+  // Everything the driver can still edit while the signal check runs. Compared after the check so
+  // an edit made during it is never silently dropped in favour of the values captured at confirm.
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, driverIssueType, driverIssueNotes, usePaperTicket, paperDeliveredOn]);
+  const completionInputsRef = useLatestRef(completionInputs);
   const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) > 0);
 
   // ── Edit Mode ──────────────────────────────────────────────────────────
@@ -1028,6 +1033,11 @@ export default function DeliveryDetail() {
       setCompleting(false);
       return;
     }
+    if (completionInputsRef.current !== completionInputs) {
+      toast('error', 'Details changed while checking for signal. Nothing was saved; check them and tap Complete Delivery again.');
+      setCompleting(false);
+      return;
+    }
 
     try {
       // Work out the completion time now, after the signal and route checks: if midnight passed
@@ -1217,7 +1227,7 @@ export default function DeliveryDetail() {
           // The delivery already succeeded; say plainly that the receipt did not go out.
           toast('warning', RECEIPT_NOT_SENT_MESSAGE);
         }
-      } else if (usePaperTicket) {
+      } else if (usePaperTicket && emailOnComplete) {
         toast('warning', RECEIPT_NO_EMAIL_MESSAGE);
       }
 

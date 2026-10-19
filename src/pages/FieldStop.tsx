@@ -24,6 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { fingerprintIntentPayload } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt } from '../lib/paperTicket';
@@ -245,6 +246,9 @@ export default function FieldStop() {
   };
 
   const isPartial = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity);
+  // What the driver can still edit while the signal check runs; compared after the check.
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, paperDeliveredOn]);
+  const completionInputsRef = useLatestRef(completionInputs);
   const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) > 0);
 
   // ── Photo upload (copied/adapted from DeliveryDetail.handlePhotoUpload) ──
@@ -354,6 +358,7 @@ export default function FieldStop() {
     }
     // The signal check can take a few seconds; re-check the stop did not change meanwhile.
     if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); setCompleting(false); return; }
+    if (completionInputsRef.current !== completionInputs) { toast('error', 'Details changed while checking for signal. Nothing was saved; check them and tap Complete Delivery again.'); setCompleting(false); return; }
 
     try {
       // Work out the completion time now, after the signal and route checks: if midnight passed
@@ -441,7 +446,7 @@ export default function FieldStop() {
           ...(usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn) ? { deliveredOn: paperDeliveredOn } : {}),
         });
         if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
-      } else if (usePaperTicket) {
+      } else if (usePaperTicket && emailOnComplete) {
         toast('warning', RECEIPT_NO_EMAIL_MESSAGE);
       }
 

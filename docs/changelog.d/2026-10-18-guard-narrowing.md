@@ -47,8 +47,27 @@ Declined, with reasons:
   is the intended speed bump, and the common harmless shapes have no such word.
 - (MED) the bare `deploy` match under a hold is unchanged from before this PR and errs toward
   blocking only while a stop is latched.
-- `node -e` inline code was allowed before and after this PR (it is an argument, not fed input),
-  the same as `node file.mjs`.
+- (superseded in round 2, see below) inline `node -e` code.
+
+**Codex connector (2 P1) and Luna round 2 (8 findings).** Fixed:
+- a program name assembled from shell variables in the same command (`a=g; b=h; … $a$b pr $c$d 951`)
+  is refused outright (`programAssembledAtRuntime`). main allowed it too;
+- inline code arguments (`node -e`, `python -c`, `perl -e`, `ruby -e`, `php -r`) are refused when the
+  CODE itself could reach a gated action (`inlineCodeReachesGatedAction`). main allowed the base64
+  `node -e` merge. `gh … | node -e "…"` still passes when the code shows nothing gated. The fallback
+  launcher counts any inline-code launch as a possible merge;
+- `.`/`..` segments below `.claude` (`find .claude/./ -delete`, `.claude/hooks/../session-state`)
+  count as the whole folder or the state dir;
+- the `~`/`$HOME` home exclusion is anchored to the start of a word;
+- the hold latch treats `gh pr update-branch`, `gh workflow run`, `gh secret/variable set`, repo,
+  release, issue, label and gist writes, `curl -T`/`--upload-file` and `wget --method=…` as outward.
+
+Refuted with a probe: `cp /tmp/payload .claude/./hooks/…` was already denied, because
+`namesEnforcementSurface` resolves dot segments.
+
+Declined: a fed script whose text names `git` (intended speed bump), the
+`ls .claude/session-state | grep del` over-block (pinned in the tests), and `vercel whoami`
+under a hold (the `vercel\s` match is unchanged from before this PR).
 
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

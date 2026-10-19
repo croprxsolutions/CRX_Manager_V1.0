@@ -341,7 +341,11 @@ separately, the permission change.
    allowed, so these refusals never were a boundary. Every readable `gh pr merge`, REST/GraphQL
    merge, `--admin`, and the existing composition, alias and depth checks are unchanged. A file-fed
    interpreter with no gated word (`bash < payload.txt`, `Get-Content payload.txt | iex`) now passes,
-   like `bash payload.sh`.
+   like `bash payload.sh`. Two refusals run whatever words the command shows: a program
+   name assembled from shell variables in the same command (`programAssembledAtRuntime`), and
+   inline code (`node -e`, `python -c`, `perl -e`, `ruby -e`, `php -r`) whose CODE could reach a gated
+   action (`inlineCodeReachesGatedAction`). main allowed both; only the code argument is judged, so
+   `gh … | node -e "…"` still passes.
 2. **Hold latch:** outward actions deny, local work warns. See its row above.
 3. **Review proof guard:** the rule that denied any command naming any `.claude` path next to a
    destructive word (34 sessions) now counts `.claude` only as a whole target (`.claude`, `.claude/`,

@@ -148,13 +148,9 @@ for (const command of guardForms) {
 // stricter side and stays correct. Exact, not only a floor (Luna, PR #956 round
 // 1): EVERY form couldReachGatedAction marks must be denied by the working guard,
 // so a form that silently stops matching fails here instead of shrinking a count.
-// Inline `node -e` code is an ARGUMENT, neither run-time text nor fed input, so the
-// working guard allowed it on main too (measured 2026-10-18); it is listed rather
-// than hidden. The launcher above still counts it as a possible merge.
-const WORKING_GUARD_NEVER_DENIED = new Set([
-  "node -e \"require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgODEy','base64').toString())\"",
-]);
-for (const command of guardForms.filter((form) => couldReachGatedAction([form]) && !WORKING_GUARD_NEVER_DENIED.has(form))) {
+// The inline `node -e` base64 form was allowed on main; inlineCodeReachesGatedAction
+// now refuses it (Luna, PR #956 round 2), so no form is exempt.
+for (const command of guardForms.filter((form) => couldReachGatedAction([form]))) {
   ok(realGuardDenies(command), `the working guard still denies a form that could reach a merge: ${command}`);
 }
 ok(deniedForms >= 8, `the parity sample reached the real guard's denials (${deniedForms} denied)`);

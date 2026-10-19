@@ -36,6 +36,8 @@ import {
   commandFedToInterpreter,
   commandFedToInterpreterDenial,
   couldReachGatedAction,
+  programAssembledAtRuntime,
+  inlineCodeReachesGatedAction,
   ghCommandUnreadableDenial,
   ghCommandUnreadableIn,
   ghHiddenByShellComposition,
@@ -148,6 +150,10 @@ if (GITHUB_MERGE_TOOL.test(toolName)) {
   // fail-closed refusals (2026-10-18; see couldReachGatedAction).
   const gated = couldReachGatedAction(scannedCommands);
   if (gated && nested.computed) deny(nestedComputedDenial("PR MERGE GATE"));
+  if (programAssembledAtRuntime(toolInput.command)) deny(nestedComputedDenial("PR MERGE GATE"));
+  if (scannedCommands.some((text) => inlineCodeReachesGatedAction(text))) {
+    deny(commandFedToInterpreterDenial("PR MERGE GATE"));
+  }
   if (gated && scannedCommands.some((text) => commandFedToInterpreter(text))) {
     deny(commandFedToInterpreterDenial("PR MERGE GATE"));
   }

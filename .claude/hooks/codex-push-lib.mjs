@@ -4054,6 +4054,45 @@ const GATED_WORD_RE = /(?:^|[^\w-])(?:gh|git|merge|push|api|alias|graphql|pulls|
 // quotes counts: `'.'` is an ordinary path argument, not a join.
 const OBFUSCATION_RE = /fromcharcode|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\.join\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode|['"`]\s*\+\s*['"`]|\bconcat\s*\(/i;
 const CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|start-process|invoke-expression|\biex\b|\beval\b|\bfetch\b|https?:|\brequest\b|socket|\b(?:bash|sh|zsh|cmd|pwsh|powershell|python3?|node|perl|ruby|deno|bun)\b|\$\(|`/i;
+// A PROGRAM NAME assembled from shell variables set in the same command
+// (`a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951`) shows no gated word at all, and was
+// allowed on main before this change too (Codex connector, PR #956). An agent never
+// needs to build the name of the program it runs, so a run-time program name next
+// to a variable assignment is refused outright, whatever words the command shows.
+const SHELL_ASSIGNMENT_RE = /(?:^|[;&|\r\n(`]|\s)(?:export\s+|local\s+|declare\s+(?:-\w+\s+)*|readonly\s+|set\s+)?[A-Za-z_]\w*\+?=|\$(?:env:)?[A-Za-z_][\w:]*\s*[+]?=(?!=)|\b(?:set-variable|new-variable|sv|nv|set-item\s+env:)\b|\bread\s+(?:-\w+\s+)*[A-Za-z_]/i;
+export function programAssembledAtRuntime(command) {
+  const text = String(command || "");
+  return SHELL_ASSIGNMENT_RE.test(text) && programBuiltAtRuntime(text, /\$/);
+}
+
+// Inline program code handed to a runtime as an ARGUMENT (`node -e "…"`,
+// `python -c "…"`, `perl -e`, `ruby -e`, `php -r`) is not fed input, so the fed-
+// interpreter refusal never saw it, on main or here: `node -e "…execSync(Buffer
+// .from('<base64 of gh pr merge>','base64')…)"` ran a merge the gate could not read
+// (Luna, PR #956 round 2). Only the CODE argument is judged, never the rest of the
+// command, so `gh pr view --json x | node -e "…"` — the everyday way to read gh JSON —
+// still passes when that code itself shows nothing gated.
+const INLINE_CODE_FLAG_RE = /^(?:-e|-p|-c|-r|-E|--eval|--print|--command|--run)$/;
+const INLINE_CODE_ATTACHED_RE = /^(?:--eval|--print|--command)=([\s\S]*)$/;
+export function inlineCodeReachesGatedAction(command) {
+  for (const segment of splitCommandSegments(String(command || ""))) {
+    const words = splitShellArgv(segment);
+    for (let index = 0; index < words.length; index += 1) {
+      const program = String(words[index]).split(/[\\/]/).pop().replace(/\.exe$/i, "").toLowerCase();
+      if (!STDIN_PROGRAM_RUNTIMES.has(program) && program !== "nodejs") continue;
+      const end = Math.min(words.length, index + 1 + NESTED_SCAN_WINDOW);
+      for (let at = index + 1; at < end; at += 1) {
+        const word = String(words[at]);
+        const attached = INLINE_CODE_ATTACHED_RE.exec(word);
+        const code = attached ? attached[1] : INLINE_CODE_FLAG_RE.test(word) ? words[at + 1] : undefined;
+        if (code !== undefined && couldReachGatedAction([code])) return true;
+        if (!word.startsWith("-")) break; // the script argument: no inline code follows
+      }
+    }
+  }
+  return false;
+}
+
 export function couldReachGatedAction(texts) {
   return [].concat(texts).some((text) => {
     const raw = String(text || "");

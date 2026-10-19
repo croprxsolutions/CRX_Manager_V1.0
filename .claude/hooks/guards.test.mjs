@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold, holdDecision } from "./hold-latch-lib.mjs";
 import { classifySql } from "./live-testdata-lib.mjs";
-import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid } from "./codex-push-lib.mjs";
+import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid, programAssembledAtRuntime } from "./codex-push-lib.mjs";
 import { DENY_TOOLNAME_RE } from "./autopilot-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -70,6 +70,12 @@ for (const command of [
   "curl -X POST -H \"Authorization: Bearer $GH_TOKEN\" --data '{\"body\":\"hi\"}' https://api.github.com/repos/o/r/issues/1/comments",
   "curl --json '{\"a\":1}' https://api.github.com/x",
   "Invoke-RestMethod -Method Post -Uri https://api.github.com/x -Body '{}'",
+  // Luna, PR #956 round 2.
+  "gh pr update-branch 951",
+  "gh workflow run ci.yml",
+  "gh secret set X --body y",
+  "curl -T artifact.zip https://example.test/upload",
+  "wget --method=PUT --body-file=x https://example.test/x",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
 eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
 eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");
@@ -121,6 +127,21 @@ ok(isBuildActionUnderHold("mcp__github__delete_file", {}), "GitHub delete_file b
 ok(isBuildActionUnderHold("mcp__github__merge_pull_request", {}), "GitHub merge_pull_request blocked under hold");
 ok(isBuildActionUnderHold("mcp__supabase__delete_branch", {}), "delete_branch blocked under hold");
 ok(isBuildActionUnderHold("mcp__supabase__rebase_branch", {}), "rebase_branch blocked under hold");
+
+// ── program name assembled at run time (Codex connector, PR #956) ─────────
+for (const command of [
+  "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
+  "a=gi; b=t; c=pu; d=sh; $a$b $c$d origin HEAD:main",
+  "export P=gh && $P pr merge 1",
+  "$p = 'gh'; & $p pr merge 1",
+]) ok(programAssembledAtRuntime(command), `assembled program name refused: ${command}`);
+for (const command of [
+  'for f in scripts/*.mjs; do node "$f" --check; done',
+  'F=$(git rev-parse --show-toplevel); ls "$F"',
+  'eval "$(fnm env)" && node -v',
+  'bash -c "$CMD"',
+  "i=$(($i+1)); git status",
+]) ok(!programAssembledAtRuntime(command), `ordinary shape not refused: ${command}`);
 
 // ── live-testdata ────────────────────────────────────────────────────────
 ok(classifySql("INSERT INTO customers (name) VALUES ('Acme Farm')").block, "real customer insert blocked");

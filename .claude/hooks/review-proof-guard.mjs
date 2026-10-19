@@ -265,6 +265,7 @@ function redirectTargetsStateDir(value) {
     if (/(?:^|\/)session-state(?:\/|$)/i.test(target) ||
         target.split("/").some((s) => globSegCouldTargetProtected(s)) ||
         /(?:^|\/)\.claude\/+[^/]*[*?[\]{}]/i.test(target) ||
+        /(?:^|\/)\.claude\/+(?:[^/]+\/+)*\.{1,2}(?:\/|$)/i.test(target) ||
         /(?:^|\/)\.claude\/+worktrees(?:\/|$)/i.test(target) ||
         /(?:^|\/)\.claude\/*$/i.test(target)) return true;
   }
@@ -440,15 +441,19 @@ if (shellTool) {
   // The home exclusion is anchored: `Users`/`home` must be the FIRST path component
   // (after an optional drive letter), so `/tmp/Users/alice/.claude` is not mistaken for a
   // home folder (Luna, PR #956 round 1).
-  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:(]|(?<!(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:^|[\s"'=(]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>])|[/\\]+worktrees(?![\w-]))/i;
+  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:(]|(?<!(?:(?:^|[\s"'=(])(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%)|(?:^|[\s"'=(]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>])|[/\\]+worktrees(?![\w-]))/i;
   // The same narrowing for a component split: a `.claude` segment alone no longer
   // counts (that is the ancestor rule's job); `session-state` and a glob that
   // could expand to a protected name still do.
   // A glob directly under `.claude` (`.claude/*`, `.claude/s*`) can expand to the
   // state dir however short its lead, so it still counts.
+  // A `.` or `..` segment anywhere below `.claude` (`.claude/./`, `.claude/x/..`,
+  // `.claude/hooks/../session-state`) can name the whole folder or the state dir
+  // without spelling either, so it counts too (Codex connector, PR #956).
   const segmentsHitStateDirNarrow = (value) => {
     const text = String(value || "").replace(/\\/g, "/");
     if (/(?:^|[\s"'=:(/])\.claude\/+[^\s/"';&|<>]*[*?[\]{}]/i.test(text)) return true;
+    if (/(?:^|[\s"'=:(/])\.claude\/+(?:[^\s/"';&|<>]+\/+)*\.{1,2}(?=\/|$|[\s"';&|<>])/i.test(text)) return true;
     const segs = text.split(/[\s"'=:/(){}|;&<>]+/);
     return segs.some((s) => /^session-state$/i.test(s) || globSegCouldTargetProtected(s));
   };

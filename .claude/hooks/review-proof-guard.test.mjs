@@ -927,6 +927,15 @@ for (const command of [
   // The home exclusion is anchored to a real home folder (Luna, PR #956 round 1).
   "rm -rf /tmp/Users/alice/.claude",
   "rm -rf C:/CRX/home/x/.claude",
+  "rm -rf /tmp/~/.claude",
+  "rm -rf /tmp/$HOME/.claude",
+  "cp /tmp/payload .claude/./hooks/review-proof-guard.mjs",
+  // Dot-segment aliases of the whole folder or the state dir (Codex connector, PR #956).
+  "find .claude/./ -delete",
+  "rsync -a --delete /tmp/empty/ .claude/./",
+  "rm -rf .claude/hooks/../session-state",
+  "rm -rf .claude/x/..",
+  "echo x > .claude/hooks/../session-state/a.json",
   // Trusted files a plain copy or tee could forge before (reviewer probes).
   "cp /tmp/x.json .claude/session-state/migration-review-x.json",
   "echo {} | tee .claude/session-state/owner-approval-x.json",

@@ -481,6 +481,11 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     [`Get-Content payload.txt | iex; ${NESTED_ADMIN}`, /on its input|--admin/],
     ["node - <<'EOF'\nrequire('child_process').execSync('gh pr merge 1 --admin')\nEOF", /on its input/],
     ["P=gh; $P pr merge 1 --squash", /built at run time/],
+    // Inline code argument that hides a merge (Luna, PR #956 round 2; main allowed it too).
+    ["node -e \"require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgODEy','base64').toString())\"", /on its input/],
+    ["python -c \"import subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\"", /on its input/],
+    // A program name assembled from variables (Codex connector, PR #956; main allowed it too).
+    ["a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash", /built at run time/],
     // String concatenation hides the gated word (Luna, PR #956 round 1).
     ["node - <<'EOF'\nrequire('child_process').execSync('g'+'h pr '+'mer'+'ge 951')\nEOF", /on its input/],
     ["python - <<'EOF'\nimport subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\nEOF", /on its input/],
@@ -501,6 +506,9 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     "python - <<'EOF'\nprint(1+1)\nEOF",
     'eval "$(fnm env)" && node -v',
     'bash -c "$CMD"',
+    // Reading gh JSON with inline code: only the CODE is judged, not the gh around it.
+    "gh pr view 956 --json title | node -e \"console.log(JSON.parse(require('fs').readFileSync(0)).title)\"",
+    'node -e "console.log(1)"',
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(r.status === 0 && r.decision === null, `CONTROL: the real hook passes ${JSON.stringify(command)}`);

@@ -27,6 +27,8 @@ import {
   commandFedToInterpreter,
   commandFedToInterpreterDenial,
   couldReachGatedAction,
+  programAssembledAtRuntime,
+  inlineCodeReachesGatedAction,
   nestedComputedDenial,
   nestedTooDeepDenial,
   proofValid,
@@ -128,6 +130,10 @@ if (nestedCommands.tooDeep) deny(nestedTooDeepDenial("CODEX GATE"));
 // fail-closed refusals (2026-10-18; see couldReachGatedAction). @speed-bump
 const pushGated = couldReachGatedAction([cmd, ...nestedCommands.commands]);
 if (pushGated && nestedCommands.computed) deny(nestedComputedDenial("CODEX GATE"));
+if (programAssembledAtRuntime(cmd)) deny(nestedComputedDenial("CODEX GATE"));
+if ([cmd, ...nestedCommands.commands].some((text) => inlineCodeReachesGatedAction(text))) {
+  deny(commandFedToInterpreterDenial("CODEX GATE"));
+}
 if (pushGated && [cmd, ...nestedCommands.commands].some((text) => commandFedToInterpreter(text))) {
   deny(commandFedToInterpreterDenial("CODEX GATE"));
 }

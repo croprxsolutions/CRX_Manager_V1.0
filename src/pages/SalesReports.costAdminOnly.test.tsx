@@ -46,7 +46,11 @@ vi.mock('../contexts/AuthContext', () => ({ useAuth: () => H.auth }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('../components/products/ProductSearchPicker', () => ({ default: () => null }));
 vi.mock('../lib/csvExport', () => ({ exportToCSV: vi.fn(), fmtCSV: vi.fn(), fmtDateCSV: vi.fn() }));
-vi.mock('../lib/reportPdf', () => ({ downloadReportPdf: vi.fn(), fmtCurrency: (n: number) => `$${n.toFixed(2)}` }));
+// Keep the real whole-cent fmtCurrency; only the PDF download is stubbed.
+vi.mock('../lib/reportPdf', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/reportPdf')>()),
+  downloadReportPdf: vi.fn(),
+}));
 
 import SalesReports from './SalesReports';
 

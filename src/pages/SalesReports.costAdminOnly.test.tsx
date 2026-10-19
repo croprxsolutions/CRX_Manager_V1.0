@@ -12,6 +12,7 @@ const H = vi.hoisted(() => ({
   summaryRow: null as Record<string, unknown> | null,
   toast: vi.fn(),
   holdNextRpc: null as Promise<void> | null,
+  failNextRpc: false,
 }));
 
 type QueryBuilder = {
@@ -46,6 +47,10 @@ vi.mock('../lib/db', () => ({
             : [],
         error: null,
       };
+      if (H.failNextRpc) {
+        H.failNextRpc = false;
+        return Promise.resolve({ data: null, error: { message: 'network down' } });
+      }
       const hold = H.holdNextRpc;
       H.holdNextRpc = null;
       return hold ? hold.then(() => result) : Promise.resolve(result);
@@ -88,6 +93,7 @@ beforeEach(() => {
   H.detailRow = null;
   H.summaryRow = null;
   H.holdNextRpc = null;
+  H.failNextRpc = false;
 });
 afterEach(() => { cleanup(); });
 
@@ -160,6 +166,31 @@ describe('SalesReports cost columns', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.getByText('40%')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /^Cost/ })).toBeInTheDocument();
+  });
+
+  it('keeps cost hidden on a tab whose cached rows were fetched before the promotion', async () => {
+    // As a rep, load the detail rows (no cost).
+    H.auth.role = 'sales_rep';
+    H.detailRow = row(null, null, null);
+    const view = render(<MemoryRouter><SalesReports /></MemoryRouter>);
+    expect(await screen.findByText('Prairie View Farms')).toBeInTheDocument();
+
+    // Move to By Product, get promoted there, and receive admin-shaped summary rows.
+    H.summaryRow = summaryRow(false);
+    fireEvent.click(screen.getByRole('button', { name: 'By Product' }));
+    expect(await screen.findByText('Roundup')).toBeInTheDocument();
+    H.auth.role = 'admin';
+    H.summaryRow = summaryRow(true);
+    view.rerender(<MemoryRouter><SalesReports /></MemoryRouter>);
+    expect(await screen.findByRole('columnheader', { name: /^Cost/ })).toBeInTheDocument();
+
+    // Back to Sales Detail, whose admin refetch fails: the cached rep rows must not be
+    // shown under admin cost columns (their NULL profit would read as $0).
+    H.failNextRpc = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Sales Detail' }));
+    expect(await screen.findByText('Prairie View Farms')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /^Cost/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('$0')).not.toBeInTheDocument();
   });
 
   it('still shows an admin the cost, profit and margin columns', async () => {

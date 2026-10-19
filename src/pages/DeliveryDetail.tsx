@@ -138,9 +138,6 @@ export default function DeliveryDetail() {
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
   const [paperDeliveredOn, setPaperDeliveredOn] = useState(localToday());
-  // A follow-up delivery reuses this page; never carry paper mode or the previous
-  // delivery's photos onto it (a failed load then shows no ticket photo: fails closed).
-  useEffect(() => { setUsePaperTicket(false); setPaperDeliveredOn(localToday()); setPhotos([]); }, [id]);
   const [completing, setCompleting] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
@@ -184,6 +181,27 @@ export default function DeliveryDetail() {
 
   // Complete delivery confirm state
   const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
+
+  // A follow-up delivery reuses this page. Before paint, drop everything the previous
+  // delivery's completion could use: its items and quantities, signer, signature, issue,
+  // paper mode, photos and an open confirm box. Until the new delivery's items load,
+  // completion has nothing to submit (fails closed).
+  useLayoutEffect(() => {
+    setItems([]);
+    setDeliveryQtys({});
+    setSignedBy('');
+    setSignatureDataUrl(null);
+    setDriverIssueType('none');
+    setDriverIssueNotes('');
+    setCompleteConfirmOpen(false);
+    setUsePaperTicket(false);
+    setPaperDeliveredOn(localToday());
+    setPhotos([]);
+  }, [id]);
+
+  // Completion may only use a delivery and item set that belong to the route on screen.
+  const completionStateMatchesRoute = () =>
+    !!delivery && delivery.id === id && items.length > 0 && items.every((item) => item.delivery_id === id);
 
   // Office re-bill state for a completed delivery with no active covering invoice.
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
@@ -927,6 +945,10 @@ export default function DeliveryDetail() {
   // ── Complete Delivery (Driver) ─────────────────────────────────────────
 
   const requestComplete = () => {
+    if (!completionStateMatchesRoute()) {
+      toast('error', 'This delivery is still loading. Please try again in a moment.');
+      return;
+    }
     if (!signedBy.trim()) {
       toast('error', 'Please enter a signature name');
       return;
@@ -950,6 +972,10 @@ export default function DeliveryDetail() {
   const handleComplete = async () => {
     if (!delivery || !profile) return;
     setCompleteConfirmOpen(false);
+    if (!completionStateMatchesRoute()) {
+      toast('error', 'This delivery is still loading. Please try again in a moment.');
+      return;
+    }
     setCompleting(true);
 
     const quantitiesJson = isPartialDelivery

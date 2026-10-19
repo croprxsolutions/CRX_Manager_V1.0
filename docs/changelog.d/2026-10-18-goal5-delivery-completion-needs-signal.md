@@ -57,6 +57,10 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   quantities (or the wrong ticket photo) could be submitted for it. Every step of the load now checks
   it still belongs to the delivery on screen. Reproduced in the preview by delaying one delivery's
   item load (the next delivery showed 5 instead of its own 3); with the fix it keeps its own 3.
+  Moving to another delivery also clears the previous one's items, quantities, signer, signature,
+  issue and open confirm box before the screen redraws, and Complete refuses ("still loading")
+  until the new delivery's own items have loaded, so it can never submit the previous delivery's
+  quantities under the new delivery's id.
 - **Pre-existing bug fixed.** On the delivery page's driver layout, Complete Delivery opened a
   confirmation box that was never drawn, so a driver's tap did nothing. Both layouts now share it.
 - **Not changed.** Completions already queued offline before this ships still sync, or go to Offline

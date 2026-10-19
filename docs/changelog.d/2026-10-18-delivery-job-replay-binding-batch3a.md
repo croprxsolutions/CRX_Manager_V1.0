@@ -1,4 +1,4 @@
-## 2026-10-18 — delivery and job completions can no longer report success for the wrong record (replay-binding batch 3a)
+## 2026-10-18 — written, not yet applied: delivery and job completions stop reporting success for the wrong record (replay-binding batch 3a)
 
 When a completion is retried, `complete_delivery` and `complete_job` hand back the first attempt's
 saved answer matched on the retry key alone. A retry that reused a key for a different delivery or

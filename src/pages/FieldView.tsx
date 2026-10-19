@@ -594,7 +594,8 @@ export default function FieldView() {
       // typed values stay in completeForm if the job is still open and the form is reopened.
       if (getIdempotencyBindingRejection(err)) {
         completeIdem.resetKey();
-        setCompleteFormOpenFor(null);
+        // Only this job's form: another job's form opened meanwhile keeps its draft.
+        setCompleteFormOpenFor((open) => (open === card.job_id ? null : open));
         fetchCards();
       }
       Sentry.captureException(err, { tags: { source: 'critical_action', action: 'field_view_complete_job' } });

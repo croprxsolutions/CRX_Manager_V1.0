@@ -14,7 +14,7 @@ refusal put the exact product cost in its error message, so a rep could type a o
   admin-only.
 - Proof: `scripts/smoke/prove-cost-margin-admin-only-rpc-leaks-real-schema.mjs` (disposable copy of the production
   schema, 38 role cases before and after) and the read-only live chain `smoke-cost_margin_admin_only_rpc_leaks.sql`.
-- Docs: `migration-history.md` row 952, `rpc-functions.md`, `pages-routes.md`, `KNOWN_ISSUES.md` (new OPEN entry with the
+- Docs: `migration-history.md` row 953, `rpc-functions.md`, `pages-routes.md`, `KNOWN_ISSUES.md` (new OPEN entry with the
   remaining steps).
 
 **Not yet.** Table columns stay readable until step 3 (after step 2 moves the screens off whole-row reads). Purchase-order

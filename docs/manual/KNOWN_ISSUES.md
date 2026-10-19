@@ -817,18 +817,25 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   cancelled; open ones show from every season, see `src/lib/invoiceSeasonWindow.ts` — so the UTC cut can
   only move a closed invoice on or off the list.)
   (Source: `docs/archive/2026-spring/2026-05-25-14-domain-review-supplement.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-spring/2026-05-25-14-domain-review-supplement.md`).)
-- **List-page row caps (scale limit).** `DataTable` has no pagination, so most list pages load a fixed
-  number of rows and filter in the browser.
-  - Main list query caps (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`):
-    - 2000: Invoices.
-    - 1000: Customers.
-    - 500: Orders, Deliveries, Application Records (the compliance history), Blend Tickets, Jobs, Quotes,
-      Purchase Orders, Field Setup, Delivery Remainders and Customer Transaction Review.
-    - 200: Payment History and Notifications.
+- **List-page row caps (scale limit).** `DataTable` has no pagination, so most list pages load all
+  their rows and filter in the browser.
+  - **Fixed 2026-10-18 (Goal 4, part 1):** these pages now read every row, page by page, through
+    `src/lib/pagedRead.ts` (`fetchAllRows`; `fetchAllRowsForIds` for follow-up lookups keyed on the
+    list's ids, sent in chunks of 200), and a failed page shows the error instead of a short list:
+    Invoices, Orders, Quotes, Blend Tickets, Purchase Orders (and its outstanding items), Vendor Bills,
+    Returns, Vendors, Application Records, Delivery Remainders, Customer Transaction Review,
+    Commission Payments (payments and unpaid commissions), Payment History, To Ship and Rebates.
+  - **Deliberately left for a follow-up PR — do not forget:** Deliveries (`Deliveries.tsx`, 500) and
+    Reports (`Reports.tsx` and `SalesReports.tsx`: the 500-row price list and posted applications, and
+    the 500-product and 1,000-customer pickers). Open PRs #954, #955 and #957 were changing those files
+    on 2026-10-18, so they get the same fix once those land.
+  - Still capped (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`; the pages
+    fixed above are removed):
+    - 1000: Customers (shows a banner).
+    - 500: Deliveries, Jobs (shows a banner) and Field Setup.
+    - 200: Notifications.
   - Pages that cap one of several queries:
     - Crop Programs: its product list, 500.
-    - Commission Payments: payment history 200 and unpaid commissions 500.
-    - To Ship: deliveries and purchase orders 500, open orders 2,000, order lines 5,000.
     - Dispatch Board: the job list is capped at 500, but its dispatch and chemical rows are paged with
       `.range()` and are not capped.
     - Reports: the price list and posted-applications datasets each stop at 500 (`fetchPriceList`,
@@ -842,8 +849,10 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
     200 most recent completed jobs. Past those counts a record silently cannot be chosen there.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
-  - Orders and Invoices show a warning toast and Jobs shows a banner when capped. Deliveries and
-    Application Records stop silently, and the other pages were not checked for a warning.
+  - Jobs and Customers show a banner when capped. Deliveries stops silently.
+  - Paging is by position, so a record added or deleted while a long list is loading can shift the
+    pages by one row (a row shown twice or missed until the next refresh). Real cursor paging and
+    server-side search are the later Goal 4 step.
   - On a capped query, records past the cap are missing from that page and its browser-side filters.
     Revisit before volumes near the caps.
   `SelectLocationsModal` still splits map and list 50/50 on tablets.

@@ -3,7 +3,7 @@
  *
  * Sprint 11: Financial Workflows
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Card from '../components/ui/Card';
 import DataTable, { type Column } from '../components/ui/DataTable';
@@ -11,6 +11,7 @@ import Badge from '../components/ui/Badge';
 import ReportShell from '../components/reports/ReportShell';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import type { CustomerTransactionRow } from '../types';
@@ -29,23 +30,36 @@ export default function CustomerTransactionReview() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase
+    fetchAllRows<{ id: string; farm_name: string }>((from, to) => supabase
       .from('customers')
       .select('id, farm_name')
       .eq('is_active', true)
       .order('farm_name')
-      .limit(500)
-      .then(({ data: rows }) => setCustomers((rows || []) as { id: string; farm_name: string }[]));
+      .order('id')
+      .range(from, to))
+      .then(({ data: rows }) => setCustomers(rows || []));
   }, []);
 
+  // A multi-page read can finish after a newer one started for another customer
+  // or date range; only the latest request may set the rows and totals.
+  const fetchSeq = useRef(0);
   const fetchData = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
-    const { data: rows, error } = await supabase.rpc('get_customer_transaction_review', {
-      p_customer_id: customerId,
-      p_start_date: startDate,
-      p_end_date: endDate,
-    });
+    // The RPC returns its rows in a fixed unique order (date, type, reference,
+    // source row id) with each running balance computed over the whole range,
+    // so paging keeps every row and every balance. One read stopped at the
+    // server's 1,000-row cap and showed short totals.
+    const { data: rows, error } = await fetchAllRows<CustomerTransactionRow>((from, to) => supabase
+      .rpc('get_customer_transaction_review', {
+        p_customer_id: customerId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+      })
+      .range(from, to));
+    if (seq !== fetchSeq.current) return;
     if (error) {
+      setData([]);
       toast('error', `Failed to load transactions: ${error.message}`);
     } else {
       setData(assertRpcResult<CustomerTransactionRow[]>(rows, 'get_customer_transaction_review'));

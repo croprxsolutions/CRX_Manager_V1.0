@@ -16,6 +16,7 @@
  */
 
 import { supabase } from './db';
+import { fetchAllRows } from './pagedRead';
 import { fetchBilledOutsideCrxDeliveryIds } from './deliveryExternalBilling';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -695,36 +696,16 @@ export function checkCustomerARConsistency(
 
 // ─── DB Wrapper ───────────────────────────────────────────────────
 
+// A ledger recompute over a partial read reports false discrepancies (or hides
+// real ones), so every check reads its rows with the shared pager.
+export { fetchAllRows };
+
 /**
  * Runs all reconciliation checks against the live database.
  *
  * Returns a structured report with pass/fail per check and
  * details on every discrepancy found.
  */
-const RECONCILIATION_PAGE_SIZE = 1000;
-
-/**
- * Read every row of a query, page by page. One request is silently cut off at
- * the PostgREST row cap, and a ledger recompute over a partial read reports
- * false discrepancies (or hides real ones). Each page must be ordered on a
- * unique column; the loop advances by the rows actually returned, so a server
- * cap below the requested page size still reads everything.
- */
-export async function fetchAllRows<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<{ data: T[] | null; error: { message: string } | null }> {
-  const rows: T[] = [];
-  for (let from = 0; ;) {
-    const { data, error } = await fetchPage(from, from + RECONCILIATION_PAGE_SIZE - 1);
-    if (error) return { data: null, error };
-    const page = data ?? [];
-    if (page.length === 0) break;
-    rows.push(...page);
-    from += page.length;
-  }
-  return { data: rows, error: null };
-}
-
 export async function runReconciliationChecks(): Promise<ReconciliationReport> {
   const checks: CheckResult[] = [];
 

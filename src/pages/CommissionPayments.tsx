@@ -16,6 +16,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
@@ -161,54 +162,68 @@ export default function CommissionPayments() {
     setLoading(true);
     try {
       // PR-07 follow-up: dropped recipient FK embed; resolve via profile_public_view.
-      const { data, error } = await supabase
+      const { data, error } = await fetchAllRows((from, to) => supabase
         .from('commission_payments')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(200);
+        .order('id')
+        .range(from, to));
 
       if (error) {
         if (!quiet) toast('error', 'Failed to load commission payments');
         return false;
       }
 
+      const paymentRows = (data || []) as Array<Record<string, unknown> & { id: string; recipient_id?: string | null }>;
       const recipientIds = [...new Set(
-        ((data || []) as Array<{ recipient_id?: string | null }>)
+        paymentRows
           .map((p) => p.recipient_id)
           .filter(Boolean) as string[]
       )];
       const recipientMap: Record<string, string> = {};
       if (recipientIds.length > 0) {
-        const { data: recipients } = await supabase
+        const { data: recipients } = await fetchAllRowsForIds(recipientIds, (idChunk, from, to) => supabase
           .from('profile_public_view')
           .select('id, full_name')
-          .in('id', recipientIds);
+          .in('id', idChunk)
+          .order('id')
+          .range(from, to));
         (recipients || []).forEach((r: { id: string | null; full_name: string | null }) => { if (r.id) recipientMap[r.id] = r.full_name ?? ''; });
       }
 
-      // Get item counts
-      const rows: CommissionPaymentRow[] = [];
-      let hasUnverifiedItemCount = false;
-      for (const p of (data || []) as Array<Record<string, unknown> & { recipient_id?: string | null }>) {
-        const { count, error: itemCountError } = await supabase
+      // Item counts. One paged read of the linked item ids for every payment,
+      // counted here, replaces a count request per payment — the list is no
+      // longer capped, so per-row requests would grow with the whole history.
+      // If that read fails, every count is unverified and Post stays disabled.
+      const paymentIds = paymentRows.map((p) => p.id);
+      const itemCounts = new Map<string, number>();
+      let itemCountError: { message: string } | null = null;
+      if (paymentIds.length > 0) {
+        const { data: items, error: itemsError } = await fetchAllRowsForIds(paymentIds, (idChunk, from, to) => supabase
           .from('commission_payment_items')
-          .select('*', { count: 'exact', head: true })
-          .eq('commission_payment_id', p.id as string);
-
-        if (itemCountError || count === null) {
-          hasUnverifiedItemCount = true;
+          .select('id, commission_payment_id')
+          .in('commission_payment_id', idChunk)
+          .order('id')
+          .range(from, to));
+        if (itemsError || !items) {
+          itemCountError = itemsError ?? { message: 'Commission item count was unavailable' };
           Sentry.captureException(
-            itemCountError ?? new Error('Commission item count was unavailable'),
-            { extra: { context: 'load_commission_payment_item_count', paymentId: p.id } },
+            itemsError ?? new Error(itemCountError.message),
+            { extra: { context: 'load_commission_payment_item_count', paymentCount: paymentIds.length } },
           );
+        } else {
+          for (const item of items as Array<{ commission_payment_id: string }>) {
+            itemCounts.set(item.commission_payment_id, (itemCounts.get(item.commission_payment_id) ?? 0) + 1);
+          }
         }
-
-        rows.push({
-          ...p,
-          recipient_name: p.recipient_id ? recipientMap[p.recipient_id] || 'Unknown' : 'Unknown',
-          item_count: itemCountError || count === null ? null : count,
-        } as CommissionPaymentRow);
       }
+
+      const hasUnverifiedItemCount = itemCountError !== null;
+      const rows: CommissionPaymentRow[] = paymentRows.map((p) => ({
+        ...p,
+        recipient_name: p.recipient_id ? recipientMap[p.recipient_id] || 'Unknown' : 'Unknown',
+        item_count: itemCountError ? null : itemCounts.get(p.id) ?? 0,
+      } as CommissionPaymentRow));
 
       setPayments(rows);
       if (hasUnverifiedItemCount) {
@@ -237,7 +252,9 @@ export default function CommissionPayments() {
     // _insert_commissions_for_order never populates (always NULL), so the payout
     // modal showed a blank order # and blank customer. Select the FK ids instead and
     // resolve order # / farm name live (same pattern as recipient resolution below).
-    const { data, error } = await supabase
+    // Every pending commission, paged: the pay-selection list and its totals
+    // must not silently drop the oldest ones past a row cap.
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('commissions')
       .select(`
         id, order_id, job_id, customer_id, order_date, commission_amount,
@@ -248,7 +265,8 @@ export default function CommissionPayments() {
       // pay-selection list and the unpaid totals. (overnight-bug-hunt finding)
       .eq('status', 'pending')
       .order('order_date', { ascending: false })
-      .limit(500);
+      .order('id')
+      .range(from, to));
 
     if (error) {
       toast('error', 'Failed to load unpaid commissions: ' + error.message);
@@ -269,19 +287,23 @@ export default function CommissionPayments() {
 
     const recipientMap: Record<string, string> = {};
     if (recipientUserIds.length > 0) {
-      const { data: recipients } = await supabase
+      const { data: recipients } = await fetchAllRowsForIds(recipientUserIds, (idChunk, from, to) => supabase
         .from('profile_public_view')
         .select('id, full_name')
-        .in('id', recipientUserIds);
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to));
       (recipients || []).forEach((r: { id: string | null; full_name: string | null }) => { if (r.id) recipientMap[r.id] = r.full_name ?? ''; });
     }
 
     const orderMap: Record<string, string> = {};
     if (orderIds.length > 0) {
-      const { data: orders } = await supabase
+      const { data: orders } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('orders')
         .select('id, order_number')
-        .in('id', orderIds);
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to));
       (orders || []).forEach((o: { id: string | null; order_number: string | null }) => { if (o.id) orderMap[o.id] = o.order_number ?? ''; });
     }
 
@@ -289,19 +311,23 @@ export default function CommissionPayments() {
     // resolve their job_number so the source column isn't blank.
     const jobMap: Record<string, string> = {};
     if (jobIds.length > 0) {
-      const { data: jobs } = await supabase
+      const { data: jobs } = await fetchAllRowsForIds(jobIds, (idChunk, from, to) => supabase
         .from('jobs')
         .select('id, job_number')
-        .in('id', jobIds);
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to));
       (jobs || []).forEach((j: { id: string | null; job_number: string | null }) => { if (j.id) jobMap[j.id] = j.job_number ?? ''; });
     }
 
     const customerMap: Record<string, string> = {};
     if (customerIds.length > 0) {
-      const { data: customers } = await supabase
+      const { data: customers } = await fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
         .from('customers')
         .select('id, farm_name')
-        .in('id', customerIds);
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to));
       (customers || []).forEach((c: { id: string | null; farm_name: string | null }) => { if (c.id) customerMap[c.id] = c.farm_name ?? ''; });
     }
 

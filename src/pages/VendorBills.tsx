@@ -13,6 +13,7 @@ import Badge, { type BadgeVariant } from '../components/ui/Badge';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { useToast } from '../components/ui/Toast';
 import { supabase } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { formatCents as fmt } from '../lib/money';
@@ -36,11 +37,15 @@ export default function VendorBills() {
 
   const fetchBills = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('vendor_bills')
-      .select('*, vendor:vendors(name), purchase_order:purchase_orders(po_number)')
-      .is('deleted_at', null)
-      .order('due_date', { ascending: true });
+    const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      supabase
+        .from('vendor_bills')
+        .select('*, vendor:vendors(name), purchase_order:purchase_orders(po_number)')
+        .is('deleted_at', null)
+        .order('due_date', { ascending: true })
+        .order('id')
+        .range(from, to),
+    );
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_vendor_bills' } });
@@ -49,7 +54,7 @@ export default function VendorBills() {
       return;
     }
 
-    const mapped = ((data || []) as Array<Record<string, unknown>>).map((b) => ({
+    const mapped = (data || []).map((b) => ({
       ...b,
       vendor_name: (b.vendor as { name?: string } | null)?.name || 'Unknown',
       po_number: (b.purchase_order as { po_number?: string } | null)?.po_number || null,

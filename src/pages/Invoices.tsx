@@ -9,6 +9,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult, describePostInvoiceBlock } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { exportToCSV } from '../lib/csvExport';
@@ -127,9 +128,9 @@ export default function Invoices() {
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
-    const QUERY_LIMIT = 2000;
     // PR-07 follow-up: dropped salesman FK embed; resolve via profile_public_view.
-    const { data, error } = await supabase
+    // Read every page: a single request is silently cut off at the server's row cap.
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('invoices')
       .select('*, customer:customers!invoices_customer_id_fkey(farm_name)')
       .is('deleted_at', null)
@@ -143,17 +144,14 @@ export default function Invoices() {
       // windowed on created_at as before. See src/lib/invoiceSeasonWindow.ts.
       .or(openOrInSeasonFilter('created_at'))
       .order('created_at', { ascending: false })
-      .limit(QUERY_LIMIT);
+      .order('id')
+      .range(from, to));
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'invoices' } });
       toast('error', 'Failed to load invoices');
       setLoading(false);
       return;
-    }
-
-    if (data && data.length === QUERY_LIMIT) {
-      toast('error', `Showing first ${QUERY_LIMIT} invoices — some invoices may be hidden. Contact admin if you need the full list.`);
     }
 
     const salesmanIds = [...new Set(
@@ -163,10 +161,12 @@ export default function Invoices() {
     )];
     const salesmanMap: Record<string, string> = {};
     if (salesmanIds.length > 0) {
-      const { data: salesmen } = await supabase
+      const { data: salesmen } = await fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => supabase
         .from('profile_public_view')
         .select('id, full_name')
-        .in('id', salesmanIds);
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to));
       ((salesmen || []) as { id: string; full_name: string }[]).forEach((s) => { salesmanMap[s.id] = s.full_name; });
     }
 
@@ -176,7 +176,12 @@ export default function Invoices() {
     )];
     const orderMap: Record<string, string> = {};
     if (orderIds.length > 0) {
-      const { data: ords } = await supabase.from('orders').select('id, order_number').in('id', orderIds);
+      const { data: ords } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
+        .from('orders')
+        .select('id, order_number')
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to));
       ((ords || []) as { id: string; order_number: string }[]).forEach((o) => { orderMap[o.id] = o.order_number; });
     }
 

@@ -37,9 +37,23 @@ function buildChain(result: { data: unknown; error: unknown }): QueryChain {
   ]) {
     self[method] = vi.fn(() => self);
   }
+  // The list reads page by page with .range(from, to); serve each page as a slice
+  // of the rows, so any number of page requests ends on an empty page.
+  self.range = vi.fn((from: number, to: number) => Promise.resolve(
+    Array.isArray(result.data)
+      ? { data: result.data.slice(from, to + 1), error: result.error }
+      : result,
+  ));
   const promise = Promise.resolve(result);
   self.then = promise.then.bind(promise);
   return self as QueryChain;
+}
+
+/** The blend_tickets table: list reads page through the rows; an update goes to `mutation`. */
+function ticketTable(rows: unknown[], mutation: QueryChain): QueryChain {
+  const table = buildChain({ data: rows, error: null });
+  table.update = vi.fn(() => mutation);
+  return table;
 }
 
 vi.mock('../lib/db', () => ({
@@ -84,14 +98,18 @@ vi.mock('../hooks/useRowSelection', () => ({
 vi.mock('../components/ui/PageHeader', () => ({
   default: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div>,
 }));
-vi.mock('../components/ui/DataTable', () => ({ default: () => <div>ticket table</div> }));
+vi.mock('../components/ui/DataTable', () => ({
+  default: ({ data }: { data: unknown[] }) => <div>ticket table: {data.length} rows</div>,
+}));
 vi.mock('../components/ui/BulkDeleteConfirmModal', () => ({
   default: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) => open
     ? <button onClick={onConfirm}>Confirm bulk delete</button>
     : null,
 }));
 vi.mock('../components/blendtickets/BulkTicketUpload', () => ({ BulkTicketUpload: () => null }));
-vi.mock('../components/blendtickets/ManualTicketCreate', () => ({ ManualTicketCreate: () => null }));
+vi.mock('../components/blendtickets/ManualTicketCreate', () => ({
+  ManualTicketCreate: ({ customers }: { customers: unknown[] }) => <div>manual create: {customers.length} customers</div>,
+}));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/errorSanitizer', () => ({
   sanitizeError: (error: unknown) => error instanceof Error ? error.message : 'Request failed',
@@ -110,18 +128,14 @@ describe('BlendTickets bulk-delete downstream guard', () => {
   });
 
   it('refuses deletion with a friendly message when a selected ticket has an application record', async () => {
-    const ticketLoad = buildChain({ data: [selectedTicket], error: null });
     const customerLoad = buildChain({ data: [], error: null });
     const applicationRecordLookup = buildChain({ data: [{ source_id: 'ticket-1' }], error: null });
     const deleteMutation = buildChain({ data: [{ id: 'ticket-1' }], error: null });
-    let blendTicketCalls = 0;
+    const tickets = ticketTable([selectedTicket], deleteMutation);
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') return customerLoad;
       if (table === 'application_records') return applicationRecordLookup;
-      if (table === 'blend_tickets') {
-        blendTicketCalls += 1;
-        return blendTicketCalls === 1 ? ticketLoad : deleteMutation;
-      }
+      if (table === 'blend_tickets') return tickets;
       return buildChain({ data: [], error: null });
     });
 
@@ -139,23 +153,18 @@ describe('BlendTickets bulk-delete downstream guard', () => {
     expect(applicationRecordLookup.eq).toHaveBeenCalledWith('source_type', 'blend_ticket');
     expect(applicationRecordLookup.in).toHaveBeenCalledWith('source_id', ['ticket-1']);
     expect(applicationRecordLookup.limit).toHaveBeenCalledWith(1);
-    expect(deleteMutation.update).not.toHaveBeenCalled();
+    expect(tickets.update).not.toHaveBeenCalled();
   });
 
   it('continues to the soft delete when no selected ticket has an application record', async () => {
-    const ticketLoad = buildChain({ data: [selectedTicket], error: null });
     const customerLoad = buildChain({ data: [], error: null });
     const applicationRecordLookup = buildChain({ data: [], error: null });
     const deleteMutation = buildChain({ data: [{ id: 'ticket-1' }], error: null });
-    let blendTicketCalls = 0;
+    const tickets = ticketTable([selectedTicket], deleteMutation);
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') return customerLoad;
       if (table === 'application_records') return applicationRecordLookup;
-      if (table === 'blend_tickets') {
-        blendTicketCalls += 1;
-        if (blendTicketCalls === 1 || blendTicketCalls === 3) return ticketLoad;
-        return deleteMutation;
-      }
+      if (table === 'blend_tickets') return tickets;
       return buildChain({ data: [], error: null });
     });
 
@@ -164,12 +173,48 @@ describe('BlendTickets bulk-delete downstream guard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm bulk delete' }));
 
     await waitFor(() => {
-      expect(deleteMutation.update).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
+      expect(tickets.update).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
       expect(mockToast).toHaveBeenCalledWith('success', 'Deleted 1 ticket(s)');
     });
     expect(mockCheckMutationResult).toHaveBeenCalledWith(
       { data: [{ id: 'ticket-1' }], error: null },
       'Delete blend tickets',
     );
+  });
+});
+
+describe('BlendTickets list reads every row', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('loads all 1,500 tickets and 1,500 active customers, past the 1,000-row server cap', async () => {
+    const manyTickets = Array.from({ length: 1500 }, (_, i) => ({
+      ...selectedTicket,
+      id: `ticket-${i}`,
+      ticket_number: `BT-${i}`,
+    }));
+    const manyCustomers = Array.from({ length: 1500 }, (_, i) => ({ id: `customer-${i}`, farm_name: `Farm ${i}` }));
+    const tickets = ticketTable(manyTickets, buildChain({ data: [], error: null }));
+    const customers = buildChain({ data: manyCustomers, error: null });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return tickets;
+      if (table === 'customers') return customers;
+      return buildChain({ data: [], error: null });
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('ticket table: 1500 rows')).toBeInTheDocument();
+    // Pages 0-999 and 1000-1999 carry rows; the third, empty page ends the read.
+    expect(tickets.range.mock.calls).toEqual([[0, 999], [1000, 1999], [1500, 2499]]);
+    expect(tickets.order).toHaveBeenCalledWith('id');
+    expect(tickets.limit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Create Manual/ }));
+    expect(await screen.findByText('manual create: 1500 customers')).toBeInTheDocument();
+    expect(customers.order).toHaveBeenCalledWith('farm_name');
+    expect(customers.order).toHaveBeenCalledWith('id');
+    expect(mockToast).not.toHaveBeenCalled();
   });
 });

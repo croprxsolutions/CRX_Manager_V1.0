@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { parseLocalDate } from '../lib/dateUtils';
 import {
@@ -24,6 +24,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { formatUSD as fmt } from '../lib/money';
@@ -76,11 +77,13 @@ export default function PurchaseOrders() {
   const canBulkAction = canManagePO;
 
   const fetchPOs = useCallback(async () => {
-    const { data, error } = await supabase
+    // Read every page: a single request is silently cut off at the server's row cap.
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('purchase_orders')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(500);
+      .order('id')
+      .range(from, to));
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_purchase_orders' } });
       toast('error', 'Failed to load purchase orders. Please try again.');
@@ -93,7 +96,9 @@ export default function PurchaseOrders() {
 
   const fetchOutstandingItems = useCallback(async () => {
     setOutstandingLoading(true);
-    const { data, error } = await supabase
+    // No explicit limit here still meant the server's silent row cap, and these rows
+    // feed the outstanding-value totals, so read every page.
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('purchase_order_items')
       .select(`
         id,
@@ -107,7 +112,9 @@ export default function PurchaseOrders() {
         product:products(product_name),
         purchase_orders!inner(po_number, vendor, status, expected_delivery_date)
       `)
-      .not('purchase_orders.status', 'in', '("cancelled","fully_received")');
+      .not('purchase_orders.status', 'in', '("cancelled","fully_received")')
+      .order('id')
+      .range(from, to));
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_outstanding_items' } });
       toast('error', 'Failed to load outstanding items.');
@@ -147,11 +154,15 @@ export default function PurchaseOrders() {
     fetchPOs();
   }, [fetchPOs]);
 
+  // Load once when the tab is first opened. Keying on "no items yet" re-ran the
+  // read forever when there were none or the read failed (a toast every pass).
+  const outstandingRequested = useRef(false);
   useEffect(() => {
-    if (activeTab === 'outstanding' && outstandingItems.length === 0 && !outstandingLoading) {
+    if (activeTab === 'outstanding' && !outstandingRequested.current) {
+      outstandingRequested.current = true;
       fetchOutstandingItems();
     }
-  }, [activeTab, outstandingItems.length, outstandingLoading, fetchOutstandingItems]);
+  }, [activeTab, fetchOutstandingItems]);
 
   /* ─── Summary stats ─── */
   const counts = useMemo(() => {

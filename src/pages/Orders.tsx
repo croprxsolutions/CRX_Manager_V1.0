@@ -15,6 +15,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { formatUSD as fmt } from '../lib/money';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
@@ -34,8 +35,6 @@ import {
   fetchActiveInvoiceCoveragePages,
   type ActiveInvoiceCoverageRow,
 } from '../lib/deliveryInvoiceCoverage';
-
-const EMPTY_UUID = '00000000-0000-0000-0000-000000000000';
 
 interface OrderWithFulfillment extends Order {
   fulfillment_pct: number;
@@ -75,25 +74,22 @@ export default function Orders() {
 
   const fetchOrders = useCallback(async () => {
     const { start: seasonStart, end: seasonEnd } = getSeasonDates();
-    const QUERY_LIMIT = 500;
-    const { data: ordersData, error: ordersError } = await supabase
+    // Read every page: a single request is silently cut off at the server's row cap.
+    const { data: ordersData, error: ordersError } = await fetchAllRows((from, to) => supabase
       .from('orders')
       .select('*, customer:customers(farm_name, parent_customer_id)')
       .gte('order_date', seasonStart)
       .lte('order_date', seasonEnd)
       .is('deleted_at', null)
       .order('order_date', { ascending: false })
-      .limit(QUERY_LIMIT);
+      .order('id')
+      .range(from, to));
 
     if (ordersError) {
       Sentry.captureException(ordersError);
       toast('error', 'Failed to load orders. Please try again.');
       setLoading(false);
       return;
-    }
-
-    if (ordersData && ordersData.length === QUERY_LIMIT) {
-      toast('error', `Showing first ${QUERY_LIMIT} orders — some orders may be hidden. Contact admin if you need the full list.`);
     }
 
     const orderIds = (ordersData || []).map((o: Record<string, unknown>) => (o as { id: string }).id);
@@ -105,24 +101,30 @@ export default function Orders() {
         .filter(Boolean) as string[]
     )];
 
-    // Run all four queries in parallel — they depend on ordersData but not on each other
+    // Run all four queries in parallel — they depend on ordersData but not on each other.
+    // Each id list is sent in chunks and every chunk is paged, so a long order list
+    // neither overflows the request URL nor loses rows past the server's row cap.
     const [itemsResult, invoiceResult, parentsResult, deliveryResult] = await Promise.all([
-      supabase
+      fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('order_items')
         .select('order_id, total_units_needed, quantity_delivered, price_per_unit, product_name')
-        .in('order_id', orderIds.length > 0 ? orderIds : [EMPTY_UUID]),
+        .in('order_id', idChunk)
+        .order('id')
+        .range(from, to)),
       fetchActiveInvoiceCoveragePages(orderIds),
-      parentIds.length > 0
-        ? supabase
-            .from('customers')
-            .select('id, farm_name')
-            .in('id', parentIds)
-        : Promise.resolve({ data: null, error: null }),
-      supabase
+      fetchAllRowsForIds(parentIds, (idChunk, from, to) => supabase
+        .from('customers')
+        .select('id, farm_name')
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to)),
+      fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('deliveries')
         .select('order_id, scheduled_date, status')
-        .in('order_id', orderIds.length > 0 ? orderIds : [EMPTY_UUID])
-        .in('status', ['scheduled', 'in_progress']),
+        .in('order_id', idChunk)
+        .in('status', ['scheduled', 'in_progress'])
+        .order('id')
+        .range(from, to)),
     ]);
 
     const { data: itemsData, error: itemsError } = itemsResult;
@@ -278,10 +280,18 @@ export default function Orders() {
       const orderIds = selectedRows.map((o) => o.id);
       const customerIds = [...new Set(selectedRows.map((o) => o.customer_id))];
 
+      // A selection can be the whole list, so read every row in id chunks.
       const [itemsRes, customersRes] = await Promise.all([
-        supabase.from('order_items').select('*').in('order_id', orderIds),
-        supabase.from('customers').select('*').in('id', customerIds),
+        fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
+          .from('order_items').select('*').in('order_id', idChunk)
+          .order('sort_order').order('id').range(from, to)),
+        fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
+          .from('customers').select('*').in('id', idChunk)
+          .order('id').range(from, to)),
       ]);
+      // A failed read must not print an order with no lines.
+      if (itemsRes.error) throw itemsRes.error;
+      if (customersRes.error) throw customersRes.error;
 
       const customerMap: Record<string, { farm_name: string; contact_name: string | null; phone: string | null; billing_address: string | null }> = {};
       for (const c of customersRes.data || []) {
@@ -335,12 +345,26 @@ export default function Orders() {
       const orderIds = selectedRows.map((o) => o.id);
       const customerIds = [...new Set(selectedRows.map((o) => o.customer_id))];
 
+      // A selection can be the whole list, and inventory is a whole-table read, so
+      // read every row (id lists in chunks) rather than stopping at the row cap.
       const [itemsRes, customersRes, addrRes, invRes] = await Promise.all([
-        supabase.from('order_items').select('*').in('order_id', orderIds),
-        supabase.from('customers').select('*').in('id', customerIds),
-        supabase.from('customer_addresses').select('*').in('customer_id', customerIds).order('is_default', { ascending: false }),
-        supabase.from('inventory').select('product_id, quantity_available, quantity_prebooked'),
+        fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
+          .from('order_items').select('*').in('order_id', idChunk)
+          .order('sort_order').order('id').range(from, to)),
+        fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
+          .from('customers').select('*').in('id', idChunk)
+          .order('id').range(from, to)),
+        fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
+          .from('customer_addresses').select('*').in('customer_id', idChunk)
+          .order('is_default', { ascending: false }).order('id').range(from, to)),
+        fetchAllRows((from, to) => supabase
+          .from('inventory').select('product_id, quantity_available, quantity_prebooked')
+          .order('id').range(from, to)),
       ]);
+      // A failed read must not print a pick list with missing lines or shortage flags.
+      for (const res of [itemsRes, customersRes, addrRes, invRes]) {
+        if (res.error) throw res.error;
+      }
 
       const customerMap: Record<string, { farm_name: string; contact_name: string | null; phone: string | null; billing_address: string | null }> = {};
       for (const c of customersRes.data || []) {

@@ -14,6 +14,7 @@ import Modal from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import { runCriticalAction } from '../lib/criticalAction';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -68,7 +69,7 @@ export default function PaymentHistory() {
 
   const fetchPayments = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('allocation_sets')
       .select(`
         id, customer_id, total_payment_cents, total_allocated_cents,
@@ -77,7 +78,8 @@ export default function PaymentHistory() {
         customers!allocation_sets_customer_id_fkey ( farm_name )
       `)
       .order('created_at', { ascending: false })
-      .limit(200);
+      .order('id')
+      .range(from, to));
 
     if (error) {
       toast('error', 'Failed to load payment history');

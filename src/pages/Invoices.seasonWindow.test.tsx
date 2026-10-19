@@ -331,6 +331,28 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     expect(screen.queryByRole('button', { name: /Post \d+ Selected/ })).not.toBeInTheDocument();
   });
 
+  it('reads every invoice past the 1,000-row server cap, so the totals count all 1,500', async () => {
+    const manyPosted = Array.from({ length: 1500 }, (_, i) => invoice({
+      invoice_number: `POSTED-${i}`, status: 'posted', season: 2027,
+      invoice_date: '2026-10-05', created_at: '2026-10-05T15:00:00+00:00',
+    }));
+    const queries: Array<ReturnType<typeof buildInMemoryQuery>> = [];
+    mockFrom.mockImplementation((table: string) => {
+      const query = buildInMemoryQuery(table === 'invoices' ? manyPosted : []);
+      if (table === 'invoices') queries.push(query);
+      return query;
+    });
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+
+    // 1,500 posted invoices x $100.00 each: a read stopped at 1,000 rows would show $100,000.00.
+    const outstanding = (await screen.findByText('unpaid balance on posted and overdue invoices')).parentElement!;
+    await waitFor(() => expect(outstanding).toHaveTextContent('$150,000.00'));
+    expect(screen.getByText(/posted invoices \(including overdue\)/)).toHaveTextContent('1500 posted invoices (including overdue)');
+    expect(queries.map((q) => (q.range as ReturnType<typeof vi.fn>).mock.calls[0])).toEqual([[0, 999], [1000, 1999], [1500, 2499]]);
+    expect(queries.every((q) => (q.order as ReturnType<typeof vi.fn>).mock.calls.some(([column]) => column === 'id'))).toBe(true);
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
   it('a prior-season draft ticked by hand is named as not from this season in the Post confirm', async () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
     await waitFor(() => expect(screen.getAllByText('OLD-DRAFT').length).toBeGreaterThan(0));

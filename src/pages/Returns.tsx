@@ -15,6 +15,7 @@ import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection'
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, checkMutationResult, sanitizeError, assertRpcResult } from '../lib/db';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV } from '../lib/csvExport';
@@ -192,16 +193,20 @@ export default function Returns() {
   const fetchReturns = useCallback(async () => {
     setLoading(true);
     // PR-07 follow-up: dropped requester FK embed; resolved via profile_public_view.
-    const { data, error } = await supabase
-      .from('returns')
-      .select(`
-        *,
-        customer:customers(farm_name),
-        order:orders(order_number),
-        items:return_items(id)
-      `)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
+    const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      supabase
+        .from('returns')
+        .select(`
+          *,
+          customer:customers(farm_name),
+          order:orders(order_number),
+          items:return_items(id)
+        `)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .order('id')
+        .range(from, to),
+    );
 
     if (error) {
       Sentry.captureException(error);
@@ -217,10 +222,17 @@ export default function Returns() {
     )];
     const requesterMap: Record<string, string> = {};
     if (requesterIds.length > 0) {
-      const { data: requesters } = await supabase
-        .from('profile_public_view')
-        .select('id, full_name')
-        .in('id', requesterIds);
+      // A failed name lookup stays non-fatal: names fall back to 'Unknown'.
+      const { data: requesters } = await fetchAllRowsForIds<{ id: string | null; full_name: string | null }, string>(
+        requesterIds,
+        (idChunk, from, to) =>
+          supabase
+            .from('profile_public_view')
+            .select('id, full_name')
+            .in('id', idChunk)
+            .order('id')
+            .range(from, to),
+      );
       (requesters || []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) requesterMap[p.id] = p.full_name || 'Unknown'; });
     }
 
@@ -240,7 +252,15 @@ export default function Returns() {
   }, [fetchReturns]);
 
   const loadCreateData = async () => {
-    const custRes = await supabase.from('customers').select('id, farm_name, assigned_tier').eq('is_active', true).order('farm_name');
+    const custRes = await fetchAllRows<Pick<Customer, 'id' | 'farm_name' | 'assigned_tier'>>((from, to) =>
+      supabase
+        .from('customers')
+        .select('id, farm_name, assigned_tier')
+        .eq('is_active', true)
+        .order('farm_name')
+        .order('id')
+        .range(from, to),
+    );
     setCustomers((custRes.data || []) as unknown as Customer[]);
   };
 

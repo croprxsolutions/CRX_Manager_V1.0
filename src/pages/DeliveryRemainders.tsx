@@ -12,6 +12,7 @@ import DataTable, { type Column } from '../components/ui/DataTable';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { sanitizeError, supabase, assertRpcResult } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import HelpTip from '../components/ui/HelpTip';
@@ -49,17 +50,20 @@ export default function DeliveryRemainders() {
   const [creating, setCreating] = useState<string | null>(null);
 
   const fetchRemainders = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('delivery_remainders')
-      .select(`
-        *,
-        customer:customers!delivery_remainders_customer_id_fkey(farm_name),
-        product:products!delivery_remainders_product_id_fkey(product_name),
-        original_delivery:deliveries!delivery_remainders_original_delivery_id_fkey(delivery_number),
-        order:orders!delivery_remainders_order_id_fkey(order_number)
-      `)
-      .order('created_at', { ascending: false })
-      .limit(500);
+    const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      supabase
+        .from('delivery_remainders')
+        .select(`
+          *,
+          customer:customers!delivery_remainders_customer_id_fkey(farm_name),
+          product:products!delivery_remainders_product_id_fkey(product_name),
+          original_delivery:deliveries!delivery_remainders_original_delivery_id_fkey(delivery_number),
+          order:orders!delivery_remainders_order_id_fkey(order_number)
+        `)
+        .order('created_at', { ascending: false })
+        .order('id')
+        .range(from, to),
+    );
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_delivery_remainders' } });

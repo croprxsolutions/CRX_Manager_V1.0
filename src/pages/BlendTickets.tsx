@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FileText, Upload, Search, CheckCircle, Clock, AlertCircle, XCircle, X, Plus, LinkIcon, Download, Trash2 } from 'lucide-react';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -61,12 +62,14 @@ export function BlendTickets() {
 
   const loadData = useCallback(async () => {
     try {
+      // Read every page of both lists: a single request is silently cut off at
+      // the server's row cap.
       const [ticketsResult, customersResult] = await Promise.all([
         // PR-07 follow-up: dropped uploader/reviewer/salesman FK embeds;
         // also dropped the email field — UI only renders uploader.full_name
         // (line ~437) so PII is unused on this page. Resolved via
         // profile_public_view post-fetch below.
-        supabase
+        fetchAllRows((from, to) => supabase
           .from('blend_tickets')
           .select(`
             *,
@@ -76,13 +79,15 @@ export function BlendTickets() {
           `)
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
-          .limit(500),
-        supabase
+          .order('id')
+          .range(from, to)),
+        fetchAllRows((from, to) => supabase
           .from('customers')
           .select('*')
           .eq('is_active', true)
           .order('farm_name')
-          .limit(500)
+          .order('id')
+          .range(from, to)),
       ]);
 
       if (ticketsResult.error) throw ticketsResult.error;
@@ -105,10 +110,12 @@ export function BlendTickets() {
       ].filter(Boolean) as string[])];
       const profMap: Record<string, { id: string; full_name: string }> = {};
       if (profIds.length > 0) {
-        const { data: profRows } = await supabase
+        const { data: profRows } = await fetchAllRowsForIds(profIds, (idChunk, from, to) => supabase
           .from('profile_public_view')
           .select('id, full_name')
-          .in('id', profIds);
+          .in('id', idChunk)
+          .order('id')
+          .range(from, to));
         ((profRows || []) as { id: string; full_name: string }[]).forEach((p) => {
           profMap[p.id] = p;
         });

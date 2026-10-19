@@ -18,6 +18,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import type { InventoryPositionRow } from '../types';
 
@@ -108,29 +109,32 @@ export default function ToShip() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     // 0. Open deliveries (scheduled / in progress) — independent of order demand
-    const { data: delivRaw } = await supabase
+    const { data: delivRaw } = await fetchAllRows((from, to) => supabase
       .from('deliveries')
       .select('id, delivery_number, scheduled_date, status, assigned_driver, customer:customers(farm_name), order:orders(order_number)')
       .in('status', ['scheduled', 'in_progress'])
       .order('scheduled_date', { ascending: true })
-      .limit(500);
+      .order('id')
+      .range(from, to));
     setDeliveries((delivRaw || []) as unknown as DeliveryRow[]);
 
     // 0b. Open purchase orders (inbound stock on the way)
-    const { data: poRaw } = await supabase
+    const { data: poRaw } = await fetchAllRows((from, to) => supabase
       .from('purchase_orders')
       .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)')
       .in('status', ['submitted', 'partially_received'])
       .order('expected_delivery_date', { ascending: true, nullsFirst: false })
-      .limit(500);
+      .order('id')
+      .range(from, to));
     setPos((poRaw || []) as unknown as PORow[]);
 
     // 1. Open orders (the booking still owes product)
-    const { data: ordersRaw, error: oErr } = await supabase
+    const { data: ordersRaw, error: oErr } = await fetchAllRows((from, to) => supabase
       .from('orders')
       .select('id, order_number, order_date, customer_id, customer:customers(farm_name, assigned_tier)')
       .in('status', OPEN_STATUSES)
-      .limit(2000);
+      .order('id')
+      .range(from, to));
     if (oErr) {
       Sentry.captureException(oErr, { tags: { source: 'fetch', action: 'load_to_ship_orders' } });
       toast('error', 'Failed to load open orders');
@@ -148,12 +152,13 @@ export default function ToShip() {
     }
 
     // 2. Open lines on those orders
-    const { data: itemsRaw, error: iErr } = await supabase
+    const { data: itemsRaw, error: iErr } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
       .from('order_items')
       .select('id, order_id, product_id, product_name, price_per_unit, quantity_remaining, unit_size')
-      .in('order_id', orderIds)
+      .in('order_id', idChunk)
       .gt('quantity_remaining', 0)
-      .limit(5000);
+      .order('id')
+      .range(from, to));
     if (iErr) {
       Sentry.captureException(iErr, { tags: { source: 'fetch', action: 'load_to_ship_items' } });
       toast('error', 'Failed to load open order lines');

@@ -228,7 +228,16 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    each other role in use) and check each can open the screens and data that role should, and cannot open
    what it should not. One admin test is not enough.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
-8. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
+8. **Bring the restored schema up to date first.** The dump is only as new as its date, but the current
+   code and Edge Functions expect every later migration (RPCs, columns, grants, constraints). Deploying
+   them against an older schema causes an immediate outage. Follow `supabase/baselines/README.md`
+   (section on replay after restore): generate the exact post-dump list with
+   `node scripts/list-post-baseline-migrations.mjs` (never choose migrations by filename date alone, and
+   never run the files directly with `psql`, which skips the migration ledger), review the dry run in an
+   isolated Supabase CLI work directory, then push that exact filtered set through the normal gates.
+   Confirm the restored `supabase_migrations.schema_migrations` ledger matches the repository before going on.
+   Applying migrations to the new project needs Mason's approval in the current conversation.
+9. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install
    every required secret (from the password manager, never pasted into chat), and smoke-test each function
    (`send-email`, `create-user`, `reset-user-password`, `process-document`, `process-blend-ticket`,
@@ -245,7 +254,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    Vercel environment variables to the new project and redeploy.
    Deploying functions, installing secrets and changing production configuration each need Mason's
    explicit approval in the current conversation.
-9. Run the post-restore checklist (4.7).
+10. Run the post-restore checklist (4.7).
 
 ### 4.7 After any restore: nothing may happen twice
 

@@ -43,8 +43,11 @@ sessions on helper reports, twice more on 2026-10-18 alone. Mason approved the r
   listed exception that main also allowed.
 
 Declined, with reasons:
-- (MED) a computed or fed command that merely mentions `git`/`merge`/`push` is still refused. That
-  is the intended speed bump, and the common harmless shapes have no such word.
+- (MED) a computed, fed or inline-code command that only mentions `git`/`merge`/`push` (for example
+  `node -e "console.log('git')"`), and any run-time-built program name, are still refused even
+  though they may not reach a gated action. This is a deliberate over-refusal at the merge and
+  push gates, named as such in the DECISION_LOG operative rule. Command text cannot tell which of
+  these reach a merge, and the common harmless shapes show no such word.
 - (MED) the bare `deploy` match under a hold is unchanged from before this PR and errs toward
   blocking only while a stop is latched.
 - (superseded in round 2, see below) inline `node -e` code.
@@ -108,6 +111,11 @@ still prompt through permissions.ask) are deferred to a follow-up.
 
 **CodeRabbit on `2cbc992f6` (1).** Fixed: `SELECT … INTO` counts as a write across a `;` inside a
 string literal (`SELECT ';' INTO t`).
+
+**CodeRabbit on `df313fe26` (2).** Fixed: under a hold, curl `--form-string` and `--data-ascii`
+are outward; the decision log names the merge/push gates' deliberate over-refusal. Also folded in
+from the Codex connector: `.claude/skills` and `.claude/workflows` are enforcement surfaces
+(shell deletes and writes are refused, reads pass).
 
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

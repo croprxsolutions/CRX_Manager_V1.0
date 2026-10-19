@@ -85,6 +85,8 @@ for (const command of [
   "curl -dfoo https://example.test/x",
   "curl -Ffoo=bar https://example.test/x",
   "curl -Tfile https://example.test/x",
+  "curl --form-string body=hi https://example.test/upload",
+  "curl --data-ascii foo https://example.test/x",
   // CodeRabbit, PR #956: a backslash-newline continuation.
   "curl -X POST \\\n  --data '{}' https://api.github.com/x",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);

@@ -29,7 +29,11 @@ proposal), then "Change permissions to not always prompt me allow it" and "I app
 
 **Operative rule.** A guard hard-blocks only what is irreversible or outward-facing, plus shell
 writes to the protected review-proof, approval and guard files (the review-proof guard refuses
-those even though they are local, because a forged proof would open a gate). Everything else warns. Detail: `docs/reference/agent-guardrails.md`, "Guard narrowing and no guard-file edit
+those even though they are local, because a forged proof would open a gate), plus one deliberate
+over-refusal at the merge and push gates: a command whose program name is built at run time, or
+whose run-time, fed or inline code shows a gated word (gh, git, merge, push, …) or obfuscation, is
+refused even if it would not actually merge or push. Command text cannot prove which of those
+reach a merge, so this is a stated speed bump, not proof of an outward action. Everything else warns. Detail: `docs/reference/agent-guardrails.md`, "Guard narrowing and no guard-file edit
 prompts".
 
 ## 2026-10-15 — Quotes follow the own-name rule; season rollover keeps the original rep

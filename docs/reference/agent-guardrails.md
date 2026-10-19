@@ -357,7 +357,7 @@ separately, the permission change.
    below `.claude` also counts as the state dir. In the same change, every file a gate trusts is protected by NAME
    (`reviewProofPathMentioned`): the migration reviewer proof `migration-review-*.json`, every
    `owner-approval-*.json`, `AUTOPILOT.on`, `applied-migrations.json` and `hold.json`. Before, `cp`,
-   `tee` or `echo >` into those were allowed. `.claude/agents` and `.claude/commands` joined
+   `tee` or `echo >` into those were allowed. `.claude/agents`, `.claude/commands`, `.claude/skills` and `.claude/workflows` joined
    `ENFORCEMENT_SURFACE_RE`. Known over-block kept: a command that names the state directory itself
    and contains a destructive word anywhere still denies.
 4. **Maintenance producer:** the by-name rule in `bash-safety-lib.mjs` is gone. The producer was

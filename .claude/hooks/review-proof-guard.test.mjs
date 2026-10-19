@@ -955,6 +955,9 @@ for (const command of [
   // Reviewer agents and commands are now enforcement surfaces.
   "cp /tmp/x .claude/agents/rls-security-reviewer.md",
   "echo x > .claude/commands/ship.md",
+  // Skill and workflow sources too (Codex connector, PR #956).
+  "rm -rf .claude/skills/codex-review",
+  "rm -rf .claude/workflows",
 ]) {
   assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /./, `still denied: ${command}`);
 }

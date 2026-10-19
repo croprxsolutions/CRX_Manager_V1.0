@@ -40,6 +40,6 @@
 ## Build checklist (when approved)
 
 1. Edit `.github/workflows/offsite-backup.yml` in `CRX_Backups`: size-ratio check, disposable-restore check, baseline file.
-2. Add the daily lateness workflow (no new secret).
+2. Add the **external** lateness check (a scheduler outside GitHub Actions that reads the newest backup date from `CRX_Backups`, using a read-only credential Mason approves). This is required, not optional: if Actions is disabled, nothing inside it can notice. Add the in-repository daily lateness workflow (no new secret) only as a second layer.
 3. Prove it: run with deliberately damaged test dumps on a branch and watch each fail: one cut off before the end of the table of contents, and one cut off **after** it (intact contents, missing data blocks); run the lateness check against a faked old date and watch the issue open. Do not merge on "it looks right".
 4. Update runbook 4.11 and the findings note.

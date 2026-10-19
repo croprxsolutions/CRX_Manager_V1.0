@@ -198,7 +198,16 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    scheduled jobs **off during reconciliation**: confirm `cron.job` in the new project is empty or inactive
    before the app is pointed at it. They are put back at the end (4.7, last item), not forgotten.
 5. Validate. **Future (once the alert design is built):** compare against the baseline file
-   `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists**, so use this fallback:
+   `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists.** If the project
+   is **lost** (no live database to count), validate without live counts: the restore finishes with no
+   errors; the key tables are not empty; the newest `created_at` in each is within a day of the dump date;
+   internal checks hold (every invoice total equals the sum of its lines, every order and invoice points to
+   a customer that exists, every profile has a matching login); and several of the most recent invoice
+   numbers before the dump match an outside record (QuickBooks, Chem Man, email, paper tickets).
+   Also, each Monday backup check below saves a dated list of live row counts for the tables named here
+   to a place that survives losing the project (the `CRX_Backups` repo), so a lost-project restore
+   can compare to the most recent one.
+   If the project is **still reachable** (a drill, or corruption), also use this fallback:
    read live row counts for `customers`, `invoices`, `orders`, `inventory_transactions`, `allocation_sets` and `prepay_credits` (the live payment tables; the old `payments` table is dead and must not be used)
    just before the drill and note the dump date. Treat a table as **append-only** only if no one can delete from it; today
    that is just `inventory_transactions` (confirm against the delete rules at drill time). For it, the restored
@@ -287,7 +296,10 @@ per step, whether validation matched, whether logins were present, and problems.
 
 Design: `docs/operations/backup-health-alert-design.md`. Today a **failed** Sunday run sends a GitHub
 email, but a run that **never starts has no alert at all**: the missed-run watchdog is designed, not built.
-Until it is, check the date of the newest file in `CRX_Backups/backups/` every Monday.
+Until it is, every Monday check the date of the newest file in `CRX_Backups/backups/`. That confirms
+freshness only; it does **not** prove the dump is complete (a truncated dump over 10 KB passes today's
+workflow). So also, once a month, decrypt the newest dump and run a full restore into a throwaway
+database (4.6) to prove it works, and save the Monday row-count list described in 4.6 step 5.
 
 ---
 

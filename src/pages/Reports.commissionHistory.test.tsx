@@ -131,6 +131,8 @@ describe('Reports commission history', () => {
   it('does not expose or fetch the admin-only commission ledger for a sales rep', async () => {
     H.auth.role = 'sales_rep';
     H.auth.profile = { id: 'sales-rep-1', role: 'sales_rep' };
+    // A rep lands on Customer Balance, which reads a list.
+    H.rpcHandler = () => Promise.resolve({ data: [], error: null });
     renderReports();
 
     fireEvent.click(screen.getByRole('button', { name: 'Financial' }));
@@ -139,6 +141,40 @@ describe('Reports commission history', () => {
     await waitFor(() => {
       expect(H.rpc.some(({ name }) => name === 'get_commission_history_report')).toBe(false);
     });
+  });
+
+  it('shows a sales rep no cost or margin report and never calls one (cost is admin-only)', async () => {
+    H.auth.role = 'sales_rep';
+    H.auth.profile = { id: 'sales-rep-1', role: 'sales_rep' };
+    H.rpcHandler = () => Promise.resolve({ data: [], error: null });
+    renderReports();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Financial' }));
+    expect(screen.queryByRole('button', { name: 'P&L' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Gross Sales' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Customer Balance' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
+    expect(screen.queryByRole('button', { name: 'Inventory Cost' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chemical History' })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const called = H.rpc.map(({ name }) => name);
+      expect(called).not.toContain('get_bottom_line_pnl');
+      expect(called).not.toContain('get_gross_sales_report');
+      expect(called).not.toContain('get_inventory_cost_report');
+    });
+  });
+
+  it('still shows an admin the P&L, Gross Sales and Inventory Cost reports', () => {
+    H.rpcHandler = () => Promise.resolve({ data: [], error: null });
+    renderReports();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Financial' }));
+    expect(screen.getByRole('button', { name: 'P&L' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gross Sales' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Operational' }));
+    expect(screen.getByRole('button', { name: 'Inventory Cost' })).toBeInTheDocument();
   });
 
   it('calls one snapshot RPC and renders both balance and payment-detail fields', async () => {

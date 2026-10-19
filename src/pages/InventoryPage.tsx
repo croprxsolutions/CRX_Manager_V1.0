@@ -1271,7 +1271,9 @@ export default function InventoryPage() {
     { label: 'Planned', value: totalPlanned, color: 'bg-amber-50 text-amber-600', icon: Package },
     { label: 'Committed', value: totalCommitted, color: 'bg-orange-50 text-orange-600', icon: Package },
     { label: 'Delivered YTD', value: totalDeliveredYTD, color: 'bg-gray-50 text-gray-600', icon: Package },
-    { label: 'Inventory Value', value: totalValuation, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'currency' },
+    // Valued at cost, so admin-only (cost is admin-only, Mason 2026-10-15; the server
+    // no longer sends non-admins current_cost, which would show a false $0).
+    ...(isAdmin ? [{ label: 'Inventory Value', value: totalValuation, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'currency' as const }] : []),
   ];
 
   const filteredProducts = products.filter((p) =>

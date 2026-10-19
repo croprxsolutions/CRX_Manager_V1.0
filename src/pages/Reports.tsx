@@ -36,6 +36,11 @@ type ProfitTab = 'customer' | 'product' | 'commission' | 'revenue';
 type FinancialTab = 'pnl' | 'gross_sales' | 'customer_balance' | 'commission_balance';
 type OperationalTab = 'chemical_history' | 'inventory_cost' | 'posted_applications' | 'price_list';
 
+// Cost and margin are admin-only (Mason, 2026-10-15). The server refuses these
+// reports to everyone else, so non-admins never see the tabs.
+const ADMIN_ONLY_FINANCIAL_TABS: ReadonlySet<FinancialTab> = new Set(['pnl', 'gross_sales', 'commission_balance']);
+const ADMIN_ONLY_OPERATIONAL_TABS: ReadonlySet<OperationalTab> = new Set(['inventory_cost']);
+
 // ─── Existing profitability interfaces (unchanged) ─────────────
 // Quick-pay recovery messages tell the admin what to do next based on what this
 // page is showing. If the refresh behind the message failed, the page is showing
@@ -138,8 +143,8 @@ export default function Reports() {
   // ─── Category / sub-tab state ───────────────────────────────
   const [category, setCategory] = useState<Category>('profitability');
   const [profitTab, setProfitTab] = useState<ProfitTab>('customer');
-  const [financialTab, setFinancialTab] = useState<FinancialTab>('pnl');
-  const [operationalTab, setOperationalTab] = useState<OperationalTab>('inventory_cost');
+  const [financialTab, setFinancialTab] = useState<FinancialTab>(() => (isAdmin ? 'pnl' : 'customer_balance'));
+  const [operationalTab, setOperationalTab] = useState<OperationalTab>(() => (isAdmin ? 'inventory_cost' : 'chemical_history'));
 
   // ─── Date range ─────────────────────────────────────────────
   const [startDate, setStartDate] = useState('');
@@ -188,9 +193,11 @@ export default function Reports() {
   // admin-only. Invalidate any in-flight admin response and leave the tab immediately if
   // the current session loses admin access while this page is open.
   useEffect(() => {
-    if (isAdmin || financialTab !== 'commission_balance') return;
+    if (isAdmin || !ADMIN_ONLY_FINANCIAL_TABS.has(financialTab)) return;
     commissionRequestId.current += 1;
-    setFinancialTab('pnl');
+    setFinancialTab('customer_balance');
+    setPnlData([]);
+    setGrossSalesData([]);
     setCommBalanceData([]);
     setCommPaymentDetailData([]);
     setCommissionAsOfDate('');
@@ -220,6 +227,12 @@ export default function Reports() {
   const [chemProductId, setChemProductId] = useState('');
   const [chemProductName, setChemProductName] = useState('');
   const [inventoryCostData, setInventoryCostData] = useState<InventoryCostRow[]>([]);
+  // Leave the admin-only Inventory Cost tab if this session is (or becomes) a non-admin.
+  useEffect(() => {
+    if (isAdmin || !ADMIN_ONLY_OPERATIONAL_TABS.has(operationalTab)) return;
+    setOperationalTab('chemical_history');
+    setInventoryCostData([]);
+  }, [isAdmin, operationalTab]);
   const [priceListData, setPriceListData] = useState<Record<string, unknown>[]>([]);
   const [priceListError, setPriceListError] = useState(false);
   const [priceListLoaded, setPriceListLoaded] = useState(false);
@@ -427,8 +440,8 @@ export default function Reports() {
   // ─── FINANCIAL parent fetcher ─────────────────────────────────
   const fetchFinancial = useCallback(async () => {
     setLoading(true);
-    if (financialTab === 'pnl') await fetchPnL();
-    if (financialTab === 'gross_sales') await fetchGrossSales();
+    if (financialTab === 'pnl' && isAdmin) await fetchPnL();
+    if (financialTab === 'gross_sales' && isAdmin) await fetchGrossSales();
     if (financialTab === 'customer_balance') await fetchCustomerBalance();
     if (financialTab === 'commission_balance' && isAdmin) await fetchCommissionBalance();
     setLoading(false);
@@ -567,11 +580,11 @@ export default function Reports() {
   const fetchOperational = useCallback(async () => {
     setLoading(true);
     if (operationalTab === 'chemical_history') await fetchChemHistory();
-    if (operationalTab === 'inventory_cost') await fetchInventoryCost();
+    if (operationalTab === 'inventory_cost' && isAdmin) await fetchInventoryCost();
     if (operationalTab === 'price_list') await fetchPriceList();
     if (operationalTab === 'posted_applications') await fetchPostedApplications();
     setLoading(false);
-  }, [operationalTab, fetchChemHistory, fetchInventoryCost, fetchPriceList, fetchPostedApplications]);
+  }, [operationalTab, isAdmin, fetchChemHistory, fetchInventoryCost, fetchPriceList, fetchPostedApplications]);
 
   // ─── Fetch on tab/date change ───────────────────────────────
   useEffect(() => {
@@ -1154,19 +1167,19 @@ export default function Reports() {
     { key: 'revenue', label: 'Revenue Summary' },
   ];
 
-  const financialTabs: { key: FinancialTab; label: string }[] = [
+  const financialTabs = ([
     { key: 'pnl', label: 'P&L' },
     { key: 'gross_sales', label: 'Gross Sales' },
     { key: 'customer_balance', label: 'Customer Balance' },
-    ...(isAdmin ? [{ key: 'commission_balance' as const, label: 'Commission Balance' }] : []),
-  ];
+    { key: 'commission_balance', label: 'Commission Balance' },
+  ] as { key: FinancialTab; label: string }[]).filter((t) => isAdmin || !ADMIN_ONLY_FINANCIAL_TABS.has(t.key));
 
-  const operationalTabs: { key: OperationalTab; label: string }[] = [
+  const operationalTabs = ([
     { key: 'inventory_cost', label: 'Inventory Cost' },
     { key: 'chemical_history', label: 'Chemical History' },
     { key: 'posted_applications', label: 'Posted Applications' },
     { key: 'price_list', label: 'Price List' },
-  ];
+  ] as { key: OperationalTab; label: string }[]).filter((t) => isAdmin || !ADMIN_ONLY_OPERATIONAL_TABS.has(t.key));
 
   // ─── Date filter bar (shared across profitability/financial/operational)
   const dateFilterBar = (onCSV: () => void, csvDisabled = false) => (

@@ -73,6 +73,32 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
+## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 written) — product cost and margin are still readable by sales reps, drivers and applicators
+
+Mason decided on 2026-10-15 that cost and margin are admin-only, including on a rep's own quotes and invoices
+(`docs/plans/2026-10-13-direction-and-goals.md`, Goal 1). A read-only live inventory on 2026-10-18 found three kinds of
+exposure (full list in the PR for step 1):
+- **Table columns** that non-admins can read through the Data API: `products` (current cost, tier margins: every active
+  profile, drivers and applicators included), `quotes`/`quote_items`, `quote_versions.snapshot_data`, `orders`/`order_items`,
+  `invoices`/`invoice_items` (the rep's own), `jobs`/`job_chemicals` (reps, the assigned applicator, a dispatched crew),
+  `purchase_orders`/`purchase_order_items`, `blend_ticket_products` and `commissions.order_profit`. Row security cannot hide a
+  column, so this needs column-level grants (the `application_services` pattern, `20260729015706`).
+- **Functions** that hand cost to non-admins: five cost reports, `dashboard_summary` (company-wide profit and margin to any signed-in account), the sales reports, `get_inventory_position`, `save_quote`'s
+  reply, and the below-cost refusal message, which carried the exact cost (a rep could type a one-cent price to read it).
+  **Step 1 (`20261019010000`, not yet applied) closes all of these** except purchase-order cost (`get_chemical_history`,
+  `match_quick_receive_items`), which waits on Mason's decision on whether reps keep purchase orders.
+- **Saves that trust the browser's cost:** `save_job` (job chemical cost), the field-application invoice save and field lines
+  in `save_invoice` take cost from the screen. Once a rep's screen can no longer read cost, these must derive it on the server
+  or job and field-invoice profit (and the commission paid on it) would be wrong.
+
+**Order of work.** Step 2: the screens stop reading whole rows on those tables (about 80 call sites in 40 files would break
+under a column lock, admins included), admin screens read cost through an admin-only function, and the three saves above derive
+cost on the server for non-admins. Step 3: the column lock, applied only after step 2's screens are live, then live per-role
+refusal checks. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
+refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
+logged or limited).
+
 ## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16, batches 2–4 open) — about 75 live functions replay a saved result matched on the retry key alone (about 66 left after batch 1)
 
 **Batch 1 shipped live 2026-10-16.** Migration `20261016060000_bind_money_replay_receipts_batch1`

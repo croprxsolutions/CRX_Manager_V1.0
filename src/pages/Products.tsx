@@ -42,6 +42,7 @@ import {
   parseProductPricingWorkbookWithSupplierEvidence,
 } from '../lib/productPricingSupplierEvidenceWorkbook';
 import { getSupplierMarketEvidence } from '../lib/supplierPricing';
+import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 
 const INLINE_PRICING_FIELDS = new Set([
@@ -67,8 +68,8 @@ function inputDecimal(value: unknown): string | null {
   return String(value).trim();
 }
 
-function storedMarginPercent(value: number | null): string | null {
-  return value === null ? null : formatPricingMarginPercent(value);
+function storedMarginPercent(value: number | null | undefined): string | null {
+  return value == null ? null : formatPricingMarginPercent(value);
 }
 
 export default function Products() {
@@ -98,6 +99,7 @@ export default function Products() {
   const exportPricingIdem = useIdempotencyKey('create_pricing_workbook_export', profile?.id || '');
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
+  const isAdmin = role === 'admin';
 
   const fetchProducts = useCallback(async (reportError = true): Promise<boolean> => {
     // Paginate so the master catalog never silently truncates as the catalog grows.
@@ -107,7 +109,7 @@ export default function Products() {
     for (let from = 0; ; from += PAGE_SIZE) {
       const { data, error } = await supabase
         .from('products')
-        .select('*')
+        .select(PRODUCT_COLUMNS)
         .order('product_name')
         .order('id')
         .range(from, from + PAGE_SIZE - 1);
@@ -121,7 +123,16 @@ export default function Products() {
       all.push(...batch);
       if (batch.length < PAGE_SIZE) break;
     }
-    const prods = all;
+    // Cost is admin-only (Mason, 2026-10-15).
+    let prods: Product[];
+    try {
+      prods = await withAdminCosts('products', all, isAdmin);
+    } catch (costError) {
+      Sentry.captureException(costError);
+      if (reportError) toast('error', 'Failed to load products. Please try again.');
+      setLoading(false);
+      return false;
+    }
     setProducts(prods);
 
     const cats = [...new Set(prods.map((p) => p.category).filter(Boolean))] as string[];
@@ -130,7 +141,7 @@ export default function Products() {
     setVendors(vends.sort());
     setLoading(false);
     return true;
-  }, [toast]);
+  }, [isAdmin, toast]);
 
   useEffect(() => {
     void fetchProducts();
@@ -141,8 +152,6 @@ export default function Products() {
     if (vendorFilter && p.vendor !== vendorFilter) return false;
     return true;
   });
-
-  const isAdmin = role === 'admin';
 
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
@@ -336,7 +345,7 @@ export default function Products() {
           .from('products')
           .update({ is_active: false, updated_at: new Date().toISOString() })
           .in('id', ids)
-          .select();
+          .select('id');
         checkMutationResult(result, 'Deactivate products');
       },
       toast,
@@ -498,7 +507,7 @@ export default function Products() {
           .from('products')
           .update({ ...nonpricingFields, updated_at: new Date().toISOString() })
           .eq('id', productId)
-          .select();
+          .select('id');
         checkMutationResult(updateResult, 'Update product');
       }
 

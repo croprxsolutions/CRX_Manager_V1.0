@@ -85,6 +85,7 @@ import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
+import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import { sendEmail } from '../lib/emailService';
 import {
   parsePreNotificationTemplate,
@@ -294,6 +295,8 @@ export default function JobDetail() {
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
+  // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
+  const isAdmin = role === 'admin';
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -1646,7 +1649,7 @@ export default function JobDetail() {
     const [custResult, fieldResult, prodResult, vehicleResult, appResult, recipeResult] = await Promise.all([
       supabase.from('customers').select('*').eq('is_active', true).order('farm_name'),
       supabase.from('fields').select('*').order('field_name'),
-      supabase.from('products').select('*, product_family:product_families(name)').eq('is_active', true).order('product_name'),
+      supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`).eq('is_active', true).order('product_name'),
       supabase.from('vehicles').select('*').eq('status', 'active').order('vehicle_name'),
       // PR-07 follow-up: applicator picker only uses a.id + a.full_name + a.role; safe via view.
       supabase.from('profile_public_view').select('id, full_name, role, is_active').in('role', ['applicator', 'admin', 'sales_rep']).eq('is_active', true).order('full_name'),
@@ -1661,7 +1664,16 @@ export default function JobDetail() {
       Sentry.captureException(prodResult.error, { tags: { source: 'fetch', action: 'load_job_products' } });
       toast('error', 'Failed to load Products. Retry before editing job chemicals.');
     }
-    setAllProducts((prodResult.data || []) as unknown as PickerProduct[]);
+    let productRows = (prodResult.data || []) as unknown as PickerProduct[];
+    try {
+      productRows = await withAdminCosts('products', productRows, isAdmin);
+    } catch (costErr) {
+      // An admin's autofill would otherwise fill a zero cost into the line it saves.
+      Sentry.captureException(costErr, { tags: { source: 'fetch', action: 'load_job_product_costs' } });
+      toast('error', 'Failed to load Products. Retry before editing job chemicals.');
+      productRows = [];
+    }
+    setAllProducts(productRows);
     setVehicles((vehicleResult.data || []) as Vehicle[]);
     setApplicators((appResult.data || []) as Profile[]);
     setRecipes((recipeResult.data || []) as BlendRecipe[]);
@@ -1692,7 +1704,7 @@ export default function JobDetail() {
       (byProfile[l.profile_id] ||= []).push({ expiry_date: l.expiry_date, is_active: l.is_active });
     });
     setLicensesByProfile(byProfile);
-  }, [toast]);
+  }, [toast, isAdmin]);
 
   const fetchJob = useCallback(async () => {
     // Ticket for THIS run (see loadGenerationRef). A post-save / post-start refetch
@@ -1746,13 +1758,13 @@ export default function JobDetail() {
       // anywhere in this page; only applicator_id is consumed (line 235).
       .from('jobs')
       .select(`
-        *,
+        ${JOB_COLUMNS},
         customer:customers(farm_name),
         vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
         quote:quotes!jobs_quote_id_fkey(quote_number),
         quote_section:quote_sections!jobs_quote_section_id_fkey(section_name),
         job_fields(*, field:fields(field_name)),
-        job_chemicals(*, product:products(product_name)),
+        job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
         job_field_shares(*),
         applied_info:job_applied_info(*)
       `)
@@ -1773,6 +1785,19 @@ export default function JobDetail() {
     }
 
     const j = data as unknown as JobDbRow;
+
+    // Cost is admin-only (Mason, 2026-10-15): only an admin's form carries the chemical cost.
+    // A failed cost read installs nothing, so an admin can never save a zero cost by accident.
+    try {
+      j.job_chemicals = await withAdminCosts('job_chemicals', j.job_chemicals || [], isAdmin);
+    } catch (costErr) {
+      if (!isCurrentLoad()) return false;
+      baselineSettleGuardRef.current = false;
+      Sentry.captureException(costErr, { tags: { source: 'fetch', page: 'job-detail', context: 'job_chemical_costs' } });
+      toast('error', 'Could not load this job\'s chemical costs. Reload the page before editing.');
+      return false;
+    }
+    if (!isCurrentLoad()) return false;
 
     // ---- Phase 1: finish every remaining round trip BEFORE installing anything. ----
     //
@@ -1973,7 +1998,7 @@ export default function JobDetail() {
     setBaselineSettleTick((t) => t + 1);
     // initialLoadDone is armed by the loading-settle effect (rAF after loading=false).
     return true;
-  }, [id, toast, navigate]);
+  }, [id, toast, navigate, isAdmin]);
 
   // Route invalidation runs in a LAYOUT effect, not the passive one below. Passive
   // effects are deferred: React commits the new route's render and can yield to the
@@ -3127,7 +3152,7 @@ export default function JobDetail() {
         .from('jobs')
         .update({ status: 'cancelled', updated_at: new Date().toISOString() })
         .eq('id', id!)
-        .select();
+        .select('id');
       checkMutationResult(result, 'Cancel job');
       if (profile) logActivity({ event: 'job_cancelled', description: `Job ${jobNumber} cancelled`, performedBy: profile.id });
       // The cancel committed and is logged. Gate the on-screen half: a stale success
@@ -3303,11 +3328,20 @@ export default function JobDetail() {
     const byId = new Map(allProducts.map((p) => [p.id, p] as const));
     const missingIds = [...new Set(program.items.map((it) => it.product_id).filter((id) => id && !byId.has(id)))];
     if (missingIds.length > 0) {
-      const { data: extra, error: extraErr } = await supabase.from('products').select('*').in('id', missingIds);
-      if (extraErr) {
-        Sentry.captureException(extraErr, { tags: { source: 'fetch', action: 'load_program_inactive_products' } });
+      const { data: extra, error: extraErr } = await supabase.from('products').select(PRODUCT_COLUMNS).in('id', missingIds);
+      let extraProducts = (extra || []) as unknown as Product[];
+      let extraCostErr: unknown = null;
+      if (!extraErr) {
+        try {
+          extraProducts = await withAdminCosts('products', extraProducts, isAdmin);
+        } catch (costErr) {
+          extraCostErr = costErr;
+        }
+      }
+      if (extraErr || extraCostErr) {
+        Sentry.captureException(extraErr || extraCostErr, { tags: { source: 'fetch', action: 'load_program_inactive_products' } });
       } else {
-        (extra as Product[] | null)?.forEach((p) => byId.set(p.id, p));
+        extraProducts.forEach((p) => byId.set(p.id, p));
       }
     }
 
@@ -4394,13 +4428,15 @@ export default function JobDetail() {
                         <input type="number" value={c.phi_days} onChange={(e) => updateChemRow(i, 'phi_days', e.target.value)}
                           disabled={!canEdit} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
                       </div>
+                      {isAdmin && (
                       <div className="col-span-6 md:col-span-2">
                         {/* Cost stays editable — current_cost can be stale/0; total_cost_cents
-                            persists from this value (Codex P2). */}
+                            persists from this value (Codex P2). Admin-only (Mason, 2026-10-15). */}
                         <label className="block text-xs font-medium text-secondary mb-1">Cost ¢/unit</label>
                         <input type="number" value={c.cost_per_unit_cents} onChange={(e) => updateChemRow(i, 'cost_per_unit_cents', e.target.value)}
                           disabled={!canEdit} step="1" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
                       </div>
+                      )}
                       <div className="col-span-6 md:col-span-2">
                         <label className="block text-xs font-medium text-secondary mb-1">Price ¢/unit</label>
                         <input type="number" value={c.price_per_unit_cents} onChange={(e) => updateChemRow(i, 'price_per_unit_cents', e.target.value)}
@@ -4459,7 +4495,7 @@ export default function JobDetail() {
                 );
               })}
               <div className="flex justify-between text-sm text-secondary pt-2">
-                <span>Total Cost: ${(totalCostCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                {isAdmin ? <span>Total Cost: ${(totalCostCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : <span />}
                 <span>Total Price: ${(totalPriceCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
               </div>
             </div>

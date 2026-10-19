@@ -13,6 +13,7 @@ import { supabase, checkMutationResult, sanitizeError, assertRpcResult, hasRpcCo
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
+import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import { exportToCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -414,7 +415,7 @@ export default function InventoryPage() {
   const fetchProducts = useCallback(async () => {
     const { data, error } = await supabase
       .from('products')
-      .select('*, product_family:product_families(name)')
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
       .eq('is_active', true)
       .order('product_name');
     if (error) {
@@ -777,18 +778,30 @@ export default function InventoryPage() {
 
     const { data, error } = await supabase
       .from('purchase_order_items')
-      .select('id, quantity_ordered, quantity_received, unit_cost, unit_size, product_id, purchase_order_id, purchase_orders!inner(po_number, status)')
+      .select('id, quantity_ordered, quantity_received, unit_size, product_id, purchase_order_id, purchase_orders!inner(po_number, status)')
       .eq('product_id', target.product_id)
       .in('purchase_orders.status', ['submitted', 'partially_received']);
 
-    if (error) {
+    // Cost is admin-only (Mason, 2026-10-15): unit_cost is added for admins and never shown.
+    type ReceivablePoRow = { id: string; quantity_ordered: number; quantity_received: number; unit_cost?: number | null; unit_size: string | null; product_id: string; purchase_order_id: string; purchase_orders: { po_number: string; status: string } };
+    let rows: ReceivablePoRow[] | null = null;
+    let loadError: unknown = error;
+    if (!error && data) {
+      try {
+        rows = await withAdminCosts('purchase_order_items', data as unknown as ReceivablePoRow[], isAdmin);
+      } catch (costError) {
+        loadError = costError;
+      }
+    }
+
+    if (loadError) {
       // Supabase RETURNS this error (doesn't throw) — surface it instead of
       // silently showing an empty PO list (Field Mode F6 class).
-      Sentry.captureException(error, { extra: { context: 'Load receivable POs for product', productId: target.product_id } });
+      Sentry.captureException(loadError, { extra: { context: 'Load receivable POs for product', productId: target.product_id } });
       toast('error', 'Could not load purchase orders for this product.');
     }
-    if (!error && data) {
-      const pos = (data as unknown as Array<{ id: string; quantity_ordered: number; quantity_received: number; unit_cost: number; unit_size: string | null; product_id: string; purchase_order_id: string; purchase_orders: { po_number: string; status: string } }>).map((item) => ({
+    if (!loadError && rows) {
+      const pos = rows.map((item) => ({
         id: item.id,
         po_number: item.purchase_orders.po_number,
         ordered: item.quantity_ordered,

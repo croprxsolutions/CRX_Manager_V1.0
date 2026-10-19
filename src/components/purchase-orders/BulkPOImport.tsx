@@ -18,6 +18,7 @@ import {
   purchaseOrderLineTotalCents,
   purchaseOrderUnitCostCents,
 } from '../../lib/purchaseOrderMoney';
+import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import {
   buildBulkPOIntentKey,
   buildBulkPOIdempotencyKey,
@@ -177,6 +178,9 @@ async function parseWithVisionOCR(
 export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
+  // Purchase cost is admin-only (Mason, 2026-10-18, Option A): a non-admin's import carries no
+  // unit cost (save_purchase_order drops it anyway) and an admin fills it in on the PO later.
+  const isAdmin = profile?.role === 'admin';
 
   const [files, setFiles] = useState<File[]>([]);
   const [parsing, setParsing] = useState(false);
@@ -204,14 +208,20 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   const fetchProducts = async () => {
     const { data, error } = await supabase
       .from('products')
-      .select('*, product_family:product_families(name)')
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
       .eq('is_active', true)
       .order('product_name');
     if (error) {
       toast('error', 'Failed to load products');
       return;
     }
-    const prods = (data || []) as unknown as PickerProduct[];
+    let prods: PickerProduct[];
+    try {
+      prods = await withAdminCosts('products', (data || []) as unknown as PickerProduct[], isAdmin);
+    } catch {
+      toast('error', 'Failed to load products');
+      return;
+    }
     setProducts(prods);
     setVendors([...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[]);
   };
@@ -420,19 +430,23 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
         if (po.invoice_date) noteParts.push(`Vendor date: ${po.invoice_date}`);
 
         const itemsPayload = validItems.map((item) => {
-          const unitCostCents = purchaseOrderUnitCostCents(item.unit_cost);
-          return {
+          const line = {
             product_id: item.matched_product!.id,
             product_name: item.matched_product!.product_name,
             quantity_ordered: item.quantity_ordered,
+            unit_size: item.unit_size || null,
+            quantity_received: 0,
+            notes: item.notes || null,
+          };
+          if (!isAdmin) return line;
+          const unitCostCents = purchaseOrderUnitCostCents(item.unit_cost);
+          return {
+            ...line,
             // OCR may return extra decimal places. Send one canonical whole-cent
             // value in both representations so the database never sees a raw,
             // fractional-cent dollar amount that disagrees with our cents math.
             unit_cost: purchaseOrderCentsToDollars(unitCostCents),
             unit_cost_cents: unitCostCents,
-            unit_size: item.unit_size || null,
-            quantity_received: 0,
-            notes: item.notes || null,
           };
         });
         const { data: poData, error: poError } = await supabase.rpc('save_purchase_order', {
@@ -685,8 +699,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                         <p className="text-xs text-secondary">
                           {po.vendor_name || 'No vendor'} &middot;{' '}
                           {po.invoice_number || 'No ref #'} &middot;{' '}
-                          {po.items.length} item{po.items.length !== 1 ? 's' : ''} &middot;{' '}
-                          {fmt(poTotal)}
+                          {po.items.length} item{po.items.length !== 1 ? 's' : ''}
+                          {isAdmin && <> &middot;{' '}{fmt(poTotal)}</>}
                         </p>
                       </div>
                       {alreadyImported && (
@@ -802,9 +816,9 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                   <th className="px-3 py-2 font-medium">Matched Product</th>
                                   <th className="px-3 py-2 font-medium w-20">Conf.</th>
                                   <th className="px-3 py-2 font-medium w-24">Qty</th>
-                                  <th className="px-3 py-2 font-medium w-28">Unit Cost</th>
+                                  {isAdmin && <th className="px-3 py-2 font-medium w-28">Unit Cost</th>}
                                   <th className="px-3 py-2 font-medium w-20">Size</th>
-                                  <th className="px-3 py-2 font-medium w-28">Total</th>
+                                  {isAdmin && <th className="px-3 py-2 font-medium w-28">Total</th>}
                                   <th className="px-3 py-2 font-medium w-8" />
                                 </tr>
                               </thead>
@@ -863,6 +877,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                         className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                                       />
                                     </td>
+                                    {isAdmin && (
                                     <td className="px-3 py-2">
                                       <input
                                         type="number"
@@ -875,6 +890,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                         className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                                       />
                                     </td>
+                                    )}
                                     <td className="px-3 py-2">
                                       <input
                                         type="text"
@@ -884,11 +900,13 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                         placeholder="GL"
                                       />
                                     </td>
+                                    {isAdmin && (
                                     <td className="px-3 py-2 font-mono text-sm text-nav-dark">
                                       {fmt(purchaseOrderCentsToDollars(
                                         purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
                                       ))}
                                     </td>
+                                    )}
                                     <td className="px-3 py-2">
                                       <button
                                         onClick={() => removeItem(poIdx, itemIdx)}
@@ -901,6 +919,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                   </tr>
                                 ))}
                               </tbody>
+                              {isAdmin && (
                               <tfoot>
                                 <tr className="border-t border-gray-200">
                                   <td colSpan={6} className="px-3 py-2 text-right text-xs font-medium text-secondary">
@@ -912,6 +931,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                   <td />
                                 </tr>
                               </tfoot>
+                              )}
                             </table>
                           </div>
                         ) : (
@@ -995,7 +1015,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                       key={p.id}
                       product={p}
                       onClick={() => assignProduct(productSearchOpen.poIdx, productSearchOpen.itemIdx, p)}
-                      trailing={fmt(p.current_cost || 0)}
+                      trailing={isAdmin ? fmt(p.current_cost || 0) : undefined}
                     />
                   ))
                 )}

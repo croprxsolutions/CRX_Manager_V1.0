@@ -8,6 +8,7 @@ import { generateIdempotencyKey } from '../../lib/idempotency';
 import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/documentOCR';
 import { localToday } from '../../lib/dateUtils';
 import { Sentry } from '../../lib/sentry';
+import { withAdminCosts } from '../../lib/costFields';
 import { logActivity } from '../../lib/activityLogger';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBelowCostApproval } from '../../contexts/BelowCostApprovalContext';
@@ -85,7 +86,8 @@ export default function BulkOrderImport({
   onPartialSuccess,
 }: BulkOrderImportProps) {
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, role } = useAuth();
+  const isAdmin = role === 'admin';
   const { runWithBelowCostApproval } = useBelowCostApproval();
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -388,7 +390,7 @@ export default function BulkOrderImport({
     const failures: OrderImportFailure[] = [];
     const productResult = await supabase
       .from('products')
-      .select('id, product_name, sku, is_active, current_cost')
+      .select('id, product_name, sku, is_active')
       .eq('is_active', true);
     if (productResult.error) {
       Sentry.captureException(productResult.error, { extra: { context: 'Failed to load Product identities for order import' } });
@@ -396,7 +398,19 @@ export default function BulkOrderImport({
       setUploading(false);
       return;
     }
-    const productCatalog = productResult.data || [];
+    // Cost is admin-only (Mason, 2026-10-15): only an admin's catalog carries current_cost.
+    // For anyone else bulk_import_order's own cost guard (COST_BASIS_REQUIRED) is the check,
+    // and cost is never displayed here.
+    type ImportProduct = NonNullable<typeof productResult.data>[number] & { current_cost?: number | null };
+    let productCatalog: ImportProduct[];
+    try {
+      productCatalog = await withAdminCosts('products', (productResult.data || []) as ImportProduct[], isAdmin);
+    } catch (costError) {
+      Sentry.captureException(costError, { extra: { context: 'Failed to load Product costs for order import' } });
+      toast('error', 'Failed to load Products. No orders were imported.');
+      setUploading(false);
+      return;
+    }
 
     for (const order of validation.valid) {
       try {
@@ -449,7 +463,7 @@ export default function BulkOrderImport({
         }
 
         const unresolvedCosts = resolvedItems.filter(({ resolution }) => {
-          if (resolution.status !== 'unique') return false;
+          if (!isAdmin || resolution.status !== 'unique') return false;
           const cost = resolution.product.current_cost;
           return cost == null || !Number.isFinite(cost) || cost < 0;
         });
@@ -486,7 +500,7 @@ export default function BulkOrderImport({
         }, 0);
         const totalCostCents = resolvedItems.reduce((sum, { item, resolution }) => {
           if (resolution.status !== 'unique') return sum; // Rejected above.
-          const unitCostCents = Math.round(resolution.product.current_cost! * 100);
+          const unitCostCents = Math.round((resolution.product.current_cost ?? 0) * 100);
           return sum + Math.round(item.quantity * unitCostCents);
         }, 0);
         const totalProfitCents = totalPriceCents - totalCostCents;

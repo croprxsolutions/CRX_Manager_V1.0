@@ -30,6 +30,14 @@ function chainable(resolveWith: unknown = { data: [], error: null }) {
   return builder;
 }
 
+// Fixtures already carry cost; the admin cost read (get_admin_cost_fields) passes rows through.
+vi.mock('../../lib/costFields', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/costFields')>()),
+  withAdminCost: async (_table: string, row: unknown) => row,
+  withAdminCosts: async (_table: string, rows: readonly unknown[]) => [...rows],
+  withAdminNestedCosts: async (_table: string, rows: readonly unknown[]) => [...rows],
+}));
+
 vi.mock('../../lib/db', () => ({
   supabase: { from: mocks.from, rpc: mocks.rpc },
   assertRpcResult: (value: unknown) => value,
@@ -37,7 +45,7 @@ vi.mock('../../lib/db', () => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    profile: { id: 'user-1', full_name: 'Test User' },
+    profile: { id: 'user-1', full_name: 'Test User', role: 'admin' },
   }),
 }));
 

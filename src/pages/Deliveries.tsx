@@ -476,8 +476,13 @@ export default function Deliveries() {
 
         // completeIdem is intentionally retained until onSuccess, so a retry after a
         // lost response replays the same complete_delivery request idempotently.
+        // Work out the completion time now, after the signal and route checks: if midnight passed
+        // during them, a ticket dated "today" is now a past date and must carry its own timestamp.
         const { data, error } = await supabase.rpc('complete_delivery', {
           ...completeParams,
+          p_completed_at: deliveredOnDate && deliveredOnDate !== businessToday()
+            ? completedAtForDeliveredOn(deliveredOnDate)
+            : undefined,
           p_idempotency_key: idemKey,
         });
         if (error) throw error;

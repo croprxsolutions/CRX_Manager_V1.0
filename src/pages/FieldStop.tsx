@@ -356,7 +356,12 @@ export default function FieldStop() {
     if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); setCompleting(false); return; }
 
     try {
-      const { data: result, error } = await supabase.rpc('complete_delivery', rpcParams);
+      // Work out the completion time now, after the signal and route checks: if midnight passed
+      // during them, a ticket dated "today" is now a past date and must carry its own timestamp.
+      const { data: result, error } = await supabase.rpc('complete_delivery', {
+        ...rpcParams,
+        p_completed_at: usePaperTicket ? paperDeliveredAt(paperDeliveredOn) : undefined,
+      });
       if (error) throw error;
       assertRpcResult(result, 'complete_delivery');
       completeIdem.resetKeyFor(completeScope);

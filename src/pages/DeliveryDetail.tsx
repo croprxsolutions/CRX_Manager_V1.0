@@ -1030,7 +1030,12 @@ export default function DeliveryDetail() {
     }
 
     try {
-      const { data: completeResult, error } = await supabase.rpc('complete_delivery', rpcParams);
+      // Work out the completion time now, after the signal and route checks: if midnight passed
+      // during them, a ticket dated "today" is now a past date and must carry its own timestamp.
+      const { data: completeResult, error } = await supabase.rpc('complete_delivery', {
+        ...rpcParams,
+        p_completed_at: usePaperTicket ? paperDeliveredAt(paperDeliveredOn) : undefined,
+      });
       if (error) throw error;
       // Retire the payload-bound key only after a confirmed result: an empty reply
       // keeps it, so retrying the same payload replays the server's saved receipt.

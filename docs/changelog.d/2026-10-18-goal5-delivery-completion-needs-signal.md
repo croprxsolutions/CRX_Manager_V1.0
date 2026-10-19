@@ -24,7 +24,8 @@ every delivery completion path follow that rule. It is an app-only change: no mi
 - **"Today" for completion dates is the Chicago business day.** The paper-ticket date (default,
   latest allowed, validation) and the Deliveries list's "Delivered on" use today in
   America/Chicago (`todayInBusinessTz`), the day the server dates the delivery, not the phone's
-  own date. The
+  own date. The completion time is worked out right before the server call, after the signal
+  check, so a delivery dated "today" keeps that day even if midnight passes during the check. The
   remaining instant between the two server calls is recorded in `docs/manual/KNOWN_ISSUES.md`;
   Mason chose to ship with it and close it later with one combined server call.
 - **Paper-ticket fallback (new `src/lib/paperTicket.ts`).** On the delivery page's driver layout and

@@ -242,7 +242,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    cutover, **sign in with a real password for one account of every active role** (admin, sales rep, and
    each other role in use) and check each can open the screens and data that role should, and cannot open
    what it should not. One admin test is not enough. These checks describe the schema as restored, so they
-   are **repeated as the final gate (step 10)** after the schema update, grants and Auth settings are done.
+   are **repeated as the final gate (step 11)** after the schema update, grants and Auth settings are done.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
 8. **Bring the restored schema up to date first.** The dump is only as new as its date, but the current
    code and Edge Functions expect every later migration (RPCs, columns, grants, constraints). Deploying
@@ -274,13 +274,18 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    and verify it (a direct signup request must be refused) before exposing it: a new project defaults to
    signup on, and the profile-creation trigger copies a role from the signup request, so open signup could
    let a stranger create an admin profile. Auth changes need Mason's explicit approval. Repoint the
-   Vercel environment variables to the new project and redeploy only after the final gate (step 10) passes.
+   Vercel environment variables to the new project and redeploy only after the final gate (step 11) passes.
    Deploying functions, installing secrets and changing production configuration each need Mason's
    explicit approval in the current conversation.
-10. **Final gate before cutover.** After steps 4, 6, 8 and 9 are complete, repeat on the finished project:
-    a real sign-in and allow/deny check for one account of every active role, the signed-out request refusal,
-    the ledger match and a password reset test. Only if all pass does the Vercel cutover go ahead.
-11. Run the post-restore checklist (4.7).
+10. **Reconcile before anyone can write.** The restored project stays unreachable to staff (Vercel still
+    pointing at the old project, or maintenance mode) until the post-restore checklist (4.7) is finished.
+    Otherwise staff could write against week-old state and trigger email or payments while you are still
+    reconciling, creating the duplicates 4.7 exists to prevent.
+11. **Final gate before cutover.** After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
+    step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
+    and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for
+    one account of every active role; the signed-out request refusal; the ledger match; and a password
+    reset test. Only if all pass does the Vercel cutover go ahead, and the scheduled jobs go back last (4.7).
 
 ### 4.7 After any restore: nothing may happen twice
 

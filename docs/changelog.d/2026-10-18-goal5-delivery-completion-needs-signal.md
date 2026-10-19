@@ -38,6 +38,12 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   a delivery completes (for example, signal drops in between), the delivery page and the field stop
   now tell the driver and point to the office's Email Confirmation button. A guaranteed retry needs
   a server-side email queue and is recorded as open in the Goal 5 plan.
+- **Pre-existing race fixed: a slow load can no longer leak onto the next delivery.** The delivery
+  page is reused when moving from one delivery to another. A slow load for the previous delivery used
+  to finish late and put its items, quantities and photos on the new delivery's screen, so the wrong
+  quantities (or the wrong ticket photo) could be submitted for it. Every step of the load now checks
+  it still belongs to the delivery on screen. Reproduced in the preview by delaying one delivery's
+  item load (the next delivery showed 5 instead of its own 3); with the fix it keeps its own 3.
 - **Pre-existing bug fixed.** On the delivery page's driver layout, Complete Delivery opened a
   confirmation box that was never drawn, so a driver's tap did nothing. Both layouts now share it.
 - **Not changed.** Completions already queued offline before this ships still sync, or go to Offline

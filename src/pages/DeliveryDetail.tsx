@@ -256,11 +256,15 @@ export default function DeliveryDetail() {
   const fetchDelivery = useCallback(async () => {
     // Never carry the previous delivery's billed-outside-CRX badge onto this one.
     setBilledOutsideCrxReason(null);
+    // This page is reused across deliveries: a slow load for the previous one must
+    // never publish its items, quantities or photos onto the delivery now on screen.
+    const isStale = () => signatureRouteIdRef.current !== id;
     const { data: delData, error: delError } = await supabase
       .from('deliveries')
       .select('*')
       .eq('id', id!)
       .maybeSingle();
+    if (isStale()) return;
 
     if (delError) {
       toast('error', sanitizeError(delError));
@@ -286,6 +290,7 @@ export default function DeliveryDetail() {
             : Promise.resolve({ data: null }),
           supabase.from('delivery_photos').select('*').eq('delivery_id', id!).order('sort_order'),
         ]);
+        if (isStale()) return;
 
         if (itemsRes.error) {
           Sentry.captureException(itemsRes.error, { extra: { context: 'load_delivery_items', deliveryId: del.id } });
@@ -335,6 +340,7 @@ export default function DeliveryDetail() {
               .eq('delivery_id', del.id)
               .maybeSingle(),
           ]);
+          if (isStale()) return;
           if (externalBillingRes.error) {
             // Fail OPEN like the split-billing read above: keep the button; the server's
             // DELIVERY_BILLED_OUTSIDE_CRX guard still refuses, in plain English.
@@ -387,6 +393,7 @@ export default function DeliveryDetail() {
           const { data: sibDels } = await supabase
             .from('deliveries').select('id, delivery_number')
             .eq('order_id', del.order_id).order('delivery_number');
+          if (isStale()) return;
           setSiblingDeliveries((sibDels || []).map((d: Record<string, unknown>) => ({
             id: d.id as string, delivery_number: d.delivery_number as string,
           })));
@@ -398,6 +405,7 @@ export default function DeliveryDetail() {
               const { data: qData } = await supabase
                 .from('quotes').select('id, quote_number')
                 .eq('id', parentOrderData.quote_id).maybeSingle();
+              if (isStale()) return;
               setParentQuote(qData as { id: string; quote_number: string } | null);
             } else { setParentQuote(null); }
           }
@@ -414,6 +422,7 @@ export default function DeliveryDetail() {
             .from('delivery_remainders')
             .select('*, product:products(product_name)')
             .eq('original_delivery_id', id!);
+          if (isStale()) return;
           if (remError) {
             toast('error', sanitizeError(remError));
           } else {
@@ -434,6 +443,7 @@ export default function DeliveryDetail() {
           }
         }
       } catch {
+        if (isStale()) return;
         toast('error', 'Failed to load delivery details. Please refresh.');
       }
     }

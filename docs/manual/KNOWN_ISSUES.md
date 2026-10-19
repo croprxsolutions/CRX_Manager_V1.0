@@ -103,7 +103,11 @@ was started…"); the dialog stays open as **Mark Complete** for the retry. Seen
 against a local test database on 2026-10-18. **Fix:** one server call that starts and completes in a
 single transaction. That touches `complete_delivery`, which replay-binding batch 2 (PR #951) owned, so
 it waited for that batch. Mason chose 2026-10-18 to ship Goal 5 with this gap and build the combined
-call after #951 lands; batch 2 went live 2026-10-19, so the combined call is now unblocked. Source:
+call after #951 lands; batch 2 went live 2026-10-19, so the combined call is now unblocked. That call
+should also take the chosen business date, so a "today" completion whose request reaches the server
+just after Chicago midnight keeps the chosen day (today the app omits `p_completed_at` for "today",
+and sending a client timestamp would either stamp completions at noon or fail on a fast phone clock).
+Source:
 `src/pages/Deliveries.tsx` `handleCompleteConfirm`, `src/lib/connectivity.ts`.
 
 ## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16; batch 2 (the stock row) LIVE 2026-10-19; batches 3–4 open) — about 75 live functions replay a saved result matched on the retry key alone (74 left after batches 1 and 2, counted from the table below)

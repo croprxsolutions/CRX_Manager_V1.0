@@ -648,6 +648,7 @@ export default function FieldStop() {
           </button>
           {!signedBy.trim() && <p className="text-xs text-amber-700 mt-2 text-center">Enter who signed or choose no one present to continue.</p>}
           {signedBy.trim() && usePaperTicket && !hasPaperTicketPhoto(photos) && <p className="text-xs text-amber-700 mt-2 text-center">Take the photo of the signed ticket to continue.</p>}
+          {signedBy.trim() && usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn) && <p className="text-xs text-amber-700 mt-2 text-center">Enter the delivery date from the paper ticket (today or earlier) to continue.</p>}
         </div>
       )}
 

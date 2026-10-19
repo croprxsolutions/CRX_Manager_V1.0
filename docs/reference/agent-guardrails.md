@@ -324,7 +324,7 @@ missing from `SQL_BUILTIN_FNS` while its siblings (`pg_get_functiondef`, `pg_get
 that is cross-tool permission laundering. Ask Mason for the scoped `REAL-DATA-OK` the guard's own
 message names, or fix the guard deliberately.
 
-### Guard narrowing and no guard-file edit prompts (2026-10-18 decision)
+### Guard narrowing (2026-10-18 decision)
 
 An audit of which guards blocked safe work, checked by an independent adversarial Opus review
 (counts are sessions since 2026-10-03), produced five changes. Mason approved the revised plan and,
@@ -363,9 +363,9 @@ separately, the permission change.
 4. **Maintenance producer:** the by-name rule in `bash-safety-lib.mjs` is gone. The producer was
    retired unapplied and deleted on 2026-09-05, never touched the live database, and the rule
    refused only reads naming it. `computedJavaScriptScriptArgument` stays as a tested parser utility.
-5. **Permissions:** every `Edit(...)`/`Write(...)` entry is removed from `permissions.ask` in
-   `.claude/settings.json`, which reverses the 2026-09-26 choice "A". Deploy, secret, Supabase
-   project/branch, GitHub write and Desktop Commander tools keep their prompts.
+5. **Permissions unchanged:** the `Edit(...)`/`Write(...)` prompts on guard files (the 2026-09-26
+   choice "A") stay. Removing them was split out of PR #956 on 2026-10-19 after Sol rated it HIGH:
+   an unprompted edit could change a merge or push guard, act, and restore it before a PR shows it.
    `scripts/check-agent-guidance.mjs` now pins the reversal. What remains: shell writes to guard
    files are still refused, and nothing reaches `main` without the PR path. Because worktree
    sessions load settings and hooks from the main checkout, all of this takes effect only after

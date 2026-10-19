@@ -1,11 +1,11 @@
-## 2026-10-18 — Guards narrowed to what they protect; no prompts for guard-file edits
+## 2026-10-18 — Guards narrowed to what they protect
 
 **Why.** An audit of which hooks block safe work, checked by an independent adversarial Opus review,
 found five refusals that cost far more than they protected. Since 2026-10-03, the merge and push
 gates refused ordinary inline scripts in about 86 sessions. The review proof guard denied any command
 mentioning a `.claude` path next to a word like "rm" in 34 sessions. The hold latch froze whole
 sessions on helper reports, twice more on 2026-10-18 alone. Mason approved the revised plan
-("Yes revised plan") and the permission change ("Change permissions to not always prompt me allow it").
+("Yes revised plan").
 
 **What changed.**
 - `.claude/hooks/codex-push-lib.mjs`, `pr-merge-guard.mjs`, `codex-push-guard.mjs`: the run-time-text
@@ -21,8 +21,6 @@ sessions on helper reports, twice more on 2026-10-18 alone. Mason approved the r
   surfaces. `codex-push-lib.mjs` `reviewProofPathMentioned` now also protects `migration-review-*.json`,
   `owner-approval-*.json`, `AUTOPILOT.on`, `applied-migrations.json` and `hold.json`.
 - `.claude/hooks/bash-safety-lib.mjs`: the retired maintenance-producer rule is removed.
-- `.claude/settings.json`: every `Edit(...)`/`Write(...)` entry is removed from `permissions.ask`.
-  `scripts/check-agent-guidance.mjs` pins the reversal.
 - Tests updated in `guards.test.mjs`, `review-proof-guard.test.mjs`, `bash-safety.test.mjs`,
   `mcp-tool-guard.test.mjs`, `pr-merge-guard.test.mjs` and `merge-guard-launcher.test.mjs`. Docs
   updated in `docs/reference/agent-guardrails.md`, `docs/manual/DECISION_LOG.md` and
@@ -105,8 +103,7 @@ outward. Mason: "After fixing those no more codex rounds we are finished make it
 **CodeRabbit (7, CHANGES_REQUESTED on `10450759a`).** Fixed: `{` and `,` delimit a whole `.claude`
 target (`rm -rf {.claude,}`, `Remove-Item .claude,x`); under a hold, backslash-newline continuations
 are joined and `SELECT … INTO` is a write; the fallback launcher counts attached `-e'…'` code; the
-new test loops use the entrypoint helpers; the decision log names the protected-file exception; and
-check-agent-guidance rejects any Edit/Write ask entry, wildcard included. Codex connector items on
+new test loops use the entrypoint helpers; the decision log names the protected-file exception. Codex connector items on
 `10450759a` (`-X=DELETE` under a hold; MCP path-field writes to `.claude/agents|commands`, which
 still prompt through permissions.ask) are deferred to a follow-up.
 
@@ -117,6 +114,13 @@ string literal (`SELECT ';' INTO t`).
 are outward; the decision log names the merge/push gates' deliberate over-refusal. Also folded in
 from the Codex connector: `.claude/skills` and `.claude/workflows` are enforcement surfaces
 (shell deletes and writes are refused, reads pass).
+
+**Sol on `824061121` (BLOCKERS), split.** Sol rated the permission change HIGH: with the Edit/Write
+prompts on guard files removed, a session could edit a merge or push guard, act, and restore the
+file before a PR diff shows it. Mason: "Split it." `.claude/settings.json` and
+`scripts/check-agent-guidance.mjs` are restored to main, so every guard file keeps its prompt; the
+prompt removal moves to its own PR for Mason to merge himself. Sol's MED (a hold warns, not denies,
+on local edits) is the approved design and stays.
 
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

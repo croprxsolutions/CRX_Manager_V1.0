@@ -17,3 +17,19 @@ first answered left the delivery **In Progress** (nothing deducted or billed, dr
   result; a reused key for a different person or request is refused. The fingerprint carries the
   chosen date, so an exact retry across midnight still replays.
 - **Grants:** EXECUTE for `authenticated` only; SECURITY DEFINER, `search_path = public, pg_temp`.
+- **App (`src/pages/Deliveries.tsx`):** Mark Delivered / Mark Complete makes this one call after the
+  signal check; the dialog-session, "details changed" and `runCriticalAction` guards stay. The
+  "started but not completed" message is gone because that state can no longer happen.
+
+**Proof.** Container: `node scripts/smoke/prove-start-and-complete-delivery-real-schema.mjs` →
+START_AND_COMPLETE_DELIVERY_PROOF_PASS (chain fails before the migration and passes after; a
+completion refused after the start leaves the delivery scheduled; five mutations each turn it red;
+the existing delivery chains still pass). Browser preview (2026-10-19, the app against a local
+stand-in server whose completion call ran the real function in that container): (1) reply dropped
+after the server committed: the app's automatic same-key retry got the saved result, one completion,
+2 units of stock, one invoice; (2) reply dropped and signal kept off: the dialog stayed open, the
+delivery was already **Completed** (never In Progress), and tapping again with signal replayed the
+saved result with no second stock move; (3) a closed-period date refused after the start: the
+delivery stayed **Scheduled** with no start record; (4) no signal: only the signal check was sent,
+"No signal… NOT completed" shown. End state: three completed, 6 units moved, three invoices, zero In
+Progress.

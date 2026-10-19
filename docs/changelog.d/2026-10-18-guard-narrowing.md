@@ -84,5 +84,10 @@ runtime executes. A text check cannot close that class, because `node file.mjs` 
 code has always been allowed. It is recorded as a **speed bump**, not a boundary. Each spelling
 found was added, and the remaining residual is stated here and in agent-guardrails.md.
 
+**Codex connector on `1f43c9cd4` (3 P1).** Fixed: a `printf` format with a `%` directive counts as
+obfuscation (`printf 'g%s pr m%s 951' h erge | bash`); a path below `.claude` built at run time
+(`.claude/s$(printf ession-state)`, `.claude/$X`) counts as the state dir; and under a hold,
+`gh <global options> api … -f` is outward.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

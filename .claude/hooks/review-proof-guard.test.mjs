@@ -936,6 +936,10 @@ for (const command of [
   "rm -rf .claude/hooks/../session-state",
   "rm -rf .claude/x/..",
   "echo x > .claude/hooks/../session-state/a.json",
+  // Run-time-built paths below .claude (Codex connector, PR #956).
+  "find .claude/s$(printf ession-state) -delete",
+  "rsync --delete /tmp/empty/ .claude/s$(printf ession-state)/",
+  "rm -rf .claude/$X",
   // Trusted files a plain copy or tee could forge before (reviewer probes).
   "cp /tmp/x.json .claude/session-state/migration-review-x.json",
   "echo {} | tee .claude/session-state/owner-approval-x.json",

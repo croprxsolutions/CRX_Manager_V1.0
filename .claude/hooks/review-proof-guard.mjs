@@ -266,6 +266,7 @@ function redirectTargetsStateDir(value) {
         target.split("/").some((s) => globSegCouldTargetProtected(s)) ||
         /(?:^|\/)\.claude\/+[^/]*[*?[\]{}]/i.test(target) ||
         /(?:^|\/)\.claude\/+(?:[^/]+\/+)*\.{1,2}(?:\/|$)/i.test(target) ||
+        /(?:^|\/)\.claude\/+[^\s]*[$`%]/i.test(target) ||
         /(?:^|\/)\.claude\/+worktrees(?:\/|$)/i.test(target) ||
         /(?:^|\/)\.claude\/*$/i.test(target)) return true;
   }
@@ -454,6 +455,9 @@ if (shellTool) {
     const text = String(value || "").replace(/\\/g, "/");
     if (/(?:^|[\s"'=:(/])\.claude\/+[^\s/"';&|<>]*[*?[\]{}]/i.test(text)) return true;
     if (/(?:^|[\s"'=:(/])\.claude\/+(?:[^\s/"';&|<>]+\/+)*\.{1,2}(?=\/|$|[\s"';&|<>])/i.test(text)) return true;
+    // A path below `.claude` built at run time (`.claude/s$(printf ession-state)`,
+    // `.claude/$X`, a backtick, `%X%`) may BE the state dir (Codex connector, PR #956).
+    if (/(?:^|[\s"'=:(/])\.claude\/+[^\s;&|<>]*[$`%]/i.test(text)) return true;
     const segs = text.split(/[\s"'=:/(){}|;&<>]+/);
     return segs.some((s) => /^session-state$/i.test(s) || globSegCouldTargetProtected(s));
   };

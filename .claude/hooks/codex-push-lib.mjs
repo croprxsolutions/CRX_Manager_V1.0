@@ -4052,7 +4052,9 @@ const GATED_WORD_RE = /(?:^|[^\w-])(?:gh|git|merge|push|api|alias|graphql|pulls|
 // String concatenation with `+` (`'g'+'h pr '+'mer'+'ge'`) hides a gated word from
 // GATED_WORD_RE just as well as char codes do (Luna, PR #956 round 1). Only `+` between two
 // quotes counts: `'.'` is an ordinary path argument, not a join.
-const OBFUSCATION_RE = /fromcharcode|fromcodepoint|fromhex|unhexlify|\bpack\s*\(|\bord\s*\(|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\bjoin\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode|['"`]\s*\+\s*['"`]|\bconcat\s*\(/i;
+// `printf 'g%s pr m%s 951' h erge | bash` assembles the words from a format string
+// (Codex connector, PR #956): a printf format with a `%` directive counts too.
+const OBFUSCATION_RE = /\bprintf\b[^|;&\n]*%|fromcharcode|fromcodepoint|fromhex|unhexlify|\bpack\s*\(|\bord\s*\(|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\bjoin\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode|['"`]\s*\+\s*['"`]|\bconcat\s*\(/i;
 const CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|start-process|invoke-expression|\biex\b|\beval\b|\bfetch\b|https?:|\brequest\b|socket|\b(?:bash|sh|zsh|cmd|pwsh|powershell|python3?|node|perl|ruby|deno|bun)\b|\$\(|`/i;
 // A PROGRAM NAME assembled from shell variables set in the same command
 // (`a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951`) shows no gated word at all, and was

@@ -78,6 +78,9 @@ for (const command of [
   "wget --method=PUT --body-file=x https://example.test/x",
   // Luna, PR #956 round 3: a shell database client.
   "psql \"$DATABASE_URL\" -f /tmp/erase-invoice.sql",
+  // Codex connector, PR #956: gh global options before `api`.
+  "gh --hostname github.com api repos/o/r/issues/1 -f title=x",
+  "gh -R o/r api repos/o/r/issues/1 --field title=x",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
 eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
 eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");

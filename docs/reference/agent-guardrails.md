@@ -353,7 +353,8 @@ separately, the permission change.
    destructive word (34 sessions) now counts `.claude` only as a whole target (`.claude`, `.claude/`,
    a glob directly under it). It never counts the user-home `~/.claude` (Claude's memory).
    `.claude/worktrees/…` keeps the old breadth at any depth, because every worktree holds its own
-   state directory. In the same change, every file a gate trusts is protected by NAME
+   state directory. A `.`/`..` segment or a run-time-built part (`$`, a backtick, `%`) anywhere
+   below `.claude` also counts as the state dir. In the same change, every file a gate trusts is protected by NAME
    (`reviewProofPathMentioned`): the migration reviewer proof `migration-review-*.json`, every
    `owner-approval-*.json`, `AUTOPILOT.on`, `applied-migrations.json` and `hold.json`. Before, `cp`,
    `tee` or `echo >` into those were allowed. `.claude/agents` and `.claude/commands` joined

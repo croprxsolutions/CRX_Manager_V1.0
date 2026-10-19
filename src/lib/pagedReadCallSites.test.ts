@@ -21,11 +21,18 @@ const CALL_PATTERN = /\bfetchAllRows(?:ForIds)?\s*(?:<[^()]*?>)?\s*\(/g;
 
 type CallSite = { file: string; line: number; callback: string };
 
+// Shared readers outside src/pages that page with fetchAllRows. The integrity
+// checks recompute ledgers from these reads, so a short read is a false result.
+const LIB_FILES = ['reconciliation.ts'];
+
 function findCallSites(): CallSite[] {
   const sites: CallSite[] = [];
-  for (const file of readdirSync(PAGES_DIR).sort()) {
-    if (!file.endsWith('.tsx') || file.endsWith('.test.tsx') || file in EXEMPT) continue;
-    const source = readFileSync(join(PAGES_DIR, file), 'utf8');
+  const pageFiles = readdirSync(PAGES_DIR).sort()
+    .filter((file) => file.endsWith('.tsx') && !file.endsWith('.test.tsx') && !(file in EXEMPT))
+    .map((file) => ({ file, path: join(PAGES_DIR, file) }));
+  const libFiles = LIB_FILES.map((file) => ({ file: `../lib/${file}`, path: join(__dirname, file) }));
+  for (const { file, path } of [...pageFiles, ...libFiles]) {
+    const source = readFileSync(path, 'utf8');
     const starts = [...source.matchAll(CALL_PATTERN)].map((m) => m.index ?? 0);
     starts.forEach((start, i) => {
       const nextCall = i + 1 < starts.length ? starts[i + 1] : source.length;
@@ -45,6 +52,7 @@ describe('paged list reads request the exact row count', () => {
 
   it('finds the paged reads (a pattern that matches nothing must fail)', () => {
     expect(sites.length).toBeGreaterThanOrEqual(20);
+    expect(sites.filter((site) => site.file === '../lib/reconciliation.ts').length).toBeGreaterThanOrEqual(10);
   });
 
   it("every fetchAllRows / fetchAllRowsForIds call selects with { count: 'exact' }", () => {

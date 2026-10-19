@@ -14,6 +14,7 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/i
 import { logActivity } from '../lib/activityLogger';
 import { exportToCSV, fmtCSV, fmtDateCSV, fmtDateOnlyCSV } from '../lib/csvExport';
 import { formatExactUSD } from '../lib/money';
+import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
 import YearEndSummaryDialog from '../components/reports/YearEndSummaryDialog';
@@ -1178,8 +1179,17 @@ export default function Reports() {
     { key: 'season', header: 'Season' },
   ];
 
-  // Unpaid commission total
-  const unpaidTotal = visibleCommissions.filter((c) => c.status === 'pending').reduce((sum, c) => sum + c.commission_amount, 0);
+  // Unpaid commission total, summed in whole cents. An amount that is not an exact
+  // whole-cent decimal makes the total unknown (shown as a dash), never a guessed number.
+  const unpaidTotalCents = visibleCommissions
+    .filter((c) => c.status === 'pending')
+    .reduce<number | null>((sum, c) => {
+      if (sum === null) return null;
+      const text = String(c.commission_amount);
+      if (!/^-?\d+(\.\d{1,2})?$/.test(text)) return null;
+      const cents = parseDollarsToCentsSigned(text);
+      return cents === null ? null : sum + cents;
+    }, 0);
 
   const categories: { key: Category; label: string }[] = [
     { key: 'profitability', label: 'Profitability' },
@@ -1327,7 +1337,7 @@ export default function Reports() {
           {profitTab === 'commission' && (
             <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
               <div className="flex items-center gap-4">
-                <span className="text-sm text-amber-800"><span className="font-semibold">Unpaid commissions:</span> {fmt(unpaidTotal)}</span>
+                <span className="text-sm text-amber-800"><span className="font-semibold">Unpaid commissions:</span> {unpaidTotalCents === null ? '—' : fmt(unpaidTotalCents / 100)}</span>
                 {selectedCommissions.size > 0 && <span className="text-sm text-secondary">{selectedCommissions.size} selected</span>}
               </div>
               {isAdmin && selectedCommissions.size > 0 && (

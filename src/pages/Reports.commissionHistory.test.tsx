@@ -15,6 +15,7 @@ const H = vi.hoisted(() => ({
   },
   rpcHandler: null as RpcHandler | null,
   selects: [] as Array<{ table: string; columns: string }>,
+  filters: [] as Array<{ table: string; column: string; value: unknown }>,
   tableHandler: null as ((table: string, columns: string) => Promise<unknown> | null) | null,
 }));
 
@@ -37,7 +38,7 @@ vi.mock('../lib/db', () => ({
       let selected = '*';
       const builder: QueryBuilder = {
         select: (columns = '*') => { selected = columns; H.selects.push({ table, columns }); return builder; },
-        eq: () => builder,
+        eq: (column: unknown, value: unknown) => { H.filters.push({ table, column: String(column), value }); return builder; },
         order: () => builder,
         limit: () => builder,
         is: () => builder,
@@ -123,6 +124,7 @@ beforeEach(() => {
   cleanup();
   H.rpc = [];
   H.selects = [];
+  H.filters = [];
   H.toast.mockReset();
   H.rpcHandler = null;
   H.tableHandler = null;
@@ -198,6 +200,8 @@ describe('Reports commission history', () => {
       if (table === 'products') expect(columns).not.toMatch(/current_cost|\*/);
       if (table === 'commissions') expect(columns).not.toMatch(/order_profit|\*/);
     }
+    // A rep's commissions are filtered to the rep's own rows.
+    expect(H.filters).toContainEqual({ table: 'commissions', column: 'recipient_user_id', value: 'sales-rep-1' });
   });
 
   it('never shows a rep commission rows from an admin load that finishes after the role change', async () => {

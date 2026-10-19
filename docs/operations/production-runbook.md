@@ -193,7 +193,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 > rely on it alone in an emergency; stop and escalate at any step that does not match what you see.
 >
 > **Known open review items (Mason chose to merge and settle these in the first drill, 2026-10-19):**
-> (1) While the replacement is reconciled, put the *old* application in read-only or maintenance mode (or
+> (1) [Now covered in step 10.] While the replacement is reconciled, put the *old* application in read-only or maintenance mode (or
 > capture and replay every write made after the freeze), or staff writes to the old project are silently lost
 > at cutover. (2) A fresh Supabase project already has platform objects, so a plain `pg_restore` can show
 > expected "already exists" and ownership errors: use the roles/schema/data split restore in Supabase's
@@ -215,7 +215,11 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    (`pg_restore --exclude-table-data` for that table), or leave the pg_cron extension disabled until the
    restore is finished and reconciled. Afterwards confirm `cron.job` is empty or inactive before the app is
    pointed at it. They are put back at the end (4.7, last item), not forgotten.
-   **Then apply the access lockdown** from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
+   **Lock the new project's API down before any data is loaded**, and keep it locked for the whole restore
+   window: anyone who knows the new project's API address could otherwise read or change restored data, and
+   pointing Vercel elsewhere does not stop direct requests. Isolate the API (restrict or pause access) or
+   apply the approved access control first, and record the result of a signed-out API request. Details of the
+   access lockdown from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
    Supabase project gives the anonymous (signed-out) role full read/write on every table and the right to
    run every function, and a restore only adds grants, never removes those. Changing privileges is a
    permission change and needs Mason's explicit approval first. The repository's lockdown file
@@ -230,7 +234,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists.** If the project
    is **lost** (no live database to count), validate without live counts: the restore finishes with no
    errors; the key tables are not empty; no table's newest `created_at` is after the dump date, and the busiest tables (`invoices`, `inventory_transactions`) have one no more than 3 days before the dump date (a season runs October 1 through September 30; outside the busy part of the season a longer gap can be normal, so explain it rather than fail) (do not apply this to low-volume tables such as `allocation_sets` or `prepay_credits`, which may have no new rows for days);
-   internal checks hold (for every invoice that is not voided or cancelled, the total equals the sum of its lines; voided invoices keep their lines but have a zero total by design, so check that zero instead; every order and invoice points to
+   internal checks hold (for every invoice not in `voided` status, the total equals the sum of its lines; voided invoices keep their lines but have a zero total by design, so check that zero instead; if another status (for example a cancelled invoice) fails the total check, compare it with that status's rules in `.claude/schema-registry.json` and the workflow docs and record the finding rather than assuming corruption or assuming it is fine; every order and invoice points to
    a customer that exists, every profile has a matching login); and several of the most recent invoice
    numbers before the dump match an outside record (QuickBooks, Chem Man, email, paper tickets).
    Also, each Monday backup check below saves a dated list of live row counts for the tables named here
@@ -297,10 +301,13 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    Vercel environment variables to the new project and redeploy only after the final gate (step 11) passes.
    Deploying functions, installing secrets and changing production configuration each need Mason's
    explicit approval in the current conversation.
-10. **Reconcile before anyone can write.** The restored project stays unreachable to staff (Vercel still
-    pointing at the old project, or maintenance mode) until the post-restore checklist (4.7) is finished.
-    Otherwise staff could write against week-old state and trigger email or payments while you are still
-    reconciling, creating the duplicates 4.7 exists to prevent.
+10. **Freeze writers, then reconcile.** Before reconciliation starts, freeze every writer on the old
+    project when it is still reachable: put the application in maintenance or read-only mode, pause the
+    scheduled jobs, disable webhooks and integrations (payments, email, QuickBooks) and tell staff to stop,
+    or else capture every write made after the freeze and replay it. Keep the restored project unreachable
+    to staff until the post-restore checklist (4.7) is finished. Otherwise staff or jobs could write against
+    week-old state, or writes to the old project could disappear at cutover, creating the duplicates 4.7
+    exists to prevent. Write down which approach you used.
 11. **Final gate before cutover.** After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
     step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
     and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for

@@ -17,6 +17,13 @@ export function countOrdinaryPhotos(photos: ReadonlyArray<{ caption?: string | n
   return photos.filter((photo) => photo.caption !== PAPER_TICKET_PHOTO_CAPTION).length;
 }
 
+// Ticket photos are bounded on their own: a front and a back is enough.
+export const MAX_PAPER_TICKET_PHOTOS = 2;
+
+export function countPaperTicketPhotos(photos: ReadonlyArray<{ caption?: string | null }>): number {
+  return photos.filter((photo) => photo.caption === PAPER_TICKET_PHOTO_CAPTION).length;
+}
+
 export function hasPaperTicketPhoto(photos: ReadonlyArray<{ caption?: string | null }>): boolean {
   return photos.some((photo) => photo.caption === PAPER_TICKET_PHOTO_CAPTION);
 }

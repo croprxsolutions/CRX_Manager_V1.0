@@ -27,7 +27,7 @@ import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
+import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -778,6 +778,10 @@ export default function DeliveryDetail() {
 
     if (!caption && countOrdinaryPhotos(photos) + files.length > MAX_ORDINARY_DELIVERY_PHOTOS) {
       toast('error', 'Maximum 10 photos per delivery');
+      return;
+    }
+    if (caption === PAPER_TICKET_PHOTO_CAPTION && countPaperTicketPhotos(photos) + files.length > MAX_PAPER_TICKET_PHOTOS) {
+      toast('error', 'Maximum 2 ticket photos per delivery');
       return;
     }
 
@@ -1646,7 +1650,7 @@ export default function DeliveryDetail() {
                   <button
                     type="button"
                     onClick={() => paperTicketInputRef.current?.click()}
-                    disabled={uploadingPhoto || !isOnline}
+                    disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS}
                     className="w-full py-3 flex items-center justify-center gap-2 text-white border border-gray-600 rounded-lg active:bg-gray-600 disabled:opacity-50 transition-colors"
                   >
                     <Camera className="w-5 h-5" />

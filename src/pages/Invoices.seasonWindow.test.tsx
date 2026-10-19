@@ -345,13 +345,14 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
 
     // 1,500 posted invoices x $100.00 each: a read stopped at 1,000 rows would show $100,000.00.
-    const outstanding = (await screen.findByText('unpaid balance on posted and overdue invoices')).parentElement!;
-    await waitFor(() => expect(outstanding).toHaveTextContent('$150,000.00'));
+    const outstanding = (await screen.findByText('unpaid balance on posted and overdue invoices', {}, { timeout: 10000 })).parentElement!;
+    await waitFor(() => expect(outstanding).toHaveTextContent('$150,000.00'), { timeout: 10000 });
     expect(screen.getByText(/posted invoices \(including overdue\)/)).toHaveTextContent('1500 posted invoices (including overdue)');
     expect(queries.map((q) => (q.range as ReturnType<typeof vi.fn>).mock.calls[0])).toEqual([[0, 999], [950, 1949], [1450, 2449]]);
     expect(queries.every((q) => (q.order as ReturnType<typeof vi.fn>).mock.calls.some(([column]) => column === 'id'))).toBe(true);
     expect(mockToast).not.toHaveBeenCalled();
-  });
+    // Rendering 1,500 rows takes several seconds on the CI runners (5.9s seen).
+  }, 30000);
 
   it('keeps the list but reports it once when the salesperson labels cannot be loaded', async () => {
     const withSalesman = ROWS.map((r) => ({ ...r, salesman_id: 'rep-1' }));

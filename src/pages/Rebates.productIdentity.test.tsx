@@ -191,5 +191,5 @@ describe('Rebates Product identity writers', () => {
     expect(within(orderSelect).getAllByRole('option')).toHaveLength(1501);
     expect(within(orderSelect).getByRole('option', { name: 'ORD-1499' })).toBeInTheDocument();
     expect(mocks.ranges).toEqual(expect.arrayContaining([[0, 999], [950, 1949]]));
-  });
+  }, 30000);
 });

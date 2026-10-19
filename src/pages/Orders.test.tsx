@@ -247,5 +247,5 @@ describe('Orders bulk-delete lifecycle guard', () => {
     expect(Math.max(...itemChunks.map((chunk) => chunk.length))).toBeLessThanOrEqual(200);
     expect(new Set(itemChunks.flat()).size).toBe(1500);
     expect(mockToast).not.toHaveBeenCalled();
-  });
+  }, 30000);
 });

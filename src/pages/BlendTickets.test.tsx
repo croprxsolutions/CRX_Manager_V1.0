@@ -244,5 +244,5 @@ describe('BlendTickets list reads every row', () => {
     expect(customers.order).toHaveBeenCalledWith('farm_name');
     expect(customers.order).toHaveBeenCalledWith('id');
     expect(mockToast).not.toHaveBeenCalled();
-  });
+  }, 30000);
 });

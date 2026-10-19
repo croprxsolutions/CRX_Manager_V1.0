@@ -200,7 +200,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 5. Validate. **Future (once the alert design is built):** compare against the baseline file
    `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists.** If the project
    is **lost** (no live database to count), validate without live counts: the restore finishes with no
-   errors; the key tables are not empty; no table's newest `created_at` is after the dump date, and the busiest tables (`invoices`, `inventory_transactions`) have one within a few days of it in season (do not apply this to low-volume tables such as `allocation_sets` or `prepay_credits`, which may have no new rows for days);
+   errors; the key tables are not empty; no table's newest `created_at` is after the dump date, and the busiest tables (`invoices`, `inventory_transactions`) have one no more than 3 days before the dump date (a season runs October 1 through September 30; outside the busy part of the season a longer gap can be normal, so explain it rather than fail) (do not apply this to low-volume tables such as `allocation_sets` or `prepay_credits`, which may have no new rows for days);
    internal checks hold (every invoice total equals the sum of its lines, every order and invoice points to
    a customer that exists, every profile has a matching login); and several of the most recent invoice
    numbers before the dump match an outside record (QuickBooks, Chem Man, email, paper tickets).

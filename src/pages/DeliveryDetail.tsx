@@ -821,6 +821,12 @@ export default function DeliveryDetail() {
           continue;
         }
         checkMutationResult(photoResult, 'Insert delivery photo');
+        // Show the saved row now, so a required ticket photo does not depend on the
+        // refresh read below succeeding.
+        const inserted = (photoResult.data || []) as DeliveryPhoto[];
+        if (signatureRouteIdRef.current === id) {
+          setPhotos((prev) => [...prev, ...inserted.filter((row) => !prev.some((p) => p.id === row.id))]);
+        }
 
         uploadCount++;
       } catch (err) {

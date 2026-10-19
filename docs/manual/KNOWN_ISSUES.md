@@ -220,7 +220,12 @@ recorded in the batch-1 paragraph above.
 **Bound by batch 3a (migration `20261019200000`, applied live 2026-10-19 20:52:46 UTC (3:52 PM Central), ledger `20261019205246`).** The table's batch-3 money group is
 split into smaller PRs; this first cut bound `complete_delivery` and `complete_job`, which left the table below, and
 extended the same commit-time guard (24 operations). Both now require a retry key, and a retry replays a saved
-result only for the same person and the exact same request. `cancel_delivery` goes in a later cut.
+result only for the same person and the exact same request.
+
+**Batch 3b written, NOT applied (migration `20261019235000`, 2026-10-19).** The second cut binds `cancel_delivery`
+(and moves its role check ahead of any replay), `void_delivery` and `void_order`, and grows the guard to 27
+operations. `batch_cancel_deliveries` keeps its keyless per-delivery cancel by calling the renamed body directly.
+The three stay in the table below until the apply is confirmed live.
 
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
 

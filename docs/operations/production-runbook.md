@@ -186,7 +186,11 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 4. Run the post-restore checklist (4.7) before anything resumes syncing.
 5. Log it in the drill log (4.9) with timings.
 
-### 4.6 Restore the newest dump into a new project
+### 4.6 Restore a dump into a new project
+
+> **UNPROVEN.** This procedure has never been run. Every review pass has found real gaps in it, so treat
+> it as a checklist to be corrected by the first supervised drill (4.9), not as a tested recipe. Do not
+> rely on it alone in an emergency; stop and escalate at any step that does not match what you see.
 
 1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
 2. Clone `masonwells1/CRX_Backups` and choose the archive `backups/crx-backup-YYYY-MM-DD.dump.gpg`:
@@ -199,15 +203,20 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    before the app is pointed at it. They are put back at the end (4.7, last item), not forgotten.
    **Then apply the access lockdown** from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
    Supabase project gives the anonymous (signed-out) role full read/write on every table and the right to
-   run every function, and a restore only adds grants, never removes those. Reset the privileges and
-   default privileges to production's, then **verify** with a query that the `anon` role holds no table
-   or function privileges it should not, and that a signed-out request to the new project's API is refused.
-   Do this before the project is exposed to anyone.
+   run every function, and a restore only adds grants, never removes those. Changing privileges is a
+   permission change and needs Mason's explicit approval first. The repository's lockdown file
+   (`20260727174805_acl_lockdown.sql`) is a **July 2026 snapshot**: it revokes everything and re-grants only
+   what existed then, so applying it blindly to a newer dump would leave later objects unusable and could
+   restore July-era grants. Reproduce production's *current* grants and default privileges for the restored
+   schema (from a grants capture taken from the live system while it exists, or by replaying the later
+   permission migrations), under a reviewed plan. Then **verify** with a query that the `anon` role holds no
+   table or function privileges it should not, and that a signed-out request to the new project's API is
+   refused. Do this before the project is exposed to anyone.
 5. Validate. **Future (once the alert design is built):** compare against the baseline file
    `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists.** If the project
    is **lost** (no live database to count), validate without live counts: the restore finishes with no
    errors; the key tables are not empty; no table's newest `created_at` is after the dump date, and the busiest tables (`invoices`, `inventory_transactions`) have one no more than 3 days before the dump date (a season runs October 1 through September 30; outside the busy part of the season a longer gap can be normal, so explain it rather than fail) (do not apply this to low-volume tables such as `allocation_sets` or `prepay_credits`, which may have no new rows for days);
-   internal checks hold (every invoice total equals the sum of its lines, every order and invoice points to
+   internal checks hold (for every invoice that is not voided or cancelled, the total equals the sum of its lines; voided invoices keep their lines but have a zero total by design, so check that zero instead; every order and invoice points to
    a customer that exists, every profile has a matching login); and several of the most recent invoice
    numbers before the dump match an outside record (QuickBooks, Chem Man, email, paper tickets).
    Also, each Monday backup check below saves a dated list of live row counts for the tables named here
@@ -232,7 +241,8 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    escalate rather than improvising). Record which case applied. Matching rows are not proof: before
    cutover, **sign in with a real password for one account of every active role** (admin, sales rep, and
    each other role in use) and check each can open the screens and data that role should, and cannot open
-   what it should not. One admin test is not enough.
+   what it should not. One admin test is not enough. These checks describe the schema as restored, so they
+   are **repeated as the final gate (step 10)** after the schema update, grants and Auth settings are done.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
 8. **Bring the restored schema up to date first.** The dump is only as new as its date, but the current
    code and Edge Functions expect every later migration (RPCs, columns, grants, constraints). Deploying
@@ -263,11 +273,14 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    password recovery fails after cutover. **Turn public signup off** in the new project's Auth settings
    and verify it (a direct signup request must be refused) before exposing it: a new project defaults to
    signup on, and the profile-creation trigger copies a role from the signup request, so open signup could
-   let a stranger create an admin profile. Auth changes need Mason's explicit approval. Only then repoint the
-   Vercel environment variables to the new project and redeploy.
+   let a stranger create an admin profile. Auth changes need Mason's explicit approval. Repoint the
+   Vercel environment variables to the new project and redeploy only after the final gate (step 10) passes.
    Deploying functions, installing secrets and changing production configuration each need Mason's
    explicit approval in the current conversation.
-10. Run the post-restore checklist (4.7).
+10. **Final gate before cutover.** After steps 4, 6, 8 and 9 are complete, repeat on the finished project:
+    a real sign-in and allow/deny check for one account of every active role, the signed-out request refusal,
+    the ledger match and a password reset test. Only if all pass does the Vercel cutover go ahead.
+11. Run the post-restore checklist (4.7).
 
 ### 4.7 After any restore: nothing may happen twice
 

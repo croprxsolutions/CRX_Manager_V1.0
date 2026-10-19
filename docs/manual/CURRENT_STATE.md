@@ -1,10 +1,16 @@
 # CRX Manager — Current State
 
 **Last verified:** 2026-10-19 (America/Chicago) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-19 01:08 UTC and again 12:50 UTC: 1034 rows / 1027 names,
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-19 18:35 UTC: 1035 rows / 1028 names, `max(version)`
+`20261019182757` = `20261019010000_cost_margin_admin_only_rpc_leaks` (PR #957, merged as `8124ae21c`), applied
+2026-10-19 18:27:57 UTC on Mason's own `I approve`. Cost and margin are now admin-only in the database functions
+(Goal 1 part 3, step 1 of 3): a read-only live per-role check (rolled back, run on Mason's REAL-DATA-OK) passed —
+an admin runs the six cost reports; an active sales rep, driver, applicator, commission recipient, an id with no
+profile and a signed-out visitor are each refused; the sales detail and summary reports give the rep the same rows
+with no cost, profit or margin; inventory position gives the rep the same rows with no `current_cost`.
+The 01:08 and 12:50 UTC reads before it had 1034 rows / 1027 names,
 `max(version)` `20261019010324` = `20261016140000_bind_stock_replay_receipts_batch2`, applied 2026-10-19
-01:03:24 UTC; PR #957's `20261019010000` is NOT applied, and every body it pins still matches live
-at 12:50 UTC; the 2026-10-16 13:42 UTC read before it had 1033 rows / 1026 names,
+01:03:24 UTC; the 2026-10-16 13:42 UTC read before it had 1033 rows / 1026 names,
 `max(version)` `20261016121253` = `20261016060000_bind_money_replay_receipts_batch1`, applied 2026-10-16
 12:12:53 UTC; the 06:16 UTC read before it had 1032 rows / 1025 names,
 `max(version)` `20261016051944` = `20261016030000_staff_photo_buckets_private`, applied 2026-10-16

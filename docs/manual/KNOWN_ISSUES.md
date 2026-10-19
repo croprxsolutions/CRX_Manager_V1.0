@@ -1,7 +1,9 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-16 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-16 13:42 UTC: 1033 rows / 1026 names; the one change since the 06:16 UTC read
+**Last verified: 2026-10-18 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-19 00:59 UTC: still 1033 rows / 1026 names, `max(version)` `20261016121253`, no
+apply since the 2026-10-16 read; the cost/margin entry below was written from a read-only live inventory
+the same day. 2026-10-16 13:42 UTC: 1033 rows / 1026 names; the one change since the 06:16 UTC read
 is that `20261016060000_bind_money_replay_receipts_batch1` (ledger `20261016121253`, PR #942 merged as
 `982bc0dda`) is now applied, which re-certified the replay-binding entry below: batch 1's nine wrappers,
 nine renamed bodies, three helpers and deferred trigger all read live at 13:42 UTC. In the 06:16 UTC read

@@ -3,6 +3,8 @@ import { chunkIds } from './dispatchDisplay';
 type PageResult<T> = { data: T[] | null; error: { message: string } | null };
 
 const PAGE_SIZE = 1000;
+// Rows re-read at each page seam when every row has an id (see fetchAllRows).
+const SEAM_OVERLAP = 50;
 
 /**
  * Read every row of a query, page by page. One request is silently cut off at
@@ -12,11 +14,15 @@ const PAGE_SIZE = 1000;
  * actually returned, so a server cap below the requested page size still reads
  * everything. Any failed page returns the error, never a partial list.
  *
- * Pages are separate requests, so a row inserted ahead of the read position
- * between two pages pushes the boundary row onto the next page as well. Rows
- * with an `id` are kept once, so that shift never shows or counts a record
- * twice. (A row deleted mid-read can still shift one row past the read; it
- * reappears on the next load.)
+ * Pages are separate requests, so the rows can move between them:
+ * - a row inserted ahead of the read position pushes the seam row onto the
+ *   next page as well; rows with an `id` are kept once, so it is never shown
+ *   or counted twice;
+ * - a row deleted ahead of the read position pulls the seam row back onto the
+ *   page already read, where a plain offset read would skip it. When every row
+ *   has an `id`, each page after the first starts SEAM_OVERLAP rows early, so
+ *   up to that many deletions between two pages still miss nothing.
+ * Rows without an `id` (an RPC's computed rows) are read without the overlap.
  */
 export async function fetchAllRows<T>(
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
@@ -28,15 +34,22 @@ export async function fetchAllRows<T>(
     if (error) return { data: null, error };
     const page = data ?? [];
     if (page.length === 0) break;
+    let newRows = 0;
+    let everyRowHasId = true;
     for (const row of page) {
       const id = rowId(row);
-      if (id !== undefined) {
+      if (id === undefined) {
+        everyRowHasId = false;
+      } else {
         if (seenIds.has(id)) continue;
         seenIds.add(id);
       }
       rows.push(row);
+      newRows += 1;
     }
-    from += page.length;
+    // Only the overlap came back: the read has reached the end.
+    if (newRows === 0) break;
+    from += everyRowHasId && page.length > SEAM_OVERLAP ? page.length - SEAM_OVERLAP : page.length;
   }
   return { data: rows, error: null };
 }
@@ -60,7 +73,9 @@ export async function fetchAllRowsForIds<T, Id>(
   for (const idChunk of chunkIds([...new Set(ids)])) {
     const result = await fetchAllRows<T>((from, to) => fetchPage(idChunk, from, to));
     if (result.error) return result;
-    rows.push(...(result.data ?? []));
+    // A loop, not push(...rows): one chunk can hold more rows than a call may
+    // take as arguments.
+    for (const row of result.data ?? []) rows.push(row);
   }
   return { data: rows, error: null };
 }

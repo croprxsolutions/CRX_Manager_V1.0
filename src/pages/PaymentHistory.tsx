@@ -3,7 +3,7 @@
  *
  * Sprint 11: Financial Workflows
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { DollarSign, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -67,7 +67,11 @@ export default function PaymentHistory() {
   const [voidReason, setVoidReason] = useState('');
   const [savingVoid, setSavingVoid] = useState(false);
 
+  // A refresh after voiding a payment is a multi-page read; an older, slower
+  // load must not overwrite the newer list, so only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchPayments = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('allocation_sets')
@@ -80,6 +84,7 @@ export default function PaymentHistory() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       toast('error', 'Failed to load payment history');

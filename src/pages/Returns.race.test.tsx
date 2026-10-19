@@ -218,6 +218,10 @@ describe('Returns loading and retry behavior', () => {
     expect(await screen.findByText('RMA-PAGED-1500', {}, { timeout: 10000 })).toBeInTheDocument();
     expect(screen.getByText('RMA-PAGED-1')).toBeInTheDocument();
     expect(screen.getByText('RMA-PAGED-1001')).toBeInTheDocument();
+    // Every row once: a read that drops or repeats rows mid-list fails here.
+    const shown = screen.getAllByText(/^RMA-PAGED-\d+$/).map((el) => el.textContent);
+    expect(shown).toHaveLength(1500);
+    expect(new Set(shown).size).toBe(1500);
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
   }, 30000);
 

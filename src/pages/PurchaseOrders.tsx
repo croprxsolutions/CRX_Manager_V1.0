@@ -76,7 +76,11 @@ export default function PurchaseOrders() {
   const canManagePO = role === 'admin' || role === 'sales_rep';
   const canBulkAction = canManagePO;
 
+  // A refresh after a receive/cancel/delete is a multi-page read; an older,
+  // slower load must not overwrite the newer list, so only the latest may set state.
+  const fetchPOsSeq = useRef(0);
   const fetchPOs = useCallback(async () => {
+    const seq = ++fetchPOsSeq.current;
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('purchase_orders')
@@ -84,6 +88,7 @@ export default function PurchaseOrders() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchPOsSeq.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_purchase_orders' } });
       toast('error', 'Failed to load purchase orders. Please try again.');
@@ -94,7 +99,15 @@ export default function PurchaseOrders() {
     setLoading(false);
   }, [toast]);
 
+  // Load once when the tab is first opened. Keying on "no items yet" re-ran the
+  // read forever when there were none or the read failed (a toast every pass).
+  // A failed read clears the flag, so reopening the tab tries again.
+  const outstandingRequested = useRef(false);
+  // Same stale-load guard: only the latest outstanding-items read may set state
+  // (including clearing the requested flag on failure).
+  const fetchOutstandingSeq = useRef(0);
   const fetchOutstandingItems = useCallback(async () => {
+    const seq = ++fetchOutstandingSeq.current;
     setOutstandingLoading(true);
     // No explicit limit here still meant the server's silent row cap, and these rows
     // feed the outstanding-value totals, so read every page.
@@ -115,9 +128,11 @@ export default function PurchaseOrders() {
       .not('purchase_orders.status', 'in', '("cancelled","fully_received")')
       .order('id')
       .range(from, to));
+    if (seq !== fetchOutstandingSeq.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_outstanding_items' } });
       toast('error', 'Failed to load outstanding items.');
+      outstandingRequested.current = false;
       setOutstandingLoading(false);
       return;
     }
@@ -154,9 +169,6 @@ export default function PurchaseOrders() {
     fetchPOs();
   }, [fetchPOs]);
 
-  // Load once when the tab is first opened. Keying on "no items yet" re-ran the
-  // read forever when there were none or the read failed (a toast every pass).
-  const outstandingRequested = useRef(false);
   useEffect(() => {
     if (activeTab === 'outstanding' && !outstandingRequested.current) {
       outstandingRequested.current = true;

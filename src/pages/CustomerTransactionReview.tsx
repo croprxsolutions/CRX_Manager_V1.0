@@ -28,6 +28,8 @@ export default function CustomerTransactionReview() {
   const [endDate, setEndDate] = useState('');
   const [data, setData] = useState<CustomerTransactionRow[]>([]);
   const [loading, setLoading] = useState(false);
+  // A failed read must not look like a customer with no transactions.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     fetchAllRows<{ id: string; farm_name: string }>((from, to) => supabase
@@ -37,8 +39,11 @@ export default function CustomerTransactionReview() {
       .order('farm_name')
       .order('id')
       .range(from, to))
-      .then(({ data: rows }) => setCustomers(rows || []));
-  }, []);
+      .then(({ data: rows, error }) => {
+        if (error) toast('error', 'Failed to load the customer list. Reload to try again.');
+        setCustomers(rows || []);
+      });
+  }, [toast]);
 
   // A multi-page read can finish after a newer one started for another customer
   // or date range; only the latest request may set the rows and totals.
@@ -60,8 +65,10 @@ export default function CustomerTransactionReview() {
     if (seq !== fetchSeq.current) return;
     if (error) {
       setData([]);
+      setLoadFailed(true);
       toast('error', `Failed to load transactions: ${error.message}`);
     } else {
+      setLoadFailed(false);
       setData(assertRpcResult<CustomerTransactionRow[]>(rows, 'get_customer_transaction_review'));
     }
     setLoading(false);
@@ -210,8 +217,10 @@ export default function CustomerTransactionReview() {
             <DataTable
               data={data as unknown as Record<string, unknown>[]}
               columns={columns as unknown as Column<Record<string, unknown>>[]}
-              emptyTitle="No transactions"
-              emptyDescription={!customerId ? 'Select a customer and date range' : undefined}
+              emptyTitle={loadFailed ? 'Transactions could not be loaded' : 'No transactions'}
+              emptyDescription={loadFailed
+                ? 'The totals are not shown because the read did not finish. Change the dates or reload to try again.'
+                : !customerId ? 'Select a customer and date range' : undefined}
               loading={loading}
             />
           </div>

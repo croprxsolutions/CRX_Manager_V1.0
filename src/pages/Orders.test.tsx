@@ -240,7 +240,7 @@ describe('Orders bulk-delete lifecycle guard', () => {
     expect(await screen.findByText('1500 orders')).toBeInTheDocument();
     expect(screen.getByText('order-0 fulfilled 50%')).toBeInTheDocument();
     expect(screen.getByText('order-1499 fulfilled 50%')).toBeInTheDocument();
-    expect(orders.range.mock.calls).toEqual([[0, 999], [1000, 1999], [1500, 2499]]);
+    expect(orders.range.mock.calls).toEqual([[0, 999], [950, 1949], [1450, 2449]]);
     expect(orders.order).toHaveBeenCalledWith('id');
     expect(orders.limit).not.toHaveBeenCalled();
     // The order ids go out in URL-sized chunks, never one 1,500-id list.

@@ -850,8 +850,10 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Jobs and Customers show a banner when capped. Deliveries stops silently.
-  - Paging is by position, so a record added or deleted while a long list is loading can shift the
-    pages by one row (a row shown twice or missed until the next refresh). Real cursor paging and
+  - Paging is by position. Repeats are dropped by `id`, and each page re-reads a 50-row overlap, so
+    up to 50 deletions between two pages miss nothing. Two cases are still not covered: more
+    deletions than that between two pages, and rows without an `id` (Customer Transaction Review's
+    function rows). Either can still miss a row until the next refresh. Real cursor paging and
     server-side search are the later Goal 4 step.
   - On a capped query, records past the cap are missing from that page and its browser-side filters.
     Revisit before volumes near the caps.

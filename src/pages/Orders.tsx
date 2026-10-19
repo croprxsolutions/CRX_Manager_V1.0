@@ -107,7 +107,8 @@ export default function Orders() {
     const [itemsResult, invoiceResult, parentsResult, deliveryResult] = await Promise.all([
       fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('order_items')
-        .select('order_id, total_units_needed, quantity_delivered, price_per_unit, product_name')
+        // `id` lets the pager drop a line repeated across a page seam.
+        .select('id, order_id, total_units_needed, quantity_delivered, price_per_unit, product_name')
         .in('order_id', idChunk)
         .order('id')
         .range(from, to)),
@@ -120,7 +121,7 @@ export default function Orders() {
         .range(from, to)),
       fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('deliveries')
-        .select('order_id, scheduled_date, status')
+        .select('id, order_id, scheduled_date, status')
         .in('order_id', idChunk)
         .in('status', ['scheduled', 'in_progress'])
         .order('id')
@@ -358,7 +359,7 @@ export default function Orders() {
           .from('customer_addresses').select('*').in('customer_id', idChunk)
           .order('is_default', { ascending: false }).order('id').range(from, to)),
         fetchAllRows((from, to) => supabase
-          .from('inventory').select('product_id, quantity_available, quantity_prebooked')
+          .from('inventory').select('id, product_id, quantity_available, quantity_prebooked')
           .order('id').range(from, to)),
       ]);
       // A failed read must not print a pick list with missing lines or shortage flags.

@@ -348,7 +348,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     const outstanding = (await screen.findByText('unpaid balance on posted and overdue invoices')).parentElement!;
     await waitFor(() => expect(outstanding).toHaveTextContent('$150,000.00'));
     expect(screen.getByText(/posted invoices \(including overdue\)/)).toHaveTextContent('1500 posted invoices (including overdue)');
-    expect(queries.map((q) => (q.range as ReturnType<typeof vi.fn>).mock.calls[0])).toEqual([[0, 999], [1000, 1999], [1500, 2499]]);
+    expect(queries.map((q) => (q.range as ReturnType<typeof vi.fn>).mock.calls[0])).toEqual([[0, 999], [950, 1949], [1450, 2449]]);
     expect(queries.every((q) => (q.order as ReturnType<typeof vi.fn>).mock.calls.some(([column]) => column === 'id'))).toBe(true);
     expect(mockToast).not.toHaveBeenCalled();
   });

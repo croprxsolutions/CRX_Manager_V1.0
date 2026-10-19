@@ -190,7 +190,11 @@ export default function Returns() {
   const effectiveCreateIntentScope = unresolvedCreateIntent?.intent.intentScope ?? createIntent.intentScope;
   const createIdem = useIdempotencyKey('create_return', profile?.id || '', effectiveCreateIntentScope);
 
+  // A refresh after an approve/receive/credit/delete is a multi-page read; an older,
+  // slower load must not overwrite the newer list, so only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchReturns = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     // PR-07 follow-up: dropped requester FK embed; resolved via profile_public_view.
     const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
@@ -207,6 +211,7 @@ export default function Returns() {
         .order('id')
         .range(from, to),
     );
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       Sentry.captureException(error);
@@ -243,6 +248,7 @@ export default function Returns() {
       requester_name: r.requested_by ? requesterMap[r.requested_by as string] || 'Unknown' : 'Unknown',
       item_count: r.items?.length || 0,
     })) as unknown as ReturnRow[];
+    if (seq !== fetchSeq.current) return;
     setReturns(rows);
     setLoading(false);
   }, [toast]);
@@ -261,6 +267,10 @@ export default function Returns() {
         .order('id')
         .range(from, to),
     );
+    if (custRes.error) {
+      Sentry.captureException(custRes.error, { tags: { source: 'fetch', action: 'load_return_customers' } });
+      toast('error', 'Failed to load customers. Close the form and try again.');
+    }
     setCustomers((custRes.data || []) as unknown as Customer[]);
   };
 

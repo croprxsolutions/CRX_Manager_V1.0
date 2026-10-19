@@ -190,6 +190,6 @@ describe('Rebates Product identity writers', () => {
     // 1,500 orders plus the "Optional..." placeholder, including one only on page two.
     expect(within(orderSelect).getAllByRole('option')).toHaveLength(1501);
     expect(within(orderSelect).getByRole('option', { name: 'ORD-1499' })).toBeInTheDocument();
-    expect(mocks.ranges).toEqual(expect.arrayContaining([[0, 999], [1000, 1999]]));
+    expect(mocks.ranges).toEqual(expect.arrayContaining([[0, 999], [950, 1949]]));
   });
 });

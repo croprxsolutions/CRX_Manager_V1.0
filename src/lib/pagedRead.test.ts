@@ -22,6 +22,31 @@ describe('fetchAllRows', () => {
     expect(new Set(ids).size).toBe(1001);
   });
 
+  it('misses nothing when rows are deleted ahead of the read between pages', async () => {
+    let rows = Array.from({ length: 2500 }, (_, i) => ({ id: `r${String(i).padStart(4, '0')}` }));
+    let call = 0;
+    const result = await fetchAllRows<{ id: string }>(async (from, to) => {
+      call += 1;
+      // After each page, three already-read rows near the top are deleted.
+      if (call > 1) rows = rows.filter((_, i) => i < 10 || i >= 13);
+      return { data: rows.slice(from, to + 1), error: null };
+    });
+    const ids = new Set((result.data ?? []).map((r) => r.id));
+    // Every row still present at the end was read.
+    for (const r of rows) expect(ids.has(r.id)).toBe(true);
+  });
+
+  it('stops after the overlap-only page at the end', async () => {
+    const all = Array.from({ length: 1500 }, (_, i) => ({ id: i + 1 }));
+    const ranges: Array<[number, number]> = [];
+    const result = await fetchAllRows<{ id: number }>(async (from, to) => {
+      ranges.push([from, to]);
+      return { data: all.slice(from, to + 1), error: null };
+    });
+    expect(result.data).toHaveLength(1500);
+    expect(ranges).toEqual([[0, 999], [950, 1949], [1450, 2449]]);
+  });
+
   it('keeps rows without an id as they are', async () => {
     const pages = [[{ n: 1 }, { n: 1 }], []];
     let call = 0;

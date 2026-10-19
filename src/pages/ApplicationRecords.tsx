@@ -60,8 +60,8 @@ export default function ApplicationRecords() {
   const [customerFilter, setCustomerFilter] = useState('');
   const [customers, setCustomers] = useState<{ id: string; farm_name: string }[]>([]);
 
-  const fetchCustomers = async () => {
-    const { data } = await fetchAllRows<{ id: string; farm_name: string }>((from, to) =>
+  const fetchCustomers = useCallback(async () => {
+    const { data, error } = await fetchAllRows<{ id: string; farm_name: string }>((from, to) =>
       supabase
         .from('customers')
         .select('id, farm_name')
@@ -70,8 +70,12 @@ export default function ApplicationRecords() {
         .order('id')
         .range(from, to),
     );
+    if (error) {
+      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_application_record_customers' } });
+      toast('error', 'Failed to load the customer filter list');
+    }
     setCustomers((data || []) as { id: string; farm_name: string }[]);
-  };
+  }, [toast]);
 
   // A long "All" read can finish after a narrower filter's; only the latest
   // request may set the list.
@@ -158,7 +162,7 @@ export default function ApplicationRecords() {
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [fetchCustomers]);
 
   useEffect(() => {
     fetchRecords();

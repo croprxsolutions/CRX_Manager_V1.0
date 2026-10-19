@@ -146,7 +146,12 @@ export default function Rebates() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Both tab loaders are multi-page reads sharing one spinner; an older, slower load
+  // (a refresh after a save, or the other tab's) must not overwrite newer state or
+  // clear the spinner early, so they share one sequence and only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchPrograms = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('rebate_programs')
@@ -154,6 +159,7 @@ export default function Rebates() {
       .order('start_date', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       toast('error', 'Failed to load rebate programs');
@@ -168,6 +174,7 @@ export default function Rebates() {
   }, [toast]);
 
   const fetchClaims = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('rebate_claims')
@@ -175,6 +182,7 @@ export default function Rebates() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       toast('error', 'Failed to load rebate claims');

@@ -22,6 +22,23 @@ Screen-only change; no database change.
 - **Commission Payments item counts.** One paged read of the payment items replaces one count
   request per payment. If that read fails, every row's count shows as unverified and Post stays
   disabled on all of them (before, only the failed row was disabled).
+- **Rows moving during a load (Luna and GPT-6.1 Sol advisory reviews).** Pages are separate
+  requests. A record added ahead of the read position would repeat the row at the page seam, and
+  rows with an `id` are now kept once. A record deleted ahead of it would skip a row, so when every
+  row has an `id`, each page after the first starts 50 rows early. Up to 50 deletions between two
+  pages therefore miss nothing. Orders' item, delivery and inventory lookups now select `id` so this
+  applies to them. Customer Transaction Review's rows come from a database function and have no
+  `id`, so they page without the overlap.
+- **Stale loads can't overwrite newer ones.** Each converted list ignores a load that finished after
+  a newer one started, for example a refresh after posting.
+- **Failures are visible.**
+  - To Ship's open-delivery and inbound purchase-order reads, the customer lists on Returns,
+    Application Records and Customer Transaction Review, the Orders print buttons, and Quotes'
+    product-name search now show an error instead of an empty list.
+  - Customer Transaction Review shows "Transactions could not be loaded" instead of "No
+    transactions".
+  - Purchase Orders' Outstanding tab no longer re-reads forever when empty or failed, and it
+    retries when reopened after a failure.
 - **Not in this change — follow-up:** Deliveries and Reports / Sales Reports keep their caps for now,
   because open PRs #954, #955 and #957 change those files. They get the same fix after those land.
   Recorded in `docs/manual/KNOWN_ISSUES.md` (list-page row caps) and under Goal 4 in

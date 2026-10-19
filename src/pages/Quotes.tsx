@@ -258,7 +258,11 @@ export default function Quotes() {
     }
   };
 
+  // A refresh after a convert/duplicate/delete is a multi-page read; an older,
+  // slower load must not overwrite the newer list, so only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchQuotes = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('quotes')
@@ -267,6 +271,7 @@ export default function Quotes() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchSeq.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_quotes' } });
       toast('error', 'Failed to load quotes. Please try again.');
@@ -283,6 +288,9 @@ export default function Quotes() {
 
     // quote_items only carries product_id, so join through products for the name (F1: search by product).
     const quoteIds = quoteList.map((q) => q.id);
+    // The list still loads without product names, but a product search would then
+    // silently miss quotes, so a failed lookup is reported once below.
+    let productNamesFailed = false;
     if (quoteIds.length > 0) {
       // Chunked and paged: a full quote list has more ids than one URL holds and
       // more item rows than the server's row cap.
@@ -294,14 +302,19 @@ export default function Quotes() {
         .range(from, to));
       if (itemErr) {
         Sentry.captureException(itemErr, { tags: { source: 'fetch', action: 'load_quote_items' } });
+        productNamesFailed = true;
       } else if (itemRows && itemRows.length > 0) {
         const productIds = [...new Set(itemRows.map((r) => r.product_id).filter(Boolean) as string[])];
-        const { data: prodRows } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => supabase
+        const { data: prodRows, error: prodErr } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => supabase
           .from('products')
           .select('id, product_name')
           .in('id', idChunk)
           .order('id')
           .range(from, to));
+        if (prodErr) {
+          Sentry.captureException(prodErr, { tags: { source: 'fetch', action: 'load_quote_products' } });
+          productNamesFailed = true;
+        }
         const nameById: Record<string, string> = {};
         (prodRows || []).forEach((p) => { nameById[p.id] = p.product_name; });
         const namesByQuote: Record<string, Set<string>> = {};
@@ -315,8 +328,12 @@ export default function Quotes() {
       }
     }
 
+    if (seq !== fetchSeq.current) return;
     setQuotes(quoteList);
     setLoading(false);
+    if (productNamesFailed) {
+      toast('error', 'Product names could not be loaded, so searching by product may miss quotes. Reload to try again.');
+    }
   }, [toast]);
 
   useEffect(() => {

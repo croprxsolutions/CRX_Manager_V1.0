@@ -4,7 +4,7 @@
  * Filterable by status (unpaid/partially_paid/paid/overdue).
  * Search by vendor name, bill number, PO number. Admin-only.
  */
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, AlertTriangle, Clock, CheckCircle2, FileText } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -35,7 +35,11 @@ export default function VendorBills() {
 
   const today = localToday();
 
+  // The list is a multi-page read; an older, slower load must not overwrite a
+  // newer one, so only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchBills = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
       supabase
@@ -46,6 +50,7 @@ export default function VendorBills() {
         .order('id')
         .range(from, to),
     );
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_vendor_bills' } });

@@ -126,7 +126,11 @@ export default function Invoices() {
   // Customer 360 peek drawer (F2) — view a customer's numbers without leaving the list.
   const [drawerCustomer, setDrawerCustomer] = useState<{ id: string; name: string } | null>(null);
 
+  // A refresh after posting/voiding/deleting is a multi-page read; an older,
+  // slower load must not overwrite the newer list, so only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchInvoices = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     // PR-07 follow-up: dropped salesman FK embed; resolve via profile_public_view.
     // Read every page: a single request is silently cut off at the server's row cap.
@@ -146,6 +150,7 @@ export default function Invoices() {
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'invoices' } });
@@ -191,6 +196,7 @@ export default function Invoices() {
       salesman_name: inv.salesman_id ? salesmanMap[inv.salesman_id] || null : null,
       order_number: inv.order_id ? orderMap[inv.order_id] || null : null,
     })) as unknown as InvoiceRow[];
+    if (seq !== fetchSeq.current) return;
     setInvoices(rows);
     setLoading(false);
   }, [toast]);

@@ -30,22 +30,35 @@ const {
 
 type QueryChain = Record<string, ReturnType<typeof vi.fn>> & PromiseLike<{ data: unknown; error: unknown }>;
 
+// Like the real server: any single request returns at most this many rows.
+const SERVER_ROW_CAP = 1000;
+
 function buildChain(result: { data: unknown; error: unknown }): QueryChain {
   const self: Record<string, unknown> = {};
+  let limitN: number | null = null;
   for (const method of [
-    'select', 'update', 'eq', 'is', 'in', 'order', 'limit',
+    'select', 'update', 'eq', 'is', 'in', 'order',
   ]) {
     self[method] = vi.fn(() => self);
   }
+  // .limit(n) caps the response at n rows, as the server does.
+  self.limit = vi.fn((n: number) => {
+    limitN = n;
+    return self;
+  });
+  const capped = (rows: unknown[]) => rows.slice(0, Math.min(SERVER_ROW_CAP, limitN ?? Infinity));
   // The list reads page by page with .range(from, to); serve each page as a slice
   // of the rows, so any number of page requests ends on an empty page.
   self.range = vi.fn((from: number, to: number) => Promise.resolve(
     Array.isArray(result.data)
-      ? { data: result.data.slice(from, to + 1), error: result.error }
+      ? { data: capped(result.data.slice(from, to + 1)), error: result.error }
       : result,
   ));
-  const promise = Promise.resolve(result);
-  self.then = promise.then.bind(promise);
+  // An unpaged read (awaited without .range) is cut off at the server row cap,
+  // so a single-request read cannot pass for a full one.
+  self.then = (onFulfilled?: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) => Promise.resolve(
+    Array.isArray(result.data) ? { data: capped(result.data), error: result.error } : result,
+  ).then(onFulfilled, onRejected);
   return self as QueryChain;
 }
 
@@ -183,6 +196,16 @@ describe('BlendTickets bulk-delete downstream guard', () => {
   });
 });
 
+/** The read began at row 0 and requested a later page that reaches rows 1,000-1,499. */
+function expectReadPastServerCap(calls: unknown[][]) {
+  expect(calls[0]).toEqual([0, SERVER_ROW_CAP - 1]);
+  expect(calls.length).toBeGreaterThanOrEqual(2);
+  const [from, to] = calls[1] as [number, number];
+  expect(from).toBeGreaterThan(0);
+  expect(from).toBeLessThanOrEqual(SERVER_ROW_CAP);
+  expect(to).toBeGreaterThanOrEqual(1499);
+}
+
 describe('BlendTickets list reads every row', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -206,13 +229,18 @@ describe('BlendTickets list reads every row', () => {
     renderPage();
 
     expect(await screen.findByText('ticket table: 1500 rows')).toBeInTheDocument();
-    // Pages 0-999 and 1000-1999 carry rows; the third, empty page ends the read.
-    expect(tickets.range.mock.calls).toEqual([[0, 999], [1000, 1999], [1500, 2499]]);
+    // The first page stops at the server cap, so the read must ask again for rows
+    // past row 1,000 (exact later ranges are pagedRead's business: seam overlap).
+    expectReadPastServerCap(tickets.range.mock.calls);
     expect(tickets.order).toHaveBeenCalledWith('id');
     expect(tickets.limit).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /Create Manual/ }));
     expect(await screen.findByText('manual create: 1500 customers')).toBeInTheDocument();
+    // The customer read pages too: an unpaged or .limit(500) read would stop at
+    // 1,000 or 500 rows in this mock, exactly as the server does.
+    expectReadPastServerCap(customers.range.mock.calls);
+    expect(customers.limit).not.toHaveBeenCalled();
     expect(customers.order).toHaveBeenCalledWith('farm_name');
     expect(customers.order).toHaveBeenCalledWith('id');
     expect(mockToast).not.toHaveBeenCalled();

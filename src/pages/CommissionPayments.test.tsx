@@ -169,16 +169,30 @@ describe('CommissionPayments item-count verification', () => {
         return buildChain({ data: [{ id: 'recipient-1', full_name: 'Test Recipient' }], error: null });
       }
       if (table === 'commission_payment_items') {
-        return buildChain({ data: itemRows(['payment-1499'], 2), error: null });
+        // Honour the id-chunk filter, so a count that leaks across chunks fails.
+        const items = itemRows(['payment-1499', 'payment-0'], 2);
+        const chain = buildChain({ data: items, error: null });
+        chain.in = (_col: string, ids: string[]) => buildChain({
+          data: items.filter((it) => ids.includes(it.commission_payment_id)),
+          error: null,
+        });
+        return chain;
       }
       return buildChain({ data: [], error: null });
     });
     render(<CommissionPayments />);
 
     // The last payment only exists on the second page of the read.
-    expect(await screen.findByText('CP-1499', {}, { timeout: 10000 })).toBeInTheDocument();
-    expect(requestedRanges.slice(0, 2)).toEqual([[0, 999], [1000, 1999]]);
-  }, 20000);
+    const lastRow = (await screen.findByText('CP-1499', {}, { timeout: 10000 })).closest('tr');
+    expect(requestedRanges.slice(0, 2)).toEqual([[0, 999], [950, 1949]]);
+    // Every payment once, and each row carries only its own items.
+    const shown = screen.getAllByText(/^CP-\d{4}$/).map((el) => el.textContent);
+    expect(shown).toHaveLength(1500);
+    expect(new Set(shown).size).toBe(1500);
+    expect(within(lastRow!).getByText('2 commission(s)')).toBeInTheDocument();
+    expect(within(screen.getByText('CP-0000').closest('tr')!).getByText('2 commission(s)')).toBeInTheDocument();
+    expect(within(screen.getByText('CP-0001').closest('tr')!).getByText('0 commission(s)')).toBeInTheDocument();
+  }, 30000);
 });
 
 // Section 07 gauntlet finding 2: the retained retry key is now bound to one

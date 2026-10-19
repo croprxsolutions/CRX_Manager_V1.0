@@ -4,7 +4,7 @@
  *
  * Sprint 10: Commission Payment Lifecycle
  */
-import { useEffect, useState , useCallback } from 'react';
+import { useEffect, useState , useCallback, useRef } from 'react';
 import { DollarSign, Send, Plus, Check, Clock, RotateCcw } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -158,7 +158,11 @@ export default function CommissionPayments() {
   // but the refresh failed" message with no message at all, and leave `loading`
   // stuck true with the spinner up. Returning false instead keeps the caller's
   // own explanation on screen and tells it the list is stale.
+  // A multi-page load started before a post can finish after the refresh the
+  // post triggered; only the newest load may replace the list.
+  const fetchPaymentsSeq = useRef(0);
   const fetchPayments = useCallback(async ({ quiet = false } = {}): Promise<boolean> => {
+    const seq = ++fetchPaymentsSeq.current;
     setLoading(true);
     try {
       // PR-07 follow-up: dropped recipient FK embed; resolve via profile_public_view.
@@ -225,6 +229,8 @@ export default function CommissionPayments() {
         item_count: itemCountError ? null : itemCounts.get(p.id) ?? 0,
       } as CommissionPaymentRow));
 
+      // Superseded: the newer load sets the list and reports its own outcome.
+      if (seq !== fetchPaymentsSeq.current) return true;
       setPayments(rows);
       if (hasUnverifiedItemCount) {
         toast('error', 'Some commission payment item counts could not be verified. Posting is disabled for those rows.');

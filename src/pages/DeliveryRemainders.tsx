@@ -2,7 +2,7 @@
  * DeliveryRemainders — Shows all pending delivery remainder items across all customers.
  * Allows creating follow-up deliveries from grouped remainders.
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Truck, Package } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -49,7 +49,11 @@ export default function DeliveryRemainders() {
   const [customerFilter, setCustomerFilter] = useState('');
   const [creating, setCreating] = useState<string | null>(null);
 
+  // A refresh after creating a follow-up delivery is a multi-page read; an older,
+  // slower load must not overwrite the newer list, so only the latest may set state.
+  const fetchSeq = useRef(0);
   const fetchRemainders = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
       supabase
         .from('delivery_remainders')
@@ -64,6 +68,7 @@ export default function DeliveryRemainders() {
         .order('id')
         .range(from, to),
     );
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_delivery_remainders' } });

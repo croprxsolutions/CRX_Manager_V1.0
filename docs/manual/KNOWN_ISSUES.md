@@ -91,7 +91,7 @@ exposure (full list in the PR for step 1):
   column, so this needs column-level grants (the `application_services` pattern, `20260729015706`).
 - **Functions** that hand cost to non-admins: five cost reports, `dashboard_summary` (company-wide profit and margin to any signed-in account), the sales reports, `get_inventory_position`, `save_quote`'s
   reply, and the below-cost refusal message, which carried the exact cost (a rep could type a one-cent price to read it).
-  **Step 1 (`20261019010000`, LIVE 2026-10-19 18:27 UTC, live per-role check passed) closes all of these** except purchase-order cost (`get_chemical_history`,
+  **Step 1 (`20261019010000`, LIVE 2026-10-19 18:27 UTC; the report and inventory reads passed a read-only live per-role check, while the quote-save reply and below-cost message need a write and were proven only in the disposable test database) closes all of these** except purchase-order cost (`get_chemical_history`,
   `match_quick_receive_items`). Mason decided on 2026-10-18 that reps keep purchase orders and receiving but cannot see or
   enter unit cost (an admin enters it later); that is built in steps 2 and 3.
 - **Saves that trust the browser's cost:** `save_job` (job chemical cost), the field-application invoice save and field lines

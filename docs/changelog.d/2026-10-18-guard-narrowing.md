@@ -14,7 +14,8 @@ sessions on helper reports, twice more on 2026-10-18 alone. Mason approved the r
   unchanged.
 - `.claude/hooks/hold-latch-lib.mjs`, `hold-latch-guard.mjs`: `holdDecision` returns deny, warn or
   allow. Outward actions deny. Push and merge are now read through autopilot's global-option-aware
-  patterns, which closes the `gh pr merge … --match-head-commit` gap. Local edits and commits warn.
+  patterns, which closes the `gh pr merge … --match-head-commit` gap. The destructive local commands autopilot denies stay denied;
+  ordinary local edits and commits warn.
 - `.claude/hooks/review-proof-guard.mjs`: the `.claude` ancestor rule is narrowed to whole targets,
   keeping `.claude/worktrees` at full breadth. `.claude/agents` and `.claude/commands` are enforcement
   surfaces. `codex-push-lib.mjs` `reviewProofPathMentioned` now also protects `migration-review-*.json`,

@@ -21,11 +21,14 @@ proposal), then "Change permissions to not always prompt me allow it" and "I app
 
 **Decision.**
 1. Mason's "stop" keeps hard-blocking outward actions (push, merge, PR publishing, migration
-   apply, deploy, live SQL writes). Local edits and commits get a warning instead. This keeps the
+   apply, deploy, live SQL writes) and the destructive local commands autopilot already denies (such
+   as a recursive delete or a forced branch delete). Ordinary edits and commits get a warning instead. This keeps the
    2026-10-02 rule that his stop is a hard block, and stops the latch's misfires from freezing
    whole sessions.
 2. The merge and push gates refuse run-time text and fed interpreters only when the command could
-   reach a merge, a push or a GitHub call.
+   reach a merge, a push or a GitHub call. As a deliberate over-refusal, they still refuse any
+   run-time-built program name, and any such command whose text shows a gated word or obfuscation,
+   even when it would not actually merge or push (see the operative rule).
 3. The review proof guard protects the review-state directory, the worktrees, and every trusted
    file by name, instead of any command that mentions `.claude`.
 4. The retired maintenance-producer rule is removed.

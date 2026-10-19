@@ -293,8 +293,9 @@ real reports minus the preamble line through `origin/main`'s hooks.
 
 **Impact reduced 2026-10-18.** Seen twice more on 2026-10-18 (4:46 PM and 4:59 PM Central), both
 times from another session's helper report, each freezing a building session until Mason replied.
-Since that day's guard narrowing, a latched hold blocks only outward actions (push, merge, PR
-publishing, migration apply, deploy, live SQL writes), and local edits and commits get a warning.
+Since that day's guard narrowing, a latched hold blocks outward actions (push, merge, PR publishing,
+migration apply, deploy, live SQL writes) and selected destructive local commands (such as a
+recursive delete or a forced branch delete). Ordinary source edits and commits get a warning.
 So a false latch now delays landing; it no longer stops all work. The root cause below is
 unchanged.
 

@@ -141,13 +141,13 @@ BEGIN
   IF v_status IS DISTINCT FROM 'fulfilled,fulfilled' THEN
     RAISE EXCEPTION 'SMOKE_SETUP: orders 2 and 3 are not fulfilled after full delivery: %', v_status;
   END IF;
-  -- void_order's unchanged body sets the order voided BEFORE it cancels the order's draft invoices,
-  -- and guard_invoice_terminal_order then refuses cancelling a nonzero draft on a voided order
-  -- (ORDER_INVOICE_TERMINAL; a pre-existing defect outside this batch, tracked separately). This
-  -- chain proves the replay binding, so it cancels the completions' draft invoices while the orders
-  -- are still fulfilled.
-  UPDATE public.invoices SET status = 'cancelled', void_reason = '[SMOKE] cleared before void_order', updated_at = now()
-   WHERE order_id IN (v_order[2], v_order[3]) AND status = 'draft' AND deleted_at IS NULL;
+  -- Each completion wrote a nonzero draft invoice: void_order must cancel it (the old body failed
+  -- here with ORDER_INVOICE_TERMINAL; 3b of the migration zeroes its money fields as cancel_order does).
+  SELECT count(*) INTO v_n FROM public.invoices
+   WHERE order_id IN (v_order[2], v_order[3]) AND status = 'draft' AND deleted_at IS NULL AND total_amount_cents > 0;
+  IF v_n <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: expected one nonzero draft invoice on each of orders 2 and 3, found %', v_n;
+  END IF;
 
   -- --------------------------------------------------------------------------------------------
   -- a. cancel_delivery: a key reused for a DIFFERENT delivery is refused; B stays scheduled.
@@ -336,10 +336,27 @@ BEGIN
   --    refused; second admin refused; keyless refused.
   -- --------------------------------------------------------------------------------------------
   v_order_key := v_prefix || 'void-order';
-  v_res := public.void_order(v_order[2], v_admin, '[SMOKE] billed elsewhere', v_order_key);
+  BEGIN
+    v_res := public.void_order(v_order[2], v_admin, '[SMOKE] billed elsewhere', v_order_key);
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: void_order could not void a fulfilled order with a draft invoice: %', SQLERRM;
+  END;
   SELECT status INTO v_status FROM public.orders WHERE id = v_order[2];
-  IF v_res->>'status' IS DISTINCT FROM 'voided' OR v_status IS DISTINCT FROM 'voided' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: void_order on order 2 did not void it (%): %', v_status, v_res;
+  IF v_res->>'status' IS DISTINCT FROM 'voided' OR v_status IS DISTINCT FROM 'voided'
+     OR (v_res->>'draft_invoices_voided')::int IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: void_order on order 2 did not void it and its one draft (%): %', v_status, v_res;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.invoices
+   WHERE order_id = v_order[2] AND deleted_at IS NULL AND status = 'cancelled'
+     AND total_amount_cents = 0 AND paid_amount_cents = 0 AND prepay_applied_cents = 0 AND write_off_cents = 0;
+  IF v_n <> 1 OR EXISTS (SELECT 1 FROM public.invoices WHERE order_id = v_order[2] AND deleted_at IS NULL AND status = 'draft') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: order 2''s draft invoice is not cancelled with zero money fields (% cancelled)', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.financial_audit_log
+   WHERE operation_type = 'invoice_cancelled' AND entity_id IN (SELECT id FROM public.invoices WHERE order_id = v_order[2])
+     AND total_impact_cents < 0;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the cancelled draft has % invoice_cancelled audit rows recording its original total, expected 1', v_n;
   END IF;
   BEGIN
     v_res2 := public.void_order(v_order[3], v_admin, '[SMOKE] billed elsewhere', v_order_key);

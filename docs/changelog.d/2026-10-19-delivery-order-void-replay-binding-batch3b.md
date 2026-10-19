@@ -15,7 +15,8 @@ change:
   guard that refuses an unbound receipt now covers these three too (27 operations). Batch cancel
   keeps cancelling each delivery with no per-delivery key: its private body now calls the renamed
   cancel body directly. `void_order`'s inner body is no longer callable by the server role (nothing
-  called it). The file narrows access, so it applies only on Mason's owner approval.
+  called it), and it now cancels an order's draft invoices at zero, as `cancel_order` does, so
+  voiding a fulfilled order that has a draft invoice no longer fails (see the review-round-1 entry). The file narrows access, so it applies only on Mason's owner approval.
 - **App:** Delivery detail (cancel, void) and Order detail (void) now keep one retry key per exact
   request (the record and the reason), keep it through an unclear reply so an exact retry replays the
   saved answer, and retire it only after a confirmed result. On any replay-binding refusal the screen

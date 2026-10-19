@@ -72,8 +72,16 @@
 --   2026-10-19) is accepted; any other definition refuses the apply (PREFLIGHT_RECEIPT_GUARD_DRIFT),
 --   and the result covers 27.
 --
--- WHAT DOES NOT CHANGE: no money, stock, commission or invoice logic is retyped (the three bodies
---   are renamed, pinned by md5 below; _void_order_impl_20260714 keeps its body); no table, row,
+-- ONE BEHAVIOR FIX (Codex review on this batch, HIGH): void_order could not void a fulfilled order
+--   that still had a nonzero draft invoice. Its inner body sets the order 'voided' and then cancels
+--   the draft with status alone, which guard_invoice_terminal_order refuses on a voided order unless
+--   the draft's money fields are zero (ORDER_INVOICE_TERMINAL, whole call rolled back; 6 live
+--   fulfilled orders had such a draft on 2026-10-19, and no order has ever been voided live).
+--   Section 3b makes the same edit cancel_order's body already has: that one UPDATE also zeroes total,
+--   paid, prepay and write-off cents. Applied by exact text substitution on the md5-pinned live body.
+--
+-- WHAT DOES NOT CHANGE: apart from that one UPDATE, no money, stock, commission or invoice logic is
+--   retyped (the three bodies are renamed, pinned by md5 below); no table, row,
 --   policy or receipt changes; every keyed legitimate call (first call, exact retry) returns what it
 --   returns today. A keyless call to the three public names is now refused (IDEMPOTENCY_KEY_REQUIRED).
 --   Checks that now run before the renamed bodies: the key requirement, the auth/actor/role tests
@@ -105,6 +113,7 @@
 --   cancel_delivery); then, for each name, DROP the wrapper, ALTER FUNCTION
 --   public._<name>_replay_impl_20261015(...) RENAME TO <name>, and restore its grants (EXECUTE to
 --   authenticated, service_role); optionally re-grant service_role on _void_order_impl_20260714.
+--   The void_order draft-cancel fix (3b) should stay: reverting it only restores the failure.
 --
 -- KNOWN LIMITS (each fails safe, nothing wrong is committed):
 --   * The binding runs before the body's record checks, so a caller who retries THEIR OWN key with an
@@ -221,15 +230,26 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_BATCH_CANCEL_DRIFT: _batch_cancel_deliveries_replay_impl_20261015 differs from its reviewed body (it calls cancel_delivery with no key)';
   END IF;
 
-  -- No other database function may call the three by name (read live 2026-10-19: only the batch-cancel
-  -- body above, which is retargeted below). A new caller would be refused for a missing key.
-  SELECT string_agg(p.proname, ', ' ORDER BY p.proname) INTO v_drift
+  -- No other database function, in ANY schema, and no pg_cron job may call the three by name (read
+  -- live 2026-10-19: only the batch-cancel body above, which is retargeted below; no cron job). The
+  -- match ignores case and allows a quoted or schema-qualified name. A new caller would be refused
+  -- for a missing key. Limit: a name assembled at run time in dynamic SQL cannot be seen here; such
+  -- a caller would fail closed (IDEMPOTENCY_KEY_REQUIRED, nothing committed).
+  SELECT string_agg(n.nspname || '.' || p.proname, ', ' ORDER BY n.nspname, p.proname) INTO v_drift
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public'
-     AND p.proname NOT IN ('cancel_delivery', 'void_delivery', 'void_order', '_batch_cancel_deliveries_replay_impl_20261015')
-     AND p.prosrc ~ '(^|[^_a-z])(cancel_delivery|void_delivery|void_order)\s*\(';
+   WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+     AND NOT (n.nspname = 'public'
+              AND p.proname IN ('cancel_delivery', 'void_delivery', 'void_order', '_batch_cancel_deliveries_replay_impl_20261015'))
+     AND p.prosrc ~* '(^|[^_a-z0-9])(cancel_delivery|void_delivery|void_order)"?\s*\(';
   IF v_drift IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_UNREVIEWED_INTERNAL_CALLER: these functions call cancel_delivery, void_delivery or void_order and were not reviewed: %', v_drift;
+  END IF;
+  IF to_regclass('cron.job') IS NOT NULL THEN
+    EXECUTE $cron$SELECT string_agg(jobname, ', ' ORDER BY jobname) FROM cron.job
+                  WHERE command ~* '(cancel_delivery|void_delivery|void_order)'$cron$ INTO v_drift;
+    IF v_drift IS NOT NULL THEN
+      RAISE EXCEPTION 'PREFLIGHT_UNREVIEWED_INTERNAL_CALLER: these pg_cron jobs call cancel_delivery, void_delivery or void_order and were not reviewed: %', v_drift;
+    END IF;
   END IF;
 
   -- What the wrappers rely on: the intent check as installed by 20260811130000 (pinned), the two
@@ -504,6 +524,40 @@ REVOKE ALL ON FUNCTION public.void_order(uuid, uuid, text, text) FROM PUBLIC, an
 GRANT EXECUTE ON FUNCTION public.void_order(uuid, uuid, text, text) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
+-- 3b. void_order's inner body cancels a draft invoice the way cancel_order does.
+--     Its live body (pinned above) sets the order 'voided' and THEN cancels the order's draft
+--     invoices with status alone. guard_invoice_terminal_order lets a draft on a voided order become
+--     'cancelled' only when its money fields are zero (its canonical cancel cleanup), so voiding any
+--     fulfilled order with a nonzero draft invoice failed with ORDER_INVOICE_TERMINAL and rolled
+--     back (6 live fulfilled orders had one, read 2026-10-19; no order has ever been voided live).
+--     cancel_order's body zeroes total, paid, prepay and write-off cents in the same UPDATE. This
+--     makes the one same edit here, by exact text substitution on the pinned live body, so nothing
+--     else in it can change. A never-posted draft has no financial impact (the body's own comment);
+--     the audit row above it still records the draft's original total. credit_applied_cents is not
+--     touched: a draft carrying an applied credit is still refused, as before.
+-- ---------------------------------------------------------------------------------------------
+DO $void_order_drafts$
+DECLARE
+  v_src text;
+  v_old constant text := E'        SET status = ''cancelled'',\n            void_reason = ''Order '' || v_order.order_number || '' voided. '' || p_reason,\n            updated_at = now()\n      WHERE id = v_invoice.id;';
+  v_new constant text := E'        SET status = ''cancelled'',\n            void_reason = ''Order '' || v_order.order_number || '' voided. '' || p_reason,\n            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n            updated_at = now()\n      WHERE id = v_invoice.id;';
+BEGIN
+  SELECT replace(p.prosrc, chr(13), '') INTO v_src
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714';
+  IF md5(v_src) IS DISTINCT FROM 'a0a9151160a6f2b58624b30435322b94'
+     OR (length(v_src) - length(replace(v_src, v_old, ''))) / length(v_old) <> 1 THEN
+    RAISE EXCEPTION 'VOID_ORDER_DRAFT_CANCEL_DRIFT: _void_order_impl_20260714 is not the reviewed body with exactly one draft-cancel UPDATE';
+  END IF;
+  -- CREATE OR REPLACE keeps the owner and the ACL (service_role was revoked above).
+  EXECUTE format(
+    'CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT %L::text, p_idempotency_key text DEFAULT NULL::text) '
+    || 'RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS %L',
+    'Voided by admin', replace(v_src, v_old, v_new));
+END
+$void_order_drafts$;
+
+-- ---------------------------------------------------------------------------------------------
 -- 4. batch_cancel_deliveries' private body: its live body (pinned above) with ONE change, the
 --    per-delivery cancel_delivery(...) call retargeted to the renamed body. The batch cancels
 --    keyless per delivery, as before; the public wrapper would now refuse that for a missing key.
@@ -624,11 +678,17 @@ BEGIN
      WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714'
        AND p.proowner = 'postgres'::regrole AND p.prosecdef
        AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
-       AND md5(replace(p.prosrc, chr(13), '')) = 'a0a9151160a6f2b58624b30435322b94'
+       AND pg_get_function_arguments(p.oid) = 'p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT ''Voided by admin''::text, p_idempotency_key text DEFAULT NULL::text'
+       AND p.prorettype = 'jsonb'::regtype
+       -- Its only change is the draft-cancel UPDATE now zeroing the four money fields (3b above).
+       AND strpos(p.prosrc, E'            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n') > 0
+       AND md5(replace(replace(p.prosrc, chr(13), ''),
+                       E'            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n',
+                       '')) = 'a0a9151160a6f2b58624b30435322b94'
        AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['postgres']::text[]) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_IMPL_CONTRACT: _void_order_impl_20260714 must keep its body and be callable only by postgres';
+    RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_IMPL_CONTRACT: _void_order_impl_20260714 must be its reviewed body plus only the draft-cancel money-field zeroing, and callable only by postgres';
   END IF;
 
   -- The batch-cancel body: still postgres-only, and its only change is the retargeted call.

@@ -401,7 +401,7 @@ function main() {
   // A database function that calls one of the three by name, not reviewed, blocks the apply.
   refusedAfter('PREFLIGHT internal caller',
     `CREATE FUNCTION public.prover_calls_void_order(p uuid) RETURNS jsonb LANGUAGE plpgsql AS $$ BEGIN RETURN void_order(p, NULL, 'x', NULL); END; $$;`,
-    /PREFLIGHT_UNREVIEWED_INTERNAL_CALLER: [^\n]*: prover_calls_void_order/, guardBefore);
+    /PREFLIGHT_UNREVIEWED_INTERNAL_CALLER: [^\n]*: public\.prover_calls_void_order/, guardBefore);
   // A drifted batch-cancel body (it is recreated from its pinned text) blocks the apply.
   refusedAfter('PREFLIGHT batch-cancel drift',
     `${candidateBody(BATCH_CANCEL).header}\nBEGIN RETURN 0; END;\n$function$;`,
@@ -501,6 +501,23 @@ function main() {
     assert.match(r.fail, expected, `MUTATION ${label}: wrong failure: ${r.fail}`);
     console.log(`[prover] MUTATION: without the ${label} hunk the chain fails: ${r.fail}`);
   }
+  // The void_order draft-cancel fix (section 3b) is applied by text substitution, so its mutation
+  // puts the live body's original UPDATE back the same way.
+  const zeroed = "            total_amount_cents = 0,\\n            paid_amount_cents = 0,\\n            prepay_applied_cents = 0,\\n            write_off_cents = 0,\\n";
+  const unfix = `DO $unfix$
+DECLARE v_src text;
+BEGIN
+  SELECT prosrc INTO v_src FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';
+  IF strpos(v_src, E'${zeroed}') = 0 THEN RAISE EXCEPTION 'prover: the draft-cancel fix is not installed'; END IF;
+  EXECUTE format('CREATE OR REPLACE FUNCTION public.${VOID_ORDER_INNER}(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT %L::text, p_idempotency_key text DEFAULT NULL::text) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS %L',
+    'Voided by admin', replace(v_src, E'${zeroed}', ''));
+END
+$unfix$;`;
+  const unfixed = chain(CHAIN, unfix);
+  assert.ok(!unfixed.pass, 'MUTATION void_order draft-cancel fix: the chain still passed without it');
+  assert.match(unfixed.fail, /SMOKE_FAIL: void_order could not void a fulfilled order with a draft invoice: ORDER_INVOICE_TERMINAL/, `MUTATION void_order draft-cancel fix: wrong failure: ${unfixed.fail}`);
+  console.log(`[prover] MUTATION: without the void_order draft-cancel fix the chain fails: ${unfixed.fail}`);
+  assert.equal(md5Of(VOID_ORDER_INNER), scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), 'MUTATION: md5 read failed');
 
   console.log('DELIVERY_ORDER_VOID_REPLAY_BINDING_BATCH3B_PROOF_PASS');
 }

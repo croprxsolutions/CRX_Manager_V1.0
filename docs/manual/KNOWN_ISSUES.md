@@ -225,6 +225,8 @@ result only for the same person and the exact same request.
 **Batch 3b written, NOT applied (migration `20261019235000`, 2026-10-19).** The second cut binds `cancel_delivery`
 (and moves its role check ahead of any replay), `void_delivery` and `void_order`, and grows the guard to 27
 operations. `batch_cancel_deliveries` keeps its keyless per-delivery cancel by calling the renamed body directly.
+It also fixes a pre-existing failure: voiding a fulfilled order that still had a nonzero draft invoice always rolled
+back with `ORDER_INVOICE_TERMINAL` (6 live orders qualified on 2026-10-19; no order has ever been voided live).
 The three stay in the table below until the apply is confirmed live.
 
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.

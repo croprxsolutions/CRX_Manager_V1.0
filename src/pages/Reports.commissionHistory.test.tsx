@@ -15,6 +15,7 @@ const H = vi.hoisted(() => ({
   },
   rpcHandler: null as RpcHandler | null,
   selects: [] as Array<{ table: string; columns: string }>,
+  tableHandler: null as ((table: string, columns: string) => Promise<unknown> | null) | null,
 }));
 
 type QueryBuilder = {
@@ -33,8 +34,9 @@ type QueryBuilder = {
 vi.mock('../lib/db', () => ({
   supabase: {
     from: (table: string) => {
+      let selected = '*';
       const builder: QueryBuilder = {
-        select: (columns = '*') => { H.selects.push({ table, columns }); return builder; },
+        select: (columns = '*') => { selected = columns; H.selects.push({ table, columns }); return builder; },
         eq: () => builder,
         order: () => builder,
         limit: () => builder,
@@ -43,7 +45,10 @@ vi.mock('../lib/db', () => ({
         gte: () => builder,
         lte: () => builder,
         not: () => builder,
-        then: (resolve) => resolve({ data: [], error: null }),
+        then: (resolve) => {
+          const custom = H.tableHandler?.(table, selected);
+          return custom ? custom.then(resolve) : resolve({ data: [], error: null });
+        },
       };
       return builder;
     },
@@ -120,6 +125,7 @@ beforeEach(() => {
   H.selects = [];
   H.toast.mockReset();
   H.rpcHandler = null;
+  H.tableHandler = null;
   H.auth.role = 'admin';
   H.auth.profile = { id: 'admin-1', role: 'admin' };
   vi.mocked(exportToCSV).mockClear();
@@ -192,6 +198,34 @@ describe('Reports commission history', () => {
       if (table === 'products') expect(columns).not.toMatch(/current_cost|\*/);
       if (table === 'commissions') expect(columns).not.toMatch(/order_profit|\*/);
     }
+  });
+
+  it('never shows a rep commission rows from an admin load that finishes after the role change', async () => {
+    H.rpcHandler = () => Promise.resolve({ data: [], error: null });
+    let finishAdminLoad: (value: unknown) => void = () => {};
+    const row = (id: string, recipient: string) => ({
+      id, recipient, order_id: null, job_id: null, commission_amount: 10, split_percentage: 100,
+      order_date: '2026-10-01', status: 'pending', paid_date: null, order_profit: 500,
+    });
+    H.tableHandler = (table, columns) => {
+      if (table !== 'commissions') return null;
+      if (columns === '*') return new Promise((resolve) => { finishAdminLoad = resolve; });
+      return Promise.resolve({ data: [row('c-own', 'Own Rep Row')], error: null });
+    };
+    const view = renderReports();
+    fireEvent.click(screen.getByRole('button', { name: 'Commissions' }));
+    await waitFor(() => expect(H.selects.some(({ table, columns }) => table === 'commissions' && columns === '*')).toBe(true));
+
+    // The session drops to sales rep while the admin's full commission load is still in flight.
+    H.auth.role = 'sales_rep';
+    H.auth.profile = { id: 'sales-rep-1', role: 'sales_rep' };
+    view.rerender(<MemoryRouter><Reports /></MemoryRouter>);
+    expect(await screen.findByText('Own Rep Row')).toBeInTheDocument();
+
+    finishAdminLoad({ data: [row('c-other', 'Other Recipient Row')], error: null });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText('Other Recipient Row')).not.toBeInTheDocument();
+    expect(screen.getByText('Own Rep Row')).toBeInTheDocument();
   });
 
   it('still asks for cost on an admin\'s Price List', async () => {

@@ -42,6 +42,7 @@ const ADMIN_ONLY_FINANCIAL_TABS: ReadonlySet<FinancialTab> = new Set(['pnl', 'gr
 const ADMIN_ONLY_OPERATIONAL_TABS: ReadonlySet<OperationalTab> = new Set(['inventory_cost']);
 // Profit by customer / product / month is profit; a rep keeps only their own commissions.
 const ADMIN_ONLY_PROFIT_TABS: ReadonlySet<ProfitTab> = new Set(['customer', 'product', 'revenue']);
+const NO_COMMISSIONS: CommissionRow[] = [];
 // A rep's own commission rows, without order_profit (profit is admin-only).
 // Price list columns; only an admin's list carries current_cost (cost is admin-only).
 const PRICE_LIST_COLUMNS = 'id, product_name, sku, category, vendor, tier1_price, tier2_price, tier3_price, product_form, container_type, container_size, unit_size';
@@ -162,6 +163,11 @@ export default function Reports() {
   const [customerData, setCustomerData] = useState<CustomerProfit[]>([]);
   const [productData, setProductData] = useState<ProductProfit[]>([]);
   const [commissionData, setCommissionData] = useState<CommissionRow[]>([]);
+  // Which role the loaded commission rows were fetched for. A rep sees only their own rows
+  // without order profit, so rows loaded under another role are never shown or exported.
+  const [commissionDataForAdmin, setCommissionDataForAdmin] = useState<boolean | null>(null);
+  const commissionsLoadId = useRef(0);
+  const visibleCommissions = commissionDataForAdmin === isAdmin ? commissionData : NO_COMMISSIONS;
   const [revenueData, setRevenueData] = useState<RevenueSummary[]>([]);
   const [selectedCommissions, setSelectedCommissions] = useState<Set<string>>(new Set());
   const [markingPaid, setMarkingPaid] = useState(false);
@@ -327,14 +333,19 @@ export default function Reports() {
   // catch, so a rejection here would discard the specific "some commissions were
   // already batched" warning and surface nothing in its place.
   const fetchCommissions = useCallback(async (): Promise<boolean> => {
+    const loadId = ++commissionsLoadId.current;
+    const forAdmin = isAdmin;
     try {
       let query = supabase.from('commissions').select(isAdmin ? '*' : REP_COMMISSION_COLUMNS).order('order_date', { ascending: false });
       if (!isAdmin && profile) query = query.eq('recipient_user_id', profile.id);
       if (startDate) query = query.gte('order_date', startDate);
       if (endDate) query = query.lte('order_date', endDate);
       const { data, error } = await query;
+      // A newer load (for example after a role change) owns the result; drop this one.
+      if (loadId !== commissionsLoadId.current) return true;
       if (error) { toast('error', 'Failed to load commissions.'); return false; }
       setCommissionData((data || []) as unknown as CommissionRow[]);
+      setCommissionDataForAdmin(forAdmin);
       setSelectedCommissions(new Set());
       return true;
     } catch (err) {
@@ -677,7 +688,7 @@ export default function Reports() {
     const actor = profile;
     if (!actor) { toast('error', 'Your profile is still loading — try again in a moment.'); return; }
     // Only pending commissions can be marked paid
-    const selected = commissionData.filter((c) => selectedCommissions.has(c.id));
+    const selected = visibleCommissions.filter((c) => selectedCommissions.has(c.id));
     const nonPending = selected.filter((c) => c.status !== 'pending');
     if (nonPending.length > 0) {
       toast('error', `${nonPending.length} selected commission(s) are not in 'pending' status — only pending commissions can be marked paid`);
@@ -879,7 +890,7 @@ export default function Reports() {
   };
 
   const toggleSelectAll = () => {
-    const pendingIds = commissionData.filter((c) => c.status === 'pending').map((c) => c.id);
+    const pendingIds = visibleCommissions.filter((c) => c.status === 'pending').map((c) => c.id);
     setSelectedCommissions(selectedCommissions.size === pendingIds.length && pendingIds.length > 0 ? new Set() : new Set(pendingIds));
   };
 
@@ -912,7 +923,7 @@ export default function Reports() {
         { key: 'margin_pct', header: 'Margin %', format: (v) => `${Number(v).toFixed(1)}%` },
       ], 'product_profitability');
     } else if (profitTab === 'commission') {
-      exportToCSV(commissionData, [
+      exportToCSV(visibleCommissions, [
         { key: 'order_date', header: 'Date', format: fmtDateOnlyCSV },
         { key: 'recipient', header: 'Recipient' },
         { key: 'commission_amount', header: 'Commission', format: fmtCSV },
@@ -1059,7 +1070,7 @@ export default function Reports() {
     ...(isAdmin ? [{
       key: '_select' as keyof CommissionRow,
       header: (
-        <input type="checkbox" checked={selectedCommissions.size > 0 && selectedCommissions.size === commissionData.filter((c) => c.status === 'pending').length} onChange={toggleSelectAll} aria-label="Select all pending commissions" className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green" />
+        <input type="checkbox" checked={selectedCommissions.size > 0 && selectedCommissions.size === visibleCommissions.filter((c) => c.status === 'pending').length} onChange={toggleSelectAll} aria-label="Select all pending commissions" className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green" />
       ) as unknown as string,
       render: (r: CommissionRow) => r.status === 'pending' ? (
         <input type="checkbox" checked={selectedCommissions.has(r.id)} onChange={() => toggleCommissionSelect(r.id)} aria-label={`Select commission for ${r.recipient}`} className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green" />
@@ -1168,7 +1179,7 @@ export default function Reports() {
   ];
 
   // Unpaid commission total
-  const unpaidTotal = commissionData.filter((c) => c.status === 'pending').reduce((sum, c) => sum + c.commission_amount, 0);
+  const unpaidTotal = visibleCommissions.filter((c) => c.status === 'pending').reduce((sum, c) => sum + c.commission_amount, 0);
 
   const categories: { key: Category; label: string }[] = [
     { key: 'profitability', label: 'Profitability' },
@@ -1329,7 +1340,7 @@ export default function Reports() {
             <div className="p-5">
               {isAdmin && profitTab === 'customer' && <DataTable data={customerData as unknown as Record<string, unknown>[]} columns={customerCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search customers..." searchKeys={['farm_name']} emptyTitle="No customer data" loading={loading} />}
               {isAdmin && profitTab === 'product' && <DataTable data={productData as unknown as Record<string, unknown>[]} columns={productCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name']} emptyTitle="No product data" loading={loading} />}
-              {profitTab === 'commission' && <DataTable data={commissionData as unknown as Record<string, unknown>[]} columns={commissionCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No commissions" loading={loading} />}
+              {profitTab === 'commission' && <DataTable data={visibleCommissions as unknown as Record<string, unknown>[]} columns={commissionCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No commissions" loading={loading} />}
               {isAdmin && profitTab === 'revenue' && <DataTable data={revenueData as unknown as Record<string, unknown>[]} columns={revenueCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No revenue data" loading={loading} />}
             </div>
           </Card>

@@ -135,8 +135,9 @@ export default function DeliveryDetail() {
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
-  // A follow-up delivery reuses this page; never carry paper mode onto it.
-  useEffect(() => { setUsePaperTicket(false); }, [id]);
+  // A follow-up delivery reuses this page; never carry paper mode or the previous
+  // delivery's photos onto it (a failed load then shows no ticket photo: fails closed).
+  useEffect(() => { setUsePaperTicket(false); setPhotos([]); }, [id]);
   const [completing, setCompleting] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);

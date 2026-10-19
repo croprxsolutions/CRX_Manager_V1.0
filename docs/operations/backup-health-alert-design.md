@@ -20,7 +20,7 @@
 
 **A. Stronger check inside the Sunday run (in `CRX_Backups`).**
 - Compare the new dump size to the previous dump. Fail if it is under 70% of the previous size (the database only grows; 89 MB live, 13.2 MB encrypted).
-- Run `pg_restore --list` on the decrypted dump and fail if it cannot read the table of contents or the table count is lower than the previous run's.
+- Prove the **whole** archive is readable, not just its table of contents (`pg_restore --list` reads only the contents list, so a dump cut off after it would pass). Restore the decrypted dump into a disposable Postgres inside the workflow run (a service container that is thrown away), fail on any restore error, and fail if the restored table count or key-table row counts are below the previous run's. The row counts from this restore are what get written to the baseline file below.
 - Record row counts for a fixed list of key tables (`customers`, `invoices`, `orders`, `inventory_transactions`, `payments`) into a small `baseline-YYYY-MM-DD.json` committed beside the dump. The restore drill compares to this file (runbook 4.6, step 5, which uses a live-count fallback until this exists).
 
 **B. A separate missed-run watchdog (not the backup job itself).** A job that does not depend on the Sunday workflow running:
@@ -41,5 +41,5 @@
 
 1. Edit `.github/workflows/offsite-backup.yml` in `CRX_Backups`: size-ratio check, `pg_restore --list` check, baseline file.
 2. Add the daily lateness workflow (no new secret).
-3. Prove it: run with a deliberately truncated test dump on a branch and watch it fail; run the lateness check against a faked old date and watch the issue open. Do not merge on "it looks right".
+3. Prove it: run with deliberately damaged test dumps on a branch and watch each fail: one cut off before the end of the table of contents, and one cut off **after** it (intact contents, missing data blocks); run the lateness check against a faked old date and watch the issue open. Do not merge on "it looks right".
 4. Update runbook 4.11 and the findings note.

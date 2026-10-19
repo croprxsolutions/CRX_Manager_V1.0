@@ -17,7 +17,8 @@ function server(initial: Row[], before: (call: number, rows: Row[]) => Row[] = (
       call += 1;
       rows = before(call, rows);
       ranges.push([from, to]);
-      return { data: rows.slice(from, to + 1), error: null, count: rows.length };
+      // Like the server: never more than 1,000 rows, whatever range is asked for.
+      return { data: rows.slice(from, Math.min(to, from + 999) + 1), error: null, count: rows.length };
     },
   };
 }
@@ -72,6 +73,15 @@ describe('fetchAllRows', () => {
     const s = server(ids(1500), (_call, rows) => [{ id: `churn-${n++}` }, ...rows]);
     const result = await fetchAllRows<Row>(s.page);
     expect(result).toEqual({ data: null, error: { message: LIST_CHANGED_WHILE_LOADING } });
+  });
+
+  it('gives up on a list that grows as fast as it is read', async () => {
+    let n = 0;
+    // An import appends 1,000 rows before every request.
+    const s = server(ids(1000), (_call, rows) => [...rows, ...Array.from({ length: 1000 }, () => ({ id: `grow-${n++}` }))]);
+    const result = await fetchAllRows<Row>(s.page);
+    expect(result).toEqual({ data: null, error: { message: LIST_CHANGED_WHILE_LOADING } });
+    expect(s.ranges.length).toBeLessThan(100);
   });
 
   it('stops after the overlap-only page at the end', async () => {

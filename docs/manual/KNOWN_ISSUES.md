@@ -859,9 +859,22 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
       of inserts;
     - Customer Transaction Review's function rows have no `id`, so its running-balance chain is also
       checked (`src/lib/transactionLedger.ts`).
-  - What is left: an insert and a delete landing in the same read can keep the count equal while
-    swapping a row. That needs real cursor paging, which is the later Goal 4 step along with
-    server-side search.
+  - A list that keeps growing as fast as it is read stops after twice its starting size plus one
+    page and is reported as changed. Customer Transaction Review also checks that the server's
+    current last row is its own last row whenever it read more than one page.
+  - **Still open (accepted residual, 2026-10-18; both review models rated it HIGH):** an insert and
+    a delete landing between two page reads of the same load can keep the count equal while
+    swapping one row, so the list can show a just-deleted record and miss a just-added one until the
+    next refresh. This needs more than 1,000 rows in the list plus both changes in that window.
+    Live volumes on 2026-10-18 were at most 151 rows. The fix is a consistent snapshot (cursor
+    paging or a database-side read), which is the later Goal 4 step along with server-side search.
+  - Deferred from the same reviews:
+    - Every page asks for an exact count, which costs one counting pass per page. That is fine at
+      today's sizes, but loading around 100,000 rows would count the table about 100 times. Server
+      paging replaces full-list loads.
+    - On Commission Payments, a refresh overtaken by a newer one reports success even if the newer
+      one then fails; the newer refresh still reports its own failure. Its loader is pinned by
+      `commissionPayoutIntentBindingMigration.test.ts`.
   - On a capped query, records past the cap are missing from that page and its browser-side filters.
     Revisit before volumes near the caps.
   `SelectLocationsModal` still splits map and list 50/50 on tablets.

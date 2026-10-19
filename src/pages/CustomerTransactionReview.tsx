@@ -12,7 +12,7 @@ import ReportShell from '../components/reports/ReportShell';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { fetchAllRows } from '../lib/pagedRead';
-import { isLedgerContinuous } from '../lib/transactionLedger';
+import { isLedgerContinuous, isSameTransaction } from '../lib/transactionLedger';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import type { CustomerTransactionRow } from '../types';
@@ -74,8 +74,33 @@ export default function CustomerTransactionReview() {
         break;
       }
       const rows = assertRpcResult<CustomerTransactionRow[]>(result.data, 'get_customer_transaction_review');
-      if (isLedgerContinuous(rows)) loaded = rows;
-      else failure = 'transactions changed while loading';
+      if (!isLedgerContinuous(rows)) {
+        failure = 'transactions changed while loading';
+        continue;
+      }
+      // A read that took more than one page could still keep a transaction
+      // deleted after its page was read and stop before the real last row, with
+      // the chain intact. The server's current last row must be ours.
+      if (rows.length >= 1000) {
+        const tail = await supabase
+          .rpc('get_customer_transaction_review', {
+            p_customer_id: customerId,
+            p_start_date: startDate,
+            p_end_date: endDate,
+          }, { count: 'exact' })
+          .range(rows.length - 1, rows.length - 1);
+        if (seq !== fetchSeq.current) return;
+        if (tail.error) {
+          failure = tail.error.message;
+          break;
+        }
+        const tailRows = assertRpcResult<CustomerTransactionRow[]>(tail.data, 'get_customer_transaction_review');
+        if (tail.count !== rows.length || tailRows.length !== 1 || !isSameTransaction(tailRows[0], rows[rows.length - 1])) {
+          failure = 'transactions changed while loading';
+          continue;
+        }
+      }
+      loaded = rows;
     }
     if (loaded === null) {
       setData([]);

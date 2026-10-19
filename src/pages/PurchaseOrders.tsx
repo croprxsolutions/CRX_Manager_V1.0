@@ -99,12 +99,7 @@ export default function PurchaseOrders() {
     setLoading(false);
   }, [toast]);
 
-  // Load once when the tab is first opened. Keying on "no items yet" re-ran the
-  // read forever when there were none or the read failed (a toast every pass).
-  // A failed read clears the flag, so reopening the tab tries again.
-  const outstandingRequested = useRef(false);
-  // Same stale-load guard: only the latest outstanding-items read may set state
-  // (including clearing the requested flag on failure).
+  // Same stale-load guard: only the latest outstanding-items read may set state.
   const fetchOutstandingSeq = useRef(0);
   const fetchOutstandingItems = useCallback(async () => {
     const seq = ++fetchOutstandingSeq.current;
@@ -132,7 +127,6 @@ export default function PurchaseOrders() {
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_outstanding_items' } });
       toast('error', 'Failed to load outstanding items.');
-      outstandingRequested.current = false;
       setOutstandingLoading(false);
       return;
     }
@@ -169,11 +163,11 @@ export default function PurchaseOrders() {
     fetchPOs();
   }, [fetchPOs]);
 
+  // Load each time the tab is opened, so it is current and a failure can be
+  // retried. Keying on "no items yet" re-ran the read forever when there were
+  // none or the read failed (a toast every pass).
   useEffect(() => {
-    if (activeTab === 'outstanding' && !outstandingRequested.current) {
-      outstandingRequested.current = true;
-      fetchOutstandingItems();
-    }
+    if (activeTab === 'outstanding') fetchOutstandingItems();
   }, [activeTab, fetchOutstandingItems]);
 
   /* ─── Summary stats ─── */

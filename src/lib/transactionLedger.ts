@@ -17,3 +17,14 @@ export function isLedgerContinuous(rows: CustomerTransactionRow[]): boolean {
   }
   return true;
 }
+
+/** Same transaction row, including its running balance (the rows carry no id). */
+export function isSameTransaction(a: CustomerTransactionRow, b: CustomerTransactionRow): boolean {
+  return a.transaction_date === b.transaction_date
+    && a.transaction_type === b.transaction_type
+    && a.reference_number === b.reference_number
+    && a.description === b.description
+    && a.debit_cents === b.debit_cents
+    && a.credit_cents === b.credit_cents
+    && a.running_balance_cents === b.running_balance_cents;
+}

@@ -58,11 +58,18 @@ async function readOnce<T>(
 ): Promise<{ rows: T[]; serverCount: number | null; error: { message: string } | null }> {
   const rows: T[] = [];
   let serverCount: number | null = null;
+  // Rows this pass may read before it stops as "changed while loading": a list
+  // that keeps growing as fast as it is read would otherwise never finish.
+  let rowLimit = Infinity;
   const seenIds = new Set<unknown>();
   for (let from = 0; ;) {
     const { data, error, count } = await fetchPage(from, from + PAGE_SIZE - 1);
     if (error) return { rows, serverCount, error };
-    if (typeof count === 'number') serverCount = count;
+    if (typeof count === 'number') {
+      if (serverCount === null) rowLimit = count * 2 + PAGE_SIZE;
+      serverCount = count;
+    }
+    if (rows.length > rowLimit) return { rows, serverCount: -1, error: null };
     const page = data ?? [];
     if (page.length === 0) break;
     let newRows = 0;

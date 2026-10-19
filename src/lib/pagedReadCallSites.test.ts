@@ -26,14 +26,16 @@ function findCallSites(): CallSite[] {
   for (const file of readdirSync(PAGES_DIR).sort()) {
     if (!file.endsWith('.tsx') || file.endsWith('.test.tsx') || file in EXEMPT) continue;
     const source = readFileSync(join(PAGES_DIR, file), 'utf8');
-    for (const match of source.matchAll(CALL_PATTERN)) {
-      const start = match.index ?? 0;
+    const starts = [...source.matchAll(CALL_PATTERN)].map((m) => m.index ?? 0);
+    starts.forEach((start, i) => {
+      const nextCall = i + 1 < starts.length ? starts[i + 1] : source.length;
       const rangeAt = source.indexOf('.range(', start);
       const line = source.slice(0, start).split('\n').length;
-      // No `.range(` after the call means the callback cannot be read as a
-      // page; record the rest of the file so the check below fails on it.
-      sites.push({ file, line, callback: rangeAt === -1 ? '' : source.slice(start, rangeAt) });
-    }
+      // The callback's `.range(` must come before the next paged call; otherwise
+      // a later query's count could mask this one, so record nothing and fail.
+      const ownsRange = rangeAt !== -1 && rangeAt < nextCall;
+      sites.push({ file, line, callback: ownsRange ? source.slice(start, rangeAt) : '' });
+    });
   }
   return sites;
 }

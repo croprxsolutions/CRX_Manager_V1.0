@@ -69,5 +69,20 @@ Declined: a fed script whose text names `git` (intended speed bump), the
 `ls .claude/session-state | grep del` over-block (pinned in the tests), and `vercel whoami`
 under a hold (the `vercel\s` match is unchanged from before this PR).
 
+**Luna round 3 (9 findings), last iterating round.** Fixed: `fromCodePoint`/`fromhex`/`unhexlify`/
+`pack(`/`ord(` and a bare `join(` count as obfuscation; inline code attached to its short flag
+(`perl -e'…'`) is read; and under a hold any `psql`/`pg_restore` launch is outward.
+
+Declined: an assembled program name that cannot reach a gated action is still refused
+(`P=python; $P --version`, which is rare); inline code that only prints a gated word; the bare `deploy`
+match; the hold's deliberate `create_directory` deny (in the tool superset since 2026-07-13);
+the pinned `ls … | grep del` over-block; and SQL keywords inside string literals under a hold.
+
+**Mason, 2026-10-18: no more iterating Codex rounds** ("call it good if we are fixing little tiny
+bugs"). Rounds 1–3 kept finding new spellings of one class: a merge hidden inside code that a
+runtime executes. A text check cannot close that class, because `node file.mjs` running the same
+code has always been allowed. It is recorded as a **speed bump**, not a boundary. Each spelling
+found was added, and the remaining residual is stated here and in agent-guardrails.md.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

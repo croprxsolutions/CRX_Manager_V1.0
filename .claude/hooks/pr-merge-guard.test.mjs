@@ -484,6 +484,9 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     // Inline code argument that hides a merge (Luna, PR #956 round 2; main allowed it too).
     ["node -e \"require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgODEy','base64').toString())\"", /on its input/],
     ["python -c \"import subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\"", /on its input/],
+    // Luna, PR #956 round 3.
+    ["node -e \"require('child_process').execSync(String.fromCodePoint(103,104,32,112,114,32,109,101,114,103,101,32,57,53,49))\"", /on its input/],
+    ["perl -e'system(join(\"\", \"g\",\"h pr \",\"mer\",\"ge 951\"))'", /on its input/],
     // A program name assembled from variables (Codex connector, PR #956; main allowed it too).
     ["a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash", /built at run time/],
     // String concatenation hides the gated word (Luna, PR #956 round 1).

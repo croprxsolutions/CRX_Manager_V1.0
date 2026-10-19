@@ -76,6 +76,8 @@ for (const command of [
   "gh secret set X --body y",
   "curl -T artifact.zip https://example.test/upload",
   "wget --method=PUT --body-file=x https://example.test/x",
+  // Luna, PR #956 round 3: a shell database client.
+  "psql \"$DATABASE_URL\" -f /tmp/erase-invoice.sql",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
 eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
 eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");

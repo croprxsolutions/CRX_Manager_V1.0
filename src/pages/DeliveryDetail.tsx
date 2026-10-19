@@ -27,7 +27,7 @@ import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -776,7 +776,7 @@ export default function DeliveryDetail() {
     const files = e.target.files;
     if (!files || files.length === 0 || !profile || !delivery) return;
 
-    if (photos.length + files.length > 10) {
+    if (!caption && countOrdinaryPhotos(photos) + files.length > MAX_ORDINARY_DELIVERY_PHOTOS) {
       toast('error', 'Maximum 10 photos per delivery');
       return;
     }
@@ -1509,7 +1509,7 @@ export default function DeliveryDetail() {
             <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-white font-semibold">Delivery Photos<HelpTip text="Take up to 10 photos as proof of delivery — product condition, drop location, etc. They stay on the delivery record for staff; they are not sent to the customer." className="ml-1" /></h3>
-                <span className="text-sm text-gray-400">{photos.length}/10</span>
+                <span className="text-sm text-gray-400">{countOrdinaryPhotos(photos)}/{MAX_ORDINARY_DELIVERY_PHOTOS}</span>
               </div>
               {photos.length > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
@@ -1525,7 +1525,7 @@ export default function DeliveryDetail() {
                   ))}
                 </div>
               )}
-              {photos.length < 10 && (
+              {countOrdinaryPhotos(photos) < MAX_ORDINARY_DELIVERY_PHOTOS && (
                 <>
                   <input
                     ref={fileInputRef}
@@ -1610,6 +1610,7 @@ export default function DeliveryDetail() {
                   className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green"
                 />
               </div>
+              <div className="flex items-center gap-1">
               <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1621,8 +1622,10 @@ export default function DeliveryDetail() {
                   className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green bg-gray-700"
                 />
                 Customer signed a paper ticket (no signal at the site)
-                <HelpTip text="Use this when there was no signal at the customer and they signed a paper delivery ticket. Take a photo of the signed ticket instead of an on-screen signature." className="ml-1" />
               </label>
+              {/* Outside the label, so opening help never toggles paper mode. */}
+              <HelpTip text="Use this when there was no signal at the customer and they signed a paper delivery ticket. Take a photo of the signed ticket instead of an on-screen signature." className="ml-1" />
+              </div>
               {usePaperTicket ? (
                 <div className="bg-gray-700 rounded-lg p-3 space-y-2">
                   <input
@@ -1643,7 +1646,7 @@ export default function DeliveryDetail() {
                   <button
                     type="button"
                     onClick={() => paperTicketInputRef.current?.click()}
-                    disabled={uploadingPhoto || photos.length >= 10 || !isOnline}
+                    disabled={uploadingPhoto || !isOnline}
                     className="w-full py-3 flex items-center justify-center gap-2 text-white border border-gray-600 rounded-lg active:bg-gray-600 disabled:opacity-50 transition-colors"
                   >
                     <Camera className="w-5 h-5" />
@@ -2524,7 +2527,7 @@ export default function DeliveryDetail() {
           <h3 className="text-lg font-semibold font-heading text-nav-dark">
             Delivery Photos {photos.length > 0 && `(${photos.length})`}
           </h3>
-          {canUploadPhoto && photos.length < 10 && (
+          {canUploadPhoto && countOrdinaryPhotos(photos) < MAX_ORDINARY_DELIVERY_PHOTOS && (
             <>
               <input
                 ref={fileInputRef}

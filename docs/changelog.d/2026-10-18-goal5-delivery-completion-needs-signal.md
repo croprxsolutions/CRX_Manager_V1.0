@@ -23,7 +23,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   captioned "Signed paper delivery ticket"; the signer's name is still required, no signature
   image is saved, and the customer receipt is always sent when the customer has an email on file.
   The Deliveries list dialog sends paper-ticket deliveries to the delivery page. The ticket photo
-  is required only when the driver ticks the paper-ticket box.
+  is required only when the driver ticks the paper-ticket box. Ticket photos do not count toward
+  the 10-photo limit, and on the field stop a saved ticket photo stays on screen even if the photo
+  list fails to reload.
 - **Photo upload no longer resets edited quantities.** On the delivery page, a photo upload used to
   reload the whole delivery, putting short quantities back to full. It now refreshes only the
   photos, so taking the ticket photo after marking items short can't record a full delivery.

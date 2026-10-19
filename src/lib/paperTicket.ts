@@ -9,6 +9,14 @@
  */
 export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
 
+// Ticket photos do not count toward the 10-photo limit, so a delivery that already has
+// 10 ordinary photos can still be completed on the paper-ticket path.
+export const MAX_ORDINARY_DELIVERY_PHOTOS = 10;
+
+export function countOrdinaryPhotos(photos: ReadonlyArray<{ caption?: string | null }>): number {
+  return photos.filter((photo) => photo.caption !== PAPER_TICKET_PHOTO_CAPTION).length;
+}
+
 export function hasPaperTicketPhoto(photos: ReadonlyArray<{ caption?: string | null }>): boolean {
   return photos.some((photo) => photo.caption === PAPER_TICKET_PHOTO_CAPTION);
 }

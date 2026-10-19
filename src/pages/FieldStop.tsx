@@ -25,7 +25,7 @@ import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
 import { compressImage } from '../lib/imageCompression';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
@@ -101,12 +101,18 @@ export default function FieldStop() {
 
   const fetchPhotos = useCallback(async () => {
     if (!id) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('delivery_photos')
       .select('id, storage_path, image_url, caption')
       .eq('delivery_id', id)
       .order('sort_order');
     if (activeStopIdRef.current !== id) return; // stale guard (H3)
+    if (error) {
+      // Keep what is on screen. Clearing it would hide a paper-ticket photo that is
+      // already saved and block completion until the stop is reopened.
+      Sentry.captureException(error, { extra: { context: 'Field Mode photo list refresh failed' } });
+      return;
+    }
     setPhotos((data || []) as StopPhoto[]);
   }, [id]);
 
@@ -240,7 +246,7 @@ export default function FieldStop() {
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, caption?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0 || !profile || !id) return;
-    if (photos.length + files.length > 10) {
+    if (!caption && countOrdinaryPhotos(photos) + files.length > MAX_ORDINARY_DELIVERY_PHOTOS) {
       toast('error', 'Maximum 10 photos per delivery');
       return;
     }
@@ -273,6 +279,9 @@ export default function FieldStop() {
           continue;
         }
         checkMutationResult(photoResult, 'Insert delivery photo');
+        // Show the saved row now, so the list does not depend on the refresh read below.
+        const inserted = (photoResult.data || []) as StopPhoto[];
+        setPhotos((prev) => [...prev, ...inserted.filter((row) => !prev.some((p) => p.id === row.id))]);
         uploadCount++;
       } catch (err) {
         Sentry.captureException(err, { tags: { source: 'critical_action', action: 'upload_delivery_photo' } });
@@ -576,7 +585,7 @@ export default function FieldStop() {
               ) : (
                 <p className="text-sm text-amber-700">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
               )}
-              <button type="button" disabled={uploadingPhoto || photos.length >= 10 || !isOnline} onClick={() => paperTicketInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
+              <button type="button" disabled={uploadingPhoto || !isOnline} onClick={() => paperTicketInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
                 <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
               </button>
             </div>
@@ -607,7 +616,7 @@ export default function FieldStop() {
               </div>
             )}
             {isOnline ? (
-              <button type="button" disabled={uploadingPhoto || photos.length >= 10} onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
+              <button type="button" disabled={uploadingPhoto || countOrdinaryPhotos(photos) >= MAX_ORDINARY_DELIVERY_PHOTOS} onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
                 <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo'}
               </button>
             ) : (

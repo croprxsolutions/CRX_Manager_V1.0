@@ -995,7 +995,14 @@ export default function DeliveryDetail() {
     // key to this exact payload: an edited retry (signer, quantities, issue, ticket date)
     // mints a fresh key and can never be answered with an earlier attempt's receipt.
     // A fresh key cannot complete twice: complete_delivery refuses a non-in_progress delivery.
-    const completeScope = `complete:${fingerprintIntentPayload(intentParams)}`;
+    // Fingerprint the date the driver chose, not the completion time derived from it:
+    // "today" sends no p_completed_at but becomes a past date after midnight, and an
+    // exact retry across midnight must keep its key to replay the saved result.
+    const completeScope = `complete:${fingerprintIntentPayload({
+      ...intentParams,
+      p_completed_at: undefined,
+      delivered_on: usePaperTicket ? paperDeliveredOn : null,
+    })}`;
     const idemKey = completeIdem.getKeyFor(completeScope);
     const rpcParams: {
       p_delivery_id: string;

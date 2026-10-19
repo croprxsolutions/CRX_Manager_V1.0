@@ -428,7 +428,14 @@ export default function Deliveries() {
     // check_idempotency replays by key and operation only: bind the key to this exact
     // payload so a retry with an edited signer or date mints a fresh key instead of
     // replaying an earlier attempt's receipt (complete_delivery refuses a completed delivery).
-    const completeScope = `complete:${fingerprintIntentPayload(completeParams)}`;
+    // Fingerprint the date the driver chose, not the completion time derived from it:
+    // "today" sends no p_completed_at but becomes a past date after midnight, and an
+    // exact retry across midnight must keep its key to replay the saved result.
+    const completeScope = `complete:${fingerprintIntentPayload({
+      ...completeParams,
+      p_completed_at: undefined,
+      delivered_on: deliveredOnDate,
+    })}`;
     const idemKey = completeIdem.getKeyFor(completeScope);
     let confirmed = false;
     // Route through runCriticalAction for parity with this page's other mutations.

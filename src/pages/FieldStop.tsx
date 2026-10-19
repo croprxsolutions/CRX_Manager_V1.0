@@ -335,7 +335,14 @@ export default function FieldStop() {
     // check_idempotency replays by key and operation only: bind the key to this exact
     // payload (stop, signer, quantities, ticket date) so an edited retry, or another
     // stop, mints a fresh key. complete_delivery refuses an already-completed delivery.
-    const completeScope = `complete:${fingerprintIntentPayload(intentParams)}`;
+    // Fingerprint the date the driver chose, not the completion time derived from it:
+    // "today" sends no p_completed_at but becomes a past date after midnight, and an
+    // exact retry across midnight must keep its key to replay the saved result.
+    const completeScope = `complete:${fingerprintIntentPayload({
+      ...intentParams,
+      p_completed_at: undefined,
+      delivered_on: usePaperTicket ? paperDeliveredOn : null,
+    })}`;
     const rpcParams = { ...intentParams, p_idempotency_key: completeIdem.getKeyFor(completeScope) };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;

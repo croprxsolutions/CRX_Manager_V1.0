@@ -53,7 +53,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   retired only after the server's reply checks out. Proven in the preview with a test server that
   saved the completion and dropped its replies (Sol final review). The Deliveries list dialog binds
   its key the same way (signer and date), so an edited retry there is refused the same way (Luna
-  review).
+  review). The key uses the date the driver picked, not the completion time worked out from it,
+  so an exact retry that crosses midnight (when "today" becomes yesterday) keeps its key and gets
+  the saved result back.
 - **Pre-existing race fixed: a slow load can no longer leak onto the next delivery.** The delivery
   page is reused when moving from one delivery to another. A slow load for the previous delivery used
   to finish late and put its items, quantities and photos on the new delivery's screen, so the wrong

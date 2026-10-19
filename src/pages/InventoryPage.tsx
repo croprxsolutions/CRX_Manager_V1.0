@@ -1,4 +1,4 @@
-import { useEffect, useState , useCallback } from 'react';
+import { useEffect, useState , useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -268,12 +268,17 @@ export default function InventoryPage() {
     setExportingPdf(false);
   };
 
+  // Only the latest load may update the grid (a role change or a refresh after a write
+  // can leave an older load in flight that would otherwise land last).
+  const inventoryRequestId = useRef(0);
   const fetchInventory = useCallback(async () => {
+    const requestId = ++inventoryRequestId.current;
     const forAdmin = isAdmin;
     // Wave B.3 — single read-only RPC replaces 4 separate fetches + JS reduce.
     // RPC computes net_position = available - prebooked + on_order server-side
     // and returns holds_qty / planned_qty / delivered_ytd alongside.
     const { data, error } = await supabase.rpc('get_inventory_position');
+    if (requestId !== inventoryRequestId.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });

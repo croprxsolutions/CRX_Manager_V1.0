@@ -11,6 +11,7 @@ const H = vi.hoisted(() => ({
   detailRow: null as Record<string, unknown> | null,
   summaryRow: null as Record<string, unknown> | null,
   toast: vi.fn(),
+  holdNextRpc: null as Promise<void> | null,
 }));
 
 type QueryBuilder = {
@@ -37,12 +38,18 @@ vi.mock('../lib/db', () => ({
       };
       return builder;
     },
-    rpc: (name: string) => Promise.resolve({
-      data: name === 'get_sales_detail_report' ? [H.detailRow]
-        : name === 'get_sales_summary_report' ? [H.summaryRow]
-          : [],
-      error: null,
-    }),
+    rpc: (name: string) => {
+      // Snapshot the rows at call time, so a held (slow) request returns what was current then.
+      const result = {
+        data: name === 'get_sales_detail_report' ? [H.detailRow]
+          : name === 'get_sales_summary_report' ? [H.summaryRow]
+            : [],
+        error: null,
+      };
+      const hold = H.holdNextRpc;
+      H.holdNextRpc = null;
+      return hold ? hold.then(() => result) : Promise.resolve(result);
+    },
   },
   assertRpcResult: <T,>(data: T) => data,
 }));
@@ -80,6 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   H.detailRow = null;
   H.summaryRow = null;
+  H.holdNextRpc = null;
 });
 afterEach(() => { cleanup(); });
 
@@ -134,6 +142,24 @@ describe('SalesReports cost columns', () => {
     expect(await screen.findByText('40%')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /^Cost/ })).toBeInTheDocument();
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
+  });
+
+  it('ignores a slow rep-era response that lands after the admin refetch', async () => {
+    H.auth.role = 'sales_rep';
+    H.detailRow = row(null, null, null);
+    let releaseRepRequest: () => void = () => {};
+    H.holdNextRpc = new Promise<void>((resolve) => { releaseRepRequest = resolve; });
+    const view = render(<MemoryRouter><SalesReports /></MemoryRouter>);
+
+    H.auth.role = 'admin';
+    H.detailRow = row(12, 8, 40);
+    view.rerender(<MemoryRouter><SalesReports /></MemoryRouter>);
+    expect(await screen.findByText('40%')).toBeInTheDocument();
+
+    releaseRepRequest();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText('40%')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^Cost/ })).toBeInTheDocument();
   });
 
   it('still shows an admin the cost, profit and margin columns', async () => {

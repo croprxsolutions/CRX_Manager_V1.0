@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Download, FileText, Eye, EyeOff, Users, X } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -166,7 +166,11 @@ export default function SalesReports() {
   }, [selectedCustomerIds]);
 
   // ── Fetch data ──
+  // Only the latest request may update the report (a role or filter change can leave an
+  // older request in flight that would otherwise land last).
+  const reportRequestId = useRef(0);
   const fetchData = useCallback(async () => {
+    const requestId = ++reportRequestId.current;
     const forAdmin = isAdmin;
     setLoading(true);
     const params: Record<string, unknown> = {};
@@ -180,6 +184,7 @@ export default function SalesReports() {
 
     if (tab === 'detail') {
       const { data, error } = await supabase.rpc('get_sales_detail_report', params);
+      if (requestId !== reportRequestId.current) return;
       if (error) { toast('error', `Failed to load: ${error.message}`); setLoading(false); return; }
       setDetailData(assertRpcResult<SalesDetailRow[]>(data, 'get_sales_detail_report'));
       setCostDataForAdmin(forAdmin);
@@ -191,6 +196,7 @@ export default function SalesReports() {
       const { data, error } = await supabase.rpc('get_sales_summary_report', {
         ...params, p_group_by: groupByMap[tab],
       });
+      if (requestId !== reportRequestId.current) return;
       if (error) { toast('error', `Failed to load: ${error.message}`); setLoading(false); return; }
       setSummaryData(assertRpcResult<SalesSummaryRow[]>(data, 'get_sales_summary_report'));
       setCostDataForAdmin(forAdmin);

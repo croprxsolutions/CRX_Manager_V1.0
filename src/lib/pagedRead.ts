@@ -1,10 +1,17 @@
 import { chunkIds } from './dispatchDisplay';
 
-type PageResult<T> = { data: T[] | null; error: { message: string } | null };
+// `count` is the server's exact row count for the query, present when the
+// caller selects with `{ count: 'exact' }` (see fetchAllRows).
+type PageResult<T> = { data: T[] | null; error: { message: string } | null; count?: number | null };
+type ReadResult<T> = { data: T[] | null; error: { message: string } | null };
 
 const PAGE_SIZE = 1000;
 // Rows re-read at each page seam when every row has an id (see fetchAllRows).
 const SEAM_OVERLAP = 50;
+// Whole reads tried before a list that keeps changing is reported as an error.
+const MAX_READ_ATTEMPTS = 3;
+
+export const LIST_CHANGED_WHILE_LOADING = 'The list changed while it was loading. Reload to try again.';
 
 /**
  * Read every row of a query, page by page. One request is silently cut off at
@@ -23,15 +30,39 @@ const SEAM_OVERLAP = 50;
  *   has an `id`, each page after the first starts SEAM_OVERLAP rows early, so
  *   up to that many deletions between two pages still miss nothing.
  * Rows without an `id` (an RPC's computed rows) are read without the overlap.
+ *
+ * The overlap cannot cover every change: a record whose sort key is edited
+ * can jump into the part already read, and a burst of inserts can make a page
+ * hold only rows already seen. So when the query selects with
+ * `{ count: 'exact' }`, the read is checked against the server's count from its
+ * last request; a mismatch means the list changed mid-read, and the whole read
+ * is repeated, up to MAX_READ_ATTEMPTS, before failing with
+ * LIST_CHANGED_WHILE_LOADING rather than returning a list that is wrong.
+ * `src/lib/pagedReadCallSites.test.ts` requires the count on every list read.
  */
 export async function fetchAllRows<T>(
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
-): Promise<PageResult<T>> {
+): Promise<ReadResult<T>> {
+  for (let attempt = 1; attempt <= MAX_READ_ATTEMPTS; attempt += 1) {
+    const result = await readOnce(fetchPage);
+    if (result.error) return { data: null, error: result.error };
+    if (result.serverCount === null || result.serverCount === result.rows.length) {
+      return { data: result.rows, error: null };
+    }
+  }
+  return { data: null, error: { message: LIST_CHANGED_WHILE_LOADING } };
+}
+
+async function readOnce<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
+): Promise<{ rows: T[]; serverCount: number | null; error: { message: string } | null }> {
   const rows: T[] = [];
+  let serverCount: number | null = null;
   const seenIds = new Set<unknown>();
   for (let from = 0; ;) {
-    const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1);
-    if (error) return { data: null, error };
+    const { data, error, count } = await fetchPage(from, from + PAGE_SIZE - 1);
+    if (error) return { rows, serverCount, error };
+    if (typeof count === 'number') serverCount = count;
     const page = data ?? [];
     if (page.length === 0) break;
     let newRows = 0;
@@ -47,11 +78,12 @@ export async function fetchAllRows<T>(
       rows.push(row);
       newRows += 1;
     }
-    // Only the overlap came back: the read has reached the end.
+    // Only the overlap came back: the read has reached the end (or, after a
+    // burst of inserts, only looks like it has; the count check catches that).
     if (newRows === 0) break;
     from += everyRowHasId && page.length > SEAM_OVERLAP ? page.length - SEAM_OVERLAP : page.length;
   }
-  return { data: rows, error: null };
+  return { rows, serverCount, error: null };
 }
 
 function rowId(row: unknown): unknown {
@@ -68,7 +100,7 @@ function rowId(row: unknown): unknown {
 export async function fetchAllRowsForIds<T, Id>(
   ids: Id[],
   fetchPage: (idChunk: Id[], from: number, to: number) => PromiseLike<PageResult<T>>,
-): Promise<PageResult<T>> {
+): Promise<ReadResult<T>> {
   const rows: T[] = [];
   for (const idChunk of chunkIds([...new Set(ids)])) {
     const result = await fetchAllRows<T>((from, to) => fetchPage(idChunk, from, to));

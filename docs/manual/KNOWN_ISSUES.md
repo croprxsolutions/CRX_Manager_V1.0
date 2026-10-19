@@ -850,11 +850,18 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Jobs and Customers show a banner when capped. Deliveries stops silently.
-  - Paging is by position. Repeats are dropped by `id`, and each page re-reads a 50-row overlap, so
-    up to 50 deletions between two pages miss nothing. Two cases are still not covered: more
-    deletions than that between two pages, and rows without an `id` (Customer Transaction Review's
-    function rows). Either can still miss a row until the next refresh. Real cursor paging and
-    server-side search are the later Goal 4 step.
+  - Paging is by position, so records changing during a long load are handled three ways:
+    - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
+    - every list read asks the server for its exact count (`{ count: 'exact' }`, enforced by
+      `src/lib/pagedReadCallSites.test.ts`). A read whose distinct rows differ from the count changed
+      mid-read, so it is repeated up to three times and then shown as an error, never as a wrong
+      list. This covers a record whose sort date is edited into the part already read, and a burst
+      of inserts;
+    - Customer Transaction Review's function rows have no `id`, so its running-balance chain is also
+      checked (`src/lib/transactionLedger.ts`).
+  - What is left: an insert and a delete landing in the same read can keep the count equal while
+    swapping a row. That needs real cursor paging, which is the later Goal 4 step along with
+    server-side search.
   - On a capped query, records past the cap are missing from that page and its browser-side filters.
     Revisit before volumes near the caps.
   `SelectLocationsModal` still splits map and list 50/50 on tablets.

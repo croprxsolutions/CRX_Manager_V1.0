@@ -205,7 +205,7 @@ export default function Returns() {
           customer:customers(farm_name),
           order:orders(order_number),
           items:return_items(id)
-        `)
+        `, { count: 'exact' })
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .order('id')
@@ -233,7 +233,7 @@ export default function Returns() {
         (idChunk, from, to) =>
           supabase
             .from('profile_public_view')
-            .select('id, full_name')
+            .select('id, full_name', { count: 'exact' })
             .in('id', idChunk)
             .order('id')
             .range(from, to),
@@ -261,7 +261,7 @@ export default function Returns() {
     const custRes = await fetchAllRows<Pick<Customer, 'id' | 'farm_name' | 'assigned_tier'>>((from, to) =>
       supabase
         .from('customers')
-        .select('id, farm_name, assigned_tier')
+        .select('id, farm_name, assigned_tier', { count: 'exact' })
         .eq('is_active', true)
         .order('farm_name')
         .order('id')

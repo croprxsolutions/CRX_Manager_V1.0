@@ -105,6 +105,10 @@ export default function ToShip() {
   });
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [pos, setPos] = useState<PORow[]>([]);
+  // A failed read must not look like an empty section; these stay set until a
+  // newer load reads that section successfully.
+  const [deliveriesFailed, setDeliveriesFailed] = useState(false);
+  const [posFailed, setPosFailed] = useState(false);
 
   // A load is several multi-page reads; an older, slower load must not overwrite
   // a newer one, so only the latest may set state (checked after every await).
@@ -115,7 +119,7 @@ export default function ToShip() {
     // 0. Open deliveries (scheduled / in progress) — independent of order demand
     const { data: delivRaw, error: dErr } = await fetchAllRows((from, to) => supabase
       .from('deliveries')
-      .select('id, delivery_number, scheduled_date, status, assigned_driver, customer:customers(farm_name), order:orders(order_number)')
+      .select('id, delivery_number, scheduled_date, status, assigned_driver, customer:customers(farm_name), order:orders(order_number)', { count: 'exact' })
       .in('status', ['scheduled', 'in_progress'])
       .order('scheduled_date', { ascending: true })
       .order('id')
@@ -126,12 +130,13 @@ export default function ToShip() {
       Sentry.captureException(dErr, { tags: { source: 'fetch', action: 'to_ship_open_deliveries' } });
       toast('error', 'Failed to load open deliveries. The Deliveries list is incomplete.');
     }
+    setDeliveriesFailed(Boolean(dErr));
     setDeliveries((delivRaw || []) as unknown as DeliveryRow[]);
 
     // 0b. Open purchase orders (inbound stock on the way)
     const { data: poRaw, error: pErr } = await fetchAllRows((from, to) => supabase
       .from('purchase_orders')
-      .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)')
+      .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)', { count: 'exact' })
       .in('status', ['submitted', 'partially_received'])
       .order('expected_delivery_date', { ascending: true, nullsFirst: false })
       .order('id')
@@ -141,12 +146,13 @@ export default function ToShip() {
       Sentry.captureException(pErr, { tags: { source: 'fetch', action: 'to_ship_inbound_pos' } });
       toast('error', 'Failed to load inbound purchase orders. The Inbound list is incomplete.');
     }
+    setPosFailed(Boolean(pErr));
     setPos((poRaw || []) as unknown as PORow[]);
 
     // 1. Open orders (the booking still owes product)
     const { data: ordersRaw, error: oErr } = await fetchAllRows((from, to) => supabase
       .from('orders')
-      .select('id, order_number, order_date, customer_id, customer:customers(farm_name, assigned_tier)')
+      .select('id, order_number, order_date, customer_id, customer:customers(farm_name, assigned_tier)', { count: 'exact' })
       .in('status', OPEN_STATUSES)
       .order('id')
       .range(from, to));
@@ -170,7 +176,7 @@ export default function ToShip() {
     // 2. Open lines on those orders
     const { data: itemsRaw, error: iErr } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
       .from('order_items')
-      .select('id, order_id, product_id, product_name, price_per_unit, quantity_remaining, unit_size')
+      .select('id, order_id, product_id, product_name, price_per_unit, quantity_remaining, unit_size', { count: 'exact' })
       .in('order_id', idChunk)
       .gt('quantity_remaining', 0)
       .order('id')
@@ -685,7 +691,11 @@ export default function ToShip() {
                   </tbody>
                 </table>
                 {visibleDeliveries.length === 0 && (
-                  <p className="text-center text-secondary py-8 text-sm">No open deliveries.</p>
+                  deliveriesFailed ? (
+                    <p role="alert" className="text-center text-red-600 py-8 text-sm">Open deliveries could not be loaded. Reload to try again.</p>
+                  ) : (
+                    <p className="text-center text-secondary py-8 text-sm">No open deliveries.</p>
+                  )
                 )}
               </div>
             </Card>
@@ -751,7 +761,11 @@ export default function ToShip() {
                 );
               })}
               {visiblePOs.length === 0 && (
-                <Card><p className="text-center text-secondary py-8 text-sm">No inbound purchase orders.</p></Card>
+                posFailed ? (
+                  <Card><p role="alert" className="text-center text-red-600 py-8 text-sm">Inbound purchase orders could not be loaded. Reload to try again.</p></Card>
+                ) : (
+                  <Card><p className="text-center text-secondary py-8 text-sm">No inbound purchase orders.</p></Card>
+                )
               )}
             </div>
           </>

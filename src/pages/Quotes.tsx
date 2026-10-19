@@ -266,7 +266,7 @@ export default function Quotes() {
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('quotes')
-      .select('*, customer:customers(farm_name)')
+      .select('*, customer:customers(farm_name)', { count: 'exact' })
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .order('id')
@@ -296,7 +296,7 @@ export default function Quotes() {
       // more item rows than the server's row cap.
       const { data: itemRows, error: itemErr } = await fetchAllRowsForIds(quoteIds, (idChunk, from, to) => supabase
         .from('quote_items')
-        .select('quote_id, product_id')
+        .select('id, quote_id, product_id', { count: 'exact' })
         .in('quote_id', idChunk)
         .order('id')
         .range(from, to));
@@ -307,7 +307,7 @@ export default function Quotes() {
         const productIds = [...new Set(itemRows.map((r) => r.product_id).filter(Boolean) as string[])];
         const { data: prodRows, error: prodErr } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => supabase
           .from('products')
-          .select('id, product_name')
+          .select('id, product_name', { count: 'exact' })
           .in('id', idChunk)
           .order('id')
           .range(from, to));
@@ -421,10 +421,10 @@ export default function Quotes() {
       // draw missed past the row cap would let a drawn booking be deleted.
       const [orderDrawnRes, jobDrawnRes] = await Promise.all([
         fetchAllRowsForIds(ids, (idChunk, from, to) => supabase
-          .from('quote_product_draws').select('quote_id').in('quote_id', idChunk).gt('quantity_drawn', 0)
+          .from('quote_product_draws').select('id, quote_id', { count: 'exact' }).in('quote_id', idChunk).gt('quantity_drawn', 0)
           .order('id').range(from, to)),
-        fetchAllRowsForIds<{ quote_id: string }, string>(ids, (idChunk, from, to) => supabaseUntyped
-          .from('job_product_draws').select('quote_id').in('quote_id', idChunk).gt('quantity_drawn', 0)
+        fetchAllRowsForIds<{ id: string; quote_id: string }, string>(ids, (idChunk, from, to) => supabaseUntyped
+          .from('job_product_draws').select('id, quote_id', { count: 'exact' }).in('quote_id', idChunk).gt('quantity_drawn', 0)
           .order('id').range(from, to)),
       ]);
       if (orderDrawnRes.error) throw orderDrawnRes.error;

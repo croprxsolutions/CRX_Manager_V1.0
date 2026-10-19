@@ -29,6 +29,15 @@ Screen-only change; no database change.
   pages therefore miss nothing. Orders' item, delivery and inventory lookups now select `id` so this
   applies to them. Customer Transaction Review's rows come from a database function and have no
   `id`, so they page without the overlap.
+- **Every read is checked against the server's count (review round 2).**
+  - Each list read asks for the exact row count. If the distinct rows read don't match it, the list
+    changed mid-read: a record's sort date edited into the part already read, or a burst of
+    inserts. The read is repeated up to three times, then shown as "The list changed while it was
+    loading", never as a wrong list. `src/lib/pagedReadCallSites.test.ts` fails if a list read
+    leaves the count out.
+  - Customer Transaction Review also checks that each row's running balance equals the sum so far
+    (`src/lib/transactionLedger.ts`, matching the live `get_customer_transaction_review`), and
+    re-reads once if not.
 - **Stale loads can't overwrite newer ones.** Each converted list ignores a load that finished after
   a newer one started, for example a refresh after posting.
 - **Failures are visible.**

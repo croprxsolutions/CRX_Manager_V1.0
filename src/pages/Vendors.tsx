@@ -70,7 +70,7 @@ export default function Vendors() {
     const seq = ++fetchSeq.current;
     setLoading(true);
     const { data, error } = await fetchAllRows((from, to) => {
-      const base = supabase.from('vendors').select('*');
+      const base = supabase.from('vendors').select('*', { count: 'exact' });
       const filtered = showInactive
         ? base.not('deleted_at', 'is', null)
         : base.is('deleted_at', null);

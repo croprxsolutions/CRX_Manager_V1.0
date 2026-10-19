@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo , useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Upload, Download, FileText, Trash2, Users, Truck, Printer, ClipboardList, PanelRightOpen } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -72,18 +72,23 @@ export default function Orders() {
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
 
+  // A multi-page read can finish after a newer one started (a refresh after a
+  // bulk action); only the latest request may set the list, toasts or loading.
+  const fetchSeq = useRef(0);
   const fetchOrders = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     const { start: seasonStart, end: seasonEnd } = getSeasonDates();
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data: ordersData, error: ordersError } = await fetchAllRows((from, to) => supabase
       .from('orders')
-      .select('*, customer:customers(farm_name, parent_customer_id)')
+      .select('*, customer:customers(farm_name, parent_customer_id)', { count: 'exact' })
       .gte('order_date', seasonStart)
       .lte('order_date', seasonEnd)
       .is('deleted_at', null)
       .order('order_date', { ascending: false })
       .order('id')
       .range(from, to));
+    if (seq !== fetchSeq.current) return;
 
     if (ordersError) {
       Sentry.captureException(ordersError);
@@ -108,25 +113,26 @@ export default function Orders() {
       fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('order_items')
         // `id` lets the pager drop a line repeated across a page seam.
-        .select('id, order_id, total_units_needed, quantity_delivered, price_per_unit, product_name')
+        .select('id, order_id, total_units_needed, quantity_delivered, price_per_unit, product_name', { count: 'exact' })
         .in('order_id', idChunk)
         .order('id')
         .range(from, to)),
       fetchActiveInvoiceCoveragePages(orderIds),
       fetchAllRowsForIds(parentIds, (idChunk, from, to) => supabase
         .from('customers')
-        .select('id, farm_name')
+        .select('id, farm_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to)),
       fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('deliveries')
-        .select('id, order_id, scheduled_date, status')
+        .select('id, order_id, scheduled_date, status', { count: 'exact' })
         .in('order_id', idChunk)
         .in('status', ['scheduled', 'in_progress'])
         .order('id')
         .range(from, to)),
     ]);
+    if (seq !== fetchSeq.current) return;
 
     const { data: itemsData, error: itemsError } = itemsResult;
     if (itemsError) {
@@ -284,10 +290,10 @@ export default function Orders() {
       // A selection can be the whole list, so read every row in id chunks.
       const [itemsRes, customersRes] = await Promise.all([
         fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
-          .from('order_items').select('*').in('order_id', idChunk)
+          .from('order_items').select('*', { count: 'exact' }).in('order_id', idChunk)
           .order('sort_order').order('id').range(from, to)),
         fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
-          .from('customers').select('*').in('id', idChunk)
+          .from('customers').select('*', { count: 'exact' }).in('id', idChunk)
           .order('id').range(from, to)),
       ]);
       // A failed read must not print an order with no lines.
@@ -350,16 +356,16 @@ export default function Orders() {
       // read every row (id lists in chunks) rather than stopping at the row cap.
       const [itemsRes, customersRes, addrRes, invRes] = await Promise.all([
         fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
-          .from('order_items').select('*').in('order_id', idChunk)
+          .from('order_items').select('*', { count: 'exact' }).in('order_id', idChunk)
           .order('sort_order').order('id').range(from, to)),
         fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
-          .from('customers').select('*').in('id', idChunk)
+          .from('customers').select('*', { count: 'exact' }).in('id', idChunk)
           .order('id').range(from, to)),
         fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
-          .from('customer_addresses').select('*').in('customer_id', idChunk)
+          .from('customer_addresses').select('*', { count: 'exact' }).in('customer_id', idChunk)
           .order('is_default', { ascending: false }).order('id').range(from, to)),
         fetchAllRows((from, to) => supabase
-          .from('inventory').select('id, product_id, quantity_available, quantity_prebooked')
+          .from('inventory').select('id, product_id, quantity_available, quantity_prebooked', { count: 'exact' })
           .order('id').range(from, to)),
       ]);
       // A failed read must not print a pick list with missing lines or shortage flags.

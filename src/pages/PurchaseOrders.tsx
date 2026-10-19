@@ -84,7 +84,7 @@ export default function PurchaseOrders() {
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('purchase_orders')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));
@@ -124,7 +124,7 @@ export default function PurchaseOrders() {
         unit_size,
         product:products(product_name),
         purchase_orders!inner(po_number, vendor, status, expected_delivery_date)
-      `)
+      `, { count: 'exact' })
       .not('purchase_orders.status', 'in', '("cancelled","fully_received")')
       .order('id')
       .range(from, to));

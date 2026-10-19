@@ -168,11 +168,14 @@ export default function CommissionPayments() {
       // PR-07 follow-up: dropped recipient FK embed; resolve via profile_public_view.
       const { data, error } = await fetchAllRows((from, to) => supabase
         .from('commission_payments')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
         .order('id')
         .range(from, to));
 
+      // Superseded: the newer load sets the list and reports its own outcome,
+      // so an older load's failure must not toast over it.
+      if (seq !== fetchPaymentsSeq.current) return true;
       if (error) {
         if (!quiet) toast('error', 'Failed to load commission payments');
         return false;
@@ -188,7 +191,7 @@ export default function CommissionPayments() {
       if (recipientIds.length > 0) {
         const { data: recipients } = await fetchAllRowsForIds(recipientIds, (idChunk, from, to) => supabase
           .from('profile_public_view')
-          .select('id, full_name')
+          .select('id, full_name', { count: 'exact' })
           .in('id', idChunk)
           .order('id')
           .range(from, to));
@@ -205,7 +208,7 @@ export default function CommissionPayments() {
       if (paymentIds.length > 0) {
         const { data: items, error: itemsError } = await fetchAllRowsForIds(paymentIds, (idChunk, from, to) => supabase
           .from('commission_payment_items')
-          .select('id, commission_payment_id')
+          .select('id, commission_payment_id', { count: 'exact' })
           .in('commission_payment_id', idChunk)
           .order('id')
           .range(from, to));
@@ -241,6 +244,7 @@ export default function CommissionPayments() {
       return true;
     } catch (err) {
       Sentry.captureException(err, { extra: { context: 'load_commission_payments' } });
+      if (seq !== fetchPaymentsSeq.current) return true;
       if (!quiet) toast('error', 'Failed to load commission payments');
       return false;
     } finally {
@@ -252,7 +256,12 @@ export default function CommissionPayments() {
     fetchPayments();
   }, [fetchPayments]);
 
+  // A multi-page load can finish after a newer one (reopening the dialog after
+  // a payment posted); an older load must not put a now-paid commission back
+  // into the unpaid list and its totals, so only the newest load may set them.
+  const fetchUnpaidSeq = useRef(0);
   const fetchUnpaid = async () => {
+    const seq = ++fetchUnpaidSeq.current;
     // PR-07 follow-up: dropped recipient FK embed; resolve via profile_public_view.
     // commissions.order_number / customer_name are denormalized columns that
     // _insert_commissions_for_order never populates (always NULL), so the payout
@@ -265,7 +274,7 @@ export default function CommissionPayments() {
       .select(`
         id, order_id, job_id, customer_id, order_date, commission_amount,
         recipient_user_id
-      `)
+      `, { count: 'exact' })
       // Only PENDING commissions are payable. `.neq('status','paid')` also leaked
       // CANCELLED commissions (lifecycle: pending → paid → cancelled) into the
       // pay-selection list and the unpaid totals. (overnight-bug-hunt finding)
@@ -274,6 +283,7 @@ export default function CommissionPayments() {
       .order('id')
       .range(from, to));
 
+    if (seq !== fetchUnpaidSeq.current) return;
     if (error) {
       toast('error', 'Failed to load unpaid commissions: ' + error.message);
       return;
@@ -295,10 +305,11 @@ export default function CommissionPayments() {
     if (recipientUserIds.length > 0) {
       const { data: recipients } = await fetchAllRowsForIds(recipientUserIds, (idChunk, from, to) => supabase
         .from('profile_public_view')
-        .select('id, full_name')
+        .select('id, full_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to));
+      if (seq !== fetchUnpaidSeq.current) return;
       (recipients || []).forEach((r: { id: string | null; full_name: string | null }) => { if (r.id) recipientMap[r.id] = r.full_name ?? ''; });
     }
 
@@ -306,10 +317,11 @@ export default function CommissionPayments() {
     if (orderIds.length > 0) {
       const { data: orders } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('orders')
-        .select('id, order_number')
+        .select('id, order_number', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to));
+      if (seq !== fetchUnpaidSeq.current) return;
       (orders || []).forEach((o: { id: string | null; order_number: string | null }) => { if (o.id) orderMap[o.id] = o.order_number ?? ''; });
     }
 
@@ -319,10 +331,11 @@ export default function CommissionPayments() {
     if (jobIds.length > 0) {
       const { data: jobs } = await fetchAllRowsForIds(jobIds, (idChunk, from, to) => supabase
         .from('jobs')
-        .select('id, job_number')
+        .select('id, job_number', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to));
+      if (seq !== fetchUnpaidSeq.current) return;
       (jobs || []).forEach((j: { id: string | null; job_number: string | null }) => { if (j.id) jobMap[j.id] = j.job_number ?? ''; });
     }
 
@@ -330,10 +343,11 @@ export default function CommissionPayments() {
     if (customerIds.length > 0) {
       const { data: customers } = await fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
         .from('customers')
-        .select('id, farm_name')
+        .select('id, farm_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to));
+      if (seq !== fetchUnpaidSeq.current) return;
       (customers || []).forEach((c: { id: string | null; farm_name: string | null }) => { if (c.id) customerMap[c.id] = c.farm_name ?? ''; });
     }
 

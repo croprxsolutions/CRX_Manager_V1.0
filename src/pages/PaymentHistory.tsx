@@ -80,7 +80,7 @@ export default function PaymentHistory() {
         payment_method, check_number, reference_number, payment_date,
         season, is_active, notes, created_at,
         customers!allocation_sets_customer_id_fkey ( farm_name )
-      `)
+      `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .order('id')
       .range(from, to));

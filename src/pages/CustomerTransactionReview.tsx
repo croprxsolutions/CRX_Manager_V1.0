@@ -12,6 +12,7 @@ import ReportShell from '../components/reports/ReportShell';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { fetchAllRows } from '../lib/pagedRead';
+import { isLedgerContinuous } from '../lib/transactionLedger';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import type { CustomerTransactionRow } from '../types';
@@ -34,7 +35,7 @@ export default function CustomerTransactionReview() {
   useEffect(() => {
     fetchAllRows<{ id: string; farm_name: string }>((from, to) => supabase
       .from('customers')
-      .select('id, farm_name')
+      .select('id, farm_name', { count: 'exact' })
       .eq('is_active', true)
       .order('farm_name')
       .order('id')
@@ -54,22 +55,35 @@ export default function CustomerTransactionReview() {
     // The RPC returns its rows in a fixed unique order (date, type, reference,
     // source row id) with each running balance computed over the whole range,
     // so paging keeps every row and every balance. One read stopped at the
-    // server's 1,000-row cap and showed short totals.
-    const { data: rows, error } = await fetchAllRows<CustomerTransactionRow>((from, to) => supabase
-      .rpc('get_customer_transaction_review', {
-        p_customer_id: customerId,
-        p_start_date: startDate,
-        p_end_date: endDate,
-      })
-      .range(from, to));
-    if (seq !== fetchSeq.current) return;
-    if (error) {
+    // server's 1,000-row cap and showed short totals. Its rows have no id, so a
+    // transaction added or removed between pages could repeat or drop a row;
+    // the running-balance chain catches that, and the read is tried once more.
+    let loaded: CustomerTransactionRow[] | null = null;
+    let failure: string | null = null;
+    for (let attempt = 1; attempt <= 2 && loaded === null; attempt += 1) {
+      const result = await fetchAllRows<CustomerTransactionRow>((from, to) => supabase
+        .rpc('get_customer_transaction_review', {
+          p_customer_id: customerId,
+          p_start_date: startDate,
+          p_end_date: endDate,
+        }, { count: 'exact' })
+        .range(from, to));
+      if (seq !== fetchSeq.current) return;
+      if (result.error) {
+        failure = result.error.message;
+        break;
+      }
+      const rows = assertRpcResult<CustomerTransactionRow[]>(result.data, 'get_customer_transaction_review');
+      if (isLedgerContinuous(rows)) loaded = rows;
+      else failure = 'transactions changed while loading';
+    }
+    if (loaded === null) {
       setData([]);
       setLoadFailed(true);
-      toast('error', `Failed to load transactions: ${error.message}`);
+      toast('error', `Failed to load transactions: ${failure}`);
     } else {
       setLoadFailed(false);
-      setData(assertRpcResult<CustomerTransactionRow[]>(rows, 'get_customer_transaction_review'));
+      setData(loaded);
     }
     setLoading(false);
   }, [customerId, startDate, endDate, toast]);

@@ -64,7 +64,7 @@ export default function ApplicationRecords() {
     const { data, error } = await fetchAllRows<{ id: string; farm_name: string }>((from, to) =>
       supabase
         .from('customers')
-        .select('id, farm_name')
+        .select('id, farm_name', { count: 'exact' })
         .eq('is_active', true)
         .order('farm_name')
         .order('id')
@@ -95,7 +95,7 @@ export default function ApplicationRecords() {
           customer:customers(farm_name),
           field:fields(field_name),
           vehicle:vehicles(vehicle_name)
-        `);
+        `, { count: 'exact' });
 
       if (startDate) query = query.gte('application_date', startDate);
       if (endDate) query = query.lte('application_date', endDate);
@@ -139,7 +139,7 @@ export default function ApplicationRecords() {
         (idChunk, from, to) =>
           supabase
             .from('profile_public_view')
-            .select('id, full_name')
+            .select('id, full_name', { count: 'exact' })
             .in('id', idChunk)
             .order('id')
             .range(from, to),

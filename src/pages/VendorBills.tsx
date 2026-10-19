@@ -44,7 +44,7 @@ export default function VendorBills() {
     const { data, error } = await fetchAllRows<Record<string, unknown>>((from, to) =>
       supabase
         .from('vendor_bills')
-        .select('*, vendor:vendors(name), purchase_order:purchase_orders(po_number)')
+        .select('*, vendor:vendors(name), purchase_order:purchase_orders(po_number)', { count: 'exact' })
         .is('deleted_at', null)
         .order('due_date', { ascending: true })
         .order('id')

@@ -136,7 +136,7 @@ export default function Invoices() {
     // Read every page: a single request is silently cut off at the server's row cap.
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('invoices')
-      .select('*, customer:customers!invoices_customer_id_fkey(farm_name)')
+      .select('*, customer:customers!invoices_customer_id_fkey(farm_name)', { count: 'exact' })
       .is('deleted_at', null)
       // Segregation (Mason 2026-06-19): field-application invoices live in their
       // own area (/field-invoices). This Chemical Sales list excludes them so a
@@ -165,13 +165,16 @@ export default function Invoices() {
         .filter(Boolean) as string[]
     )];
     const salesmanMap: Record<string, string> = {};
+    // A failed label lookup keeps the list but must not fail silently.
+    let labelLookupError: { message: string } | null = null;
     if (salesmanIds.length > 0) {
-      const { data: salesmen } = await fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => supabase
+      const { data: salesmen, error: salesmenError } = await fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => supabase
         .from('profile_public_view')
-        .select('id, full_name')
+        .select('id, full_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to));
+      if (salesmenError) labelLookupError = salesmenError;
       ((salesmen || []) as { id: string; full_name: string }[]).forEach((s) => { salesmanMap[s.id] = s.full_name; });
     }
 
@@ -181,12 +184,13 @@ export default function Invoices() {
     )];
     const orderMap: Record<string, string> = {};
     if (orderIds.length > 0) {
-      const { data: ords } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
+      const { data: ords, error: ordersLookupError } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
         .from('orders')
-        .select('id, order_number')
+        .select('id, order_number', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
         .range(from, to));
+      if (ordersLookupError) labelLookupError ??= ordersLookupError;
       ((ords || []) as { id: string; order_number: string }[]).forEach((o) => { orderMap[o.id] = o.order_number; });
     }
 
@@ -197,6 +201,10 @@ export default function Invoices() {
       order_number: inv.order_id ? orderMap[inv.order_id] || null : null,
     })) as unknown as InvoiceRow[];
     if (seq !== fetchSeq.current) return;
+    if (labelLookupError) {
+      Sentry.captureException(labelLookupError, { tags: { source: 'fetch', page: 'invoices', action: 'load_invoice_labels' } });
+      toast('error', 'Some salesperson or order labels could not be loaded.');
+    }
     setInvoices(rows);
     setLoading(false);
   }, [toast]);

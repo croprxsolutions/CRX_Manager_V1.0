@@ -80,14 +80,14 @@ export function BlendTickets() {
             customer:customers(id, farm_name),
             field:fields(id, field_name),
             images:blend_ticket_images(count)
-          `)
+          `, { count: 'exact' })
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
           .order('id')
           .range(from, to)),
         fetchAllRows((from, to) => supabase
           .from('customers')
-          .select('*')
+          .select('*', { count: 'exact' })
           .eq('is_active', true)
           .order('farm_name')
           .order('id')
@@ -117,7 +117,7 @@ export function BlendTickets() {
       if (profIds.length > 0) {
         const { data: profRows } = await fetchAllRowsForIds(profIds, (idChunk, from, to) => supabase
           .from('profile_public_view')
-          .select('id, full_name')
+          .select('id, full_name', { count: 'exact' })
           .in('id', idChunk)
           .order('id')
           .range(from, to));

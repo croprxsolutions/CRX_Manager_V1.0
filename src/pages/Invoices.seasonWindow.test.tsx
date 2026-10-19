@@ -353,6 +353,23 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     expect(mockToast).not.toHaveBeenCalled();
   });
 
+  it('keeps the list but reports it once when the salesperson labels cannot be loaded', async () => {
+    const withSalesman = ROWS.map((r) => ({ ...r, salesman_id: 'rep-1' }));
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'profile_public_view') return buildInMemoryQuery(table === 'invoices' ? withSalesman : []);
+      const failing: Record<string, unknown> = {};
+      for (const method of ['select', 'in', 'order', 'range']) failing[method] = vi.fn(() => failing);
+      failing.then = (resolve: (value: unknown) => unknown) =>
+        Promise.resolve({ data: null, error: { message: 'labels unavailable' } }).then(resolve);
+      return failing;
+    });
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getAllByText('NEW-DRAFT').length).toBeGreaterThan(0));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Some salesperson or order labels could not be loaded.'));
+    expect(mockToast).toHaveBeenCalledTimes(1);
+  });
+
   it('a prior-season draft ticked by hand is named as not from this season in the Post confirm', async () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
     await waitFor(() => expect(screen.getAllByText('OLD-DRAFT').length).toBeGreaterThan(0));

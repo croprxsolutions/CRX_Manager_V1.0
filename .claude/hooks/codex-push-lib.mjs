@@ -4069,7 +4069,9 @@ const SHELL_ASSIGNMENT_RE = /(?:^|[;&|\r\n(`]|\s)(?:export\s+|local\s+|declare\s
 // `eval "$(fnm env)"`) is a different shape and is not affected.
 export function programAssembledAtRuntime(command) {
   const text = String(command || "");
-  return programBuiltAtRuntime(text, /\$/) || (SHELL_ASSIGNMENT_RE.test(text) && programBuiltAtRuntime(text, /\$/));
+  // `$` AND backtick: `` `printf g`h pr m`printf er`ge 951 `` builds the name too
+  // (Codex connector, PR #956 third pass).
+  return programBuiltAtRuntime(text, /[$`]/);
 }
 
 // Inline program code handed to a runtime as an ARGUMENT (`node -e "…"`,
@@ -4095,7 +4097,9 @@ export function inlineCodeReachesGatedAction(command) {
         const attached = INLINE_CODE_ATTACHED_RE.exec(word) || /^-[epcrE](.+)$/s.exec(word);
         const code = attached ? attached[1] : INLINE_CODE_FLAG_RE.test(word) ? words[at + 1] : undefined;
         if (code !== undefined && couldReachGatedAction([code])) return true;
-        if (!word.startsWith("-")) break; // the script argument: no inline code follows
+        // No early stop at the first bare word: a detached option value
+        // (`node --require fs -e "…"`) looks like a script argument, so the whole
+        // window is scanned (Codex connector, PR #956 third pass).
       }
     }
   }

@@ -82,6 +82,9 @@ for (const command of [
   "gh --hostname github.com api repos/o/r/issues/1 -f title=x",
   "gh -R o/r api repos/o/r/issues/1 --field title=x",
   "gh api repos/o/r/issues/1/comments -fbody=x",
+  "curl -dfoo https://example.test/x",
+  "curl -Ffoo=bar https://example.test/x",
+  "curl -Tfile https://example.test/x",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
 eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
 eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");
@@ -142,6 +145,8 @@ for (const command of [
   "$p = 'gh'; & $p pr merge 1",
   "$(printf g)h pr m$(printf er)ge 951 --squash",
   "$(printf g)it pu$(printf sh) origin HEAD:main",
+  "`printf g`h pr m`printf er`ge 951 --squash",
+  "`printf g`it pu`printf sh` origin HEAD:main",
 ]) ok(programAssembledAtRuntime(command), `assembled program name refused: ${command}`);
 for (const command of [
   'for f in scripts/*.mjs; do node "$f" --check; done',

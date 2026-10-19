@@ -484,6 +484,8 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     // Inline code argument that hides a merge (Luna, PR #956 round 2; main allowed it too).
     ["node -e \"require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgODEy','base64').toString())\"", /on its input/],
     ["python -c \"import subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\"", /on its input/],
+    // Codex connector, PR #956: inline code after a detached option value.
+    ["node --require fs -e \"require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgODEy','base64').toString())\"", /on its input/],
     // Codex connector, PR #956: words assembled by a printf format.
     ["printf 'g%s pr m%s 951 --squash' h erge | bash", /on its input/],
     // Luna, PR #956 round 3.

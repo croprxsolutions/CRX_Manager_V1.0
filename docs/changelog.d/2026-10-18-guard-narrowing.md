@@ -93,5 +93,10 @@ obfuscation (`printf 'g%s pr m%s 951' h erge | bash`); a path below `.claude` bu
 refused, including a plain command substitution (`$(printf g)h pr m$(printf er)ge 951`); and under
 a hold, an attached short `gh api` field flag (`-fbody=x`) is outward.
 
+**Codex connector on `68b78a17d` (3 P1), the last fixes before landing.** Fixed: backtick-built
+program names are refused; inline-code detection scans past a detached option value
+(`node --require fs -e …`); and under a hold, attached curl flags (`-dfoo`, `-Ffoo=bar`, `-Tfile`) are
+outward. Mason: "After fixing those no more codex rounds we are finished make it live."
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

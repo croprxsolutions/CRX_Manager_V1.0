@@ -33,6 +33,7 @@ import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { hasSignal, NO_SIGNAL_AFTER_START_MESSAGE, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -124,6 +125,7 @@ export default function Deliveries() {
   const confirmIdem = useIdempotencyKey('confirm_delivery', profile?.id || '');
   const completeIdem = useIdempotencyKey('complete_delivery', profile?.id || '');
   const [completeTarget, setCompleteTarget] = useState<DeliveryRow | null>(null);
+  const completeTargetRef = useLatestRef(completeTarget);
   // Send the in-app completion notification at most once per delivery. complete_delivery
   // is idempotent but returns no replay marker, so a same-key retry after a lost
   // response replays its cached success; the stable delivery id avoids duplicate
@@ -438,10 +440,14 @@ export default function Deliveries() {
     })}`;
     const idemKey = completeIdem.getKeyFor(completeScope);
     let confirmed = false;
+    // The signal checks take a few seconds; if the dialog was cancelled or switched to
+    // another delivery meanwhile, stop before sending the next server call.
+    const stillOpenForTarget = () => completeTargetRef.current?.id === target.id;
     // Route through runCriticalAction for parity with this page's other mutations.
-    const outcome = await runCriticalAction<'completed' | 'no_signal'>({
+    const outcome = await runCriticalAction<'completed' | 'no_signal' | 'cancelled'>({
       action: async () => {
         if (!(await hasSignal())) return 'no_signal';
+        if (!stillOpenForTarget()) return 'cancelled';
         if (target.status === 'scheduled') {
           const { data, error } = await supabase.rpc('confirm_delivery', {
             p_delivery_id: target.id,
@@ -452,6 +458,7 @@ export default function Deliveries() {
           confirmIdem.resetKey();
           confirmed = true;
           if (!(await hasSignal())) return 'no_signal';
+          if (!stillOpenForTarget()) return 'cancelled';
         }
 
         // completeIdem is intentionally retained until onSuccess, so a retry after a
@@ -468,6 +475,12 @@ export default function Deliveries() {
       setLoading: setCompleting,
       sentryTag: 'complete_delivery',
       onSuccess: (result) => {
+        if (result === 'cancelled') {
+          toast('warning', confirmed
+            ? `Cancelled. Delivery ${target.delivery_number} was started and is now In Progress, but it was NOT completed: no stock was taken and nothing was billed.`
+            : 'Cancelled. Nothing was changed.');
+          return;
+        }
         if (result !== 'completed') {
           toast('error', confirmed ? NO_SIGNAL_AFTER_START_MESSAGE : NO_SIGNAL_MESSAGE);
           return;

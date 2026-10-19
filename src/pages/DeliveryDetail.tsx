@@ -1022,6 +1022,12 @@ export default function DeliveryDetail() {
       setCompleting(false);
       return;
     }
+    // The signal check can take a few seconds; never complete a delivery the user has left.
+    if (signatureRouteIdRef.current !== id) {
+      toast('error', 'This delivery changed before it was completed. Nothing was saved; please retry.');
+      setCompleting(false);
+      return;
+    }
 
     try {
       const { data: completeResult, error } = await supabase.rpc('complete_delivery', rpcParams);

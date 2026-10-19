@@ -16,6 +16,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   start step and again between start and complete. If signal drops between them, the driver is told
   the delivery is now In Progress but not completed, with no stock taken and nothing billed, and
   the table row shows it as In Progress right away (no reload is attempted without signal). The
+  signal check takes a few seconds, so after each check the list confirms the dialog is still open
+  for the same delivery (Cancel during a check sends nothing more), and the delivery page confirms
+  the driver has not moved to another delivery, before the next server call. The
   remaining instant between the two server calls is recorded in `docs/manual/KNOWN_ISSUES.md`;
   Mason chose to ship with it and close it later with one combined server call.
 - **Paper-ticket fallback (new `src/lib/paperTicket.ts`).** On the delivery page's driver layout and

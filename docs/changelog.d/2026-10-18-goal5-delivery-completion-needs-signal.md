@@ -18,7 +18,13 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   the table row shows it as In Progress right away (no reload is attempted without signal). The
   signal check takes a few seconds, so after each check the list confirms the dialog is still open
   for the same delivery (Cancel during a check sends nothing more), and the delivery page confirms
-  the driver has not moved to another delivery, before the next server call. The
+  the driver has not moved to another delivery, before the next server call. Each opening of the
+  list dialog is its own session, so cancelling and reopening the same delivery during a check
+  never lets the old request submit or close the new dialog.
+- **"Today" for completion dates is the Chicago business day.** The paper-ticket date (default,
+  latest allowed, validation) and the Deliveries list's "Delivered on" use today in
+  America/Chicago (`todayInBusinessTz`), the day the server dates the delivery, not the phone's
+  own date. The
   remaining instant between the two server calls is recorded in `docs/manual/KNOWN_ISSUES.md`;
   Mason chose to ship with it and close it later with one combined server call.
 - **Paper-ticket fallback (new `src/lib/paperTicket.ts`).** On the delivery page's driver layout and

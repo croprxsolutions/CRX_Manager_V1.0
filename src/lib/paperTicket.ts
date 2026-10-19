@@ -7,15 +7,16 @@
  * The ticket photo is an ordinary delivery photo carrying this caption, so it is
  * stored, protected and shown exactly like every other delivery photo.
  */
-import { localToday } from './dateUtils';
+import { todayInBusinessTz } from './dateUtils';
 
 export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
 
 // A paper-ticket delivery is completed later, once back in signal, so the driver
 // records the day it really happened. That day becomes the delivery and invoice date.
 // The ticket date is required on the paper path and can never be in the future.
+// "Today" is the business day in America/Chicago, the day the server dates the delivery.
 export function isValidPaperDeliveredOn(deliveredOn: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(deliveredOn) && deliveredOn <= localToday();
+  return /^\d{4}-\d{2}-\d{2}$/.test(deliveredOn) && deliveredOn <= todayInBusinessTz();
 }
 
 // The server takes the delivery and invoice date from the completion time in
@@ -26,7 +27,7 @@ export function completedAtForDeliveredOn(deliveredOn: string): string {
 }
 
 export function paperDeliveredAt(deliveredOn: string): string | undefined {
-  if (!deliveredOn || deliveredOn === localToday()) return undefined;
+  if (!deliveredOn || deliveredOn === todayInBusinessTz()) return undefined;
   return completedAtForDeliveredOn(deliveredOn);
 }
 

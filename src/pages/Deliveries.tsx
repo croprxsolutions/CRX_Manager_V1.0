@@ -44,7 +44,7 @@ import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
-import { localToday, parseLocalDate, formatLocalDate } from '../lib/dateUtils';
+import { localToday, parseLocalDate, formatLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { findShortDeliveries } from '../lib/inventoryShortage';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
@@ -61,6 +61,8 @@ interface DeliveryRow extends Delivery {
 
 /* ─── Helpers ─── */
 const today = () => localToday();
+// Completion dates use the business day in America/Chicago, the day the server dates the delivery.
+const businessToday = () => todayInBusinessTz();
 const addDays = (d: string, n: number) => {
   const dt = parseLocalDate(d);
   dt.setDate(dt.getDate() + n);
@@ -126,13 +128,22 @@ export default function Deliveries() {
   const completeIdem = useIdempotencyKey('complete_delivery', profile?.id || '');
   const [completeTarget, setCompleteTarget] = useState<DeliveryRow | null>(null);
   const completeTargetRef = useLatestRef(completeTarget);
+  // Bumped on every open and close of the complete dialog, so a request started in an
+  // earlier dialog session can never submit or close a later one.
+  const completeDialogGenRef = useRef(0);
+  const closeCompleteDialog = () => {
+    completeDialogGenRef.current += 1;
+    setCompleteTarget(null);
+    setSignedBy('');
+    setDeliveredOnDate(businessToday());
+  };
   // Send the in-app completion notification at most once per delivery. complete_delivery
   // is idempotent but returns no replay marker, so a same-key retry after a lost
   // response replays its cached success; the stable delivery id avoids duplicate
   // driver/admin notifications on that replay (Codex P2).
   const notifiedCompletionFor = useRef<Set<string>>(new Set());
   const [signedBy, setSignedBy] = useState('');
-  const [deliveredOnDate, setDeliveredOnDate] = useState(today());
+  const [deliveredOnDate, setDeliveredOnDate] = useState(businessToday());
   const [completing, setCompleting] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -423,7 +434,7 @@ export default function Deliveries() {
       p_signed_by: signedBy.trim(),
       p_performed_by: profile.id,
       // Midday in Chicago, so the server's America/Chicago date is the selected date.
-      ...(deliveredOnDate && deliveredOnDate !== today()
+      ...(deliveredOnDate && deliveredOnDate !== businessToday()
         ? { p_completed_at: completedAtForDeliveredOn(deliveredOnDate) }
         : {}),
     };
@@ -442,7 +453,9 @@ export default function Deliveries() {
     let confirmed = false;
     // The signal checks take a few seconds; if the dialog was cancelled or switched to
     // another delivery meanwhile, stop before sending the next server call.
-    const stillOpenForTarget = () => completeTargetRef.current?.id === target.id;
+    const dialogGen = completeDialogGenRef.current;
+    const stillOpenForTarget = () =>
+      completeDialogGenRef.current === dialogGen && completeTargetRef.current?.id === target.id;
     // Route through runCriticalAction for parity with this page's other mutations.
     const outcome = await runCriticalAction<'completed' | 'no_signal' | 'cancelled'>({
       action: async () => {
@@ -496,9 +509,8 @@ export default function Deliveries() {
           notifiedCompletionFor.current.add(target.id);
           notifyDeliveryCompleted(target.id, target.delivery_number, target.customer_name, target.assigned_driver, target.order_id, false).catch(() => { /* non-critical */ });
         }
-        setCompleteTarget(null);
-        setSignedBy('');
-        setDeliveredOnDate(today());
+        // Close only the dialog session this request came from.
+        if (completeDialogGenRef.current === dialogGen) closeCompleteDialog();
         fetchDeliveries();
       },
     });
@@ -509,7 +521,9 @@ export default function Deliveries() {
       // so a retry replays idempotently. If the failed call actually committed
       // server-side, the replay returns the cached result and onSuccess (including
       // the completion notification) still fires.
-      setCompleteTarget((prev) => (prev && prev.id === target.id ? { ...prev, status: 'in_progress' } : prev));
+      if (completeDialogGenRef.current === dialogGen) {
+        setCompleteTarget((prev) => (prev && prev.id === target.id ? { ...prev, status: 'in_progress' } : prev));
+      }
       // Without signal the reload would only add a second "failed to load" message,
       // so show the started delivery as In Progress in the table directly.
       if (outcome === 'no_signal') {
@@ -1191,9 +1205,10 @@ export default function Deliveries() {
               e.stopPropagation();
               completeIdem.resetKey();
               if (row.status === 'scheduled') confirmIdem.resetKey();
+              completeDialogGenRef.current += 1;
               setCompleteTarget(row);
               setSignedBy('');
-              setDeliveredOnDate(today());
+              setDeliveredOnDate(businessToday());
             }}
             title={row.status === 'scheduled' ? 'Mark this delivery delivered' : 'Mark this delivery complete'}
             aria-label={`Mark delivery ${row.delivery_number} ${row.status === 'scheduled' ? 'delivered' : 'complete'}`}
@@ -1565,7 +1580,7 @@ export default function Deliveries() {
 
       <Modal
         open={!!completeTarget}
-        onClose={() => { setCompleteTarget(null); setSignedBy(''); setDeliveredOnDate(today()); }}
+        onClose={closeCompleteDialog}
         title={completeTarget?.status === 'scheduled' ? 'Mark Delivered' : 'Mark Delivery Complete'}
       >
         <div className="space-y-4">
@@ -1605,13 +1620,13 @@ export default function Deliveries() {
               type="date"
               value={deliveredOnDate}
               onChange={(e) => setDeliveredOnDate(e.target.value)}
-              max={todayStr}
+              max={businessToday()}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             />
             <p className="mt-1 text-xs text-secondary">Recording a delivery that already happened? Set the real date — it becomes the invoice date.</p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="ghost" onClick={() => { setCompleteTarget(null); setSignedBy(''); setDeliveredOnDate(today()); }}>Cancel</Button>
+            <Button variant="ghost" onClick={closeCompleteDialog}>Cancel</Button>
             <Button icon={<CheckCircle2 className="w-4 h-4" />} onClick={handleCompleteConfirm} loading={completing} disabled={!signedBy.trim()}>
               {completeTarget?.status === 'scheduled' ? 'Mark Delivered' : 'Mark Complete'}
             </Button>

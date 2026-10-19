@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasSignal } from './connectivity';
 import { countOrdinaryPhotos, hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from './paperTicket';
-import { localToday } from './dateUtils';
+import { todayInBusinessTz } from './dateUtils';
 
 function setOnline(value: boolean) {
   Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => value });
@@ -59,7 +59,7 @@ describe('paper ticket photo', () => {
   });
 
   it('sends a delivered-on date only when it is not today', () => {
-    expect(paperDeliveredAt(localToday())).toBeUndefined();
+    expect(paperDeliveredAt(todayInBusinessTz())).toBeUndefined();
     expect(paperDeliveredAt('')).toBeUndefined();
     // Chicago midday, independent of the test machine's time zone.
     expect(paperDeliveredAt('2026-10-17')).toBe('2026-10-17T17:00:00.000Z');

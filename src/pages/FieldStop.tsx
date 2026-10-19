@@ -28,7 +28,7 @@ import { fingerprintIntentPayload } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt } from '../lib/paperTicket';
 import { compressImage } from '../lib/imageCompression';
-import { localToday } from '../lib/dateUtils';
+import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
 import { RECEIPT_NOT_SENT_MESSAGE, sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
@@ -95,11 +95,11 @@ export default function FieldStop() {
   const [noOnePresent, setNoOnePresent] = useState(false);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
-  const [paperDeliveredOn, setPaperDeliveredOn] = useState(localToday());
+  const [paperDeliveredOn, setPaperDeliveredOn] = useState(todayInBusinessTz());
   // Stop-to-stop navigation reuses this page; never carry paper mode onto the next stop.
   // Also drop the previous stop's photos, so a failed load for this stop shows none
   // (fails closed) instead of letting the last stop's ticket photo pass the check.
-  useEffect(() => { setUsePaperTicket(false); setPaperDeliveredOn(localToday()); setPhotos([]); }, [id]);
+  useEffect(() => { setUsePaperTicket(false); setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]); }, [id]);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   const [emailOnComplete, setEmailOnComplete] = useState(true);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
@@ -615,7 +615,7 @@ export default function FieldStop() {
                       id="paper-delivered-on"
                       type="date"
                       value={paperDeliveredOn}
-                      max={localToday()}
+                      max={todayInBusinessTz()}
                       onChange={(e) => setPaperDeliveredOn(e.target.value)}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />

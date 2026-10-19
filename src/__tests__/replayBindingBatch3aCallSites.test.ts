@@ -25,11 +25,20 @@ const SITES: Array<[string, string]> = [
   ['src/pages/JobDetail.tsx', 'completeJobIdem'],
 ];
 
-// The reset runs on any binding refusal (the helper returns 'intent', 'actor' or 'receipt', else null).
+// The reset runs on any binding refusal (the helper returns 'intent', 'actor' or 'receipt', else null),
+// first in a block that then reloads the record (CodeRabbit on PR #954).
 const anyBindingReset = (hook: string) => new RegExp(
-  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) ${hook}\\.resetKey\\(\\);`,
+  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) \\{\\n\\s*${hook}\\.resetKey\\(\\);`,
   'g',
 );
+// Each screen's reload in that block (the next 1-4 lines).
+const RELOADS: Record<string, RegExp> = {
+  'src/pages/Deliveries.tsx': /bindingRejected = true;[\s\S]*?if \(!completed && bindingRejected\) \{[\s\S]{0,500}?await fetchDeliveries\(\);/,
+  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKey\(\);\n\s*fetchDelivery\(\);/,
+  'src/pages/FieldStop.tsx': /completeIdem\.resetKey\(\);\n\s*fetchStop\(\);/,
+  'src/pages/FieldView.tsx': /completeIdem\.resetKey\(\);\n\s*setCompleteFormOpenFor\(null\);\n\s*fetchCards\(\);/,
+  'src/pages/JobDetail.tsx': /completeJobIdem\.resetKey\(\);\n\s*if \(stillOnThisJob\(\)\) \{\n\s*setShowCompleteModal\(false\);\n\s*fetchJob\(\);/,
+};
 // The narrower batch-1/2 form, which would leave a completion stuck on a 'receipt' refusal.
 const INTENT_OR_ACTOR_ONLY = /bindingRejection === 'intent' \|\| bindingRejection === 'actor'\) complete(?:Job)?Idem\.resetKey/;
 
@@ -41,6 +50,7 @@ describe('replay-binding batch 3a call sites retire the key on any binding refus
       const source = read(file);
       expect(source.match(anyBindingReset(hook))?.length ?? 0).toBe(1);
       expect(INTENT_OR_ACTOR_ONLY.test(source)).toBe(false);
+      expect(source).toMatch(RELOADS[file]);
     });
   }
 
@@ -78,7 +88,7 @@ describe('replay-binding batch 3a call sites retire the key on any binding refus
   });
 
   it('the patterns tell the two forms apart', () => {
-    const good = 'if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();';
+    const good = 'if (getIdempotencyBindingRejection(error)) {\n        completeIdem.resetKey();\n        fetchDelivery();\n      }';
     const narrow = "const bindingRejection = getIdempotencyBindingRejection(error);\n    if (bindingRejection === 'intent' || bindingRejection === 'actor') completeIdem.resetKey();";
     expect(good.match(anyBindingReset('completeIdem'))?.length).toBe(1);
     expect(narrow.match(anyBindingReset('completeIdem'))).toBeNull();

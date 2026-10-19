@@ -417,7 +417,11 @@ export default function FieldStop() {
       // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
       // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
       // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
-      if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();
+      // Reload so a completion an earlier attempt already committed shows instead of a stale form.
+      if (getIdempotencyBindingRejection(error)) {
+        completeIdem.resetKey();
+        fetchStop();
+      }
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
       toast('error', sanitizeError(error));
     }

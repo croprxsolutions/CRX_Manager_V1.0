@@ -411,6 +411,7 @@ export default function Deliveries() {
     const target = completeTarget;
     const idemKey = completeIdem.getKey();
     let confirmed = false;
+    let bindingRejected = false;
     // Route through runCriticalAction for parity with this page's other mutations.
     const completed = await runCriticalAction({
       action: async () => {
@@ -441,7 +442,10 @@ export default function Deliveries() {
           // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
           // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
           // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
-          if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();
+          if (getIdempotencyBindingRejection(error)) {
+            completeIdem.resetKey();
+            bindingRejected = true;
+          }
           throw error;
         }
         assertRpcResult(data, 'complete_delivery');
@@ -469,7 +473,14 @@ export default function Deliveries() {
       },
     });
 
-    if (!completed && confirmed) {
+    if (!completed && bindingRejected) {
+      // The key was refused and retired: close the modal and reload, so a completion an earlier
+      // attempt already committed shows in the list instead of a stale, still-actionable modal.
+      setCompleteTarget(null);
+      setSignedBy('');
+      setDeliveredOnDate(today());
+      await fetchDeliveries();
+    } else if (!completed && confirmed) {
       // Confirm succeeded so the delivery is now in_progress; keep the modal open
       // with the SAME retained complete-key (completeIdem resets only on success or an
       // intent/actor binding refusal)

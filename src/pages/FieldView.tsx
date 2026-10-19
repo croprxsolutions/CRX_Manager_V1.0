@@ -590,7 +590,13 @@ export default function FieldView() {
       // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
       // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
       // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
-      if (getIdempotencyBindingRejection(err)) completeIdem.resetKey();
+      // Close the form and reload so a completion an earlier attempt already committed shows; the
+      // typed values stay in completeForm if the job is still open and the form is reopened.
+      if (getIdempotencyBindingRejection(err)) {
+        completeIdem.resetKey();
+        setCompleteFormOpenFor(null);
+        fetchCards();
+      }
       Sentry.captureException(err, { tags: { source: 'critical_action', action: 'field_view_complete_job' } });
       // U12 Codex R5 #2: a dispatch-only applicator on a SPLIT job (other
       // locations dispatched to someone else) sees Complete, but complete_job

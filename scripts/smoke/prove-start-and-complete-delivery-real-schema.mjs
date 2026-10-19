@@ -308,7 +308,7 @@ function main() {
       /SMOKE_FAIL: a future date ran|future-date refusal was/],
     ['past-date midday stamp', "    v_completed_at := (p_delivered_on + time '17:00') AT TIME ZONE 'UTC';\n", '    NULL;\n',
       /SMOKE_FAIL: delivery 2 \(yesterday\)/],
-    ['past-date bound', '  IF NOT isfinite(p_delivered_on) OR p_delivered_on < v_today - 366 THEN', '  IF false THEN',
+    ['past-date bound', "  IF p_delivered_on < (v_today - interval '1 year')::date THEN", '  IF false THEN',
       /SMOKE_FAIL: a date more than a year back ran/],
     ['authorization before replay', '  IF v_actor_role IS NULL OR NOT (', '  IF false AND NOT (',
       /SMOKE_FAIL: a deactivated account replayed its completion/],

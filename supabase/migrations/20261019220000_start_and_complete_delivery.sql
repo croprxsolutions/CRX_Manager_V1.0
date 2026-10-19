@@ -14,7 +14,8 @@
 --        p_performed_by naming someone else (ACTOR_MISMATCH) -- complete_delivery's tests and
 --        messages;
 --     2. requires p_delivered_on, the business date the person chose (America/Chicago), and refuses
---        one after today's Chicago date (DELIVERED_ON_IN_FUTURE), not a real date or more than a
+--        one that is not a real date (DELIVERED_ON_INVALID), after today's Chicago date
+--        (DELIVERED_ON_IN_FUTURE), or more than a
 --        year back (DELIVERED_ON_TOO_OLD: -infinity or a typo year would date the invoice outside
 --        any accounting period);
 --     3. locks the delivery row and runs complete_delivery's authorization test (active admin or
@@ -132,13 +133,16 @@ BEGIN
   IF p_delivered_on IS NULL THEN
     RAISE EXCEPTION 'DELIVERED_ON_REQUIRED: choose the delivery date' USING ERRCODE = '22023';
   END IF;
+  -- A real date no more than a year back: refuses +/-infinity and typo years, which would otherwise
+  -- date the delivery and its invoice outside any accounting period.
+  IF NOT isfinite(p_delivered_on) THEN
+    RAISE EXCEPTION 'DELIVERED_ON_INVALID: % is not a real date', p_delivered_on USING ERRCODE = '22023';
+  END IF;
   IF p_delivered_on > v_today THEN
     RAISE EXCEPTION 'DELIVERED_ON_IN_FUTURE: the delivery date % is after today (%)', p_delivered_on, v_today
       USING ERRCODE = '22023';
   END IF;
-  -- A real date no more than a year back: refuses -infinity and typo years, which would otherwise
-  -- date the delivery and its invoice outside any accounting period.
-  IF NOT isfinite(p_delivered_on) OR p_delivered_on < v_today - 366 THEN
+  IF p_delivered_on < (v_today - interval '1 year')::date THEN
     RAISE EXCEPTION 'DELIVERED_ON_TOO_OLD: the delivery date % is more than a year before today (%)', p_delivered_on, v_today
       USING ERRCODE = '22023';
   END IF;

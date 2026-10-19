@@ -18,8 +18,8 @@
 --      delivery stays scheduled;
 --   d. the same key from a different person is refused (IDEMPOTENCY_ACTOR_MISMATCH);
 --   e. no key: IDEMPOTENCY_KEY_REQUIRED; no date: DELIVERED_ON_REQUIRED; a forged p_performed_by:
---      ACTOR_MISMATCH; tomorrow: DELIVERED_ON_IN_FUTURE; 400 days back or -infinity:
---      DELIVERED_ON_TOO_OLD; each leaves the delivery scheduled;
+--      ACTOR_MISMATCH; tomorrow: DELIVERED_ON_IN_FUTURE; one day past a calendar year back, or -infinity:
+--      DELIVERED_ON_TOO_OLD (-infinity: DELIVERED_ON_INVALID); each leaves the delivery scheduled;
 --   f. a past date (yesterday): completed at 17:00 UTC of that date, Chicago date = yesterday (the
 --      path a "today" request takes when it reaches the server after Chicago midnight);
 --   g. a completion that fails AFTER the start (a closed accounting period) leaves the delivery
@@ -136,12 +136,12 @@ BEGIN
   END IF;
   SELECT request_actor_id, request_fingerprint INTO v_actor, v_fp FROM public.idempotency_keys
    WHERE idempotency_key = v_key AND operation = 'start_and_complete_delivery';
-  IF v_actor IS DISTINCT FROM v_admin OR v_fp !~ '^[0-9a-f]{64}$' THEN
+  IF v_actor IS DISTINCT FROM v_admin OR v_fp IS NULL OR v_fp !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the start_and_complete_delivery receipt is not bound (actor %, fingerprint %)', v_actor, v_fp;
   END IF;
   SELECT request_actor_id, request_fingerprint INTO v_actor, v_fp FROM public.idempotency_keys
    WHERE idempotency_key = v_key || ':complete' AND operation = 'complete_delivery';
-  IF v_actor IS DISTINCT FROM v_admin OR v_fp !~ '^[0-9a-f]{64}$' THEN
+  IF v_actor IS DISTINCT FROM v_admin OR v_fp IS NULL OR v_fp !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the inner complete_delivery receipt is not bound (actor %, fingerprint %)', v_actor, v_fp;
   END IF;
 
@@ -236,7 +236,7 @@ BEGIN
     IF SQLERRM NOT LIKE 'DELIVERED_ON_IN_FUTURE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: future-date refusal was %', SQLERRM; END IF;
   END;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today - 400, v_admin, NULL, NULL, NULL, v_prefix || 'too-old');
+    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', (v_today - interval '1 year')::date - 1, v_admin, NULL, NULL, NULL, v_prefix || 'too-old');
     RAISE EXCEPTION 'SMOKE_FAIL: a date more than a year back ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -247,7 +247,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a -infinity date ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF SQLERRM NOT LIKE 'DELIVERED_ON_TOO_OLD%' THEN RAISE EXCEPTION 'SMOKE_FAIL: -infinity refusal was %', SQLERRM; END IF;
+    IF SQLERRM NOT LIKE 'DELIVERED_ON_INVALID%' THEN RAISE EXCEPTION 'SMOKE_FAIL: -infinity refusal was %', SQLERRM; END IF;
   END;
   SELECT status INTO v_status FROM public.deliveries WHERE id = v_del[2];
   IF v_status IS DISTINCT FROM 'scheduled' THEN

@@ -1539,8 +1539,9 @@ export default function Deliveries() {
           <p className="text-sm text-secondary">
             Complete delivery <span className="font-medium text-nav-dark">{completeTarget?.delivery_number}</span> for{' '}
             <span className="font-medium text-nav-dark">{completeTarget?.customer_name}</span> — all items delivered in full.
-            For a partial delivery, to email the customer their receipt, or if the customer signed a
-            paper ticket (it needs a photo of the signed ticket), open the delivery instead.
+            For a partial delivery or to email the customer their receipt, open the delivery instead.
+            If the customer signed a paper ticket, the assigned driver completes it from their own
+            delivery screen with a photo of the signed ticket.
           </p>
           {completeTarget?.status === 'scheduled' && (
             <p className="text-sm text-secondary">

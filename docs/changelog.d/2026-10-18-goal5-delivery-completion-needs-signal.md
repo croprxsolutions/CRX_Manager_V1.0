@@ -26,7 +26,8 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   future); a past date is sent as the completion time, so the delivery and its invoice land on the
   day the delivery really happened, not the day it was entered. The date is required (an empty
   date blocks completion), and the customer receipt shows that same date.
-  The Deliveries list dialog sends paper-ticket deliveries to the delivery page. The ticket photo
+  The Deliveries list dialog (office staff only) says the assigned driver completes a paper-ticket
+  delivery from their own delivery screen, since only the driver layout has the ticket controls. The ticket photo
   is required only when the driver ticks the paper-ticket box. Ticket photos do not count toward
   the 10-photo limit (they have their own limit of 2), and on the field stop a saved ticket photo
   stays on screen even if the photo list fails to reload. Moving to another stop clears the photo

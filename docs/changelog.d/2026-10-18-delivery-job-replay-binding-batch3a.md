@@ -1,4 +1,4 @@
-## 2026-10-18 — written, not yet applied: delivery and job completions stop reporting success for the wrong record (replay-binding batch 3a)
+## 2026-10-18 — delivery and job completions can no longer report success for the wrong record (replay-binding batch 3a)
 
 When a completion is retried, `complete_delivery` and `complete_job` hand back the first attempt's
 saved answer matched on the retry key alone. A retry that reused a key for a different delivery or
@@ -15,7 +15,9 @@ twice; the harm was a false success. This change:
   saved action as before (one whose delivery or job changed since it was saved still goes to office
   review first, before this check). Both now require a retry key (every screen and the offline queue already send one). The
   commit-time guard that refuses an unbound receipt now covers both; it applies only over the live
-  batch 1 + stock batch (PR #951) guard. The file narrows access, so it applies only on Mason's owner approval.
+  batch 1 + stock batch (PR #951) guard. The file narrows access, so it applied only on Mason's owner approval: applied live 2026-10-19
+  20:52:46 UTC (ledger `20261019205246`), after which a read-only check found both wrappers, both renamed
+  bodies (unchanged md5s) and the 24-operation guard live.
 - **App:** the five completion screens (Deliveries, Delivery detail, Field stop, Field view, Job
   detail) drop a retry key on any replay-binding refusal (another request's or person's key, or a
   receipt that can never be used), which is safe because the database refuses a second completion
@@ -32,5 +34,13 @@ twice; the harm was a false success. This change:
   `src/__tests__/replayBindingBatch3aCallSites.test.ts` pins the screen and browser-test call sites.
   `smoke-delivery-accounting-period-guard.sql` now accepts either refusal for another person's
   retry key.
+- **After the apply:** the DB invariant sweeps ran read-only (28 of 29; `quote-versions-rpc-owned` was declined).
+  `complete_delivery`'s actor-forgery exception is re-pinned to the batch-3a wrapper
+  (`scripts/db-invariant-sweeps/allowlist.json`), and `complete_job`'s is retired because its wrapper no longer
+  trips the check. Five actor-forgery flags remain from earlier changes, not this one (`save_quote`,
+  `get_profitability_report`, `get_sales_summary_report` and `get_gross_sales_report` after `20261019010000`,
+  and `apply_prepay_to_invoice` after `20261016060000`), each awaiting its own review. The registry
+  records `20261019010000` and `20261019200000` as applied (high-water `20261019205246`), which retires
+  the `_enforce_below_cost_line` inventory exemption in `src/lib/rpcContracts.test.ts`.
 - **Rollback:** the migration header lists the order to undo it, narrowing the commit-time guard
   first.

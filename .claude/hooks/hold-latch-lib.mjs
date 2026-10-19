@@ -60,7 +60,11 @@ const ALLOW_WRITE_PATH_RE = /(\.claude[\\/]session-state|scratchpad|SCOPE\.md$|P
 // already matches them through global options, `.exe` and any case
 // (`git -C dir push`, `gh -R o/r pr merge`), which a bare `git\s+push` missed —
 // so before 2026-10-18 a "stop" did not stop the autonomous-landing merge.
-const OUTWARD_BASH_RE = /(supabase\s+db|apply_migration|apply-migration-file|deploy|npm\s+publish|vercel\s|\bgh(?:\.\w+)?["']?\s+(?:\S+\s+)*?(?:pr\s+(?:create|ready|close|reopen|comment|review|edit)|release\s+create|issue\s+(?:create|close|comment|edit))\b|\bgh(?:\.\w+)?["']?\s+api\b[^\n]*?(?:\s-X\s*(?:POST|PUT|PATCH|DELETE)|--method[=\s]+(?:POST|PUT|PATCH|DELETE)|\s-[fF]\s))/i;
+// A writing `gh api` call: an explicit write method, or any field / input flag
+// (`-f`, `-F`, `--field`, `--raw-field`, `--input`), which makes gh default to POST.
+// A REST client writing anywhere (curl/wget/Invoke-RestMethod/Invoke-WebRequest with a
+// write method or a body) is outward too (Luna, PR #956 round 1).
+const OUTWARD_BASH_RE = /(supabase\s+db|apply_migration|apply-migration-file|deploy|npm\s+publish|vercel\s|\bgh(?:\.\w+)?["']?\s+(?:\S+\s+)*?(?:pr\s+(?:create|ready|close|reopen|comment|review|edit)|release\s+create|issue\s+(?:create|close|comment|edit))\b|\bgh(?:\.\w+)?["']?\s+api\b[^\n]*?(?:\s-X\s*(?:POST|PUT|PATCH|DELETE)|--method[=\s]+(?:POST|PUT|PATCH|DELETE)|\s-[fF](?:\s|=)|\s--(?:field|raw-field|input)(?:\s|=))|\b(?:curl|wget|invoke-restmethod|invoke-webrequest|irm|iwr)\b[^\n]*?(?:\s-X\s*(?:POST|PUT|PATCH|DELETE)|\s--request[=\s]+(?:POST|PUT|PATCH|DELETE)|\s-method\s+(?:post|put|patch|delete)|\s(?:-d|--data(?:-raw|-binary|-urlencode)?|--json|-F|--form|--post-data|--post-file|-body|-infile)(?:\s|=)))/i;
 const LOCAL_GIT_RE = /\bgit\b[^\n]*?\b(commit|merge|rebase|cherry-pick|tag)\b/i;
 const SQL_WRITE_RE = /\b(insert|update|delete|create|alter|drop|truncate|grant|revoke|copy|call|do|merge|refresh|vacuum|reindex|cluster|comment\s+on|security\s+label|lock|set\s+role|reset\s+role)\b/i;
 

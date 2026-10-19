@@ -924,6 +924,9 @@ for (const command of [
   "rm -rf .claude/session-state",
   "echo x > .claude/session-state/anything.json",
   "rm -rf .claude/worktrees/wt-a/src",
+  // The home exclusion is anchored to a real home folder (Luna, PR #956 round 1).
+  "rm -rf /tmp/Users/alice/.claude",
+  "rm -rf C:/CRX/home/x/.claude",
   // Trusted files a plain copy or tee could forge before (reviewer probes).
   "cp /tmp/x.json .claude/session-state/migration-review-x.json",
   "echo {} | tee .claude/session-state/owner-approval-x.json",

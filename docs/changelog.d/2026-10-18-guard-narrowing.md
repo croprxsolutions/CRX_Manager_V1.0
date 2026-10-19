@@ -34,5 +34,21 @@ sessions on helper reports, twice more on 2026-10-18 alone. Mason approved the r
   `git -C … push` and `select public.void_invoice(42)`;
 - the review proof guard passes the reviewer's over-block probes and denies every forgery probe.
 
+**Luna round 1 (7 findings).** Fixed:
+- inline scripts that join strings with `+` (`'g'+'h pr '+'mer'+'ge'`) now count as obfuscation;
+- the review proof guard's home-folder exclusion is anchored to a real home folder;
+- the hold latch treats `gh api --field/--raw-field/--input` and writing REST clients (curl,
+  wget, Invoke-RestMethod/WebRequest with a write method or a body) as outward;
+- the launcher parity test now requires the working guard to deny every gated form, with one
+  listed exception that main also allowed.
+
+Declined, with reasons:
+- (MED) a computed or fed command that merely mentions `git`/`merge`/`push` is still refused. That
+  is the intended speed bump, and the common harmless shapes have no such word.
+- (MED) the bare `deploy` match under a hold is unchanged from before this PR and errs toward
+  blocking only while a stop is latched.
+- `node -e` inline code was allowed before and after this PR (it is an argument, not fed input),
+  the same as `node file.mjs`.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

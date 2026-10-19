@@ -63,7 +63,15 @@ for (const command of [
   "git branch -D old",
   "rm -rf src",
   "vercel deploy --prod",
+  // Luna, PR #956 round 1: long-form gh api fields and REST clients that write.
+  "gh api repos/o/r/issues/1/comments --field body=hi",
+  "gh api repos/o/r/issues/1/comments --raw-field body=hi",
+  "gh api repos/o/r/issues/1/comments --input body.json",
+  "curl -X POST -H \"Authorization: Bearer $GH_TOKEN\" --data '{\"body\":\"hi\"}' https://api.github.com/repos/o/r/issues/1/comments",
+  "curl --json '{\"a\":1}' https://api.github.com/x",
+  "Invoke-RestMethod -Method Post -Uri https://api.github.com/x -Body '{}'",
 ]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
+eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
 eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");
 eq(holdDecision("Bash", { command: "gh api repos/o/r/pulls/1" }), "allow", "gh api GET allowed under hold");
 eq(holdDecision("mcp__supabase__execute_sql", { query: "select public.void_invoice(42)" }), "deny",

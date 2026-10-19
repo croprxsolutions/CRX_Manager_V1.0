@@ -4049,7 +4049,10 @@ export function commandFedToInterpreter(command) {
 //     joining) together with a way to run a program or reach the network,
 //     because that pair is how a gated word is hidden from the first test.
 const GATED_WORD_RE = /(?:^|[^\w-])(?:gh|git|merge|push|api|alias|graphql|pulls|refs|curl|wget|irm|iwr|invoke-restmethod|invoke-webrequest|encodedcommand|frombase64string|base64|atob)(?:$|[^\w-])|api\.github|(?:^|\s)-e(?:nc(?:odedcommand)?)?\s+[A-Za-z0-9+/=]{12,}/i;
-const OBFUSCATION_RE = /fromcharcode|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\.join\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode/i;
+// String concatenation with `+` (`'g'+'h pr '+'mer'+'ge'`) hides a gated word from
+// GATED_WORD_RE just as well as char codes do (Luna, PR #956 round 1). Only `+` between two
+// quotes counts: `'.'` is an ordinary path argument, not a join.
+const OBFUSCATION_RE = /fromcharcode|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\.join\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode|['"`]\s*\+\s*['"`]|\bconcat\s*\(/i;
 const CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|start-process|invoke-expression|\biex\b|\beval\b|\bfetch\b|https?:|\brequest\b|socket|\b(?:bash|sh|zsh|cmd|pwsh|powershell|python3?|node|perl|ruby|deno|bun)\b|\$\(|`/i;
 export function couldReachGatedAction(texts) {
   return [].concat(texts).some((text) => {

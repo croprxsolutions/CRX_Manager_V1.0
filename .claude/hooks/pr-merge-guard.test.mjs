@@ -481,6 +481,9 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     [`Get-Content payload.txt | iex; ${NESTED_ADMIN}`, /on its input|--admin/],
     ["node - <<'EOF'\nrequire('child_process').execSync('gh pr merge 1 --admin')\nEOF", /on its input/],
     ["P=gh; $P pr merge 1 --squash", /built at run time/],
+    // String concatenation hides the gated word (Luna, PR #956 round 1).
+    ["node - <<'EOF'\nrequire('child_process').execSync('g'+'h pr '+'mer'+'ge 951')\nEOF", /on its input/],
+    ["python - <<'EOF'\nimport subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\nEOF", /on its input/],
     ["sudo -u root -g staff -H -n -E gh mm 123", /is not a gh command this guard can read/],
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });

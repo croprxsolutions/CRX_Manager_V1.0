@@ -437,7 +437,10 @@ if (shellTool) {
   // every agent worktree carries its own `.claude/session-state`, so deleting or
   // moving a worktree (or anything reached from inside one) destroys that state,
   // and the eight historic spellings of that exploit are pinned in the tests.
-  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:(]|(?<!(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>])|[/\\]+worktrees(?![\w-]))/i;
+  // The home exclusion is anchored: `Users`/`home` must be the FIRST path component
+  // (after an optional drive letter), so `/tmp/Users/alice/.claude` is not mistaken for a
+  // home folder (Luna, PR #956 round 1).
+  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:(]|(?<!(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:^|[\s"'=(]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>])|[/\\]+worktrees(?![\w-]))/i;
   // The same narrowing for a component split: a `.claude` segment alone no longer
   // counts (that is the ancestor rule's job); `session-state` and a glob that
   // could expand to a protected name still do.

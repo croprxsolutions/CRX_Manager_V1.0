@@ -894,6 +894,7 @@ export default function Reports() {
 
   // ─── CSV export (profitability) ─────────────────────────────
   const handleProfitCSV = () => {
+    if (!isAdmin && ADMIN_ONLY_PROFIT_TABS.has(profitTab)) return;
     if (profitTab === 'customer') {
       exportToCSV(customerData, [
         { key: 'farm_name', header: 'Customer' },
@@ -933,6 +934,7 @@ export default function Reports() {
 
   // ─── Generic CSV/PDF export for financial/operational ───────
   const handleFinancialCSV = () => {
+    if (!isAdmin && ADMIN_ONLY_FINANCIAL_TABS.has(financialTab)) return;
     if (financialTab === 'pnl') {
       exportToCSV(pnlData as unknown as Record<string, unknown>[], [
         { key: 'line_item', header: 'Line Item' },
@@ -976,6 +978,7 @@ export default function Reports() {
   };
 
   const handleOperationalCSV = () => {
+    if (!isAdmin && ADMIN_ONLY_OPERATIONAL_TABS.has(operationalTab)) return;
     if (operationalTab === 'chemical_history') {
       exportToCSV(chemHistoryData as unknown as Record<string, unknown>[], [
         { key: 'transaction_date', header: 'Date', format: fmtDateCSV },
@@ -1224,7 +1227,7 @@ export default function Reports() {
         </div>
 
         {/* Gross sales group-by selector */}
-        {category === 'financial' && financialTab === 'gross_sales' && (
+        {category === 'financial' && isAdmin && financialTab === 'gross_sales' && (
           <div>
             <label className="block text-xs font-medium text-secondary mb-1">Group By</label>
             <select value={grossSalesGroupBy} onChange={(e) => setGrossSalesGroupBy(e.target.value as 'product' | 'customer' | 'salesman')} aria-label="Group by" className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green">
@@ -1324,10 +1327,10 @@ export default function Reports() {
 
           <Card padding={false}>
             <div className="p-5">
-              {profitTab === 'customer' && <DataTable data={customerData as unknown as Record<string, unknown>[]} columns={customerCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search customers..." searchKeys={['farm_name']} emptyTitle="No customer data" loading={loading} />}
-              {profitTab === 'product' && <DataTable data={productData as unknown as Record<string, unknown>[]} columns={productCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name']} emptyTitle="No product data" loading={loading} />}
+              {isAdmin && profitTab === 'customer' && <DataTable data={customerData as unknown as Record<string, unknown>[]} columns={customerCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search customers..." searchKeys={['farm_name']} emptyTitle="No customer data" loading={loading} />}
+              {isAdmin && profitTab === 'product' && <DataTable data={productData as unknown as Record<string, unknown>[]} columns={productCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name']} emptyTitle="No product data" loading={loading} />}
               {profitTab === 'commission' && <DataTable data={commissionData as unknown as Record<string, unknown>[]} columns={commissionCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No commissions" loading={loading} />}
-              {profitTab === 'revenue' && <DataTable data={revenueData as unknown as Record<string, unknown>[]} columns={revenueCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No revenue data" loading={loading} />}
+              {isAdmin && profitTab === 'revenue' && <DataTable data={revenueData as unknown as Record<string, unknown>[]} columns={revenueCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No revenue data" loading={loading} />}
             </div>
           </Card>
         </>
@@ -1350,7 +1353,7 @@ export default function Reports() {
           {dateFilterBar(handleFinancialCSV, isAdmin && financialTab === 'commission_balance' && !commissionExportReady)}
 
           {/* P&L summary cards */}
-          {financialTab === 'pnl' && pnlData.length > 0 && (
+          {isAdmin && financialTab === 'pnl' && pnlData.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
               {pnlData.map((row) => (
                 <Card key={row.line_item}>
@@ -1379,8 +1382,8 @@ export default function Reports() {
 
           <Card padding={false}>
             <div className="p-5">
-              {financialTab === 'pnl' && <DataTable data={pnlData as unknown as Record<string, unknown>[]} columns={pnlCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No P&L data" emptyDescription="Select a date range to generate P&L" loading={loading} />}
-              {financialTab === 'gross_sales' && <DataTable data={grossSalesData as unknown as Record<string, unknown>[]} columns={grossSalesCols as unknown as Column<Record<string, unknown>>[]} searchable searchKeys={['group_name']} emptyTitle="No gross sales data" emptyDescription="Select a date range" loading={loading} />}
+              {isAdmin && financialTab === 'pnl' && <DataTable data={pnlData as unknown as Record<string, unknown>[]} columns={pnlCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No P&L data" emptyDescription="Select a date range to generate P&L" loading={loading} />}
+              {isAdmin && financialTab === 'gross_sales' && <DataTable data={grossSalesData as unknown as Record<string, unknown>[]} columns={grossSalesCols as unknown as Column<Record<string, unknown>>[]} searchable searchKeys={['group_name']} emptyTitle="No gross sales data" emptyDescription="Select a date range" loading={loading} />}
               {financialTab === 'customer_balance' && <DataTable data={custBalanceData as unknown as Record<string, unknown>[]} columns={custBalanceCols as unknown as Column<Record<string, unknown>>[]} searchable searchKeys={['farm_name']} emptyTitle="No outstanding balances" loading={loading} />}
               {isAdmin && financialTab === 'commission_balance' && (
                 <>
@@ -1443,7 +1446,7 @@ export default function Reports() {
           )}
 
           {/* Inventory cost total */}
-          {operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (
+          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (
             <div className="flex items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
               <span className="text-sm text-blue-800">
                 <span className="font-semibold">Total Inventory Value:</span>{' '}
@@ -1460,7 +1463,7 @@ export default function Reports() {
 
           {!(operationalTab === 'price_list' && priceListError) && <Card padding={false}>
             <div className="p-5">
-              {operationalTab === 'inventory_cost' && <DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category']} emptyTitle="No inventory data" loading={loading} />}
+              {isAdmin && operationalTab === 'inventory_cost' && <DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category']} emptyTitle="No inventory data" loading={loading} />}
               {operationalTab === 'chemical_history' && <DataTable data={chemHistoryData as unknown as Record<string, unknown>[]} columns={chemHistoryCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No chemical history" emptyDescription="Select a product and date range" loading={loading} />}
               {operationalTab === 'posted_applications' && <DataTable data={postedAppsData} columns={postedAppsCols} searchable searchKeys={['customer_name', 'record_number']} emptyTitle="No posted applications" loading={loading} />}
               {operationalTab === 'price_list' && <DataTable data={priceListData} columns={priceListCols} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'vendor']} emptyTitle="No products" loading={loading || priceListPending} />}

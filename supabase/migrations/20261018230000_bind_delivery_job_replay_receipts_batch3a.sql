@@ -54,9 +54,10 @@
 --   now also covers complete_delivery and complete_job. A trigger's WHEN clause cannot be altered, so
 --   the trigger is dropped and recreated with the same name, function and timing, inside this
 --   transaction under its ACCESS EXCLUSIVE lock on idempotency_keys (no gap is visible). No second
---   trigger is created. Replay-binding batch 2 (20261016140000, PR #951) recreates the same trigger
---   and is not applied yet, so this file accepts exactly the two states the trigger can be in when it
---   runs and keeps every operation already covered:
+--   trigger is created. Replay-binding batch 2 (20261016140000, PR #951) recreates the same trigger;
+--   it was not applied when this file was written and was applied live on 2026-10-19 (ledger
+--   20261019010324), so the batch 1 + batch 2 state is the expected one. This file accepts exactly
+--   the two states the trigger can be in and keeps every operation already covered:
 --     batch 1 only               -> the nine batch-1 operations + these two
 --     batch 1 + batch 2 applied  -> the nine + batch 2's thirteen + these two
 --   Any other trigger definition refuses the apply (PREFLIGHT_RECEIPT_GUARD_DRIFT). If this file is
@@ -112,8 +113,9 @@
 --     UNEXPECTED_SERVER_ERROR); the action still goes to needs_review with nothing committed.
 --
 -- ORDERING: strict. Live high-water when written: 20261016060000 (PR #942, replay-binding batch 1,
---   ledger 20261016121253). Numbered above 20261016140000 (PR #951, batch 2, not applied). Re-read
---   the live ledger before applying. If THIS file is applied before batch 2, batch 2 must both
+--   ledger 20261016121253). Numbered above 20261016140000 (PR #951, batch 2, applied live
+--   2026-10-19 as ledger 20261019010324, before this file as planned). Re-read the live ledger
+--   before applying. If THIS file is applied before batch 2, batch 2 must both
 --   renumber above 20261018230000 (the ordering guard refuses a file below the high-water) and
 --   update its pinned trigger literal to keep complete_delivery and complete_job.
 --

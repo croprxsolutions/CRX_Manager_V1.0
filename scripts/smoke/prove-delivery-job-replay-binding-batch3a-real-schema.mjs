@@ -6,18 +6,19 @@
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
  * PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate (the
- * same skips as the other real-schema provers; batch 1, 20261016060000, is replayed, so the
- * commit-time guard is in its batch-1-only state), then:
+ * same skips as the other real-schema provers; batches 1 and 2, 20261016060000 and 20261016140000,
+ * are replayed, so the commit-time guard is in its batch-1+2 state, as on live since ledger
+ * 20261019010324), then:
  *   0. FIDELITY: every body the candidate's preflight pins replayed with its pinned md5;
  *   1. BEFORE: the new chain fails first at step a (complete_delivery hands delivery A's receipt
  *      back as success for delivery B), and every covering chain that passes is recorded;
  *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the file stops at its preflight;
  *      PREFLIGHT: a drifted complete_delivery body, an unexpired complete_job receipt, and an unknown
  *      commit-time guard list each abort the candidate before any change;
- *   3. BATCH-2 STATE: in a rolled-back transaction, with the guard recreated as batch 1 + batch 2
- *      (20261016140000, PR #951, not on this branch) would leave it, the candidate applies and the
- *      guard then lists the 9 + 13 + 2 operations in that order;
- *   4. APPLY (batch-1-only state, committed): POSTFLIGHT_OK, the guard lists 9 + 2;
+ *   3. BATCH-1-ONLY STATE: in a rolled-back transaction, with the guard recreated as batch 1 alone
+ *      left it (the other prior state the candidate accepts), the candidate applies and the guard
+ *      then lists the 9 + 2 operations in that order;
+ *   4. APPLY (batch-1+2 state, committed): POSTFLIGHT_OK, the guard lists 9 + 13 + 2;
  *   5. AFTER: the new chain passes and rolls back (the sequences it moved are reported: completing
  *      a delivery on an order draws an invoice number, so the chain is CONTAINER ONLY), every
  *      covering chain that passed BEFORE still passes, and an unbound complete_delivery /
@@ -152,6 +153,10 @@ function plan() {
   }
   return before;
 }
+function installLiveAuthUid() {
+  psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
+  assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
+}
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
@@ -175,13 +180,14 @@ function buildContainer() {
     for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
+    // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
+    if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));
     replayed += 1;
   }
-  psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
-  assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
+  installLiveAuthUid();
   console.log(`[prover] replayed ${replayed} post-baseline migrations before the candidate (skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
 }
 
@@ -348,7 +354,7 @@ function main() {
   assert.equal(batch2.length, 13, 'the candidate lists the thirteen batch-2 operations');
   assert.deepEqual(batch3a, WRAPPED, 'the candidate adds exactly complete_delivery and complete_job');
   const guardBefore = guardOps();
-  assert.deepEqual(guardBefore, batch1, 'the replayed database is not in the batch-1-only guard state');
+  assert.deepEqual(guardBefore, [...batch1, ...batch2], 'the replayed database is not in the batch-1+2 guard state');
 
   // 1. BEFORE.
   const before = chain(CHAIN);
@@ -399,30 +405,30 @@ ROLLBACK;`,
   assertUntouched('PREFLIGHT guard drift', guardBefore);
   console.log('[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, over a drifted complete_delivery body, with an unexpired complete_job receipt, or over an unknown guard list, the candidate stops and leaves nothing behind');
 
-  // 3. BATCH-2 STATE (rolled back): the guard as batch 1 + batch 2 would leave it.
-  const b2 = docker([...psqlArgs(), '-A', '-t'], {
+  // 3. BATCH-1-ONLY STATE (rolled back): the guard as batch 1 alone left it.
+  const b1 = docker([...psqlArgs(), '-A', '-t'], {
     input: `BEGIN;
-${recreateGuardSql([...batch1, ...batch2])}
+${recreateGuardSql(batch1)}
 ${guardOpsSql().replace("'GUARD_OPS='", "'GUARD_OPS_BEFORE='")}
 \\i /tmp/candidate.sql
 ${guardOpsSql()}
 ROLLBACK;`,
     allowFailure: true,
   });
-  const b2out = `${b2.stdout}\n${b2.stderr}`;
-  assert.equal(b2.status, 0, `BATCH-2 STATE: the candidate failed over the batch-1+2 guard:\n${b2out}`);
-  assert.match(b2out, /POSTFLIGHT_OK/, `BATCH-2 STATE: no POSTFLIGHT_OK:\n${b2out}`);
-  assert.deepEqual(/GUARD_OPS_BEFORE=([a-z_,]*)/.exec(b2out)?.[1].split(','), [...batch1, ...batch2], 'BATCH-2 STATE: the batch-1+2 guard was not set up');
-  assert.deepEqual(guardOps(b2out), [...batch1, ...batch2, ...batch3a], 'BATCH-2 STATE: the guard does not list 9 + 13 + 2 operations in order');
-  assertUntouched('BATCH-2 STATE rollback', guardBefore);
-  console.log(`[prover] BATCH-2 STATE: over the batch-1+2 guard the candidate prints POSTFLIGHT_OK and the guard lists ${batch1.length} + ${batch2.length} + ${batch3a.length} operations in order (rolled back)`);
+  const b1out = `${b1.stdout}\n${b1.stderr}`;
+  assert.equal(b1.status, 0, `BATCH-1-ONLY STATE: the candidate failed over the batch-1 guard:\n${b1out}`);
+  assert.match(b1out, /POSTFLIGHT_OK/, `BATCH-1-ONLY STATE: no POSTFLIGHT_OK:\n${b1out}`);
+  assert.deepEqual(/GUARD_OPS_BEFORE=([a-z_,]*)/.exec(b1out)?.[1].split(','), batch1, 'BATCH-1-ONLY STATE: the batch-1 guard was not set up');
+  assert.deepEqual(guardOps(b1out), [...batch1, ...batch3a], 'BATCH-1-ONLY STATE: the guard does not list 9 + 2 operations in order');
+  assertUntouched('BATCH-1-ONLY STATE rollback', guardBefore);
+  console.log(`[prover] BATCH-1-ONLY STATE: over the batch-1 guard the candidate prints POSTFLIGHT_OK and the guard lists ${batch1.length} + ${batch3a.length} operations in order (rolled back)`);
 
-  // 4. APPLY (batch-1-only state, committed).
+  // 4. APPLY (batch-1+2 state, as on live; committed).
   const a = apply('candidate.sql');
   assert.equal(a.status, 0, `the candidate failed to apply:\n${a.output}`);
   assert.match(a.output, /POSTFLIGHT_OK/, `the postflight did not report OK:\n${a.output}`);
-  assert.deepEqual(guardOps(), [...batch1, ...batch3a], 'APPLY: the guard does not list 9 + 2 operations in order');
-  console.log(`[prover] candidate applied; POSTFLIGHT_OK; the guard lists ${batch1.length} + ${batch3a.length} operations: ${guardOps().join(', ')}`);
+  assert.deepEqual(guardOps(), [...batch1, ...batch2, ...batch3a], 'APPLY: the guard does not list 9 + 13 + 2 operations in order');
+  console.log(`[prover] candidate applied; POSTFLIGHT_OK; the guard lists ${batch1.length} + ${batch2.length} + ${batch3a.length} operations: ${guardOps().join(', ')}`);
 
   // 5. AFTER.
   const seqBefore = sequences();
@@ -450,15 +456,16 @@ ROLLBACK;`,
   });
   assert.match(autocommit.stderr, /REPLAY_RECEIPT_UNBOUND/, `AFTER: an autocommit unbound complete_delivery receipt was not refused:\n${autocommit.stderr}`);
   assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = 'prover-unbound-autocommit';"), '0', 'AFTER: the refused unbound receipt was committed');
-  // A batch-1 operation is still covered.
+  // A batch-1 and a batch-2 operation are still covered.
   assert.match(unboundReceipt('void_payment'), /REPLAY_RECEIPT_UNBOUND/, 'AFTER: the guard no longer covers a batch-1 operation');
-  console.log('[prover] AFTER: an unbound complete_delivery or complete_job receipt never commits (immediate check and an autocommit INSERT), and batch-1 operations stay covered');
+  assert.match(unboundReceipt('release_inventory_hold'), /REPLAY_RECEIPT_UNBOUND/, 'AFTER: the guard no longer covers a batch-2 operation');
+  console.log('[prover] AFTER: an unbound complete_delivery or complete_job receipt never commits (immediate check and an autocommit INSERT), and batch-1 and batch-2 operations stay covered');
 
   // 6. RE-APPLY.
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0, 'the candidate applied a second time');
   assert.match(again.output, /PREFLIGHT_DELIVERY_JOB_REPLAY_BODY_DRIFT/, `second apply refused for the wrong reason:\n${again.output}`);
-  assert.deepEqual(guardOps(), [...batch1, ...batch3a], 'RE-APPLY: the refused second apply changed the guard');
+  assert.deepEqual(guardOps(), [...batch1, ...batch2, ...batch3a], 'RE-APPLY: the refused second apply changed the guard');
   console.log('[prover] RE-APPLY: refused by the preflight, nothing changed');
 
   // 7. MUTATION: each fingerprint field, the epoch normalization and the key requirement are what

@@ -27,6 +27,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   future); a past date is sent as the completion time, so the delivery and its invoice land on the
   day the delivery really happened, not the day it was entered. The date is required (an empty
   date blocks completion), and the customer receipt shows that same date.
+  A past date is sent as 17:00 UTC (midday in Chicago), so the server's America/Chicago date is the
+  chosen date whatever time zone the phone is set to; the Deliveries list's backdate uses the same
+  helper (`completedAtForDeliveredOn`).
   The Deliveries list dialog (office staff only) says the assigned driver completes a paper-ticket
   delivery from their own delivery screen, since only the driver layout has the ticket controls. The ticket photo
   is required only when the driver ticks the paper-ticket box. Ticket photos do not count toward

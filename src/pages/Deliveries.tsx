@@ -37,6 +37,7 @@ import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { completedAtForDeliveredOn } from '../lib/paperTicket';
 import { notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import BatchCancelModal from '../components/deliveries/BatchCancelModal';
 import QuickDeliveryModal from '../components/deliveries/QuickDeliveryModal';
@@ -419,9 +420,9 @@ export default function Deliveries() {
       p_delivery_id: target.id,
       p_signed_by: signedBy.trim(),
       p_performed_by: profile.id,
-      // Use local midday so the ISO timestamp stays on the selected delivery date.
+      // Midday in Chicago, so the server's America/Chicago date is the selected date.
       ...(deliveredOnDate && deliveredOnDate !== today()
-        ? { p_completed_at: new Date(deliveredOnDate + 'T12:00:00').toISOString() }
+        ? { p_completed_at: completedAtForDeliveredOn(deliveredOnDate) }
         : {}),
     };
     // check_idempotency replays by key and operation only: bind the key to this exact

@@ -61,7 +61,12 @@ describe('paper ticket photo', () => {
   it('sends a delivered-on date only when it is not today', () => {
     expect(paperDeliveredAt(localToday())).toBeUndefined();
     expect(paperDeliveredAt('')).toBeUndefined();
-    expect(new Date(paperDeliveredAt('2026-10-17') as string).getDate()).toBe(17);
+    // Chicago midday, independent of the test machine's time zone.
+    expect(paperDeliveredAt('2026-10-17')).toBe('2026-10-17T17:00:00.000Z');
+    const chicagoDay = (iso: string) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date(iso));
+    expect(chicagoDay(paperDeliveredAt('2026-10-17') as string)).toBe('2026-10-17'); // CDT
+    expect(chicagoDay(paperDeliveredAt('2026-01-15') as string)).toBe('2026-01-15'); // CST
   });
 
   it('does not count toward the 10-photo limit', () => {

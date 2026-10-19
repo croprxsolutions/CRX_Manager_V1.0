@@ -538,7 +538,7 @@ export default function DeliveryDetail() {
   const isPartialDelivery = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) < item.quantity);
   // Everything the driver can still edit while the signal check runs. Compared after the check so
   // an edit made during it is never silently dropped in favour of the values captured at confirm.
-  const completionInputs = JSON.stringify([signedBy, deliveryQtys, driverIssueType, driverIssueNotes, usePaperTicket, paperDeliveredOn]);
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, driverIssueType, driverIssueNotes, usePaperTicket, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
   const completionInputsRef = useLatestRef(completionInputs);
   const hasAnyQty = items.some((item) => (deliveryQtys[item.id] ?? item.quantity) > 0);
 

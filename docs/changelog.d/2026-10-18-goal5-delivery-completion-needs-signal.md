@@ -21,7 +21,8 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   the driver has not moved to another delivery, before the next server call. Each opening of the
   list dialog is its own session, so cancelling and reopening the same delivery during a check
   never lets the old request submit or close the new dialog. If the driver or office user edits a
-  quantity, the signer, an issue note or the date while the signal check runs, the completion stops
+  quantity, the signer, the drawn signature, the receipt choice, an issue note or the date while the
+  signal check runs, the completion stops
   ("Details changed while checking for signal") instead of sending the values captured at confirm.
 - **"Today" for completion dates is the Chicago business day.** The paper-ticket date (default,
   latest allowed, validation) and the Deliveries list's "Delivered on" use today in

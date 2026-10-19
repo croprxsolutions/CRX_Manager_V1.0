@@ -247,7 +247,7 @@ export default function FieldStop() {
 
   const isPartial = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity);
   // What the driver can still edit while the signal check runs; compared after the check.
-  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, paperDeliveredOn]);
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
   const completionInputsRef = useLatestRef(completionInputs);
   const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) > 0);
 

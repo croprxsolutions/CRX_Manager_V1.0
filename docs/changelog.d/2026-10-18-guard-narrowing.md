@@ -124,7 +124,9 @@ on local edits) is the approved design and stays.
 
 **Codex connector on `8cdd865dc` (1 P1, a regression).** Fixed: Bash extglob below `.claude`
 (`bash -O extglob -c 'rm -rf .claude/s@(ession-)state'`, `+(…)`, `!(…)`) counts as a glob that may
-expand to the state dir. main denied it; the narrowed matcher had missed it.
+expand to the state dir. main denied it; the narrowed matcher had missed it. The shared glob-segment
+check now reads extglob too, so an obscured ancestor (`.clau@(de)`, `.c+(laude)/s@(ession-)state`,
+`.clau!(x)/s*`) is denied; main allowed those.
 
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

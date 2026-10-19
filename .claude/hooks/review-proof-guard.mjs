@@ -226,9 +226,12 @@ const PROTECTED_GLOB_TARGETS = [".claude", "session-state", "applied-source-ledg
 // (`.clau*` → `.claude`, `sess*` → `session-state`, `…ledger.jso*` → `…ledger.json`).
 // Fail closed. A too-generic lead (`*`, `*.tmp`, `x*`) is ignored so ordinary
 // deletes like `rm dist/*.js` or `rm -rf node_modules/.cache` are not over-blocked.
+// Bash extglob `@(…)`, `+(…)`, `!(…)` opens a glob too (`.clau@(de)`). Callers
+// split on `(`, so the opener may arrive bare at the segment's end (`.clau@`).
+const GLOB_OPENER_RE = /[*?[\]{}]|[@!+](?:\(|$)/;
 function globSegCouldTargetProtected(seg) {
-  if (!/[*?[\]{}]/.test(seg)) return false;
-  const lead = (seg.match(/^[^*?[\]{}]*/)[0] || "").toLowerCase();
+  if (!GLOB_OPENER_RE.test(seg)) return false;
+  const lead = (seg.match(/^(?:(?![@!+](?:\(|$))[^*?[\]{}])*/)[0] || "").toLowerCase();
   // Floor the lead length so a too-generic glob (`*`, `s*`, `a*`) is ignored and
   // ordinary deletes (`rm dist/*.js`, `rm s*.o`, `rm a*.log`) are not over-blocked.
   // A DOTTED lead is specific enough at length 2: the only protected name starting

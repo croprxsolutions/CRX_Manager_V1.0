@@ -123,54 +123,123 @@ git checkout HEAD -- supabase/functions/<fn-name>/
 
 ## 4. Backups and disaster recovery
 
-> **Rewritten 2026-07-16.** The old text here described Supabase Pro-plan daily backups
-> and point-in-time recovery. **The org is on the FREE plan — there are NO Supabase
-> daily backups and NO PITR, and no "Restore" button in the dashboard.** The two paths
-> below are the ONLY recovery paths (settled 2026-07-12/13, see `docs/manual/DECISION_LOG.md`).
+> **Rewritten 2026-10-19** from the Goal 6 findings (`docs/plans/2026-10-18-goal-6-safety-net-findings.md`).
+> **Today (live check 2026-10-18): the Supabase org is on the FREE plan. There is no PITR and
+> no usable Supabase daily backup.** Parts marked **AFTER PRO + PITR** describe the target state
+> Mason decided on 2026-10-13. They are not true until an agent re-checks the plan live and
+> records it. Recovery target (Mason, 2026-10-14): an outage may last overnight, CRX is back by
+> the next business morning, and lost work is minutes, not a day.
 
-### 4.1 What's actually backed up
+### 4.1 What is backed up
 
-- **Database (primary, off-site):** a weekly encrypted `pg_dump` pushed to the private
-  GitHub repo `masonwells1/CRX_Backups` by a GitHub Action. This is the real
-  disaster-recovery copy. Trigger a fresh one anytime with the `/backup-db` skill
-  (deterministic half: `node scripts/backup-db.mjs --plan`).
-- **Database (secondary, in-DB):** a weekly `pg_cron` job snapshots every table into the
-  `backup_snapshots` table (migration `20260713050000`), keeping 8 weeks, pruned only on
-  full success. Protects against bad-data mistakes, NOT against losing the database itself.
-- **Edge Function source:** stored in this repo only — git is the backup.
-- **Vercel deployments:** retained ~30 days; you can promote any past deployment.
-- **Storage buckets** (blend ticket images, signature uploads): NOT covered by either
-  backup path above — treat uploads as re-obtainable from the customer if lost.
+| Copy | Where | Covers | Does NOT cover |
+|---|---|---|---|
+| Weekly encrypted `pg_dump` | Private repo `masonwells1/CRX_Backups`, workflow `.github/workflows/offsite-backup.yml` (this repo has no backup workflow). Sundays 08:00 UTC, newest 8 kept. | Database rows. | Uploaded files. Whether the `auth` schema (logins) is included is **unverified** until a drill decrypts one. |
+| Weekly in-database snapshot | `pg_cron` job `weekly-db-backup` into `backup_snapshots`, 8 weeks. | Bad-data mistakes in a table that still exists. | Losing the project (same database). |
+| Storage files (photos, signatures, documents; nine buckets) | **Nothing.** | n/a | Everything. Delivery photos and signatures are staff evidence, not re-obtainable from the customer. |
+| Edge Function source, app code | Git. | Code. | n/a |
+| Vercel deployments | About 30 days; any past deployment can be promoted. | Frontend. | n/a |
+| **AFTER PRO + PITR:** point-in-time recovery | Supabase. | Database to any minute inside the window. PITR is a paid add-on and needs at least Small compute. | Uploaded files (neither Pro nor PITR backs up Storage bytes). |
 
-### 4.2 Restoring
+Until the file backup exists (Goal 6, agent step 2), a lost Storage bucket cannot be recovered.
+Say so plainly if it happens; do not promise a restore.
 
-**Bad data written (table intact):** query `backup_snapshots` for the affected table's
-last-known-good rows and write a compensating fix through the normal migration gate.
+### 4.2 Who runs recovery
 
-**Database lost/corrupted:** clone `masonwells1/CRX_Backups`, decrypt the newest dump
-(key location: Mason's password manager), and restore with `pg_restore`/`psql` against a
-fresh project using the Session-pooler connection string (IPv4). Restore to a NEW
-project first — never overwrite production directly.
+Recovery owner: **_not yet named (Mason)_**. Backup person: **_not yet named (Mason)_**.
+The dump passphrase lives only in Mason's password manager, so Mason is currently the single
+point of failure. Both people need GitHub access to `CRX_Backups`, the passphrase, Supabase org
+access and Vercel access. Fill in the two names here the day they are chosen.
 
-**Restore drill (recommended quarterly):** run the database-lost path against a throwaway
-project, verify representative rows (`customers`, `invoices`, recent
-`inventory_transactions`), document the time it took here.
+### 4.3 Decide which recovery you need
 
-**Last drill:** _none yet (still open as item 8 in `TODO.md`)_
+| Situation | Path |
+|---|---|
+| A few wrong rows, table intact | 4.4 Compensating fix from a snapshot |
+| A bad change just wrote wrong data across many rows | **AFTER PRO + PITR:** 4.5 Rewind. Until then: 4.4 for small damage, 4.6 for large. |
+| Project lost or corrupted | 4.6 Restore into a new project |
+| A Storage bucket lost | Not recoverable today (no file backup). Tell Mason. |
+| Site down but data fine | Section 6.1, not this section |
 
-### 4.3 What's NOT in the backup
+**First, always:** stop the damage and tell Mason in plain words what is wrong. Pause anything that
+writes (scheduled jobs, imports) if the cause is unknown. Write down the clock time you noticed
+it; it decides how far back to restore.
 
-- `.env` secrets (live in Vercel + Supabase, NOT in any database backup)
-- Resend email logs (Resend's own retention — 30 days)
-- Sentry error history (Sentry's own retention)
-- GitHub Actions logs (90 days)
+### 4.4 Compensating fix from a snapshot (table intact)
 
-Keep an offline copy of:
-- Supabase service role key (in a password manager)
-- Resend API key
-- Mapbox token
-- Sentry DSN
-- Vercel deploy hooks (if any)
+1. Read `backup_snapshots` for the affected table (read-only `SELECT`).
+2. Compare to live and list exactly which rows differ.
+3. Write the fix as a normal reviewed migration. Never edit an applied migration. Changing live
+   data outside a reviewed migration needs Mason's approval in that conversation.
+
+### 4.5 Rewind to a time (AFTER PRO + PITR; not available today)
+
+1. Pick the restore time: the last moment before the bad change, in UTC. Give Mason the Central equivalent.
+2. Prefer restoring into a **new** project and copying back only what is wrong. Rewinding production
+   discards every legitimate write after that time; Mason approves that trade-off first.
+3. Run the post-restore checklist (4.7) before anything resumes syncing.
+4. Log it in the drill log (4.9) with timings.
+
+### 4.6 Restore the newest dump into a new project
+
+1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
+2. Clone `masonwells1/CRX_Backups` and take the newest `backups/crx-backup-YYYY-MM-DD.dump.gpg`.
+3. Decrypt with the passphrase from Mason's password manager. Never paste it into chat or a file.
+4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4).
+5. Compare against the **backup-time baseline** (row counts recorded when the dump ran), not today's
+   live counts; writes after the dump would otherwise look like missing data. Also spot-check
+   `customers`, `invoices` and recent `inventory_transactions`.
+6. Check logins: confirm users exist in `auth.users` in the restored copy. If the dump lacks them,
+   logins must be re-created and users told to reset passwords. Record which case applied.
+7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
+8. Going live on the restored copy means repointing the Vercel environment variables to the new project,
+   redeploying, and re-checking Edge Functions and secrets. That changes production configuration, so it
+   needs Mason's explicit approval.
+9. Run the post-restore checklist (4.7).
+
+### 4.7 After any restore: nothing may happen twice
+
+Before scheduled jobs, QuickBooks sync, payment notifications or email sending resume, reconcile what
+the real world already did after the restore point:
+
+- **Payments:** list payments settled after the restore time (Stripe once Goal 7 ships; until then, bank deposits and checks). Each must exist in CRX exactly once.
+- **QuickBooks (once Goal 7 ships):** list entries already written after the restore time. Do not re-send them; link them.
+- **Email:** the Resend logs (30 days) show what was already sent. Do not re-send invoices or receipts customers already got.
+- **Deliveries and stock:** drivers may have completed deliveries after the restore time. Re-apply them from the tickets through the normal screens.
+- **Commissions and payouts:** compare any payout paid after the restore time.
+
+Goal 7 completes the payment and QuickBooks lines; keep this section in step with it.
+
+### 4.8 Outage paper fallback
+
+The office keeps working while CRX is down overnight:
+
+- **Dispatch:** the last printed delivery schedule, plus phone calls to drivers.
+- **Deliveries:** a paper ticket recording customer, product, quantity, date, signer name and signature. Photograph it.
+- **Payments:** a paper log of checks and cash: customer, invoice number, amount, date, method.
+- Afterward, enter everything through the normal screens, oldest first, ticking each off the log.
+
+Not yet rehearsed. Log the first rehearsal in 4.9.
+
+### 4.9 Drill log (quarterly; the first is overdue)
+
+Run 4.6 against a throwaway project each quarter. Record the date, backup file, who ran it, minutes
+per step, whether the baseline matched, whether logins were present, and problems. Rewind drills
+(after Pro + PITR), file-restore drills (after the file backup exists) and the paper rehearsal go in the same table.
+
+| Date | Type | Backup used | Total time | Baseline match | Logins present | Notes |
+|---|---|---|---|---|---|---|
+| _none yet_ | | | | | | |
+
+### 4.10 What is NOT in any backup
+
+- `.env` secrets (they live in Vercel and Supabase). Keep offline copies in a password manager: Supabase service role key, Resend API key, Mapbox token, Sentry DSN, Vercel deploy hooks, and the dump passphrase (a second entry for the backup person).
+- Resend email logs (30 days), Sentry history, GitHub Actions logs (90 days).
+
+### 4.11 Backup health alerting
+
+Design: `docs/operations/backup-health-alert-design.md`. Today the only signal that a Sunday backup
+failed or did not run is a GitHub email.
 
 ---
 

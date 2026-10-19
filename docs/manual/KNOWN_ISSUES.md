@@ -214,6 +214,15 @@ The nine HIGH-money functions it covers left the table below: `void_payment`, `d
 `apply_prepay_to_invoice`, `batch_apply_prepayments` and `batch_void_invoices`. The live re-check is
 recorded in the batch-1 paragraph above.
 
+**Batch 3a written, NOT applied (2026-10-18).** The table's batch-3 money group is split into smaller
+PRs. The first cut, migration `20261019200000_bind_delivery_job_replay_receipts_batch3a`, binds
+`complete_delivery` and `complete_job` (the first row below) and extends the same commit-time guard
+trigger, accepting only its batch 1 + stock batch state (PR #951, `20261016140000`, live since ledger
+`20261019010324`).
+It is access-changing, so it applies only on Mason's owner approval. Until it is applied, both
+functions still replay by key alone. `cancel_delivery` was held for PR #951 (`batch_cancel_deliveries`
+calls it per delivery with no key) and goes in a later cut now that #951 is live.
+
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
 
 **Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batches 1 and 2 list 74 functions (17 in batch 3, then 50 and 7 in batch 4; a row can name a function whose create path alone is unbound; after batch 1 alone they listed 87). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.

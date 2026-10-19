@@ -3,7 +3,7 @@
 **Last verified:** 2026-10-19 (America/Chicago) for the migration ledger only (read-only
 `execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-19 18:35 UTC: 1035 rows / 1028 names, `max(version)`
 `20261019182757` = `20261019010000_cost_margin_admin_only_rpc_leaks` (PR #957, merged as `8124ae21c`), applied
-2026-10-19 18:27:57 UTC on Mason's own `I approve`. Cost and margin are now admin-only in the database functions
+2026-10-19 18:27:57 UTC on Mason's own `I approve`. Candidate `20261019200000` (replay-binding batch 3a, PR #954) is written, not applied. Cost and margin are now admin-only in the database functions
 (Goal 1 part 3, step 1 of 3): a read-only live per-role check (rolled back, run on Mason's REAL-DATA-OK) passed —
 an admin runs the six cost reports; an active sales rep, driver, applicator, commission recipient, an id with no
 profile and a signed-out visitor are each refused; the sales detail and summary reports give the rep the same rows

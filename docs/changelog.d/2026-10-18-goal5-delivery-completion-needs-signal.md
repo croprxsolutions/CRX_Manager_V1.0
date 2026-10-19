@@ -14,7 +14,8 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   signal.
 - **Deliveries list (`Deliveries.tsx`).** Mark Delivered / Mark Complete checks for signal before the
   start step and again between start and complete. If signal drops between them, the driver is told
-  the delivery is now In Progress but not completed, with no stock taken and nothing billed. The
+  the delivery is now In Progress but not completed, with no stock taken and nothing billed, and
+  the table row shows it as In Progress right away (no reload is attempted without signal). The
   remaining instant between the two server calls is recorded in `docs/manual/KNOWN_ISSUES.md`;
   Mason chose to ship with it and close it later with one combined server call.
 - **Paper-ticket fallback (new `src/lib/paperTicket.ts`).** On the delivery page's driver layout and
@@ -39,6 +40,15 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   a delivery completes (for example, signal drops in between), the delivery page and the field stop
   now tell the driver and point to the office's Email Confirmation button. A guaranteed retry needs
   a server-side email queue and is recorded as open in the Goal 5 plan.
+- **An edited retry can no longer reuse an earlier attempt's result.** The server's retry check
+  matches only the retry key, not what was sent. If a completion was saved but its reply was lost,
+  a retry after the driver changed the ticket date, signer or quantities used to get the first
+  result back while the receipt showed the new values. On the delivery page and the field stop the
+  key is now tied to the exact inputs (`fingerprintIntentPayload`): the same inputs reuse the key
+  and get the saved result back; changed inputs get a fresh key, which the server refuses because
+  the delivery is already completed, so no receipt with the wrong date is sent. The key is also
+  retired only after the server's reply checks out. Proven in the preview with a test server that
+  saved the completion and dropped its replies (Sol final review).
 - **Pre-existing race fixed: a slow load can no longer leak onto the next delivery.** The delivery
   page is reused when moving from one delivery to another. A slow load for the previous delivery used
   to finish late and put its items, quantities and photos on the new delivery's screen, so the wrong

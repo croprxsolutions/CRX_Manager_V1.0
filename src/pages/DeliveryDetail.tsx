@@ -17,6 +17,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { fingerprintIntentPayload } from '../lib/idempotency';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
@@ -955,7 +956,21 @@ export default function DeliveryDetail() {
       ? Object.fromEntries(items.map((item) => [item.id, deliveryQtys[item.id] ?? item.quantity]))
       : null;
 
-    const idemKey = completeIdem.getKey();
+    const intentParams = {
+      p_delivery_id: id!,
+      p_signed_by: signedBy,
+      p_performed_by: profile.id,
+      ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
+      ...(driverIssueType !== 'none' ? { p_issue_type: driverIssueType } : {}),
+      ...(driverIssueNotes.trim() ? { p_issue_notes: driverIssueNotes.trim() } : {}),
+      ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
+    };
+    // check_idempotency replays a saved result by key and operation only, so bind the
+    // key to this exact payload: an edited retry (signer, quantities, issue, ticket date)
+    // mints a fresh key and can never be answered with an earlier attempt's receipt.
+    // A fresh key cannot complete twice: complete_delivery refuses a non-in_progress delivery.
+    const completeScope = `complete:${fingerprintIntentPayload(intentParams)}`;
+    const idemKey = completeIdem.getKeyFor(completeScope);
     const rpcParams: {
       p_delivery_id: string;
       p_signed_by: string;
@@ -965,16 +980,7 @@ export default function DeliveryDetail() {
       p_quantities?: Json;
       p_issue_type?: string;
       p_issue_notes?: string;
-    } = {
-      p_delivery_id: id!,
-      p_signed_by: signedBy,
-      p_performed_by: profile.id,
-      p_idempotency_key: idemKey,
-      ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
-      ...(driverIssueType !== 'none' ? { p_issue_type: driverIssueType } : {}),
-      ...(driverIssueNotes.trim() ? { p_issue_notes: driverIssueNotes.trim() } : {}),
-      ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
-    };
+    } = { ...intentParams, p_idempotency_key: idemKey };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
     // without a reachable server the delivery stays exactly as it was.
@@ -987,18 +993,10 @@ export default function DeliveryDetail() {
     try {
       const { data: completeResult, error } = await supabase.rpc('complete_delivery', rpcParams);
       if (error) throw error;
-      // F1 DELIBERATELY NOT FIXED HERE — left in main's (defective) order, and this is
-      // the strongest case on the page. complete_delivery sends p_signed_by,
-      // p_quantities, p_issue_type and p_issue_notes, all live UI state the driver can
-      // change before retrying. check_idempotency returns the cached result by key and
-      // operation WITHOUT looking at the new payload, so a retained key after an
-      // ambiguous reply would apply the first payload's quantities and signature while
-      // the screen reports the edited ones — silently wrong stock and a wrong signer on
-      // a delivery record. This is the same payload-binding defect that invalidated the
-      // FieldStop fix; it needs fingerprintIntentPayload, not a reorder (Codex round-4
-      // HIGH).
-      completeIdem.resetKey();
+      // Retire the payload-bound key only after a confirmed result: an empty reply
+      // keeps it, so retrying the same payload replays the server's saved receipt.
       assertRpcResult(completeResult, 'complete_delivery');
+      completeIdem.resetKeyFor(completeScope);
 
       // Upload signature image if provided. The delivery has ALREADY completed
       // (complete_delivery succeeded above), so a failed upload must NOT abort

@@ -482,8 +482,13 @@ export default function Deliveries() {
       // server-side, the replay returns the cached result and onSuccess (including
       // the completion notification) still fires.
       setCompleteTarget((prev) => (prev && prev.id === target.id ? { ...prev, status: 'in_progress' } : prev));
-      // Without signal the reload would only add a second "failed to load" message.
-      if (outcome !== 'no_signal') await fetchDeliveries();
+      // Without signal the reload would only add a second "failed to load" message,
+      // so show the started delivery as In Progress in the table directly.
+      if (outcome === 'no_signal') {
+        setDeliveries((prev) => prev.map((row) => (row.id === target.id ? { ...row, status: 'in_progress' } : row)));
+      } else {
+        await fetchDeliveries();
+      }
     }
   };
 

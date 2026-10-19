@@ -24,6 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { fingerprintIntentPayload } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt } from '../lib/paperTicket';
 import { compressImage } from '../lib/imageCompression';
@@ -324,14 +325,18 @@ export default function FieldStop() {
     const quantitiesJson = isPartial
       ? Object.fromEntries(items.map((it) => [it.id, deliveryQtys[it.id] ?? it.quantity]))
       : null;
-    const rpcParams = {
+    const intentParams = {
       p_delivery_id: id,
       p_signed_by: signedBy,
       p_performed_by: profile.id,
-      p_idempotency_key: completeIdem.getKey(),
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
       ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
     };
+    // check_idempotency replays by key and operation only: bind the key to this exact
+    // payload (stop, signer, quantities, ticket date) so an edited retry, or another
+    // stop, mints a fresh key. complete_delivery refuses an already-completed delivery.
+    const completeScope = `complete:${fingerprintIntentPayload(intentParams)}`;
+    const rpcParams = { ...intentParams, p_idempotency_key: completeIdem.getKeyFor(completeScope) };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
     // without a reachable server the stop stays exactly as it was.
@@ -346,8 +351,8 @@ export default function FieldStop() {
     try {
       const { data: result, error } = await supabase.rpc('complete_delivery', rpcParams);
       if (error) throw error;
-      completeIdem.resetKey();
       assertRpcResult(result, 'complete_delivery');
+      completeIdem.resetKeyFor(completeScope);
 
       // Signature image upload (PII — stored as a path, signed URL on demand).
       if (signatureDataUrl && !usePaperTicket) {

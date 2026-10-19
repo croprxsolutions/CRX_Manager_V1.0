@@ -29,7 +29,7 @@ import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_O
 import { compressImage } from '../lib/imageCompression';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
-import { sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
+import { RECEIPT_NOT_SENT_MESSAGE, sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
@@ -407,7 +407,7 @@ export default function FieldStop() {
         const emailItems = items
           .map((it) => ({ name: it.product?.product_name || 'Product', qty: isPartial ? (deliveryQtys[it.id] ?? it.quantity) : it.quantity }))
           .filter((r) => r.qty > 0);
-        await sendDeliveryCompletionEmail({
+        const receiptSent = await sendDeliveryCompletionEmail({
           customerEmail: delivery.customer.email,
           contactName: delivery.customer.contact_name,
           deliveryNumber: delivery.delivery_number || '',
@@ -417,6 +417,7 @@ export default function FieldStop() {
           isPartial,
           signedBy,
         });
+        if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
       }
 
       setStep('done');

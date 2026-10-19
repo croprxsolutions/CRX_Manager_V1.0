@@ -40,7 +40,12 @@ export interface DeliveryCompletionEmailParams {
  * warning level) because the delivery itself has already succeeded — a failed
  * receipt email must never surface as a completion error.
  */
-export async function sendDeliveryCompletionEmail(params: DeliveryCompletionEmailParams): Promise<void> {
+// Returns false when the email could not be sent (the delivery itself already completed),
+// so the caller can tell the driver instead of failing silently.
+export const RECEIPT_NOT_SENT_MESSAGE =
+  'Delivery completed, but the customer receipt email did not send. Ask the office to send it with Email Confirmation on this delivery.';
+
+export async function sendDeliveryCompletionEmail(params: DeliveryCompletionEmailParams): Promise<boolean> {
   const { customerEmail, contactName, deliveryNumber, deliveryId, customerId, items, isPartial, signedBy } = params;
 
   try {
@@ -102,10 +107,12 @@ export async function sendDeliveryCompletionEmail(params: DeliveryCompletionEmai
       resource_id: deliveryId,
       idempotency_key: `delivery-completed-${deliveryId}`,
     });
+    return true;
   } catch (emailErr) {
     Sentry.captureException(emailErr instanceof Error ? emailErr : new Error(String(emailErr)), {
       level: 'warning',
       extra: { context: 'Field Mode delivery completion email failed — delivery already succeeded' },
     });
+    return false;
   }
 }

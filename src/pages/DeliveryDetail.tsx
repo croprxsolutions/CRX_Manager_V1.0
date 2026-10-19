@@ -22,6 +22,7 @@ import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail, buildEmailHtml } from '../lib/emailService';
+import { RECEIPT_NOT_SENT_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -1149,7 +1150,8 @@ export default function DeliveryDetail() {
           });
         } catch (emailErr) {
           Sentry.captureException(emailErr instanceof Error ? emailErr : new Error(String(emailErr)), { level: 'warning', extra: { context: 'Delivery completion email failed — delivery already succeeded' } });
-          // Delivery already succeeded — don't show error for email
+          // The delivery already succeeded; say plainly that the receipt did not go out.
+          toast('warning', RECEIPT_NOT_SENT_MESSAGE);
         }
       }
 

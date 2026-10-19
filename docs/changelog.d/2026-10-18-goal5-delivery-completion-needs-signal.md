@@ -30,6 +30,10 @@ every delivery completion path follow that rule. It is an app-only change: no mi
 - **Photo upload no longer resets edited quantities.** On the delivery page, a photo upload used to
   reload the whole delivery, putting short quantities back to full. It now refreshes only the
   photos, so taking the ticket photo after marking items short can't record a full delivery.
+- **A failed receipt email is no longer silent.** If the customer receipt email cannot be sent after
+  a delivery completes (for example, signal drops in between), the delivery page and the field stop
+  now tell the driver and point to the office's Email Confirmation button. A guaranteed retry needs
+  a server-side email queue and is recorded as open in the Goal 5 plan.
 - **Pre-existing bug fixed.** On the delivery page's driver layout, Complete Delivery opened a
   confirmation box that was never drawn, so a driver's tap did nothing. Both layouts now share it.
 - **Not changed.** Completions already queued offline before this ships still sync, or go to Offline

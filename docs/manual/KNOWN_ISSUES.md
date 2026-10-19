@@ -131,9 +131,9 @@ queue would also cover it. Found by the Codex GitHub review on #955. Source:
 delivery ends completed or nothing changed. Neither existing function is edited. It takes the chosen
 business date (`p_delivered_on`, America/Chicago): "today" completes at the server's clock, an
 earlier date at 17:00 UTC of that date (the value the app already sent), and a later date, one more
-than a year back, or a non-finite one is refused. It runs `complete_delivery`'s authorization test
-before its receipt lookup, so a reassigned driver or deactivated account cannot replay. So a "today" request that reaches the
-server just after Chicago midnight keeps the chosen day. Its retry key is required and bound to the
+than a year back, or a non-finite one is refused. So a "today" request that reaches the server just
+after Chicago midnight keeps the chosen day. It runs `complete_delivery`'s authorization test before
+its receipt lookup, so a reassigned driver or deactivated account cannot replay. Its retry key is required and bound to the
 caller and the exact request (date included), and `complete_delivery` runs under a key derived from
 it. The Deliveries list (`handleCompleteConfirm`) now makes this one call after the signal check
 and keeps the dialog-session, "details changed" and `runCriticalAction` guards. Proof: container

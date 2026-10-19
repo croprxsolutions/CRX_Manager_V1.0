@@ -379,6 +379,8 @@ function preflightRefusesDrift() {
   for (const [setup, refusal] of [
     ['CREATE OR REPLACE FUNCTION public.get_inventory_cost_report() RETURNS TABLE(product_id uuid, product_name text, sku text, category text, vendor text, quantity_available numeric, quantity_prebooked numeric, net_available numeric, unit_cost numeric, total_cost_value numeric, reorder_point numeric, below_reorder boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$ BEGIN RETURN; END; $$;',
       /COST_ADMIN_ONLY_PREFLIGHT: public\.get_inventory_cost_report\(\) is missing or drifted/],
+    ['CREATE FUNCTION public._get_inventory_cost_report_cost_impl_20261019() RETURNS TABLE(product_id uuid) LANGUAGE sql AS $$ SELECT NULL::uuid $$;',
+      /COST_ADMIN_ONLY_PREFLIGHT: public\._get_inventory_cost_report_cost_impl_20261019 exists but is not the pinned body/],
     ['CREATE FUNCTION public.get_bottom_line_pnl(p_x int) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;',
       /COST_ADMIN_ONLY_PREFLIGHT: expected exactly one public\.get_bottom_line_pnl overload/],
     ['CREATE OR REPLACE FUNCTION public.is_admin() RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$ BEGIN RETURN true; END; $$;',
@@ -388,7 +390,7 @@ function preflightRefusesDrift() {
     assert.notEqual(d.status, 0, `the candidate applied over: ${setup}`);
     assert.match(d.stderr, refusal, `wrong refusal for ${setup}:\n${d.stderr}`);
   }
-  console.log('[prover] PREFLIGHT: a drifted report body, an extra overload and a drifted is_admin() each abort the candidate');
+  console.log('[prover] PREFLIGHT: a drifted report body, a stale impl of the renamed name, an extra overload and a drifted is_admin() each abort the candidate');
 }
 
 function main() {

@@ -79,7 +79,14 @@ BEGIN
     ) AS v(sig, name, md5)
   LOOP
     IF to_regproc('public._' || r.name || '_cost_impl_20261019') IS NOT NULL THEN
-      CONTINUE;  -- already renamed by an earlier run of this file
+      -- Renamed by an earlier run of this file: the impl must BE the pinned live body (the
+      -- rename keeps it byte-identical), so a stale or hand-made impl of that name is refused
+      -- instead of being wired behind the wrapper.
+      IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
+           WHERE p.oid = to_regproc('public._' || r.name || '_cost_impl_20261019')) IS DISTINCT FROM r.md5 THEN
+        RAISE EXCEPTION 'COST_ADMIN_ONLY_PREFLIGHT: public._%_cost_impl_20261019 exists but is not the pinned body', r.name;
+      END IF;
+      CONTINUE;
     END IF;
     IF (SELECT count(*) FROM pg_proc p
          WHERE p.pronamespace = 'public'::regnamespace AND p.proname = r.name) <> 1 THEN

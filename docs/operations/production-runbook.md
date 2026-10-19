@@ -106,7 +106,7 @@ rollback above is faster — prefer it mid-incident.)
 4. Confirm app works against the reversed state.
 
 **Worst-case (data corruption):** restore from the `CRX_Backups` dump or the in-database
-`backup_snapshots` (see §4.2). There is no Supabase point-in-time recovery on the FREE plan.
+`backup_snapshots` (see §4.4 and §4.6). There is no Supabase point-in-time recovery on the FREE plan.
 
 ### 3.3 Rolling back an Edge Function
 
@@ -177,18 +177,28 @@ it; it decides how far back to restore.
 1. Pick the restore time: the last moment before the bad change, in UTC. Give Mason the Central equivalent.
 2. Prefer restoring into a **new** project and copying back only what is wrong. Rewinding production
    discards every legitimate write after that time; Mason approves that trade-off first.
-3. Run the post-restore checklist (4.7) before anything resumes syncing.
-4. Log it in the drill log (4.9) with timings.
+3. **A Supabase clone starts the copied scheduled jobs (`pg_cron`), webhooks and wrappers immediately**
+   (Supabase clone-project docs), with no chance to pause them first. So disable every `pg_cron` job
+   (`cron.job`) and webhook in the copy before connecting the app, and note what may have run in the
+   minutes before you could. If that is not acceptable, use the logical dump path (4.6), which brings
+   no scheduled jobs.
+4. Run the post-restore checklist (4.7) before anything resumes syncing.
+5. Log it in the drill log (4.9) with timings.
 
 ### 4.6 Restore the newest dump into a new project
 
 1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
 2. Clone `masonwells1/CRX_Backups` and take the newest `backups/crx-backup-YYYY-MM-DD.dump.gpg`.
 3. Decrypt with the passphrase from Mason's password manager. Never paste it into chat or a file.
-4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4).
-5. Compare against the **backup-time baseline** (row counts recorded when the dump ran), not today's
-   live counts; writes after the dump would otherwise look like missing data. Also spot-check
-   `customers`, `invoices` and recent `inventory_transactions`.
+4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Do not recreate
+   `cron` jobs: confirm `cron.job` in the new project is empty or inactive before the app is pointed at it.
+5. Validate. **Future (once the alert design is built):** compare against the baseline file
+   `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists**, so use this fallback:
+   read live row counts for `customers`, `invoices`, `orders`, `inventory_transactions` and `payments`
+   just before the drill and note the dump date. The restored counts must be at or below live and close
+   to it (rows written since the dump are expected to be missing, never extra), and the newest
+   `created_at` in each table must not be after the dump time. Spot-check a few known recent invoices by
+   number. Record the numbers in the drill log.
 6. Check logins: confirm users exist in `auth.users` in the restored copy. If the dump lacks them,
    logins must be re-created and users told to reset passwords. Record which case applied.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
@@ -224,10 +234,10 @@ Not yet rehearsed. Log the first rehearsal in 4.9.
 ### 4.9 Drill log (quarterly; the first is overdue)
 
 Run 4.6 against a throwaway project each quarter. Record the date, backup file, who ran it, minutes
-per step, whether the baseline matched, whether logins were present, and problems. Rewind drills
+per step, whether validation matched, whether logins were present, and problems. Rewind drills
 (after Pro + PITR), file-restore drills (after the file backup exists) and the paper rehearsal go in the same table.
 
-| Date | Type | Backup used | Total time | Baseline match | Logins present | Notes |
+| Date | Type | Backup used | Total time | Validation match | Logins present | Notes |
 |---|---|---|---|---|---|---|
 | _none yet_ | | | | | | |
 
@@ -306,7 +316,7 @@ See §3.2 — write a forward-fix migration, never edit history.
 
 | Task | Cadence | How |
 |---|---|---|
-| Restore drill | Quarterly | §4.2 |
+| Restore drill | Quarterly | §4.6 and §4.9 |
 | Month-end close | Monthly (first weekday) | §5 |
 | Vercel + Supabase + Resend usage check | Monthly | Each dashboard's billing tab |
 | Sentry triage | Weekly | Sentry → Issues → unresolved |
@@ -353,6 +363,6 @@ See §3.2 — write a forward-fix migration, never edit history.
 After any of:
 - New Edge Function deployed
 - New external service integrated (replace Resend, add Stripe, etc.)
-- Disaster recovery drill performed (record outcome in §4.2)
+- Disaster recovery drill performed (record outcome in §4.9)
 - Incident that revealed a missing playbook step
 - New month-end procedure or accounting period rule

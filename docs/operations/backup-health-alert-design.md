@@ -21,14 +21,14 @@
 **A. Stronger check inside the Sunday run (in `CRX_Backups`).**
 - Compare the new dump size to the previous dump. Fail if it is under 70% of the previous size (the database only grows; 89 MB live, 13.2 MB encrypted).
 - Run `pg_restore --list` on the decrypted dump and fail if it cannot read the table of contents or the table count is lower than the previous run's.
-- Record row counts for a fixed list of key tables (`customers`, `invoices`, `orders`, `inventory_transactions`, `payments`) into a small `baseline-YYYY-MM-DD.json` committed beside the dump. The restore drill compares to this file (runbook 4.6, step 5).
+- Record row counts for a fixed list of key tables (`customers`, `invoices`, `orders`, `inventory_transactions`, `payments`) into a small `baseline-YYYY-MM-DD.json` committed beside the dump. The restore drill compares to this file (runbook 4.6, step 5, which uses a live-count fallback until this exists).
 
 **B. A separate missed-run watchdog (not the backup job itself).** A job that does not depend on the Sunday workflow running:
 - Runs daily. Reads the newest file date in `CRX_Backups/backups/`.
 - If the newest dump is more than 8 days old, it raises the alert. (7 days plus a day of grace.)
 - Home options, in order of preference: (1) a second scheduled workflow in `CRX_Backups` that opens a GitHub issue titled "Backup is late"; (2) the existing nightly watchdog that the Goal 6 plan mentions, reading a staleness flag. Option 1 needs no new secret because it only reads the repo it lives in.
 
-**C. Where Mason sees it.** Both A and B end in the same place: a GitHub issue in `CRX_Backups` (GitHub emails the owner on issue creation, which is a stronger signal than a failed-run email because it names the problem), plus a line in the app's admin health view if one exists when this is built. The alert text is plain: "The weekly backup did not finish. Last good copy: <date>. Next step: tell your agent to check the backup."
+**C. Where Mason sees it.** Both A and B end in the same place: a GitHub issue in `CRX_Backups` (the workflow **assigns the issue to Mason and mentions him by username**, because GitHub emails only people who are watching, assigned or mentioned, not merely the repo owner; the build step must also confirm Mason's GitHub notification settings send email for `CRX_Backups`, or add a second channel such as a text or email sent by a scheduled task), plus a line in the app's admin health view if one exists when this is built. The alert text is plain: "The weekly backup did not finish. Last good copy: <date>. Next step: tell your agent to check the backup."
 
 **D. Who responds.** The recovery owner and backup person (runbook 4.2) once Mason names them. Until then, Mason.
 

@@ -422,6 +422,10 @@ function main() {
   assert.match(a.output, /POSTFLIGHT_OK/, `the postflight did not report OK:\n${a.output}`);
   assert.deepEqual(guardOps(), [...prior, ...batch3b], 'APPLY: the guard does not list 24 + 3 operations in order');
   assert.equal(serviceRoleCanRunVoidOrderInner(), 'f', `APPLY: service_role can still run ${VOID_ORDER_INNER}`);
+  // The inner body is the pinned live body plus only the four zeroing lines (section 3b).
+  assert.equal(scalar(`SELECT md5(replace(replace(prosrc, chr(13), ''), E'            total_amount_cents = 0,\\n            paid_amount_cents = 0,\\n            prepay_applied_cents = 0,\\n            write_off_cents = 0,\\n', '')) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`),
+    'a0a9151160a6f2b58624b30435322b94', `APPLY: ${VOID_ORDER_INNER} is not the pinned body plus only the draft-cancel zeroing`);
+  assert.equal(scalar(`SELECT (length(prosrc) - length(replace(prosrc, 'total_amount_cents = 0,', ''))) / length('total_amount_cents = 0,') FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), '1', `APPLY: ${VOID_ORDER_INNER} does not carry exactly one zeroing edit`);
   for (const api of ['anon', 'authenticated', 'service_role']) {
     for (const impl of IMPLS) {
       assert.equal(scalar(`SELECT has_function_privilege('${api}', (SELECT p.oid FROM pg_proc p WHERE p.proname = '${impl}'), 'EXECUTE');`), 'f', `APPLY: ${api} can run ${impl}`);
@@ -480,7 +484,7 @@ function main() {
       /SMOKE_FAIL: cancel_delivery replayed a receipt for an edited reason/],
     ['cancel_delivery role-before-replay', 'cancel_delivery',
       "  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')) THEN\n    RAISE EXCEPTION 'Not authorized to cancel deliveries';\n  END IF;\n", '',
-      /SMOKE_FAIL: wrong applicator cancel_delivery refusal: IDEMPOTENCY_ACTOR_MISMATCH/],
+      /SMOKE_FAIL: cancel_delivery handed a stored result to its author after they lost the role/],
     keyless('cancel_delivery', 'public._cancel_delivery_replay_impl_20261015(p_delivery_id, p_cancel_reason, p_performed_by, NULL)'),
     ['void_delivery target', 'void_delivery', "    'delivery_id', p_delivery_id,\n", '',
       /SMOKE_FAIL: void_delivery replayed delivery C's receipt as success for delivery D/],
@@ -517,7 +521,6 @@ $unfix$;`;
   assert.ok(!unfixed.pass, 'MUTATION void_order draft-cancel fix: the chain still passed without it');
   assert.match(unfixed.fail, /SMOKE_FAIL: void_order could not void a fulfilled order with a draft invoice: ORDER_INVOICE_TERMINAL/, `MUTATION void_order draft-cancel fix: wrong failure: ${unfixed.fail}`);
   console.log(`[prover] MUTATION: without the void_order draft-cancel fix the chain fails: ${unfixed.fail}`);
-  assert.equal(md5Of(VOID_ORDER_INNER), scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), 'MUTATION: md5 read failed');
 
   console.log('DELIVERY_ORDER_VOID_REPLAY_BINDING_BATCH3B_PROOF_PASS');
 }

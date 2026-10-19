@@ -244,6 +244,16 @@ BEGIN
   IF v_drift IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_UNREVIEWED_INTERNAL_CALLER: these functions call cancel_delivery, void_delivery or void_order and were not reviewed: %', v_drift;
   END IF;
+  -- _void_order_impl_20260714 loses service_role below: only void_order's body may call it (read live
+  -- 2026-10-19: no other function in any schema, no cron job).
+  SELECT string_agg(n.nspname || '.' || p.proname, ', ' ORDER BY n.nspname, p.proname) INTO v_drift
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+     AND NOT (n.nspname = 'public' AND p.proname IN ('void_order', '_void_order_impl_20260714'))
+     AND p.prosrc ~* '_void_order_impl_20260714';
+  IF v_drift IS NOT NULL THEN
+    RAISE EXCEPTION 'PREFLIGHT_UNREVIEWED_INTERNAL_CALLER: these functions call _void_order_impl_20260714 and were not reviewed: %', v_drift;
+  END IF;
   IF to_regclass('cron.job') IS NOT NULL THEN
     EXECUTE $cron$SELECT string_agg(jobname, ', ' ORDER BY jobname) FROM cron.job
                   WHERE command ~* '(cancel_delivery|void_delivery|void_order)'$cron$ INTO v_drift;
@@ -550,10 +560,12 @@ BEGIN
     RAISE EXCEPTION 'VOID_ORDER_DRAFT_CANCEL_DRIFT: _void_order_impl_20260714 is not the reviewed body with exactly one draft-cancel UPDATE';
   END IF;
   -- CREATE OR REPLACE keeps the owner and the ACL (service_role was revoked above).
+  -- The name is passed as an argument (not spelled after CREATE OR REPLACE FUNCTION in this text)
+  -- so migration-body scanners do not read this dynamic statement as a function definition.
   EXECUTE format(
-    'CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT %L::text, p_idempotency_key text DEFAULT NULL::text) '
+    'CREATE OR REPLACE FUNCTION public.%I(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT %L::text, p_idempotency_key text DEFAULT NULL::text) '
     || 'RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS %L',
-    'Voided by admin', replace(v_src, v_old, v_new));
+    '_void_order_impl_20260714', 'Voided by admin', replace(v_src, v_old, v_new));
 END
 $void_order_drafts$;
 

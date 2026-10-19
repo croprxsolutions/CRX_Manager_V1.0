@@ -195,6 +195,31 @@ BEGIN
   END;
 
   -- --------------------------------------------------------------------------------------------
+  -- d0. The SAME person, after losing the role, retrying their own exact request is stopped by the
+  --     role check and is not handed the stored result (the old body replayed before its role
+  --     check; the actor/intent binding alone would replay here, since actor and request match).
+  -- --------------------------------------------------------------------------------------------
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_b, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
+  UPDATE public.profiles SET role = 'applicator' WHERE id = v_admin;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  BEGIN
+    v_res2 := public.cancel_delivery(v_del[1], '[SMOKE] customer called', v_admin, v_key);
+    RAISE EXCEPTION 'SMOKE_FAIL: cancel_delivery handed a stored result to its author after they lost the role: %', v_res2;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM IS DISTINCT FROM 'Not authorized to cancel deliveries' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong demoted-author cancel_delivery refusal: %', SQLERRM;
+    END IF;
+  END;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_b, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
+  UPDATE public.profiles SET role = 'admin' WHERE id = v_admin;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
+  -- --------------------------------------------------------------------------------------------
   -- d. An applicator presenting the admin's key is stopped by the role check, never shown the
   --    admin's result (the old body replayed before its role check).
   -- --------------------------------------------------------------------------------------------

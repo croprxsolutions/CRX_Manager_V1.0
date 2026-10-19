@@ -14,5 +14,5 @@
   `quote-versions-rpc-owned` was declined (not run). `actor-forgery`, which used to time out, now
   completes and flags one batch-1 row (`apply_prepay_to_invoice`, its keyless internal-batch branch),
   recorded as OPEN in KNOWN_ISSUES.
-- **Docs.** Migration history row 952, KNOWN_ISSUES (replay-binding entry, about 53 functions left),
+- **Docs.** Migration history row 952, KNOWN_ISSUES (replay-binding entry, 74 functions left, the stock row removed from its table),
   CURRENT_STATE (high-water) and the schema registry's `migrations_high_water` now read applied.

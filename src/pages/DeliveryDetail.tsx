@@ -188,6 +188,10 @@ export default function DeliveryDetail() {
   // paper mode, photos and an open confirm box. Until the new delivery's items load,
   // completion has nothing to submit (fails closed).
   useLayoutEffect(() => {
+    // Hide the previous delivery entirely (spinner) until this route's record loads, so no
+    // action (complete, cancel, void...) can be taken while the old details are on screen.
+    setDelivery(null);
+    setLoading(true);
     setItems([]);
     setDeliveryQtys({});
     setSignedBy('');

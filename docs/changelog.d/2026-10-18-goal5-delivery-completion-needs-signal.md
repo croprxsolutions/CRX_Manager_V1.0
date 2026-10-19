@@ -91,7 +91,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   Moving to another delivery also clears the previous one's items, quantities, signer, signature,
   issue and open confirm box before the screen redraws, and Complete refuses ("still loading")
   until the new delivery's own items have loaded, so it can never submit the previous delivery's
-  quantities under the new delivery's id.
+  quantities under the new delivery's id. The page also shows its loading spinner (no previous
+  delivery, no action buttons) until the new delivery's record has loaded, so nothing (complete,
+  cancel, void) can be done to the new delivery while the previous one's details are on screen.
 - **Pre-existing bug fixed.** On the delivery page's driver layout, Complete Delivery opened a
   confirmation box that was never drawn, so a driver's tap did nothing. Both layouts now share it.
 - **Not changed.** Completions already queued offline before this ships still sync, or go to Offline

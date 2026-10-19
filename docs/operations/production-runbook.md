@@ -199,8 +199,12 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    than about 8 weeks cannot be undone this way. Say which you chose and why in the drill log.
 3. Decrypt with the passphrase from Mason's password manager. Never paste it into chat or a file.
 4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Keep
-   scheduled jobs **off during reconciliation**: confirm `cron.job` in the new project is empty or inactive
-   before the app is pointed at it. They are put back at the end (4.7, last item), not forgotten.
+   scheduled jobs **off during reconciliation**. The dump itself can carry the `cron.job` rows (the pg_cron
+   extension marks that table for inclusion in dumps), and on a project with pg_cron enabled they would start
+   running as soon as they load. So stop that before it can happen: restore with the `cron.job` data excluded
+   (`pg_restore --exclude-table-data` for that table), or leave the pg_cron extension disabled until the
+   restore is finished and reconciled. Afterwards confirm `cron.job` is empty or inactive before the app is
+   pointed at it. They are put back at the end (4.7, last item), not forgotten.
    **Then apply the access lockdown** from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
    Supabase project gives the anonymous (signed-out) role full read/write on every table and the right to
    run every function, and a restore only adds grants, never removes those. Changing privileges is a
@@ -247,8 +251,11 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 8. **Bring the restored schema up to date first.** The dump is only as new as its date, but the current
    code and Edge Functions expect every later migration (RPCs, columns, grants, constraints). Deploying
    them against an older schema causes an immediate outage. Follow `supabase/baselines/README.md`
-   (section on replay after restore): generate the exact post-dump list with
-   `node scripts/list-post-baseline-migrations.mjs` (never choose migrations by filename date alone, and
+   (section on replay after restore). That script compares against the fixed July baseline, **not** against
+   your dump, so its list is only a starting point: for an October dump it also lists migrations the dump
+   already contains. Read the restored `supabase_migrations.schema_migrations` (version and name pairs) and
+   compare it with the repository to get the migrations the dump is actually missing, then build the filtered
+   set from that comparison (use `node scripts/list-post-baseline-migrations.mjs` as input only; never choose migrations by filename date alone, and
    never run the files directly with `psql`, which skips the migration ledger), review the dry run in an
    isolated Supabase CLI work directory, then push that exact filtered set through the normal gates.
    Confirm the restored `supabase_migrations.schema_migrations` ledger matches the repository before going on.
@@ -270,7 +277,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    the normal PR path first, or browsers will block every request after cutover. Also set the new project's
    Auth **Site URL** to `https://croprxsolutions.app` and add `https://croprxsolutions.app/reset-password`
    (and any other redirect the app uses) to its redirect allow list, then test a password reset; otherwise
-   password recovery fails after cutover. **Turn public signup off** in the new project's Auth settings
+   password recovery fails after cutover. Also restore the **Realtime publications** the app depends on
+   (`team_notes`, `team_note_comments`, `notifications`, `note_activity_log` use live updates, per
+   `src/hooks/useRealtimeSubscription.ts`) and confirm in the project settings that they are active;
+   a logical restore does not bring them back on its own. **Turn public signup off** in the new project's Auth settings
    and verify it (a direct signup request must be refused) before exposing it: a new project defaults to
    signup on, and the profile-creation trigger copies a role from the signup request, so open signup could
    let a stranger create an admin profile. Auth changes need Mason's explicit approval. Repoint the
@@ -285,7 +295,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
     step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
     and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for
     one account of every active role; the signed-out request refusal; the ledger match; and a password
-    reset test. Only if all pass does the Vercel cutover go ahead, and the scheduled jobs go back last (4.7).
+    reset test; and a live-update test (post a team note in one browser and see it, and a notification, appear in another without reloading). Only if all pass does the Vercel cutover go ahead, and the scheduled jobs go back last (4.7).
 
 ### 4.7 After any restore: nothing may happen twice
 

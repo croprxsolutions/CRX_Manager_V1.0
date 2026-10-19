@@ -146,10 +146,10 @@ Say so plainly if it happens; do not promise a restore.
 
 ### 4.2 Who runs recovery
 
-Recovery owner: **_not yet named (Mason)_**. Backup person: **_not yet named (Mason)_**.
+Recovery owner: **Mason Wells**. Backup person: **Mason Wells (no second person named yet)**.
 The dump passphrase lives only in Mason's password manager, so Mason is currently the single
 point of failure. Both people need GitHub access to `CRX_Backups`, the passphrase, Supabase org
-access and Vercel access. Fill in the two names here the day they are chosen.
+access and Vercel access. Replace the backup person with a second human the day one is chosen.
 
 ### 4.3 Decide which recovery you need
 

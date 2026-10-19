@@ -10,6 +10,7 @@ const H = vi.hoisted(() => ({
   auth: { role: 'admin' as 'admin' | 'sales_rep' },
   detailRow: null as Record<string, unknown> | null,
   summaryRow: null as Record<string, unknown> | null,
+  toast: vi.fn(),
 }));
 
 type QueryBuilder = {
@@ -46,7 +47,8 @@ vi.mock('../lib/db', () => ({
   assertRpcResult: <T,>(data: T) => data,
 }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => H.auth }));
-vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+// A stable toast, as in the app, so a refetch happens only when a real dependency (like the role) changes.
+vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 vi.mock('../components/products/ProductSearchPicker', () => ({ default: () => null }));
 vi.mock('../lib/csvExport', () => ({ exportToCSV: vi.fn(), fmtCSV: vi.fn(), fmtDateCSV: vi.fn() }));
 // Keep the real whole-cent fmtCurrency; only the PDF download is stubbed.
@@ -115,6 +117,22 @@ describe('SalesReports cost columns', () => {
     expect(screen.queryByRole('columnheader', { name: /^Cost/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^Profit/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^Margin/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('$0')).not.toBeInTheDocument();
+  });
+
+  it('refetches when a rep is promoted mid-page and never shows the rep-shaped rows as admin cost', async () => {
+    H.auth.role = 'sales_rep';
+    H.detailRow = row(null, null, null);
+    const view = render(<MemoryRouter><SalesReports /></MemoryRouter>);
+    expect(await screen.findByText('Prairie View Farms')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /^Cost/ })).not.toBeInTheDocument();
+
+    // Promoted while the page stays open: the server now returns real cost for this session.
+    H.auth.role = 'admin';
+    H.detailRow = row(12, 8, 40);
+    view.rerender(<MemoryRouter><SalesReports /></MemoryRouter>);
+    expect(await screen.findByText('40%')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^Cost/ })).toBeInTheDocument();
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
   });
 

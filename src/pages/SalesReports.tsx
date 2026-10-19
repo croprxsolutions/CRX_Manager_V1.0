@@ -74,7 +74,10 @@ export default function SalesReports() {
   const [customerView, setCustomerView] = useState(false);
   // Cost, profit and margin are admin-only (Mason, 2026-10-15); the server sends
   // them as NULL to everyone else, so non-admins never get those columns.
-  const showCost = isAdmin && !customerView;
+  // Which role the loaded rows were fetched for: the server sends NULL cost to non-admins,
+  // so a session promoted mid-page must refetch before cost columns appear (never a false $0).
+  const [costDataForAdmin, setCostDataForAdmin] = useState<boolean | null>(null);
+  const showCost = isAdmin && !customerView && costDataForAdmin === true;
 
   // ── Filter state ──
   const [startDate, setStartDate] = useState('');
@@ -164,6 +167,7 @@ export default function SalesReports() {
 
   // ── Fetch data ──
   const fetchData = useCallback(async () => {
+    const forAdmin = isAdmin;
     setLoading(true);
     const params: Record<string, unknown> = {};
     if (startDate) params.p_start_date = startDate;
@@ -178,6 +182,7 @@ export default function SalesReports() {
       const { data, error } = await supabase.rpc('get_sales_detail_report', params);
       if (error) { toast('error', `Failed to load: ${error.message}`); setLoading(false); return; }
       setDetailData(assertRpcResult<SalesDetailRow[]>(data, 'get_sales_detail_report'));
+      setCostDataForAdmin(forAdmin);
     } else {
       const groupByMap: Record<Tab, string> = {
         by_product: 'product', by_customer: 'customer',
@@ -188,9 +193,10 @@ export default function SalesReports() {
       });
       if (error) { toast('error', `Failed to load: ${error.message}`); setLoading(false); return; }
       setSummaryData(assertRpcResult<SalesSummaryRow[]>(data, 'get_sales_summary_report'));
+      setCostDataForAdmin(forAdmin);
     }
     setLoading(false);
-  }, [tab, startDate, endDate, productId, effectiveCustomerIds, salesRepId, category, season, toast]);
+  }, [isAdmin, tab, startDate, endDate, productId, effectiveCustomerIds, salesRepId, category, season, toast]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

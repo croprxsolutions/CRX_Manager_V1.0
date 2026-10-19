@@ -149,6 +149,13 @@ describe('Reports commission history', () => {
     H.rpcHandler = () => Promise.resolve({ data: [], error: null });
     renderReports();
 
+    // Profitability: only the rep's own Commissions, without the Order Profit column.
+    expect(screen.queryByRole('button', { name: 'By Customer' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'By Product' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revenue Summary' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Commissions' })).toBeInTheDocument();
+    expect(screen.queryByText('Order Profit')).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: 'Financial' }));
     expect(screen.queryByRole('button', { name: 'P&L' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Gross Sales' })).not.toBeInTheDocument();
@@ -170,6 +177,8 @@ describe('Reports commission history', () => {
     H.rpcHandler = () => Promise.resolve({ data: [], error: null });
     renderReports();
 
+    expect(screen.getByRole('button', { name: 'By Customer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Revenue Summary' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Financial' }));
     expect(screen.getByRole('button', { name: 'P&L' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Gross Sales' })).toBeInTheDocument();

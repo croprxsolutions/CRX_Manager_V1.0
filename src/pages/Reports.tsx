@@ -40,6 +40,10 @@ type OperationalTab = 'chemical_history' | 'inventory_cost' | 'posted_applicatio
 // reports to everyone else, so non-admins never see the tabs.
 const ADMIN_ONLY_FINANCIAL_TABS: ReadonlySet<FinancialTab> = new Set(['pnl', 'gross_sales', 'commission_balance']);
 const ADMIN_ONLY_OPERATIONAL_TABS: ReadonlySet<OperationalTab> = new Set(['inventory_cost']);
+// Profit by customer / product / month is profit; a rep keeps only their own commissions.
+const ADMIN_ONLY_PROFIT_TABS: ReadonlySet<ProfitTab> = new Set(['customer', 'product', 'revenue']);
+// A rep's own commission rows, without order_profit (profit is admin-only).
+const REP_COMMISSION_COLUMNS = 'id, recipient, order_id, job_id, commission_amount, split_percentage, order_date, status, paid_date';
 
 // ─── Existing profitability interfaces (unchanged) ─────────────
 // Quick-pay recovery messages tell the admin what to do next based on what this
@@ -142,7 +146,7 @@ export default function Reports() {
 
   // ─── Category / sub-tab state ───────────────────────────────
   const [category, setCategory] = useState<Category>('profitability');
-  const [profitTab, setProfitTab] = useState<ProfitTab>('customer');
+  const [profitTab, setProfitTab] = useState<ProfitTab>(() => (isAdmin ? 'customer' : 'commission'));
   const [financialTab, setFinancialTab] = useState<FinancialTab>(() => (isAdmin ? 'pnl' : 'customer_balance'));
   const [operationalTab, setOperationalTab] = useState<OperationalTab>(() => (isAdmin ? 'inventory_cost' : 'chemical_history'));
 
@@ -227,6 +231,13 @@ export default function Reports() {
   const [chemProductId, setChemProductId] = useState('');
   const [chemProductName, setChemProductName] = useState('');
   const [inventoryCostData, setInventoryCostData] = useState<InventoryCostRow[]>([]);
+  useEffect(() => {
+    if (isAdmin || !ADMIN_ONLY_PROFIT_TABS.has(profitTab)) return;
+    setProfitTab('commission');
+    setCustomerData([]);
+    setProductData([]);
+    setRevenueData([]);
+  }, [isAdmin, profitTab]);
   // Leave the admin-only Inventory Cost tab if this session is (or becomes) a non-admin.
   useEffect(() => {
     if (isAdmin || !ADMIN_ONLY_OPERATIONAL_TABS.has(operationalTab)) return;
@@ -314,13 +325,13 @@ export default function Reports() {
   // already batched" warning and surface nothing in its place.
   const fetchCommissions = useCallback(async (): Promise<boolean> => {
     try {
-      let query = supabase.from('commissions').select('*').order('order_date', { ascending: false });
+      let query = supabase.from('commissions').select(isAdmin ? '*' : REP_COMMISSION_COLUMNS).order('order_date', { ascending: false });
       if (!isAdmin && profile) query = query.eq('recipient_user_id', profile.id);
       if (startDate) query = query.gte('order_date', startDate);
       if (endDate) query = query.lte('order_date', endDate);
       const { data, error } = await query;
       if (error) { toast('error', 'Failed to load commissions.'); return false; }
-      setCommissionData((data || []) as CommissionRow[]);
+      setCommissionData((data || []) as unknown as CommissionRow[]);
       setSelectedCommissions(new Set());
       return true;
     } catch (err) {
@@ -354,12 +365,12 @@ export default function Reports() {
   // ─── PROFITABILITY parent fetcher ────────────────────────────
   const fetchProfitability = useCallback(async () => {
     setLoading(true);
-    if (profitTab === 'customer') await fetchCustomerProfitability();
-    if (profitTab === 'product') await fetchProductProfitability();
+    if (profitTab === 'customer' && isAdmin) await fetchCustomerProfitability();
+    if (profitTab === 'product' && isAdmin) await fetchProductProfitability();
     if (profitTab === 'commission') await fetchCommissions();
-    if (profitTab === 'revenue') await fetchRevenue();
+    if (profitTab === 'revenue' && isAdmin) await fetchRevenue();
     setLoading(false);
-  }, [profitTab, fetchCustomerProfitability, fetchProductProfitability, fetchCommissions, fetchRevenue]);
+  }, [profitTab, isAdmin, fetchCustomerProfitability, fetchProductProfitability, fetchCommissions, fetchRevenue]);
 
   // ─── FINANCIAL sub-fetchers ─────────────────────────────────
   const fetchPnL = useCallback(async () => {
@@ -901,7 +912,7 @@ export default function Reports() {
         { key: 'recipient', header: 'Recipient' },
         { key: 'commission_amount', header: 'Commission', format: fmtCSV },
         { key: 'split_percentage', header: 'Split %', format: (v) => `${v}%` },
-        { key: 'order_profit', header: 'Order Profit', format: fmtCSV },
+        ...(isAdmin ? [{ key: 'order_profit', header: 'Order Profit', format: fmtCSV }] : []),
         { key: 'status', header: 'Status' },
         { key: 'paid_date', header: 'Paid Date', format: fmtDateOnlyCSV },
       ], 'commissions');
@@ -1051,7 +1062,7 @@ export default function Reports() {
     { key: 'recipient', header: 'Recipient', sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.recipient}</span> },
     { key: 'commission_amount', header: 'Commission', sortable: true, render: (r) => <span className="font-mono font-medium">{fmt(r.commission_amount)}</span> },
     { key: 'split_percentage', header: 'Split %', sortable: true, render: (r) => `${r.split_percentage}%` },
-    { key: 'order_profit', header: 'Order Profit', sortable: true, render: (r) => <span className="font-mono">{fmt(r.order_profit)}</span> },
+    ...(isAdmin ? [{ key: 'order_profit', header: 'Order Profit', sortable: true, render: (r: CommissionRow) => <span className="font-mono">{fmt(r.order_profit)}</span> } as Column<CommissionRow>] : []),
     { key: 'status', header: 'Status', render: (r) => <Badge variant={statusToBadgeVariant[r.status] || 'default'}>{r.status}</Badge> },
     { key: 'paid_date', header: 'Paid', sortable: true, render: (r) => r.paid_date ? parseLocalDate(r.paid_date).toLocaleDateString() : '-' },
   ];
@@ -1160,12 +1171,12 @@ export default function Reports() {
     { key: 'year_end', label: 'Year-End Summaries' },
   ];
 
-  const profitTabs: { key: ProfitTab; label: string }[] = [
+  const profitTabs = ([
     { key: 'customer', label: 'By Customer' },
     { key: 'product', label: 'By Product' },
     { key: 'commission', label: 'Commissions' },
     { key: 'revenue', label: 'Revenue Summary' },
-  ];
+  ] as { key: ProfitTab; label: string }[]).filter((t) => isAdmin || !ADMIN_ONLY_PROFIT_TABS.has(t.key));
 
   const financialTabs = ([
     { key: 'pnl', label: 'P&L' },

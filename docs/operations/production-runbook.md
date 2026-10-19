@@ -214,7 +214,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    `auth.users`, do not just re-create logins: new logins get new IDs and would not inherit their restored
    profiles, roles or records. Either restore the original user IDs, or relink and validate every
    identity-dependent row before cutover (this needs its own reviewed plan and Mason's approval; stop and
-   escalate rather than improvising). Record which case applied.
+   escalate rather than improvising). Record which case applied. Matching rows are not proof: before
+   cutover, **sign in with a real password for one account of every active role** (admin, sales rep, and
+   each other role in use) and check each can open the screens and data that role should, and cannot open
+   what it should not. One admin test is not enough.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
 8. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install
@@ -226,7 +229,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    the normal PR path first, or browsers will block every request after cutover. Also set the new project's
    Auth **Site URL** to `https://croprxsolutions.app` and add `https://croprxsolutions.app/reset-password`
    (and any other redirect the app uses) to its redirect allow list, then test a password reset; otherwise
-   password recovery fails after cutover. Only then repoint the
+   password recovery fails after cutover. **Turn public signup off** in the new project's Auth settings
+   and verify it (a direct signup request must be refused) before exposing it: a new project defaults to
+   signup on, and the profile-creation trigger copies a role from the signup request, so open signup could
+   let a stranger create an admin profile. Auth changes need Mason's explicit approval. Only then repoint the
    Vercel environment variables to the new project and redeploy.
    Deploying functions, installing secrets and changing production configuration each need Mason's
    explicit approval in the current conversation.

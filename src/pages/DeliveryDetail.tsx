@@ -28,7 +28,7 @@ import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from '../lib/paperTicket';
+import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
@@ -929,6 +929,10 @@ export default function DeliveryDetail() {
       toast('error', 'Take a photo of the signed paper ticket before completing');
       return;
     }
+    if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) {
+      toast('error', 'Enter the delivery date from the paper ticket (today or earlier)');
+      return;
+    }
     setCompleteConfirmOpen(true);
   };
 
@@ -1108,6 +1112,10 @@ export default function DeliveryDetail() {
             ? '<p style="color:#d97706;font-size:13px;font-weight:600;margin-top:8px;">This was a partial delivery. Remaining items will be delivered separately.</p>'
             : '';
 
+          // A paper-ticket receipt shows the day on the ticket, matching the backdated delivery.
+          const receiptDate = usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn)
+            ? parseLocalDate(paperDeliveredOn).toLocaleDateString()
+            : new Date().toLocaleDateString();
           const html = buildEmailHtml(`
             <h2 style="color:#1e293b;margin:0 0 12px;">Delivery Completed</h2>
             <p style="color:#475569;font-size:14px;line-height:1.6;">
@@ -1123,7 +1131,7 @@ export default function DeliveryDetail() {
               </tr>
               <tr>
                 <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;color:#64748b;">Date</td>
-                <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600;">${new Date().toLocaleDateString()}</td>
+                <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600;">${receiptDate}</td>
               </tr>
             </table>
             <h3 style="color:#1e293b;font-size:14px;margin:16px 0 8px;">Delivered Items</h3>

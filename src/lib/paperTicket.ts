@@ -14,6 +14,11 @@ export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
 // A paper-ticket delivery is completed later, once back in signal, so the driver
 // records the day it really happened. That day becomes the delivery and invoice date.
 // Local midday keeps the ISO timestamp on the chosen day (same as the Deliveries list).
+// The ticket date is required on the paper path and can never be in the future.
+export function isValidPaperDeliveredOn(deliveredOn: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(deliveredOn) && deliveredOn <= localToday();
+}
+
 export function paperDeliveredAt(deliveredOn: string): string | undefined {
   if (!deliveredOn || deliveredOn === localToday()) return undefined;
   return new Date(deliveredOn + 'T12:00:00').toISOString();

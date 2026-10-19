@@ -25,7 +25,7 @@ import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from '../lib/paperTicket';
+import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt } from '../lib/paperTicket';
 import { compressImage } from '../lib/imageCompression';
 import { localToday } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
@@ -310,6 +310,7 @@ export default function FieldStop() {
     if (!signedBy.trim()) { toast('error', 'Enter who signed for the delivery'); return; }
     if (!hasAnyQty) { toast('error', 'At least one item must have a quantity above zero'); return; }
     if (usePaperTicket && !hasPaperTicketPhoto(photos)) { toast('error', 'Take a photo of the signed paper ticket before completing'); return; }
+    if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) { toast('error', 'Enter the delivery date from the paper ticket (today or earlier)'); return; }
     void handleComplete();
   };
 
@@ -419,6 +420,7 @@ export default function FieldStop() {
           items: emailItems,
           isPartial,
           signedBy,
+          ...(usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn) ? { deliveredOn: paperDeliveredOn } : {}),
         });
         if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
       }
@@ -616,7 +618,7 @@ export default function FieldStop() {
             </div>
           )}
           {noOnePresent && <p className="text-xs text-gray-500 mt-2">Signature skipped because no one was present.</p>}
-          <button type="button" disabled={!signedBy.trim() || (usePaperTicket && !hasPaperTicketPhoto(photos))} onClick={() => setStep('review')} className="w-full mt-4 flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
+          <button type="button" disabled={!signedBy.trim() || (usePaperTicket && (!hasPaperTicketPhoto(photos) || !isValidPaperDeliveredOn(paperDeliveredOn)))} onClick={() => setStep('review')} className="w-full mt-4 flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
             <PenLine className="w-5 h-5" /> Continue to Review
           </button>
           {!signedBy.trim() && <p className="text-xs text-amber-700 mt-2 text-center">Enter who signed or choose no one present to continue.</p>}

@@ -12,6 +12,7 @@
  */
 import { sendEmail, buildEmailHtml } from './emailService';
 import { Sentry } from './sentry';
+import { parseLocalDate } from './dateUtils';
 
 export interface CompletionEmailItem {
   /** Product name */
@@ -31,6 +32,8 @@ export interface DeliveryCompletionEmailParams {
   items: CompletionEmailItem[];
   isPartial: boolean;
   signedBy: string;
+  /** YYYY-MM-DD the delivery happened (paper-ticket path); defaults to today. */
+  deliveredOn?: string;
 }
 
 /**
@@ -46,7 +49,8 @@ export const RECEIPT_NOT_SENT_MESSAGE =
   'Delivery completed, but the customer receipt email did not send. Ask the office to send it with Email Confirmation on this delivery.';
 
 export async function sendDeliveryCompletionEmail(params: DeliveryCompletionEmailParams): Promise<boolean> {
-  const { customerEmail, contactName, deliveryNumber, deliveryId, customerId, items, isPartial, signedBy } = params;
+  const { customerEmail, contactName, deliveryNumber, deliveryId, customerId, items, isPartial, signedBy, deliveredOn } = params;
+  const receiptDate = deliveredOn ? parseLocalDate(deliveredOn).toLocaleDateString() : new Date().toLocaleDateString();
 
   try {
     const deliveredItems = items
@@ -79,7 +83,7 @@ export async function sendDeliveryCompletionEmail(params: DeliveryCompletionEmai
         </tr>
         <tr>
           <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;color:#64748b;">Date</td>
-          <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600;">${new Date().toLocaleDateString()}</td>
+          <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;font-weight:600;">${receiptDate}</td>
         </tr>
       </table>
       <h3 style="color:#1e293b;font-size:14px;margin:16px 0 8px;">Delivered Items</h3>

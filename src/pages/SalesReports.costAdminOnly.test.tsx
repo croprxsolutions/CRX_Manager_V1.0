@@ -71,7 +71,7 @@ const summaryRow = (admin: boolean) => ({
   total_cost: admin ? 12 : null, total_profit: admin ? 8 : null, margin_pct: admin ? 40 : null, order_count: 1, line_count: 1,
 });
 const SENSITIVE = new Set(['Cost', 'Profit', 'Margin', 'Margin %']);
-const hasSensitive = (headers: string[]) => headers.some((header) => SENSITIVE.has(header.trim()));
+const sensitiveHeaders = (headers: string[]) => headers.map((header) => header.trim()).filter((header) => SENSITIVE.has(header));
 
 beforeEach(() => {
   cleanup();
@@ -83,25 +83,25 @@ afterEach(() => { cleanup(); });
 
 describe('SalesReports cost columns', () => {
   it.each([
-    { role: 'sales_rep' as const, showsCost: false },
-    { role: 'admin' as const, showsCost: true },
-  ])('summary table, CSV and PDF follow role visibility ($role)', async ({ role, showsCost }) => {
+    { role: 'sales_rep' as const, showsCost: false, table: [], csv: [], pdf: [] },
+    { role: 'admin' as const, showsCost: true, table: ['Cost', 'Profit', 'Margin'], csv: ['Cost', 'Profit', 'Margin %'], pdf: ['Profit', 'Margin'] },
+  ])('summary table, CSV and PDF follow role visibility ($role)', async ({ role, showsCost, table, csv, pdf }) => {
     H.auth.role = role;
     H.summaryRow = summaryRow(showsCost);
     render(<MemoryRouter initialEntries={['/?tab=by_product']}><SalesReports /></MemoryRouter>);
 
     expect(await screen.findByText('Roundup')).toBeInTheDocument();
-    expect(hasSensitive(screen.getAllByRole('columnheader').map((h) => h.textContent || ''))).toBe(showsCost);
+    expect(sensitiveHeaders(screen.getAllByRole('columnheader').map((h) => h.textContent || ''))).toEqual(table);
 
     fireEvent.click(screen.getByRole('button', { name: 'CSV' }));
     await waitFor(() => expect(exportToCSV).toHaveBeenCalled());
     const csvColumns = vi.mocked(exportToCSV).mock.calls[0][1] as Array<{ header: string }>;
-    expect(hasSensitive(csvColumns.map((c) => c.header))).toBe(showsCost);
+    expect(sensitiveHeaders(csvColumns.map((c) => c.header))).toEqual(csv);
 
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
     await waitFor(() => expect(downloadReportPdf).toHaveBeenCalled());
     const pdfColumns = (vi.mocked(downloadReportPdf).mock.calls[0][0] as { columns: Array<{ header: string }> }).columns;
-    expect(hasSensitive(pdfColumns.map((c) => c.header))).toBe(showsCost);
+    expect(sensitiveHeaders(pdfColumns.map((c) => c.header))).toEqual(pdf);
   });
 
   it('shows a sales rep revenue but no cost, profit or margin column or card', async () => {

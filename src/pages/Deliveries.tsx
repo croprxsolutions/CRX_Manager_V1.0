@@ -123,7 +123,7 @@ export default function Deliveries() {
   const batchRescheduleIdem = useIdempotencyKey('batch_reschedule_deliveries', profile?.id || '');
   const reassignIdem = useIdempotencyKey('reassign_delivery', profile?.id || '');
   const isOnline = useOnlineStatus();
-  // F3 act-from-list: complete an in_progress delivery in place (signed-by popup).
+  // F3 act-from-list: complete a scheduled or in_progress delivery in place (signed-by popup).
   // One server call starts a scheduled delivery and completes it in a single transaction.
   const completeIdem = useIdempotencyKey('start_and_complete_delivery', profile?.id || '');
   const [completeTarget, setCompleteTarget] = useState<DeliveryRow | null>(null);
@@ -137,7 +137,7 @@ export default function Deliveries() {
     setSignedBy('');
     setDeliveredOnDate(businessToday());
   };
-  // Send the in-app completion notification at most once per delivery. complete_delivery
+  // Send the in-app completion notification at most once per delivery. start_and_complete_delivery
   // is idempotent but returns no replay marker, so a same-key retry after a lost
   // response replays its cached success; the stable delivery id avoids duplicate
   // driver/admin notifications on that replay (Codex P2).

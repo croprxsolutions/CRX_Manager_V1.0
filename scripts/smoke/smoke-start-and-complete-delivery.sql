@@ -13,11 +13,13 @@
 --   a. scheduled delivery, today: completed, started = true, stock moved once, completion dated
 --      today in Chicago, the start's activity row written; both receipts bound (64-hex fingerprint);
 --   b. the exact retry returns the identical result and moves no extra stock;
+--   b2. a deactivated account cannot replay its own saved completion (authorization runs first);
 --   c. the same key for a DIFFERENT delivery is refused (IDEMPOTENCY_INTENT_MISMATCH), and that
 --      delivery stays scheduled;
 --   d. the same key from a different person is refused (IDEMPOTENCY_ACTOR_MISMATCH);
 --   e. no key: IDEMPOTENCY_KEY_REQUIRED; no date: DELIVERED_ON_REQUIRED; a forged p_performed_by:
---      ACTOR_MISMATCH; tomorrow: DELIVERED_ON_IN_FUTURE; each leaves the delivery scheduled;
+--      ACTOR_MISMATCH; tomorrow: DELIVERED_ON_IN_FUTURE; 400 days back or -infinity:
+--      DELIVERED_ON_TOO_OLD; each leaves the delivery scheduled;
 --   f. a past date (yesterday): completed at 17:00 UTC of that date, Chicago date = yesterday (the
 --      path a "today" request takes when it reaches the server after Chicago midnight);
 --   g. a completion that fails AFTER the start (a closed accounting period) leaves the delivery
@@ -54,6 +56,7 @@ DECLARE
   v_completed timestamptz;
   v_fp text;
   v_actor uuid;
+  v_closed_start date;
 BEGIN
   -- 0. Preconditions, two admins, fixtures.
   IF EXISTS (SELECT 1 FROM public.accounting_periods
@@ -152,6 +155,28 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: the exact retry moved stock again (% left)', v_avail;
   END IF;
 
+  -- b2. A deactivated account cannot replay its own saved completion (authorization runs first).
+  -- The second admin deactivates the first (profile changes need an admin), then the first retries.
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_b, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
+  UPDATE public.profiles SET is_active = false WHERE id = v_admin;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  BEGIN
+    v_res2 := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_key);
+    RAISE EXCEPTION 'SMOKE_FAIL: a deactivated account replayed its completion: %', v_res2;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'Not authorized to complete this delivery%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong refusal for a deactivated replay: %', SQLERRM;
+    END IF;
+  END;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_b, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
+  UPDATE public.profiles SET is_active = true WHERE id = v_admin;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
   -- c. The same key for a different delivery is refused; delivery 2 stays scheduled.
   BEGIN
     v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_key);
@@ -210,6 +235,20 @@ BEGIN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE 'DELIVERED_ON_IN_FUTURE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: future-date refusal was %', SQLERRM; END IF;
   END;
+  BEGIN
+    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today - 400, v_admin, NULL, NULL, NULL, v_prefix || 'too-old');
+    RAISE EXCEPTION 'SMOKE_FAIL: a date more than a year back ran: %', v_res2;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'DELIVERED_ON_TOO_OLD%' THEN RAISE EXCEPTION 'SMOKE_FAIL: too-old refusal was %', SQLERRM; END IF;
+  END;
+  BEGIN
+    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', '-infinity'::date, v_admin, NULL, NULL, NULL, v_prefix || 'neg-infinity');
+    RAISE EXCEPTION 'SMOKE_FAIL: a -infinity date ran: %', v_res2;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'DELIVERED_ON_TOO_OLD%' THEN RAISE EXCEPTION 'SMOKE_FAIL: -infinity refusal was %', SQLERRM; END IF;
+  END;
   SELECT status INTO v_status FROM public.deliveries WHERE id = v_del[2];
   IF v_status IS DISTINCT FROM 'scheduled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: delivery 2 is % after refused calls', v_status;
@@ -225,14 +264,22 @@ BEGIN
   END IF;
 
   -- g. A completion refused after the start rolls the start back too.
-  INSERT INTO public.accounting_periods (period_start, period_end, status, notes)
-  VALUES (DATE '2001-01-01', DATE '2001-01-31', 'closed', '[SMOKE] closed period');
+  -- The whole calendar month about three months back (inside the one-year window), closed.
+  v_closed_start := date_trunc('month', v_today - 90)::date;
+  UPDATE public.accounting_periods SET status = 'closed'
+   WHERE period_start = v_closed_start;
+  IF NOT FOUND THEN
+    INSERT INTO public.accounting_periods (period_start, period_end, status, notes)
+    VALUES (v_closed_start, (v_closed_start + interval '1 month' - interval '1 day')::date, 'closed', '[SMOKE] closed period');
+  END IF;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[3], '[SMOKE] Receiver', DATE '2001-01-15', v_admin, NULL, NULL, NULL, v_prefix || 'closed');
+    v_res2 := public.start_and_complete_delivery(v_del[3], '[SMOKE] Receiver', v_closed_start + 14, v_admin, NULL, NULL, NULL, v_prefix || 'closed');
     RAISE EXCEPTION 'SMOKE_FAIL: a completion in a closed period ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    RAISE NOTICE 'closed-period refusal: %', SQLERRM;
+    IF SQLERRM NOT LIKE '%falls in closed accounting period%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong refusal for a closed-period completion: %', SQLERRM;
+    END IF;
   END;
   SELECT status INTO v_status FROM public.deliveries WHERE id = v_del[3];
   SELECT count(*) INTO v_n FROM public.activity_feed WHERE event_type = 'delivery_confirmed' AND related_entity_id = v_del[3];

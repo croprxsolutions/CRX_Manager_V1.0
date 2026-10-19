@@ -256,11 +256,11 @@ const UNCHANGED = [
 /** The candidate's CREATE with one hunk replaced, for a mutation run before the chain. */
 function mutate(find, replacement, label) {
   const sql = lf(CANDIDATE);
-  const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.start_and_complete_delivery(');
+  const start = sql.indexOf('CREATE FUNCTION public.start_and_complete_delivery(');
   const end = sql.indexOf('$function$;', start) + '$function$;'.length;
   const fn = sql.slice(start, end);
   assert.equal(fn.split(find).length - 1, 1, `mutation "${label}": hunk not found exactly once`);
-  return fn.replace(find, replacement);
+  return fn.replace(find, replacement).replace(/^CREATE FUNCTION/, 'CREATE OR REPLACE FUNCTION');
 }
 
 function main() {
@@ -279,14 +279,14 @@ function main() {
   assert.equal(a.status, 0, `the candidate failed to apply:\n${a.output}`);
   assert.equal(scalar(`SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('${FN}');`), 't', 'APPLY: not SECURITY DEFINER');
   assert.equal(scalar(`SELECT array_to_string(proconfig, ';') FROM pg_proc WHERE oid = to_regprocedure('${FN}');`), 'search_path=public, pg_temp', 'APPLY: wrong search_path');
-  for (const [role, want] of [['authenticated', 't'], ['anon', 'f'], ['public', 'f']]) {
+  for (const [role, want] of [['authenticated', 't'], ['anon', 'f'], ['service_role', 'f'], ['public', 'f']]) {
     const got = role === 'public'
       ? scalar(`SELECT coalesce(bool_or(a.grantee = 0), false) FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = to_regprocedure('${FN}') AND a.privilege_type = 'EXECUTE';`)
       : scalar(`SELECT has_function_privilege('${role}', '${FN}', 'EXECUTE');`);
     assert.equal(got, want, `APPLY: EXECUTE for ${role} is ${got}, expected ${want}`);
   }
   assert.deepEqual(UNCHANGED.map(bodyMd5), md5Before, 'APPLY: confirm_delivery or complete_delivery changed');
-  console.log('[prover] APPLY: SECURITY DEFINER, search_path public, pg_temp; EXECUTE authenticated only (not anon, not PUBLIC); confirm_delivery and complete_delivery unchanged');
+  console.log('[prover] APPLY: SECURITY DEFINER, search_path public, pg_temp; EXECUTE authenticated only (not anon, service_role or PUBLIC); confirm_delivery and complete_delivery unchanged');
 
   const seqBefore = sequences();
   const after = chain(CHAIN);
@@ -308,6 +308,10 @@ function main() {
       /SMOKE_FAIL: a future date ran|future-date refusal was/],
     ['past-date midday stamp', "    v_completed_at := (p_delivered_on + time '17:00') AT TIME ZONE 'UTC';\n", '    NULL;\n',
       /SMOKE_FAIL: delivery 2 \(yesterday\)/],
+    ['past-date bound', '  IF NOT isfinite(p_delivered_on) OR p_delivered_on < v_today - 366 THEN', '  IF false THEN',
+      /SMOKE_FAIL: a date more than a year back ran/],
+    ['authorization before replay', '  IF v_actor_role IS NULL OR NOT (', '  IF false AND NOT (',
+      /SMOKE_FAIL: a deactivated account replayed its completion/],
     ['target in the fingerprint', "    'delivery_id', p_delivery_id,\n", '',
       /SMOKE_FAIL: delivery 1's key replayed as success for delivery 2/],
   ];

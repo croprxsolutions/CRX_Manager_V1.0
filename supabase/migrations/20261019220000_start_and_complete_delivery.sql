@@ -14,20 +14,28 @@
 --        p_performed_by naming someone else (ACTOR_MISMATCH) -- complete_delivery's tests and
 --        messages;
 --     2. requires p_delivered_on, the business date the person chose (America/Chicago), and refuses
---        one after today's Chicago date (DELIVERED_ON_IN_FUTURE);
---     3. fingerprints the actor and every argument (SHA-256, _replay_fingerprint_20261015) and calls
+--        one after today's Chicago date (DELIVERED_ON_IN_FUTURE), not a real date or more than a
+--        year back (DELIVERED_ON_TOO_OLD: -infinity or a typo year would date the invoice outside
+--        any accounting period);
+--     3. locks the delivery row and runs complete_delivery's authorization test (active admin or
+--        sales_rep, or the assigned driver) BEFORE the receipt lookup, as complete_delivery's own
+--        body authorizes before replaying, so a driver taken off the delivery or a deactivated
+--        account gets neither a replayed completion nor a refusal carrying the saved result;
+--     4. fingerprints the actor and every argument (SHA-256, _replay_fingerprint_20261015) and calls
 --        check_idempotency_intent under the per-key advisory lock. An exact retry by the same person
 --        returns the saved result; a different person or request is refused
 --        (IDEMPOTENCY_ACTOR_MISMATCH / IDEMPOTENCY_INTENT_MISMATCH). The fingerprint carries the
---        chosen DATE, not a derived timestamp, so an exact retry across Chicago midnight replays;
---     4. locks the delivery row; if it is scheduled, starts it by calling confirm_delivery keyless
+--        chosen DATE, not a derived timestamp, so an exact retry across Chicago midnight replays.
+--        Then, if the delivery is scheduled, starts it by calling confirm_delivery keyless
 --        (unchanged: same status change, activity row, driver notification and authorization);
 --     5. completes it by calling complete_delivery under a derived key (<key>:complete), which
 --        binds its own receipt as before. completed_at: NULL (the server's now()) when the chosen
---        date is today in Chicago; otherwise midday of the chosen date, 17:00 UTC -- the exact
+--        date is today in Chicago; otherwise 17:00 UTC of the chosen date (noon CDT, 11 AM CST) -- the exact
 --        value the app already sends for a past date (src/lib/paperTicket.ts
 --        completedAtForDeliveredOn). So a "today" completion that reaches the server just after
---        Chicago midnight keeps the chosen day instead of moving to the next;
+--        Chicago midnight keeps the chosen day instead of moving to the next. Such a completion is
+--        then dated a past day, so for an order with field allocations complete_delivery treats it
+--        like any backdated completion (split drafts flagged for the office instead of created);
 --     6. saves its own receipt (save_idempotency) and binds it to the caller and fingerprint
 --        (_bind_replay_receipt_20261015) before returning complete_delivery's result plus
 --        "started" (true when step 4 ran).
@@ -47,7 +55,12 @@
 --   complete_delivery receipt is covered by that trigger already. Recreating the trigger here
 --   would race the other replay-binding batches that recreate it.
 --
--- GRANTS: EXECUTE for authenticated only (no anon, no PUBLIC); SECURITY DEFINER with
+-- ORDERING: the live ledger read 2026-10-19 21:2x UTC has 20261019205246
+--   (20261019200000_bind_delivery_job_replay_receipts_batch3a) as its newest row, effective stamp
+--   20261019200000; this file sorts above it and needs that batch live (the preflight checks it).
+--
+-- GRANTS: EXECUTE for authenticated only (revoked from PUBLIC, anon and service_role; service_role
+--   has no auth.uid() and would only ever get AUTH_REQUIRED); SECURITY DEFINER with
 --   search_path = public, pg_temp. The function runs as its owner so it can call the
 --   postgres-only helpers; every caller check above uses auth.uid(), and confirm_delivery and
 --   complete_delivery re-check authorization on the caller.
@@ -55,7 +68,34 @@
 -- ROLLBACK: DROP FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text,
 --   text, text); the app would then need its previous two-call version.
 
-CREATE OR REPLACE FUNCTION public.start_and_complete_delivery(
+-- PREFLIGHT: every function this one calls exists with the signature it calls (PL/pgSQL resolves
+-- calls only at run time, so a missing one would otherwise fail mid-completion), batch 3a is live
+-- (complete_delivery is the bound wrapper), and this function does not exist yet.
+DO $preflight$
+DECLARE
+  v_sig text;
+BEGIN
+  FOREACH v_sig IN ARRAY ARRAY[
+    'public.confirm_delivery(uuid,uuid,text)',
+    'public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz)',
+    'public._complete_delivery_replay_impl_20261015(uuid,text,uuid,jsonb,text,text,text,timestamptz)',
+    'public.check_idempotency_intent(text,text,uuid,text)',
+    'public.save_idempotency(text,text,jsonb)',
+    'public._bind_replay_receipt_20261015(text,text,text)',
+    'public._replay_fingerprint_20261015(jsonb)'
+  ] LOOP
+    IF to_regprocedure(v_sig) IS NULL THEN
+      RAISE EXCEPTION 'PREFLIGHT_START_AND_COMPLETE_DEPENDENCY_MISSING: %', v_sig;
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+              WHERE n.nspname = 'public' AND p.proname = 'start_and_complete_delivery') THEN
+    RAISE EXCEPTION 'PREFLIGHT_START_AND_COMPLETE_ALREADY_EXISTS';
+  END IF;
+END;
+$preflight$;
+
+CREATE FUNCTION public.start_and_complete_delivery(
   p_delivery_id uuid,
   p_signed_by text,
   p_delivered_on date,
@@ -77,6 +117,8 @@ DECLARE
   v_fingerprint text;
   v_replay jsonb;
   v_status text;
+  v_assigned_driver uuid;
+  v_actor_role text;
   v_started boolean := false;
   v_result jsonb;
 BEGIN
@@ -94,6 +136,28 @@ BEGIN
     RAISE EXCEPTION 'DELIVERED_ON_IN_FUTURE: the delivery date % is after today (%)', p_delivered_on, v_today
       USING ERRCODE = '22023';
   END IF;
+  -- A real date no more than a year back: refuses -infinity and typo years, which would otherwise
+  -- date the delivery and its invoice outside any accounting period.
+  IF NOT isfinite(p_delivered_on) OR p_delivered_on < v_today - 366 THEN
+    RAISE EXCEPTION 'DELIVERED_ON_TOO_OLD: the delivery date % is more than a year before today (%)', p_delivered_on, v_today
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- complete_delivery's own test, run BEFORE the receipt lookup, so a driver taken off the
+  -- delivery or a deactivated account gets neither a replayed completion nor a refusal that
+  -- carries the saved result (check_idempotency_intent's intent-mismatch DETAIL).
+  SELECT status, assigned_driver INTO v_status, v_assigned_driver
+    FROM public.deliveries WHERE id = p_delivery_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Delivery not found: %', p_delivery_id;
+  END IF;
+  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
+  IF v_actor_role IS NULL OR NOT (
+    v_actor_role IN ('admin', 'sales_rep')
+    OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver)
+  ) THEN
+    RAISE EXCEPTION 'Not authorized to complete this delivery';
+  END IF;
 
   -- p_quantities is fingerprinted as sent (jsonb normalizes key order); the chosen date, not a
   -- derived instant, so an exact retry keeps its fingerprint across Chicago midnight.
@@ -107,16 +171,12 @@ BEGIN
     'issue_notes', p_issue_notes
   ));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'start_and_complete_delivery', v_actor, v_fingerprint);
+
   IF v_replay IS NOT NULL THEN
     IF jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
       RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
     END IF;
     RETURN v_replay -> 'result';
-  END IF;
-
-  SELECT status INTO v_status FROM public.deliveries WHERE id = p_delivery_id FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Delivery not found: %', p_delivery_id;
   END IF;
 
   IF v_status = 'scheduled' THEN
@@ -125,7 +185,8 @@ BEGIN
   END IF;
 
   IF p_delivered_on < v_today THEN
-    -- Midday in Chicago of the chosen date: same instant as completedAtForDeliveredOn.
+    -- 17:00 UTC of the chosen date (noon CDT, 11 AM CST): the same instant the app already sends
+    -- for a past date (completedAtForDeliveredOn), and always the chosen date in Chicago.
     v_completed_at := (p_delivered_on + time '17:00') AT TIME ZONE 'UTC';
   END IF;
 
@@ -151,7 +212,7 @@ END;
 $function$;
 
 ALTER FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text) TO authenticated;
 
 COMMENT ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text) IS

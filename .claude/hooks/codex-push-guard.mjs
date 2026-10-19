@@ -26,6 +26,7 @@ import {
   mainPushSource,
   commandFedToInterpreter,
   commandFedToInterpreterDenial,
+  couldReachGatedAction,
   nestedComputedDenial,
   nestedTooDeepDenial,
   proofValid,
@@ -123,8 +124,11 @@ try {
   deny(`CODEX GATE: could not unwrap the commands nested in this one, so it is denied (fail closed). ${error?.message || error}`);
 }
 if (nestedCommands.tooDeep) deny(nestedTooDeepDenial("CODEX GATE"));
-if (nestedCommands.computed) deny(nestedComputedDenial("CODEX GATE"));
-if ([cmd, ...nestedCommands.commands].some((text) => commandFedToInterpreter(text))) {
+// Only a command that could reach a push or a GitHub call gets the two
+// fail-closed refusals (2026-10-18; see couldReachGatedAction). @speed-bump
+const pushGated = couldReachGatedAction([cmd, ...nestedCommands.commands]);
+if (pushGated && nestedCommands.computed) deny(nestedComputedDenial("CODEX GATE"));
+if (pushGated && [cmd, ...nestedCommands.commands].some((text) => commandFedToInterpreter(text))) {
   deny(commandFedToInterpreterDenial("CODEX GATE"));
 }
 if (nestedCommands.commands.some((inner) =>

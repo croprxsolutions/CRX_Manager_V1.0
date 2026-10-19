@@ -257,7 +257,16 @@ function segmentsHitStateDir(value) {
 function redirectTargetsStateDir(value) {
   const norm = String(value || "").replace(/\\/g, "/");
   for (const m of norm.matchAll(/>>?\s*("[^"]*"|'[^']*'|[^\s;&|()<>]+)/g)) {
-    if (segmentsHitStateDir(m[1].replace(/["']/g, ""))) return true;
+    const target = m[1].replace(/["']/g, "");
+    // A redirect INTO the state dir, or a globbed name that could be it. A
+    // redirect to some other `.claude/…` file (memory, commands) is not this
+    // rule's business (narrowed 2026-10-18; hooks/settings stay covered by
+    // ENFORCEMENT_SURFACE_RE, agents/commands now too).
+    if (/(?:^|\/)session-state(?:\/|$)/i.test(target) ||
+        target.split("/").some((s) => globSegCouldTargetProtected(s)) ||
+        /(?:^|\/)\.claude\/+[^/]*[*?[\]{}]/i.test(target) ||
+        /(?:^|\/)\.claude\/+worktrees(?:\/|$)/i.test(target) ||
+        /(?:^|\/)\.claude\/*$/i.test(target)) return true;
   }
   return false;
 }
@@ -412,7 +421,34 @@ if (shellTool) {
   // reviewStateDirectoryMentioned only matches the contiguous state path (Opus
   // review 2026-08-19, round 3 — deleting the parent was unguarded). `.claude`
   // must be a whole path component: `.claude-cache` / `foo.claude` do not match.
-  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:/\\(])\.claude(?![\w-])/i;
+  //
+  // NARROWED 2026-10-18 (Mason): `.claude` counts only as a WHOLE target —
+  // `.claude` or `.claude/` ending the word — never as the start of a deeper path
+  // (`.claude/commands/x.md`, `.claude/hooks/a.mjs`) and never as the user-home
+  // folder (`~/.claude/…`, `C:/Users/<name>/.claude/…`, Claude's memory). The old
+  // form denied any command mentioning any `.claude` path next to a word like
+  // `rm`/`move`/`del` — a grep for "move", a commit message, a heredoc — in about
+  // 34 sessions in two weeks. Deeper paths keep their own protection: hooks and
+  // settings by ENFORCEMENT_SURFACE_RE below, the state dir by
+  // reviewStateDirectoryMentioned, and every trusted file by name
+  // (reviewProofPathMentioned).
+  //
+  // `.claude/worktrees/…` is the exception and keeps the old breadth at ANY depth:
+  // every agent worktree carries its own `.claude/session-state`, so deleting or
+  // moving a worktree (or anything reached from inside one) destroys that state,
+  // and the eight historic spellings of that exploit are pinned in the tests.
+  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:(]|(?<!(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>])|[/\\]+worktrees(?![\w-]))/i;
+  // The same narrowing for a component split: a `.claude` segment alone no longer
+  // counts (that is the ancestor rule's job); `session-state` and a glob that
+  // could expand to a protected name still do.
+  // A glob directly under `.claude` (`.claude/*`, `.claude/s*`) can expand to the
+  // state dir however short its lead, so it still counts.
+  const segmentsHitStateDirNarrow = (value) => {
+    const text = String(value || "").replace(/\\/g, "/");
+    if (/(?:^|[\s"'=:(/])\.claude\/+[^\s/"';&|<>]*[*?[\]{}]/i.test(text)) return true;
+    const segs = text.split(/[\s"'=:/(){}|;&<>]+/);
+    return segs.some((s) => /^session-state$/i.test(s) || globSegCouldTargetProtected(s));
+  };
   // Check EVERY normalized view (parity with scanCdInvocations and the
   // proof-path matcher): the shell collapses `r"m"` → `rm` (quote-stripped view)
   // and drops the `\` in `.clau\de` → `.claude` (backslash-dropped view), but
@@ -431,7 +467,7 @@ if (shellTool) {
   // needed): a `>`/`>>` write into the state dir overwrites a wrapper-owned file
   // even when its basename is globbed.
   const namesStateDir = (v) =>
-    reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDir(v);
+    reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDirNarrow(v);
   if (destructiveViews.some((v) => (hitsDestructiveVerb(v) && namesStateDir(v)) || redirectTargetsStateDir(v))) {
     deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
   }
@@ -461,7 +497,7 @@ if (shellTool) {
   // deleting the lock would quietly drop `git checkout <rev> -- .claude/hooks/x`
   // — a silent guard rewrite — from the protected set.
   const ENFORCEMENT_SURFACE_RE =
-    /(?:^|[\s"'=:/\\(])(?:\.husky|\.github[/\\]workflows|\.codex[/\\](?:hooks|config\.toml)|\.claude[/\\](?:hooks|settings(?:\.local)?\.json)|\.coderabbit\.ya?ml|scripts[/\\](?:(?:check|validate|verify)-[^\s"']*|write-codex-push-proof\.mjs|run-claude-review\.mjs|remove-applied-ledger-entry\.mjs|agent-manifest-parity\.mjs|sync-agent-workflows\.mjs))(?![\w-])/i;
+    /(?:^|[\s"'=:/\\(])(?:\.husky|\.github[/\\]workflows|\.codex[/\\](?:hooks|config\.toml)|\.claude[/\\](?:hooks|agents|commands|settings(?:\.local)?\.json)|\.coderabbit\.ya?ml|scripts[/\\](?:(?:check|validate|verify)-[^\s"']*|write-codex-push-proof\.mjs|run-claude-review\.mjs|remove-applied-ledger-entry\.mjs|agent-manifest-parity\.mjs|sync-agent-workflows\.mjs))(?![\w-])/i;
   // FAIL-CLOSED READ-ONLY ALLOWLIST — deliberately NOT a destructive-verb list.
   // @proven-by review-proof-guard.test.mjs (the deny block asserts that heads
   // absent from this set — cp, tee, rm, Set-Content, command, npx — are refused,

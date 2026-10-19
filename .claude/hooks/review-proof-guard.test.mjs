@@ -899,4 +899,52 @@ for (const [label, payload] of [
 // A parameterless tool sends an empty tool_input object; that is readable, not skipped.
 assertEntrypointAllowed({ tool_name: "TodoRead", tool_input: {} }, "parameterless tool call");
 
+// ── Narrowing, 2026-10-18 (adversarial review of the guard proposals) ─────────
+// The state-dir rule used to deny ANY command naming ANY `.claude` path next to a
+// word like rm/move/del. These are the reviewer's probe commands; they are reads
+// or writes outside the review state and must pass now.
+for (const command of [
+  'grep -rn "move" ~/.claude/projects/C--CRX-Manager/memory',
+  "echo note > ~/.claude/projects/C--CRX-Manager/memory/a.md",
+  "echo note > C:/Users/mason/.claude/projects/x/memory/a.md",
+  'git commit -m "docs: rm stale note in .claude/commands"',
+  "cat .claude/hooks/a.mjs | grep -c rd",
+  "cat > /tmp/note.txt <<'EOF'\nsee .claude/launch.json and rm the old one\nEOF",
+]) {
+  assert.equal(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `narrowed rule allows: ${command}`);
+}
+// …while the state dir, the whole `.claude` folder, globs that can reach it, and
+// every worktree stay protected.
+for (const command of [
+  "rm -rf .claude",
+  "rm -rf .claude/",
+  "mv C:/CRX_Manager/.claude /tmp/x",
+  "rm -rf .claude/*",
+  "rm -rf .claude/s*",
+  "rm -rf .claude/session-state",
+  "echo x > .claude/session-state/anything.json",
+  "rm -rf .claude/worktrees/wt-a/src",
+  // Trusted files a plain copy or tee could forge before (reviewer probes).
+  "cp /tmp/x.json .claude/session-state/migration-review-x.json",
+  "echo {} | tee .claude/session-state/owner-approval-x.json",
+  "node -e \"require('fs').writeFileSync('.claude/session-state/migration-review-x.json','{}')\"",
+  "rm owner-approval-code-used-123456.json",
+  "printf on > AUTOPILOT.on",
+  "echo '{\"held\":false}' > hold.json",
+  "cp /tmp/snap.json applied-migrations.json",
+  // Reviewer agents and commands are now enforcement surfaces.
+  "cp /tmp/x .claude/agents/rls-security-reviewer.md",
+  "echo x > .claude/commands/ship.md",
+]) {
+  assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);
+}
+// KNOWN OVER-BLOCK kept on purpose: a command that names the state dir ITSELF
+// and also contains a destructive word anywhere still denies, even as a read.
+// Telling a read from a write there needs the verb-to-target parser this file
+// declines to write; naming the state dir is rare in ordinary work.
+assert.match(run({ tool_name: "Bash", tool_input: { command: "ls .claude/session-state | grep del" } }).stdout, /"permissionDecision":"deny"/);
+// Reading agents/commands stays allowed, and Edit/Write remain the way to change them.
+assert.equal(run({ tool_name: "Bash", tool_input: { command: "cat .claude/agents/rls-security-reviewer.md" } }).stdout, "");
+assert.equal(run({ tool_name: "Edit", tool_input: { file_path: ".claude/commands/ship.md" } }).stdout, "");
+
 console.log("OK - review proof guard checks passed.");

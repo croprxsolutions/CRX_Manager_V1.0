@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold } from "./hold-latch-lib.mjs";
+import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold, holdDecision } from "./hold-latch-lib.mjs";
 import { classifySql } from "./live-testdata-lib.mjs";
 import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid } from "./codex-push-lib.mjs";
 import { DENY_TOOLNAME_RE } from "./autopilot-lib.mjs";
@@ -43,8 +43,35 @@ ok(isHoldPhrase("pause this loop"), "pause");
 ok(isHoldPhrase("im just scoping a future session, dont build yet"), "scope-only");
 ok(!isHoldPhrase("build me the invoices page"), "normal build is not a hold");
 ok(isResumePhrase("ok go ahead and continue"), "resume phrase");
-ok(isBuildActionUnderHold("Edit", { file_path: "src/pages/Foo.tsx" }), "edit source blocked under hold");
-ok(isBuildActionUnderHold("Bash", { command: "git commit -m x" }), "commit blocked under hold");
+// Local, reversible work WARNS under a hold; outward actions stay denied (2026-10-18).
+eq(holdDecision("Edit", { file_path: "src/pages/Foo.tsx" }), "warn", "edit source warns under hold");
+eq(holdDecision("Bash", { command: "git commit -m x" }), "warn", "commit warns under hold");
+eq(holdDecision("Bash", { command: "git -C C:/x rebase origin/main" }), "warn", "local rebase warns under hold");
+eq(holdDecision("Bash", { command: "npm run test" }), "allow", "tests stay plainly allowed");
+// The autonomous-landing merge and global-option pushes were MISSED before
+// (adversarial review 2026-10-18); a "stop" must hold them now.
+for (const command of [
+  "gh pr merge 951 --squash --match-head-commit 37222b56b0000000000000000000000000000000",
+  "gh -R masonwells1/CRX_Manager_V1.0 pr merge 951 --squash",
+  "git -C \"C:/CRX Manager/wt\" push origin HEAD",
+  "git push origin HEAD",
+  "git.exe push origin HEAD",
+  "git commit -m x && git push",
+  "gh pr create --fill",
+  "gh api repos/o/r/pulls/1/merge -X PUT",
+  "gh api repos/o/r/issues/1/comments -f body=hi",
+  "git branch -D old",
+  "rm -rf src",
+  "vercel deploy --prod",
+]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
+eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");
+eq(holdDecision("Bash", { command: "gh api repos/o/r/pulls/1" }), "allow", "gh api GET allowed under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "select public.void_invoice(42)" }), "deny",
+  "mutating RPC inside a SELECT is denied under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "grant execute on function f() to anon" }), "deny",
+  "GRANT is denied under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "select count(*) from invoices" }), "allow",
+  "plain read SQL allowed under hold");
 ok(isBuildActionUnderHold("mcp__supabase__apply_migration", {}), "apply blocked under hold");
 // The file-bytes live-apply door is a Bash command, not an MCP tool, so the
 // tool-name set never sees it. Codex (P1, PR #460) verified the predicate returned

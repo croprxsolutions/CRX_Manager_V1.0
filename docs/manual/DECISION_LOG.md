@@ -1,12 +1,35 @@
 # Decision Log
 
-Last verified: 2026-10-15 (an entry added: Mason's Goal 2 and Goal 3 walkthrough decisions, including admin-only cost and margin, superseding the 2026-10-14 Goal 1 answer that reps keep them; the order-invoice own-name entry updated: its migration is applied live); 2026-10-14 (a Goal 1 entry added: no photos in customer receipts, applicators see a job's fields for 2 days after it is done, reps keep cost and margin (superseded 2026-10-15); an entry added: order invoices carry only the rep's own name, and a completed delivery's automatic split keeps the order's salesperson; a clarification entry added: 6e covers only the New Invoice page, and field-applied chemicals count as delivered for 6g; GitHub branch cleanup: two owner decisions recovered from never-merged branches, the 2026-08-09 pricing answers and the 2026-08-27 ingredient-identity model D-AA, and a new entry recording that #544's 2026-09-20 close superseded the 2026-09-01 return-credit split; seven entries added: six from Mason's answers to the goals plan's questions 6e–6k (orderless invoices carry no products; Chem Man's last bill 2026-12-31 and a CRX-only pilot from 2027-01-01; bill products only when delivered; Mason owns compliance and inventory; an overnight outage is acceptable; admin-only commission splits), plus revised quotes keep locked prices, reps see last-charged prices while price history stays admin-only, prices come in through the full Excel workbook; also re-read for PR #905 review; 2026-10-13: five entries added: a sent quote's prices stay locked until accepted or expired; an order's bill can be split to a landlord; a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
+Last verified: 2026-10-18 (an entry added: guards narrowed and guard-file edit prompts removed, reversing the 2026-09-26 choice "A"); 2026-10-15 (an entry added: Mason's Goal 2 and Goal 3 walkthrough decisions, including admin-only cost and margin, superseding the 2026-10-14 Goal 1 answer that reps keep them; the order-invoice own-name entry updated: its migration is applied live); 2026-10-14 (a Goal 1 entry added: no photos in customer receipts, applicators see a job's fields for 2 days after it is done, reps keep cost and margin (superseded 2026-10-15); an entry added: order invoices carry only the rep's own name, and a completed delivery's automatic split keeps the order's salesperson; a clarification entry added: 6e covers only the New Invoice page, and field-applied chemicals count as delivered for 6g; GitHub branch cleanup: two owner decisions recovered from never-merged branches, the 2026-08-09 pricing answers and the 2026-08-27 ingredient-identity model D-AA, and a new entry recording that #544's 2026-09-20 close superseded the 2026-09-01 return-credit split; seven entries added: six from Mason's answers to the goals plan's questions 6e–6k (orderless invoices carry no products; Chem Man's last bill 2026-12-31 and a CRX-only pilot from 2027-01-01; bill products only when delivered; Mason owns compliance and inventory; an overnight outage is acceptable; admin-only commission splits), plus revised quotes keep locked prices, reps see last-charged prices while price history stays admin-only, prices come in through the full Excel workbook; also re-read for PR #905 review; 2026-10-13: five entries added: a sent quote's prices stay locked until accepted or expired; an order's bill can be split to a landlord; a plain "I approve" replaces typing the approval code; reps work with any customer (the build session's full entry, merged with the short one PR #904 added), superseding the 2026-10-06 rep-scoping entry and marking three 2026-07-17 SETTLED entries superseded; direction to a senior-developer handoff; earlier: owner approval moved from Windows Hello to a chat reply, superseding rule 1 of the 2026-09-29 entry; documentation-only Sol exemption entry added, Mason kept DECISION_LOG.md eligible on 2026-10-09 and dropped docs/reference/ from it on 2026-10-10; CRX-LIFE-001 scope decision entry added; guard-cleanup and lighter-review decision added; nested-command entries condensed, full gap list in agent-guardrails.md; owner Windows Hello approval entry added; #841's fewer-prompts entry condensed, its approval observation corrected; Mason hand-merged PR #857 over Sol's self-verifier HIGH; after #841 landed, a CORRECTION entry records that PRs do merge on CodeRabbit's approval)
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
+
+## 2026-10-18 — Guards narrowed to what they protect; no prompts for guard-file edits
+
+**Source:** Mason, 2026-10-18: "Yes revised plan" (after an independent adversarial review of the
+proposal), then "Change permissions to not always prompt me allow it" and "I approve all edits!!".
+
+**Decision.**
+1. Mason's "stop" keeps hard-blocking outward actions (push, merge, PR publishing, migration
+   apply, deploy, live SQL writes). Local edits and commits get a warning instead. This keeps the
+   2026-10-02 rule that his stop is a hard block, and stops the latch's misfires from freezing
+   whole sessions.
+2. The merge and push gates refuse run-time text and fed interpreters only when the command could
+   reach a merge, a push or a GitHub call.
+3. The review proof guard protects the review-state directory, the worktrees, and every trusted
+   file by name, instead of any command that mentions `.claude`.
+4. The retired maintenance-producer rule is removed.
+5. **Reverses the 2026-09-26 choice "A":** guard files, settings, workflows, Husky and
+   `package.json` no longer prompt before an Edit/Write. Deploy, secret and other outward tools
+   keep their prompts.
+
+**Operative rule.** A guard hard-blocks only what is irreversible or outward-facing. Everything
+else warns. Detail: `docs/reference/agent-guardrails.md`, "Guard narrowing and no guard-file edit
+prompts".
 
 ## 2026-10-15 — Quotes follow the own-name rule; season rollover keeps the original rep
 

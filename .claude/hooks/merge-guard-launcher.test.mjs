@@ -140,7 +140,12 @@ for (const command of guardForms) {
   deniedForms += 1;
   ok(mayMerge(payload(command)), `a form the working guard denies is a possible merge here too: ${command}`);
 }
-ok(deniedForms >= 26, `the parity sample reached the real guard's denials (${deniedForms} denied)`);
+// Since 2026-10-18 the working guard refuses run-time text and fed interpreters
+// only when the command could reach a merge (couldReachGatedAction), so the
+// forms above with no gated word (`bash -c "$CMD"`, `cat prog.js | node`, …)
+// pass it. This launcher still treats them as possible merges, which is the
+// stricter side and stays correct. The floor counts the forms that name a merge.
+ok(deniedForms >= 8, `the parity sample reached the real guard's denials (${deniedForms} denied)`);
 
 // Drift check (Codex App P1, PR #841): every name on the guard's own lists of
 // programs that run text it cannot see is a possible merge here. The lists are

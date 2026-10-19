@@ -658,7 +658,18 @@ export function reviewProofPathMentioned(value) {
   // scripts/remove-applied-ledger-entry.mjs, which never names the file in a
   // tool command. stop-wrap-ack.json is deliberately NOT protected — writing
   // it is the designed acknowledgment valve.
-  return /(?<![\w.-])(?:claude-review-push\.json|codex-review-[^\s/"']+\.json|applied-source-ledger\.json)(?![\w.-])/i.test(text);
+  //
+  // Every other file a gate TRUSTS is named here too (adversarial review
+  // 2026-10-18): the migration reviewer proof, every owner-approval record (a
+  // deleted used-code marker would let an approval code be replayed), the
+  // AUTOPILOT.on flag, the applied-migrations snapshot, and hold.json. Before,
+  // only the broad "any .claude mention plus a destructive word" rule covered
+  // them, and `cp`/`tee`/`echo >` into them walked through; that broad rule is
+  // now narrowed to the state directory itself, so the names carry the weight.
+  // Their legitimate writers (write-apply-proofs, owner-approval-prompt,
+  // autopilot-arm, refresh-applied-migrations, hold-latch-prompt) all write
+  // internally and never name the file in a tool command.
+  return /(?<![\w.-])(?:claude-review-push\.json|codex-review-[^\s/"']+\.json|applied-source-ledger\.json|migration-review-[^\s/"']+\.json|owner-approval-[^\s/"']+\.json|AUTOPILOT\.on|applied-migrations\.json|hold\.json)(?![\w.-])/i.test(text);
 }
 
 export function reviewStateDirectoryMentioned(value) {
@@ -4013,6 +4024,38 @@ export function commandFedToInterpreter(command) {
       if (stage.redirected && /^\s*exec(?:\s|$)/.test(stage.text.slice(0, 64))) inputReplaced = true;
     }
     return false;
+  });
+}
+
+// Could this command's text reach a merge, a push, or a GitHub call at all?
+// @speed-bump — the two fail-closed refusals above (a program or shell text built at run
+// time, and text fed to an interpreter on its input) are only worth their cost
+// when it could. Before 2026-10-18 they ran on every command, and refused an
+// ordinary `node - <<'EOF'` script, `python -` and `eval "$(fnm env)"` in about
+// 50 sessions in two weeks (adversarial review, 2026-10-18) — while
+// `node scratch.mjs` and `bash payload.sh`, which run the same arbitrary code
+// from a file, were always allowed. So these refusals are a speed bump for
+// commands that visibly involve gated words, not a boundary; the boundary for
+// merges is the merge gate's own checks on every readable `gh pr merge`, and
+// GitHub's branch protection.
+//
+// "Could reach" is read from every view the guards already use (as written,
+// with shell quoting consumed, and as argv words), over the command AND every
+// nested command it unwraps (a decoded -EncodedCommand payload included):
+//   • a gated WORD: gh, git, merge, push, api, alias, graphql, pulls, refs, a
+//     REST client (curl, wget, irm, iwr, Invoke-RestMethod/WebRequest), or an
+//     encoded-command / base64 marker whose payload the text does not show;
+//   • or an OBFUSCATION marker (char codes, escapes, decoding, reversing,
+//     joining) together with a way to run a program or reach the network,
+//     because that pair is how a gated word is hidden from the first test.
+const GATED_WORD_RE = /(?:^|[^\w-])(?:gh|git|merge|push|api|alias|graphql|pulls|refs|curl|wget|irm|iwr|invoke-restmethod|invoke-webrequest|encodedcommand|frombase64string|base64|atob)(?:$|[^\w-])|api\.github|(?:^|\s)-e(?:nc(?:odedcommand)?)?\s+[A-Za-z0-9+/=]{12,}/i;
+const OBFUSCATION_RE = /fromcharcode|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\.join\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode/i;
+const CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|start-process|invoke-expression|\biex\b|\beval\b|\bfetch\b|https?:|\brequest\b|socket|\b(?:bash|sh|zsh|cmd|pwsh|powershell|python3?|node|perl|ruby|deno|bun)\b|\$\(|`/i;
+export function couldReachGatedAction(texts) {
+  return [].concat(texts).some((text) => {
+    const raw = String(text || "");
+    const views = [raw, withoutShellQuoting(raw), splitShellArgv(raw).join(" ")];
+    return views.some((view) => GATED_WORD_RE.test(view) || (OBFUSCATION_RE.test(view) && CAPABILITY_RE.test(view)));
   });
 }
 

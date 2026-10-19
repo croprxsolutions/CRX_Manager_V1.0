@@ -477,16 +477,28 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     [`pwsh -EncodedCommand ${Buffer.from(NESTED_ADMIN, "utf16le").toString("base64")}`, /--admin/],
     [`bash ${pad("--norc", 70)} -c "${NESTED_ADMIN}"`, /option words/],
     [`${Array.from({ length: 40 }, (_, i) => `bash${" ".repeat(i + 1)}-c 'echo ok'; `).join("")}bash -c '${NESTED_ADMIN}'`, /inner commands/],
-    ["Get-Content payload.txt | iex", /on its input/],
     [`echo '${NESTED_ADMIN}' | env bash`, /on its input/],
-    ['cmd /c "type payload.txt | bash"', /on its input/],
+    [`Get-Content payload.txt | iex; ${NESTED_ADMIN}`, /on its input|--admin/],
+    ["node - <<'EOF'\nrequire('child_process').execSync('gh pr merge 1 --admin')\nEOF", /on its input/],
+    ["P=gh; $P pr merge 1 --squash", /built at run time/],
     ["sudo -u root -g staff -H -n -E gh mm 123", /is not a gh command this guard can read/],
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(r.decision?.permissionDecision === "deny" && why.test(r.decision?.permissionDecisionReason || ""),
       `the real hook refuses ${JSON.stringify(command.slice(0, 60))} for the expected reason`);
   }
-  for (const command of ["timeout 30 echo gh mm 123", "git log --oneline | grep -n bash", "bash -c 'echo ok'; bash -c 'echo ok'"]) {
+  // 2026-10-18: the run-time-text and fed-to-interpreter refusals apply only
+  // when the command could reach a merge or GitHub call (couldReachGatedAction).
+  // A file payload with no gated word is the same as `bash payload.sh`, which
+  // was always allowed; inline scripts with no gated word are ordinary work.
+  for (const command of [
+    "timeout 30 echo gh mm 123", "git log --oneline | grep -n bash", "bash -c 'echo ok'; bash -c 'echo ok'",
+    "Get-Content payload.txt | iex", 'cmd /c "type payload.txt | bash"',
+    "node - <<'EOF'\nconsole.log(require('fs').readdirSync('.').length)\nEOF",
+    "python - <<'EOF'\nprint(1+1)\nEOF",
+    'eval "$(fnm env)" && node -v',
+    'bash -c "$CMD"',
+  ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(r.status === 0 && r.decision === null, `CONTROL: the real hook passes ${JSON.stringify(command)}`);
   }
@@ -760,8 +772,9 @@ ok(
   "every scanned command is checked for a gh alias or unknown gh command",
 );
 ok(
-  /if\s*\(\s*nested\.computed\s*\)\s*deny\(/.test(guardSource),
-  "a nested command built at run time is refused",
+  /if\s*\(\s*gated\s*&&\s*nested\.computed\s*\)\s*deny\(/.test(guardSource) &&
+    /const\s+gated\s*=\s*couldReachGatedAction\(\s*scannedCommands\s*\)/.test(guardSource),
+  "a nested command built at run time is refused when the command could reach a merge",
 );
 ok(
   /scannedCommands\.some\(\s*\(text\)\s*=>\s*commandFedToInterpreter\(\s*text\s*\)\s*\)/.test(guardSource),

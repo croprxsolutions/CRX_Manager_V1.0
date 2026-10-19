@@ -84,8 +84,9 @@ same opt-in as an on-screen signature) is sent by the phone, and the delivery pa
 read the customer through the client. Under the current
 `customers_select` policy, an assigned driver may not see the customer of a stop whose
 `scheduled_date` is NULL or older than yesterday, so the page has no email and no receipt is sent.
-Since PR #955 the driver is told no receipt was sent from the phone and that the office can send it
-with **Email Confirmation**; it is no longer silent. **Fix:** read the receipt recipient through an
+Since PR #955, on a **paper-ticket** completion the driver is told no receipt was sent from the phone
+and that the office can send it with **Email Confirmation**. A normal on-screen-signature completion
+still skips the receipt without a warning in this case (unchanged from before Goal 5). **Fix:** read the receipt recipient through an
 authorized RPC (or widen the policy for an assigned driver's open delivery); a server-side receipt
 queue would also cover it. Found by the Codex GitHub review on #955. Source:
 `src/pages/DeliveryDetail.tsx`, `src/pages/FieldStop.tsx` (receipt send after completion).

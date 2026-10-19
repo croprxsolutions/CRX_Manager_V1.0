@@ -188,7 +188,7 @@ recorded in the batch-1 paragraph above.
 **Batch 3a written, NOT applied (2026-10-18).** The table's batch-3 money group is split into smaller
 PRs. The first cut, migration `20261018230000_bind_delivery_job_replay_receipts_batch3a`, binds
 `complete_delivery` and `complete_job` (the first row below) and extends the same commit-time guard
-trigger, accepting it with or without the stock batch (PR #951, `20261016140000`, live since ledger
+trigger, accepting only its batch 1 + stock batch state (PR #951, `20261016140000`, live since ledger
 `20261019010324`).
 It is access-changing, so it applies only on Mason's owner approval. Until it is applied, both
 functions still replay by key alone. `cancel_delivery` was held for PR #951 (`batch_cancel_deliveries`

@@ -15,9 +15,9 @@
  *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the file stops at its preflight;
  *      PREFLIGHT: a drifted complete_delivery body, an unexpired complete_job receipt, and an unknown
  *      commit-time guard list each abort the candidate before any change;
- *   3. BATCH-1-ONLY STATE: in a rolled-back transaction, with the guard recreated as batch 1 alone
- *      left it (the other prior state the candidate accepts), the candidate applies and the guard
- *      then lists the 9 + 2 operations in that order;
+ *   3. BATCH-1-ONLY GUARD: in a rolled-back transaction, with the guard drifted back to the batch-1
+ *      literal while batch 2's wrappers stay installed, the candidate refuses
+ *      (PREFLIGHT_RECEIPT_GUARD_DRIFT) and changes nothing;
  *   4. APPLY (batch-1+2 state, committed): POSTFLIGHT_OK, the guard lists 9 + 13 + 2;
  *   5. AFTER: the new chain passes and rolls back (the sequences it moved are reported: completing
  *      a delivery on an order draws an invoice number, so the chain is CONTAINER ONLY), every
@@ -405,23 +405,19 @@ ROLLBACK;`,
   assertUntouched('PREFLIGHT guard drift', guardBefore);
   console.log('[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, over a drifted complete_delivery body, with an unexpired complete_job receipt, or over an unknown guard list, the candidate stops and leaves nothing behind');
 
-  // 3. BATCH-1-ONLY STATE (rolled back): the guard as batch 1 alone left it.
-  const b1 = docker([...psqlArgs(), '-A', '-t'], {
+  // 3. BATCH-1-ONLY GUARD (rolled back): with batch 2's wrappers installed, a guard drifted back to
+  // the batch-1 literal is refused, never rebuilt without the thirteen batch-2 operations.
+  const b1 = docker([...psqlArgs()], {
     input: `BEGIN;
 ${recreateGuardSql(batch1)}
-${guardOpsSql().replace("'GUARD_OPS='", "'GUARD_OPS_BEFORE='")}
 \\i /tmp/candidate.sql
-${guardOpsSql()}
 ROLLBACK;`,
     allowFailure: true,
   });
-  const b1out = `${b1.stdout}\n${b1.stderr}`;
-  assert.equal(b1.status, 0, `BATCH-1-ONLY STATE: the candidate failed over the batch-1 guard:\n${b1out}`);
-  assert.match(b1out, /POSTFLIGHT_OK/, `BATCH-1-ONLY STATE: no POSTFLIGHT_OK:\n${b1out}`);
-  assert.deepEqual(/GUARD_OPS_BEFORE=([a-z_,]*)/.exec(b1out)?.[1].split(','), batch1, 'BATCH-1-ONLY STATE: the batch-1 guard was not set up');
-  assert.deepEqual(guardOps(b1out), [...batch1, ...batch3a], 'BATCH-1-ONLY STATE: the guard does not list 9 + 2 operations in order');
-  assertUntouched('BATCH-1-ONLY STATE rollback', guardBefore);
-  console.log(`[prover] BATCH-1-ONLY STATE: over the batch-1 guard the candidate prints POSTFLIGHT_OK and the guard lists ${batch1.length} + ${batch3a.length} operations in order (rolled back)`);
+  assert.notEqual(b1.status, 0, 'BATCH-1-ONLY GUARD: the candidate applied over a batch-1-only guard');
+  assert.match(b1.stderr, /PREFLIGHT_RECEIPT_GUARD_DRIFT: [^\n]*is not the batch-1\+2 trigger/, `BATCH-1-ONLY GUARD: wrong refusal:\n${b1.stderr}`);
+  assertUntouched('BATCH-1-ONLY GUARD rollback', guardBefore);
+  console.log('[prover] BATCH-1-ONLY GUARD: a guard drifted back to the batch-1 literal is refused (PREFLIGHT_RECEIPT_GUARD_DRIFT) and nothing changes');
 
   // 4. APPLY (batch-1+2 state, as on live; committed).
   const a = apply('candidate.sql');

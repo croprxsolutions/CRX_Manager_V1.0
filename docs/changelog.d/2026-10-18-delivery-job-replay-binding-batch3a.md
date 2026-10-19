@@ -14,8 +14,8 @@ twice; the harm was a false success. This change:
   changes. An exact retry still returns the original answer, and the offline queue replays a
   saved action as before (one whose delivery or job changed since it was saved still goes to office
   review first, before this check). Both now require a retry key (every screen and the offline queue already send one). The
-  commit-time guard that refuses an unbound receipt now covers both, whether or not the stock batch
-  (PR #951) lands first. The file narrows access, so it applies only on Mason's owner approval.
+  commit-time guard that refuses an unbound receipt now covers both; it applies only over the live
+  batch 1 + stock batch (PR #951) guard. The file narrows access, so it applies only on Mason's owner approval.
 - **App:** the five completion screens (Deliveries, Delivery detail, Field stop, Field view, Job
   detail) drop a retry key on any replay-binding refusal (another request's or person's key, or a
   receipt that can never be used), which is safe because the database refuses a second completion

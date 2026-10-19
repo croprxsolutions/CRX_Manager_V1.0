@@ -56,13 +56,11 @@
 --   transaction under its ACCESS EXCLUSIVE lock on idempotency_keys (no gap is visible). No second
 --   trigger is created. Replay-binding batch 2 (20261016140000, PR #951) recreates the same trigger;
 --   it was not applied when this file was written and was applied live on 2026-10-19 (ledger
---   20261019010324), so the batch 1 + batch 2 state is the expected one. This file accepts exactly
---   the two states the trigger can be in and keeps every operation already covered:
---     batch 1 only               -> the nine batch-1 operations + these two
---     batch 1 + batch 2 applied  -> the nine + batch 2's thirteen + these two
---   Any other trigger definition refuses the apply (PREFLIGHT_RECEIPT_GUARD_DRIFT). If this file is
---   applied FIRST, batch 2's preflight (which pins the batch-1-only trigger) refuses until it is
---   updated to keep these two operations; that refusal is the intended stop, not a silent loss.
+--   20261019010324), so this file accepts only the batch 1 + batch 2 trigger and keeps every
+--   operation it covers: the nine batch-1 operations + batch 2's thirteen + these two (24). Any
+--   other trigger definition, the earlier batch-1-only literal included, refuses the apply
+--   (PREFLIGHT_RECEIPT_GUARD_DRIFT): with batch 2 live, a batch-1-only trigger is drift, and
+--   rebuilding from it would leave the thirteen batch-2 operations unguarded (Codex on PR #954).
 --
 -- WHAT DOES NOT CHANGE: no money, stock or invoice logic is retyped (the bodies are renamed, pinned
 --   by md5 below); the private chain under complete_delivery (_complete_delivery_period_preflight_impl,
@@ -272,7 +270,7 @@ $preflight$;
 
 -- ---------------------------------------------------------------------------------------------
 -- The commit-time guard now covers the two operations too (same trigger, same function), keeping
--- every operation it already covers. Exactly two prior states are accepted (see the header).
+-- every operation it already covers. Only the batch-1+2 prior state is accepted (see the header).
 -- ---------------------------------------------------------------------------------------------
 DO $guard$
 DECLARE
@@ -304,16 +302,14 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_RECEIPT_GUARD_DRIFT: expected exactly one enabled deferred require_bound_replay_receipt_20261015 trigger';
   END IF;
 
+  -- Batch 2 is live (ledger 20261019010324), so only the batch-1+2 trigger is accepted: a
+  -- batch-1-only literal now means drift, and keeping it would leave the batch-2 operations unguarded.
   IF v_def = 'CREATE CONSTRAINT TRIGGER require_bound_replay_receipt_20261015 AFTER INSERT OR UPDATE ON public.idempotency_keys DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((new.operation = ANY (ARRAY['
-            || (SELECT string_agg(quote_literal(o) || '::text', ', ' ORDER BY ord) FROM unnest(v_batch1) WITH ORDINALITY AS u(o, ord))
+            || (SELECT string_agg(quote_literal(o) || '::text', ', ' ORDER BY ord) FROM unnest(v_batch1 || v_batch2) WITH ORDINALITY AS u(o, ord))
             || ']))) EXECUTE FUNCTION _require_bound_replay_receipt_20261015()' THEN
-    v_ops := v_batch1 || v_batch3a;
-  ELSIF v_def = 'CREATE CONSTRAINT TRIGGER require_bound_replay_receipt_20261015 AFTER INSERT OR UPDATE ON public.idempotency_keys DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((new.operation = ANY (ARRAY['
-               || (SELECT string_agg(quote_literal(o) || '::text', ', ' ORDER BY ord) FROM unnest(v_batch1 || v_batch2) WITH ORDINALITY AS u(o, ord))
-               || ']))) EXECUTE FUNCTION _require_bound_replay_receipt_20261015()' THEN
     v_ops := v_batch1 || v_batch2 || v_batch3a;
   ELSE
-    RAISE EXCEPTION 'PREFLIGHT_RECEIPT_GUARD_DRIFT: require_bound_replay_receipt_20261015 is neither the batch-1 nor the batch-1+2 trigger: %', v_def;
+    RAISE EXCEPTION 'PREFLIGHT_RECEIPT_GUARD_DRIFT: require_bound_replay_receipt_20261015 is not the batch-1+2 trigger: %', v_def;
   END IF;
 
   INSERT INTO pg_temp.delivery_job_replay_binding_batch3a_guard_ops (ord, operation)
@@ -503,7 +499,7 @@ BEGIN
 
   -- The commit-time guard: the one trigger running the guard function, exactly as recorded above
   -- (every previously covered operation, then these two), deferred AFTER INSERT OR UPDATE per row.
-  IF (SELECT count(*) FROM pg_temp.delivery_job_replay_binding_batch3a_guard_ops) NOT IN (11, 24)
+  IF (SELECT count(*) FROM pg_temp.delivery_job_replay_binding_batch3a_guard_ops) <> 24
      OR NOT EXISTS (SELECT 1 FROM pg_temp.delivery_job_replay_binding_batch3a_guard_ops WHERE operation = 'complete_delivery')
      OR NOT EXISTS (SELECT 1 FROM pg_temp.delivery_job_replay_binding_batch3a_guard_ops WHERE operation = 'complete_job') THEN
     RAISE EXCEPTION 'POSTFLIGHT_RECEIPT_GUARD_CONTRACT: the recorded guard operation list is not a reviewed state';

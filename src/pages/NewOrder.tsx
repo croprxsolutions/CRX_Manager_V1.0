@@ -203,7 +203,11 @@ export default function NewOrder() {
   const [productSearch, setProductSearch] = useState('');
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<string, { available: number; prebooked: number; onOrder: number }>>({});
 
+  // Only the newest load may install the product list: a role change re-runs this loader while an
+  // older (cost-less) load may still be in flight (Luna round 3).
+  const loadSeqRef = useRef(0);
   const fetchData = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     const [customersRes, productsRes] = await Promise.all([
       supabase.from('customers').select('*').order('farm_name'),
       supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`).eq('is_active', true).order('product_name'),
@@ -246,6 +250,7 @@ export default function NewOrder() {
       // Never offer an admin a product list without cost (Luna round 1).
       productRows = [];
     }
+    if (seq !== loadSeqRef.current) return;
 
     setCustomers((customersRes.data || []) as Customer[]);
     setProducts(productRows);

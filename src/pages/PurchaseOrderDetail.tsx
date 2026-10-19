@@ -1022,7 +1022,9 @@ export default function PurchaseOrderDetail() {
       if (draft === undefined || draft.trim() === '') return [];
       const cents = purchaseOrderUnitCostCents(parseFloat(draft));
       return cents === purchaseOrderUnitCostCents(item.unit_cost ?? 0) ? [] : [{ id: item.id, unit_cost_cents: cents }];
-    });
+    // Sorted by line id so a lost-response retry rebuilds the same request whatever order the
+    // lines reloaded in (Luna round 3).
+    }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     if (changed.length === 0) {
       setCostOpen(false);
       return;

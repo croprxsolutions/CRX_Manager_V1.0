@@ -88,6 +88,7 @@ export default function OrderDetail() {
   const splitInvoiceIdem = useIdempotencyKey('create_split_invoices_from_order', profile?.id || '', id ?? '');
   // Latest order id the route is showing — older in-flight fetches bail (M6 stale guard).
   const activeOrderIdRef = useRef<string | undefined>(undefined);
+  const fetchSeqRef = useRef(0);
   // Per-target idempotency keys for "post all drafts" (M7) — keyed by standalone
   // invoice or split group so a network retry reuses the server dedup boundary.
   const postDraftKeysRef = useRef<Record<string, string>>({});
@@ -175,8 +176,11 @@ export default function OrderDetail() {
 
   const fetchOrder = useCallback(async () => {
     // Stale-route guard (M6): on rapid order-to-order navigation an older in-flight
-    // fetch must not render the previous order's items/invoices/deliveries.
-    const isStale = () => activeOrderIdRef.current !== id;
+    // fetch must not render the previous order's items/invoices/deliveries. Only the newest
+    // fetch may install state either, so an older cost-less load cannot overwrite an admin's
+    // costed lines (Luna round 3).
+    const seq = ++fetchSeqRef.current;
+    const isStale = () => activeOrderIdRef.current !== id || seq !== fetchSeqRef.current;
     const { data: orderRow } = await supabase
       .from('orders')
       .select(ORDER_COLUMNS)

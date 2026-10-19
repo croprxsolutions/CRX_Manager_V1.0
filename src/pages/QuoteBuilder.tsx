@@ -794,7 +794,11 @@ export default function QuoteBuilder() {
     return () => { cancelled = true; };
   }, [isEditing, id]);
 
+  // Only the newest load may install the product list: a role change re-runs this loader while an
+  // older (cost-less) load may still be in flight (Luna round 3).
+  const referenceSeqRef = useRef(0);
   const fetchReferenceData = useCallback(async () => {
+    const seq = ++referenceSeqRef.current;
     const [custRes, prodRes, convRes, fieldsRes] = await Promise.all([
       supabase.from('customers').select('*').eq('is_active', true).order('farm_name'),
       supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`).eq('is_active', true).order('product_name'),
@@ -824,6 +828,7 @@ export default function QuoteBuilder() {
       // Never offer an admin a product list without cost (Luna round 1).
       productRows = [];
     }
+    if (seq !== referenceSeqRef.current) return;
 
     setCustomers((custRes.data || []) as Customer[]);
     setProducts(productRows);

@@ -22,6 +22,9 @@ every delivery completion path follow that rule. It is an app-only change: no mi
   signature with a required photo of the signed ticket. The photo is an ordinary delivery photo
   captioned "Signed paper delivery ticket"; the signer's name is still required, no signature
   image is saved, and the customer receipt is always sent when the customer has an email on file.
+  The driver also enters the "Delivered on" date from the ticket (today by default, never in the
+  future); a past date is sent as the completion time, so the delivery and its invoice land on the
+  day the delivery really happened, not the day it was entered.
   The Deliveries list dialog sends paper-ticket deliveries to the delivery page. The ticket photo
   is required only when the driver ticks the paper-ticket box. Ticket photos do not count toward
   the 10-photo limit (they have their own limit of 2), and on the field stop a saved ticket photo

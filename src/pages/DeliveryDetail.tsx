@@ -28,10 +28,10 @@ import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
+import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from '../lib/paperTicket';
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
-import { parseLocalDate } from '../lib/dateUtils';
+import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { formatCents as fmtCents } from '../lib/money';
 import { Sentry } from '../lib/sentry';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -136,9 +136,10 @@ export default function DeliveryDetail() {
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
+  const [paperDeliveredOn, setPaperDeliveredOn] = useState(localToday());
   // A follow-up delivery reuses this page; never carry paper mode or the previous
   // delivery's photos onto it (a failed load then shows no ticket photo: fails closed).
-  useEffect(() => { setUsePaperTicket(false); setPhotos([]); }, [id]);
+  useEffect(() => { setUsePaperTicket(false); setPaperDeliveredOn(localToday()); setPhotos([]); }, [id]);
   const [completing, setCompleting] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
@@ -946,6 +947,7 @@ export default function DeliveryDetail() {
       p_signed_by: string;
       p_performed_by?: string;
       p_idempotency_key?: string;
+      p_completed_at?: string;
       p_quantities?: Json;
       p_issue_type?: string;
       p_issue_notes?: string;
@@ -957,6 +959,7 @@ export default function DeliveryDetail() {
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
       ...(driverIssueType !== 'none' ? { p_issue_type: driverIssueType } : {}),
       ...(driverIssueNotes.trim() ? { p_issue_notes: driverIssueNotes.trim() } : {}),
+      ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
     };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -1656,6 +1659,17 @@ export default function DeliveryDetail() {
                   ) : (
                     <p className="text-sm text-yellow-300">A photo of the signed paper ticket is required.</p>
                   )}
+                  <div>
+                    <label htmlFor="paper-delivered-on" className="block text-sm font-medium text-gray-400 mb-1">Delivered on (date on the ticket)</label>
+                    <input
+                      id="paper-delivered-on"
+                      type="date"
+                      value={paperDeliveredOn}
+                      max={localToday()}
+                      onChange={(e) => setPaperDeliveredOn(e.target.value)}
+                      className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => paperTicketInputRef.current?.click()}

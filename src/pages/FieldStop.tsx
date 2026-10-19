@@ -25,8 +25,9 @@ import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
+import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from '../lib/paperTicket';
 import { compressImage } from '../lib/imageCompression';
+import { localToday } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
 import { RECEIPT_NOT_SENT_MESSAGE, sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
@@ -93,10 +94,11 @@ export default function FieldStop() {
   const [noOnePresent, setNoOnePresent] = useState(false);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
+  const [paperDeliveredOn, setPaperDeliveredOn] = useState(localToday());
   // Stop-to-stop navigation reuses this page; never carry paper mode onto the next stop.
   // Also drop the previous stop's photos, so a failed load for this stop shows none
   // (fails closed) instead of letting the last stop's ticket photo pass the check.
-  useEffect(() => { setUsePaperTicket(false); setPhotos([]); }, [id]);
+  useEffect(() => { setUsePaperTicket(false); setPaperDeliveredOn(localToday()); setPhotos([]); }, [id]);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   const [emailOnComplete, setEmailOnComplete] = useState(true);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
@@ -327,6 +329,7 @@ export default function FieldStop() {
       p_performed_by: profile.id,
       p_idempotency_key: completeIdem.getKey(),
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
+      ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
     };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -592,6 +595,17 @@ export default function FieldStop() {
               ) : (
                 <p className="text-sm text-amber-700">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
               )}
+                  <div>
+                    <label htmlFor="paper-delivered-on" className="block text-sm font-medium text-gray-700 mb-1">Delivered on (date on the ticket)</label>
+                    <input
+                      id="paper-delivered-on"
+                      type="date"
+                      value={paperDeliveredOn}
+                      max={localToday()}
+                      onChange={(e) => setPaperDeliveredOn(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
               <button type="button" disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS} onClick={() => paperTicketInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
                 <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
               </button>

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasSignal } from './connectivity';
-import { countOrdinaryPhotos, hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION } from './paperTicket';
+import { countOrdinaryPhotos, hasPaperTicketPhoto, PAPER_TICKET_PHOTO_CAPTION, paperDeliveredAt } from './paperTicket';
+import { localToday } from './dateUtils';
 
 function setOnline(value: boolean) {
   Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => value });
@@ -55,6 +56,12 @@ describe('paper ticket photo', () => {
   it('is found only by its exact caption', () => {
     expect(hasPaperTicketPhoto([{ caption: null }, { caption: 'Drop spot' }])).toBe(false);
     expect(hasPaperTicketPhoto([{ caption: PAPER_TICKET_PHOTO_CAPTION }])).toBe(true);
+  });
+
+  it('sends a delivered-on date only when it is not today', () => {
+    expect(paperDeliveredAt(localToday())).toBeUndefined();
+    expect(paperDeliveredAt('')).toBeUndefined();
+    expect(new Date(paperDeliveredAt('2026-10-17') as string).getDate()).toBe(17);
   });
 
   it('does not count toward the 10-photo limit', () => {

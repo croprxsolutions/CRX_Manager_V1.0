@@ -7,7 +7,17 @@
  * The ticket photo is an ordinary delivery photo carrying this caption, so it is
  * stored, protected and shown exactly like every other delivery photo.
  */
+import { localToday } from './dateUtils';
+
 export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
+
+// A paper-ticket delivery is completed later, once back in signal, so the driver
+// records the day it really happened. That day becomes the delivery and invoice date.
+// Local midday keeps the ISO timestamp on the chosen day (same as the Deliveries list).
+export function paperDeliveredAt(deliveredOn: string): string | undefined {
+  if (!deliveredOn || deliveredOn === localToday()) return undefined;
+  return new Date(deliveredOn + 'T12:00:00').toISOString();
+}
 
 // Ticket photos do not count toward the 10-photo limit, so a delivery that already has
 // 10 ordinary photos can still be completed on the paper-ticket path.

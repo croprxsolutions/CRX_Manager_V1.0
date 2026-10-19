@@ -43,8 +43,9 @@
 --   A key is REQUIRED from callers (IDEMPOTENCY_KEY_REQUIRED, 22023), as in batches 1, 2 and 3a: a
 --   keyless call would run with no receipt, so a lost-response retry could repeat the reversal's
 --   notifications and audit rows. Every app caller already sends one: DeliveryDetail (cancel, void),
---   OrderDetail (void) and the offline queue's cancel_delivery branch (src/lib/offlineSync.ts, which
---   no screen enqueues today and whose queued actions always carry a key).
+--   OrderDetail (void). The offline queue's cancel_delivery branch (src/lib/offlineSync.ts) forwards
+--   whatever params were queued, but no screen enqueues a cancel_delivery today; one queued without
+--   a key would be refused (see KNOWN LIMITS).
 --
 --   The one internal keyless caller: batch_cancel_deliveries' private body
 --   (_batch_cancel_deliveries_replay_impl_20261015, batch 2) calls cancel_delivery once per delivery
@@ -194,6 +195,7 @@ BEGIN
        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714'
           AND p.proowner = 'postgres'::regrole AND p.prosecdef
+          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
           AND pg_get_function_identity_arguments(p.oid) = 'p_order_id uuid, p_performed_by uuid, p_reason text, p_idempotency_key text'
           AND md5(replace(p.prosrc, chr(13), '')) = 'a0a9151160a6f2b58624b30435322b94'
           AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
@@ -605,6 +607,7 @@ BEGIN
        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public' AND p.proname = '_' || pin.name || '_replay_impl_20261015'
           AND p.proowner = 'postgres'::regrole AND p.prosecdef
+          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
           AND md5(replace(p.prosrc, chr(13), '')) = pin.body_md5
           AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                       FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
@@ -613,10 +616,14 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_ORDER_VOID_REPLAY_CONTRACT: wrapper or renamed body drifted for: %', v_bad;
   END IF;
 
-  -- void_order's inner body: unchanged, callable only by postgres.
-  IF NOT EXISTS (
+  -- void_order's inner body: unchanged (one overload, owner, definer, search_path), callable only by postgres.
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714') <> 1
+     OR NOT EXISTS (
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714'
+       AND p.proowner = 'postgres'::regrole AND p.prosecdef
+       AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
        AND md5(replace(p.prosrc, chr(13), '')) = 'a0a9151160a6f2b58624b30435322b94'
        AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)

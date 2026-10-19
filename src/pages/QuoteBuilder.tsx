@@ -3891,7 +3891,7 @@ export default function QuoteBuilder() {
               <div className="text-sm text-secondary mb-3">
                 Total: {fmt(selectedVersion.snapshot_data?.quote?.total_price || 0)}
                 {' '}&middot;{' '}
-                {isAdmin && <>Margin: {(selectedVersion.snapshot_data?.quote?.total_margin_pct || 0).toFixed(1)}%</>}
+                {!hideCost && <>Margin: {(selectedVersion.snapshot_data?.quote?.total_margin_pct || 0).toFixed(1)}%</>}
               </div>
               {selectedVersion.snapshot_data?.sections?.map((sec, si) => (
                 <div key={si} className="mb-3">

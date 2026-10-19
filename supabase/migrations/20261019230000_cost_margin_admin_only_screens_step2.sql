@@ -723,6 +723,9 @@ BEGIN
 END;
 $function$;
 
+-- Row scope is unchanged by running as definer: the body reads orders, order_items, customers,
+-- purchase_orders and purchase_order_items, whose SELECT policies (read live 2026-10-19) all let an
+-- admin or a sales rep see every row, and this wrapper answers only admins and sales reps.
 CREATE OR REPLACE FUNCTION public.get_chemical_history(p_product_id uuid, p_start_date date, p_end_date date)
 RETURNS TABLE(transaction_date text, transaction_type text, reference_number text, customer_name text,
               quantity numeric, unit text, unit_price numeric, total_amount numeric, notes text)

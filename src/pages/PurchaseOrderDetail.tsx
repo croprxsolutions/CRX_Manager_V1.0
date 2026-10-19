@@ -29,6 +29,7 @@ import { logActivity } from '../lib/activityLogger';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt } from '../lib/money';
+import { MONEY_PRECISION_MESSAGE, parseDollarsToCentsSigned } from '../lib/parseCents';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import HelpTip from '../components/ui/HelpTip';
@@ -1017,10 +1018,22 @@ export default function PurchaseOrderDetail() {
   // that line has never been costed; the server refuses anything else).
   const handleSaveCosts = async () => {
     if (!po || !profile || !isAdmin) return;
+    // Exact decimal text to whole cents; more than two decimals is refused, never rounded (Luna round 4).
+    const invalid = items.some((item) => {
+      const draft = costDrafts[item.id];
+      if (draft === undefined || draft.trim() === '') return false;
+      const cents = parseDollarsToCentsSigned(draft);
+      return cents === null || cents < 0;
+    });
+    if (invalid) {
+      toast('error', `Unit cost cannot be negative. ${MONEY_PRECISION_MESSAGE}`);
+      return;
+    }
     const changed = items.flatMap((item) => {
       const draft = costDrafts[item.id];
       if (draft === undefined || draft.trim() === '') return [];
-      const cents = purchaseOrderUnitCostCents(parseFloat(draft));
+      const cents = parseDollarsToCentsSigned(draft);
+      if (cents === null || cents < 0) return [];
       return cents === purchaseOrderUnitCostCents(item.unit_cost ?? 0) ? [] : [{ id: item.id, unit_cost_cents: cents }];
     // Sorted by line id so a lost-response retry rebuilds the same request whatever order the
     // lines reloaded in (Luna round 3).

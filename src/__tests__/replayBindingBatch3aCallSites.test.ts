@@ -1,5 +1,5 @@
 /**
- * Replay-binding batch 3a (migration 20261018230000): the five screens that call complete_delivery
+ * Replay-binding batch 3a (migration 20261019200000): the five screens that call complete_delivery
  * or complete_job retire a refused retry key on ANY replay-binding refusal: 'intent' (the key
  * belongs to a different request), 'actor' (to another user) and 'receipt' (IDEMPOTENCY_RESULT_INVALID
  * / IDEMPOTENCY_RECEIPT_MISSING, a receipt that can never be used, so keeping the key would repeat
@@ -55,7 +55,7 @@ describe('replay-binding batch 3a call sites retire the key on any binding refus
     });
   }
 
-  // After 20261018230000 both refuse a keyless call (IDEMPOTENCY_KEY_REQUIRED); the generated types
+  // After 20261019200000 both refuse a keyless call (IDEMPOTENCY_KEY_REQUIRED); the generated types
   // still mark the key optional, so pin that every app call sends one.
   const KEYED_CALLS: Array<[string, string]> = [
     ['src/pages/Deliveries.tsx', 'complete_delivery'],

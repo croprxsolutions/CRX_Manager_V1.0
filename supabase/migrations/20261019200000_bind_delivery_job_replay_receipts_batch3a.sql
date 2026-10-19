@@ -112,10 +112,10 @@
 --
 -- ORDERING: strict. Live high-water when written: 20261016060000 (PR #942, replay-binding batch 1,
 --   ledger 20261016121253). Numbered above 20261016140000 (PR #951, batch 2, applied live
---   2026-10-19 as ledger 20261019010324, before this file as planned). Re-read the live ledger
---   before applying. If THIS file is applied before batch 2, batch 2 must both
---   renumber above 20261018230000 (the ordering guard refuses a file below the high-water) and
---   update its pinned trigger literal to keep complete_delivery and complete_job.
+--   2026-10-19 as ledger 20261019010324, before this file as planned). Written as 20261018230000;
+--   renumbered 20261019200000 above 20261019010000 (PR #957, applied live 2026-10-19 as ledger
+--   20261019182757; it touches none of the bodies this file pins, whose live md5s were re-read
+--   after it). Re-read the live ledger before applying.
 --
 -- idempotency-body-check: exempt. Every wrapper reads idempotency_keys through
 --   check_idempotency_intent with its own operation literal and writes it through

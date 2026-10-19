@@ -27,7 +27,7 @@ const SITES: Record<string, number> = {
 const INTENT_OR_ACTOR_RESET =
   /const bindingRejection = getIdempotencyBindingRejection\(\w+\);\s*\n\s*if \(bindingRejection === 'intent' \|\| bindingRejection === 'actor'\) \S*reset\S*\(/g;
 // Any reset guarded by the bare helper result (truthy for 'receipt' too). The delivery and job
-// completion keys (completeIdem, completeJobIdem) are exempt: batch 3a (20261018230000) resets them on
+// completion keys (completeIdem, completeJobIdem) are exempt: batch 3a (20261019200000) resets them on
 // any binding refusal on purpose, pinned by replayBindingBatch3aCallSites.test.ts.
 const BARE_HELPER_RESET = /if\s*\(\s*getIdempotencyBindingRejection\([^)]*\)\s*\)\s*\{?\s*(?!complete(?:Job)?Idem\.)\S*reset\S*\(/;
 

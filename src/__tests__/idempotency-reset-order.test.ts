@@ -185,7 +185,7 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   'src/pages/BlendTicketDetail.tsx': ['recovery'],
   'src/pages/NewOrder.tsx': ['recovery'],
   'src/pages/QuoteBuilder.tsx': ['recovery'],
-  // Replay-binding batch 3a (20261018230000): complete_delivery's intent/actor recovery reset
+  // Replay-binding batch 3a (20261019200000): complete_delivery's intent/actor recovery reset
   // inside the `if (error)` branch that then rethrows. Deliveries.tsx stays pinned below for its
   // OTHER site; 'recovery' excuses only the binding-rejection reset, which classify() verifies on
   // its own line.

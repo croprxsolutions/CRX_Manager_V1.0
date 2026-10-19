@@ -1,5 +1,5 @@
 -- ============================================================================
--- SMOKE TEST (rolled back by design) for 20261018230000_bind_delivery_job_replay_receipts_batch3a.
+-- SMOKE TEST (rolled back by design) for 20261019200000_bind_delivery_job_replay_receipts_batch3a.
 --
 -- CONTAINER ONLY: run through scripts/smoke/prove-delivery-job-replay-binding-batch3a-real-schema.mjs,
 -- never against the live database. Completing a delivery on an order writes the order's automatic

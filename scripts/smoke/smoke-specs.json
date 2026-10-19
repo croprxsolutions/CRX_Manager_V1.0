@@ -265,6 +265,27 @@
         "security"
       ]
     },
+    "cost_margin_admin_only_rpc_leaks": {
+      "chain": "smoke-cost_margin_admin_only_rpc_leaks.sql",
+      "container_prover": "prove-cost-margin-admin-only-rpc-leaks-real-schema.mjs",
+      "description": "REQUIRES 20261019010000 (Goal 1 part 3, step 1: cost and margin are admin-only). READ-ONLY. As each live role (authenticated with real profile claims): an active admin runs get_gross_sales_report, get_inventory_cost_report, get_field_profitability, get_profitability_report, get_bottom_line_pnl and dashboard_summary, while an active sales rep, driver, applicator, commission-recipient profile and an id with no active profile are each refused ('Permission denied: requires admin role') and a signed-out visitor (anon) cannot call them; get_sales_detail_report and get_sales_summary_report give the rep the admin's rows with every cost, profit and margin value NULL; get_inventory_position gives the rep the admin's rows with no current_cost. Also checks wrapper attributes and grants, that the nine renamed _*_cost_impl_20261019 bodies are callable by no API role, and that the below-cost trigger strips locked_unit_cost_cents for non-admins (its behavior, and save_quote's reply, need a write and are proven only by the container prover). Fails closed before the migration; terminal rollback.",
+      "covers": [
+        "get_gross_sales_report",
+        "get_inventory_cost_report",
+        "get_field_profitability",
+        "get_profitability_report",
+        "get_bottom_line_pnl",
+        "get_sales_detail_report",
+        "get_sales_summary_report",
+        "get_inventory_position",
+        "dashboard_summary",
+        "save_quote",
+        "_enforce_below_cost_line"
+      ],
+      "area": [
+        "security"
+      ]
+    },
     "money_replay_binding_batch1": {
       "chain": "smoke-money-replay-binding-batch1.sql",
       "container_prover": "prove-money-replay-binding-batch1-real-schema.mjs",
@@ -289,7 +310,7 @@
       "chain": "smoke-delivery-job-replay-binding-batch3a.sql",
       "container_only": true,
       "container_prover": "prove-delivery-job-replay-binding-batch3a-real-schema.mjs",
-      "description": "CONTAINER ONLY - run via scripts/smoke/prove-delivery-job-replay-binding-batch3a-real-schema.mjs, never through run-smoke.mjs against the live database: completing a delivery on an order writes its automatic draft invoice, whose customer-visible invoice number is drawn by next_invoice_number() from a non-transactional sequence that a rollback does not return (the prover reports which document-number sequences the chain moved), and the chain plants [SMOKE] customers, products, inventory, orders, deliveries and jobs, which the LIVE-DATA GUARD refuses. 20261018230000 (replay-binding batch 3a): complete_delivery and complete_job replay a stored idempotency receipt only for the person who wrote it and the exact same request. complete_delivery: a key reused for a different delivery is refused with IDEMPOTENCY_INTENT_MISMATCH and that delivery stays in_progress; the exact retry returns the identical result and moves no extra stock; edited quantities, signer, issue notes or completion time on the same key are refused; the same completion instant re-sent under another session TimeZone replays (the fingerprint uses its epoch); a keyless call is refused with IDEMPOTENCY_KEY_REQUIRED (22023) and changes nothing; a second active admin presenting the key for the identical request is refused with IDEMPOTENCY_ACTOR_MISMATCH and the error discloses nothing of the stored result. complete_job: another job on the same key is refused and stays in_progress; edited applied info is refused; the exact retry replays with one application record; keyless is refused; a NULL p_performed_by is refused. The offline path (stage_offline_action + process_offline_action) completes one delivery and one job once, and processing again returns succeeded with the same result and no second piece of work. Every fresh receipt is stamped with the admin and a SHA-256 fingerprint. Fail-first: step a fails before the migration (complete_delivery hands delivery A's receipt back as success for delivery B). Uses two real active admins; terminal rollback.",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-delivery-job-replay-binding-batch3a-real-schema.mjs, never through run-smoke.mjs against the live database: completing a delivery on an order writes its automatic draft invoice, whose customer-visible invoice number is drawn by next_invoice_number() from a non-transactional sequence that a rollback does not return (the prover reports which document-number sequences the chain moved), and the chain plants [SMOKE] customers, products, inventory, orders, deliveries and jobs, which the LIVE-DATA GUARD refuses. 20261019200000 (replay-binding batch 3a): complete_delivery and complete_job replay a stored idempotency receipt only for the person who wrote it and the exact same request. complete_delivery: a key reused for a different delivery is refused with IDEMPOTENCY_INTENT_MISMATCH and that delivery stays in_progress; the exact retry returns the identical result and moves no extra stock; edited quantities, signer, issue notes or completion time on the same key are refused; the same completion instant re-sent under another session TimeZone replays (the fingerprint uses its epoch); a keyless call is refused with IDEMPOTENCY_KEY_REQUIRED (22023) and changes nothing; a second active admin presenting the key for the identical request is refused with IDEMPOTENCY_ACTOR_MISMATCH and the error discloses nothing of the stored result. complete_job: another job on the same key is refused and stays in_progress; edited applied info is refused; the exact retry replays with one application record; keyless is refused; a NULL p_performed_by is refused. The offline path (stage_offline_action + process_offline_action) completes one delivery and one job once, and processing again returns succeeded with the same result and no second piece of work. Every fresh receipt is stamped with the admin and a SHA-256 fingerprint. Fail-first: step a fails before the migration (complete_delivery hands delivery A's receipt back as success for delivery B). Uses two real active admins; terminal rollback.",
       "covers": [
         "complete_delivery",
         "complete_job",

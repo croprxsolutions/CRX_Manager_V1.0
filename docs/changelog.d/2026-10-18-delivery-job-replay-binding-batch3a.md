@@ -7,7 +7,7 @@ and the new request was never carried out (no stock moved, no invoice draft). No
 twice; the harm was a false success. This change:
 
 - **Splits the money group** (KNOWN_ISSUES.md, the table's batch 3) into smaller PRs and fixes the
-  first cut, the two field completions that move money and stock (migration `20261018230000`, not
+  first cut, the two field completions that move money and stock (migration `20261019200000`, not
   applied when written). Each live body is renamed unchanged, and a same-name wrapper replays a saved
   answer only for the same person and the exact same request (delivery or job, quantities, signer,
   issue type and notes, completion time, applied info). Anything else is refused and nothing

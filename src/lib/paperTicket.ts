@@ -47,7 +47,7 @@ export function paperDeliveredAt(deliveredOn: string): string | undefined {
 }
 
 // The completion time sent under one retry key: worked out on the key's first send and
-// reused by every retry of that key. Since 20261018230000, complete_delivery replays a
+// reused by every retry of that key. Since 20261019200000, complete_delivery replays a
 // saved result only for the exact same request, p_completed_at included. A "today"
 // completion sends none, but after midnight "today" is a past date that would send one,
 // so recomputing on a retry across midnight would turn the replay into a refusal.

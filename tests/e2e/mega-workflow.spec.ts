@@ -808,7 +808,7 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
         p_delivery_id: S.delivery1Id,
         p_signed_by: 'E2E Test',
         p_performed_by: userId,
-        // A fresh key per call: complete_delivery refuses a keyless call since 20261018230000.
+        // A fresh key per call: complete_delivery refuses a keyless call since 20261019200000.
         p_idempotency_key: `e2e-complete_delivery-${crypto.randomUUID()}`,
       });
       await waitForPageStable(page, 2000);
@@ -957,7 +957,7 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
           p_delivery_id: S.delivery2Id,
           p_signed_by: 'E2E Test',
           p_performed_by: userId,
-          // A fresh key per call: complete_delivery refuses a keyless call since 20261018230000.
+          // A fresh key per call: complete_delivery refuses a keyless call since 20261019200000.
           p_idempotency_key: `e2e-complete_delivery-${crypto.randomUUID()}`,
         });
         await waitForPageStable(page, 2000);
@@ -1488,7 +1488,7 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
       p_delivery_id: qdDelId,
       p_signed_by: 'E2E Quick Delivery',
       p_performed_by: userId,
-      // A fresh key per call: complete_delivery refuses a keyless call since 20261018230000.
+      // A fresh key per call: complete_delivery refuses a keyless call since 20261019200000.
       p_idempotency_key: `e2e-complete_delivery-${crypto.randomUUID()}`,
     }).catch(e => { console.error('QD complete_delivery error:', e); return null; });
 

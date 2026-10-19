@@ -269,7 +269,7 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    -- Before 20261018230000 the body's authorization refuses; after it, the replay-binding wrapper
+    -- Before 20261019200000 the body's authorization refuses; after it, the replay-binding wrapper
     -- refuses another person's key first (IDEMPOTENCY_ACTOR_MISMATCH). Either way nothing replays.
     IF v_err NOT IN ('Not authorized to complete this delivery', 'IDEMPOTENCY_ACTOR_MISMATCH') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong unauthorized-replay error: %', v_err;

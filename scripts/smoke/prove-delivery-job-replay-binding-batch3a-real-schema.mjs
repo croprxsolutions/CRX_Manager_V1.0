@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261018230000 candidate: complete_delivery and complete_job replay a
+ * Full-chain proof for the 20261019200000 candidate: complete_delivery and complete_job replay a
  * stored idempotency receipt only for the same person and the exact same request (batch 3a of the
  * replay-binding fix, KNOWN_ISSUES.md).
  *
@@ -44,7 +44,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261018230000_bind_delivery_job_replay_receipts_batch3a.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261019200000_bind_delivery_job_replay_receipts_batch3a.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

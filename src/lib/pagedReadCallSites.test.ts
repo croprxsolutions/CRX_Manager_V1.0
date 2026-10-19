@@ -29,10 +29,15 @@ function findCallSites(): CallSite[] {
   const sites: CallSite[] = [];
   const pageFiles = readdirSync(PAGES_DIR).sort()
     .filter((file) => file.endsWith('.tsx') && !file.endsWith('.test.tsx') && !(file in EXEMPT))
-    .map((file) => ({ file, path: join(PAGES_DIR, file) }));
-  const libFiles = LIB_FILES.map((file) => ({ file: `../lib/${file}`, path: join(__dirname, file) }));
+    .map((file) => ({ file: `src/pages/${file}`, path: join(PAGES_DIR, file) }));
+  const libFiles = LIB_FILES.map((file) => ({ file: `src/lib/${file}`, path: join(__dirname, file) }));
   for (const { file, path } of [...pageFiles, ...libFiles]) {
-    const source = readFileSync(path, 'utf8');
+    // Comments are blanked (same length, newlines kept, so lines still match)
+    // so a comment mentioning the count cannot satisfy the check. Blanking only
+    // removes text, so a misread string can only make a site fail, never pass.
+    const source = readFileSync(path, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
     const starts = [...source.matchAll(CALL_PATTERN)].map((m) => m.index ?? 0);
     starts.forEach((start, i) => {
       const nextCall = i + 1 < starts.length ? starts[i + 1] : source.length;
@@ -52,13 +57,13 @@ describe('paged list reads request the exact row count', () => {
 
   it('finds the paged reads (a pattern that matches nothing must fail)', () => {
     expect(sites.length).toBeGreaterThanOrEqual(20);
-    expect(sites.filter((site) => site.file === '../lib/reconciliation.ts').length).toBeGreaterThanOrEqual(10);
+    expect(sites.filter((site) => site.file === 'src/lib/reconciliation.ts').length).toBeGreaterThanOrEqual(10);
   });
 
   it("every fetchAllRows / fetchAllRowsForIds call selects with { count: 'exact' }", () => {
     const offenders = sites
       .filter((site) => !site.callback.includes("count: 'exact'"))
-      .map((site) => `src/pages/${site.file}:${site.line}`);
+      .map((site) => `${site.file}:${site.line}`);
     expect(offenders, `paged reads without { count: 'exact' }:\n${offenders.join('\n')}`).toEqual([]);
   });
 

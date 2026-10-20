@@ -78,7 +78,7 @@
 --   the draft's money fields are zero (ORDER_INVOICE_TERMINAL, whole call rolled back; 6 live
 --   fulfilled orders had such a draft on 2026-10-19, and no order has ever been voided live).
 --   Section 3b makes the same edit cancel_order's body already has: that one UPDATE also zeroes total,
---   paid, prepay and write-off cents. Applied by exact text substitution on the md5-pinned live body.
+--   paid, prepay and write-off cents. Written out in full: the md5-pinned live body plus only those four lines.
 --
 -- WHAT DOES NOT CHANGE: apart from that one UPDATE, no money, stock, commission or invoice logic is
 --   retyped (the three bodies are renamed, pinned by md5 below); no table, row,
@@ -541,33 +541,312 @@ GRANT EXECUTE ON FUNCTION public.void_order(uuid, uuid, text, text) TO authentic
 --     fulfilled order with a nonzero draft invoice failed with ORDER_INVOICE_TERMINAL and rolled
 --     back (6 live fulfilled orders had one, read 2026-10-19; no order has ever been voided live).
 --     cancel_order's body zeroes total, paid, prepay and write-off cents in the same UPDATE. This
---     makes the one same edit here, by exact text substitution on the pinned live body, so nothing
---     else in it can change. A never-posted draft has no financial impact (the body's own comment);
+--     makes the one same edit here, to the pinned live body (written out below), and the postflight proves nothing
+--     else in it changed. A never-posted draft has no financial impact (the body's own comment);
 --     the audit row above it still records the draft's original total. credit_applied_cents is not
 --     touched: a draft carrying an applied credit is still refused, as before.
 -- ---------------------------------------------------------------------------------------------
-DO $void_order_drafts$
+-- The full body is written out (the pinned live body, md5 a0a9151160a6f2b58624b30435322b94 checked in
+-- the preflight, plus only the four zeroing lines) so every migration scanner reads it. The
+-- postflight re-checks that removing those four lines gives back the pinned md5.
+-- CREATE OR REPLACE keeps the owner and the ACL (service_role was revoked above).
+CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT 'Voided by admin'::text, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
 DECLARE
-  v_src text;
-  v_old constant text := E'        SET status = ''cancelled'',\n            void_reason = ''Order '' || v_order.order_number || '' voided. '' || p_reason,\n            updated_at = now()\n      WHERE id = v_invoice.id;';
-  v_new constant text := E'        SET status = ''cancelled'',\n            void_reason = ''Order '' || v_order.order_number || '' voided. '' || p_reason,\n            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n            updated_at = now()\n      WHERE id = v_invoice.id;';
+  v_actor uuid;
+  v_order record;
+  v_item record;
+  v_invoice record;
+  v_admin record;
+  v_inventory_restored integer := 0;
+  v_commissions_cancelled integer := 0;
+  v_paid_commissions integer := 0;
+  v_draft_voided integer := 0;
+  v_posted_notified integer := 0;
+  v_existing jsonb;
+  v_result jsonb;
+  -- A3<<<
+  v_draw_item record;
+  v_draw_quote record;
+  v_draw_fully_drawn boolean;
+  -- >>>A3
 BEGIN
-  SELECT replace(p.prosrc, chr(13), '') INTO v_src
-    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714';
-  IF md5(v_src) IS DISTINCT FROM 'a0a9151160a6f2b58624b30435322b94'
-     OR (length(v_src) - length(replace(v_src, v_old, ''))) / length(v_old) <> 1 THEN
-    RAISE EXCEPTION 'VOID_ORDER_DRAFT_CANCEL_DRIFT: _void_order_impl_20260714 is not the reviewed body with exactly one draft-cancel UPDATE';
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
-  -- CREATE OR REPLACE keeps the owner and the ACL (service_role was revoked above).
-  -- The name is passed as an argument (not spelled after CREATE OR REPLACE FUNCTION in this text)
-  -- so migration-body scanners do not read this dynamic statement as a function definition.
-  EXECUTE format(
-    'CREATE OR REPLACE FUNCTION public.%I(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT %L::text, p_idempotency_key text DEFAULT NULL::text) '
-    || 'RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS %L',
-    '_void_order_impl_20260714', 'Voided by admin', replace(v_src, v_old, v_new));
-END
-$void_order_drafts$;
+  IF NOT is_admin() THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := check_idempotency(p_idempotency_key, 'void_order');
+    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  END IF;
+
+  SELECT * INTO v_order FROM public.orders WHERE id = p_order_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ORDER_NOT_FOUND'; END IF;
+  IF v_order.status != 'fulfilled' THEN
+    RAISE EXCEPTION 'INVALID_ORDER_STATUS: %', v_order.status;
+  END IF;
+
+  -- Commission batch-freeze guard (overnight bug-hunt HIGH, 20260620): a pending
+  -- commission already committed to a non-voided commission_payments batch must not
+  -- be silently cancelled here — post_commission_payment would later resurrect it to
+  -- 'paid' and pay the retained snapshot. Force the admin to void the payout first.
+  IF EXISTS (
+    SELECT 1
+    FROM public.commissions cm
+    JOIN public.commission_payment_items cpi ON cpi.commission_id = cm.id
+    JOIN public.commission_payments cp ON cp.id = cpi.commission_payment_id
+    WHERE cm.order_id = p_order_id
+      AND cm.status = 'pending'
+      AND cp.status <> 'voided'
+  ) THEN
+    RAISE EXCEPTION 'ORDER_HAS_BATCHED_COMMISSIONS: order % has pending commission(s) committed to an active commission payment batch. Void that payment first, then void the order.', v_order.order_number;
+  END IF;
+
+  -- fulfilled→voided is a deliberate admin reversal the status-transition trigger does not
+  -- include; bracket ONLY this write with the transaction-local admin override.
+  PERFORM set_config('app.admin_override', 'true', true);
+  UPDATE public.orders
+    SET status = 'voided',
+        updated_at = now()
+  WHERE id = p_order_id;
+  PERFORM set_config('app.admin_override', 'false', true);
+  -- A3<<< draw-ledger reversal (finding A3, 20260610190000 — see file header).
+  -- void = the order is nulled and goods return to the warehouse, so the FULL
+  -- drawn quantity goes back to the booking balance.
+  IF COALESCE(v_order.booking_draw, false) AND v_order.quote_id IS NOT NULL THEN
+    -- Lock the parent quote first: same quote → inventory order as
+    -- draw_down_quote, and serializes against a concurrent draw.
+    SELECT * INTO v_draw_quote FROM public.quotes
+    WHERE id = v_order.quote_id FOR UPDATE;
+
+    FOR v_draw_item IN
+      SELECT product_id, SUM(COALESCE(total_units_needed, 0)) AS qty_drawn
+      FROM public.order_items
+      WHERE order_id = p_order_id AND product_id IS NOT NULL
+      GROUP BY product_id
+      HAVING SUM(COALESCE(total_units_needed, 0)) > 0
+    LOOP
+      UPDATE public.quote_product_draws
+        SET quantity_drawn = GREATEST(quantity_drawn - v_draw_item.qty_drawn, 0),
+            updated_at = now()
+      WHERE quote_id = v_order.quote_id
+        AND product_id = v_draw_item.product_id;
+    END LOOP;
+
+    -- If this was the final draw, the quote sits at 'accepted'; with the
+    -- balance restored it is no longer fully drawn, so reopen the booking.
+    IF v_draw_quote.status = 'accepted' THEN
+      SELECT COALESCE(bool_and(COALESCE(d.quantity_drawn, 0) >= b.booked), true) INTO v_draw_fully_drawn
+      FROM (
+        SELECT product_id, SUM(COALESCE(total_units_needed, 0)) AS booked
+        FROM public.quote_items WHERE quote_id = v_order.quote_id
+        GROUP BY product_id
+      ) b
+      LEFT JOIN public.quote_product_draws d
+        ON d.quote_id = v_order.quote_id AND d.product_id = b.product_id
+      WHERE b.booked > 0;
+
+      IF NOT v_draw_fully_drawn THEN
+        -- accepted→sent is enforcer-legal on the live enforcer today; the
+        -- override bracket is defense-in-depth (see file header).
+        PERFORM set_config('app.admin_override', 'true', true);
+        UPDATE public.quotes SET status = 'sent', updated_at = now()
+        WHERE id = v_order.quote_id;
+        PERFORM set_config('app.admin_override', 'false', true);
+
+        INSERT INTO public.activity_feed (event_type, description, performed_by,
+          related_entity_type, related_entity_id, customer_id)
+        VALUES ('booking_reopened',
+          'Booking ' || v_draw_quote.quote_number || ' reopened (accepted → sent): draw order ' ||
+            v_order.order_number || ' was voided, returning its drawn quantity to the booking balance',
+          v_actor, 'quote', v_order.quote_id, v_draw_quote.customer_id);
+      END IF;
+    END IF;
+    -- VOID-1 fix (2026-06-13): the draw moved hold→prebooked; complete_delivery
+    -- drained the prebooked to 0 before fulfilment, and the drawn ledger was just
+    -- reversed above, so the still-OPEN booking's hold must be REBUILT to
+    -- booked−drawn — a preserved (decremented) hold leaks the returned quantity
+    -- out of the reservation (Net Free over-counts). Runs for every booking_draw
+    -- void (reopened or not). The helper self-gates for non-planned/closed quotes.
+    -- Symmetric twin of the cancel_order fix (20260613150100).
+    PERFORM _sync_planned_holds(v_order.quote_id, v_actor);
+  END IF;
+  -- >>>A3
+
+  FOR v_item IN
+    SELECT product_id, quantity_delivered
+    FROM public.order_items
+    WHERE order_id = p_order_id
+      AND COALESCE(quantity_delivered, 0) > 0
+  LOOP
+    UPDATE public.inventory
+      SET quantity_available = quantity_available + v_item.quantity_delivered,
+          updated_at = now()
+    WHERE product_id = v_item.product_id
+      AND location = 'Main Warehouse';
+
+    INSERT INTO public.inventory_transactions (
+      product_id, transaction_type, quantity, to_location,
+      order_id, performed_by, notes
+    ) VALUES (
+      v_item.product_id,
+      'void_delivery_reversal',
+      v_item.quantity_delivered,
+      'Main Warehouse',
+      p_order_id,
+      v_actor,
+      'Restored ' || v_item.quantity_delivered || ' units - order ' ||
+        v_order.order_number || ' voided. Reason: ' || p_reason
+    );
+
+    v_inventory_restored := v_inventory_restored + 1;
+  END LOOP;
+
+  UPDATE public.commissions
+    SET status = 'cancelled',
+        commission_amount = 0
+  WHERE order_id = p_order_id
+    AND status = 'pending';
+  GET DIAGNOSTICS v_commissions_cancelled = ROW_COUNT;
+
+  SELECT COUNT(*) INTO v_paid_commissions
+  FROM public.commissions
+  WHERE order_id = p_order_id AND status = 'paid';
+
+  IF v_paid_commissions > 0 THEN
+    FOR v_admin IN
+      SELECT id FROM public.profiles WHERE role = 'admin' AND is_active = true
+    LOOP
+      INSERT INTO public.notifications (
+        user_id, title, message,
+        notification_type,
+        related_entity_type,
+        related_entity_id
+      ) VALUES (
+        v_admin.id,
+        'Voided Order Has Paid Commissions',
+        'Order ' || v_order.order_number || ' was voided but has ' ||
+          v_paid_commissions || ' paid commission(s). Manual review required.',
+        'void_review', 'order', p_order_id
+      );
+    END LOOP;
+  END IF;
+
+  FOR v_invoice IN
+    SELECT * FROM public.invoices
+    WHERE order_id = p_order_id
+      AND deleted_at IS NULL
+      AND status IN ('draft', 'posted')
+  LOOP
+    IF v_invoice.status = 'draft' THEN
+      -- never-posted draft has no financial impact: cancel (allowed transition), do not void.
+      UPDATE public.invoices
+        SET status = 'cancelled',
+            void_reason = 'Order ' || v_order.order_number || ' voided. ' || p_reason,
+            total_amount_cents = 0,
+            paid_amount_cents = 0,
+            prepay_applied_cents = 0,
+            write_off_cents = 0,
+            updated_at = now()
+      WHERE id = v_invoice.id;
+
+      INSERT INTO public.financial_audit_log (
+        operation_type,
+        entity_type,
+        entity_id,
+        actor_role,
+        old_values, new_values, total_impact_cents, description
+      ) VALUES (
+        'invoice_cancelled', 'invoice', v_invoice.id, 'admin',
+        jsonb_build_object('status', 'draft', 'total_cents', v_invoice.total_amount_cents),
+        jsonb_build_object('status', 'cancelled', 'void_reason', 'Order voided'),
+        -1 * v_invoice.total_amount_cents,
+        'Auto-cancelled draft invoice ' || v_invoice.invoice_number ||
+          ' - order ' || v_order.order_number || ' voided'
+      );
+
+      v_draft_voided := v_draft_voided + 1;
+    ELSIF v_invoice.status = 'posted' THEN
+      FOR v_admin IN
+        SELECT id FROM public.profiles WHERE role = 'admin' AND is_active = true
+      LOOP
+        INSERT INTO public.notifications (
+          user_id, title, message,
+          notification_type,
+          related_entity_type,
+          related_entity_id
+        ) VALUES (
+          v_admin.id,
+          'Voided Order - Posted Invoice Needs Review',
+          'Order ' || v_order.order_number || ' was voided. Invoice ' ||
+            v_invoice.invoice_number || ' is posted and needs manual voiding.',
+          'void_review', 'invoice', v_invoice.id
+        );
+      END LOOP;
+
+      v_posted_notified := v_posted_notified + 1;
+    END IF;
+  END LOOP;
+
+  INSERT INTO public.financial_audit_log (
+    operation_type,
+    entity_type,
+    entity_id,
+    actor_role,
+    old_values, new_values, total_impact_cents, description
+  ) VALUES (
+    'order_voided', 'order', p_order_id, 'admin',
+    jsonb_build_object('status', 'fulfilled', 'total_price', v_order.total_price),
+    jsonb_build_object('status', 'voided', 'void_reason', p_reason),
+    -1 * ROUND(v_order.total_price * 100)::bigint,
+    'Order ' || v_order.order_number || ' voided. Reason: ' || p_reason
+  );
+
+  INSERT INTO public.activity_feed (
+    event_type, description, performed_by,
+    related_entity_type,
+    related_entity_id,
+    customer_id
+  ) VALUES (
+    'order_voided',
+    'Order ' || v_order.order_number || ' voided. ' ||
+      v_inventory_restored || ' product(s) inventory restored. ' ||
+      v_commissions_cancelled || ' commission(s) cancelled. ' ||
+      v_draft_voided || ' draft invoice(s) cancelled.' ||
+      CASE WHEN v_posted_notified > 0
+           THEN ' ' || v_posted_notified || ' posted invoice(s) flagged for review.'
+           ELSE '' END ||
+      CASE WHEN v_paid_commissions > 0
+           THEN ' ' || v_paid_commissions || ' paid commission(s) flagged for review.'
+           ELSE '' END ||
+      ' Reason: ' || p_reason,
+    v_actor, 'order', p_order_id, v_order.customer_id
+  );
+
+  v_result := jsonb_build_object(
+    'status', 'voided',
+    'order_number', v_order.order_number,
+    'inventory_products_restored', v_inventory_restored,
+    'commissions_cancelled', v_commissions_cancelled,
+    'paid_commissions_flagged', v_paid_commissions,
+    'draft_invoices_voided', v_draft_voided,
+    'posted_invoices_flagged', v_posted_notified
+  );
+
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM save_idempotency(p_idempotency_key, 'void_order', v_result);
+  END IF;
+
+  RETURN v_result;
+END;
+$function$;
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. batch_cancel_deliveries' private body: its live body (pinned above) with ONE change, the

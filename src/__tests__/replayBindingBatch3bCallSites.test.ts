@@ -69,6 +69,11 @@ describe('replay-binding batch 3b call sites key each retry to the exact request
         const catchAt = handler.indexOf('} catch (', assertAt);
         expect(tryAt).toBeGreaterThan(-1);
         expect(callAt).toBeGreaterThan(tryAt);
+        // No block closes between that try and the call, so the call is inside it (not after an
+        // earlier, unrelated try).
+        expect(handler.slice(tryAt + 'try {'.length, callAt)).not.toMatch(/\n\s*\}/);
+        // The catch found is the first one after the call, and it closes that same try.
+        expect(handler.indexOf('} catch (', callAt)).toBe(catchAt);
         expect(catchAt).toBeGreaterThan(assertAt);
         expect(handler.slice(catchAt)).toMatch(/\} finally \{\n\s*set(?:Cancelling|Voiding)\(false\);\n\s*\}$/);
       });

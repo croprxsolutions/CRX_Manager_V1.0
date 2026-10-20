@@ -411,6 +411,26 @@ for (const command of [
     ok(res.stdout.includes("deny"), `${hook} denies a nested assembled program name: ${command}`);
   }
 }
+// Inline runtime code behind a short-option cluster or `deno eval`, through the REAL
+// merge and push guards (Codex connector, PR #956; Luna on the follow-up).
+for (const command of [
+  "node -pe \"require('child_process').execSync('gh pr merge 951 --squash')\"",
+  "node -pe \"require('child_process').execSync('git push origin HEAD:main')\"",
+  "perl -0e \"system('gh pr merge 951')\"",
+  "deno eval \"new Deno.Command('gh',{args:['pr','merge','951']}).outputSync()\"",
+  "deno --quiet eval \"new Deno.Command('git',{args:['push','origin','HEAD:main']}).outputSync()\"",
+]) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    ok(res.stdout.includes("deny"), `${hook} denies inline runtime code reaching a gated action: ${command}`);
+  }
+}
+for (const command of ['node -pe "1+1"', 'perl -0e "print 1"', 'deno --quiet eval "console.log(1)"']) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    eq(res.stdout.trim(), "", `${hook} silent on harmless inline runtime code: ${command}`);
+  }
+}
 for (const command of [
   "bash -c 'echo $(date)'",
   "bash -c 'eval \"$(fnm env)\" && node -v'",

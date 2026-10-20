@@ -4113,9 +4113,11 @@ const INLINE_CODE_ATTACHED_RE = /^(?:--eval|--print|--command)=([\s\S]*)$/;
 // code is the text after that letter or, when the cluster ends there, the next word.
 // Before this, `node -pe "…gh pr merge…"` was read as code "e" and the real code
 // argument was never judged (Codex connector, PR #956; main allowed it too).
-const INLINE_CODE_CLUSTER_RE = /^-[A-Za-z]*?[epcrE]([\s\S]*)$/;
+// Digits count as cluster letters too (`perl -0e`; Luna, follow-up to PR #956).
+const INLINE_CODE_CLUSTER_RE = /^-[A-Za-z0-9]*?[epcrE]([\s\S]*)$/;
 // `deno eval "…"` takes its code as a subcommand argument, not a flag (Codex
-// connector, PR #956). Every word after `eval` in the window is judged.
+// connector, PR #956). Every word after `eval` in the window is judged, and
+// `eval` may follow the runtime's own options (`deno --quiet eval`; Luna).
 const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 export function inlineCodeReachesGatedAction(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
@@ -4125,12 +4127,15 @@ export function inlineCodeReachesGatedAction(command) {
       if (!STDIN_PROGRAM_RUNTIMES.has(program) && program !== "nodejs") continue;
       const end = Math.min(words.length, index + 1 + NESTED_SCAN_WINDOW);
       let evalSubcommand = false;
+      let beforeSubcommand = true;
       for (let at = index + 1; at < end; at += 1) {
         const word = String(words[at]);
-        if (EVAL_SUBCOMMAND_RUNTIMES.has(program) && at === index + 1 && word.toLowerCase() === "eval") {
+        if (EVAL_SUBCOMMAND_RUNTIMES.has(program) && beforeSubcommand && word.toLowerCase() === "eval") {
           evalSubcommand = true;
+          beforeSubcommand = false;
           continue;
         }
+        if (!word.startsWith("-")) beforeSubcommand = false;
         if (evalSubcommand && couldReachGatedAction([word])) return true;
         // `--eval=…`, a separate `--eval …`, or a short cluster whose code is
         // attached (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3) or

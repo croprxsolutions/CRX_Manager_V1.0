@@ -114,7 +114,7 @@ export function mayMerge(input) {
     // guard is broken any such launch is a possible merge. A short-option cluster
     // with a code letter anywhere in it (`-pe`, `-Bc`) counts too, as it does in
     // the guard. `deno eval` already counts through the `eval` word above.
-    || /\b(?:node|nodejs|python\d*|py|deno|bun|perl|ruby|php)(?:\.exe)?\b[^|;&\n]*?\s(?:-[A-Za-z]*[epcrE]\S*|(?:--eval|--print|--command|--run)(?:[\s=]|$))/i.test(text);
+    || /\b(?:node|nodejs|python\d*|py|deno|bun|perl|ruby|php)(?:\.exe)?\b[^|;&\n]*?\s(?:-[A-Za-z0-9]*[epcrE]\S*|(?:--eval|--print|--command|--run)(?:[\s=]|$))/i.test(text);
 }
 
 // Every key and string value in a tool call's input, in order.

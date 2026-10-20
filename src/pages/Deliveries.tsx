@@ -30,6 +30,7 @@ import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { runCriticalAction } from '../lib/criticalAction';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -152,6 +153,8 @@ export default function Deliveries() {
   const { toast } = useToast();
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // The last load failed: the page shows an error instead of an empty or partial list.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   /* Filters */
   const [statusFilter, setStatusFilter] = useState('');
@@ -236,12 +239,14 @@ export default function Deliveries() {
 
   const fetchDrivers = useCallback(async () => {
     // PR-07 follow-up: driver filter dropdown only uses d.id + d.full_name; safe via view.
-    const { data, error } = await supabase
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('profile_public_view')
-      .select('id, full_name, role, is_active')
+      .select('id, full_name, role, is_active', { count: 'exact' })
       .eq('role', 'driver')
       .eq('is_active', true)
-      .order('full_name');
+      .order('full_name')
+      .order('id')
+      .range(from, to));
     if (error) {
       toast('error', 'Failed to load drivers: ' + error.message);
       return;
@@ -250,17 +255,19 @@ export default function Deliveries() {
   }, [toast]);
 
   const fetchCustomers = useCallback(async () => {
-    const { data, error } = await supabase
+    // Every active customer, page by page: one request stops at the server's row cap.
+    const { data, error } = await fetchAllRows<{ id: string; farm_name: string }>((from, to) => supabase
       .from('customers')
-      .select('id, farm_name')
+      .select('id, farm_name', { count: 'exact' })
       .eq('is_active', true)
       .order('farm_name')
-      .limit(500);
+      .order('id')
+      .range(from, to));
     if (error) {
       toast('error', 'Failed to load customers: ' + error.message);
       return;
     }
-    setCustomers((data || []) as { id: string; farm_name: string }[]);
+    setCustomers(data || []);
   }, [toast]);
 
   const fetchRemainderCount = useCallback(async () => {
@@ -275,41 +282,61 @@ export default function Deliveries() {
     setRemainderCount(count || 0);
   }, []);
 
+  // A multi-page read can finish after a newer one started (a refresh after completing or
+  // cancelling); only the latest load may set the list, its badges or the loading state.
+  const fetchSeq = useRef(0);
   const fetchDeliveries = useCallback(async () => {
+    const seq = ++fetchSeq.current;
+    // A failed read shows an error, never a short list with complete-looking counts.
+    const failLoad = (error: unknown) => {
+      Sentry.captureException(error, { tags: { source: 'fetch', page: 'deliveries' } });
+      toast('error', 'Failed to load deliveries. Please try again.');
+      setDeliveries([]);
+      setShortageDeliveryIds(new Set());
+      setLoadFailed(true);
+      setLoading(false);
+    };
+
+    // Read every page: a single request is silently cut off at the server's row cap.
     // PR-07 follow-up: dropped `driver:profiles!fk(full_name)` embed; driver
     // names resolved via profile_public_view post-fetch (see below).
-    let query = supabase
-      .from('deliveries')
-      .select('*, customer:customers(farm_name, parent_customer_id)')
-      .order('scheduled_date', { ascending: false })
-      .limit(500);
+    const { data: delPages, error: delError } = await fetchAllRows((from, to) => {
+      let query = supabase
+        .from('deliveries')
+        .select('*, customer:customers(farm_name, parent_customer_id)', { count: 'exact' });
 
-    if (statusFilter === 'cancelled' || statusFilter === 'voided') {
-      query = query.eq('status', statusFilter);
-    } else {
-      query = query.not('status', 'in', '("cancelled","voided")');
-    }
+      if (statusFilter === 'cancelled' || statusFilter === 'voided') {
+        query = query.eq('status', statusFilter);
+      } else {
+        query = query.not('status', 'in', '("cancelled","voided")');
+      }
 
-    // Driver sees only their deliveries
-    if (isDriver && profile?.id) {
-      query = query.eq('assigned_driver', profile.id);
-    }
+      // Driver sees only their deliveries
+      if (isDriver && profile?.id) {
+        query = query.eq('assigned_driver', profile.id);
+      }
 
-    const { data: delData, error: delError } = await query;
+      return query
+        .order('scheduled_date', { ascending: false })
+        .order('id')
+        .range(from, to);
+    });
+    if (seq !== fetchSeq.current) return;
 
     if (delError) {
-      Sentry.captureException(delError, { tags: { source: 'fetch', page: 'deliveries' } });
-      toast('error', 'Failed to load deliveries. Please try again.');
-      setLoading(false);
+      failLoad(delError);
       return;
     }
+    const delData = (delPages || []) as unknown as Array<Delivery & {
+      customer: { farm_name: string; parent_customer_id: string | null } | null;
+    }>;
 
     const deliveryIds = (delData || []).map((d) => d.id);
 
     // Fetch parent customer names for farm group labels
     const parentIds = [...new Set(
       (delData || [])
-        .map((d: Record<string, unknown>) => (d.customer as { parent_customer_id?: string })?.parent_customer_id)
+        .map((d) => d.customer?.parent_customer_id)
         .filter(Boolean) as string[]
     )];
 
@@ -318,55 +345,55 @@ export default function Deliveries() {
     // profiles_select tightens to admin-or-self.
     const driverIds = [...new Set(
       (delData || [])
-        .map((d: Record<string, unknown>) => d.assigned_driver as string | null)
+        .map((d) => d.assigned_driver)
         .filter(Boolean) as string[]
     )];
 
-    // Run all post-fetch queries in parallel — they depend on delData but not each other
+    // Run all post-fetch queries in parallel — they depend on delData but not each other.
+    // Each id list is sent in chunks and every chunk is paged, so a long delivery list
+    // neither overflows the request URL nor loses rows past the server's row cap.
     const [itemCountsResult, parentsResult, driversResult] = await Promise.all([
-      deliveryIds.length > 0
-        ? supabase
-            .from('delivery_items')
-            .select('delivery_id')
-            .in('delivery_id', deliveryIds.slice(0, 500))
-        : Promise.resolve({ data: null, error: null }),
-      parentIds.length > 0
-        ? supabase
-            .from('customers')
-            .select('id, farm_name')
-            .in('id', parentIds)
-        : Promise.resolve({ data: null, error: null }),
-      driverIds.length > 0
-        ? supabase
-            .from('profile_public_view')
-            .select('id, full_name')
-            .in('id', driverIds)
-        : Promise.resolve({ data: null, error: null }),
+      fetchAllRowsForIds(deliveryIds, (idChunk, from, to) => supabase
+        .from('delivery_items')
+        // `id` lets the pager drop a line repeated across a page seam.
+        .select('id, delivery_id', { count: 'exact' })
+        .in('delivery_id', idChunk)
+        .order('id')
+        .range(from, to)),
+      fetchAllRowsForIds(parentIds, (idChunk, from, to) => supabase
+        .from('customers')
+        .select('id, farm_name', { count: 'exact' })
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to)),
+      fetchAllRowsForIds(driverIds, (idChunk, from, to) => supabase
+        .from('profile_public_view')
+        .select('id, full_name', { count: 'exact' })
+        .in('id', idChunk)
+        .order('id')
+        .range(from, to)),
     ]);
+    if (seq !== fetchSeq.current) return;
+
+    // A missing lookup would show wrong item counts or "Unknown" names as if they were right.
+    const lookupError = itemCountsResult.error || parentsResult.error || driversResult.error;
+    if (lookupError) {
+      failLoad(lookupError);
+      return;
+    }
 
     const countMap: Record<string, number> = {};
-    const { data: itemCounts, error: itemCountErr } = itemCountsResult;
-    if (itemCountErr) {
-      Sentry.captureException(itemCountErr, { tags: { source: 'fetch', page: 'deliveries' } });
-    }
-    (itemCounts || []).forEach((item: { delivery_id: string }) => {
+    ((itemCountsResult.data || []) as Array<{ delivery_id: string }>).forEach((item) => {
       countMap[item.delivery_id] = (countMap[item.delivery_id] || 0) + 1;
     });
 
     const parentNameMap: Record<string, string> = {};
-    const { data: parents, error: parentErr } = parentsResult;
-    if (parentErr) {
-      Sentry.captureException(parentErr, { tags: { source: 'fetch', page: 'deliveries' } });
-    }
-    (parents || []).forEach((p: { id: string; farm_name: string }) => { parentNameMap[p.id] = p.farm_name; });
+    ((parentsResult.data || []) as Array<{ id: string; farm_name: string }>).forEach((p) => { parentNameMap[p.id] = p.farm_name; });
 
     const driverNameMap: Record<string, string> = {};
-    const { data: drivers } = driversResult;
-    ((drivers || []) as Array<{ id: string; full_name: string }>).forEach((d) => { driverNameMap[d.id] = d.full_name; });
+    ((driversResult.data || []) as Array<{ id: string; full_name: string }>).forEach((d) => { driverNameMap[d.id] = d.full_name; });
 
-    const rows = ((delData || []) as Array<Delivery & {
-      customer: { farm_name: string; parent_customer_id: string | null } | null;
-    }>).map((d) => ({
+    const rows = (delData || []).map((d) => ({
       ...d,
       customer_name: d.customer?.farm_name || 'Unknown',
       driver_name: d.assigned_driver ? (driverNameMap[d.assigned_driver] || 'Unknown driver') : 'Unassigned',
@@ -376,27 +403,43 @@ export default function Deliveries() {
 
     const todayForSort = today();
     setDeliveries(rows.sort((a, b) => compareDefaultDeliveryOrder(a, b, todayForSort)));
+    setLoadFailed(false);
 
     // Inventory shortage check for active (non-completed) deliveries
     const activeIds = rows
       .filter((d) => d.status === 'scheduled' || d.status === 'in_progress')
       .map((d) => d.id);
 
+    // A failed check is said out loud: no badge must never be mistaken for "enough stock".
+    const shortageCheckFailed = (error: unknown) => {
+      Sentry.captureException(error, { tags: { source: 'fetch', page: 'deliveries', action: 'shortage_check' } });
+      toast('error', 'Stock shortage warnings could not be checked. Reload to try again.');
+      setShortageDeliveryIds(new Set());
+    };
+
     if (activeIds.length > 0) {
       try {
-        const { data: diData } = await supabase
+        const { data: diData, error: diError } = await fetchAllRowsForIds(activeIds, (idChunk, from, to) => supabase
           .from('delivery_items')
-          .select('delivery_id, product_id, quantity')
-          .in('delivery_id', activeIds.slice(0, 500));
+          .select('id, delivery_id, product_id, quantity', { count: 'exact' })
+          .in('delivery_id', idChunk)
+          .order('id')
+          .range(from, to));
+        if (seq !== fetchSeq.current) return;
+        if (diError) throw diError;
 
         const productIds = [...new Set((diData || []).map((i: { product_id: string }) => i.product_id).filter(Boolean))];
 
         if (productIds.length > 0) {
-          const { data: invData } = await supabase
+          const { data: invData, error: invError } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => supabase
             .from('inventory')
-            .select('product_id, quantity_available')
-            .in('product_id', productIds)
-            .eq('location', 'Main Warehouse');
+            .select('id, product_id, quantity_available', { count: 'exact' })
+            .in('product_id', idChunk)
+            .eq('location', 'Main Warehouse')
+            .order('id')
+            .range(from, to));
+          if (seq !== fetchSeq.current) return;
+          if (invError) throw invError;
 
           const invMap: Record<string, number> = {};
           for (const row of (invData || []) as Array<{ product_id: string; quantity_available: number }>) {
@@ -412,8 +455,9 @@ export default function Deliveries() {
         } else {
           setShortageDeliveryIds(new Set());
         }
-      } catch {
-        setShortageDeliveryIds(new Set());
+      } catch (err) {
+        if (seq !== fetchSeq.current) return;
+        shortageCheckFailed(err);
       }
     } else {
       setShortageDeliveryIds(new Set());
@@ -709,24 +753,35 @@ export default function Deliveries() {
             .filter(Boolean),
         )];
 
+        // Chunked and paged, so a large selection neither overflows the request URL nor
+        // loses rows past the server's row cap.
         const [customerResult, orderResult, addressResult] = await Promise.all([
-          customerIds.length > 0
-            ? supabase.from('customers').select('id, contact_name, phone, shipping_address, billing_address').in('id', customerIds)
-            : Promise.resolve({ data: null, error: null }),
-          orderIds.length > 0
-            ? supabase.from('orders').select('id, order_number').in('id', orderIds)
-            : Promise.resolve({ data: null, error: null }),
-          addressIds.length > 0
-            ? supabase.from('customer_addresses').select('id, address_line, city, state, zip').in('id', addressIds)
-            : Promise.resolve({ data: null, error: null }),
+          fetchAllRowsForIds(customerIds, (idChunk, from, to) => supabase
+            .from('customers')
+            .select('id, contact_name, phone, shipping_address, billing_address', { count: 'exact' })
+            .in('id', idChunk)
+            .order('id')
+            .range(from, to)),
+          fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
+            .from('orders')
+            .select('id, order_number', { count: 'exact' })
+            .in('id', idChunk)
+            .order('id')
+            .range(from, to)),
+          fetchAllRowsForIds(addressIds, (idChunk, from, to) => supabase
+            .from('customer_addresses')
+            .select('id, address_line, city, state, zip', { count: 'exact' })
+            .in('id', idChunk)
+            .order('id')
+            .range(from, to)),
         ]);
 
-        const { data: customerData, error: customerErr } = customerResult;
-        if (customerErr) Sentry.captureException(customerErr, { tags: { source: 'load_sheet', page: 'deliveries' } });
-        const { data: orderData, error: orderErr } = orderResult;
-        if (orderErr) Sentry.captureException(orderErr, { tags: { source: 'load_sheet', page: 'deliveries' } });
-        const { data: addressData, error: addressErr } = addressResult;
-        if (addressErr) Sentry.captureException(addressErr, { tags: { source: 'load_sheet', page: 'deliveries' } });
+        // A load sheet missing contacts, order numbers or addresses would look complete.
+        const lookupError = customerResult.error || orderResult.error || addressResult.error;
+        if (lookupError) throw lookupError;
+        const customerData = customerResult.data;
+        const orderData = orderResult.data;
+        const addressData = addressResult.data;
 
         const customerMap: Record<string, { contact_name: string | null; phone: string | null; shipping_address: string | null; billing_address: string | null }> = {};
         ((customerData || []) as Array<{ id: string; contact_name: string | null; phone: string | null; shipping_address: string | null; billing_address: string | null }>).forEach((c) => {
@@ -1224,6 +1279,18 @@ export default function Deliveries() {
           <SkeletonCard />
         </div>
         <SkeletonTable rows={8} />
+      </div>
+    );
+  }
+
+  // No counts, schedule strip or list: zeros or a short list would look complete.
+  if (loadFailed) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Deliveries" />
+        <Card>
+          <p role="alert" className="text-center text-red-600 py-8 text-sm">Deliveries could not be loaded. Reload to try again.</p>
+        </Card>
       </div>
     );
   }

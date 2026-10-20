@@ -428,6 +428,10 @@ const SCENARIOS = [
   { name: '8. private rewrite helpers', steps: [
     ['field-app chemicals, existing field invoice', 'owner', FIELD_APP_HELPER(`'${FI}'::uuid`), MISSING_FN, 'ok|1999,725,0'],
     ['field-app chemicals, new invoice', 'owner', FIELD_APP_HELPER('NULL::uuid'), MISSING_FN, 'ok|2250,725,0'],
+    // Sol 2026-10-20: a compact (no hyphens) or braced product id is still recognised, as the writer's ::uuid cast does.
+    ['field-app chemicals, compact and braced product ids', 'owner', costList(`public._cost_step2_field_app_chemicals(NULL::uuid, ${j([
+      { product_id: PROD.replace(/-/g, ''), sort_order: 0 }, { product_id: `{${PROD_B.toUpperCase()}}`, sort_order: 1 },
+    ])})`, 'cost_cents'), MISSING_FN, 'ok|2250,725'],
     ['invoice items, sale invoice', 'owner', INVOICE_HELPER_SALE, MISSING_FN, 'ok|2250'],
     ['invoice items, field invoice', 'owner', INVOICE_HELPER_FIELD, MISSING_FN, 'ok|1999,10000,725,0'],
     ['rep calls the field-app helper', U.REP, FIELD_APP_HELPER('NULL::uuid'), MISSING_FN, NO_FN('_cost_step2_field_app_chemicals')],

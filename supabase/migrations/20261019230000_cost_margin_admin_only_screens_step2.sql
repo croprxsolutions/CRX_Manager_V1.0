@@ -202,14 +202,19 @@ REVOKE ALL ON FUNCTION public._match_quick_receive_items_cost_step2_impl(jsonb, 
 -- ---------------------------------------------------------------------------
 -- 2. Private helpers (no API role may execute them; the wrappers run as their owner).
 -- ---------------------------------------------------------------------------
+-- Every spelling the writers' own ::uuid cast accepts (hyphenated, compact, braced, any case), so a
+-- line the writer stores is never one this file failed to recognise (Sol, 2026-10-20); anything else
+-- is NULL.
 CREATE OR REPLACE FUNCTION public._cost_step2_try_uuid(p_text text)
 RETURNS uuid
-LANGUAGE sql IMMUTABLE
+LANGUAGE plpgsql IMMUTABLE
 SET search_path = public, pg_temp
 AS $function$
-  SELECT CASE
-    WHEN p_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN p_text::uuid
-  END;
+BEGIN
+  RETURN p_text::uuid;
+EXCEPTION WHEN invalid_text_representation THEN
+  RETURN NULL;
+END;
 $function$;
 
 -- A product's current cost in whole cents per its stock unit; NULL when the product does not exist.

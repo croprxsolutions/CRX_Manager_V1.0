@@ -11,7 +11,7 @@ and Supabase support (runbook 4.6).
 
 **Open items from the final review (fold into the first drill):**
 - **Independent schema check.** Before declaring a restore valid or cutting over, compare the restored
-  constraints, triggers, indexes, functions, policies and **views** (with their security settings, such as
+  constraints, triggers, indexes, functions, policies, **sequences** (each restored value beyond every number already used, for example `invoice_number_seq` against `invoices.invoice_number`) and **views** (with their security settings, such as
   `profile_public_view`, which the Team Board reads) with an *independent* expected schema (a
   schema-only capture saved beside the dump from the same snapshot, or the repository migrations rebuilt
   up to the dump's ledger version in a scratch database), not with the archive's own contents list. A dump

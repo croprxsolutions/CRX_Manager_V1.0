@@ -20,8 +20,11 @@
 > `mergeStateStatus` CLEAN, no aggregate `reviewDecision` `CHANGES_REQUESTED` (from anyone), the head containing
 > GitHub's real base, the `--match-head-commit` pin, and a fresh exact-SHA `gpt-6-sol`/`high` proof run last — except a
 > documentation-only change, which needs only the green checks, the pin and base containment. A non-destructive
-> migration apply needs the same conditions minus CodeRabbit. Mason removed the `protect-main` ruleset's required
-> approving review himself (required status checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
+> migration apply needs the same conditions minus CodeRabbit. Both merge gates also DENY while any CodeRabbit review
+> thread on the PR is unresolved, on any commit (`unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in
+> `codex-bot-review-lib.mjs`; fail-open on a failed thread read, like the Codex App check), because CodeRabbit never
+> re-reviews the fix. Mason sets the `protect-main` ruleset's required approving reviews to 0 himself (required status
+> checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
 > (CodeRabbit only comments), `auto_incremental_review: false` (one review per PR, when opened non-draft or marked
 > ready), `ignore_title_keywords: ["docs("]`. Agents open PRs as drafts, mark them ready once the head is frozen, fix or
 > refute every CodeRabbit comment that arrives before the merge in one push, do not wait for a review that has not

@@ -16,11 +16,14 @@ import {
   CODEX_THREAD_MAX_PAGES,
   codexBotFindingsDenial,
   codexBotThreads,
+  coderabbitFindingsDenial,
   collectCodexThreads,
   evaluateCodexBotReview,
+  isCodeRabbitLogin,
   isCodexBotLogin,
   isStandingAtHead,
   oidMatchesHead,
+  unresolvedCodeRabbitThreads,
 } from "./codex-bot-review-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +41,19 @@ const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = fals
   comments: { nodes: [{ author: { login }, originalCommit: { oid } }] },
 });
 const pr = (threads, headRefOid = HEAD) => ({ headRefOid, reviewThreads: { nodes: threads } });
+
+// ── CodeRabbit's unresolved threads (advisory since 2026-10-19) ──────────────
+ok(isCodeRabbitLogin("coderabbitai") && isCodeRabbitLogin("coderabbitai[bot]") && isCodeRabbitLogin(" CodeRabbitAI "),
+  "both API spellings of CodeRabbit's login match");
+ok(!isCodeRabbitLogin("coderabbit") && !isCodeRabbitLogin("chatgpt-codex-connector"), "other logins do not");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", oid: OLD })])), 1,
+  "an unresolved CodeRabbit thread on an OLDER commit counts — it never re-reviews the fix");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true })])), 0, "a resolved one does not");
+eq(unresolvedCodeRabbitThreads(pr([thread()])), 0, "a Codex App thread is not a CodeRabbit thread");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai" }), thread({ login: "coderabbitai[bot]", oid: OLD })])), 2,
+  "every unresolved CodeRabbit thread is counted");
+eq(unresolvedCodeRabbitThreads({}), 0, "no thread data reads as zero (fail-open)");
+ok(/CodeRabbit has 2 unresolved comment threads/.test(coderabbitFindingsDenial("X", "5", 2)), "the denial names the count");
 
 // ── the two spellings of the bot's name ──────────────────────────────────────
 // Verified live 2026-09-02 on PR #556: `gh pr view --json reviews` reports

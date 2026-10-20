@@ -56,8 +56,10 @@ import {
   CODEX_THREADS_QUERY,
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
+  coderabbitFindingsDenial,
   collectCodexThreads,
   evaluateCodexBotReview,
+  unresolvedCodeRabbitThreads,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
 
@@ -333,6 +335,7 @@ const CODEX_ADVISORY_BUDGET_MS = 12_000;
 // the one `deadlineMs` the caller computed, so N merges spend one budget.
 function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_MS) {
   let codexVerdict = null;
+  let coderabbitOpen = 0;
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -356,9 +359,17 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
         return JSON.parse(gh(args))?.data?.repository?.pullRequest;
       }, { deadlineMs });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
+      coderabbitOpen = unresolvedCodeRabbitThreads(node);
     }
   } catch {
     codexVerdict = null; // notice below; never a deny
+  }
+
+  // CodeRabbit is advisory (2026-10-19): its unanswered threads, on any commit,
+  // are the one thing about its review that still blocks. See
+  // unresolvedCodeRabbitThreads(). A failed read leaves this 0 — fail-open.
+  if (coderabbitOpen > 0) {
+    deny(coderabbitFindingsDenial("PR MERGE GATE", request.selector, coderabbitOpen));
   }
 
   // The one blocking case: it flagged THIS commit and nobody answered. Not

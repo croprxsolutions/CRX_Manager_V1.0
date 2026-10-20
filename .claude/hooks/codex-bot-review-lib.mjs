@@ -289,6 +289,43 @@ export function evaluateCodexBotReview(pullRequest) {
   return { status: anyAtHead ? "clean-at-head" : "stale", ...base };
 }
 
+// ── CodeRabbit's unanswered findings (Mason, 2026-10-19) ─────────────────────
+// CodeRabbit became advisory on 2026-10-19: it reviews a PR once, when it is
+// marked ready, and never approves or requests changes, so nothing it says can
+// hold a merge on its own. Its comment threads are the one record of what it
+// found. Every UNRESOLVED CodeRabbit thread on the PR blocks — on ANY commit,
+// not only the head, because CodeRabbit never re-reviews: a fix pushed after its
+// review moves the head past every thread it opened, and a head-only rule would
+// let all of them through unanswered. The exit is the same as for the Codex App:
+// fix it and resolve the thread, or reply with a one-line reason and resolve it.
+// Fail-open like the rest of this file: a thread read that fails or is partial
+// prints a notice and never denies.
+export const CODERABBIT_LOGINS = Object.freeze(["coderabbitai", "coderabbitai[bot]"]);
+
+export function isCodeRabbitLogin(login) {
+  return CODERABBIT_LOGINS.includes(String(login || "").trim().toLowerCase());
+}
+
+// How many review threads CodeRabbit opened on this PR that nobody resolved.
+export function unresolvedCodeRabbitThreads(pullRequest) {
+  const nodes = pullRequest?.reviewThreads?.nodes;
+  if (!Array.isArray(nodes)) return 0;
+  return nodes.map(normalizeThread).filter((thread) => isCodeRabbitLogin(thread.author) && !thread.resolved).length;
+}
+
+export function coderabbitFindingsDenial(prefix, selector, count) {
+  const which = selector ? String(selector) : "<number>";
+  const n = Number(count) > 0 ? Number(count) : 1;
+  const noun = n === 1 ? "an unresolved comment thread" : `${n} unresolved comment threads`;
+  return (
+    `${prefix}: CodeRabbit has ${noun} on this pull request. Its approval is not required (Mason, ` +
+    "2026-10-19), but its findings are: every one must be fixed or answered before the merge.\n\n" +
+    `  1. Read them:  gh pr view ${which} --comments      (author: coderabbitai)\n` +
+    "  2. Fix each real issue and push (CodeRabbit will not re-review; the checks and Sol cover the fix).\n" +
+    "  3. Resolve each thread — after the fix, or with a one-line reason it is wrong."
+  );
+}
+
 // The deny text for "findings-at-head". Kept here so the Claude and Codex
 // guards cannot drift into two different explanations of the same refusal.
 export function codexBotFindingsDenial(prefix, selector, count) {

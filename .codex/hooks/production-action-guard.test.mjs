@@ -2712,6 +2712,43 @@ try {
   });
   assert.equal(shellStanding.blocked, true, "PARITY: the same standing thread denies the shell route");
   assert.match(String(shellStanding.reason), /unresolved comment/, "…with the same denial");
+
+  // CodeRabbit is advisory (2026-10-19), but an UNRESOLVED CodeRabbit thread on
+  // ANY commit still denies: it never re-reviews, so its threads sit on an older
+  // commit once a fix is pushed. A resolved one does not block.
+  const coderabbitThreadGh = (resolved) => (args) => {
+    if (Array.isArray(args) && args.includes("graphql")) {
+      return JSON.stringify({ data: { repository: { pullRequest: {
+        headRefOid: risky.sha,
+        reviewThreads: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [{
+            isResolved: resolved,
+            isOutdated: true,
+            comments: { nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: risky.base } }] },
+          }],
+        },
+      } } } });
+    }
+    if (isAdvisoryMetaCall(args)) return advisoryMetaJson;
+    return mainPrJson;
+  };
+  const coderabbitOpenVerdict = evaluateProductionAction({
+    toolName: "PowerShell",
+    toolInput: { command: `gh pr merge 123 --squash${PIN}` },
+    repoDir: risky.repo,
+    nowMs: now,
+    runGh: coderabbitThreadGh(false),
+  });
+  assert.equal(coderabbitOpenVerdict.blocked, true, "an unresolved CodeRabbit thread on an OLDER commit denies the merge");
+  assert.match(String(coderabbitOpenVerdict.reason), /CodeRabbit has an unresolved comment thread/, "…naming CodeRabbit");
+  assert.equal(evaluateProductionAction({
+    toolName: "PowerShell",
+    toolInput: { command: `gh pr merge 123 --squash${PIN}` },
+    repoDir: risky.repo,
+    nowMs: now,
+    runGh: coderabbitThreadGh(true),
+  }).blocked, false, "CONTROL: a resolved CodeRabbit thread does not block a green, Sol-proven merge");
   // The connector route used to ALLOW a clean, green, proof-backed merge. Since
   // 2026-09-26 it cannot carry the head pin, so even that merge is refused and
   // agents merge through `gh pr merge --match-head-commit`. The fail-open advisory

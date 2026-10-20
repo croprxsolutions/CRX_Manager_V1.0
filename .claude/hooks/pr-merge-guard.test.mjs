@@ -672,6 +672,11 @@ ok(!/coderabbitApprovedHead/.test(guardSource),
   "the merge guard no longer requires CodeRabbit's approval of the head");
 ok(/if\s*\(\s*pullRequestReviewBlocked\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "a CHANGES_REQUESTED review still denies the merge");
+// …and its unresolved threads, on any commit, still deny (behaviour is proven in
+// codex-bot-review-lib.test.mjs and on the Codex guard; this pins the wiring).
+ok(/coderabbitOpen = unresolvedCodeRabbitThreads\(node\);/.test(guardSource)
+  && /if \(coderabbitOpen > 0\) \{\s*deny\(coderabbitFindingsDenial\("PR MERGE GATE"/.test(guardSource),
+  "the Claude merge guard denies a PR with unresolved CodeRabbit threads");
 ok(/if\s*\(\s*!pullRequestChecksGreen\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "the green-pipeline denial is unconditional (no --auto exemption left)");
 ok(!/riskyFiles|contentIsRisky|advisoryQueue\.push\(request\);\s*return;\s*\}\s*\/\/[^\n]*risky/i.test(gateRequestSource),

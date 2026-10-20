@@ -54,8 +54,10 @@ import {
   CODEX_THREADS_QUERY,
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
+  coderabbitFindingsDenial,
   collectCodexThreads,
   evaluateCodexBotReview,
+  unresolvedCodeRabbitThreads,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
 
@@ -1322,6 +1324,7 @@ const CODEX_CALL_TIMEOUT_MS = 5_000;
 // than N budgets in series.
 function codexAppAdvisory({ request, repoDir, runGh, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_MS }) {
   let codexVerdict = null;
+  let coderabbitOpen = 0;
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -1344,9 +1347,15 @@ function codexAppAdvisory({ request, repoDir, runGh, deadlineMs = Date.now() + C
         return JSON.parse(runGh(args, repoDir))?.data?.repository?.pullRequest;
       }, { deadlineMs });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
+      coderabbitOpen = unresolvedCodeRabbitThreads(node);
     }
   } catch {
     codexVerdict = null; // never a deny
+  }
+  // CodeRabbit is advisory (2026-10-19): its unanswered threads, on any commit,
+  // still block — mirror of pr-merge-guard.mjs. A failed read leaves this 0.
+  if (coderabbitOpen > 0) {
+    return denied(coderabbitFindingsDenial("CODEX PRODUCTION GATE", request.selector, coderabbitOpen));
   }
   if (codexVerdict?.status === "findings-at-head") {
     return denied(codexBotFindingsDenial("CODEX PRODUCTION GATE", request.selector, codexVerdict.unresolvedAtHead));

@@ -2862,6 +2862,9 @@ try {
     ["an unexpected field", `gh api graphql -f query='${resolveQuery}' -F other=1`],
     ["two queries", `gh api graphql -f query='${resolveQuery}' -f query='${resolveQuery}'`],
     ["a different host", `gh api --hostname evil.example graphql -f query='${resolveQuery}'`],
+    ["a computed program path", `$(echo /tmp)/gh api graphql -f query='${resolveQuery}'`],
+    ["a variable program path", `$env:TEMP/gh api graphql -f query='${resolveQuery}'`],
+    ["a hand-pathed program", `/tmp/evil/gh api graphql -f query='${resolveQuery}'`],
     ["a wider selection", `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_1"}){thread{id pullRequest{id}}}}'`],
   ]) {
     assert.equal(ghCall(command).blocked, true, `still blocked: ${label}`);

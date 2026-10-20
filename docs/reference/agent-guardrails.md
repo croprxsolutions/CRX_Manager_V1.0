@@ -28,7 +28,8 @@
 > or null `reviewThreads` list incomplete, Codex App review of PR #973). The Codex guard runs this lookup on its HARD-gate
 > time budget, so a slow lookup denies instead of being killed, and it allows exactly one GraphQL write,
 > `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`
-> (`ghApiIsResolveReviewThreadOnly` in `codex-push-lib.mjs`), so a Codex session can clear the thread denial (#973, because CodeRabbit never
+> (`ghApiIsResolveReviewThreadOnly` in `codex-push-lib.mjs`; bare `gh`/`gh.exe` only, and no `$` or backtick anywhere in
+> the segment), so a Codex session can clear the thread denial (#973, because CodeRabbit never
 > re-reviews the fix. Mason sets the `protect-main` ruleset's required approving reviews to 0 himself (required status
 > checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
 > (CodeRabbit only comments), `auto_incremental_review: false` (one review per PR, when opened non-draft or marked

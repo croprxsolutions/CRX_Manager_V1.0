@@ -4409,9 +4409,16 @@ const RESOLVE_THREAD_QUERY_RE = new RegExp(
   "\\{\\s*thread\\s*\\{\\s*(?:id|isResolved)(?:\\s+(?:id|isResolved))*\\s*\\}\\s*\\}\\s*\\}\\s*$",
 );
 export function ghApiIsResolveReviewThreadOnly(command) {
-  const words = splitShellArgv(String(command || ""));
+  const raw = String(command || "");
+  // No run-time text anywhere in the raw segment: this predicate exempts the
+  // segment from the computed-text rule, so it must prove there is none
+  // (automated security review of #973: an unanchored binary path let
+  // `$(...)/gh` through).
+  if (/[$`]/.test(raw)) return false;
+  const words = splitShellArgv(raw);
   if (words.length < 5) return false;
-  if (!/^(?:.*[\\/])?gh(?:\.exe)?$/i.test(words[0])) return false;
+  // The bare program name only — a path could itself be computed or hostile.
+  if (!/^gh(?:\.exe)?$/i.test(words[0])) return false;
   if (words[1] !== "api" || words[2] !== "graphql") return false;
   // Exactly `gh api graphql -f query=<the mutation>`, nothing more.
   if (words.length !== 5 || words[3] !== "-f") return false;

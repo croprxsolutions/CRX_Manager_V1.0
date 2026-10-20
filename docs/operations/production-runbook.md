@@ -371,7 +371,7 @@ Not yet rehearsed. Log the first rehearsal in 4.9.
 
 ### 4.9 Drill log (quarterly; the first is overdue)
 
-Targets (Mason, 2026-10-14): **RTO** = back by the next business morning; **RPO** = minutes of lost work (only reachable after Pro + PITR; today the honest answer is "up to about 7 days", so mark RPO as not met until then). Run 4.6 against a throwaway project each quarter. Record the date, backup file, who ran it, minutes
+Targets (Mason, 2026-10-14): **RTO** = back by the next business morning; **RPO** = minutes of lost work (only reachable after Pro + PITR; today the honest answer is "up to about 7 days", so mark RPO as not met until then). Run 4.6 against a throwaway project each quarter, **stopping after step 9**: a drill never performs step 10 (freezing production writers), never touches production jobs, integrations or Vercel settings, and never points the app at the drill project. Those steps, and step 11's cutover, belong only to a real recovery that Mason has approved. Drill the final gate against the isolated preview only. Record the date, backup file, who ran it, minutes
 per step, whether validation matched, whether logins were present, and problems. Rewind drills
 (after Pro + PITR), file-restore drills (after the file backup exists) and the paper rehearsal go in the same table.
 

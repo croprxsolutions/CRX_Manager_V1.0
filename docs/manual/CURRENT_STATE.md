@@ -1,7 +1,7 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-19 (America/Chicago) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-19 20:55 UTC: 1036 rows / 1029 names, `max(version)`
+**Last verified:** 2026-10-20 (America/Chicago) for the migration ledger only (read-only
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-20 21:12 UTC: 1038 rows / 1031 names, `max(version)` `20261020193610` = `20261019230000_cost_margin_admin_only_screens_step2` (cost step 2, applied 2026-10-20 19:36 UTC; its functions `get_admin_cost_fields`, `get_quote_versions` and the renamed `_save_job_cost_step2_impl` read live), with `20261019220000_start_and_complete_delivery` (ledger `20261020022222`) before it; `20261020200000` (purchase-order cost, PR #980) not applied. Earlier read: 2026-10-19 20:55 UTC: 1036 rows / 1029 names, `max(version)`
 `20261019205246` = `20261019200000_bind_delivery_job_replay_receipts_batch3a` (replay-binding batch 3a, PR #954),
 applied 2026-10-19 20:52:46 UTC on Mason's own `I approve`: `complete_delivery` and `complete_job` now replay a
 saved result only for the same person and the exact same request, and both require a retry key. The 18:35 UTC read

@@ -421,6 +421,10 @@ const SCENARIOS = [
     ['stored after rep quantity edit', 'owner', PO_STORED, 'ok|6:1500|9000', 'same'],
     ['rep edit sends unit_cost_cents 1', U.REP, poReply(savePo(PONEW, U.REP, `${poLine(", 'quantity_ordered', 6, 'unit_cost_cents', 1")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
     ['stored after rep cost 1', 'owner', PO_STORED, 'ok|6:1|6', 'ok|6:1500|9000'],
+    // A rep switching the existing line to another product gets that product's cost (PROD_B: $7.25),
+    // not the old product's stored cost (CodeRabbit).
+    ['rep switches the line to another product', U.REP, poReply(savePo(PONEW, U.REP, `jsonb_build_object('product_id', '${PROD_B}', 'unit_size', 'gal', 'quantity_ordered', 6) || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
+    ['stored after rep product switch', 'owner', PO_STORED, /^ok\|6:\d+\|\d+$/, 'ok|6:725|4350'],
   ] },
   { name: '5a. set_purchase_order_item_costs', steps: [
     ['rep refused', U.REP, setCosts(U.REP, [{ id: POI3, unit_cost_cents: 700 }], 'k-rep'), MISSING_FN, DENIED],

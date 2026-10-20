@@ -461,8 +461,8 @@ $function$;
 
 -- save_purchase_order (non-admin): drop any cost the request carries.
 -- save_purchase_order (non-admin): the rep's cost keys are dropped. A line already on this purchase
--- order keeps its stored cost (the impl fills it in when no cost key is sent). A NEW line gets the
--- product's current cost, never 0: on the supplier-cost-basis products a received line's cost is
+-- order keeps its stored cost (the impl fills it in when no cost key is sent). A NEW line, or an
+-- existing line switched to another product, gets the product's current cost, never 0: on the supplier-cost-basis products a received line's cost is
 -- locked, so a rep receiving a $0 line would freeze it at $0 (Sol, 2026-10-19; Mason chose this).
 -- An admin can still change the cost before the line is received.
 CREATE OR REPLACE FUNCTION public._cost_step2_po_items(p_po_id uuid, p_items jsonb)
@@ -480,7 +480,11 @@ AS $function$
                    SELECT 1 FROM public.purchase_order_items poi
                     WHERE p_po_id IS NOT NULL
                       AND poi.purchase_order_id = p_po_id
-                      AND poi.id = public._cost_step2_try_uuid(e.value->>'id'))
+                      AND poi.id = public._cost_step2_try_uuid(e.value->>'id')
+                      -- A line switched to another product is priced like a new line (CodeRabbit):
+                      -- otherwise the writer would keep the old product's stored cost.
+                      AND (e.value->>'product_id' IS NULL
+                           OR poi.product_id = public._cost_step2_try_uuid(e.value->>'product_id')))
                    THEN e.value - 'unit_cost' - 'unit_cost_cents'
                  ELSE (e.value - 'unit_cost' - 'unit_cost_cents')
                       || jsonb_build_object('unit_cost_cents', COALESCE(

@@ -14,7 +14,8 @@ three; Mason chose these three and dropped the other six deferred spelling varia
 - **GitHub MCP writes under a hold.** `create_pull_request`, `update_pull_request`,
   `add_issue_comment` and the rest of the write family went through a "stop". The hold latch now
   holds every `mcp__github__` tool except a read (`get_*`, `list_*`, `search_*`, `*_read`,
-  `actions_get`, `actions_list`), so a new write tool is held by default.
+  `actions_get`, `actions_list`), so a new write tool is held by default. A `mark_*` tool is never
+  a read, even ending in `_read` (`mark_all_notifications_read` changes state; CodeRabbit).
 
 Tests: `pr-merge-guard.test.mjs`, `codex-push-lib.test.mjs`, `merge-guard-launcher.test.mjs`,
 `guards.test.mjs` (both directions). Reference: `docs/reference/agent-guardrails.md`, Guard narrowing item 6.

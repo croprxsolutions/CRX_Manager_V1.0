@@ -110,6 +110,8 @@ for (const tool of [
   "issue_write", "update_pull_request_branch", "create_branch", "add_comment_to_pending_review",
   "add_reply_to_pull_request_comment", "sub_issue_write", "actions_run_trigger", "fork_repository",
   "create_repository", "merge_pull_request", "push_files",
+  // Ends in `_read` but changes state (CodeRabbit, PR #975).
+  "mark_all_notifications_read",
 ]) eq(holdDecision(`mcp__github__${tool}`, {}), "deny", `GitHub MCP write held: ${tool}`);
 for (const tool of [
   "get_file_contents", "list_pull_requests", "search_code", "pull_request_read", "issue_read",

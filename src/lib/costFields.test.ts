@@ -12,11 +12,13 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rpc = vi.fn();
-vi.mock('./db', () => ({
+// The real assertRpcResult (no side effects), so an empty reply still fails the helpers (CodeRabbit).
+vi.mock('./db', async (importOriginal) => ({
   supabase: { rpc: (...args: unknown[]) => rpc(...args) },
-  assertRpcResult: <T>(data: unknown) => data as T,
+  assertRpcResult: (await importOriginal<typeof import('./db')>()).assertRpcResult,
 }));
 
+import * as costFieldsModule from './costFields';
 import {
   COST_COLUMNS,
   SAFE_COLUMNS,
@@ -38,9 +40,13 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** The literal text of a select argument, interpolations removed (they are vetted constants). */
+/** The vetted column-list constants a select may name or interpolate (costFields.ts `*_COLUMNS`). */
+const VETTED = new Set(Object.keys(costFieldsModule).filter((name) => name.endsWith('_COLUMNS')));
+const UNVETTED = '__UNVETTED_INTERPOLATION__';
+
+/** The literal text of a select argument: vetted constants removed, anything else marked. */
 function literalText(arg: string): string {
-  return arg.replace(/\$\{[^}]*\}/g, ' ');
+  return arg.replace(/\$\{\s*([^}]*?)\s*\}/g, (_all, name: string) => (VETTED.has(name) ? ' ' : ` ${UNVETTED} `));
 }
 
 function costColumnNamed(text: string, table: CostTable): string | null {
@@ -73,6 +79,12 @@ function costEmbeds(text: string): Array<{ table: CostTable; columns: string }> 
 
 interface Offence { file: string; line: number; problem: string }
 
+/** The text of `const NAME = '...'` (or a template) declared in the same file, if any. */
+function sameFileStringConstant(src: string, name: string): string | undefined {
+  const m = new RegExp(`const\\s+${name}\\s*=\\s*(['"\`])([\\s\\S]*?)\\1`).exec(src);
+  return m ? m[2] : undefined;
+}
+
 function scan(): Offence[] {
   const offences: Offence[] = [];
   const fromRe = new RegExp(`\\.from\\(\\s*['"](${COST_TABLES.join('|')})['"]\\s*\\)`, 'g');
@@ -90,19 +102,32 @@ function scan(): Offence[] {
       const rest = src.slice(m.index + m[0].length);
       const end = rest.search(/;|\.from\(/);
       const chain = end === -1 ? rest : rest.slice(0, end);
-      const sel = /\.select\(\s*(?:(['"`])([\s\S]*?)\1|\))/.exec(chain);
+      const sel = /\.select\(\s*(?:(['"`])([\s\S]*?)\1|\)|([A-Za-z_$][\w$]*)\s*[,)])/.exec(chain);
       if (!sel) continue; // a write without a returned row, or a delete
-      if (sel[2] === undefined) {
+      let selectText = sel[2];
+      if (sel[3] !== undefined) {
+        if (VETTED.has(sel[3])) continue;
+        // A column list held in a same-file string constant is checked like an inline one.
+        selectText = sameFileStringConstant(src, sel[3]);
+        if (selectText === undefined) {
+          offences.push({ file: rel, line: lineOf(m.index), problem: `${table}: .select(${sel[3]}) is neither a vetted *_COLUMNS constant nor a same-file string constant` });
+          continue;
+        }
+      }
+      if (selectText === undefined) {
         offences.push({ file: rel, line: lineOf(m.index), problem: `${table}: bare .select() returns every column` });
         continue;
       }
-      const text = literalText(sel[2]);
+      const text = literalText(selectText);
       const topLevel = text.replace(/\([^()]*\)/g, '()');
       if (/(^|[\s,])\*/.test(topLevel)) {
         offences.push({ file: rel, line: lineOf(m.index), problem: `${table}: select('*')` });
       }
       const named = costColumnNamed(topLevel, table);
       if (named) offences.push({ file: rel, line: lineOf(m.index), problem: `${table}: names cost column ${named}` });
+      if (topLevel.includes(UNVETTED)) {
+        offences.push({ file: rel, line: lineOf(m.index), problem: `${table}: interpolates something other than a *_COLUMNS constant` });
+      }
     }
 
     // 2. Embedded cost tables inside ANY select string.
@@ -115,6 +140,9 @@ function scan(): Offence[] {
         }
         const named = costColumnNamed(embed.columns, embed.table);
         if (named) offences.push({ file: rel, line: lineOf(m.index), problem: `embedded ${embed.table} names cost column ${named}` });
+        if (embed.columns.includes(UNVETTED)) {
+          offences.push({ file: rel, line: lineOf(m.index), problem: `embedded ${embed.table} interpolates something other than a *_COLUMNS constant` });
+        }
       }
     }
   }
@@ -133,6 +161,11 @@ describe('cost columns are never read by the screens', () => {
     expect(costColumnNamed(embeds[1].columns, 'order_items')).toBe('cost_per_unit');
     expect(costColumnNamed('id, unit_cost_cents_note', 'purchase_order_items')).toBeNull();
     expect(costColumnNamed('id, current_cost', 'products')).toBe('current_cost');
+    expect(sameFileStringConstant("const SEL = 'id, current_cost';", 'SEL')).toBe('id, current_cost');
+    expect(sameFileStringConstant('const other = 1;', 'SEL')).toBeUndefined();
+    expect(literalText('${PRODUCT_COLUMNS}, x')).not.toContain(UNVETTED);
+    expect(literalText('${someVariable}, x')).toContain(UNVETTED);
+    expect(costEmbeds(literalText('id, product:products(${cols})'))[0].columns).toContain(UNVETTED);
   });
 });
 
@@ -168,6 +201,11 @@ describe('admin cost helpers', () => {
     const merged = await withAdminCosts('products', [{ id: 'a' }, { id: 'b' }], true);
     expect(rpc).toHaveBeenCalledWith('get_admin_cost_fields', { p_table: 'products', p_ids: ['a', 'b'] });
     expect(merged).toEqual([{ id: 'a', current_cost: 12.5 }, { id: 'b' }]);
+  });
+
+  it('an admin cost read with an empty reply fails instead of merging nothing', async () => {
+    rpc.mockResolvedValue({ data: null, error: null });
+    await expect(withAdminCosts('products', [{ id: 'a' }], true)).rejects.toThrow();
   });
 
   it('chunks large id lists under the server limit', async () => {

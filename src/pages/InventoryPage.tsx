@@ -13,7 +13,7 @@ import { supabase, checkMutationResult, sanitizeError, assertRpcResult, hasRpcCo
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
-import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import { PRODUCT_COLUMNS } from '../lib/costFields';
 import { exportToCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -782,17 +782,12 @@ export default function InventoryPage() {
       .eq('product_id', target.product_id)
       .in('purchase_orders.status', ['submitted', 'partially_received']);
 
-    // Cost is admin-only (Mason, 2026-10-15): unit_cost is added for admins and never shown.
-    type ReceivablePoRow = { id: string; quantity_ordered: number; quantity_received: number; unit_cost?: number | null; unit_size: string | null; product_id: string; purchase_order_id: string; purchase_orders: { po_number: string; status: string } };
-    let rows: ReceivablePoRow[] | null = null;
-    let loadError: unknown = error;
-    if (!error && data) {
-      try {
-        rows = await withAdminCosts('purchase_order_items', data as unknown as ReceivablePoRow[], isAdmin);
-      } catch (costError) {
-        loadError = costError;
-      }
-    }
+    // Cost is admin-only (Mason, 2026-10-15). Receiving never needs it (the picker shows PO number
+    // and quantities; receive_po_items takes only line and quantity), so no cost is read here and a
+    // cost-read failure can never block receiving (CodeRabbit).
+    type ReceivablePoRow = { id: string; quantity_ordered: number; quantity_received: number; unit_size: string | null; product_id: string; purchase_order_id: string; purchase_orders: { po_number: string; status: string } };
+    const rows = error ? null : ((data || []) as unknown as ReceivablePoRow[]);
+    const loadError: unknown = error;
 
     if (loadError) {
       // Supabase RETURNS this error (doesn't throw) — surface it instead of
@@ -806,7 +801,7 @@ export default function InventoryPage() {
         po_number: item.purchase_orders.po_number,
         ordered: item.quantity_ordered,
         received: item.quantity_received || 0,
-        unit_cost: item.unit_cost || 0,
+        unit_cost: 0,
         purchase_order_id: item.purchase_order_id,
         product_id: item.product_id,
         unit_size: item.unit_size,

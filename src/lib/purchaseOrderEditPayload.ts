@@ -20,7 +20,7 @@ export interface PurchaseOrderEditableLine {
  */
 export function buildPurchaseOrderEditItemsPayload(
   items: PurchaseOrderEditableLine[],
-  { includeCost = true }: { includeCost?: boolean } = {},
+  { includeCost }: { includeCost: boolean },
 ) {
   return items.map((item) => {
     const quantityOrdered = Number.parseFloat(item.quantity_ordered);

@@ -300,6 +300,8 @@ export default function JobDetail() {
   const isAdmin = role === 'admin';
 
   const [loading, setLoading] = useState(!isNew);
+  // An admin's job-chemical cost read failed: show a retry panel instead of a cost-less form.
+  const [costLoadFailed, setCostLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   // Dirty = current form differs from the baseline captured at load/save. This is
   // CONTENT-based (not a ref-flag armed on a timer), so it is immune to render
@@ -1795,9 +1797,13 @@ export default function JobDetail() {
       if (!isCurrentLoad()) return false;
       baselineSettleGuardRef.current = false;
       Sentry.captureException(costErr, { tags: { source: 'fetch', page: 'job-detail', context: 'job_chemical_costs' } });
-      toast('error', 'Could not load this job\'s chemical costs. Reload the page before editing.');
+      toast('error', 'Could not load this job\'s chemical costs. Retry before editing.');
+      // Leave the skeleton for a retry panel; nothing was installed, so the job stays unsaveable.
+      setCostLoadFailed(true);
+      setLoading(false);
       return false;
     }
+    setCostLoadFailed(false);
     if (!isCurrentLoad()) return false;
 
     // ---- Phase 1: finish every remaining round trip BEFORE installing anything. ----
@@ -3676,6 +3682,17 @@ export default function JobDetail() {
         <div className="h-8 bg-gray-100 rounded w-48 animate-pulse" />
         <div className="h-64 bg-gray-100 rounded animate-pulse" />
       </div>
+    );
+  }
+
+  if (costLoadFailed) {
+    return (
+      <Card>
+        <div className="p-6 space-y-3">
+          <p className="text-sm text-secondary">This job's chemical costs could not be loaded, so it cannot be edited yet.</p>
+          <Button onClick={() => { setLoading(true); void fetchJob(); }}>Retry</Button>
+        </div>
+      </Card>
     );
   }
 

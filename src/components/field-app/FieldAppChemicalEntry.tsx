@@ -203,6 +203,11 @@ export default function FieldAppChemicalEntry({
   }, [isAdmin]);
 
   useEffect(() => {
+    // A new query retires any search still in flight and clears its results at once, so an older
+    // reply can never appear under the new text during the debounce (CodeRabbit).
+    searchSeqRef.current += 1;
+    setSearchResults([]);
+    setSearching(false);
     const timer = setTimeout(() => { if (searchQuery) searchProducts(searchQuery); }, 250);
     return () => clearTimeout(timer);
   }, [searchQuery, searchProducts]);

@@ -154,7 +154,9 @@ BEGIN
       -- set_purchase_order_item_costs: operation-scoped, actor-bound receipts and the PO cent parser
       ('public.check_idempotency_intent(text,text,uuid,text)', 'edc73be809069669e8441eba7acf443d'),
       ('public.save_idempotency(text,text,jsonb)', 'f600171c426e48c995f204c4dac3ff8b'),
-      ('public._purchase_order_item_unit_cost_cents(jsonb)', '0fa4a7fee34fc8d76ef605e44a0bebfa')
+      ('public._purchase_order_item_unit_cost_cents(jsonb)', '0fa4a7fee34fc8d76ef605e44a0bebfa'),
+      -- save_purchase_order: a rep's no-cost line on a supplier-cost-basis product is refused
+      ('public._supplier_cost_basis_enabled_for_product(uuid)', '6de9259b699ea2c8642cf8914b3590ac')
     ) AS v(sig, md5)
   LOOP
     IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
@@ -614,6 +616,8 @@ RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
+DECLARE
+  v_items jsonb;
 BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
@@ -624,9 +628,22 @@ BEGIN
     RETURN public._save_purchase_order_cost_step2_impl(
       p_po_id, p_po_payload, p_items, p_performed_by, p_idempotency_key);
   END IF;
+  v_items := public._cost_step2_po_items(p_po_id, p_items);
+  -- A supplier-cost-basis product locks a received line's cost, so a rep may not add one at $0
+  -- (the product has no cost on file): an admin sets the product's cost first (Sol; Mason chose
+  -- this 2026-10-20). Only new or switched lines carry unit_cost_cents here.
+  IF jsonb_typeof(v_items) = 'array' AND EXISTS (
+       SELECT 1 FROM jsonb_array_elements(v_items) AS e(value)
+        WHERE jsonb_typeof(e.value) = 'object'
+          AND e.value ? 'unit_cost_cents'
+          AND (e.value->>'unit_cost_cents')::bigint = 0
+          AND COALESCE(public._supplier_cost_basis_enabled_for_product(
+                public._cost_step2_try_uuid(e.value->>'product_id')), false)) THEN
+    RAISE EXCEPTION 'PO_COST_REQUIRED: this product has no cost on file; an admin must set its cost before it is ordered'
+      USING ERRCODE = 'P0001';
+  END IF;
   RETURN public._save_purchase_order_cost_step2_impl(
-    p_po_id, p_po_payload, public._cost_step2_po_items(p_po_id, p_items),
-    p_performed_by, p_idempotency_key);
+    p_po_id, p_po_payload, v_items, p_performed_by, p_idempotency_key);
 END;
 $function$;
 
@@ -1001,7 +1018,7 @@ BEGIN
       ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'public._cost_step2_job_chemicals(p_job_id, p_chemicals)'),
       ('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._cost_step2_field_app_chemicals(p_invoice_id, p_chemicals)'),
       ('public.save_invoice(jsonb,jsonb,text)', 'public._cost_step2_invoice_items(p_invoice, p_items)'),
-      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'public._cost_step2_po_items(p_po_id, p_items)'),
+      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'v_items := public._cost_step2_po_items(p_po_id, p_items);'),
       ('public.get_chemical_history(uuid,date,date)', 'CASE WHEN v_admin OR r.transaction_type IS DISTINCT FROM ''Purchase'' THEN r.unit_price END'),
       ('public.match_quick_receive_items(jsonb,text)', 'a.value - ''unit_cost'''),
       ('public.set_purchase_order_item_costs(uuid,jsonb,uuid,text)', 'PERFORM public.require_admin();'),

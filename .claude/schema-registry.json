@@ -3269,7 +3269,7 @@
     {
       "table": "invoice_items",
       "constraint": "invoice_items_charge_line_shape_chk",
-      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (unit_price_cents > 0) AND (extended_cents = unit_price_cents))))",
+      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (btrim(description) <> ''::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (unit_price_cents > 0) AND (extended_cents = unit_price_cents))))",
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {

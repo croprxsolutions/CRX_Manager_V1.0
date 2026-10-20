@@ -19,6 +19,10 @@
   (`get_gross_sales_report`) and three re-pinned ones. Each is pinned to the live wrapper, its private
   body, `auth.uid()` and the role helpers it calls. The digests come from the sweep's own contract query.
   The allowlist test's exception count goes from 21 to 22. No database change.
+- **Owner decision.** The Codex GitHub review pointed out that the `p_group_by` exceptions conflict with
+  Mason's 2026-09-02 call to keep those look-alikes visible. On 2026-10-20 Mason chose to mark them as
+  reviewed. `docs/manual/DECISION_LOG.md` records the reversal, and the 2026-09-02 triage audit carries a
+  pointer to it.
 - **Proof.**
   - The live `actor-forgery` sweep was run read-only on 2026-10-20 and adjudicated against this
     allowlist. All four rows are cleared. The only row left is `start_and_complete_delivery`, which

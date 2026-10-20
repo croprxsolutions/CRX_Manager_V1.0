@@ -21,7 +21,7 @@ and Supabase support (runbook 4.6).
     when row-level security is switched off, so matching policy names proves nothing on its own (see
     `supabase/baselines/README.md`, the `relations_and_acl` row). The expected schema must also be compared
     for: each table's row-level security switches (`ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL
-    SECURITY`); the grants on every table, column and function (their access lists, or ACLs); and the
+    SECURITY`); the grants on every table, column, sequence and function (their access lists, or ACLs; sequence grants decide who can draw document numbers such as invoice numbers); and the
     default privileges (`pg_default_acl`, the standing rule for what the *next* new object gets, which
     no grant on an existing object shows). A difference in any of these fails the restore.
   - **Sequences: compare the next number, not the stored value.** For each sequence, such as

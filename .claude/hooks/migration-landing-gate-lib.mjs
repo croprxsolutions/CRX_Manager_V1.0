@@ -32,6 +32,12 @@ import {
   pullRequestChecksGreen,
   pullRequestReviewBlocked,
 } from "./codex-push-lib.mjs";
+import {
+  CODEX_THREADS_QUERY,
+  CODEX_THREAD_PAGE_SIZE,
+  collectCodexThreads,
+  unresolvedCodeRabbitThreads,
+} from "./codex-bot-review-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 
@@ -159,6 +165,36 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees }) {
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
+  }
+  // CodeRabbit is advisory (2026-10-19), but its unanswered threads block the
+  // merge gates, so they block an apply too — otherwise production could take a
+  // migration whose PR cannot merge (Luna round 2, HIGH). Unlike the merge gates'
+  // fail-open notice, an apply FAILS CLOSED here like every other check in this
+  // gate: an unreadable or partly read thread list refuses.
+  let threads;
+  try {
+    threads = collectCodexThreads((cursor) => {
+      const args = [
+        "api", "graphql",
+        "-f", `query=${CODEX_THREADS_QUERY}`,
+        "-F", "owner={owner}",
+        "-F", "name={repo}",
+        "-F", `number=${pr.number}`,
+        "-F", `first=${CODEX_THREAD_PAGE_SIZE}`,
+      ];
+      if (cursor) args.push("-F", `after=${cursor}`);
+      return JSON.parse(gh(args))?.data?.repository?.pullRequest;
+    });
+  } catch (error) {
+    if (OUT(error)) throw error;
+    return refuse(`could not read ${number}'s review threads to check for unanswered CodeRabbit findings (${error?.message || error}); fail closed.`);
+  }
+  if (threads.incomplete || !threads.headRefOid) {
+    return refuse(`${number}'s review threads could not be read completely, so unanswered CodeRabbit findings cannot be ruled out (fail closed).`);
+  }
+  const coderabbitOpen = unresolvedCodeRabbitThreads(threads);
+  if (coderabbitOpen > 0) {
+    return refuse(`${number} has ${coderabbitOpen} unresolved CodeRabbit comment thread(s). Fix or answer each and resolve it before applying.`);
   }
 
   const baseSha = String(pr?.baseRefOid || "").trim();

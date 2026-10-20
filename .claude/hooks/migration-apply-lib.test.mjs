@@ -1588,7 +1588,9 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
   };
-  const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH } = {}) => evaluateLandingGate({
+  const crThread = (resolved) => ({ isResolved: resolved, isOutdated: true,
+    comments: { nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
+  const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "",
     runGit: (args) => {
       const key = args.join(" ");
@@ -1600,6 +1602,12 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      if (args[0] === "api" && args[1] === "graphql") {
+        if (threadsError) throw threadsError;
+        assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));
+        return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: HEAD_SHA,
+          reviewThreads: { pageInfo: { hasNextPage: threadsMore, endCursor: threadsMore ? null : null }, nodes: threads } } } } });
+      }
       if (args[0] === "api") {
         const base = pr.baseRefOid || BASE_SHA;
         assert.deepEqual(args, ["api", `repos/{owner}/{repo}/compare/${base}...${HEAD_SHA}`, "--jq", ".behind_by"]);
@@ -1662,6 +1670,12 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");
   // CodeRabbit is advisory since 2026-10-19 (Mason): its approval is not a landing condition.
   ok(gate({ pr: { reviews: [], reviewDecision: null } }).ok === true, "a ready PR with no CodeRabbit review passes");
+  // …but its unanswered threads block an apply exactly as they block the merge (Luna round 2, HIGH),
+  // and an apply fails CLOSED when the threads cannot be read.
+  refused(gate({ threads: [crThread(false)] }), "unresolved CodeRabbit comment thread", "an unresolved CodeRabbit thread on an older commit is refused");
+  ok(gate({ threads: [crThread(true)] }).ok === true, "a resolved CodeRabbit thread does not block");
+  refused(gate({ threadsError: new Error("HTTP 502") }), "fail closed", "an unreadable thread list refuses the apply");
+  refused(gate({ threadsMore: true }), "could not be read completely", "a partly read thread list refuses the apply");
   refused(gate({ pr: { mergeStateStatus: "BLOCKED" } }), "not merge-ready", "a PR that is not CLEAN is refused");
   refused(gate({ pr: { statusCheckRollup: [{ ...readyPr.statusCheckRollup[0], conclusion: "FAILURE" }] } }), "not merge-ready",
     "a failed check is refused");

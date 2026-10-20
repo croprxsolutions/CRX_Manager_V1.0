@@ -11,7 +11,7 @@
 > review. If that review arrives before the merge, fix or refute with evidence every comment, in
 > one push. Do not wait for CodeRabbit if it has not reviewed by the time checks are green and Sol
 > is clean, and never post `@coderabbitai review` to buy a re-review. A failed CodeRabbit
-> pre-merge "error" check is a finding to fix or refute, not a blocker. Accepted loss: its
+> pre-merge check is a finding to fix or refute, not a blocker (all five custom checks are `warning` mode since 2026-10-19). Accepted loss: its
 > "edit to an already-applied migration" error check no longer blocks; the mandatory exact-SHA Sol
 > review of any migration change and the CI migration check remain.
 >

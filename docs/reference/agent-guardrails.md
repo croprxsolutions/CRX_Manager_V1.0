@@ -28,7 +28,7 @@
 > (CodeRabbit only comments), `auto_incremental_review: false` (one review per PR, when opened non-draft or marked
 > ready), `ignore_title_keywords: ["docs("]`. Agents open PRs as drafts, mark them ready once the head is frozen, fix or
 > refute every CodeRabbit comment that arrives before the merge in one push, do not wait for a review that has not
-> arrived, and never post `@coderabbitai review`. A failed CodeRabbit pre-merge "error" check is a finding, not a
+> arrived, and never post `@coderabbitai review`. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
 > blocker; accepted loss: its "edit to an already-applied migration" check no longer blocks (the mandatory Sol review
 > of any migration change and the CI migration check remain). Mentions of CodeRabbit APPROVED below are history.
 >

@@ -25,9 +25,8 @@ reviews:
   # PR whose GitHub reviewDecision is CHANGES_REQUESTED. Agents fix or answer every
   # CodeRabbit comment that arrives before the merge (.claude/commands/ship.md).
   #
-  # With this off, the error-mode pre_merge_checks below show a red X but hold
-  # nothing: CodeRabbit's docs say an error-mode check blocks only while this
-  # workflow is on. Treat a failed check as a finding to fix or refute.
+  # The pre_merge_checks below are all `warning` mode now: a failed one is a
+  # finding to fix or refute, never a red status that holds the merge.
   request_changes_workflow: false
   high_level_summary: true
   # Put the summary in the walkthrough COMMENT, never in the PR description
@@ -205,14 +204,20 @@ reviews:
     issue_assessment:
       mode: warning
 
-    # ---- error mode: red X (advisory since 2026-10-19; see request_changes_workflow)
+    # ---- WARNING mode since 2026-10-19 (were `error`) ----------------------
+    # CodeRabbit is advisory and reviews each PR once, so a failed check could
+    # never be cleared by a re-review, and a red CodeRabbit status would hold the
+    # merge gates (they refuse any red check) on a finding the agent already
+    # fixed (Luna round 2). As warnings they stay findings the agent must fix or
+    # refute (ship.md Step 8); the exact-SHA Sol review covers the same rules.
+    # The "STAYS error" note on the applied-migration check below is history.
     # Every instruction below opens with an explicit skip clause, so a PR that
     # touches none of the named files passes trivially. That is deliberate: a
     # check that fires on unrelated docs and hook work gets ignored, and an
     # ignored check protects nothing.
     custom_checks:
       - name: New table without RLS
-        mode: error
+        mode: warning
         instructions: >-
           Scope: only files ADDED under supabase/migrations/. If this pull
           request adds no new file under supabase/migrations/, PASS immediately
@@ -235,7 +240,7 @@ reviews:
           and a policy on the child too. Otherwise PASS.
 
       - name: SECURITY DEFINER without search_path
-        mode: error
+        mode: warning
         instructions: >-
           Scope: only files ADDED under supabase/migrations/. If this pull
           request adds no new file under supabase/migrations/, PASS immediately
@@ -258,7 +263,7 @@ reviews:
           for arbitrary restricted paths. Otherwise PASS.
 
       - name: Mutating RPC without idempotency key
-        mode: error
+        mode: warning
         instructions: >-
           Scope: only files ADDED under supabase/migrations/. If this pull
           request adds no new file under supabase/migrations/, PASS immediately
@@ -340,7 +345,7 @@ reviews:
           write enforces nothing. Otherwise PASS.
 
       - name: Money not exact whole cents
-        mode: error
+        mode: warning
         instructions: >-
           Scope: files under supabase/migrations/, src/, AND
           supabase/functions/. Edge Functions are TypeScript and are an
@@ -372,7 +377,7 @@ reviews:
       # migration never ran, a false positive on a parked draft is the price:
       # Mason clears it with "Ignore failed checks" in the walkthrough.
       - name: Edit to an already-applied migration
-        mode: error
+        mode: warning
         instructions: >-
           Scope: only supabase/migrations/. If this pull request modifies no
           existing file there, PASS immediately.

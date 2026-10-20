@@ -827,6 +827,9 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     const unknown = run("prompt-router.mjs", `${REMINDER}approve 999999`);
     ok(unknown.includes("OWNER APPROVAL NOT RECORDED") && unknown.includes("\"approve 999999\"") && unknown.includes("code 999999"),
       `a reply behind the app's reminder reaches the code check instead of silence: ${unknown}`);
+    ok(run("prompt-router.mjs", "<system-reminder>\nsession note\napprove 482913\n</system-reminder>\n\nwhat is left to do?") === "" &&
+      existsSync(path.join(dir, requestFileName("482913"))),
+      "an approval-shaped line inside the app's note, before an unrelated question, is not his attempt (CodeRabbit, PR #979)");
     const extra = run("prompt-router.mjs", `${REMINDER}also drop the table\napprove 482913`);
     ok(extra.includes("OWNER APPROVAL NOT RECORDED") && extra.includes("other text came with it") &&
       existsSync(path.join(dir, requestFileName("482913"))), "other words before the reply are refused out loud, not silently");

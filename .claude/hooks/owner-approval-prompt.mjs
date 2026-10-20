@@ -41,7 +41,8 @@ const plain = !code && isPlainApprovalReply(reply);
 // Not a whole reply, but one of its lines is: say it did not count rather than
 // stay silent, so an approval is never lost without a word (2026-10-20). A plain
 // "I approve" with nothing waiting in this session stays ordinary chat.
-const attempt = !code && !plain ? approvalAttemptIn(payload?.prompt) : null;
+// The note's own lines are not his words, so they are never read as an attempt (CodeRabbit, PR #979).
+const attempt = !code && !plain ? approvalAttemptIn(reply) : null;
 if (!code && !plain && !attempt) emit();
 const said = (attempt ? attempt.line : reply.trim()).slice(0, 40);
 

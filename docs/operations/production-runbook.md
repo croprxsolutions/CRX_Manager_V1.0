@@ -213,14 +213,21 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Keep
    scheduled jobs **off during reconciliation**. The dump itself can carry the `cron.job` rows (the pg_cron
    extension marks that table for inclusion in dumps), and on a project with pg_cron enabled they would start
-   running as soon as they load. So stop that before it can happen: restore with the `cron.job` data excluded
-   (`pg_restore --exclude-table-data` for that table), or leave the pg_cron extension disabled until the
-   restore is finished and reconciled. Afterwards confirm `cron.job` is empty or inactive before the app is
-   pointed at it. They are put back at the end (4.7, last item), not forgotten.
-   **Lock the new project's API down before any data is loaded**, and keep it locked for the whole restore
-   window: anyone who knows the new project's API address could otherwise read or change restored data, and
-   pointing Vercel elsewhere does not stop direct requests. Isolate the API (restrict or pause access) or
-   apply the approved access control first, and record the result of a signed-out API request. Details of the
+   running as soon as they load. So stop that before it can happen. `pg_restore` has no option to skip one
+   table's data on the command line, so write the archive's contents list to a file (`pg_restore --list`),
+   comment out every entry for `cron.job` (and any other `cron` table data) in that file, and restore with
+   that edited list (`pg_restore --use-list`). The extension cannot be trusted to stay quiet by being left
+   disabled, because the archive itself may enable it while loading. Afterwards, before the app is pointed
+   at the project, run a query that confirms `cron.job` is empty and no job is active; if any job is present,
+   stop and treat the restore as failed. The first drill must prove this on a real archive. Jobs are put back
+   at the end (4.7, last item), not forgotten.
+   **Keep the new project's API isolated for the whole restore window, independent of database privileges.**
+   A restore adds grants and default privileges after the lockdown, so a privilege change alone cannot be
+   relied on to keep the data private while it loads. Anyone who knows the new project's API address could
+   otherwise read or change restored data, and pointing Vercel elsewhere does not stop direct requests.
+   Use a control that does not depend on grants (restrict network access to the restoring machine, or
+   pause or disable the project's Data API in its settings), keep it in place until the privilege check below
+   passes and a signed-out API request is refused, and record that result. Details of the
    access lockdown from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
    Supabase project gives the anonymous (signed-out) role full read/write on every table and the right to
    run every function, and a restore only adds grants, never removes those. Changing privileges is a

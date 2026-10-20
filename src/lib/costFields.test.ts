@@ -104,7 +104,7 @@ function scan(): Offence[] {
       const chain = end === -1 ? rest : rest.slice(0, end);
       const sel = /\.select\(\s*(?:(['"`])([\s\S]*?)\1|\)|([A-Za-z_$][\w$]*)\s*[,)])/.exec(chain);
       if (!sel) continue; // a write without a returned row, or a delete
-      let selectText = sel[2];
+      let selectText: string | undefined = sel[2];
       if (sel[3] !== undefined) {
         if (VETTED.has(sel[3])) continue;
         // A column list held in a same-file string constant is checked like an inline one.

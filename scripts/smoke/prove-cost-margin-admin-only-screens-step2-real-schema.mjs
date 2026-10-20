@@ -196,7 +196,7 @@ const FIELD = id('1e1');
 const PROD = id('f1'); // current_cost 22.50 per gal, liquid
 const PROD_B = id('f2'); // current_cost 7.25 per gal
 const PROD_C = id('f3'); // current_cost 8.00 per gal (PO3 only)
-const PROD_Z = id('f4'); // supplier-cost-basis product with no cost on file (current_cost 0)
+const PROD_Z = id('f4'); // supplier-cost-basis product (current_cost 9.00)
 const PO1 = id('101'); const PO2 = id('102'); const PO3 = id('103');
 const POI1 = id('201'); const POI2 = id('202'); const POI3 = id('203'); const POI4 = id('204');
 const FI = id('301'); const SI = id('302');
@@ -244,7 +244,7 @@ function seed() {
       ('${PROD}', '[PROVER] Chem', 'gal', 22.50, 30.00, 'liquid', true),
       ('${PROD_B}', '[PROVER] Chem B', 'gal', 7.25, 12.00, 'liquid', true),
       ('${PROD_C}', '[PROVER] Chem C', 'gal', 8.00, 12.00, 'liquid', true),
-      ('${PROD_Z}', '[PROVER] Chem Z', 'gal', 0, 12.00, 'liquid', true);
+      ('${PROD_Z}', '[PROVER] Chem Z', 'gal', 9.00, 12.00, 'liquid', true);
     INSERT INTO public.product_cost_basis_rollout (product_id, rollout_scope) VALUES ('${PROD_Z}', 'wells_phase2_canary');
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO public.purchase_orders (id, po_number, vendor, status, submitted_date, created_by) VALUES
@@ -428,9 +428,9 @@ const SCENARIOS = [
     // not the old product's stored cost (CodeRabbit).
     ['rep switches the line to another product', U.REP, poReply(savePo(PONEW, U.REP, `jsonb_build_object('product_id', '${PROD_B}', 'unit_size', 'gal', 'quantity_ordered', 6) || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
     ['stored after rep product switch', 'owner', PO_STORED, /^ok\|6:\d+\|\d+$/, 'ok|6:725|4350'],
-    // A rep may not add a $0 line for a supplier-cost-basis product with no cost on file: its
-    // received cost would lock at $0 (Sol; Mason 2026-10-20).
-    ['rep new line on a no-cost cost-basis product', U.REP, poReply(`public.save_purchase_order(NULL, jsonb_build_object('vendor', '[PROVER] Vendor Z', 'status', 'draft'), jsonb_build_array(jsonb_build_object('product_id', '${PROD_Z}', 'unit_size', 'gal', 'quantity_ordered', 1)), '${U.REP}', NULL)`), /^ok\|/, /^P0001\|PO_COST_REQUIRED/],
+    // A rep may not add a supplier-cost-basis product line at all, even with a catalog cost: its
+    // received cost locks and the rep cannot enter the vendor's real cost (Sol; Mason 2026-10-20).
+    ['rep new line on a cost-basis product', U.REP, poReply(`public.save_purchase_order(NULL, jsonb_build_object('vendor', '[PROVER] Vendor Z', 'status', 'draft'), jsonb_build_array(jsonb_build_object('product_id', '${PROD_Z}', 'unit_size', 'gal', 'quantity_ordered', 1)), '${U.REP}', NULL)`), /^ok\|/, /^P0001\|PO_COST_BASIS_ADMIN_ONLY/],
   ] },
   { name: '5a. set_purchase_order_item_costs', steps: [
     ['rep refused', U.REP, setCosts(U.REP, [{ id: POI3, unit_cost_cents: 700 }], 'k-rep'), MISSING_FN, DENIED],

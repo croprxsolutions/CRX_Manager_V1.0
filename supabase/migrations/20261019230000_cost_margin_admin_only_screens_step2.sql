@@ -155,7 +155,7 @@ BEGIN
       ('public.check_idempotency_intent(text,text,uuid,text)', 'edc73be809069669e8441eba7acf443d'),
       ('public.save_idempotency(text,text,jsonb)', 'f600171c426e48c995f204c4dac3ff8b'),
       ('public._purchase_order_item_unit_cost_cents(jsonb)', '0fa4a7fee34fc8d76ef605e44a0bebfa'),
-      -- save_purchase_order: a rep's no-cost line on a supplier-cost-basis product is refused
+      -- save_purchase_order: a rep may not add a supplier-cost-basis product line
       ('public._supplier_cost_basis_enabled_for_product(uuid)', '6de9259b699ea2c8642cf8914b3590ac')
     ) AS v(sig, md5)
   LOOP
@@ -629,17 +629,17 @@ BEGIN
       p_po_id, p_po_payload, p_items, p_performed_by, p_idempotency_key);
   END IF;
   v_items := public._cost_step2_po_items(p_po_id, p_items);
-  -- A supplier-cost-basis product locks a received line's cost, so a rep may not add one at $0
-  -- (the product has no cost on file): an admin sets the product's cost first (Sol; Mason chose
-  -- this 2026-10-20). Only new or switched lines carry unit_cost_cents here.
+  -- A supplier-cost-basis product locks a received line's cost, and a rep cannot see or enter the
+  -- vendor's real cost, so a rep may not ADD such a product to a purchase order (or switch a line
+  -- to one): an admin adds that line with the real cost (Sol; Mason chose this 2026-10-20). Only
+  -- new or switched lines carry unit_cost_cents here; a rep can still edit and receive the line.
   IF jsonb_typeof(v_items) = 'array' AND EXISTS (
        SELECT 1 FROM jsonb_array_elements(v_items) AS e(value)
         WHERE jsonb_typeof(e.value) = 'object'
           AND e.value ? 'unit_cost_cents'
-          AND (e.value->>'unit_cost_cents')::bigint = 0
           AND COALESCE(public._supplier_cost_basis_enabled_for_product(
                 public._cost_step2_try_uuid(e.value->>'product_id')), false)) THEN
-    RAISE EXCEPTION 'PO_COST_REQUIRED: this product has no cost on file; an admin must set its cost before it is ordered'
+    RAISE EXCEPTION 'PO_COST_BASIS_ADMIN_ONLY: an admin must add this product to the purchase order, with its real cost'
       USING ERRCODE = 'P0001';
   END IF;
   RETURN public._save_purchase_order_cost_step2_impl(

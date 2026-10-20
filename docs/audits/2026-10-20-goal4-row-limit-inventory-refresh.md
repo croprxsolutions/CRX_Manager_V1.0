@@ -168,13 +168,16 @@ Plain-English terms: **paging** means asking for records one batch at a time unt
 - AR and prepay H15, H16, H20, H23, H38, H43, N1, N9, plus the report functions H19, H24 and H37 (paged like part 1's report functions);
 - integrity checks H25–H30;
 - compliance H32, H33 and H42, plus the logbook pickers M40;
-- Notifications (L10-1), with the bell badge (L9) counting unread notifications in the database instead of the 20 it loads.
+- Notifications (L10-1), with the bell badge (L9) counting unread notifications in the database instead of the 20 it loads;
+- the lookups and per-record reads that are simple full reads:
+  - M23, M24, M36, M54, M57, M62, N4, N5, N7, N8, N10, N11 and L17;
+  - M27 and M64, which must show the newest rows, not the oldest.
 
-Done when each reads past a 1,000-row fake in tests, and a live check with a 10-row page matches the database count, as in part 1. Size: one PR, similar to #981. H36 (dashboard counts) needs the function to return a true count, so it moves to part 4.
+Done when each reads past a 1,000-row fake in tests, and a live check with a 10-row page matches the database count, as in part 1. Size: likely two PRs (money and checks first, then the lookups). H36 (dashboard counts) needs the function to return a true count, so it moves to part 4.
 
 **Part 3, item (b): pickers become search boxes.**
 - Add customer and field search pickers beside the existing `ProductSearchPicker`. Each asks the database as you type and loads a saved choice by id.
-- Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the picker entries in M48, M49 and M50, M59, N2, N3 and N6.
+- Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the picker entries in M48, M49 and M50, M53, M59, N2, N3 and N6.
 - Screens that use the whole list are not pickers, and a search box would leave them capped. They keep a full paged read (`fetchAllRows`) or move into a database report instead:
   - Label Data Quality (M49, coverage and batch checks);
   - Brand vs Generic (M49 and N12, the mapping viewer);
@@ -196,5 +199,21 @@ Done when a search finds a record past the old limit on every picker. Probably t
   - tell the user the list changed instead of showing a silently wrong page.
 - This replaces part 1's "load everything" approach before history grows, and removes part 1's per-page counting cost (KNOWN_ISSUES "Deferred").
 - It likely needs new database search functions, which are non-destructive migrations, and the dashboard queue count (H36).
+- **Totals and exports come first.** Once a screen loads one page, its totals and exports would cover only that page. So a list is switched to one-screenful paging only in the same change that does both of these:
+  - its money totals and counts come from the database, which brings item (d) forward for that page;
+  - its CSV and PDF exports read the full filtered result.
 
-**Then (d) and (e)** as the plan says: money totals computed in the database, then the workload test.
+  This applies, for example, to Invoices (Posted and Outstanding cards, CSV and PDF) and Deliveries (exports). Every action that works on "all" rows selects its targets in the database.
+- Also in part 4:
+  - the Office Cockpit tiles (M20), including "Post all clean", which acts on every eligible draft;
+  - the Jobs billed-customer column (M52), read per page;
+  - the remaining list-like screens: M11, M18, M19, M21, M22, M25, M55, M56, M61 and M66, Customers (L1), Jobs (L2), and Team Board notes (L10-3).
+
+**Then (d) and (e)** as the plan says: database money totals for the remaining screens (part 1's fixed pages still add up in the browser from the full set), then the workload test.
+
+**Deliberately not scheduled.** These stay as they are, with the reason:
+- The per-record reads in N13, L20 and L19 (one record's lines, photos and notes, or small reference lists). Each holds tens of rows today.
+- The staff and setup tables in L22.
+- The by-design LOW items (L3–L7, L11–L15, L18, L21).
+
+Proof required to keep these deferred: the live table-size check in this audit (`pg_stat_user_tables`), re-run at each part's live check. Any table behind these items that reaches 500 rows is pulled into the next part.

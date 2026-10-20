@@ -205,7 +205,11 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   const [productSearchOpen, setProductSearchOpen] = useState<{ poIdx: number; itemIdx: number } | null>(null);
   const [productQuery, setProductQuery] = useState('');
 
+  // Only the newest load installs products: the load re-runs when the role changes, so an older
+  // (cost-less) load must not overwrite an admin's costed list (Codex review).
+  const productLoadSeqRef = useRef(0);
   const fetchProducts = async () => {
+    const seq = ++productLoadSeqRef.current;
     const { data, error } = await supabase
       .from('products')
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
@@ -222,6 +226,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
       toast('error', 'Failed to load products');
       return;
     }
+    if (seq !== productLoadSeqRef.current) return;
     setProducts(prods);
     setVendors([...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[]);
   };
@@ -229,7 +234,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   useEffect(() => {
     if (open) fetchProducts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, isAdmin]);
 
   useEffect(() => {
     if (!profile?.id || pendingProfileRef.current === profile.id) return;

@@ -106,13 +106,16 @@ under a column lock, admins included), admin screens read cost through an admin-
 cost on the server for non-admins. **Step 2 is written (2026-10-19, migration `20261019230000` plus the screens; not applied, PR
 pending):** every screen now lists the non-cost columns it reads (`src/lib/costFields.ts`, guarded by `costFields.test.ts`),
 admins add cost through `get_admin_cost_fields`, quote history comes through `get_quote_versions`, the three saves derive a
-non-admin's cost, and purchase orders follow Option A (reps order and receive without cost; an admin fills it in with **Enter Unit
-Cost** on the purchase order). Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
+non-admin's cost, and chemical history and Quick Receive no longer show purchase cost to reps. **Purchase orders are NOT part of
+step 2 (Mason, 2026-10-20, option 1 "for now"):** the purchase order screens and `save_purchase_order` are unchanged, so reps still
+see and enter purchase cost there. Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
 lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
-cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Known step-2 limits: a new PO line a rep adds (by hand or bulk import)
-takes the product's current cost, not the vendor's quoted price, until an admin corrects it, and on the supplier-cost-basis products
-that cost locks once the line is received (Mason chose this 2026-10-19 over a $0 line that would lock at $0). Because of that lock, a rep cannot add a supplier-cost-basis product to a purchase order at all (PO_COST_BASIS_ADMIN_ONLY): an admin adds that line with the real vendor cost; reps still order every other product and still receive (Mason, 2026-10-20, option A "for now"). **TOP-PRIORITY FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"):** how purchase cost should work end to end for reps on the supplier-cost-basis products, including a governed way to correct or at least track a received line's cost (today it cannot be changed after receipt), so reps can order those products again. A lost-response retry of a
-rep's new PO after the product cost changed is refused rather than replayed. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Step 3 must leave the columns the purchase order screens read (product `current_cost`, purchase order and line cost) unlocked
+until the purchase order project lands (`costFields.test.ts` names those four screens as its only exemption). **TOP-PRIORITY
+FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"): purchase orders as their own project.** Three Sol rounds
+on PR #965 showed any cost a rep's purchase order line is given (the catalog cost, or $0) can be wrong and then locked at receipt
+(the supplier-cost-basis snapshot trigger, and the writer's received-line rule), with no governed way to correct it. The project
+needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).

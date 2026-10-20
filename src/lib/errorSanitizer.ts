@@ -35,9 +35,6 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'You can only change or post invoices under your own name'],
   [/^CUSTOMER_HAS_OPEN_INVOICES\b/i,
    'This customer has posted or overdue invoices. Resolve them before deactivating the customer'],
-  // Purchase cost is admin-only (Mason, 2026-10-20): reps cannot add a supplier-cost-basis product.
-  [/^PO_COST_BASIS_ADMIN_ONLY\b/i,
-   'An admin must add this product to the purchase order, with its real cost. You can still add every other product'],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,

@@ -19,10 +19,8 @@
  *      the stored snapshot; driver refused.
  *   3. save_job: a rep's chemical cost is server-derived (281 per pt, 2250 per gal from 22.50/gal),
  *      the job total follows; an admin's sent cost is stored; a rep re-save keeps the admin's cost.
- *   4. save_purchase_order: a rep's cost is dropped (a new line gets the product's current cost,
- *      an existing line keeps its cost).
- *   5. set_purchase_order_item_costs: admin-only; fills a 0-cost line (also once received);
- *      RECEIVED_PO_LINE_IMMUTABLE; duplicate ids; idempotent replay; key reuse refused.
+ *   4. save_purchase_order is NOT changed (Mason, 2026-10-20, option 1): a rep's cost is stored as
+ *      sent, before and after.
  *   6. match_quick_receive_items: no unit_cost for a rep; is_no_return for everyone.
  *   7. get_chemical_history: a rep sees no purchase price; driver gets no rows.
  *   8. The private save_field_app_invoice / save_invoice rewrite helpers, called as the owner.
@@ -170,8 +168,8 @@ function pins() {
   const sql = lf(CANDIDATE).split('$preflight$')[1];
   const renamed = [...sql.matchAll(/\('(public\.[a-z_]+\([^']*\))', '([a-z_]+)', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[3]]);
   const relied = [...sql.matchAll(/^\s*\('(public\.[a-z_0-9]+\([^']*\))', '([0-9a-f]{32})'\)/gm)].map((m) => [m[1], m[2]]);
-  assert.equal(renamed.length, 6, 'the preflight pins the six renamed bodies');
-  assert.equal(relied.length, 11, 'the preflight pins the eleven bodies the rewrites and set_purchase_order_item_costs rely on');
+  assert.equal(renamed.length, 5, 'the preflight pins the five renamed bodies');
+  assert.equal(relied.length, 6, 'the preflight pins the six bodies the rewrites rely on');
   return [...renamed, ...relied];
 }
 function fidelity() {
@@ -196,7 +194,6 @@ const FIELD = id('1e1');
 const PROD = id('f1'); // current_cost 22.50 per gal, liquid
 const PROD_B = id('f2'); // current_cost 7.25 per gal
 const PROD_C = id('f3'); // current_cost 8.00 per gal (PO3 only)
-const PROD_Z = id('f4'); // supplier-cost-basis product (current_cost 9.00)
 const PO1 = id('101'); const PO2 = id('102'); const PO3 = id('103');
 const POI1 = id('201'); const POI2 = id('202'); const POI3 = id('203'); const POI4 = id('204');
 const FI = id('301'); const SI = id('302');
@@ -243,9 +240,7 @@ function seed() {
     INSERT INTO public.products (id, product_name, unit_size, current_cost, tier1_price, product_form, is_active) VALUES
       ('${PROD}', '[PROVER] Chem', 'gal', 22.50, 30.00, 'liquid', true),
       ('${PROD_B}', '[PROVER] Chem B', 'gal', 7.25, 12.00, 'liquid', true),
-      ('${PROD_C}', '[PROVER] Chem C', 'gal', 8.00, 12.00, 'liquid', true),
-      ('${PROD_Z}', '[PROVER] Chem Z', 'gal', 9.00, 12.00, 'liquid', true);
-    INSERT INTO public.product_cost_basis_rollout (product_id, rollout_scope) VALUES ('${PROD_Z}', 'wells_phase2_canary');
+      ('${PROD_C}', '[PROVER] Chem C', 'gal', 8.00, 12.00, 'liquid', true);
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO public.purchase_orders (id, po_number, vendor, status, submitted_date, created_by) VALUES
       ('${PO1}', 'PROVER-PO-1', 'Acme', 'submitted', CURRENT_DATE - 2, '${U.ADMIN}'),
@@ -340,8 +335,6 @@ const poReply = (call) => `(SELECT (SELECT string_agg(k, ',' ORDER BY k) FROM js
 const savePo = (poId, actor, line) => `public.save_purchase_order(${poId}, jsonb_build_object('vendor', '${PO_VENDOR}', 'status', 'draft'), jsonb_build_array(${line}), '${actor}', NULL)`;
 const poLine = (extra) => `jsonb_build_object('product_id', '${PROD_C}', 'unit_size', 'gal'${extra})`;
 
-const setCosts = (actor, items, key) => `public.set_purchase_order_item_costs('${PO3}', ${j(items)}, '${actor}', '${key}')`;
-const PO3_STORED = `(SELECT string_agg(poi.unit_cost_cents::text, ',' ORDER BY poi.id) FROM public.purchase_order_items poi WHERE poi.purchase_order_id = '${PO3}') || '|' || (SELECT po.total_cost_cents FROM public.purchase_orders po WHERE po.id = '${PO3}')`;
 
 // "<reply mentions unit_cost>|<is_no_return per allocation>|<unit_cost per allocation>"
 const MATCH = `(SELECT (r::text LIKE '%unit_cost%') || '|' || (SELECT string_agg(COALESCE(a->>'is_no_return', '-'), ',' ORDER BY o) FROM jsonb_array_elements(r->0->'allocations') WITH ORDINALITY x(a, o))
@@ -414,45 +407,11 @@ const SCENARIOS = [
     ['admin creates with 123 / 4567', U.ADMIN, saveJob('NULL', U.ADMIN, 123, 4567), 'ok|true', 'same'],
     ['stored', 'owner', JOB_STORED, 'ok|123,4567|46900', 'same'],
   ] },
-  { name: '4. save_purchase_order', steps: [
-    ['rep creates with unit_cost_cents 999', U.REP, poReply(savePo('NULL', U.REP, poLine(", 'quantity_ordered', 4, 'unit_cost_cents', 999"))), /^ok\|.*\|(true|false)$/, /^ok\|.*\|false$/],
-    // A rep's new line gets the product's current cost (PROD_C: $8.00), never the rep's 999 and never 0.
-    ['stored after rep create', 'owner', PO_STORED, 'ok|4:999|3996', 'ok|4:800|3200'],
-    ['admin edit sets 1500', U.ADMIN, poReply(savePo(PONEW, U.ADMIN, `${poLine(", 'quantity_ordered', 4, 'unit_cost_cents', 1500")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, 'same'],
-    ['stored after admin edit', 'owner', PO_STORED, 'ok|4:1500|6000', 'same'],
-    ['rep edits quantity, no cost keys', U.REP, poReply(savePo(PONEW, U.REP, `${poLine(", 'quantity_ordered', 6")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
-    ['stored after rep quantity edit', 'owner', PO_STORED, 'ok|6:1500|9000', 'same'],
-    ['rep edit sends unit_cost_cents 1', U.REP, poReply(savePo(PONEW, U.REP, `${poLine(", 'quantity_ordered', 6, 'unit_cost_cents', 1")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
-    ['stored after rep cost 1', 'owner', PO_STORED, 'ok|6:1|6', 'ok|6:1500|9000'],
-    // A rep switching the existing line to another product gets that product's cost (PROD_B: $7.25),
-    // not the old product's stored cost (CodeRabbit).
-    ['rep switches the line to another product', U.REP, poReply(savePo(PONEW, U.REP, `jsonb_build_object('product_id', '${PROD_B}', 'unit_size', 'gal', 'quantity_ordered', 6) || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
-    ['stored after rep product switch', 'owner', PO_STORED, /^ok\|6:\d+\|\d+$/, 'ok|6:725|4350'],
-    // A rep may not add a supplier-cost-basis product line at all, even with a catalog cost: its
-    // received cost locks and the rep cannot enter the vendor's real cost (Sol; Mason 2026-10-20).
-    ['rep new line on a cost-basis product', U.REP, poReply(`public.save_purchase_order(NULL, jsonb_build_object('vendor', '[PROVER] Vendor Z', 'status', 'draft'), jsonb_build_array(jsonb_build_object('product_id', '${PROD_Z}', 'unit_size', 'gal', 'quantity_ordered', 1)), '${U.REP}', NULL)`), /^ok\|/, /^P0001\|PO_COST_BASIS_ADMIN_ONLY/],
-  ] },
-  { name: '5a. set_purchase_order_item_costs', steps: [
-    ['rep refused', U.REP, setCosts(U.REP, [{ id: POI3, unit_cost_cents: 700 }], 'k-rep'), MISSING_FN, DENIED],
-    ['driver refused', U.DRIVER, setCosts(U.DRIVER, [{ id: POI3, unit_cost_cents: 700 }], 'k-drv'), MISSING_FN, DENIED],
-    ['admin duplicate ids', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }, { id: POI3, unit_cost_cents: 700 }], 'k-dup'), MISSING_FN, /^P0001\|PO_ITEM_ID_DUPLICATE/],
-    // Luna round 1: the same line spelled in upper and lower case is still one line.
-    ['admin duplicate ids differing only in case', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }, { id: POI3.toUpperCase(), unit_cost_cents: 800 }], 'k-dup-case'), MISSING_FN, /^P0001\|PO_ITEM_ID_DUPLICATE/],
-    ['admin no key', U.ADMIN, `public.set_purchase_order_item_costs('${PO3}', ${j([{ id: POI3, unit_cost_cents: 700 }])}, '${U.ADMIN}', NULL)`, MISSING_FN, /^P0001\|IDEMPOTENCY_KEY_REQUIRED/],
-    ['admin fills the 0-cost line', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }], 'k1'), MISSING_FN, `ok|{"po_id": "${PO3}", "status": "saved", "lines_changed": 1}`],
-    ['stored after fill', 'owner', PO3_STORED, 'ok|0,800|4000', 'ok|700,800|7500'],
-    ['admin replays the same key', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }], 'k1'), MISSING_FN, `ok|{"po_id": "${PO3}", "status": "saved", "lines_changed": 1}`],
-    ['admin reuses the key for another payload', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 701 }], 'k1'), MISSING_FN, /^22023\|IDEMPOTENCY_INTENT_MISMATCH$/],
-    ['stored after replay + refused reuse', 'owner', PO3_STORED, 'ok|0,800|4000', 'ok|700,800|7500'],
-  ] },
-  { name: '5b. set_purchase_order_item_costs on received lines', steps: [
-    ['mark both PO3 lines received; cost basis off', 'owner', { stmt: `UPDATE public.purchase_order_items SET quantity_received = 5 WHERE id IN ('${POI3}', '${POI4}');
-        v := public._supplier_cost_basis_enabled_for_product('${PROD_C}')::text;` }, 'ok|false', 'same'],
-    ['admin fills the received 0-cost line', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 700 }], 'k2'), MISSING_FN, `ok|{"po_id": "${PO3}", "status": "saved", "lines_changed": 1}`],
-    ['stored after fill', 'owner', `${PO3_STORED} || '|' || (SELECT string_agg(quantity_received::int::text, ',' ORDER BY id) FROM public.purchase_order_items WHERE purchase_order_id = '${PO3}')`, 'ok|0,800|4000|5,5', 'ok|700,800|7500|5,5'],
-    ['admin changes a received costed line', U.ADMIN, setCosts(U.ADMIN, [{ id: POI4, unit_cost_cents: 900 }], 'k3'), MISSING_FN, /^P0001\|RECEIVED_PO_LINE_IMMUTABLE: /],
-    ['admin changes the line it just filled', U.ADMIN, setCosts(U.ADMIN, [{ id: POI3, unit_cost_cents: 800 }], 'k4'), MISSING_FN, /^P0001\|RECEIVED_PO_LINE_IMMUTABLE: /],
-    ['stored after refusals', 'owner', PO3_STORED, 'ok|0,800|4000', 'ok|700,800|7500'],
+  { name: '4. save_purchase_order is unchanged (purchase orders are not part of step 2)', steps: [
+    ['rep creates with unit_cost_cents 999', U.REP, poReply(savePo('NULL', U.REP, poLine(", 'quantity_ordered', 4, 'unit_cost_cents', 999"))), /^ok\|/, 'same'],
+    ['stored after rep create', 'owner', PO_STORED, 'ok|4:999|3996', 'same'],
+    ['rep edit sends unit_cost_cents 1500', U.REP, poReply(savePo(PONEW, U.REP, `${poLine(", 'quantity_ordered', 6, 'unit_cost_cents', 1500")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, 'same'],
+    ['stored after rep edit', 'owner', PO_STORED, 'ok|6:1500|9000', 'same'],
   ] },
   { name: '6. match_quick_receive_items', steps: [
     ['rep', U.REP, MATCH, 'ok|true|-,-|10.00,12.00', 'ok|false|true,false|-,-'],
@@ -517,14 +476,14 @@ function grants() {
       has_function_privilege('service_role', p.oid, 'EXECUTE'), p.prosecdef
     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
      AND (p.proname LIKE '\\_%\\_cost\\_step2\\_impl' OR p.proname LIKE '\\_cost\\_step2\\_%'
-          OR p.proname IN ('save_job', 'save_field_app_invoice', 'save_invoice', 'save_purchase_order', 'get_chemical_history',
-                           'match_quick_receive_items', 'set_purchase_order_item_costs', 'get_quote_versions', 'get_admin_cost_fields'))
+          OR p.proname IN ('save_job', 'save_field_app_invoice', 'save_invoice', 'get_chemical_history',
+                           'match_quick_receive_items', 'get_quote_versions', 'get_admin_cost_fields'))
     ORDER BY 1;` }).stdout.trim().split(/\r?\n/).map((l) => l.split('|'));
   const priv = rows.filter(([sig]) => sig.startsWith('_'));
   const pub = rows.filter(([sig]) => !sig.startsWith('_'));
-  assert.equal(priv.length, 13, `expected 6 renamed impls + 7 helpers, got:\n${priv.map((r) => r[0]).join('\n')}`);
+  assert.equal(priv.length, 11, `expected 5 renamed impls + 6 helpers, got:\n${priv.map((r) => r[0]).join('\n')}`);
   for (const [sig, anon, auth, svc] of priv) assert.deepEqual([anon, auth, svc], ['f', 'f', 'f'], `${sig} is executable by an API role`);
-  assert.equal(pub.length, 9, `expected nine public functions, got:\n${pub.map((r) => r[0]).join('\n')}`);
+  assert.equal(pub.length, 7, `expected seven public functions, got:\n${pub.map((r) => r[0]).join('\n')}`);
   for (const [sig, anon, auth, , secdef] of pub) assert.deepEqual([anon, auth, secdef], ['f', 't', 't'], `${sig}: anon must not, authenticated must execute, and it must be SECURITY DEFINER`);
   console.log(`[prover] GRANTS: ${priv.length} private impls/helpers executable by no API role (anon, authenticated, service_role); ${pub.length} public functions executable by authenticated, not anon`);
 }
@@ -557,24 +516,21 @@ function unapply() {
   psql(`BEGIN;
     DROP FUNCTION IF EXISTS public.get_admin_cost_fields(text, uuid[]);
     DROP FUNCTION IF EXISTS public.get_quote_versions(uuid);
-    DROP FUNCTION IF EXISTS public.set_purchase_order_item_costs(uuid, jsonb, uuid, text);
     DROP FUNCTION public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text);
     ALTER FUNCTION public._save_job_cost_step2_impl(uuid, jsonb, jsonb, jsonb, uuid, text) RENAME TO save_job;
     DROP FUNCTION public.save_field_app_invoice(uuid, jsonb, jsonb, jsonb, uuid, uuid, text);
     ALTER FUNCTION public._save_field_app_invoice_cost_step2_impl(uuid, jsonb, jsonb, jsonb, uuid, uuid, text) RENAME TO save_field_app_invoice;
     DROP FUNCTION public.save_invoice(jsonb, jsonb, text);
     ALTER FUNCTION public._save_invoice_cost_step2_impl(jsonb, jsonb, text) RENAME TO save_invoice;
-    DROP FUNCTION public.save_purchase_order(uuid, jsonb, jsonb, uuid, text);
-    ALTER FUNCTION public._save_purchase_order_cost_step2_impl(uuid, jsonb, jsonb, uuid, text) RENAME TO save_purchase_order;
     DROP FUNCTION public.get_chemical_history(uuid, date, date);
     ALTER FUNCTION public._get_chemical_history_cost_step2_impl(uuid, date, date) RENAME TO get_chemical_history;
     DROP FUNCTION public.match_quick_receive_items(jsonb, text);
     ALTER FUNCTION public._match_quick_receive_items_cost_step2_impl(jsonb, text) RENAME TO match_quick_receive_items;
     GRANT EXECUTE ON FUNCTION public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text), public.save_field_app_invoice(uuid, jsonb, jsonb, jsonb, uuid, uuid, text),
-      public.save_invoice(jsonb, jsonb, text), public.save_purchase_order(uuid, jsonb, jsonb, uuid, text), public.get_chemical_history(uuid, date, date),
+      public.save_invoice(jsonb, jsonb, text), public.get_chemical_history(uuid, date, date),
       public.match_quick_receive_items(jsonb, text) TO authenticated, service_role;
     DROP FUNCTION public._cost_step2_job_chemicals(uuid, jsonb), public._cost_step2_field_app_chemicals(uuid, jsonb), public._cost_step2_invoice_items(jsonb, jsonb),
-      public._cost_step2_po_items(uuid, jsonb), public._cost_step2_snapshot_without_cost(jsonb), public._cost_step2_product_cost_cents(uuid), public._cost_step2_try_uuid(text);
+      public._cost_step2_snapshot_without_cost(jsonb), public._cost_step2_product_cost_cents(uuid), public._cost_step2_try_uuid(text);
     COMMIT;`);
   console.log('[prover] (reuse) un-applied the candidate with its ROLLBACK recipe');
 }

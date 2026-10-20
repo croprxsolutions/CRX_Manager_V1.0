@@ -1,10 +1,9 @@
 -- Written 2026-10-19. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migration-history.md.
 --
--- idempotency-body-check: exempt -- set_purchase_order_item_costs binds its receipt to the actor
---   and request with check_idempotency_intent (the receive_po_items pattern) and then writes it
---   with save_idempotency; the four save wrappers delegate to their renamed bodies, which keep
---   their own idempotency unchanged. The hook only recognises check_idempotency().
+-- idempotency-body-check: exempt -- the three save wrappers delegate to their renamed bodies, which
+--   keep their own idempotency unchanged; this file adds no other mutating function. The hook only
+--   recognises check_idempotency().
 --
 -- WHAT: Goal 1 part 3, step 2 of 3 (docs/plans/2026-10-13-direction-and-goals.md): product cost
 --   and margin are ADMIN-ONLY (Mason, 2026-10-15). Step 1 (20261019010000, live) closed the
@@ -40,17 +39,7 @@
 --      rows the first attempt wrote, with the costs it wrote), unless an admin changed that
 --      product's catalog cost in between: then the fingerprint-bound writers refuse the retry as a
 --      changed request, which the screens already explain as "the earlier save completed".
---   4. Purchase orders, Mason's decision 2026-10-18 (Option A): reps keep creating purchase orders
---      and receiving, but cannot see or enter unit cost.
---        save_purchase_order   for a non-admin, unit_cost / unit_cost_cents are dropped from every
---                              line: an existing line keeps its stored cost (the writer already
---                              hydrates it, 20260726190515) and a new line gets the product's
---                              current cost (never 0, so nothing received can lock at $0).
---        set_purchase_order_item_costs  NEW, admin-only: fill in unit cost later, including on a
---                              line a rep has already received, provided that line was never costed
---                              (0). The cost-snapshot trigger still refuses this for the products on
---                              the supplier cost-basis rollout; that line has to be costed before
---                              it is received, or its receipt reversed first.
+--   4. Purchase cost on two read paths reps use:
 --        get_chemical_history  now admin-or-sales-rep (everyone else gets no rows, as RLS gave them
 --                              before) and a non-admin sees no purchase cost (unit price and total
 --                              are NULL on Purchase rows). SECURITY DEFINER so step 3's column lock
@@ -59,20 +48,18 @@
 --                              allocation gains is_no_return (cheaper than the product's dearest
 --                              open line), which the receiving screen's NO-RETURN badge needs.
 --
---   Whole-cent CHECKs: set_purchase_order_item_costs writes the legacy numeric-dollar columns
---   purchase_order_items.unit_cost and purchase_orders.total_cost, so each gains the house finite
---   whole-cent CHECK, <table>_<column>_whole_cents_chk (docs/workflows/SAFE_DEVELOPMENT_RULES.md):
---   non-negative, whole cents, finite (NaN and Infinity refused) and equal to its generated cents
---   column. Live read 2026-10-19: 0 of 194 lines and 0 of 34 purchase orders would fail. The older
---   *_whole_cents constraints stay; nothing is dropped and no row changes.
---
 --   The changed functions use the house rename-and-wrap pattern (20261019010000): each live body is
 --   RENAMED unchanged to _<name>_cost_step2_impl, every API role loses EXECUTE on it, and a public
 --   wrapper with the identical signature, defaults and return type takes its name. Admins pass
 --   straight through; the wrapper rewrites only a non-admin's request (or reply).
 --
--- NOT HERE (deliberately): the column REVOKE itself (step 3, applied only after these screens are
---   live). create_order_from_blend_ticket, manual_inventory_add, complete_delivery and complete_job
+-- NOT HERE (deliberately): purchase orders (Mason, 2026-10-20, option 1 "for now"). Purchase order
+--   screens and save_purchase_order stay exactly as they are; reps still see and enter purchase cost
+--   there. Three review rounds showed any cost a rep's line is given can be wrong and then locked
+--   at receipt, so purchase orders become their own project together with a governed way to correct
+--   or track a received cost (docs/manual/KNOWN_ISSUES.md). The column REVOKE itself (step 3, applied
+--   only after these screens are live; it must leave the purchase order cost columns alone until
+--   that project lands). create_order_from_blend_ticket, manual_inventory_add, complete_delivery and complete_job
 --   belong to the replay-binding batches (PR #954 is open). compute_application_service_fee needs
 --   nothing: only postgres and service_role may execute it (live ACL read 2026-10-19), so no browser
 --   ever received its cost. dashboard_summary is already admin-only (step 1, verified live
@@ -82,18 +69,14 @@
 -- caller-analysis: save_job :: JobDetail.tsx; admins unchanged, a rep's chemical cost is derived here
 -- caller-analysis: save_field_app_invoice :: FieldApplicationInvoice.tsx; admins unchanged, a rep's chemical cost is derived here
 -- caller-analysis: save_invoice :: InvoiceDetail.tsx; admins unchanged, a rep's line cost is derived here
--- caller-analysis: save_purchase_order :: NewPurchaseOrder.tsx, PurchaseOrderDetail.tsx, BulkPOImport.tsx; admins unchanged, a rep's cost input is ignored (a new line takes the product's current cost)
 -- caller-analysis: get_chemical_history :: Reports.tsx chemical history; admins unchanged, reps lose purchase cost, other roles already got no rows
 -- caller-analysis: match_quick_receive_items :: QuickReceivePanel.tsx, offlineSync.ts; admins unchanged, a rep's reply has no unit_cost
 -- caller-analysis: get_admin_cost_fields :: NEW; src/lib/costFields.ts (admin screens only)
 -- caller-analysis: get_quote_versions :: NEW; QuoteBuilder.tsx version history
--- caller-analysis: set_purchase_order_item_costs :: NEW; PurchaseOrderDetail.tsx (admin only)
 --
--- ROLLBACK: DROP the three new functions; for each wrapped function DROP the wrapper, RENAME
+-- ROLLBACK: DROP the two new functions; for each wrapped function DROP the wrapper, RENAME
 --   _<name>_cost_step2_impl back to <name> and GRANT EXECUTE TO authenticated, service_role (the
---   live grants on 2026-10-19; never PUBLIC or anon). DROP the seven private helpers. No data changes.
---   ALTER TABLE public.purchase_order_items DROP CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk;
---   ALTER TABLE public.purchase_orders DROP CONSTRAINT purchase_orders_total_cost_whole_cents_chk;
+--   live grants on 2026-10-19; never PUBLIC or anon). DROP the six private helpers. No data changes.
 
 SET LOCAL lock_timeout = '10s';
 
@@ -110,7 +93,6 @@ BEGIN
       ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'save_job', '8acf34542105a90212ddb0a5e7c5d272'),
       ('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'save_field_app_invoice', '8700762576625bd06a833845d57ddbb6'),
       ('public.save_invoice(jsonb,jsonb,text)', 'save_invoice', 'cb932dc51a680442affde5aeba2eaee3'),
-      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'save_purchase_order', 'd6161fc6c0c0402bdead9235d5466d5f'),
       ('public.get_chemical_history(uuid,date,date)', 'get_chemical_history', 'a625bbe0eeded3089671740002554624'),
       ('public.match_quick_receive_items(jsonb,text)', 'match_quick_receive_items', '2f674b20b0eefaa13a894d82d87c3abe')
     ) AS v(sig, name, md5)
@@ -140,8 +122,6 @@ BEGIN
   -- Bodies whose behaviour the rewrites depend on.
   FOR r IN
     SELECT * FROM (VALUES
-      -- hydrates a line's stored cost when the request omits unit_cost/unit_cost_cents
-      ('public._save_purchase_order_atomic_number_impl(uuid,jsonb,jsonb,uuid,text)', 'ebc897c7df1430fa3b6d828f2b431cd2'),
       -- reads chemical cost_cents per the product's sold unit
       ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '29d699a8b0698424345a78e9aac9dcd1'),
       -- takes a field line's cost_cents from the request; re-derives sale lines from the product
@@ -150,13 +130,7 @@ BEGIN
       ('public.field_app_priced_quantity(numeric,text,text,text)', 'bc91a52577840973f18f1710e47edf2b'),
       ('public.is_admin()', 'f76bf61116c3bd52bd9c6ea125079b73'),
       ('public.is_sales_rep()', 'fcb3133010fe3f4f56e3be31f709d102'),
-      ('public.require_admin()', '83dbda095d67a37031d5cd093a605a78'),
-      -- set_purchase_order_item_costs: operation-scoped, actor-bound receipts and the PO cent parser
-      ('public.check_idempotency_intent(text,text,uuid,text)', 'edc73be809069669e8441eba7acf443d'),
-      ('public.save_idempotency(text,text,jsonb)', 'f600171c426e48c995f204c4dac3ff8b'),
-      ('public._purchase_order_item_unit_cost_cents(jsonb)', '0fa4a7fee34fc8d76ef605e44a0bebfa'),
-      -- save_purchase_order: a rep may not add a supplier-cost-basis product line
-      ('public._supplier_cost_basis_enabled_for_product(uuid)', '6de9259b699ea2c8642cf8914b3590ac')
+      ('public.require_admin()', '83dbda095d67a37031d5cd093a605a78')
     ) AS v(sig, md5)
   LOOP
     IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
@@ -170,8 +144,7 @@ BEGIN
   FOR r IN
     SELECT * FROM (VALUES
       ('get_admin_cost_fields', 'get_admin_cost_fields(text,uuid[])'),
-      ('get_quote_versions', 'get_quote_versions(uuid)'),
-      ('set_purchase_order_item_costs', 'set_purchase_order_item_costs(uuid,jsonb,uuid,text)')
+      ('get_quote_versions', 'get_quote_versions(uuid)')
     ) AS v(name, sig)
   LOOP
     IF to_regproc('public._save_job_cost_step2_impl') IS NULL THEN
@@ -203,9 +176,6 @@ BEGIN
   IF to_regproc('public._save_invoice_cost_step2_impl') IS NULL THEN
     ALTER FUNCTION public.save_invoice(jsonb, jsonb, text) RENAME TO _save_invoice_cost_step2_impl;
   END IF;
-  IF to_regproc('public._save_purchase_order_cost_step2_impl') IS NULL THEN
-    ALTER FUNCTION public.save_purchase_order(uuid, jsonb, jsonb, uuid, text) RENAME TO _save_purchase_order_cost_step2_impl;
-  END IF;
   IF to_regproc('public._get_chemical_history_cost_step2_impl') IS NULL THEN
     ALTER FUNCTION public.get_chemical_history(uuid, date, date) RENAME TO _get_chemical_history_cost_step2_impl;
   END IF;
@@ -218,7 +188,6 @@ $rename$;
 REVOKE ALL ON FUNCTION public._save_job_cost_step2_impl(uuid, jsonb, jsonb, jsonb, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._save_field_app_invoice_cost_step2_impl(uuid, jsonb, jsonb, jsonb, uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._save_invoice_cost_step2_impl(jsonb, jsonb, text) FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public._save_purchase_order_cost_step2_impl(uuid, jsonb, jsonb, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._get_chemical_history_cost_step2_impl(uuid, date, date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._match_quick_receive_items_cost_step2_impl(jsonb, text) FROM PUBLIC, anon, authenticated, service_role;
 
@@ -461,43 +430,6 @@ BEGIN
 END;
 $function$;
 
--- save_purchase_order (non-admin): drop any cost the request carries.
--- save_purchase_order (non-admin): the rep's cost keys are dropped. A line already on this purchase
--- order keeps its stored cost (the impl fills it in when no cost key is sent). A NEW line, or an
--- existing line switched to another product, gets the product's current cost, never 0: on the supplier-cost-basis products a received line's cost is
--- locked, so a rep receiving a $0 line would freeze it at $0 (Sol, 2026-10-19; Mason chose this).
--- An admin can still change the cost before the line is received.
-CREATE OR REPLACE FUNCTION public._cost_step2_po_items(p_po_id uuid, p_items jsonb)
-RETURNS jsonb
-LANGUAGE sql STABLE
-SET search_path = public, pg_temp
-AS $function$
-  SELECT CASE
-    WHEN jsonb_typeof(p_items) IS DISTINCT FROM 'array' THEN p_items
-    ELSE COALESCE((
-      SELECT jsonb_agg(
-               CASE
-                 WHEN jsonb_typeof(e.value) IS DISTINCT FROM 'object' THEN e.value
-                 WHEN EXISTS (
-                   SELECT 1 FROM public.purchase_order_items poi
-                    WHERE p_po_id IS NOT NULL
-                      AND poi.purchase_order_id = p_po_id
-                      AND poi.id = public._cost_step2_try_uuid(e.value->>'id')
-                      -- A line switched to another product is priced like a new line (CodeRabbit):
-                      -- otherwise the writer would keep the old product's stored cost.
-                      AND (e.value->>'product_id' IS NULL
-                           OR poi.product_id = public._cost_step2_try_uuid(e.value->>'product_id')))
-                   THEN e.value - 'unit_cost' - 'unit_cost_cents'
-                 ELSE (e.value - 'unit_cost' - 'unit_cost_cents')
-                      || jsonb_build_object('unit_cost_cents', COALESCE(
-                           public._cost_step2_product_cost_cents(public._cost_step2_try_uuid(e.value->>'product_id')), 0))
-               END
-               ORDER BY e.ord)
-        FROM jsonb_array_elements(p_items) WITH ORDINALITY AS e(value, ord)
-    ), '[]'::jsonb)
-  END;
-$function$;
-
 -- Quote snapshots for a non-admin: every value under a key naming cost, profit or margin, at any
 -- depth, becomes NULL. Keys are kept so the screen still recognises the snapshot's shape.
 CREATE OR REPLACE FUNCTION public._cost_step2_snapshot_without_cost(p_value jsonb)
@@ -531,7 +463,6 @@ REVOKE ALL ON FUNCTION public._cost_step2_product_cost_cents(uuid) FROM PUBLIC, 
 REVOKE ALL ON FUNCTION public._cost_step2_job_chemicals(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._cost_step2_field_app_chemicals(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._cost_step2_invoice_items(jsonb, jsonb) FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public._cost_step2_po_items(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._cost_step2_snapshot_without_cost(jsonb) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
@@ -606,205 +537,8 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------
--- 4. Purchase orders (Option A, Mason 2026-10-18).
+-- 4. Purchase cost on two read paths reps use (purchase orders themselves are not changed here).
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.save_purchase_order(
-  p_po_id uuid, p_po_payload jsonb, p_items jsonb, p_performed_by uuid,
-  p_idempotency_key text DEFAULT NULL::text
-)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $function$
-DECLARE
-  v_items jsonb;
-BEGIN
-  IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
-    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
-  END IF;
-  -- Reps create and edit purchase orders but cannot enter unit cost: an existing line keeps its
-  -- stored cost and a new line gets the product's current cost; an admin can change it later.
-  IF public.is_admin() THEN
-    RETURN public._save_purchase_order_cost_step2_impl(
-      p_po_id, p_po_payload, p_items, p_performed_by, p_idempotency_key);
-  END IF;
-  v_items := public._cost_step2_po_items(p_po_id, p_items);
-  -- A supplier-cost-basis product locks a received line's cost, and a rep cannot see or enter the
-  -- vendor's real cost, so a rep may not ADD such a product to a purchase order (or switch a line
-  -- to one): an admin adds that line with the real cost (Sol; Mason chose this 2026-10-20). Only
-  -- new or switched lines carry unit_cost_cents here; a rep can still edit and receive the line.
-  IF jsonb_typeof(v_items) = 'array' AND EXISTS (
-       SELECT 1 FROM jsonb_array_elements(v_items) AS e(value)
-        WHERE jsonb_typeof(e.value) = 'object'
-          AND e.value ? 'unit_cost_cents'
-          AND COALESCE(public._supplier_cost_basis_enabled_for_product(
-                public._cost_step2_try_uuid(e.value->>'product_id')), false)) THEN
-    RAISE EXCEPTION 'PO_COST_BASIS_ADMIN_ONLY: an admin must add this product to the purchase order, with its real cost'
-      USING ERRCODE = 'P0001';
-  END IF;
-  RETURN public._save_purchase_order_cost_step2_impl(
-    p_po_id, p_po_payload, v_items, p_performed_by, p_idempotency_key);
-END;
-$function$;
-
--- The two legacy numeric-dollar columns set_purchase_order_item_costs writes get the house finite
--- whole-cent CHECK. Re-runnable: an existing one is not re-added; the verify block checks its shape.
-DO $whole_cents$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'public.purchase_order_items'::regclass
-      AND conname = 'purchase_order_items_unit_cost_whole_cents_chk'
-  ) THEN
-    ALTER TABLE public.purchase_order_items
-      ADD CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk
-      CHECK (
-        unit_cost >= 0
-        AND unit_cost = round(unit_cost, 2)
-        AND unit_cost < 'Infinity'::numeric
-        AND unit_cost = unit_cost_cents::numeric / 100.0
-      );
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'public.purchase_orders'::regclass
-      AND conname = 'purchase_orders_total_cost_whole_cents_chk'
-  ) THEN
-    ALTER TABLE public.purchase_orders
-      ADD CONSTRAINT purchase_orders_total_cost_whole_cents_chk
-      CHECK (
-        total_cost >= 0
-        AND total_cost = round(total_cost, 2)
-        AND total_cost < 'Infinity'::numeric
-        AND total_cost = total_cost_cents::numeric / 100.0
-      );
-  END IF;
-END
-$whole_cents$;
-
-CREATE OR REPLACE FUNCTION public.set_purchase_order_item_costs(
-  p_po_id uuid, p_items jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text
-)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $function$
-DECLARE
-  v_actor uuid := auth.uid();
-  v_fingerprint text;
-  v_replay jsonb;
-  v_status text;
-  v_po_number text;
-  v_item jsonb;
-  v_item_id uuid;
-  v_cents bigint;
-  v_line record;
-  v_changed integer := 0;
-  v_result jsonb;
-BEGIN
-  IF v_actor IS NULL THEN
-    RAISE EXCEPTION 'AUTH_REQUIRED';
-  END IF;
-  IF p_performed_by IS DISTINCT FROM v_actor THEN
-    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
-  END IF;
-  -- Purchase cost is admin-only (Mason, 2026-10-18, Option A).
-  PERFORM public.require_admin();
-  IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: set_purchase_order_item_costs requires p_idempotency_key';
-  END IF;
-  IF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items) = 0 THEN
-    RAISE EXCEPTION 'PO_ITEMS_REQUIRED';
-  END IF;
-  -- Compared as uuids: the same line spelled in upper and lower case is one line.
-  IF (SELECT count(*) <> count(DISTINCT public._cost_step2_try_uuid(e.value->>'id'))
-        OR bool_or(public._cost_step2_try_uuid(e.value->>'id') IS NULL)
-        FROM jsonb_array_elements(p_items) AS e(value)) THEN
-    RAISE EXCEPTION 'PO_ITEM_ID_DUPLICATE: each line must appear once, by a valid id';
-  END IF;
-
-  -- The same advisory lock save_purchase_order takes, in the same order (before the key lock).
-  PERFORM pg_advisory_xact_lock(73492009);
-
-  v_fingerprint := encode(extensions.digest(convert_to(jsonb_build_object(
-    'actor_id', v_actor, 'po_id', p_po_id, 'items', p_items
-  )::text, 'UTF8'), 'sha256'), 'hex');
-  v_replay := public.check_idempotency_intent(
-    p_idempotency_key, 'set_purchase_order_item_costs', v_actor, v_fingerprint);
-  IF v_replay IS NOT NULL THEN
-    RETURN v_replay -> 'result';
-  END IF;
-
-  SELECT status, po_number INTO v_status, v_po_number
-    FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Purchase order not found: %', p_po_id;
-  END IF;
-  IF v_status = 'cancelled' THEN
-    RAISE EXCEPTION 'Cannot change cost on a cancelled purchase order';
-  END IF;
-
-  FOR v_item IN SELECT e.value FROM jsonb_array_elements(p_items) AS e(value)
-  LOOP
-    IF jsonb_typeof(v_item) IS DISTINCT FROM 'object' OR NOT (v_item ? 'unit_cost_cents') THEN
-      RAISE EXCEPTION 'PO_UNIT_COST_REQUIRED';
-    END IF;
-    v_item_id := public._cost_step2_try_uuid(v_item->>'id');
-    IF v_item_id IS NULL THEN
-      RAISE EXCEPTION 'PO_ITEM_ID_REQUIRED';
-    END IF;
-    -- whole cents, not negative (the PO writer's own parser)
-    v_cents := public._purchase_order_item_unit_cost_cents(v_item - 'unit_cost');
-
-    SELECT poi.id, poi.unit_cost_cents, poi.quantity_received INTO v_line
-      FROM public.purchase_order_items poi
-     WHERE poi.id = v_item_id AND poi.purchase_order_id = p_po_id
-     FOR UPDATE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'PO_ITEM_ID_NOT_IN_PURCHASE_ORDER';
-    END IF;
-    CONTINUE WHEN v_line.unit_cost_cents IS NOT DISTINCT FROM v_cents;
-
-    -- A received line is purchase evidence: only a line that was never costed (0) may be filled in.
-    IF (COALESCE(v_line.quantity_received, 0) > 0
-        OR EXISTS (SELECT 1 FROM public.receiving_records rr WHERE rr.po_item_id = v_item_id))
-       AND COALESCE(v_line.unit_cost_cents, 0) <> 0 THEN
-      RAISE EXCEPTION 'RECEIVED_PO_LINE_IMMUTABLE: reverse the receiving record before changing the cost of a received PO line'
-        USING ERRCODE = 'P0001';
-    END IF;
-
-    UPDATE public.purchase_order_items
-       SET unit_cost = v_cents::numeric / 100.0
-     WHERE id = v_item_id;
-    v_changed := v_changed + 1;
-  END LOOP;
-
-  UPDATE public.purchase_orders po
-     SET total_cost = COALESCE((
-           SELECT SUM(round(poi.quantity_ordered * poi.unit_cost_cents)::bigint)
-             FROM public.purchase_order_items poi
-            WHERE poi.purchase_order_id = po.id), 0)::numeric / 100.0,
-         updated_at = now()
-   WHERE po.id = p_po_id;
-
-  IF v_changed > 0 THEN
-    INSERT INTO public.activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id)
-    VALUES ('po_updated', 'PO ' || COALESCE(v_po_number, '') || ' unit cost entered', v_actor, 'purchase_order', p_po_id);
-  END IF;
-
-  v_result := jsonb_build_object('status', 'saved', 'po_id', p_po_id, 'lines_changed', v_changed);
-  PERFORM public.save_idempotency(p_idempotency_key, 'set_purchase_order_item_costs', v_result);
-  UPDATE public.idempotency_keys
-     SET request_fingerprint = v_fingerprint, request_actor_id = v_actor
-   WHERE idempotency_key = p_idempotency_key AND operation = 'set_purchase_order_item_costs';
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_RECEIPT_MISSING';
-  END IF;
-  RETURN v_result;
-END;
-$function$;
-
 -- Row scope is unchanged by running as definer: the body reads orders, order_items, customers,
 -- purchase_orders and purchase_order_items, whose SELECT policies (read live 2026-10-19) all let an
 -- admin or a sales rep see every row, and this wrapper answers only admins and sales reps.
@@ -992,10 +726,8 @@ BEGIN
       ('save_job', 'uuid,jsonb,jsonb,jsonb,uuid,text'),
       ('save_field_app_invoice', 'uuid,jsonb,jsonb,jsonb,uuid,uuid,text'),
       ('save_invoice', 'jsonb,jsonb,text'),
-      ('save_purchase_order', 'uuid,jsonb,jsonb,uuid,text'),
       ('get_chemical_history', 'uuid,date,date'),
       ('match_quick_receive_items', 'jsonb,text'),
-      ('set_purchase_order_item_costs', 'uuid,jsonb,uuid,text'),
       ('get_quote_versions', 'uuid'),
       ('get_admin_cost_fields', 'text,uuid[]')
     ) AS v(name, args)
@@ -1018,10 +750,8 @@ BEGIN
       ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'public._cost_step2_job_chemicals(p_job_id, p_chemicals)'),
       ('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._cost_step2_field_app_chemicals(p_invoice_id, p_chemicals)'),
       ('public.save_invoice(jsonb,jsonb,text)', 'public._cost_step2_invoice_items(p_invoice, p_items)'),
-      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'v_items := public._cost_step2_po_items(p_po_id, p_items);'),
       ('public.get_chemical_history(uuid,date,date)', 'CASE WHEN v_admin OR r.transaction_type IS DISTINCT FROM ''Purchase'' THEN r.unit_price END'),
       ('public.match_quick_receive_items(jsonb,text)', 'a.value - ''unit_cost'''),
-      ('public.set_purchase_order_item_costs(uuid,jsonb,uuid,text)', 'PERFORM public.require_admin();'),
       ('public.get_quote_versions(uuid)', 'public._cost_step2_snapshot_without_cost(qv.snapshot_data)'),
       ('public.get_admin_cost_fields(text,uuid[])', 'PERFORM public.require_admin();')
     ) AS v(sig, needle)
@@ -1039,13 +769,12 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Six renamed bodies, unchanged, and no API role may call them or the helpers.
+  -- Five renamed bodies, unchanged, and no API role may call them or the helpers.
   FOR r IN
     SELECT * FROM (VALUES
       ('public._save_job_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,text)', '8acf34542105a90212ddb0a5e7c5d272'),
       ('public._save_field_app_invoice_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '8700762576625bd06a833845d57ddbb6'),
       ('public._save_invoice_cost_step2_impl(jsonb,jsonb,text)', 'cb932dc51a680442affde5aeba2eaee3'),
-      ('public._save_purchase_order_cost_step2_impl(uuid,jsonb,jsonb,uuid,text)', 'd6161fc6c0c0402bdead9235d5466d5f'),
       ('public._get_chemical_history_cost_step2_impl(uuid,date,date)', 'a625bbe0eeded3089671740002554624'),
       ('public._match_quick_receive_items_cost_step2_impl(jsonb,text)', '2f674b20b0eefaa13a894d82d87c3abe')
     ) AS v(sig, md5)
@@ -1067,8 +796,8 @@ BEGIN
     END IF;
   END LOOP;
   IF (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
-        AND p.proname LIKE '\_%\_cost\_step2\_impl') <> 6 THEN
-    RAISE EXCEPTION 'COST_STEP2_VERIFY: expected 6 renamed impls';
+        AND p.proname LIKE '\_%\_cost\_step2\_impl') <> 5 THEN
+    RAISE EXCEPTION 'COST_STEP2_VERIFY: expected 5 renamed impls';
   END IF;
 
   -- Each wrapper keeps its body's exact signature, defaults and return type.
@@ -1077,7 +806,6 @@ BEGIN
       ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'public._save_job_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,text)'),
       ('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._save_field_app_invoice_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'),
       ('public.save_invoice(jsonb,jsonb,text)', 'public._save_invoice_cost_step2_impl(jsonb,jsonb,text)'),
-      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'public._save_purchase_order_cost_step2_impl(uuid,jsonb,jsonb,uuid,text)'),
       ('public.get_chemical_history(uuid,date,date)', 'public._get_chemical_history_cost_step2_impl(uuid,date,date)'),
       ('public.match_quick_receive_items(jsonb,text)', 'public._match_quick_receive_items_cost_step2_impl(jsonb,text)')
     ) AS v(wrapper, impl)
@@ -1088,27 +816,6 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Each whole-cent CHECK exists, is validated, and is EXACTLY the expected predicate (a same-named
-  -- constraint that already existed with another shape fails closed).
-  FOR r IN
-    SELECT * FROM (VALUES
-      ('public.purchase_order_items', 'purchase_order_items_unit_cost_whole_cents_chk', 'unit_cost'),
-      ('public.purchase_orders', 'purchase_orders_total_cost_whole_cents_chk', 'total_cost')
-    ) AS v(tbl, name, col)
-  LOOP
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint c
-      WHERE c.conrelid = r.tbl::regclass
-        AND c.conname = r.name
-        AND c.contype = 'c'
-        AND c.convalidated
-        AND pg_get_constraintdef(c.oid) = format(
-          'CHECK (((%1$s >= (0)::numeric) AND (%1$s = round(%1$s, 2)) AND (%1$s < ''Infinity''::numeric) AND (%1$s = ((%1$s_cents)::numeric / 100.0))))',
-          r.col)
-    ) THEN
-      RAISE EXCEPTION 'COST_STEP2_VERIFY: % is missing, not validated, or not the expected whole-cent CHECK', r.name;
-    END IF;
-  END LOOP;
 END
 $verify$;
 

@@ -22,7 +22,7 @@ describe('buildPurchaseOrderEditItemsPayload', () => {
         unit_cost: '900.25',
         quantity_received: 0,
       },
-    ], { includeCost: true });
+    ]);
 
     expect(payload.map(({ id, product_id, quantity_received }) => ({
       id,
@@ -51,6 +51,6 @@ describe('buildPurchaseOrderEditItemsPayload', () => {
       quantity_ordered: '',
       unit_cost: '10',
       quantity_received: 0,
-    }], { includeCost: true })).toThrow('Invalid quantity ordered for purchase order line invalid-line');
+    }])).toThrow('Invalid quantity ordered for purchase order line invalid-line');
   });
 });

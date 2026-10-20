@@ -14826,15 +14826,6 @@ export type Database = {
         }
         Returns: Json
       }
-      set_purchase_order_item_costs: {
-        Args: {
-          p_idempotency_key?: string
-          p_items: Json
-          p_performed_by: string
-          p_po_id: string
-        }
-        Returns: Json
-      }
       set_primary_customer_contact: {
         Args: { p_contact_id: string; p_customer_id: string }
         Returns: Json

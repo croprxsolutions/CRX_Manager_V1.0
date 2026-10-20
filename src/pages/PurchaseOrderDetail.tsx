@@ -21,7 +21,6 @@ import {
 import {
   purchaseOrderCentsToDollars,
   purchaseOrderLineTotalCents,
-  purchaseOrderUnitCostCents,
 } from '../lib/purchaseOrderMoney';
 import { buildPurchaseOrderEditItemsPayload } from '../lib/purchaseOrderEditPayload';
 import { notifyDamagedReceiving, notifyOverReceive } from '../lib/notificationTriggers';
@@ -29,7 +28,6 @@ import { logActivity } from '../lib/activityLogger';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt } from '../lib/money';
-import { MONEY_PRECISION_MESSAGE, parseDollarsToCentsSigned } from '../lib/parseCents';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import HelpTip from '../components/ui/HelpTip';
@@ -38,7 +36,6 @@ import { Sentry } from '../lib/sentry';
 import { getIdempotencyMismatchResult } from '../lib/idempotency';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
-import { PRODUCT_COLUMNS, PURCHASE_ORDER_COLUMNS, PURCHASE_ORDER_ITEM_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
 
 type PickerProduct = ProductOptionPresentationModel & {
   unit_size?: string | null;
@@ -108,7 +105,6 @@ export default function PurchaseOrderDetail() {
   } = useIdempotencyKey('submit_purchase_order', `${profile?.id || ''}:${id || ''}`);
   const cancelPOIdem = useIdempotencyKey('cancel_purchase_order', profile?.id || '');
   const reverseIdem = useIdempotencyKey('reverse_receiving_record', profile?.id || '');
-  const setCostsIdem = useIdempotencyKey('set_purchase_order_item_costs', profile?.id || '');
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [items, setItems] = useState<PurchaseOrderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,10 +150,6 @@ export default function PurchaseOrderDetail() {
     setReceiveStep('review');
     setReceiveOpen(true);
   }, [receiveIntent.unresolvedIntent]);
-
-  /* Admin unit-cost entry (Option A, Mason 2026-10-18: reps order and receive without cost) */
-  const [costOpen, setCostOpen] = useState(false);
-  const [costDrafts, setCostDrafts] = useState<Record<string, string>>({});
 
   /* Edit modal state */
   const [editOpen, setEditOpen] = useState(false);
@@ -259,25 +251,13 @@ export default function PurchaseOrderDetail() {
     const isCurrentFetch = () =>
       poFetchTokenRef.current === token && routeIdRef.current === startedForId;
 
-    const { data: rawPoData, error: poReadError } = await supabase
+    const { data: poData, error: poError } = await supabase
       .from('purchase_orders')
-      .select(PURCHASE_ORDER_COLUMNS)
+      .select('*')
       .eq('id', id!)
       .maybeSingle();
 
     if (!isCurrentFetch()) return;
-
-    // Purchase cost is admin-only (Mason, 2026-10-18).
-    let poData = rawPoData as unknown as PurchaseOrder | null;
-    let poError: unknown = poReadError;
-    if (!poReadError && poData) {
-      try {
-        poData = await withAdminCost('purchase_orders', poData, isAdmin);
-      } catch (costErr) {
-        poError = costErr;
-      }
-      if (!isCurrentFetch()) return;
-    }
 
     if (poError) {
       Sentry.captureException(poError, { tags: { source: 'fetch', action: 'load_purchase_order' } });
@@ -287,23 +267,12 @@ export default function PurchaseOrderDetail() {
     }
     if (poData) {
       setPo(poData as PurchaseOrder);
-      const { data: rawItemsData, error: itemsReadError } = await supabase
+      const { data: itemsData, error: itemsError } = await supabase
         .from('purchase_order_items')
-        .select(`${PURCHASE_ORDER_ITEM_COLUMNS}, product:products(${PRODUCT_COLUMNS}, product_family:product_families(name))`)
+        .select('*, product:products(*, product_family:product_families(name))')
         .eq('purchase_order_id', id!);
 
       if (!isCurrentFetch()) return;
-
-      let itemsData = (rawItemsData || []) as unknown as PurchaseOrderItem[];
-      let itemsError: unknown = itemsReadError;
-      if (!itemsReadError) {
-        try {
-          itemsData = await withAdminCosts('purchase_order_items', itemsData, isAdmin);
-        } catch (costErr) {
-          itemsError = costErr;
-        }
-        if (!isCurrentFetch()) return;
-      }
 
       if (itemsError) {
         Sentry.captureException(itemsError, { tags: { source: 'fetch', action: 'load_purchase_order_items' } });
@@ -311,14 +280,14 @@ export default function PurchaseOrderDetail() {
         setLoading(false);
         return;
       }
-      setItems(itemsData);
+      setItems((itemsData || []) as unknown as PurchaseOrderItem[]);
     } else {
       // A missing PO must not leave the previously loaded PO's lines on screen.
       setPo(null);
       setItems([]);
     }
     setLoading(false);
-  }, [id, toast, isAdmin]);
+  }, [id, toast]);
 
   const fetchReceivingHistory = useCallback(async () => {
     // Refuse a call minted by a stale render closure BEFORE raising the loading
@@ -924,7 +893,7 @@ export default function PurchaseOrderDetail() {
       product_name: (item.product as unknown as { product_name: string })?.product_name || 'Unknown',
       unit_size: item.unit_size || '',
       quantity_ordered: String(item.quantity_ordered),
-      unit_cost: String(item.unit_cost ?? 0),
+      unit_cost: String(item.unit_cost),
       quantity_received: item.quantity_received,
       product: (item.product || null) as unknown as PickerProduct | null,
     })));
@@ -966,7 +935,7 @@ export default function PurchaseOrderDetail() {
     try {
       // Keep received lines in-place and preserve the exact selected Product UUID
       // for editable lines when the RPC updates this PO atomically.
-      const itemsPayload = buildPurchaseOrderEditItemsPayload(editItems, { includeCost: isAdmin });
+      const itemsPayload = buildPurchaseOrderEditItemsPayload(editItems);
 
       const poPayload = {
         vendor: editForm.vendor,
@@ -1003,72 +972,6 @@ export default function PurchaseOrderDetail() {
         if (saveScope) savePOIdem.resetKeyFor(saveScope);
         toast('warning', 'That retry belongs to a different purchase-order edit. Nothing was changed; retry with a fresh key.');
       } else {
-        toast('error', sanitizeError(err));
-      }
-    }
-    setSaving(false);
-  };
-
-  const openCostModal = () => {
-    setCostDrafts(Object.fromEntries(items.map((item) => [item.id, String(item.unit_cost ?? 0)])));
-    setCostOpen(true);
-  };
-
-  // Admin-only: fill in unit cost later, including on a line a rep already received (only while
-  // that line has never been costed; the server refuses anything else).
-  const handleSaveCosts = async () => {
-    if (!po || !profile || !isAdmin) return;
-    // Exact decimal text to whole cents; more than two decimals is refused, never rounded (Luna round 4).
-    // Exponent text ("1e2", which a number input accepts) is refused too: the parser reads it as 0.
-    const parseCostDraft = (draft: string): number | null => {
-      if (/[eE]/.test(draft)) return null;
-      const cents = parseDollarsToCentsSigned(draft);
-      // A safe integer only: past 2^53 cents the parser silently rounds (Codex review).
-      return cents === null || cents < 0 || !Number.isSafeInteger(cents) ? null : cents;
-    };
-    const invalid = items.some((item) => {
-      const draft = costDrafts[item.id];
-      if (draft === undefined || draft.trim() === '') return false;
-      return parseCostDraft(draft) === null;
-    });
-    if (invalid) {
-      toast('error', `Unit cost cannot be negative or too large. ${MONEY_PRECISION_MESSAGE}`);
-      return;
-    }
-    const changed = items.flatMap((item) => {
-      const draft = costDrafts[item.id];
-      if (draft === undefined || draft.trim() === '') return [];
-      const cents = parseCostDraft(draft);
-      if (cents === null) return [];
-      return cents === purchaseOrderUnitCostCents(item.unit_cost ?? 0) ? [] : [{ id: item.id, unit_cost_cents: cents }];
-    // Sorted by line id so a lost-response retry rebuilds the same request whatever order the
-    // lines reloaded in (Luna round 3).
-    }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    if (changed.length === 0) {
-      setCostOpen(false);
-      return;
-    }
-    setSaving(true);
-    const costScope = `set-po-costs:${id}:${fingerprintIntentPayload(changed)}`;
-    try {
-      const { data, error } = await supabase.rpc('set_purchase_order_item_costs', {
-        p_po_id: id!,
-        p_items: changed,
-        p_performed_by: profile.id,
-        p_idempotency_key: setCostsIdem.getKeyFor(costScope),
-      });
-      if (error) throw error;
-      assertRpcResult(data, 'set_purchase_order_item_costs');
-      setCostsIdem.resetKeyFor(costScope);
-      toast('success', 'Unit cost saved');
-      setCostOpen(false);
-      fetchPO();
-    } catch (err: unknown) {
-      if (getIdempotencyBindingRejection(err)) {
-        setCostsIdem.resetKeyFor(costScope);
-        toast('warning', 'That retry belongs to a different cost entry. Nothing was changed; save again.');
-      } else {
-        Sentry.captureException(err, { tags: { source: 'write', action: 'set_purchase_order_item_costs' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -1242,12 +1145,10 @@ export default function PurchaseOrderDetail() {
                 : '-'}
             </p>
           </div>
-          {isAdmin && (
-            <div>
-              <p className="text-xs text-secondary">Total Cost</p>
-              <p className="text-sm font-medium text-nav-dark">{fmt(po.total_cost ?? 0)}</p>
-            </div>
-          )}
+          <div>
+            <p className="text-xs text-secondary">Total Cost</p>
+            <p className="text-sm font-medium text-nav-dark">{fmt(po.total_cost)}</p>
+          </div>
           <div>
             <p className="text-xs text-secondary">Status</p>
             <p className="text-sm font-medium text-nav-dark capitalize">
@@ -1272,14 +1173,7 @@ export default function PurchaseOrderDetail() {
       {/* Line Items */}
       <Card padding={false}>
         <div className="p-5">
-          <div className="flex items-start justify-between gap-2">
-            <CardHeader title="Line" accent="Items" />
-            {isAdmin && po.status !== 'cancelled' && items.length > 0 && (
-              <Button variant="secondary" size="sm" onClick={openCostModal}>
-                Enter Unit Cost
-              </Button>
-            )}
-          </div>
+          <CardHeader title="Line" accent="Items" />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -1287,8 +1181,8 @@ export default function PurchaseOrderDetail() {
                   <th className="px-4 py-3 text-left font-medium text-secondary">Product</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Qty Ordered</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Qty Received</th>
-                  {isAdmin && <th className="px-4 py-3 text-left font-medium text-secondary">Unit Cost</th>}
-                  {isAdmin && <th className="px-4 py-3 text-left font-medium text-secondary">Line Total</th>}
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Unit Cost</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Line Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -1309,20 +1203,12 @@ export default function PurchaseOrderDetail() {
                         {item.quantity_received}
                       </span>
                     </td>
-                    {isAdmin && (
-                      <td className="px-4 py-3 font-mono">
-                        {(item.unit_cost ?? 0) === 0
-                          ? <Badge variant="warning">Needs cost</Badge>
-                          : fmt(item.unit_cost ?? 0)}
-                      </td>
-                    )}
-                    {isAdmin && (
-                      <td className="px-4 py-3 font-mono">
-                        {fmt(purchaseOrderCentsToDollars(
-                          purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost ?? 0),
-                        ))}
-                      </td>
-                    )}
+                    <td className="px-4 py-3 font-mono">{fmt(item.unit_cost)}</td>
+                    <td className="px-4 py-3 font-mono">
+                      {fmt(purchaseOrderCentsToDollars(
+                        purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
+                      ))}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1792,7 +1678,6 @@ export default function PurchaseOrderDetail() {
                       }}
                     />
                   </div>
-                  {isAdmin && (
                   <div>
                     <label className="block text-xs text-secondary mb-1">Cost</label>
                     <Input
@@ -1808,7 +1693,6 @@ export default function PurchaseOrderDetail() {
                       }}
                     />
                   </div>
-                  )}
                 </div>
                 );
               })}
@@ -1861,39 +1745,6 @@ export default function PurchaseOrderDetail() {
       </Modal>
 
       {/* Cancel PO Modal */}
-      <Modal open={costOpen} onClose={() => setCostOpen(false)} title="Enter Unit" accent="Cost">
-        <div className="space-y-4">
-          <p className="text-sm text-secondary">
-            Unit cost per line. A line that has been received can only be filled in while it has no cost yet;
-            to correct a received cost, reverse its receiving record first.
-          </p>
-          {items.map((item) => (
-            <div key={item.id} className="grid grid-cols-3 items-center gap-3">
-              <span className="col-span-2 text-sm text-nav-dark">
-                {(item.product as unknown as { product_name: string })?.product_name || item.product_name || 'Unknown'}
-                {item.quantity_received > 0 && <span className="ml-2 text-xs text-secondary">(received)</span>}
-              </span>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                aria-label="Unit cost"
-                value={costDrafts[item.id] ?? ''}
-                onChange={(e) => setCostDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
-              />
-            </div>
-          ))}
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setCostOpen(false)}>
-              Close
-            </Button>
-            <Button onClick={handleSaveCosts} loading={saving}>
-              Save Cost
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
       <Modal open={cancelOpen} onClose={() => setCancelOpen(false)} title="Cancel Purchase" accent="Order">
         <div className="space-y-4">
           <p className="text-sm text-secondary">

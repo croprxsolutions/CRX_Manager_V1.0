@@ -189,7 +189,14 @@ Plain-English terms: **paging** means asking for records one batch at a time unt
 Done when each reads past a 1,000-row fake in tests, and a live check with a 10-row page matches the database count, as in part 1. Size: likely two PRs (money and checks first, then the lookups). H36 (dashboard counts) needs the function to return a true count, so it moves to part 4.
 
 **Part 3, item (b): pickers become search boxes.**
-- Add customer and field search pickers beside the existing `ProductSearchPicker`. Each asks the database as you type and loads a saved choice by id.
+- Add a database search picker for each kind of record still chosen from a fixed list, beside the existing `ProductSearchPicker`. Each asks the database as you type and loads a saved choice by id:
+  - customers;
+  - fields;
+  - orders (M17, open orders for a new delivery);
+  - jobs (M34, M38);
+  - purchase orders (M47).
+- New cycle count locations (N6) come from a database query of distinct locations, not a picker.
+- Proof for each kind: a search finds a record past the old cap.
 - Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the picker entries in M48, M49 and M50, M59, N2, N3 and N6.
 - Screens that use the whole list are not pickers, and a search box would leave them capped. They keep a full paged read (`fetchAllRows`) or move into a database report instead:
   - Label Data Quality (M49, coverage and batch checks);

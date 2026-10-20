@@ -4107,8 +4107,18 @@ export function nestedProgramNameGlued(command) {
 // (Luna, PR #956 round 2). Only the CODE argument is judged, never the rest of the
 // command, so `gh pr view --json x | node -e "…"` — the everyday way to read gh JSON —
 // still passes when that code itself shows nothing gated.
-const INLINE_CODE_FLAG_RE = /^(?:-e|-p|-c|-r|-E|--eval|--print|--command|--run)$/;
+const INLINE_CODE_FLAG_RE = /^(?:--eval|--print|--command|--run)$/;
 const INLINE_CODE_ATTACHED_RE = /^(?:--eval|--print|--command)=([\s\S]*)$/;
+// A short-option cluster with a code letter in it (`-e`, `-pe`, `-ce`, `-Bc`). The
+// code is the text after that letter or, when the cluster ends there, the next word.
+// Before this, `node -pe "…gh pr merge…"` was read as code "e" and the real code
+// argument was never judged (Codex connector, PR #956; main allowed it too).
+// Digits count as cluster letters too (`perl -0e`; Luna, follow-up to PR #956).
+const INLINE_CODE_CLUSTER_RE = /^-[A-Za-z0-9]*?[epcrE]([\s\S]*)$/;
+// `deno eval "…"` takes its code as a subcommand argument, not a flag (Codex
+// connector, PR #956). Every word after `eval` in the window is judged, and
+// `eval` may follow the runtime's own options (`deno --quiet eval`; Luna).
+const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 export function inlineCodeReachesGatedAction(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
     const words = splitShellArgv(segment);
@@ -4116,13 +4126,28 @@ export function inlineCodeReachesGatedAction(command) {
       const program = String(words[index]).split(/[\\/]/).pop().replace(/\.exe$/i, "").toLowerCase();
       if (!STDIN_PROGRAM_RUNTIMES.has(program) && program !== "nodejs") continue;
       const end = Math.min(words.length, index + 1 + NESTED_SCAN_WINDOW);
+      let evalSubcommand = false;
       for (let at = index + 1; at < end; at += 1) {
         const word = String(words[at]);
-        // `--eval=…`, a separate `-e …`, or the short flag with its code attached
-        // (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3).
-        const attached = INLINE_CODE_ATTACHED_RE.exec(word) || /^-[epcrE](.+)$/s.exec(word);
-        const code = attached ? attached[1] : INLINE_CODE_FLAG_RE.test(word) ? words[at + 1] : undefined;
-        if (code !== undefined && couldReachGatedAction([code])) return true;
+        // Any `eval` word counts, not only the first non-option one: a global option
+        // with a detached value (`deno -L debug eval`) looks like a subcommand (Codex
+        // connector, PR #975). Words after it are refused only if they could reach a
+        // gated action, so a script argument named `eval` costs nothing.
+        if (EVAL_SUBCOMMAND_RUNTIMES.has(program) && word.toLowerCase() === "eval") {
+          evalSubcommand = true;
+          continue;
+        }
+        if (evalSubcommand && couldReachGatedAction([word])) return true;
+        // `--eval=…`, a separate `--eval …`, or a short cluster whose code is
+        // attached (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3) or
+        // is the next word (`node -pe "…"`).
+        const attached = INLINE_CODE_ATTACHED_RE.exec(word);
+        const cluster = word.startsWith("--") ? null : INLINE_CODE_CLUSTER_RE.exec(word);
+        const codes = attached ? [attached[1]]
+          : INLINE_CODE_FLAG_RE.test(word) ? [words[at + 1]]
+          : cluster ? [cluster[1], words[at + 1]]
+          : [];
+        if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]))) return true;
         // No early stop at the first bare word: a detached option value
         // (`node --require fs -e "…"`) looks like a script argument, so the whole
         // window is scanned (Codex connector, PR #956 third pass).
@@ -4394,6 +4419,39 @@ export function hardGateBudgetDenial(prefix, action = "merge") {
 // reason ghApiMergeRequest above already does: a global flag may sit between the
 // binary and the subcommand (`gh -R o/r api -X POST …`), and the old
 // position-anchored `gh\s+api` test did not see that form either.
+// The ONE GraphQL write the Codex guard lets through (Codex App P1 on PR #973):
+// resolving a single review thread. Since 2026-10-19 the merge gates deny while
+// any CodeRabbit thread is unresolved, and resolving is the sanctioned exit, so
+// a Codex session must be able to do it. Deliberately narrow: `gh api graphql`
+// followed only by separate `-f`/`-F` fields, exactly one `query=` whose whole
+// text is a lone resolveReviewThread mutation on a LITERAL thread id, selecting
+// only `id`/`isResolved`. (A `$threadId` variable form is not accepted: the
+// guard's computed-text rule refuses any `$` in the segment anyway.) Anything
+// else stays an unrecognized mutating call.
+const RESOLVE_THREAD_QUERY_RE = new RegExp(
+  "^\\s*mutation\\s*\\{\\s*" +
+  "resolveReviewThread\\s*\\(\\s*input\\s*:\\s*\\{\\s*threadId\\s*:\\s*\"[A-Za-z0-9_=-]+\"\\s*\\}\\s*\\)\\s*" +
+  "\\{\\s*thread\\s*\\{\\s*(?:id|isResolved)(?:\\s+(?:id|isResolved))*\\s*\\}\\s*\\}\\s*\\}\\s*$",
+);
+export function ghApiIsResolveReviewThreadOnly(command) {
+  const raw = String(command || "");
+  // No run-time text anywhere in the raw segment: this predicate exempts the
+  // segment from the computed-text rule, so it must prove there is none
+  // (automated security review of #973: an unanchored binary path let
+  // `$(...)/gh` through).
+  if (/[$`]/.test(raw)) return false;
+  const words = splitShellArgv(raw);
+  if (words.length < 5) return false;
+  // The bare program name only — a path could itself be computed or hostile.
+  if (!/^gh(?:\.exe)?$/i.test(words[0])) return false;
+  if (words[1] !== "api" || words[2] !== "graphql") return false;
+  // Exactly `gh api graphql -f query=<the mutation>`, nothing more.
+  if (words.length !== 5 || words[3] !== "-f") return false;
+  const value = String(words[4]);
+  if (!value.startsWith("query=")) return false;
+  return RESOLVE_THREAD_QUERY_RE.test(value.slice("query=".length));
+}
+
 export function ghApiMutates(command) {
   const text = String(command || "");
   if (!ghBinaryMentioned(text)) return false;
@@ -4557,38 +4615,6 @@ export function pullRequestApproved(pullRequest) {
 // CI, not a review, is what gates a landing now.
 export function pullRequestReviewBlocked(pullRequest) {
   return String(pullRequest?.reviewDecision || "").toUpperCase() === "CHANGES_REQUESTED";
-}
-
-// Autonomous-landing rule (Mason, 2026-09-26): an agent merges only when
-// CodeRabbit has reviewed the FINAL head with no unresolved objection. Read from
-// `gh pr view --json reviews` — `author.login` is the bare `coderabbitai` there
-// (the `[bot]` suffix is REST-only), and `commit.oid` is the commit the review
-// was submitted against.
-//
-// The latest CodeRabbit VERDICT decides: APPROVED, CHANGES_REQUESTED or
-// DISMISSED. COMMENTED reviews are skipped because a thread reply mints an empty
-// COMMENTED review at the current head, and that is a reply artifact, not a
-// verdict. With `request_changes_workflow: true` CodeRabbit approves only once its
-// comments are resolved and the latest commit was reviewed, so APPROVED at the
-// exact head is the "clean final review" signal; an approval at an older commit,
-// or one GitHub dismissed on a later push, does not count.
-//
-// The name cannot be claimed by a person: `coderabbitai` is CodeRabbit's own
-// GitHub organization login, so no user account can hold it.
-export function coderabbitApprovedHead(pullRequest) {
-  const headSha = String(pullRequest?.headRefOid || "");
-  const reviews = pullRequest?.reviews;
-  if (!/^[0-9a-f]{40}$/i.test(headSha) || !Array.isArray(reviews)) return false;
-  const verdicts = reviews
-    .filter((review) => String(review?.author?.login || "").toLowerCase().replace(/\[bot\]$/, "") === "coderabbitai")
-    .filter((review) => ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(String(review?.state || "").toUpperCase()))
-    .map((review) => ({ review, at: Date.parse(String(review?.submittedAt || "")) }))
-    .filter((entry) => Number.isFinite(entry.at))
-    .sort((left, right) => left.at - right.at);
-  const latest = verdicts[verdicts.length - 1]?.review;
-  return Boolean(latest)
-    && String(latest.state).toUpperCase() === "APPROVED"
-    && String(latest?.commit?.oid || "").toLowerCase() === headSha.toLowerCase();
 }
 
 // The API path for `gh api` calls about a merge request's repository. `gh pr

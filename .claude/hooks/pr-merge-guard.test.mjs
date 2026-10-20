@@ -7,7 +7,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  coderabbitApprovedHead,
   ghApiMergeRequest,
   ghApiMutates,
   ghApiRepoPath,
@@ -291,34 +290,6 @@ ok(!pullRequestChecksGreen({ mergeStateStatus: "CLEAN", statusCheckRollup: [
   lifecycle("SUCCESS", "2026-09-25T04:05:04Z", "2026-09-25T04:05:17Z"),
 ] }), "order in the list does not matter: an unfinished run always ranks newest");
 
-// ── CodeRabbit approved the exact head (autonomous landing, 2026-09-26) ──────
-const HEAD = "890b41dcb233ad8c3f45c6dd9d3e14d38388135a";
-const OLD = "48e85fbb6c90837d94cc08bff660b352ca2ee6b0";
-const cr = (state, oid, submittedAt, body = "") => ({ author: { login: "coderabbitai" }, state, commit: { oid }, submittedAt, body });
-ok(coderabbitApprovedHead({ headRefOid: HEAD, reviews: [cr("APPROVED", HEAD, "2026-09-25T03:40:38Z")] }),
-  "PR #794's real shape: an empty-body APPROVED at the head is a real approval");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [cr("APPROVED", OLD, "2026-09-25T03:40:38Z")] }),
-  "an approval of an OLDER commit does not cover the head");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [
-  cr("APPROVED", HEAD, "2026-09-25T03:40:38Z"), cr("CHANGES_REQUESTED", HEAD, "2026-09-25T03:50:00Z"),
-] }), "a later objection at the head wins over an earlier approval");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [
-  cr("APPROVED", HEAD, "2026-09-25T03:40:38Z"), cr("DISMISSED", HEAD, "2026-09-25T03:50:00Z"),
-] }), "a dismissed approval is not an approval");
-ok(coderabbitApprovedHead({ headRefOid: HEAD, reviews: [
-  cr("CHANGES_REQUESTED", OLD, "2026-09-25T02:00:00Z"), cr("APPROVED", HEAD, "2026-09-25T03:40:38Z"),
-  cr("COMMENTED", HEAD, "2026-09-25T04:00:00Z"),
-] }), "a fix on the same PR: the old objection is superseded, and a later thread-reply COMMENTED artifact is not a verdict");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [
-  { ...cr("APPROVED", HEAD, "2026-09-25T03:40:38Z"), author: { login: "masonwells1" } },
-] }), "only CodeRabbit's approval counts here");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [cr("COMMENTED", HEAD, "2026-09-25T03:40:38Z", "**Actionable comments posted: 0**")] }),
-  "a COMMENTED summary is delivery, not a clean final verdict");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [] }), "no review at all denies");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD }), "a PR view that never asked for reviews denies (fail closed)");
-ok(!coderabbitApprovedHead({ headRefOid: "", reviews: [cr("APPROVED", HEAD, "2026-09-25T03:40:38Z")] }), "an unusable head denies");
-ok(!coderabbitApprovedHead({ headRefOid: HEAD, reviews: [cr("APPROVED", HEAD, "not-a-date")] }), "an undated verdict is ignored");
-
 // ── hook decision paths that need no gh (stdin spawn) ────────────────────────
 const HOOK = path.join(__dirname, "pr-merge-guard.mjs");
 function runHook(payload) {
@@ -497,6 +468,13 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     ["node - <<'EOF'\nrequire('child_process').execSync('g'+'h pr '+'mer'+'ge 951')\nEOF", /on its input/],
     ["python - <<'EOF'\nimport subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\nEOF", /on its input/],
     ["sudo -u root -g staff -H -n -E gh mm 123", /is not a gh command this guard can read/],
+    // Clustered short flags: the code is the NEXT word (Codex connector, PR #956; main allowed it too).
+    ["node -pe \"require('child_process').execSync('gh pr merge 951 --squash')\"", /on its input/],
+    ["node -ep \"require('child_process').execSync('gh pr merge 951 --squash')\"", /on its input/],
+    ["python3 -Bc \"import subprocess; subprocess.run('gh pr merge 951', shell=True)\"", /on its input/],
+    // `deno eval` takes its code as a subcommand argument (Codex connector, PR #956).
+    ["deno eval \"new Deno.Command('gh',{args:['pr','merge','951','--squash']}).output()\"", /on its input/],
+    ["deno eval --print \"new Deno.Command('gh',{args:['pr','merge','951']}).outputSync()\"", /on its input/],
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(r.decision?.permissionDecision === "deny" && why.test(r.decision?.permissionDecisionReason || ""),
@@ -516,6 +494,10 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     // Reading gh JSON with inline code: only the CODE is judged, not the gh around it.
     "gh pr view 956 --json title | node -e \"console.log(JSON.parse(require('fs').readFileSync(0)).title)\"",
     'node -e "console.log(1)"',
+    'node -pe "1+1"',
+    'python3 -Bc "print(1)"',
+    'deno eval "console.log(1+1)"',
+    "deno run --allow-read scripts/report.ts",
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(r.status === 0 && r.decision === null, `CONTROL: the real hook passes ${JSON.stringify(command)}`);
@@ -642,7 +624,6 @@ ok(
     ["the CHANGES_REQUESTED objection", "if (pullRequestReviewBlocked(pr))"],
     ["the --match-head-commit pin", "if (String(request.matchHeadCommit"],
     ["the --auto refusal", "if (request.auto)"],
-    ["CodeRabbit's exact-head approval", "if (!coderabbitApprovedHead(pr))"],
     ["the green pipeline", "if (!pullRequestChecksGreen(pr))"],
     ["the head-contains-base check", "if (!headContainsBase)"],
     ["the Sol proof scan", "if (valid) {"],
@@ -724,14 +705,22 @@ ok(!/const\s+stateDir\s*=\s*path\.join\(/.test(guardSource), "the single-directo
 // ── Mason's autonomous-landing rule (2026-09-26), pinned at the call sites ────
 // gateRequest() needs a real gh, so its wiring is pinned here and the predicates
 // are exercised behaviourally above.
-ok(/"--json",\s*"[^"]*\breviews\b[^"]*"/.test(gateRequestSource),
-  "the PR resolve asks GitHub for reviews, so the CodeRabbit verdict comes from the same snapshot");
 ok(/if\s*\(\s*request\.auto\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "--auto into main is denied outright, for every diff");
-ok(/if\s*\(\s*!coderabbitApprovedHead\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
-  "a merge without CodeRabbit's approval of the exact head is denied");
-ok(!/request\.auto[^\n]*coderabbitApprovedHead|coderabbitApprovedHead[^\n]*request\.auto/.test(gateRequestSource),
-  "the CodeRabbit requirement is not exempt for any merge mode");
+// CodeRabbit is advisory since 2026-10-19 (Mason, "not force to have a review"):
+// the guard must not demand its approval, but must still refuse an open objection.
+ok(!/coderabbitApprovedHead/.test(guardSource),
+  "the merge guard no longer requires CodeRabbit's approval of the head");
+ok(/if\s*\(\s*pullRequestReviewBlocked\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
+  "a CHANGES_REQUESTED review still denies the merge");
+// …and its unresolved threads, on any commit, still deny (behaviour is proven in
+// codex-bot-review-lib.test.mjs and on the Codex guard; this pins the wiring).
+ok(/let coderabbitOpen = null;/.test(guardSource)
+  && /coderabbitOpen = coderabbitThreadCount\(node\);/.test(guardSource)
+  && /if \(coderabbitOpen > 0\) \{\s*deny\(coderabbitFindingsDenial\("PR MERGE GATE"/.test(guardSource),
+  "the Claude merge guard denies a PR with unresolved CodeRabbit threads");
+ok(/if \(coderabbitOpen === null\) \{\s*deny\(coderabbitUnreadableDenial\("PR MERGE GATE"/.test(guardSource),
+  "…and fails CLOSED when the thread read failed or was partial (Luna round 3)");
 ok(/if\s*\(\s*!pullRequestChecksGreen\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "the green-pipeline denial is unconditional (no --auto exemption left)");
 ok(!/riskyFiles|contentIsRisky|advisoryQueue\.push\(request\);\s*return;\s*\}\s*\/\/[^\n]*risky/i.test(gateRequestSource),

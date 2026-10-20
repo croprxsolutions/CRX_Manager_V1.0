@@ -82,7 +82,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; steps 2–3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
+## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; step 2 written as `20261019230000`, not applied; step 3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
 
 Mason decided on 2026-10-15 that cost and margin are admin-only, including on a rep's own quotes and invoices
 (`docs/plans/2026-10-13-direction-and-goals.md`, Goal 1). A read-only live inventory on 2026-10-18 found three kinds of
@@ -103,8 +103,19 @@ exposure (full list in the PR for step 1):
 
 **Order of work.** Step 2: the screens stop reading whole rows on those tables (about 80 call sites in 40 files would break
 under a column lock, admins included), admin screens read cost through an admin-only function, and the three saves above derive
-cost on the server for non-admins. Step 3: the column lock, applied only after step 2's screens are live, then live per-role
-refusal checks. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+cost on the server for non-admins. **Step 2 is written (2026-10-19, migration `20261019230000` plus the screens; not applied, PR
+pending):** every screen now lists the non-cost columns it reads (`src/lib/costFields.ts`, guarded by `costFields.test.ts`),
+admins add cost through `get_admin_cost_fields`, quote history comes through `get_quote_versions`, the three saves derive a
+non-admin's cost, and chemical history and Quick Receive no longer show purchase cost to reps. **Purchase orders are NOT part of
+step 2 (Mason, 2026-10-20, option 1 "for now"):** the purchase order screens and `save_purchase_order` are unchanged, so reps still
+see and enter purchase cost there. Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
+lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
+cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Step 3 must leave the columns the purchase order screens read (product `current_cost`, purchase order and line cost) unlocked
+until the purchase order project lands (`costFields.test.ts` names those four screens as its only exemption). **TOP-PRIORITY
+FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"): purchase orders as their own project.** Three Sol rounds
+on PR #965 showed any cost a rep's purchase order line is given (the catalog cost, or $0) can be wrong and then locked at receipt
+(the supplier-cost-basis snapshot trigger, and the writer's received-line rule), with no governed way to correct it. The project
+needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
@@ -487,8 +498,10 @@ shell rule matches protected names in the command text, so a command that spells
 recognised. Two `gpt-5.6-sol` rounds showed that, combined with a hard link made through the alias, an
 agent could rewrite a proof's `base_sha`, timestamp, model or verdict, and the push guard would accept
 it, because proof validation trusts those fields without checking who wrote them. That would defeat the
-expiry and moved-base rules of the protected-review gate. (Merging into `main` still also needs
-CodeRabbit's APPROVED review of the exact head, which a rewritten proof does not supply.)
+expiry and moved-base rules of the protected-review gate. (Until 2026-10-19 merging into `main` also
+needed CodeRabbit's APPROVED review of the exact head, which a rewritten proof does not supply. Since
+2026-10-19 CodeRabbit is advisory and that backstop is gone: a rewritten Sol proof plus green checks is
+enough for the merge gates, so this gap is now more exposed.)
 
 **The 8.3 alias is one route, not the whole problem.** The same write-up records that the review-proof
 guard is a named-access speed bump against mistakes and casual self-certification, NOT a
@@ -2371,9 +2384,8 @@ from an agent; the guards can only refuse the *commands* that would use it.
 state directly rather than inferring it (**corrected 2026-09-26:** they no longer require
 `reviewDecision === "APPROVED"` — no approving review has been required since 2026-09-02;
 `.claude/hooks/pr-merge-guard.mjs` refuses
-`CHANGES_REQUESTED` and requires `mergeStateStatus` CLEAN with every check green; the landing path
-in `.claude/commands/ship.md` Step 8 still requires the `ready-for-coderabbit` review of the frozen
-head before merge — only the GitHub *approval* requirement was removed), and deny the
+`CHANGES_REQUESTED` and requires `mergeStateStatus` CLEAN with every check green; since 2026-10-19
+CodeRabbit is advisory and no CodeRabbit review or approval is required before merge), and deny the
 `/pulls/<n>/merge` REST endpoint and the `mergePullRequest` GraphQL mutation by destination
 regardless of transport. That closes every route found so far, and it is an honest-mistake net —
 **not a security boundary.** A command shape nobody has thought of, or an indirection that never
@@ -2444,8 +2456,10 @@ three careful passes.
 **What actually protects this path** (do not treat the hook as load-bearing) — and it differs by residual:
 
 - **For the novel-lexical and non-hooked tool-path gaps** (rows 5 and 6
-  above): the exact-SHA `gpt-6-sol` proof on migration diffs and the CodeRabbit final review are the
-  controls that always apply. The post-apply sweep predicates are a **partial, conditional** control here,
+  above): the exact-SHA `gpt-6-sol` proof on migration diffs is the control that always applies.
+  (**Since 2026-10-19 the CodeRabbit review is advisory and not guaranteed:** it reviews a PR once when
+  marked ready, skips `docs(` titles, and the merge does not wait for it, so "the CodeRabbit review" in
+  the rows below is a best-effort extra layer, not a guaranteed one.) The post-apply sweep predicates are a **partial, conditional** control here,
   not a third guaranteed one, and the condition must be stated rather than implied. They consider such a
   routine at all only because it carries no `ACTOR_MISMATCH` token — but they then fire only on their own
   sinks: the actor parameter near COALESCE/`auth.uid()`/role text, or a `financial_audit_log` write in the
@@ -3488,7 +3502,7 @@ live ledger.** `20260914101000`..`101300` are on `main` since #850 and LIVE sinc
 landing this higher stamp first would strand them. Full
 order: `20260914100700`, `100800`, `100900` (all three live as of 2026-09-28), `101000`..`101300`,
 then this file. **Apply authority (Mason, 2026-09-27): no separate in-chat yes.** Once the hold lifts it applies
-under the autonomous-landing rule (#804): CodeRabbit APPROVED on the final head, a fresh exact-SHA
+under the autonomous-landing rule (#804; CodeRabbit APPROVED no longer required since 2026-10-19): a fresh exact-SHA
 `gpt-6-sol` review clean, every required check green, and the migration-apply-guard proofs. Until then a rep's Remove on
 the live Documents tab (shipped in PR #764) is refused.
 

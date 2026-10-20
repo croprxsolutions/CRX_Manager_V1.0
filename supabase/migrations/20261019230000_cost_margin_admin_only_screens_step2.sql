@@ -78,6 +78,14 @@
 --   _<name>_cost_step2_impl back to <name> and GRANT EXECUTE TO authenticated, service_role (the
 --   live grants on 2026-10-19; never PUBLIC or anon). DROP the six private helpers. No data changes.
 
+-- LIVE EVIDENCE (read-only, 2026-10-20 14:24 UTC): each function this file renames has exactly ONE
+--   live overload -- save_job(uuid,jsonb,jsonb,jsonb,uuid,text), save_field_app_invoice(uuid,jsonb,
+--   jsonb,jsonb,uuid,uuid,text), save_invoice(jsonb,jsonb,text), get_chemical_history(uuid,date,date),
+--   match_quick_receive_items(jsonb,text). The older five-argument save_job declared in 20260215200000
+--   no longer exists live, and the preflight below refuses to run if a second overload of any of them
+--   ever appears. Live ledger: 1037 rows, max(version) 20261020022222 from
+--   20261019220000_start_and_complete_delivery, so this file's stamp sorts above the live high-water.
+
 SET LOCAL lock_timeout = '10s';
 
 -- ---------------------------------------------------------------------------

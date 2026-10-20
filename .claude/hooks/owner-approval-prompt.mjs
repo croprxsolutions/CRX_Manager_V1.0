@@ -42,19 +42,17 @@ const plain = !code && isPlainApprovalReply(reply);
 // "I approve" with nothing waiting in this session stays ordinary chat.
 const attempt = !code && !plain ? approvalAttemptIn(payload?.prompt) : null;
 if (!code && !plain && !attempt) emit();
-const said = (attempt
-  ? String(payload?.prompt ?? "").split(/\r?\n/).find((l) => approvalCodeFromReply(l) || isPlainApprovalReply(l))
-  : reply).trim().slice(0, 40);
+const said = (attempt ? attempt.line : reply.trim()).slice(0, 40);
 
 // Output happens only outside this try: under prompt-router.mjs process.exit
 // throws, and a catch here would turn a clean exit into a failure.
 let which = null;
 let result;
-let waiting = attempt === "code";
+let waiting = attempt?.kind === "code";
 try {
   // Only THIS session's folders: a request another session built is never found here.
   const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
-  if (attempt === "plain") waiting = !resolvePlainReply({ dirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
+  if (attempt?.kind === "plain") waiting = !resolvePlainReply({ dirs, sessionId: payload?.session_id, readShown: () => "" }).silent;
   if (plain) {
     which = resolvePlainReply({
       dirs,

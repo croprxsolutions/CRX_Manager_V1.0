@@ -227,14 +227,17 @@ export function replyWithoutReminders(prompt) {
 }
 
 /**
- * "code" or "plain" when the message is not a whole reply but one of its lines
- * is (other words or an envelope came with it), else null. The hook then says it
- * did not count instead of staying silent (2026-10-20).
+ * When the message is not a whole reply but one of its lines is (other words or
+ * an envelope came with it): which form ("code" or "plain") and that line; else
+ * null. The hook then says it did not count instead of staying silent
+ * (2026-10-20). Every line break counts, a bare CR and U+2028/9 too (Luna MED).
  */
 export function approvalAttemptIn(prompt) {
-  const lines = String(prompt ?? "").split(/\r?\n/);
-  if (lines.some((l) => approvalCodeFromReply(l))) return "code";
-  return lines.some((l) => isPlainApprovalReply(l)) ? "plain" : null;
+  const lines = String(prompt ?? "").split(/\r\n|[\r\n\p{Zl}\p{Zp}]/u);
+  const code = lines.find((l) => approvalCodeFromReply(l));
+  if (code) return { kind: "code", line: code.trim() };
+  const plain = lines.find((l) => isPlainApprovalReply(l));
+  return plain ? { kind: "plain", line: plain.trim() } : null;
 }
 
 const textOf = (content) => (typeof content === "string" ? content

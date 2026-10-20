@@ -24,7 +24,9 @@
 --      any unit_price_cents first as a 'manual' price; nothing set one.) Also in this body:
 --      (a) a tier-priced line with no usable tier or tier-1 price is refused with
 --      BLEND_TICKET_PRICE_MISSING instead of billed at $0, checked before any invoice number;
---      (b) only USABLE quote prices count anywhere (above zero, finite, whole cents):
+--      (b) a job pointed at another customer's quote, or a deleted quote, supplies no quoted price
+--      (the automatic lookup trusted any section the job named); (c) only USABLE quote prices
+--      count anywhere (above zero, finite, whole cents):
 --      quote_items.price_per_unit is NOT NULL DEFAULT 0, so a $0 quote line is how an unpriced line
 --      looks, and it now falls to the tier price instead of a $0 'quoted' line, which the
 --      below-cost line guard then refused (no invoice at all). Matching the
@@ -824,6 +826,15 @@ BEGIN
   IF v_ticket.job_id IS NOT NULL THEN
     SELECT j.quote_section_id INTO v_quote_section_id FROM jobs j WHERE j.id = v_ticket.job_id;
   END IF;
+  -- Goal 3 pricing (20261020210000): a job pointed at another customer's quote, or at a deleted
+  -- quote, supplies no quoted price (and no choices); the lines bill their tier prices instead.
+  IF v_quote_section_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM quote_sections qs JOIN quotes q ON q.id = qs.quote_id
+        WHERE qs.id = v_quote_section_id
+          AND q.customer_id = v_ticket.customer_id
+          AND q.deleted_at IS NULL) THEN
+    v_quote_section_id := NULL;
+  END IF;
 
   -- Goal 3 pricing (20261020210000), both before any invoice number or row:
   -- (1) The job's quote lists a product more than once at different prices. Taking one at
@@ -1326,7 +1337,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text)', 'create_invoice_from_blend_ticket', 'db20d7bbe9e02b39f05384fa3b07bf2e', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text)', 'create_invoice_from_blend_ticket', '41d6f7f66314e14deeaa89a2bd6f2dda', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)', '_create_order_from_blend_ticket_replay_impl_20261015', '4b5ea386b9be7c70c240ffb8efae08e6', 'json', ARRAY['postgres'], true, 'plpgsql'),
         ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', '9a571eb0ce297ee5de6b0eb839d374e6', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', '_blend_tier_price_cents_20261020', '44e3957c991c1ce20961713051d58e5d', 'bigint', ARRAY['postgres'], false, 'sql'),

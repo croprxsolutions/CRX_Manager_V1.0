@@ -398,6 +398,20 @@ BEGIN
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
     IF v_err NOT LIKE 'BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: wrong other-customer refusal: %', v_err; END IF;
   END;
+  --     Nor does the automatic lookup bill another customer's quoted price (or ask to pick one):
+  --     the line bills its own tier price.
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t7, v_admin, 'e2e-btp-invoice-7-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    RAISE EXCEPTION 'SMOKE_FAIL: a ticket whose job names another customer''s quote was refused: %', v_err;
+  END;
+  SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_text
+    FROM public.invoice_items ii
+   WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = v_p_full;
+  IF v_cents IS DISTINCT FROM 900 OR v_text IS DISTINCT FROM 'tier' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: another customer''s quote priced this customer''s invoice line at % (%), expected the 900-cent tier-2 price', v_cents, v_text;
+  END IF;
 
   -- 13. A pick goes stale when the line's product changes: the old price is never billed. Here the
   --     new product's quote lines share one price, so it bills that quoted price instead.

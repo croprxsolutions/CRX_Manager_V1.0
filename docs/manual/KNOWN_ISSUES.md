@@ -2970,8 +2970,8 @@ makes the first one reachable more often by emitting several order lines per pro
    quote line is stored) no longer becomes a $0 quoted line (which the below-cost guard refused,
    blocking the invoice); the line bills its tier price.
    Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
-   stays open, and the automatic quote lookup still trusts the ticket's job link without checking
-   the quote's customer (only a staff pick checks it).
+   stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
+   price; the line bills its tier price.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

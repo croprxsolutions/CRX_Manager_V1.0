@@ -326,6 +326,11 @@ ROLLBACK;`,
         "             AND qi.product_id = v_btp.product_id\n           ORDER BY qi.id LIMIT 1;\n"]],
       /SMOKE_FAIL: a line whose quote prices are unusable (billed|was refused)/],
     // The setter tests the product twice (its own line and the shared valid-pick rule); remove both.
+    // The automatic lookup trusts any section the job names again: the other customer's quote
+    // either asks for a pick (two prices) or bills its price.
+    ['invoice quote-customer test', INVOICE,
+      [["  IF v_quote_section_id IS NOT NULL AND NOT EXISTS (\n       SELECT 1 FROM quote_sections qs JOIN quotes q ON q.id = qs.quote_id\n", "  IF false AND NOT EXISTS (\n       SELECT 1 FROM quote_sections qs JOIN quotes q ON q.id = qs.quote_id\n"]],
+      /SMOKE_FAIL: (a ticket whose job names another customer's quote was refused|another customer's quote priced this customer's invoice line)/],
     ['setter same-product test', SETTER, [['     OR v_quote_item.product_id IS DISTINCT FROM v_line.product_id\n', ''],
       ['     OR NOT public._blend_quote_pick_valid_20261020(\n              v_section, v_ticket.customer_id, v_line.product_id, (v_quote_item.price_per_unit * 100)::bigint) THEN\n', ' THEN\n']],
       /SMOKE_FAIL: a quote line for another product was accepted as the pick/],

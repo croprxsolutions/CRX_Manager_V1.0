@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke, mockResetKey } = vi.hoisted(() => ({
@@ -43,12 +43,19 @@ function buildChain(result: { data: unknown; error: unknown }): Record<string, u
   return self;
 }
 
-vi.mock('../lib/db', () => ({
-  supabase: { from: mockFrom, rpc: mockRpc, storage: { from: mockStorageFrom }, functions: { invoke: mockInvoke } },
-  checkMutationResult: vi.fn(),
-  assertRpcResult: vi.fn((d) => d),
-  sanitizeError: vi.fn((e: unknown) => (e as Error)?.message || 'Error'),
-}));
+vi.mock('../lib/db', async () => {
+  const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
+  return {
+    supabase: { from: mockFrom, rpc: mockRpc, storage: { from: mockStorageFrom }, functions: { invoke: mockInvoke } },
+    checkMutationResult: vi.fn(),
+    assertRpcResult: vi.fn((d) => d),
+    sanitizeError: vi.fn((e: unknown) => (e as Error)?.message || 'Error'),
+    // The real token matchers: the page and lib/blendTicketPricing read refusals through them.
+    hasRpcCode: actual.hasRpcCode,
+    rpcCodeDetail: actual.rpcCodeDetail,
+    RpcErrorCodes: actual.RpcErrorCodes,
+  };
+});
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Test Admin' }, role: 'admin' }),
@@ -64,7 +71,11 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: mockResetKey }),
+  useIdempotencyKey: () => ({
+    getKey: () => 'test-idem-key',
+    getKeyFor: (scope: string) => `test-idem-key:${scope}`,
+    resetKey: mockResetKey,
+  }),
 }));
 
 vi.mock('../hooks/usePageMeta', () => ({ usePageMeta: () => {} }));
@@ -74,15 +85,29 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
 vi.mock('../hooks/useOCRThresholds', () => ({ useOCRThresholds: () => ({}) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
-vi.mock('../lib/criticalAction', () => ({
-  runCriticalAction: async ({ action, setLoading }: {
-    action: () => Promise<void>;
-    setLoading?: (v: boolean) => void;
-  }) => {
-    setLoading?.(true);
-    try { await action(); } finally { setLoading?.(false); }
-  },
-}));
+vi.mock('../lib/criticalAction', () => {
+  class CriticalActionHandledError extends Error {}
+  return {
+    CriticalActionHandledError,
+    // Mirrors the real helper's outcome reporting: success toast, handled errors silent,
+    // anything else an error toast.
+    runCriticalAction: async ({ action, setLoading, toast, successMessage }: {
+      action: () => Promise<void>;
+      setLoading?: (v: boolean) => void;
+      toast?: (type: string, message: string) => void;
+      successMessage?: string;
+    }) => {
+      setLoading?.(true);
+      try {
+        await action();
+        if (successMessage) toast?.('success', successMessage);
+      } catch (err) {
+        if (err instanceof CriticalActionHandledError) return;
+        toast?.('error', (err as Error)?.message || 'Error');
+      } finally { setLoading?.(false); }
+    },
+  };
+});
 vi.mock('../lib/blendMathValidator', () => ({ validateBlendMath: () => [] }));
 vi.mock('../lib/dateUtils', () => ({ localToday: () => '2026-04-29' }));
 
@@ -932,6 +957,82 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     fireEvent.click(createInvoiceButton);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mockRpc.mock.calls.some(([name]) => name === 'create_invoice_from_blend_ticket')).toBe(false);
+  });
+
+  // Goal 3 pricing (20261020210000): the job's quote lists a product twice at different prices,
+  // so the invoice RPC stops with the choices; staff pick one and the screen saves it.
+  const LINE_ID = '22222222-2222-4222-8222-222222222222';
+  const QI_700 = '33333333-3333-4333-8333-333333333333';
+  const QI_750 = '44444444-4444-4444-8444-444444444444';
+  async function createInvoiceWith(invoiceError: { message: string; details?: string }) {
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'blend_ticket_products') return buildChain({ data: [baseProduct], error: null });
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'create_invoice_from_blend_ticket') return Promise.resolve({ data: null, error: invoiceError });
+      if (name === 'set_blend_ticket_product_quote_price') {
+        return Promise.resolve({ data: { success: true, unit_price_cents: 750 }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    renderTicket();
+    const createInvoice = await screen.findByRole('button', { name: 'Create Invoice' });
+    await waitFor(() => expect(createInvoice).toBeEnabled());
+    fireEvent.click(createInvoice);
+    const confirm = await screen.findByRole('dialog');
+    fireEvent.click(within(confirm).getByRole('button', { name: /create invoice/i }));
+    await waitFor(() => {
+      expect(mockRpc.mock.calls.some(([name]) => name === 'create_invoice_from_blend_ticket')).toBe(true);
+    });
+  }
+
+  it('asks staff to pick the quoted price when the quote lists the product twice, then saves the pick', async () => {
+    await createInvoiceWith({
+      message: 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: the quote lists a product more than once at different prices; pick the price to bill',
+      details: JSON.stringify({
+        products: [{
+          blend_ticket_product_id: LINE_ID,
+          product_id: 'prod-1',
+          product_name: 'Atrazine 4L',
+          options: [{ quote_item_id: QI_700, price_cents: 700 }, { quote_item_id: QI_750, price_cents: 750 }],
+        }],
+      }),
+    });
+
+    const picker = await screen.findByRole('dialog', { name: 'Pick the quoted price' });
+    expect(within(picker).getByText('Atrazine 4L')).toBeInTheDocument();
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
+    expect(mockNavigate).not.toHaveBeenCalled();
+    const save = within(picker).getByRole('button', { name: 'Save price' });
+    expect(save).toBeDisabled();
+
+    fireEvent.click(within(picker).getByLabelText(/\$7\.50 per unit/));
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_blend_ticket_product_quote_price', {
+      p_blend_ticket_product_id: LINE_ID,
+      p_quote_item_id: QI_750,
+      p_performed_by: 'user-1',
+      p_idempotency_key: `test-idem-key:${LINE_ID}:${QI_750}`,
+    }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Price saved. Click Create Invoice again to bill this ticket.'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Pick the quoted price' })).not.toBeInTheDocument());
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('shows a plain-English reason when a product has no price on the price list', async () => {
+    await createInvoiceWith({ message: 'BLEND_TICKET_PRICE_MISSING: product(s) have no price on the price list: Mystery Mix' });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'These products have no price on the Price List, so nothing was created: Mystery Mix. Add a price for them, then try again.',
+    ));
+    expect(screen.queryByRole('dialog', { name: 'Pick the quoted price' })).not.toBeInTheDocument();
+    expect(mockRpc.mock.calls.some(([name]) => name === 'set_blend_ticket_product_quote_price')).toBe(false);
   });
 
   it('locks header, product, and application-field editing for a billed ticket when invoice SELECT is RLS-empty', async () => {

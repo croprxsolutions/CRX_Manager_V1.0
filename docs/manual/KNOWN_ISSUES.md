@@ -1,7 +1,9 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-19 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-19 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
+**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-20 21:28 UTC: 1038 rows / 1031 names, `max(version)` `20261020193610` =
+`20261019230000_cost_margin_admin_only_screens_step2`, recorded by its own docs PR; the blend-ticket pricing
+candidate `20261020210000` is not applied. Earlier read, 2026-10-19 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
 replay-binding entry below (both wrappers, both renamed bodies and the 24-operation guard read live); at 18:35 UTC:
 1035 rows / 1028 names; the one change since the 12:50 UTC read is that the
@@ -2958,6 +2960,13 @@ makes the first one reachable more often by emitting several order lines per pro
    defect today, independent of PR #404 — multi-line bookings already exist as quote data whether or
    not the draw splits order lines. Deliberately not fixed in PR #404: it needs its own design
    decision about how a ticket quantity is split across tiers.
+   **Guarded 2026-10-20 (Goal 3, migration `20261020210000_blend_ticket_pricing_guards`, not yet
+   applied when written; live state in `docs/reference/migration-history.md`).** Mason (2026-10-15)
+   made automatic exact-line matching future work and asked for a small guard instead: when the
+   job's quote lists the product more than once at *different* prices, the invoice now stops before
+   anything is written and the Blend Ticket screen asks staff to pick the quoted price; the pick is
+   stored on the ticket line and bills as `quoted`. Same-price duplicates bill as before. Matching
+   the exact quoted line automatically (and splitting a ticket quantity across tiers) stays open.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

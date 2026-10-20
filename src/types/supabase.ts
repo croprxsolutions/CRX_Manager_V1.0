@@ -14808,6 +14808,15 @@ export type Database = {
         }
         Returns: Json
       }
+      set_blend_ticket_product_quote_price: {
+        Args: {
+          p_blend_ticket_product_id: string
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_quote_item_id: string
+        }
+        Returns: Json
+      }
       set_field_boundary: {
         Args: {
           p_boundary_geojson: string

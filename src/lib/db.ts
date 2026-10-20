@@ -309,6 +309,13 @@ export const RpcErrorCodes = {
   // U6 blend<->job double-bill cross-guards (2026-07-06)
   // create_invoice_from_blend_ticket — ticket's job already has a live invoice
   JOB_ALREADY_INVOICED: 'JOB_ALREADY_INVOICED',
+  // Goal 3 pricing (20261020210000): blend-ticket order/invoice with a product that has no price
+  BLEND_TICKET_PRICE_MISSING: 'BLEND_TICKET_PRICE_MISSING',
+  // create_invoice_from_blend_ticket — the quote lists a product twice at different prices
+  BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED',
+  // set_blend_ticket_product_quote_price refusals
+  BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE: 'BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE',
+  BLEND_TICKET_QUOTE_PRICE_LOCKED: 'BLEND_TICKET_QUOTE_PRICE_LOCKED',
   // transfer_job_to_invoice — a blend ticket for this job is already billed
   BLEND_TICKET_ALREADY_BILLED: 'BLEND_TICKET_ALREADY_BILLED',
   // transfer_job_to_invoice (U7 multi-owner split) — a job whose fields carry per-field

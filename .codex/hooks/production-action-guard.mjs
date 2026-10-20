@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
-  coderabbitApprovedHead,
   contentIsRisky,
   createHardGateBudget,
   expandNestedCommands,
@@ -1231,8 +1230,10 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
     );
   }
   // Mason's autonomous-landing rule (2026-09-26) — mirror of pr-merge-guard.mjs.
-  // An agent merges into main only when CodeRabbit APPROVED the exact head, the
-  // newest run of every check is green, and a fresh exact-SHA Sol proof exists.
+  // An agent merges into main only when the newest run of every check is green
+  // and a fresh exact-SHA Sol proof exists (or the diff is documentation-only).
+  // CodeRabbit's approval is no longer required (Mason, 2026-10-19): it is
+  // advisory, and a CHANGES_REQUESTED review from anyone still denies above.
   // `--auto` would land commits pushed after this gate ran, so it is refused.
   // An immediate merge has the same race, closed by `--match-head-commit` equal
   // to the head checked here, which makes GitHub refuse a moved head (Sol HIGH,
@@ -1248,17 +1249,8 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   if (request.auto) {
     return denied(
       "CODEX PRODUCTION GATE: `--auto` is not allowed into main — auto-merge lands the PR after this gate has " +
-      "run, so commits pushed in the meantime would merge without an exact-head Sol proof or a CodeRabbit " +
-      "review of them. Wait for the checks, then merge immediately."
-    );
-  }
-  if (!coderabbitApprovedHead(pullRequest)) {
-    return denied(
-      `CODEX PRODUCTION GATE: CodeRabbit has not APPROVED this exact head (${String(pullRequest.headRefOid).slice(0, 12)}). ` +
-      "Agents merge only after CodeRabbit's final review of the frozen head is clean. CodeRabbit reviews every " +
-      "non-draft push automatically (since 2026-09-26): wait for its review of this head, fix every real " +
-      "finding, and retry. If CodeRabbit skipped or was rate limited on this exact head, post " +
-      "`@coderabbitai review` on the PR once (Mason, 2026-09-27)."
+      "run, so commits pushed in the meantime would merge without an exact-head Sol proof. Wait for the " +
+      "checks, then merge immediately."
     );
   }
   if (!pullRequestChecksGreen(pullRequest)) {

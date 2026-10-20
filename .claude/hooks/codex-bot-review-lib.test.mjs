@@ -460,7 +460,6 @@ const claudeQueuePushes = [...guardSource.matchAll(/advisoryQueue\.push\(request
 const claudeAdvisoryCalls = [...guardSource.matchAll(/codexAdvisory\(request, advisoryDeadlineMs\);/g)].map((m) => m.index);
 const claudeGreenAt = guardSource.indexOf("green-pipeline requirement");
 const claudeProofAt = guardSource.indexOf("every main merge → require the fresh, bound Sol proof");
-const claudeCodeRabbitAt = guardSource.indexOf("if (!coderabbitApprovedHead(pr))");
 const claudeRequestLoopAt = guardSource.indexOf("for (const request of requests) gateRequest(request);");
 eq(
   claudeQueuePushes.length,
@@ -486,11 +485,11 @@ ok(
   "the Claude guard computes one shared deadline for the whole queue",
 );
 // Every merge now reaches the proof gate, so the single allow point must follow
-// it — and the CodeRabbit exact-head approval check — as well as the green gate.
-ok(claudeCodeRabbitAt > 0, "the Claude guard's CodeRabbit exact-head approval check is present to order");
+// it as well as the green gate. (CodeRabbit's approval check was removed
+// 2026-10-19 when Mason made CodeRabbit advisory.)
 ok(
-  claudeQueuePushes.every((at) => at > claudeProofAt && at > claudeCodeRabbitAt),
-  "MUST RUN LAST: both allow points follow the CodeRabbit approval check and the exact-SHA proof gate",
+  claudeQueuePushes.every((at) => at > claudeProofAt && at > claudeGreenAt),
+  "MUST RUN LAST: both allow points follow the green-pipeline gate and the exact-SHA proof gate",
 );
 
 // ── the lookup is BOUNDED, on both guards ────────────────────────────────────

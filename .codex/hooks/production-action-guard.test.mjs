@@ -1468,15 +1468,16 @@ try {
     nowMs: now,
     runGh: () => JSON.stringify({ ...mainPr, reviews: [] }),
   });
-  assert.equal(noCodeRabbit.blocked, true, "no CodeRabbit review of the head: the merge stays with Mason");
-  assert.match(noCodeRabbit.reason, /CodeRabbit has not APPROVED this exact head/, "and the denial says why");
+  // CodeRabbit is advisory since 2026-10-19 (Mason): no review of the head no
+  // longer holds a green, Sol-proven merge.
+  assert.equal(noCodeRabbit.blocked, false, "no CodeRabbit review of the head: a green, Sol-proven merge still lands");
   assert.equal(evaluateProductionAction({
     toolName: "PowerShell",
     toolInput: { command: `gh pr merge 123 --squash${PIN}` },
     repoDir: risky.repo,
     nowMs: now,
-    runGh: () => JSON.stringify({ ...mainPr, reviews: [{ ...mainPr.reviews[0], commit: { oid: risky.base } }] }),
-  }).blocked, true, "an approval of an OLDER commit does not cover the head");
+    runGh: () => JSON.stringify({ ...mainPr, reviewDecision: "CHANGES_REQUESTED" }),
+  }).blocked, true, "an open CHANGES_REQUESTED objection still refuses the merge");
   const autoMerge = evaluateProductionAction({
     toolName: "PowerShell",
     toolInput: { command: `gh pr merge 123 --squash --auto${PIN}` },
@@ -1775,9 +1776,9 @@ try {
       "GitHub reporting the head behind its base needs Sol");
 
     // The exemption replaces ONLY the Sol proof. Every other gate still refuses.
-    const unapproved = mergeDocs({ pr: { ...docsPr, reviews: [] } });
-    assert.equal(unapproved.blocked, true, "a docs-only PR without CodeRabbit's approval of the head is refused");
-    assert.match(unapproved.reason, /CodeRabbit has not APPROVED/, "by the CodeRabbit gate");
+    // CodeRabbit skips "docs(" PRs since 2026-10-19, so its approval cannot be required.
+    assert.equal(mergeDocs({ pr: { ...docsPr, reviews: [] } }).blocked, false,
+      "a docs-only PR with no CodeRabbit review merges once checks are green");
     const red = mergeDocs({ pr: { ...docsPr, mergeStateStatus: "UNSTABLE", statusCheckRollup: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "FAILURE" }] } });
     assert.equal(red.blocked, true, "a docs-only PR with a failed check is refused");
     assert.match(red.reason, /green GitHub pipeline/, "by the green-pipeline gate");

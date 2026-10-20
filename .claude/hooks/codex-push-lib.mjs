@@ -4435,38 +4435,6 @@ export function pullRequestReviewBlocked(pullRequest) {
   return String(pullRequest?.reviewDecision || "").toUpperCase() === "CHANGES_REQUESTED";
 }
 
-// Autonomous-landing rule (Mason, 2026-09-26): an agent merges only when
-// CodeRabbit has reviewed the FINAL head with no unresolved objection. Read from
-// `gh pr view --json reviews` — `author.login` is the bare `coderabbitai` there
-// (the `[bot]` suffix is REST-only), and `commit.oid` is the commit the review
-// was submitted against.
-//
-// The latest CodeRabbit VERDICT decides: APPROVED, CHANGES_REQUESTED or
-// DISMISSED. COMMENTED reviews are skipped because a thread reply mints an empty
-// COMMENTED review at the current head, and that is a reply artifact, not a
-// verdict. With `request_changes_workflow: true` CodeRabbit approves only once its
-// comments are resolved and the latest commit was reviewed, so APPROVED at the
-// exact head is the "clean final review" signal; an approval at an older commit,
-// or one GitHub dismissed on a later push, does not count.
-//
-// The name cannot be claimed by a person: `coderabbitai` is CodeRabbit's own
-// GitHub organization login, so no user account can hold it.
-export function coderabbitApprovedHead(pullRequest) {
-  const headSha = String(pullRequest?.headRefOid || "");
-  const reviews = pullRequest?.reviews;
-  if (!/^[0-9a-f]{40}$/i.test(headSha) || !Array.isArray(reviews)) return false;
-  const verdicts = reviews
-    .filter((review) => String(review?.author?.login || "").toLowerCase().replace(/\[bot\]$/, "") === "coderabbitai")
-    .filter((review) => ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(String(review?.state || "").toUpperCase()))
-    .map((review) => ({ review, at: Date.parse(String(review?.submittedAt || "")) }))
-    .filter((entry) => Number.isFinite(entry.at))
-    .sort((left, right) => left.at - right.at);
-  const latest = verdicts[verdicts.length - 1]?.review;
-  return Boolean(latest)
-    && String(latest.state).toUpperCase() === "APPROVED"
-    && String(latest?.commit?.oid || "").toLowerCase() === headSha.toLowerCase();
-}
-
 // The API path for `gh api` calls about a merge request's repository. `gh pr
 // merge --repo` accepts OWNER/REPO, HOST/OWNER/REPO or a URL; `gh api` takes a
 // path, so reduce it to OWNER/REPO. No --repo means the checkout's own remote,

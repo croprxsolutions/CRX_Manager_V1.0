@@ -192,7 +192,11 @@ and Supabase support (runbook 4.6).
     or else capture every write made after the freeze and replay it. Keep the restored project unreachable
     to staff until the post-restore checklist (4.7) is finished. Otherwise staff or jobs could write against
     week-old state, or writes to the old project could disappear at cutover, creating the duplicates 4.7
-    exists to prevent. Write down which approach you used.
+    exists to prevent. Write down which approach you used. Then carry over every legitimate change made on
+    the old project between the dump time and the freeze, across **all** business tables (runbook 4.7,
+    "Every other business record"), before cutover. A drill exercises this without touching production:
+    restore a second throwaway copy from the same dump to act as the "old" project, make test changes there,
+    and prove each one is found and carried over.
 11. **Final gate before cutover.** First repeat the full table, function and default-privilege audit from
     step 4 for every object the schema replay (step 8) added or changed, including row-level-security
     policies as well as grants. **Do this audit inside the database first, with the API still off**

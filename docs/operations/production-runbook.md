@@ -217,6 +217,11 @@ the real world already did after the restore point:
 - **Email:** the Resend logs (30 days) show what was already sent. Do not re-send invoices or receipts customers already got.
 - **Deliveries and stock:** drivers may have completed deliveries after the restore time. Re-apply them from the tickets through the normal screens.
 - **Commissions and payouts:** compare any payout paid after the restore time.
+- **Every other business record (when the old project is still reachable):** compare every business table
+  (customers, quotes, orders, invoices, prepay credits, allocations and the rest) between the dump time and
+  the writer freeze, and carry over or deliberately reject each legitimate change before cutover, so no
+  valid work made on the old project disappears. Record each decision. When the old project is lost, use
+  the paper log and outside records (4.8) instead.
 - **Scheduled jobs (last):** only after everything above is reconciled, put the `pg_cron` jobs back. The
   logical dump path leaves `cron.job` empty, and any job the schema replay recreated was left inactive (see the draft procedure). Compare against the job list
   in the repository's migrations (for example `mark-overdue-invoices`, `auto-expire-quotes`,

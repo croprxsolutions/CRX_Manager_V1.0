@@ -211,25 +211,30 @@ export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(promp
 // note) in front of Mason's words, and the hook's prompt carries it. On 2026-10-20
 // five of his replies arrived that way and none matched the whole-message forms
 // above, so the hook said nothing and an urgent apply stalled for an hour. Whole
-// blocks at the start or end are not his words; what is left must still be
-// exactly the reply. Each block ends at its first closing tag, so a block can
-// never swallow the words after it.
+// blocks at the START are not his words (the shape measured: the note first, his
+// words last). Each block ends at its first closing tag, and if any reminder tag
+// is left after them, nothing is removed: text inside a note (a session title)
+// that closes it early and opens another must never become his reply (Luna
+// BLOCKER, this PR).
 const LEADING_REMINDERS_RE = /^(?:\s*<system-reminder>[\s\S]*?<\/system-reminder>)+\s*/;
-const TRAILING_REMINDERS_RE = /(?:<system-reminder>(?:(?!<\/?system-reminder>)[\s\S])*<\/system-reminder>\s*)+$/;
+const REMINDER_TAG_RE = /<\/?system-reminder\b/i;
 
-/** Mason's reply without the whole reminder blocks Claude Code or the app put around it. */
-export const replyWithoutReminders = (prompt) =>
-  String(prompt ?? "").replace(LEADING_REMINDERS_RE, "").replace(TRAILING_REMINDERS_RE, "");
+/** Mason's reply without the whole reminder blocks the app put in front of it. */
+export function replyWithoutReminders(prompt) {
+  const text = String(prompt ?? "");
+  const rest = text.replace(LEADING_REMINDERS_RE, "");
+  return rest !== text && REMINDER_TAG_RE.test(rest) ? text : rest;
+}
 
 /**
- * "code" or "plain" when the message is not a whole reply but its last line is
- * one (other words or an envelope came with it), else null. The hook then says
- * it did not count instead of staying silent (2026-10-20).
+ * "code" or "plain" when the message is not a whole reply but one of its lines
+ * is (other words or an envelope came with it), else null. The hook then says it
+ * did not count instead of staying silent (2026-10-20).
  */
 export function approvalAttemptIn(prompt) {
-  const last = replyWithoutReminders(prompt).trim().split(/\r?\n/).pop() ?? "";
-  if (approvalCodeFromReply(last)) return "code";
-  return isPlainApprovalReply(last) ? "plain" : null;
+  const lines = String(prompt ?? "").split(/\r?\n/);
+  if (lines.some((l) => approvalCodeFromReply(l))) return "code";
+  return lines.some((l) => isPlainApprovalReply(l)) ? "plain" : null;
 }
 
 const textOf = (content) => (typeof content === "string" ? content

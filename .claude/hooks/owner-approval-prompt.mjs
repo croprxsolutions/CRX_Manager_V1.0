@@ -10,9 +10,9 @@
 //   - A plain `I approve` with no request waiting in this session is ordinary
 //     chat: the hook says nothing.
 //   - Any other message, or the reply in another session → nothing is approved.
-//     A whole <system-reminder> block the app puts around his words is not part
-//     of the message; a message whose LAST line is a reply but which carries
-//     other text is refused out loud, never silently (2026-10-20).
+//     A whole <system-reminder> block the app puts in front of his words is not
+//     part of the message; a message with a reply on one of its lines but other
+//     text as well is refused out loud, never silently (2026-10-20).
 // Claude Code runs this on each message sent into a session. Nothing stops an
 // agent running it by hand with a made-up message; that is the deliberate
 // forgery Mason accepted as the residual (owner-approval-lib.mjs header).
@@ -37,12 +37,14 @@ try { payload = globalThis.__CRX_ROUTED_HOOK_PAYLOAD ?? JSON.parse(readFileSync(
 const reply = replyWithoutReminders(payload?.prompt);
 let code = approvalCodeFromReply(reply);
 const plain = !code && isPlainApprovalReply(reply);
-// Not a whole reply, but its last line is one: say it did not count rather than
+// Not a whole reply, but one of its lines is: say it did not count rather than
 // stay silent, so an approval is never lost without a word (2026-10-20). A plain
 // "I approve" with nothing waiting in this session stays ordinary chat.
 const attempt = !code && !plain ? approvalAttemptIn(payload?.prompt) : null;
 if (!code && !plain && !attempt) emit();
-const said = (attempt ? reply.trim().split(/\r?\n/).pop() : reply).trim().slice(0, 40);
+const said = (attempt
+  ? String(payload?.prompt ?? "").split(/\r?\n/).find((l) => approvalCodeFromReply(l) || isPlainApprovalReply(l))
+  : reply).trim().slice(0, 40);
 
 // Output happens only outside this try: under prompt-router.mjs process.exit
 // throws, and a catch here would turn a clean exit into a failure.
@@ -75,7 +77,7 @@ try {
 if (attempt && !result) {
   if (!waiting) emit();
   emit([
-    `OWNER APPROVAL NOT RECORDED — Mason's message ended "${said}", but other text came with it, so it was not those words alone. Nothing was approved.`,
+    `OWNER APPROVAL NOT RECORDED — Mason's message contained "${said}", but other text came with it, so it was not those words alone. Nothing was approved.`,
     "If he meant to approve the waiting database change, ask him to send the reply again as a message of its own: " +
       "only approve followed by the reference number (or I approve right after the request). Do not take this message as his approval.",
   ].join("\n"));

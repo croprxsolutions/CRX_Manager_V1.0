@@ -254,15 +254,17 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    table or function privileges it should not, and that a signed-out request to the new project's API is
    refused. Do this before the project is exposed to anyone.
 5. Validate. **Future (once the alert design is built):** compare against the baseline file bound to the **exact selected archive** (its name and checksum are recorded in the file; a file merely dated earlier or later is not valid, because it cannot show that this archive holds all its rows)
-   `baseline-YYYY-MM-DD.json` stored beside the dump. If the selected archive has no such bound file, count validation is unavailable for it and the live-count or lost-project method below applies. **Today no baseline exists.** If the project
+   `baseline-YYYY-MM-DD.json` stored beside the dump. If the selected archive has no such bound file, count validation is unavailable for it and the live-count or lost-project method below applies. **As of 2026-10-19 no baseline exists.** If the project
    is **lost** (no live database to count), validate without live counts: the restore finishes with no
    errors; the key tables are not empty; no table's newest `created_at` is after the dump date, and the busiest tables (`invoices`, `inventory_transactions`) have one no more than 3 days before the dump date (a season runs October 1 through September 30; outside the busy part of the season a longer gap can be normal, so explain it rather than fail) (do not apply this to low-volume tables such as `allocation_sets` or `prepay_credits`, which may have no new rows for days);
    internal checks hold (for every invoice not in `voided` status, the total equals the sum of its lines; voided invoices keep their lines but have a zero total by design, so check that zero instead; if another status (for example a cancelled invoice) fails the total check, compare it with that status's rules in `.claude/schema-registry.json` and the workflow docs and record the finding rather than assuming corruption or assuming it is fine; every order and invoice points to
    a customer that exists, every profile has a matching login); and several of the most recent invoice
    numbers before the dump match an outside record (QuickBooks, Chem Man, email, paper tickets).
-   Also, each Monday backup check below saves a dated list of live row counts for the tables named here
-   to a place that survives losing the project (the `CRX_Backups` repo), so a lost-project restore
-   can compare to the most recent one.
+   Also, each Monday backup check below saves a dated list of live row counts for `customers`, `invoices`, `orders`,
+   `inventory_transactions`, `allocation_sets`, `prepay_credits`, `auth.users`, `profiles` and every other
+   identity table the restore needs, to a place that survives losing the project (the `CRX_Backups` repo),
+   so a lost-project restore can compare to the most recent one and stops on any unexplained difference,
+   including missing accounts.
    If the project is **still reachable** (a drill, or corruption), also use this fallback:
    read live row counts for `customers`, `invoices`, `orders`, `inventory_transactions`, `allocation_sets` and `prepay_credits` (the live payment tables; the old `payments` table is dead and must not be used)
    just before the drill and note the dump date. Treat a table as **append-only** only if no one can delete from it; today
@@ -286,7 +288,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    invariants instead) and check each can open the screens and data that role should, and cannot open
    what it should not. One admin test is not enough. These checks describe the schema as restored, so they
    are **repeated as the final gate (step 11)** after the schema update, grants and Auth settings are done.
-7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
+7. Work lost is everything written after the dump time: up to about 7 days (as of 2026-10-19, weekly dumps), more if a Sunday run was missed.
 8. **Bring the restored schema up to date first.** (Some migrations call `cron.schedule`, so replay can
    recreate scheduled jobs. Keep jobs disabled during replay and run the `cron.job` check from step 4 again
    afterward; any job present stops the restore until it is removed and reconciled.) The dump is only as new as its date, but the current
@@ -312,7 +314,9 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install
    every required secret (from the password manager, never pasted into chat). **Run the function smoke
    tests inside step 11's controlled API-on window, not here:** the functions use the Data API, which stays
-   off until the in-database proof in step 11 passes. Smoke-test each function **safely**: use isolated test fixtures (synthetic records), non-production recipients and sandbox
+   off until the in-database proof in step 11 passes. Use the same bounded API-on window described in
+   step 4, record it, and turn the API off again before cleanup of the test records and before the row-count
+   validation. Smoke-test each function **safely**: use isolated test fixtures (synthetic records), non-production recipients and sandbox
    credentials or stubbed integrations, because `send-email`, the user-management functions and the OCR
    functions have real external or database side effects, and OCR is not safe to repeat. Remove every test
    record before the row-count validation in step 11 so counts and email logs are not polluted. Deleting
@@ -410,7 +414,7 @@ per step, whether validation matched, whether logins were present, and problems.
 
 ### 4.11 Backup health alerting
 
-Design: `docs/operations/backup-health-alert-design.md`. Today a **failed** Sunday run sends a GitHub
+Design: `docs/operations/backup-health-alert-design.md`. As of 2026-10-19 a **failed** Sunday run sends a GitHub
 email, but a run that **never starts has no alert at all**: the missed-run watchdog is designed, not built.
 Until it is, every Monday check the date of the newest file in `CRX_Backups/backups/`. That confirms
 freshness only; it does **not** prove the dump is complete (a truncated dump over 10 KB passes today's

@@ -9,7 +9,7 @@ three; Mason chose these three and dropped the other six deferred spelling varia
   code too. `node -pe "1+1"` still passes.
 - **`deno eval`.** Its code is a subcommand argument, not a flag, so `deno eval "new
   Deno.Command('gh',…)"` passed both guards. Every word after `deno eval` / `bun eval` is now judged, also when options come first
-  (`deno --quiet eval`).
+  (`deno --quiet eval`, `deno -L debug eval`): any `eval` word after `deno`/`bun` starts the code.
   The merge-guard-launcher fallback already counted `eval`; it now counts the wider clusters too.
 - **GitHub MCP writes under a hold.** `create_pull_request`, `update_pull_request`,
   `add_issue_comment` and the rest of the write family went through a "stop". The hold latch now

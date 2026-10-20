@@ -378,7 +378,7 @@ separately, the permission change.
 6. **Follow-up (2026-10-20, three items deferred from PR #956; main allowed all three):**
    `inlineCodeReachesGatedAction` reads a short-option cluster with a code letter anywhere in it
    (`node -pe`, `-ce`, `python -Bc`, `perl -0e`) as taking the next word as code, and judges every
-   word after `deno eval` / `bun eval` (options may come before `eval`); the merge-guard-launcher fallback counts the same clusters. The hold
+   word after `deno eval` / `bun eval` (any `eval` word after the runtime, so options and their values may come first); the merge-guard-launcher fallback counts the same clusters. The hold
    latch now holds every GitHub MCP tool except a read (`get_*`, `list_*`, `search_*`, `*_read`,
    `actions_get`, `actions_list`), so `create_pull_request`, `update_pull_request`,
    `add_issue_comment` and any new write tool stop on "stop". The other six deferred spelling

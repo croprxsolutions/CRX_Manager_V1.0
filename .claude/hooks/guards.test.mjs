@@ -419,13 +419,16 @@ for (const command of [
   "perl -0e \"system('gh pr merge 951')\"",
   "deno eval \"new Deno.Command('gh',{args:['pr','merge','951']}).outputSync()\"",
   "deno --quiet eval \"new Deno.Command('git',{args:['push','origin','HEAD:main']}).outputSync()\"",
+  // A global option with a detached value before `eval` (Codex connector, PR #975).
+  "deno -L debug eval \"new Deno.Command('git',{args:['push']}).outputSync()\"",
+  "deno --log-level info eval \"new Deno.Command('gh',{args:['pr','merge','951']}).outputSync()\"",
 ]) {
   for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
     const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
     ok(res.stdout.includes("deny"), `${hook} denies inline runtime code reaching a gated action: ${command}`);
   }
 }
-for (const command of ['node -pe "1+1"', 'perl -0e "print 1"', 'deno --quiet eval "console.log(1)"']) {
+for (const command of ['node -pe "1+1"', 'perl -0e "print 1"', 'deno --quiet eval "console.log(1)"', 'deno -L debug eval "console.log(1)"']) {
   for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
     const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
     eq(res.stdout.trim(), "", `${hook} silent on harmless inline runtime code: ${command}`);

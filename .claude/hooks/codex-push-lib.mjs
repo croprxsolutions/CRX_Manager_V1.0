@@ -4127,15 +4127,16 @@ export function inlineCodeReachesGatedAction(command) {
       if (!STDIN_PROGRAM_RUNTIMES.has(program) && program !== "nodejs") continue;
       const end = Math.min(words.length, index + 1 + NESTED_SCAN_WINDOW);
       let evalSubcommand = false;
-      let beforeSubcommand = true;
       for (let at = index + 1; at < end; at += 1) {
         const word = String(words[at]);
-        if (EVAL_SUBCOMMAND_RUNTIMES.has(program) && beforeSubcommand && word.toLowerCase() === "eval") {
+        // Any `eval` word counts, not only the first non-option one: a global option
+        // with a detached value (`deno -L debug eval`) looks like a subcommand (Codex
+        // connector, PR #975). Words after it are refused only if they could reach a
+        // gated action, so a script argument named `eval` costs nothing.
+        if (EVAL_SUBCOMMAND_RUNTIMES.has(program) && word.toLowerCase() === "eval") {
           evalSubcommand = true;
-          beforeSubcommand = false;
           continue;
         }
-        if (!word.startsWith("-")) beforeSubcommand = false;
         if (evalSubcommand && couldReachGatedAction([word])) return true;
         // `--eval=…`, a separate `--eval …`, or a short cluster whose code is
         // attached (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3) or

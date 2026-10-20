@@ -79,6 +79,13 @@ export function blendQuotePriceSaveErrorMessage(error: unknown): string | null {
   if (rpcCodeDetail(error, RpcErrorCodes.INSUFFICIENT_ROLE) !== null) {
     return 'Only an admin or a sales rep can pick a ticket\'s prices.';
   }
+  if (rpcCodeDetail(error, RpcErrorCodes.AUTH_REQUIRED) !== null
+      || rpcCodeDetail(error, RpcErrorCodes.ACTOR_MISMATCH) !== null) {
+    return 'Your sign-in could not be confirmed. Sign in again, then pick the price again.';
+  }
+  if (rpcCodeDetail(error, RpcErrorCodes.BLEND_TICKET_PRODUCT_NOT_UPDATED) !== null) {
+    return 'The price was not saved. Reload the ticket and try again.';
+  }
   return null;
 }
 

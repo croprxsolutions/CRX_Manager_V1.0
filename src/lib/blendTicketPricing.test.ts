@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blendTicketMissingPriceMessage, getBlendQuotePriceChoices } from './blendTicketPricing';
+import { blendQuotePriceSaveErrorMessage, blendTicketMissingPriceMessage, getBlendQuotePriceChoices } from './blendTicketPricing';
 
 const LINE = '22222222-2222-4222-8222-222222222222';
 const QI_A = '33333333-3333-4333-8333-333333333333';
@@ -39,6 +39,29 @@ describe('getBlendQuotePriceChoices', () => {
     expect(getBlendQuotePriceChoices(choiceError([{ ...good, options: [good.options[0]] }]))).toBeNull();
     expect(getBlendQuotePriceChoices(choiceError([{ ...good, options: [good.options[0], { quote_item_id: QI_B, price_cents: 7.5 }] }]))).toBeNull();
     expect(getBlendQuotePriceChoices(choiceError([{ ...good, options: [good.options[0], { quote_item_id: QI_B, price_cents: -1 }] }]))).toBeNull();
+  });
+});
+
+describe('blendQuotePriceSaveErrorMessage', () => {
+  it('turns every refusal the setter can raise into plain English', () => {
+    const cases: Array<[string, RegExp]> = [
+      ['BLEND_TICKET_QUOTE_PRICE_LOCKED: only an unbilled blend ticket', /already been billed or linked/],
+      ['BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE: that price is not on this ticket\'s quote', /no longer on this ticket's quote/],
+      ['BLEND_TICKET_PRODUCT_NOT_FOUND', /line no longer exists/],
+      ['SALESMAN_SCOPE_DENIED', /belongs to another sales rep/],
+      ['INSUFFICIENT_ROLE: admin or sales role required to pick a blend-ticket price', /Only an admin or a sales rep/],
+      ['AUTH_REQUIRED', /sign-in could not be confirmed/],
+      ['ACTOR_MISMATCH', /sign-in could not be confirmed/],
+      ['BLEND_TICKET_PRODUCT_NOT_UPDATED', /price was not saved/],
+    ];
+    for (const [message, expected] of cases) {
+      expect(blendQuotePriceSaveErrorMessage({ message })).toMatch(expected);
+    }
+  });
+
+  it('leaves unknown errors to the normal handling', () => {
+    expect(blendQuotePriceSaveErrorMessage({ message: 'IDEMPOTENCY_INTENT_MISMATCH' })).toBeNull();
+    expect(blendQuotePriceSaveErrorMessage(null)).toBeNull();
   });
 });
 

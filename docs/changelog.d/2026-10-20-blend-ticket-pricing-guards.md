@@ -20,7 +20,8 @@
   a usable price on the current job's quote, for the line's current product, on the ticket
   customer's quote (`_blend_quote_pick_valid_20261020`); otherwise it asks again or tier-prices the
   line. A new column guard (trigger `blend_ticket_products_price_pick_guard_20261020`) refuses any
-  direct write of that column except through the setter (`BLEND_TICKET_PRICE_PICK_REQUIRED`).
+  direct write of that column except through the setter (`BLEND_TICKET_PRICE_PICK_REQUIRED`), and
+  clears a line's pick when its product changes or it moves to another ticket.
 - A job pointed at another customer's quote, or a deleted quote, supplies no quoted price (the
   automatic lookup used to trust any section the job named); the line bills its tier price.
 - The same invoice refuses a tier-priced product with no usable price instead of billing $0, and

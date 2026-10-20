@@ -413,19 +413,35 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: another customer''s quote priced this customer''s invoice line at % (%), expected the 900-cent tier-2 price', v_cents, v_text;
   END IF;
 
-  -- 13. A pick goes stale when the line's product changes: the old price is never billed. Here the
-  --     new product's quote lines share one price, so it bills that quoted price instead.
+  -- 13. Changing a line's product drops its pick, so the old price can never carry over.
   v_res := public.set_blend_ticket_product_quote_price(v_line_t8, v_qi_700, v_admin, 'e2e-btp-pick-t8-' || v_suffix);
   IF (v_res->>'unit_price_cents')::bigint IS DISTINCT FROM 700 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the T8 pick was not stored: %', v_res;
   END IF;
   UPDATE public.blend_ticket_products SET product_id = v_p_t1only WHERE id = v_line_t8;
-  v_res := public.create_invoice_from_blend_ticket(v_t8, v_admin, 'e2e-btp-invoice-8-' || v_suffix);
+  IF (SELECT unit_price_cents FROM public.blend_ticket_products WHERE id = v_line_t8) IS NOT NULL THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: changing a line''s product kept its old pick';
+  END IF;
+  --     A pick also goes stale when the ticket's job changes; billing itself refuses to honour it.
+  --     Put the product back, pick again, then move the ticket to the job whose quote has no usable
+  --     price for it: the line must bill its tier price, never the old pick.
+  UPDATE public.blend_ticket_products SET product_id = v_p_full WHERE id = v_line_t8;
+  v_res := public.set_blend_ticket_product_quote_price(v_line_t8, v_qi_700, v_admin, 'e2e-btp-pick-t8b-' || v_suffix);
+  IF (SELECT unit_price_cents FROM public.blend_ticket_products WHERE id = v_line_t8) IS DISTINCT FROM 700 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the second T8 pick was not stored: %', v_res;
+  END IF;
+  UPDATE public.blend_tickets SET job_id = v_job3 WHERE id = v_t8;
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t8, v_admin, 'e2e-btp-invoice-8-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    RAISE EXCEPTION 'SMOKE_FAIL: the ticket moved to a job with no usable quote price was refused: %', v_err;
+  END;
   SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_text
     FROM public.invoice_items ii
-   WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = v_p_t1only;
-  IF v_cents IS DISTINCT FROM 600 OR v_text IS DISTINCT FROM 'quoted' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a stale pick billed % (%) after the product changed, expected 600 cents as quoted', v_cents, v_text;
+   WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = v_p_full;
+  IF v_cents IS DISTINCT FROM 900 OR v_text IS DISTINCT FROM 'tier' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a stale pick billed % (%) after the job changed, expected the 900-cent tier-2 price', v_cents, v_text;
   END IF;
 
   -- 14. A quote price that is not usable ($0, which is how an unpriced quote line looks) is

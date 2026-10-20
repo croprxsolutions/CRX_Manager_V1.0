@@ -1028,6 +1028,28 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
+  it('keeps the window and the retry key when the first pick fails', async () => {
+    await createInvoiceWith({
+      message: 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: pick the price to bill',
+      details: JSON.stringify({
+        products: [{ blend_ticket_product_id: LINE_ID, product_name: 'Atrazine 4L',
+          options: [{ quote_item_id: QI_700, price_cents: 700 }, { quote_item_id: QI_750, price_cents: 750 }] }],
+      }),
+    });
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'set_blend_ticket_product_quote_price'
+      ? { data: null, error: { message: 'BLEND_TICKET_QUOTE_PRICE_LOCKED: only an unbilled blend ticket that is not linked to an order can take a picked price' } }
+      : { data: null, error: null }));
+    const picker = await screen.findByRole('dialog', { name: 'Pick the quoted price' });
+    fireEvent.click(within(picker).getByLabelText(/\$7\.00 per unit/));
+    fireEvent.click(within(picker).getByRole('button', { name: 'Save price' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'This ticket has already been billed or linked to an order, so its prices can no longer be picked.',
+    ));
+    expect(screen.getByRole('dialog', { name: 'Pick the quoted price' })).toBeInTheDocument();
+    expect(mockResetKeyFor).not.toHaveBeenCalled();
+  });
+
   it('says which picks saved when a later one fails, and keeps only the unsaved line open', async () => {
     const LINE_2 = '55555555-5555-4555-8555-555555555555';
     const QI_B1 = '66666666-6666-4666-8666-666666666666';

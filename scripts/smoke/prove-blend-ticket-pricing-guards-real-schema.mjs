@@ -319,12 +319,12 @@ ROLLBACK;`,
       /SMOKE_FAIL: a blend-ticket invoice picked one of two quoted prices without asking/],
     // Billing honours any stored value again, as before: the stale pick bills the old price.
     ['invoice valid-pick test', INVOICE, [[PICK_VALID_CALL, '        IF v_btp.unit_price_cents IS NOT NULL THEN\n']],
-      /SMOKE_FAIL: a stale pick billed 700 \(quoted\) after the product changed/],
+      /SMOKE_FAIL: a stale pick billed 700 \(quoted\) after the job changed/],
     // The quote lookup takes any priced line again: an unusable quote price wins over the tier.
     ['invoice usable-quote-price filter', INVOICE,
       [["             AND qi.product_id = v_btp.product_id\n             AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)\n           ORDER BY qi.id LIMIT 1;\n",
         "             AND qi.product_id = v_btp.product_id\n           ORDER BY qi.id LIMIT 1;\n"]],
-      /SMOKE_FAIL: a line whose quote prices are unusable (billed|was refused)/],
+      /SMOKE_FAIL: (a line whose quote prices are unusable (billed|was refused)|the ticket moved to a job with no usable quote price was refused)/],
     // The setter tests the product twice (its own line and the shared valid-pick rule); remove both.
     // The automatic lookup trusts any section the job names again: the other customer's quote
     // either asks for a pick (two prices) or bills its price.
@@ -337,6 +337,9 @@ ROLLBACK;`,
     ['setter same-customer test', SETTER,
       [['     OR NOT public._blend_quote_pick_valid_20261020(\n              v_section, v_ticket.customer_id, v_line.product_id, (v_quote_item.price_per_unit * 100)::bigint) THEN\n', ' THEN\n']],
       /SMOKE_FAIL: a price from another customer's quote was accepted as the pick/],
+    ['pick cleared on a product change', GUARD_FN,
+      [["  IF TG_OP = 'UPDATE'\n     AND (NEW.product_id IS DISTINCT FROM OLD.product_id\n", "  IF false\n     AND (NEW.product_id IS DISTINCT FROM OLD.product_id\n"]],
+      /SMOKE_FAIL: changing a line's product kept its old pick/],
     ['price-pick column guard', GUARD_FN, [["  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1' THEN\n", '  IF true THEN\n']],
       /SMOKE_FAIL: a ticket line price was written directly, skipping the pick checks/],
     ['setter own-name test', SETTER, [["  IF NOT public.is_admin()\n     AND v_ticket.salesman_id IS NOT NULL\n     AND v_ticket.salesman_id IS DISTINCT FROM v_actor THEN\n    RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n  END IF;\n", '']],

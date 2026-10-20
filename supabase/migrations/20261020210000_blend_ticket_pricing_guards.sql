@@ -92,6 +92,9 @@
 --   authenticated user') before any write. The order body and the new setter raise ACTOR_MISMATCH.
 
 SET LOCAL lock_timeout = '5s';
+-- The postflight compares pg_get_triggerdef text, which prints the trigger function unqualified only
+-- while public is on the search_path.
+SET LOCAL search_path = public, pg_temp;
 
 CREATE TEMP TABLE blend_ticket_pricing_guards_tx ON COMMIT DROP AS
 SELECT pg_current_xact_id()::text AS transaction_id,
@@ -160,7 +163,7 @@ BEGIN
   -- The columns the new code reads and writes, with their types.
   IF (SELECT count(*) FROM pg_attribute a
        WHERE NOT a.attisdropped AND (
-             (a.attrelid = 'public.blend_ticket_products'::regclass AND a.attname = 'unit_price_cents' AND a.atttypid = 'bigint'::regtype)
+             (a.attrelid = 'public.blend_ticket_products'::regclass AND a.attname = 'unit_price_cents' AND a.atttypid = 'bigint'::regtype AND NOT a.atthasdef)
           OR (a.attrelid = 'public.jobs'::regclass AND a.attname = 'quote_section_id' AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quote_items'::regclass AND a.attname IN ('section_id', 'product_id') AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quote_items'::regclass AND a.attname = 'price_per_unit' AND a.atttypid = 'numeric'::regtype)
@@ -245,7 +248,15 @@ BEGIN
   -- set_blend_ticket_product_quote_price, which sets this transaction-local flag around its one
   -- UPDATE. A direct Data API write (the office policy allows reps and admins to update the row)
   -- would otherwise skip that function's own-name, quote and customer checks. Clearing a pick
-  -- (setting NULL) is always allowed: billing then simply asks again.
+  -- (setting NULL) is always allowed: billing then simply asks again. A line whose product changes,
+  -- or that moves to another ticket, drops its pick, so an old pick never carries over even when
+  -- the new product happens to be quoted at the same price.
+  IF TG_OP = 'UPDATE'
+     AND (NEW.product_id IS DISTINCT FROM OLD.product_id
+          OR NEW.blend_ticket_id IS DISTINCT FROM OLD.blend_ticket_id) THEN
+    NEW.unit_price_cents := NULL;
+    RETURN NEW;
+  END IF;
   IF NEW.unit_price_cents IS NULL THEN RETURN NEW; END IF;
   IF TG_OP = 'UPDATE' AND NEW.unit_price_cents IS NOT DISTINCT FROM OLD.unit_price_cents THEN
     RETURN NEW;
@@ -259,8 +270,11 @@ $function$;
 
 REVOKE ALL ON FUNCTION public._guard_blend_ticket_price_pick_20261020() FROM PUBLIC, anon, authenticated, service_role;
 
+COMMENT ON COLUMN public.blend_ticket_products.unit_price_cents IS
+  'Quoted price (cents) staff picked for this line when the job''s quote lists its product at more than one price (set only by set_blend_ticket_product_quote_price, Goal 3 2026-10-20). Billing honours it only while it still matches a usable price on the current job''s quote, for the line''s current product, on a live quote of the ticket''s customer. Cleared when the line''s product or ticket changes.';
+
 CREATE TRIGGER blend_ticket_products_price_pick_guard_20261020
-  BEFORE INSERT OR UPDATE OF unit_price_cents ON public.blend_ticket_products
+  BEFORE INSERT OR UPDATE OF unit_price_cents, product_id, blend_ticket_id ON public.blend_ticket_products
   FOR EACH ROW EXECUTE FUNCTION public._guard_blend_ticket_price_pick_20261020();
 
 -- 1. The order body: verbatim live body plus the pre-check and the tier-1 fallback.
@@ -843,7 +857,7 @@ BEGIN
   --     A stored pick counts only while it still matches a usable price on THIS job's quote for
   --     the line's CURRENT product and the ticket's customer (_blend_quote_pick_valid_20261020),
   --     so editing the product or the job asks again. Only usable quote prices count (finite,
-  --     zero or more, whole cents), each price offered once, and only when some billed share is
+  --     above zero, whole cents), each price offered once, and only when some billed share is
   --     priced per unit (a line billed wholly inside grower-share overrides never uses it).
   IF v_quote_section_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
@@ -1274,6 +1288,10 @@ BEGIN
   END IF;
 
   SELECT * INTO v_line FROM public.blend_ticket_products WHERE id = p_blend_ticket_product_id FOR UPDATE;
+  -- The line must still belong to the ticket locked above (a concurrent edit could have moved it).
+  IF NOT FOUND OR v_line.blend_ticket_id IS DISTINCT FROM v_ticket.id THEN
+    RAISE EXCEPTION 'BLEND_TICKET_PRODUCT_NOT_FOUND';
+  END IF;
   IF v_ticket.job_id IS NOT NULL THEN
     SELECT j.quote_section_id INTO v_section FROM public.jobs j WHERE j.id = v_ticket.job_id;
   END IF;
@@ -1337,12 +1355,12 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text)', 'create_invoice_from_blend_ticket', '41d6f7f66314e14deeaa89a2bd6f2dda', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text)', 'create_invoice_from_blend_ticket', 'fad1bf1faada114696169264a58bda70', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)', '_create_order_from_blend_ticket_replay_impl_20261015', '4b5ea386b9be7c70c240ffb8efae08e6', 'json', ARRAY['postgres'], true, 'plpgsql'),
-        ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', '9a571eb0ce297ee5de6b0eb839d374e6', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', 'e8dbfc9db51ecb5620af19c9251cf0c7', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', '_blend_tier_price_cents_20261020', '44e3957c991c1ce20961713051d58e5d', 'bigint', ARRAY['postgres'], false, 'sql'),
         ('public._blend_quote_pick_valid_20261020(uuid,uuid,uuid,bigint)', '_blend_quote_pick_valid_20261020', '3ee99ffb4a08205c0f2ff0d1e24e4705', 'boolean', ARRAY['postgres'], false, 'sql'),
-        ('public._guard_blend_ticket_price_pick_20261020()', '_guard_blend_ticket_price_pick_20261020', '6a7e2aa3078aa12fa918d0a741d255a2', 'trigger', ARRAY['postgres'], false, 'plpgsql')
+        ('public._guard_blend_ticket_price_pick_20261020()', '_guard_blend_ticket_price_pick_20261020', '9b650a954cddb3a3064fd7a51b6ec4e1', 'trigger', ARRAY['postgres'], false, 'plpgsql')
       ) AS pin(sig, name, body_md5, ret, acl, definer, lang)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -1373,7 +1391,7 @@ BEGIN
          AND t.tgname = 'blend_ticket_products_price_pick_guard_20261020'
          AND t.tgenabled = 'O'
          AND t.tgfoid = to_regprocedure('public._guard_blend_ticket_price_pick_20261020()')
-         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER blend_ticket_products_price_pick_guard_20261020 BEFORE INSERT OR UPDATE OF unit_price_cents ON public.blend_ticket_products FOR EACH ROW EXECUTE FUNCTION _guard_blend_ticket_price_pick_20261020()') <> 1 THEN
+         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER blend_ticket_products_price_pick_guard_20261020 BEFORE INSERT OR UPDATE OF unit_price_cents, product_id, blend_ticket_id ON public.blend_ticket_products FOR EACH ROW EXECUTE FUNCTION _guard_blend_ticket_price_pick_20261020()') <> 1 THEN
     RAISE EXCEPTION 'POSTFLIGHT_BLEND_TICKET_PRICE_PICK_GUARD';
   END IF;
   -- The rule itself, on fixed inputs.

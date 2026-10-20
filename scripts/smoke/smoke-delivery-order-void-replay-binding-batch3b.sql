@@ -436,6 +436,33 @@ BEGIN
   END;
 
   -- --------------------------------------------------------------------------------------------
+  -- i2. A draft that already carries recorded money is refused, never zeroed: order 3's draft gets
+  --     a 100-cent payment (a direct fixture write), and void_order must refuse with
+  --     ORDER_VOID_DRAFT_HAS_APPLIED_MONEY and change nothing.
+  -- --------------------------------------------------------------------------------------------
+  UPDATE public.invoices SET paid_amount_cents = 100
+   WHERE order_id = v_order[3] AND status = 'draft' AND deleted_at IS NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: expected one draft invoice on order 3 to give a payment, found %', v_n;
+  END IF;
+  BEGIN
+    v_res2 := public.void_order(v_order[3], v_admin, '[SMOKE] billed elsewhere', v_prefix || 'void-order-paid-draft');
+    RAISE EXCEPTION 'SMOKE_FAIL: void_order voided an order whose draft invoice carries a recorded payment: %', v_res2;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong refusal for a draft with a recorded payment: %', SQLERRM;
+    END IF;
+  END;
+  SELECT o.status || ',' || i.status || ',' || i.paid_amount_cents INTO v_status
+    FROM public.orders o JOIN public.invoices i ON i.order_id = o.id AND i.deleted_at IS NULL
+   WHERE o.id = v_order[3];
+  IF v_status IS DISTINCT FROM 'fulfilled,draft,100' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused void_order changed order 3 or its paid draft: %', v_status;
+  END IF;
+
+  -- --------------------------------------------------------------------------------------------
   -- j. Every fresh receipt above is bound to the admin and carries a SHA-256 fingerprint.
   -- --------------------------------------------------------------------------------------------
   SELECT count(*) INTO v_n FROM public.idempotency_keys

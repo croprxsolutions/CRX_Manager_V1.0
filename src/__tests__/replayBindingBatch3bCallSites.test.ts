@@ -113,6 +113,19 @@ describe('replay-binding batch 3b migration binds the record and the reason', ()
     });
   }
 
+  it('void_order refuses a draft that already carries recorded money before zeroing it', () => {
+    const start = sql.indexOf('CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(');
+    expect(start).toBeGreaterThan(-1);
+    const body = sql.slice(start, sql.indexOf('$function$;', start));
+    const refusal = body.indexOf("RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY:");
+    const zeroing = body.indexOf('paid_amount_cents = 0,');
+    expect(refusal).toBeGreaterThan(body.indexOf("IF v_invoice.status = 'draft' THEN"));
+    expect(refusal).toBeLessThan(zeroing);
+    for (const field of ['paid_amount_cents', 'prepay_applied_cents', 'write_off_cents', 'credit_applied_cents']) {
+      expect(body).toContain(`COALESCE(v_invoice.${field}, 0) <> 0`);
+    }
+  });
+
   it('batch cancel keeps cancelling keyless through the renamed body, not the keyed wrapper', () => {
     const start = sql.indexOf('CREATE OR REPLACE FUNCTION public._batch_cancel_deliveries_replay_impl_20261015(');
     expect(start).toBeGreaterThan(-1);

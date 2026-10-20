@@ -125,7 +125,7 @@ query($owner:String!, $name:String!, $number:Int!, $first:Int!, $after:String) {
         nodes {
           isResolved
           isOutdated
-          comments(first:1) { nodes { author { login } originalCommit { oid } } }
+          comments(first:1) { totalCount nodes { author { login } originalCommit { oid } } }
         }
       }
     }
@@ -230,6 +230,8 @@ function normalizeThread(node) {
     // The empty string means "unknown" and must never compare equal to a head.
     oid: String(first?.originalCommit?.oid ?? "").trim().toLowerCase(),
     resolved: node?.isResolved === true,
+    // Comments after the first one: a reply. Unknown counts as none.
+    replies: Math.max(0, (Number.isInteger(node?.comments?.totalCount) ? node.comments.totalCount : 1) - 1),
   };
 }
 
@@ -321,11 +323,15 @@ export function isCodeRabbitLogin(login) {
   return CODERABBIT_LOGINS.includes(String(login || "").trim().toLowerCase());
 }
 
-// How many review threads CodeRabbit opened on this PR that nobody resolved.
+// How many review threads CodeRabbit opened on this PR that are not HANDLED.
+// Handled = resolved AND answered: at least one reply after CodeRabbit's comment
+// (the fix or the reason it is wrong). Resolving without a word does not count
+// (Luna rounds 4–6): the gate cannot judge a reply, but it can require one.
 export function unresolvedCodeRabbitThreads(pullRequest) {
   const nodes = pullRequest?.reviewThreads?.nodes;
   if (!Array.isArray(nodes)) return 0;
-  return nodes.map(normalizeThread).filter((thread) => isCodeRabbitLogin(thread.author) && !thread.resolved).length;
+  return nodes.map(normalizeThread)
+    .filter((thread) => isCodeRabbitLogin(thread.author) && !(thread.resolved && thread.replies >= 1)).length;
 }
 
 // The count the gates act on, or null when the read cannot be trusted as
@@ -358,7 +364,8 @@ export function coderabbitFindingsDenial(prefix, selector, count) {
     "2026-10-19), but its findings are: every one must be fixed or answered before the merge.\n\n" +
     `  1. Read them:  gh pr view ${which} --comments      (author: coderabbitai)\n` +
     "  2. Fix each real issue and push (CodeRabbit will not re-review; the checks and Sol cover the fix).\n" +
-    "  3. Resolve each thread — after the fix, or with a one-line reason it is wrong."
+    "  3. REPLY on each thread (what you fixed, or a one-line reason it is wrong), then resolve it —\n" +
+    "     a thread resolved with no reply still counts as unanswered."
   );
 }
 

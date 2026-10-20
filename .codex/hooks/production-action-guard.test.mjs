@@ -2801,7 +2801,7 @@ try {
           nodes: [{
             isResolved: resolved,
             isOutdated: true,
-            comments: { nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: risky.base } }] },
+            comments: { totalCount: resolved ? 2 : 1, nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: risky.base } }] },
           }],
         },
       } } } });

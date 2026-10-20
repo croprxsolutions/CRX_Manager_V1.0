@@ -37,10 +37,10 @@ const HEAD = "53e9c07142a4428848a3cebc0c31d2c1b83334c9";
 const OLD = "306d1e263e0000000000000000000000000000aa";
 
 // Build a GraphQL-shaped reviewThread node.
-const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = false } = {}) => ({
+const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = false, totalCount } = {}) => ({
   isResolved: resolved,
   isOutdated: false,
-  comments: { nodes: [{ author: { login }, originalCommit: { oid } }] },
+  comments: { ...(totalCount === undefined ? {} : { totalCount }), nodes: [{ author: { login }, originalCommit: { oid } }] },
 });
 const pr = (threads, headRefOid = HEAD) => ({ headRefOid, reviewThreads: { nodes: threads } });
 
@@ -50,7 +50,14 @@ ok(isCodeRabbitLogin("coderabbitai") && isCodeRabbitLogin("coderabbitai[bot]") &
 ok(!isCodeRabbitLogin("coderabbit") && !isCodeRabbitLogin("chatgpt-codex-connector"), "other logins do not");
 eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", oid: OLD })])), 1,
   "an unresolved CodeRabbit thread on an OLDER commit counts — it never re-reviews the fix");
-eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true })])), 0, "a resolved one does not");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: 2 })])), 0,
+  "a thread resolved WITH a reply is handled");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: 1 })])), 1,
+  "a thread resolved with NO reply still counts as unanswered (Luna rounds 4–6)");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true })])), 1,
+  "an unknown comment count is treated as no reply");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: false, totalCount: 3 })])), 1,
+  "a reply alone, without resolving, is still open");
 eq(unresolvedCodeRabbitThreads(pr([thread()])), 0, "a Codex App thread is not a CodeRabbit thread");
 eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai" }), thread({ login: "coderabbitai[bot]", oid: OLD })])), 2,
   "every unresolved CodeRabbit thread is counted");

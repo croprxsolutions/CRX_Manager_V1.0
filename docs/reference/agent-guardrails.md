@@ -21,7 +21,8 @@
 > GitHub's real base, the `--match-head-commit` pin, and a fresh exact-SHA `gpt-6-sol`/`high` proof run last — except a
 > documentation-only change, which needs only the green checks, the pin and base containment. A non-destructive
 > migration apply needs the same conditions minus CodeRabbit. Both merge gates also DENY while any CodeRabbit review
-> thread on the PR is unresolved, on any commit (`unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in
+> thread on the PR is not HANDLED — resolved with at least one reply (the fix or the reason) — on any commit (a thread
+> resolved with no reply still counts, Luna rounds 4–6; `unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in
 > `codex-bot-review-lib.mjs`; unlike the Codex App check this FAILS CLOSED — a failed or partial thread read denies
 > via `coderabbitThreadCount` / `coderabbitUnreadableDenial`, and the agent retries; Luna round 3; an answer with no
 > thread list at all counts as unreadable, not as zero, Luna round 4; `collectCodexThreads` marks a page with a missing

@@ -1589,7 +1589,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
   };
   const crThread = (resolved) => ({ isResolved: resolved, isOutdated: true,
-    comments: { nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
+    comments: { totalCount: resolved ? 2 : 1, nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "",
     runGit: (args) => {

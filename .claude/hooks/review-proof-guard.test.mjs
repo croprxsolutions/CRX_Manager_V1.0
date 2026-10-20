@@ -996,6 +996,23 @@ for (const command of [
 ]) {
   assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /after cd into the repo's \.claude/, `cd-then-delete denied: ${command}`);
 }
+// The schema registry backs three schema checks; deleting, moving or overwriting it
+// by shell is denied as main denied it, and reads stay allowed (Codex connector, PR #956).
+for (const command of [
+  "rm -f .claude/schema-registry.json",
+  "mv .claude/schema-registry.json /tmp/x.json",
+  "echo {} > .claude/schema-registry.json",
+  "Remove-Item .claude\\schema-registry.json",
+  "node -e \"1\" > .claude/schema-registry.json",
+]) {
+  assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /./, `registry write denied: ${command}`);
+}
+for (const command of [
+  "cat .claude/schema-registry.json | head",
+  "grep -n customers .claude/schema-registry.json",
+]) {
+  assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `registry read allowed: ${command}`);
+}
 // Reading after that cd, and deleting after a cd elsewhere, stay allowed.
 for (const command of [
   "cd .claude/hooks && ls",

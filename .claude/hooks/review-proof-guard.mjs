@@ -257,6 +257,13 @@ function segmentsHitStateDir(value) {
 // the literal-basename proof-path matcher misses (Opus review 2026-08-19, round
 // 5). The wrappers write internally via Node fs and never shell-redirect into the
 // state dir, so any such redirect is illegitimate; fail closed.
+// The schema registry by name: without it generated-column-check and
+// status-enum-check allow every edit and sql-safety fails open, so deleting,
+// moving or overwriting it disables three schema-backed checks. main denied those
+// through the broad `.claude` rule (Codex connector, PR #956). Reads and the
+// regenerate step (a script that writes it itself) are untouched.
+const SCHEMA_REGISTRY_RE = /(?:^|[\s"'=:/\\({,])\.claude[/\\]+schema-registry\.json(?![\w.-])/i;
+
 function redirectTargetsStateDir(value) {
   const norm = String(value || "").replace(/\\/g, "/");
   for (const m of norm.matchAll(/>>?\s*("[^"]*"|'[^']*'|[^\s;&|()<>]+)/g)) {
@@ -271,6 +278,7 @@ function redirectTargetsStateDir(value) {
         /(?:^|\/)\.claude\/+(?:[^/]+\/+)*\.{1,2}(?:\/|$)/i.test(target) ||
         /(?:^|\/)\.claude\/+[^\s]*[$`%]/i.test(target) ||
         /(?:^|\/)\.claude\/+worktrees(?:\/|$)/i.test(target) ||
+        SCHEMA_REGISTRY_RE.test(target) ||
         /(?:^|\/)\.claude\/*$/i.test(target)) return true;
   }
   return false;
@@ -496,7 +504,8 @@ if (shellTool) {
   // needed): a `>`/`>>` write into the state dir overwrites a wrapper-owned file
   // even when its basename is globbed.
   const namesStateDir = (v) =>
-    reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDirNarrow(v);
+    reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDirNarrow(v) ||
+    SCHEMA_REGISTRY_RE.test(v.replace(/\\/g, "/"));
   if (destructiveViews.some((v) => (hitsDestructiveVerb(v) && namesStateDir(v)) || redirectTargetsStateDir(v))) {
     deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
   }

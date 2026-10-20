@@ -146,5 +146,9 @@ both gates refuse it again. Three single-case checks in `review-proof-guard.test
 entrypoint helpers. CI: the sweep runner now waits for its ~300 KB print to flush before exiting;
 one Linux run had read 21 of 29 blocks and a re-run of the same code passed.
 
+**Codex connector on `1c89e107a` (1 regression).** Fixed: deleting, moving or overwriting
+`.claude/schema-registry.json` by shell (`rm`, `mv`, `Remove-Item`, a `>` redirect) is denied again,
+as main denied it. Without the registry three schema checks allow everything. Reads still pass.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

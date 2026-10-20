@@ -57,10 +57,9 @@ export async function fetchAllRows<T>(
   for (let attempt = 1; attempt <= MAX_READ_ATTEMPTS; attempt += 1) {
     const result = await readOnce(fetchPage);
     if (result.error) return { data: null, error: result.error };
-    if (result.serverCount !== null && result.serverCount !== result.rows.length) {
-      unconfirmed = null;
-      continue;
-    }
+    // A count-wrong pass is skipped; an earlier count-right pass can still be
+    // confirmed by a later one.
+    if (result.serverCount !== null && result.serverCount !== result.rows.length) continue;
     if (result.requests === 1) return { data: result.rows, error: null };
     const keys = result.rows.map(rowKey);
     if (unconfirmed !== null && sameKeys(unconfirmed, keys)) return { data: result.rows, error: null };

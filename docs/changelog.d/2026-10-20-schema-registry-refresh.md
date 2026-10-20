@@ -6,7 +6,7 @@
   `20261019230000_cost_margin_admin_only_screens_step2` (ledger `20261020193610`).
 - **Change.** The registry was regenerated with `scripts/regenerate-schema-registry.mjs --from-introspection`.
   `migrations_high_water` moves from `20261019205246` to `20261020193610`, and the two names are added.
-  Nothing else in the registry changed. `docs/manual/CURRENT_STATE.md`'s "Schema registry" bullet now says
+  `_meta.generated_at` moves from 2026-10-15 to 2026-10-20. Nothing else in the registry changed. `docs/manual/CURRENT_STATE.md`'s "Schema registry" bullet now says
   the registry is current.
 - **Proof.** The live ledger was re-read read-only: 1038 rows, newest `20261020193610`. Read-only md5 hashes
   of the live sequences, generated columns, all 346 CHECK constraints, the per-table column lists and the

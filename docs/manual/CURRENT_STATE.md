@@ -131,7 +131,7 @@ ships or quarterly, whichever comes first.
   `20261019220000_start_and_complete_delivery` (ledger `20261020022222`) and
   `20261019230000_cost_margin_admin_only_screens_step2` (ledger `20261020193610`). Live hashes of the
   sequences, generated columns, CHECK constraints and column lists matched the previous input exactly, so
-  only the high-water and the applied-name list changed (both migrations changed function bodies and grants only).
+  only `generated_at`, the high-water and the applied-name list changed (both migrations changed function bodies and grants only).
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on
   2026-09-22 UTC, the Documents tab that calls it merged in PR #764 (2026-09-23 UTC, the evening
   of 2026-09-22 Chicago), and migration

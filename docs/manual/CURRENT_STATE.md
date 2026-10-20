@@ -104,7 +104,11 @@ ships or quarterly, whichever comes first.
   `20261016030000_staff_photo_buckets_private` (`20261016051944`); then, from PR #942 (merged as
   `982bc0dda`; 2026-10-16 UTC), `20261016060000_bind_money_replay_receipts_batch1` (`20261016121253`); then, from
   PR #951 (merged as `d51d67c0b`; 2026-10-19 UTC), `20261016140000_bind_stock_replay_receipts_batch2` (`20261019010324`); then, from PR #957 (merged as `8124ae21c`;
-  2026-10-19 UTC), `20261019010000_cost_margin_admin_only_rpc_leaks` (`20261019182757`).
+  2026-10-19 UTC), `20261019010000_cost_margin_admin_only_rpc_leaks` (`20261019182757`); then, from PR #954 (merged
+  as `9dbc953c3`; 2026-10-19 UTC), `20261019200000_bind_delivery_job_replay_receipts_batch3a` (`20261019205246`); then,
+  from PR #964 (merged as `b0cd83b0a`; 2026-10-20 UTC), `20261019220000_start_and_complete_delivery`
+  (`20261020022222`); then, carried by PR #976 (merged as `2c448ce4e`; 2026-10-20 UTC; screens in PR #965),
+  `20261019230000_cost_margin_admin_only_screens_step2` (`20261020193610`).
 - **Nothing from the commission cohort is parked on `main` any more.** The whole cohort
   `20260914100100`..`20260914100900` is live. (Until 2026-09-27 evening, `20260914100900` was the
   one file written but not applied.) The four field-season migrations `20260914101000`..`20260914101300`

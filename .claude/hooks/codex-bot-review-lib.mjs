@@ -319,6 +319,8 @@ export function unresolvedCodeRabbitThreads(pullRequest) {
 // count — partial evidence of a finding is evidence.
 export function coderabbitThreadCount(pullRequest) {
   if (!pullRequest || !String(pullRequest.headRefOid || "")) return null;
+  // No thread list at all is a malformed answer, not an empty one (Luna round 4).
+  if (!Array.isArray(pullRequest?.reviewThreads?.nodes)) return null;
   const open = unresolvedCodeRabbitThreads(pullRequest);
   if (open > 0) return open;
   return pullRequest.incomplete === true ? null : 0;

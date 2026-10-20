@@ -64,6 +64,8 @@ eq(coderabbitThreadCount({ ...pr([thread({ login: "coderabbitai" })]), incomplet
   "a partial read that already shows an open thread still counts it");
 eq(coderabbitThreadCount(pr([], "")), null, "no head means nothing was read — null");
 eq(coderabbitThreadCount(null), null, "no data at all — null");
+eq(coderabbitThreadCount({ headRefOid: HEAD }), null, "a head with no thread list is malformed — null, not a clean 0");
+eq(coderabbitThreadCount({ headRefOid: HEAD, reviewThreads: {} }), null, "a thread object with no nodes — null");
 ok(/fail closed/.test(coderabbitUnreadableDenial("X", "5")), "the unreadable denial says it fails closed");
 
 // ── the two spellings of the bot's name ──────────────────────────────────────

@@ -159,19 +159,33 @@ describe('fetchAllRows', () => {
     expect(result.data === null || qty('r00010') === qty('r01500')).toBe(true);
   });
 
-  it('treats a reordered embedded list as the same read', async () => {
+  it('ignores key order but treats a reordered array field as a change', async () => {
     let call = 0;
     const rows = ids(1500).map((r) => ({ ...r, items: [{ n: 1 }, { n: 2 }] }));
     const result = await fetchAllRows(async (from, to) => {
       call += 1;
-      // The confirming pass gets the embedded items in the other order.
+      // From the second pass on, keys come back in another order (same row) and
+      // the ordered items are reversed (a real change, so a third pass confirms).
       const page = rows.slice(from, Math.min(to, from + 999) + 1)
         .map((r) => (call > 3 ? { items: [...r.items].reverse(), id: r.id } : r));
       return { data: page, error: null, count: rows.length };
     });
     expect(result.error).toBeNull();
-    expect(result.data).toHaveLength(1500);
-    expect(call).toBe(6);
+    expect(result.data?.[0].items).toEqual([{ n: 2 }, { n: 1 }]);
+    expect(call).toBe(9);
+  });
+
+  it('restarts confirmation after a pass whose count is wrong', async () => {
+    // Pass one and pass three match, but pass two saw a different count: the
+    // list changed in between, so pass three alone is not confirmed.
+    let call = 0;
+    const rows = ids(1500);
+    const result = await fetchAllRows<Row>(async (from, to) => {
+      call += 1;
+      const page = rows.slice(from, Math.min(to, from + 999) + 1);
+      return { data: page, error: null, count: call >= 4 && call <= 6 ? rows.length + 1 : rows.length };
+    });
+    expect(result).toEqual({ data: null, error: { message: LIST_CHANGED_WHILE_LOADING } });
   });
 
   it('fails instead of returning a list when every multi-page read differs from the last', async () => {

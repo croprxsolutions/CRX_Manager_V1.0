@@ -57,9 +57,12 @@ export async function fetchAllRows<T>(
   for (let attempt = 1; attempt <= MAX_READ_ATTEMPTS; attempt += 1) {
     const result = await readOnce(fetchPage);
     if (result.error) return { data: null, error: result.error };
-    // A count-wrong pass is skipped; an earlier count-right pass can still be
-    // confirmed by a later one.
-    if (result.serverCount !== null && result.serverCount !== result.rows.length) continue;
+    // A count-wrong pass means the list changed, so confirmation starts over:
+    // only two back-to-back matching reads are returned.
+    if (result.serverCount !== null && result.serverCount !== result.rows.length) {
+      unconfirmed = null;
+      continue;
+    }
     if (result.requests === 1) return { data: result.rows, error: null };
     const keys = result.rows.map(rowKey);
     if (unconfirmed !== null && sameKeys(unconfirmed, keys)) return { data: result.rows, error: null };
@@ -70,14 +73,14 @@ export async function fetchAllRows<T>(
 
 // The whole row, not just its id: an edit landing between pages can leave the
 // ids in place while mixing old and new field values (a ledger recompute sums
-// those values). Keys and embedded lists are sorted, because an embedded
-// list's order is not guaranteed and must not fail a read that did not change.
+// those values). Object keys are sorted; arrays keep their order, since some
+// array fields (an application's product list) are ordered.
 function rowKey(row: unknown): string {
   return JSON.stringify(canonical(row));
 }
 
 function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map((item) => JSON.stringify(canonical(item))).sort();
+  if (Array.isArray(value)) return value.map(canonical);
   if (value === null || typeof value !== 'object') return value;
   return Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]);
 }

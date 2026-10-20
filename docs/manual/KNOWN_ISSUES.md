@@ -951,12 +951,13 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
       list. This covers a record whose sort date is edited into the part already read, and a burst
       of inserts;
     - **Fixed 2026-10-19 (the insert+delete swap accepted on 2026-10-18):** a list that needed more
-      than one request is read a second time and returned only when both reads match row for row
-      (every field of every row, in the same order; embedded lists compared regardless of their
-      order), so a field edited between pages cannot mix old and new values either. An insert and a delete
-      between two pages keep the count equal, so the count alone could show a just-deleted record and
-      miss a just-added one (or, with a sort-date edit, miss a record that existed throughout). Two
-      reads that disagree are retried within the same three attempts and then shown as an error. A
+      than one request is read a second time and returned only when two back-to-back reads match row
+      for row (every field of every row, array fields in order, rows in the same order), so a field
+      edited between pages cannot mix old and new values either. An insert and a delete between two
+      pages keep the count equal, so the count alone could show a just-deleted record and miss a
+      just-added one (or, with a sort-date edit, miss a record that existed throughout). Two reads
+      that disagree, or a read with the wrong count, restart the confirmation within the same three
+      attempts, and a list that never settles is shown as an error. A
       list that fits in one request (every live list on 2026-10-19) is a single database statement
       and is still read once; only lists that need more than one request (past the 1,000-row page, or
       a smaller server cap) pay the second read. A list changed

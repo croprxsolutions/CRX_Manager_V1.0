@@ -179,6 +179,7 @@ Plain-English terms: **paging** means asking for records one batch at a time unt
 - Notifications (L10-1), with the bell badge (L9) counting unread notifications in the database instead of the 20 it loads;
 - the lookups and per-record reads that are simple full reads:
   - M23, M24, M36, M54, M57, M62, N4, N5, N7, N8, N10, N11 and L17;
+  - from N13: `PrepaymentManagerPanel.tsx:141` (part of H20's money total) and `DeliveryDetail.tsx:601` (scheduled quantities);
   - M27 and M64, which must show the newest rows, not the oldest;
 - the 20-page document-scan limit (`lib/documentOCR.ts:47`, applied at `:61`; the 2026-10-15 audit, "Found along the way").
   - It hits bulk customer, order, quote and PO imports from PDF.
@@ -226,6 +227,7 @@ Done when a search finds a record past the old limit on every picker. Probably t
 
 **Deliberately not scheduled.** These stay as they are, with the reason:
 - The per-record reads in N13, L20 and L19 (one record's lines, photos and notes, or small reference lists). Each holds tens of rows today.
+  - Two N13 reads are not deferred and are fixed in Part 2: `PrepaymentManagerPanel.tsx:141` feeds H20's unpaid-invoice money total, and `DeliveryDetail.tsx:601` feeds the "already scheduled elsewhere" quantities.
 - The staff and setup tables in L22.
 - The by-design LOW items (L3–L7, L11–L15, L18, L21).
 

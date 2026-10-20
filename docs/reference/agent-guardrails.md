@@ -19,7 +19,7 @@
 > `coderabbitApprovedHead` was deleted. Still required to merge: the newest run of every reported check green with
 > `mergeStateStatus` CLEAN, no aggregate `reviewDecision` `CHANGES_REQUESTED` (from anyone), the head containing
 > GitHub's real base, the `--match-head-commit` pin, and a fresh exact-SHA `gpt-6-sol`/`high` proof run last — except a
-> documentation-only change, which needs only the green checks, the pin and base containment. A non-destructive
+> documentation-only change, which needs only the green checks, no `CHANGES_REQUESTED`, the pin and base containment. A non-destructive
 > migration apply needs the same conditions minus CodeRabbit. Both merge gates also DENY while any CodeRabbit review
 > thread on the PR is not HANDLED — resolved with at least one reply (the fix or the reason) — on any commit (a thread
 > resolved with no reply still counts, Luna rounds 4–6; `unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in

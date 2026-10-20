@@ -1590,7 +1590,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   };
   const crThread = (resolved) => ({ isResolved: resolved, isOutdated: true,
     comments: { totalCount: resolved ? 2 : 1, nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
-  const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false } = {}) => evaluateLandingGate({
+  const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "",
     runGit: (args) => {
       const key = args.join(" ");
@@ -1605,7 +1605,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       if (args[0] === "api" && args[1] === "graphql") {
         if (threadsError) throw threadsError;
         assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));
-        return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: HEAD_SHA,
+        return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: threadsHead,
           reviewThreads: { pageInfo: { hasNextPage: threadsMore, endCursor: threadsMore ? null : null }, nodes: threads } } } } });
       }
       if (args[0] === "api") {
@@ -1676,6 +1676,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   ok(gate({ threads: [crThread(true)] }).ok === true, "a resolved CodeRabbit thread does not block");
   refused(gate({ threadsError: new Error("HTTP 502") }), "fail closed", "an unreadable thread list refuses the apply");
   refused(gate({ threadsMore: true }), "could not be read completely", "a partly read thread list refuses the apply");
+  // Luna round 8: same fail-closed counter as the merge gates, bound to the checked head.
+  refused(gate({ threads: [{ isResolved: false, comments: { totalCount: 1, nodes: [{ author: null }] } }] }),
+    "could not be read completely", "a thread whose author cannot be read refuses the apply");
+  refused(gate({ threadsHead: "d".repeat(40) }), "head moved while it was being checked",
+    "a thread answer for a different head refuses the apply");
   refused(gate({ pr: { mergeStateStatus: "BLOCKED" } }), "not merge-ready", "a PR that is not CLEAN is refused");
   refused(gate({ pr: { statusCheckRollup: [{ ...readyPr.statusCheckRollup[0], conclusion: "FAILURE" }] } }), "not merge-ready",
     "a failed check is refused");

@@ -35,8 +35,8 @@ import {
 import {
   CODEX_THREADS_QUERY,
   CODEX_THREAD_PAGE_SIZE,
+  coderabbitThreadCount,
   collectCodexThreads,
-  unresolvedCodeRabbitThreads,
 } from "./codex-bot-review-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
@@ -189,12 +189,19 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees }) {
     if (OUT(error)) throw error;
     return refuse(`could not read ${number}'s review threads to check for unanswered CodeRabbit findings (${error?.message || error}); fail closed.`);
   }
-  if (threads.incomplete || !threads.headRefOid) {
+  // The thread answer must describe the SAME head everything above checked
+  // (Luna round 8): a push between the two lookups would otherwise apply A's
+  // migration on the strength of B's threads.
+  if (String(threads.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
+    return refuse(`${number}'s head moved while it was being checked (threads read at ${String(threads.headRefOid || "?").slice(0, 12)}, applying ${head.slice(0, 12)}); fail closed — re-run on the current head.`);
+  }
+  // Same counter as the merge gates: null = unreadable or partial → refuse.
+  const coderabbitOpen = coderabbitThreadCount(threads);
+  if (coderabbitOpen === null) {
     return refuse(`${number}'s review threads could not be read completely, so unanswered CodeRabbit findings cannot be ruled out (fail closed).`);
   }
-  const coderabbitOpen = unresolvedCodeRabbitThreads(threads);
   if (coderabbitOpen > 0) {
-    return refuse(`${number} has ${coderabbitOpen} unresolved CodeRabbit comment thread(s). Fix or answer each and resolve it before applying.`);
+    return refuse(`${number} has ${coderabbitOpen} unresolved CodeRabbit comment thread(s). Reply on each (the fix or the reason) and resolve it before applying.`);
   }
 
   const baseSha = String(pr?.baseRefOid || "").trim();

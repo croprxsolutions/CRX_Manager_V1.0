@@ -149,14 +149,15 @@ BEGIN
       FROM (VALUES
         ('public.is_admin()', 'f76bf61116c3bd52bd9c6ea125079b73'),
         ('public.is_sales_rep()', 'fcb3133010fe3f4f56e3be31f709d102'),
-        ('public.create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '8939753ffb18b5dc98528dbfd621cfb3')
+        ('public.create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '8939753ffb18b5dc98528dbfd621cfb3'),
+        ('public.check_idempotency_intent(text,text,uuid,text)', 'edc73be809069669e8441eba7acf443d'),
+        ('public._bind_replay_receipt_20261015(text,text,text)', '722ddd3b5d9174c598735cb321088f73'),
+        ('public._replay_fingerprint_20261015(jsonb)', '68d5c0c62579349ced47c89e6b65ccaf'),
+        ('public.save_idempotency(text,text,jsonb)', 'f600171c426e48c995f204c4dac3ff8b')
       ) AS pin(sig, body_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM pin.body_md5
-  ) OR to_regprocedure('public.check_idempotency_intent(text,text,uuid,text)') IS NULL
-    OR to_regprocedure('public._bind_replay_receipt_20261015(text,text,text)') IS NULL
-    OR to_regprocedure('public._replay_fingerprint_20261015(jsonb)') IS NULL
-    OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL THEN
+  ) THEN
     RAISE EXCEPTION 'PREFLIGHT_DEPENDENCY_DRIFT: a role helper, the order wrapper or a replay helper differs from its reviewed state';
   END IF;
 
@@ -261,7 +262,11 @@ BEGIN
   IF TG_OP = 'UPDATE' AND NEW.unit_price_cents IS NOT DISTINCT FROM OLD.unit_price_cents THEN
     RETURN NEW;
   END IF;
-  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1' THEN
+  -- Both conditions: the flag, and running as the table owner (current_user is postgres only inside
+  -- a definer function; a Data API write runs as authenticated). A caller who somehow set the flag
+  -- in their own session still cannot write the column.
+  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1'
+     AND current_user = 'postgres' THEN
     RETURN NEW;
   END IF;
   RAISE EXCEPTION 'BLEND_TICKET_PRICE_PICK_REQUIRED: a blend-ticket line price is set only by picking a quoted price';
@@ -1360,7 +1365,7 @@ BEGIN
         ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', 'e8dbfc9db51ecb5620af19c9251cf0c7', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', '_blend_tier_price_cents_20261020', '44e3957c991c1ce20961713051d58e5d', 'bigint', ARRAY['postgres'], false, 'sql'),
         ('public._blend_quote_pick_valid_20261020(uuid,uuid,uuid,bigint)', '_blend_quote_pick_valid_20261020', '3ee99ffb4a08205c0f2ff0d1e24e4705', 'boolean', ARRAY['postgres'], false, 'sql'),
-        ('public._guard_blend_ticket_price_pick_20261020()', '_guard_blend_ticket_price_pick_20261020', '9b650a954cddb3a3064fd7a51b6ec4e1', 'trigger', ARRAY['postgres'], false, 'plpgsql')
+        ('public._guard_blend_ticket_price_pick_20261020()', '_guard_blend_ticket_price_pick_20261020', '92155bb50d09deab206c4ed79caf8a79', 'trigger', ARRAY['postgres'], false, 'plpgsql')
       ) AS pin(sig, name, body_md5, ret, acl, definer, lang)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

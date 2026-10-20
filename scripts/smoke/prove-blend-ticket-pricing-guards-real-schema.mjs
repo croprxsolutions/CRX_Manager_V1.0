@@ -180,7 +180,7 @@ function fidelity() {
     ['public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)', contract[1]],
     ...[...sql.matchAll(/\('(public\.[^']+\))', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2]]),
   ];
-  assert.equal(all.length, 5, 'the preflight pins five bodies');
+  assert.equal(all.length, 9, 'the preflight pins nine bodies');
   for (const [sig, pin] of all) {
     assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('${sig}');`), pin, `${sig} replayed with a body that differs from the live pin`);
   }
@@ -340,7 +340,9 @@ ROLLBACK;`,
     ['pick cleared on a product change', GUARD_FN,
       [["  IF TG_OP = 'UPDATE'\n     AND (NEW.product_id IS DISTINCT FROM OLD.product_id\n", "  IF false\n     AND (NEW.product_id IS DISTINCT FROM OLD.product_id\n"]],
       /SMOKE_FAIL: changing a line's product kept its old pick/],
-    ['price-pick column guard', GUARD_FN, [["  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1' THEN\n", '  IF true THEN\n']],
+    ['price-pick column guard owner test', GUARD_FN, [["     AND current_user = 'postgres' THEN\n", ' THEN\n']],
+      /SMOKE_FAIL: a ticket line price was written directly through the Data API/],
+    ['price-pick column guard', GUARD_FN, [["  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1'\n     AND current_user = 'postgres' THEN\n", '  IF true THEN\n']],
       /SMOKE_FAIL: a ticket line price was written directly, skipping the pick checks/],
     ['setter own-name test', SETTER, [["  IF NOT public.is_admin()\n     AND v_ticket.salesman_id IS NOT NULL\n     AND v_ticket.salesman_id IS DISTINCT FROM v_actor THEN\n    RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n  END IF;\n", '']],
       /SMOKE_FAIL: a sales rep picked a price on another rep's ticket/],

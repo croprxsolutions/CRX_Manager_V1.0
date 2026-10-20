@@ -376,6 +376,8 @@ BEGIN
   END;
   BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
+    -- Even with the setter's flag forged in this session, a write as the authenticated role is refused.
+    PERFORM set_config('app.crx_blend_quote_price_pick', '1', true);
     UPDATE public.blend_ticket_products SET unit_price_cents = 1 WHERE id = v_line_t8;
     RAISE EXCEPTION 'SMOKE_FAIL: a ticket line price was written directly through the Data API';
   EXCEPTION WHEN OTHERS THEN

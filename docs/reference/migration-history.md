@@ -4,6 +4,8 @@
 > `list_migrations` observation is at the top of this file, immediately below.
 > Do not scroll for it, and do not treat any older dated block as the latest.
 
+**Live capture — 2026-10-20 19:37 UTC (2:37 PM America/Chicago; read-only `execute_sql` on `supabase_migrations.schema_migrations`, after row 956 applied): 1038 rows / 1031 distinct names, `max(version)` `20261020193610`, from the row `20261019230000_cost_margin_admin_only_screens_step2` (row 956, applied through carrier PR #976 after #965 merged). Effective ordering high-water: `20261019230000`, the highest name timestamp of any row; row 957's candidate `20261019235000` sorts strictly above it. The earlier 2026-10-20 captures below predate that apply.**
+
 **Live capture — 2026-10-20 14:24 UTC (9:24 AM America/Chicago; read-only `execute_sql` on `supabase_migrations.schema_migrations`): 1037 rows / 1030 distinct names, `max(version)` `20261020022222`, from the row `20261019220000_start_and_complete_delivery` (row 955, PR #964). Effective ordering high-water: `20261019220000`; a new candidate must sort strictly above it. The 2026-10-19 20:55 UTC capture below predates that apply.**
 
 **Live capture — 2026-10-20 13:06 UTC (8:06 AM America/Chicago; read-only `execute_sql` on `supabase_migrations.schema_migrations`, after row 955 applied): 1037 rows / 1030 distinct names, `max(version)` `20261020022222`, from the row `20261019220000_start_and_complete_delivery` (row 955, PR #964 merged as `b0cd83b0a`). Effective ordering high-water: `20261019220000`, the highest name timestamp of any row; a new candidate must sort strictly above it (row 957's `20261019235000` does). The 20:55 UTC capture below predates that apply.**

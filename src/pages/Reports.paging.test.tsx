@@ -23,6 +23,7 @@ const H = vi.hoisted(() => ({
   functions: {} as Record<string, Row[]>,
   // A table or function whose pages from this offset on fail, like a dropped connection.
   failPage: null as { source: string; from: number } | null,
+  reads: [] as string[],
   toast: vi.fn(),
   exportToCSV: vi.fn(),
 }));
@@ -41,7 +42,7 @@ function serverRead(source: string, all: () => Row[]): Record<string, unknown> {
     if (column !== 'status') rows = rows.filter((r) => values.includes(r[column]));
     return b;
   };
-  b.range = (from: number, to: number) => { range = [from, to]; return b; };
+  b.range = (from: number, to: number) => { range = [from, to]; H.reads.push(source); return b; };
   const settle = () => {
     if (H.failPage?.source === source && range && range[0] >= H.failPage.from) {
       return { data: null, error: { message: 'connection reset' }, count: null };
@@ -107,6 +108,7 @@ beforeEach(() => {
   H.auth.role = 'admin';
   H.auth.profile = { id: 'admin-1', role: 'admin' };
   H.failPage = null;
+  H.reads = [];
   H.tables = {};
   H.functions = {};
 });
@@ -179,6 +181,17 @@ describe('Reports past the 1,000-row server cap', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded completely');
     expect(screen.queryByTestId('rows:No outstanding balances')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Export CSV/ })).toBeDisabled();
+  });
+
+  it('reads the Year-End customer list once, even when there are no active customers', async () => {
+    H.tables.customers = [];
+    render(<MemoryRouter><Reports /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Year-End Summaries' }));
+
+    await waitFor(() => expect(H.reads.filter((s) => s === 'customers')).toHaveLength(1));
+    // An empty result leaves the list length at 0, so the effect has nothing new to run on.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(H.reads.filter((s) => s === 'customers')).toHaveLength(1);
   });
 
   it('shows a dash, not $0, for unpaid commissions when the commission list fails', async () => {

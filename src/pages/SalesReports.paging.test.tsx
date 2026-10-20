@@ -17,6 +17,8 @@ const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   functions: {} as Record<string, Row[]>,
   failPage: null as { source: string; from: number } | null,
+  // While set, report-function reads wait for it, like a slow network.
+  hold: null as Promise<void> | null,
   toast: vi.fn(),
 }));
 
@@ -38,7 +40,7 @@ function serverRead(source: string, all: Row[]): Record<string, unknown> {
     return { data: all.slice(from, to + 1).slice(0, SERVER_ROW_CAP), error: null, count: countRequested ? all.length : null };
   };
   b.then = (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
-    Promise.resolve().then(settle).then(onFulfilled, onRejected);
+    (source.startsWith('get_') && H.hold ? H.hold : Promise.resolve()).then(settle).then(onFulfilled, onRejected);
   return b;
 }
 
@@ -75,6 +77,7 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   H.failPage = null;
+  H.hold = null;
   H.tables = {
     // 1,500 active customers: the customer filter used to list only the first 1,000.
     customers: Array.from({ length: TOTAL }, (_, i) => ({ id: `c${i}`, farm_name: `Farm ${String(i).padStart(4, '0')}` })),
@@ -95,6 +98,18 @@ describe('Sales Reports past the 1,000-row server cap', () => {
     // 1,500 lines at $10.00: a read stopped at 1,000 would show $10,000.00 and 1,000 orders.
     expect(card('Total Revenue')).toHaveTextContent('$15,000');
     expect(card('Orders')).toHaveTextContent('1,500');
+  });
+
+  it('cannot export while a report is still loading', async () => {
+    let release = () => {};
+    H.hold = new Promise<void>((r) => { release = r; });
+    render(<MemoryRouter><SalesReports /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'CSV' })).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'CSV' })).toBeEnabled());
+    expect(screen.getByTestId('table-rows')).toHaveTextContent(String(TOTAL));
   });
 
   it('shows an error and no totals, not the first 1,000 lines, when a later page fails', async () => {

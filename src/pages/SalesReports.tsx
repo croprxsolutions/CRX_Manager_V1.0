@@ -475,8 +475,8 @@ export default function SalesReports() {
           {customerView ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           Customer View
         </button>
-        <Button variant="secondary" size="sm" icon={<Download className="w-4 h-4" />} showChevron={false} onClick={handleCSV} disabled={loadFailed}>CSV</Button>
-        <Button variant="secondary" size="sm" icon={<FileText className="w-4 h-4" />} showChevron={false} onClick={handlePDF} disabled={loadFailed}>PDF</Button>
+        <Button variant="secondary" size="sm" icon={<Download className="w-4 h-4" />} showChevron={false} onClick={handleCSV} disabled={loadFailed || loading}>CSV</Button>
+        <Button variant="secondary" size="sm" icon={<FileText className="w-4 h-4" />} showChevron={false} onClick={handlePDF} disabled={loadFailed || loading}>PDF</Button>
       </SplitHeading>
 
       {/* ── Customer View banner ── */}

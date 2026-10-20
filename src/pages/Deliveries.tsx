@@ -203,6 +203,8 @@ export default function Deliveries() {
 
   /* Inventory shortage tracking */
   const [shortageDeliveryIds, setShortageDeliveryIds] = useState<Set<string>>(new Set());
+  // The last stock check failed: no badges then means "not checked", not "enough stock".
+  const [shortageCheckFailed, setShortageCheckFailed] = useState(false);
 
   /* Driver-specific: unassigned deliveries they can claim */
   const [unassigned, setUnassigned] = useState<DeliveryRow[]>([]);
@@ -411,10 +413,11 @@ export default function Deliveries() {
       .map((d) => d.id);
 
     // A failed check is said out loud: no badge must never be mistaken for "enough stock".
-    const shortageCheckFailed = (error: unknown) => {
+    const markShortageCheckFailed = (error: unknown) => {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'deliveries', action: 'shortage_check' } });
       toast('error', 'Stock shortage warnings could not be checked. Reload to try again.');
       setShortageDeliveryIds(new Set());
+      setShortageCheckFailed(true);
     };
 
     if (activeIds.length > 0) {
@@ -452,15 +455,18 @@ export default function Deliveries() {
           const lines = ((diData || []) as Array<{ delivery_id: string; product_id: string; quantity: number }>)
             .map((item) => ({ deliveryId: item.delivery_id, productId: item.product_id, quantity: Number(item.quantity) }));
           setShortageDeliveryIds(findShortDeliveries(lines, invMap));
+          setShortageCheckFailed(false);
         } else {
           setShortageDeliveryIds(new Set());
+          setShortageCheckFailed(false);
         }
       } catch (err) {
         if (seq !== fetchSeq.current) return;
-        shortageCheckFailed(err);
+        markShortageCheckFailed(err);
       }
     } else {
       setShortageDeliveryIds(new Set());
+      setShortageCheckFailed(false);
     }
 
     setLoading(false);
@@ -1491,6 +1497,12 @@ export default function Deliveries() {
           );
         })}
       </div>
+
+      {shortageCheckFailed && (
+        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
+        </div>
+      )}
 
       {/* Data Table */}
       <Card padding={false}>

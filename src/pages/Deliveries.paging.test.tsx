@@ -151,6 +151,15 @@ describe('Deliveries list past the 1,000-row server cap', () => {
     expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load deliveries. Please try again.');
   }, 30000);
 
+  it('keeps a warning on screen when the stock check fails, so no badge is not read as enough stock', async () => {
+    H.failPage = { table: 'inventory', from: 0 };
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+
+    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Stock shortage warnings could not be checked');
+    // The list itself still loaded in full.
+    expect(screen.getByTestId('table-rows')).toHaveTextContent(String(TOTAL));
+  }, 30000);
+
   it('shows an error when the item counts cannot be read, instead of zero items', async () => {
     H.failPage = { table: 'delivery_items', from: 0 };
     render(<MemoryRouter><Deliveries /></MemoryRouter>);

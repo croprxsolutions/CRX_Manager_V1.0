@@ -159,10 +159,17 @@ export default function Reports() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
-  // The report (`category:tab`) whose last load failed. It shows an error and cannot be
-  // exported, instead of an empty or partial table that looks complete.
-  const [failedReport, setFailedReport] = useState<string | null>(null);
-  const reportLoaded = useCallback((key: string) => setFailedReport((k) => (k === key ? null : k)), []);
+  // The reports (`category:tab`) whose last load failed. Each shows an error and cannot be
+  // exported, instead of an empty or partial table that looks complete. One entry per report,
+  // so a late failure of one report can never clear another's.
+  const [failedReports, setFailedReports] = useState<ReadonlySet<string>>(() => new Set());
+  const markReportFailed = useCallback((key: string) => setFailedReports((s) => (s.has(key) ? s : new Set(s).add(key))), []);
+  const reportLoaded = useCallback((key: string) => setFailedReports((s) => {
+    if (!s.has(key)) return s;
+    const next = new Set(s);
+    next.delete(key);
+    return next;
+  }), []);
   // Only the newest tab or date load may set report data or clear `loading`; an older
   // multi-page read finishing late is ignored.
   const reportLoadSeq = useRef(0);
@@ -285,7 +292,7 @@ export default function Reports() {
     const seq = reportLoadSeq.current;
     const fail = () => {
       setCustomerData([]);
-      setFailedReport('profitability:customer');
+      markReportFailed('profitability:customer');
       toast('error', 'Failed to load customer profitability.');
     };
     // Cost is admin-only (Mason, 2026-10-15): profit comes from get_admin_cost_fields, not the table.
@@ -329,13 +336,13 @@ export default function Reports() {
     result.sort((a, b) => b.total_revenue - a.total_revenue);
     setCustomerData(result);
     reportLoaded('profitability:customer');
-  }, [startDate, endDate, toast, isAdmin, reportLoaded]);
+  }, [startDate, endDate, toast, isAdmin, reportLoaded, markReportFailed]);
 
   const fetchProductProfitability = useCallback(async () => {
     const seq = reportLoadSeq.current;
     const fail = () => {
       setProductData([]);
-      setFailedReport('profitability:product');
+      markReportFailed('profitability:product');
       toast('error', 'Failed to load product profitability.');
     };
     type ProductProfitItem = { id: string; product_name: string; total_price: number; profit?: number | null; total_units_needed: number };
@@ -375,7 +382,7 @@ export default function Reports() {
     result.sort((a, b) => b.total_revenue - a.total_revenue);
     setProductData(result);
     reportLoaded('profitability:product');
-  }, [startDate, endDate, toast, isAdmin, reportLoaded]);
+  }, [startDate, endDate, toast, isAdmin, reportLoaded, markReportFailed]);
 
   // Returns whether the commission list on screen is now current. The quick-pay
   // recovery messages send the admin to a list to work out what actually
@@ -394,7 +401,7 @@ export default function Reports() {
       setCommissionData([]);
       setCommissionDataForAdmin(null);
       setSelectedCommissions(new Set());
-      setFailedReport('profitability:commission');
+      markReportFailed('profitability:commission');
       toast('error', 'Failed to load commissions.');
     };
     try {
@@ -427,13 +434,13 @@ export default function Reports() {
       fail();
       return false;
     }
-  }, [isAdmin, profile, startDate, endDate, toast, reportLoaded]);
+  }, [isAdmin, profile, startDate, endDate, toast, reportLoaded, markReportFailed]);
 
   const fetchRevenue = useCallback(async () => {
     const seq = reportLoadSeq.current;
     const fail = () => {
       setRevenueData([]);
-      setFailedReport('profitability:revenue');
+      markReportFailed('profitability:revenue');
       toast('error', 'Failed to load revenue data.');
     };
     type RevenueOrder = { id: string; order_date: string; total_price: number; total_profit?: number | null };
@@ -468,7 +475,7 @@ export default function Reports() {
     });
     setRevenueData(Object.values(grouped).sort((a, b) => b.month.localeCompare(a.month)));
     reportLoaded('profitability:revenue');
-  }, [startDate, endDate, toast, isAdmin, reportLoaded]);
+  }, [startDate, endDate, toast, isAdmin, reportLoaded, markReportFailed]);
 
   // ─── PROFITABILITY parent fetcher ────────────────────────────
   const fetchProfitability = useCallback(async () => {
@@ -493,13 +500,13 @@ export default function Reports() {
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setPnlData([]);
-      setFailedReport('financial:pnl');
+      markReportFailed('financial:pnl');
       toast('error', `P&L failed: ${error.message}`);
       return;
     }
     setPnlData(assertRpcResult<PnLRow[]>(data, 'get_bottom_line_pnl'));
     reportLoaded('financial:pnl');
-  }, [startDate, endDate, toast, reportLoaded]);
+  }, [startDate, endDate, toast, reportLoaded, markReportFailed]);
 
   const fetchGrossSales = useCallback(async () => {
     if (!startDate || !endDate) { setGrossSalesData([]); reportLoaded('financial:gross_sales'); return; }
@@ -514,13 +521,13 @@ export default function Reports() {
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setGrossSalesData([]);
-      setFailedReport('financial:gross_sales');
+      markReportFailed('financial:gross_sales');
       toast('error', `Gross sales failed: ${error.message}`);
       return;
     }
     setGrossSalesData(assertRpcResult<GrossSalesRow[]>(data, 'get_gross_sales_report'));
     reportLoaded('financial:gross_sales');
-  }, [startDate, endDate, grossSalesGroupBy, toast, reportLoaded]);
+  }, [startDate, endDate, grossSalesGroupBy, toast, reportLoaded, markReportFailed]);
 
   const fetchCustomerBalance = useCallback(async () => {
     const asOf = endDate || localToday();
@@ -531,13 +538,13 @@ export default function Reports() {
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setCustBalanceData([]);
-      setFailedReport('financial:customer_balance');
+      markReportFailed('financial:customer_balance');
       toast('error', `Customer balance failed: ${error.message}`);
       return;
     }
     setCustBalanceData(assertRpcResult<CustomerBalanceRow[]>(data, 'get_customer_balance_listing'));
     reportLoaded('financial:customer_balance');
-  }, [endDate, toast, reportLoaded]);
+  }, [endDate, toast, reportLoaded, markReportFailed]);
 
   const fetchCommissionBalance = useCallback(async () => {
     if (!isAdmin) {
@@ -614,13 +621,13 @@ export default function Reports() {
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setChemHistoryData([]);
-      setFailedReport('operational:chemical_history');
+      markReportFailed('operational:chemical_history');
       toast('error', `Chemical history failed: ${error.message}`);
       return;
     }
     setChemHistoryData(assertRpcResult<ChemicalHistoryRow[]>(data, 'get_chemical_history'));
     reportLoaded('operational:chemical_history');
-  }, [chemProductId, startDate, endDate, toast, reportLoaded]);
+  }, [chemProductId, startDate, endDate, toast, reportLoaded, markReportFailed]);
 
   const fetchInventoryCost = useCallback(async () => {
     const seq = reportLoadSeq.current;
@@ -630,13 +637,13 @@ export default function Reports() {
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setInventoryCostData([]);
-      setFailedReport('operational:inventory_cost');
+      markReportFailed('operational:inventory_cost');
       toast('error', `Inventory cost failed: ${error.message}`);
       return;
     }
     setInventoryCostData(assertRpcResult<InventoryCostRow[]>(data, 'get_inventory_cost_report'));
     reportLoaded('operational:inventory_cost');
-  }, [toast, reportLoaded]);
+  }, [toast, reportLoaded, markReportFailed]);
 
   // Reads every active product page by page (one request stops at the row cap).
   // A failed page clears the list and shows an error, so a partial price list
@@ -712,7 +719,7 @@ export default function Reports() {
     const seq = reportLoadSeq.current;
     const fail = () => {
       setPostedAppsData([]);
-      setFailedReport('operational:posted_applications');
+      markReportFailed('operational:posted_applications');
       toast('error', 'Failed to load posted applications.');
     };
     type PostedApplicationRow = Record<string, unknown> & {
@@ -764,7 +771,7 @@ export default function Reports() {
       applicator_name: r.applicator_name || (r.applicator_id ? (applicatorNameMap[r.applicator_id] || 'Unknown') : '-'),
     })));
     reportLoaded('operational:posted_applications');
-  }, [startDate, endDate, toast, reportLoaded]);
+  }, [startDate, endDate, toast, reportLoaded, markReportFailed]);
 
   // ─── OPERATIONAL parent fetcher ───────────────────────────────
   const fetchOperational = useCallback(async () => {
@@ -1356,19 +1363,19 @@ export default function Reports() {
 
   // Unpaid commission total, summed in whole cents. An amount that is not an exact
   // whole-cent decimal makes the total unknown (shown as a dash), never a guessed number.
-  // The report on screen, as recorded by failedReport, and whether its last load failed.
+  // The report on screen, as recorded in failedReports, and whether its last load failed.
   const currentReportKey = category === 'profitability' ? `profitability:${profitTab}`
     : category === 'financial' ? `financial:${financialTab}`
       : category === 'operational' ? `operational:${operationalTab}`
         : category;
-  const reportFailed = failedReport === currentReportKey;
+  const reportFailed = failedReports.has(currentReportKey);
   const reportFailedBanner = reportFailed && (
     <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
       This report could not be loaded completely, so it is not shown and cannot be exported. Reload to try again.
     </div>
   );
 
-  const unpaidTotalCents = failedReport === 'profitability:commission' ? null : visibleCommissions
+  const unpaidTotalCents = failedReports.has('profitability:commission') ? null : visibleCommissions
     .filter((c) => c.status === 'pending')
     .reduce<number | null>((sum, c) => {
       if (sum === null) return null;

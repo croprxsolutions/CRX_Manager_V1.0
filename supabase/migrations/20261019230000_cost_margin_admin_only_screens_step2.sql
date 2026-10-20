@@ -573,7 +573,7 @@ SET search_path = public, pg_temp
 AS $function$
 BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
-    RAISE EXCEPTION 'p_performed_by does not match authenticated user' USING ERRCODE = 'P0001';
+    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
   -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.
   IF public.is_admin() THEN

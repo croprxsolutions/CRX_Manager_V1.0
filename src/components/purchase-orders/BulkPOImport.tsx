@@ -5,7 +5,7 @@ import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase, assertRpcResult } from '../../lib/db';
+import { supabase, assertRpcResult, sanitizeError } from '../../lib/db';
 import { processDocumentWithOCR, isOCRSupported } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
 import { formatUSD as fmt } from '../../lib/money';
@@ -512,7 +512,9 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
         }
       } catch (error) {
         Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error importing PO' } });
-        const guidance = bulkPOImportFailureGuidance(error);
+        // A rep cannot add a supplier-cost-basis product (Mason, 2026-10-20): say so plainly (CodeRabbit).
+        const refusedForRep = /PO_COST_BASIS_ADMIN_ONLY/.test(error instanceof Error ? error.message : String((error as { message?: unknown })?.message ?? error));
+        const guidance = bulkPOImportFailureGuidance(error) ?? (refusedForRep ? sanitizeError(error) : null);
         if (guidance) {
           toast('error', `${po.source_file}: ${guidance}`);
         } else {

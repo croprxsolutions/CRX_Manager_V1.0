@@ -18,14 +18,16 @@
 - **Change.** `scripts/db-invariant-sweeps/allowlist.json`: one new fingerprint-bound exception
   (`get_gross_sales_report`) and three re-pinned ones. Each is pinned to the live wrapper, its private
   body, `auth.uid()` and the role helpers it calls. The digests come from the sweep's own contract query.
-  The allowlist test's exception count goes from 21 to 22. No database change.
+  The allowlist test's exception count goes from 22 to 23. That is counted after merging `main`, which
+  already carries #971's `start_and_complete_delivery` entry. No database change.
 - **Owner decision.** The Codex GitHub review pointed out that the `p_group_by` exceptions conflict with
   Mason's 2026-09-02 call to keep those look-alikes visible. On 2026-10-20 Mason chose to mark them as
   reviewed. `docs/manual/DECISION_LOG.md` records the reversal, and the 2026-09-02 triage audit carries a
   pointer to it.
 - **Proof.**
-  - The live `actor-forgery` sweep was run read-only on 2026-10-20 and adjudicated against this
-    allowlist. All four rows are cleared. The only row left is `start_and_complete_delivery`, which
-    PR #971 handles.
-  - Control: the same capture against `main`'s allowlist still shows all five rows.
-  - `npm run proof:actor-allowlist` passes (627 matcher checks and 34 disposable-database checks).
+  - **Final.** The live `actor-forgery` sweep was run read-only on 2026-10-20, after #971 merged, and
+    adjudicated against this allowlist. It is PASS: 19 rows, 19 allowlisted, 0 violations.
+  - **Control.** An earlier same-day capture against `main`'s allowlist before #971 left 5 rows: these four
+    plus `start_and_complete_delivery`.
+  - **Tests.** `allowlist-match.test.mjs` passes 656 assertions after the merge. Before the merge,
+    `npm run proof:actor-allowlist` passed 627 matcher checks and 34 disposable-database checks.

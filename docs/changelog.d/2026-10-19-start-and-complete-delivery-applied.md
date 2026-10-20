@@ -12,7 +12,9 @@
   only in `actor-forgery`, flagged on `p_signed_by`, the receiver's printed name, not a user
   identity. That is the same shape as the reviewed `complete_delivery` exception. A
   fingerprint-bound allowlist entry now covers it, pinned to the live contracts of the function,
-  `complete_delivery` and `auth.uid()`. The allowlist test count is 22. Four other
+  `confirm_delivery`, `complete_delivery`, the two private bodies behind `complete_delivery`
+  that hold its authorization (`_complete_delivery_replay_impl_20261015`,
+  `_complete_delivery_period_preflight_impl`), and `auth.uid()`. The allowlist test count is 22. Four other
   `actor-forgery` rows are pre-existing and untouched by this change: three `p_group_by` report
   functions (one never reviewed, two with drifted pins) and `save_quote` with a drifted pin. They
   are left visible for their own review.

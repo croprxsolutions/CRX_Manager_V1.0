@@ -310,8 +310,9 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    Applying migrations to the new project needs Mason's approval in the current conversation.
 9. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install
-   every required secret (from the password manager, never pasted into chat), and smoke-test each function
-   **safely**: use isolated test fixtures (synthetic records), non-production recipients and sandbox
+   every required secret (from the password manager, never pasted into chat). **Run the function smoke
+   tests inside step 11's controlled API-on window, not here:** the functions use the Data API, which stays
+   off until the in-database proof in step 11 passes. Smoke-test each function **safely**: use isolated test fixtures (synthetic records), non-production recipients and sandbox
    credentials or stubbed integrations, because `send-email`, the user-management functions and the OCR
    functions have real external or database side effects, and OCR is not safe to repeat. Remove every test
    record before the row-count validation in step 11 so counts and email logs are not polluted. Deleting
@@ -351,8 +352,11 @@ moment **before the bad change began** (4.5), which may be earlier than when any
     signed-out refusal request and the browser role checks from the isolated preview, and turn it off again
     at once if anything unexpected appears. Leave it on for cutover only with Mason's approval.
     After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
-    step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
-    and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for
+    step 5 validation (internal consistency, recent invoice numbers, and the exact archive row counts
+    taken **before** reconciliation, because schema updates and one-shot recovery plans change the data
+    after step 5 ran). Reconciliation in step 10 legitimately adds rows after the dump, so after it,
+    validate the reconciled delta against the external records (payments, deliveries, stock, email logs)
+    and the business invariants instead of expecting dump-time counts; a real sign-in and allow/deny check for
     one account of every active interactive role (service-only profiles are checked by invariants, not passwords) (run from an isolated Vercel preview deployment or test host that is
     configured with the restored project's environment variables and security policy, because production
     Vercel still points at the old project until cutover, so checks run from it would test the wrong

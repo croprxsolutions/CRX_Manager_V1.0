@@ -40,7 +40,7 @@ Every other section keeps its own date; nothing below was re-certified by that r
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
 ships or quarterly, whichever comes first.
 
-## Current state at a glance (2026-10-19)
+## Current state at a glance (2026-10-19; migration ledger and registry lines 2026-10-20)
 
 - **Effective ordering high-water: `20261019230000_cost_margin_admin_only_screens_step2`**
   (ledger version `20261020193610`, UTC; applied live 2026-10-20 19:36 UTC, carried by PR #976 merged as
@@ -124,8 +124,8 @@ ships or quarterly, whichever comes first.
   registry tracks). PR #954 then brought it to `migrations_high_water` `20261019205246`, listing
   `20261019010000_cost_margin_admin_only_rpc_leaks` and `20261019200000_bind_delivery_job_replay_receipts_batch3a`.
   **Stale since 2026-10-20 02:22 UTC:** `20261019220000_start_and_complete_delivery` (ledger `20261020022222`) and
-  `20261019230000_cost_margin_admin_only_screens_step2` (ledger `20261020193610`) are not in the registry yet. Bring
-  them to live next (`/regen-schema-registry`).
+  `20261019230000_cost_margin_admin_only_screens_step2` (ledger `20261020193610`), both applied live, are not in
+  the registry yet. Refresh the registry next (`/regen-schema-registry`); no database apply is pending for them.
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on
   2026-09-22 UTC, the Documents tab that calls it merged in PR #764 (2026-09-23 UTC, the evening
   of 2026-09-22 Chicago), and migration

@@ -98,17 +98,61 @@ describe('fetchAllRows', () => {
     }
   });
 
-  it('stops after the overlap-only page at the end', async () => {
+  it('stops after the overlap-only page at the end, then confirms with a second read', async () => {
     const s = server(ids(1500));
     const result = await fetchAllRows<Row>(s.page);
     expect(result.data).toHaveLength(1500);
-    expect(s.ranges).toEqual([[0, 999], [950, 1949], [1450, 2449]]);
+    const pass: Array<[number, number]> = [[0, 999], [950, 1949], [1450, 2449]];
+    expect(s.ranges).toEqual([...pass, ...pass]);
+  });
+
+  it('reads a list that fits in one request once, with no confirming read', async () => {
+    const s = server(ids(999));
+    const result = await fetchAllRows<Row>(s.page);
+    expect(result.data).toHaveLength(999);
+    expect(s.ranges).toEqual([[0, 999]]);
+  });
+
+  it('does not return a swapped row when an insert and a delete between pages keep the count equal', async () => {
+    // After page one, a record is added and an already-read record is deleted,
+    // both ahead of the read position: the count and the seam stay the same, so
+    // the count check alone returned the deleted row and missed the new one.
+    const s = server(ids(2500), (call, rows) => (call === 2
+      ? [{ id: 'new' }, ...rows.filter((r) => r.id !== 'r00010')]
+      : rows));
+    const result = await fetchAllRows<Row>(s.page);
+    expect(result.error).toBeNull();
+    const got = (result.data ?? []).map((r) => r.id);
+    expect(got).toContain('new');
+    expect(got).not.toContain('r00010');
+    expect(got).toEqual(s.rows().map((r) => r.id));
+  });
+
+  it('never misses a row that existed for the whole read (sort-key edit plus a delete)', async () => {
+    // r01500 is edited to sort first and an already-read row is deleted, so the
+    // count still matches while r01500, present the whole time, was skipped.
+    const s = server(ids(2500), (call, rows) => {
+      if (call !== 2) return rows;
+      const moved = rows.find((r) => r.id === 'r01500')!;
+      return [moved, ...rows.filter((r) => r !== moved && r.id !== 'r00010')];
+    });
+    const result = await fetchAllRows<Row>(s.page);
+    expect(result.error).toBeNull();
+    expect((result.data ?? []).map((r) => r.id)).toEqual(s.rows().map((r) => r.id));
+  });
+
+  it('fails instead of returning a list when every multi-page read differs from the last', async () => {
+    let n = 0;
+    // Before each pass, one record is added and another removed, keeping the count.
+    const s = server(ids(1500), (_call, rows) => (s.ranges.length % 3 === 0
+      ? [{ id: `swap-${n++}` }, ...rows.slice(0, 5), ...rows.slice(6)]
+      : rows));
+    const result = await fetchAllRows<Row>(s.page);
+    expect(result).toEqual({ data: null, error: { message: LIST_CHANGED_WHILE_LOADING } });
   });
 
   it('keeps rows without an id as they are', async () => {
-    const pages = [[{ n: 1 }, { n: 1 }], []];
-    let call = 0;
-    const result = await fetchAllRows(async () => ({ data: pages[call++], error: null }));
+    const result = await fetchAllRows(async (from) => ({ data: from === 0 ? [{ n: 1 }, { n: 1 }] : [], error: null }));
     expect(result.data).toEqual([{ n: 1 }, { n: 1 }]);
   });
 
@@ -131,7 +175,9 @@ describe('fetchAllRowsForIds', () => {
       const rows = chunk.flatMap((id) => [1, 2, 3, 4, 5, 6].map((n) => ({ id: `${id}:${n}` })));
       return { data: rows.slice(from, to + 1), error: null, count: rows.length };
     });
-    expect(chunkSizes).toEqual([200, 200, 50]);
+    // A 1,200-row chunk takes two pages, so it is read twice to confirm it; the
+    // 300-row chunk fits in one request.
+    expect(chunkSizes).toEqual([200, 200, 200, 200, 50]);
     expect(result.data).toHaveLength(450 * 6);
     expect(new Set((result.data ?? []).map((r) => r.id)).size).toBe(450 * 6);
   });

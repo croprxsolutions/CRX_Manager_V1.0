@@ -24,7 +24,8 @@
 > thread on the PR is unresolved, on any commit (`unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in
 > `codex-bot-review-lib.mjs`; unlike the Codex App check this FAILS CLOSED — a failed or partial thread read denies
 > via `coderabbitThreadCount` / `coderabbitUnreadableDenial`, and the agent retries; Luna round 3; an answer with no
-> thread list at all counts as unreadable, not as zero, Luna round 4), because CodeRabbit never
+> thread list at all counts as unreadable, not as zero, Luna round 4; `collectCodexThreads` marks a page with a missing
+> or null `reviewThreads` list incomplete, Codex App review of PR #973), because CodeRabbit never
 > re-reviews the fix. Mason sets the `protect-main` ruleset's required approving reviews to 0 himself (required status
 > checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
 > (CodeRabbit only comments), `auto_incremental_review: false` (one review per PR, when opened non-draft or marked

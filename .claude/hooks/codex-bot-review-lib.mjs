@@ -191,7 +191,14 @@ export function collectCodexThreads(runQuery, { deadlineMs = null, now = Date.no
     }
     if (!headRefOid) headRefOid = String(pr.headRefOid || "");
     const threads = pr?.reviewThreads;
-    if (Array.isArray(threads?.nodes)) nodes.push(...threads.nodes);
+    // A page with no thread list (a partial or malformed GraphQL answer) is NOT
+    // an empty page: mark the walk incomplete so it is never read as "nothing
+    // open" (Codex App review of PR #973, P1).
+    if (!Array.isArray(threads?.nodes)) {
+      incomplete = true;
+      break;
+    }
+    nodes.push(...threads.nodes);
     if (threads?.pageInfo?.hasNextPage !== true) break;
     const next = String(threads?.pageInfo?.endCursor || "");
     // No cursor but "hasNextPage" would loop forever on the same page — and

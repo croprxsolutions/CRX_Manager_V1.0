@@ -66,6 +66,16 @@ eq(coderabbitThreadCount(pr([], "")), null, "no head means nothing was read — 
 eq(coderabbitThreadCount(null), null, "no data at all — null");
 eq(coderabbitThreadCount({ headRefOid: HEAD }), null, "a head with no thread list is malformed — null, not a clean 0");
 eq(coderabbitThreadCount({ headRefOid: HEAD, reviewThreads: {} }), null, "a thread object with no nodes — null");
+// End to end through the pager (Codex App P1 on PR #973): a GraphQL answer with a
+// head but a missing or null reviewThreads field must come out INCOMPLETE, so the
+// CodeRabbit count is null (fail closed), never a clean 0.
+for (const reviewThreads of [undefined, null, {}, { nodes: null }]) {
+  const walked = collectCodexThreads(() => ({ headRefOid: HEAD, reviewThreads }));
+  eq(walked.incomplete, true, `a page with reviewThreads=${JSON.stringify(reviewThreads)} marks the walk incomplete`);
+  eq(coderabbitThreadCount(walked), null, `…and the CodeRabbit count is null for reviewThreads=${JSON.stringify(reviewThreads)}`);
+}
+eq(coderabbitThreadCount(collectCodexThreads(() => ({ headRefOid: HEAD, reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } }))), 0,
+  "CONTROL: a well-formed empty page through the pager counts 0");
 ok(/fail closed/.test(coderabbitUnreadableDenial("X", "5")), "the unreadable denial says it fails closed");
 
 // ── the two spellings of the bot's name ──────────────────────────────────────

@@ -28,6 +28,7 @@ import { fetchAllRows } from '../lib/pagedRead';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { formatUSD as fmt } from '../lib/money';
+import { purchaseOrderCentsToDollars, purchaseOrderLineTotalCents } from '../lib/purchaseOrderMoney';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { sanitizeError } from '../lib/errorSanitizer';
 import { Sentry } from '../lib/sentry';
@@ -54,6 +55,7 @@ interface OutstandingItem {
   unit_size: string | null;
   expected_delivery_date: string | null;
   outstanding_value: number;
+  outstanding_value_cents: number;
 }
 
 export default function PurchaseOrders() {
@@ -173,7 +175,10 @@ export default function PurchaseOrders() {
           unit_cost: (row.unit_cost as number | null | undefined) ?? 0,
           unit_size: row.unit_size as string | null,
           expected_delivery_date: po.expected_delivery_date as string | null,
-          outstanding_value: remaining * ((row.unit_cost as number | null | undefined) ?? 0),
+          // Exact whole cents (CodeRabbit money check); dollars only for display.
+          outstanding_value_cents: purchaseOrderLineTotalCents(remaining, (row.unit_cost as number | null | undefined) ?? 0),
+          outstanding_value: purchaseOrderCentsToDollars(
+            purchaseOrderLineTotalCents(remaining, (row.unit_cost as number | null | undefined) ?? 0)),
         };
       })
       .filter((item) => item.quantity_remaining > 0)
@@ -221,7 +226,8 @@ export default function PurchaseOrders() {
   const outstandingStats = useMemo(() => {
     const totalItems = filteredOutstanding.length;
     const totalQty = filteredOutstanding.reduce((s, i) => s + i.quantity_remaining, 0);
-    const totalValue = filteredOutstanding.reduce((s, i) => s + i.outstanding_value, 0);
+    const totalValue = purchaseOrderCentsToDollars(
+      filteredOutstanding.reduce((s, i) => s + i.outstanding_value_cents, 0));
     const vendorCount = new Set(filteredOutstanding.map((i) => i.vendor)).size;
     const overdue = filteredOutstanding.filter((i) => {
       if (!i.expected_delivery_date) return false;

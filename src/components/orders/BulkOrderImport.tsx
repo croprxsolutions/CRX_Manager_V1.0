@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useBelowCostApproval } from '../../contexts/BelowCostApprovalContext';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../../lib/belowCostApproval';
 import { resolveExactProductIdentity } from '../../lib/productIdentityResolver';
+import { purchaseOrderLineTotalCents } from '../../lib/purchaseOrderMoney';
 
 interface BulkOrderImportProps {
   open: boolean;
@@ -494,14 +495,13 @@ export default function BulkOrderImport({
             };
         });
 
-        const totalPriceCents = itemsPayload.reduce((sum, item) => {
-          const unitPriceCents = Math.round(item.price_per_unit * 100);
-          return sum + Math.round(item.total_units_needed * unitPriceCents);
-        }, 0);
+        // Exact whole cents: each dollar amount is converted from its decimal digits, never by
+        // binary-float multiplication (CodeRabbit money check).
+        const totalPriceCents = itemsPayload.reduce(
+          (sum, item) => sum + purchaseOrderLineTotalCents(item.total_units_needed, item.price_per_unit), 0);
         const totalCostCents = resolvedItems.reduce((sum, { item, resolution }) => {
           if (resolution.status !== 'unique') return sum; // Rejected above.
-          const unitCostCents = Math.round((resolution.product.current_cost ?? 0) * 100);
-          return sum + Math.round(item.quantity * unitCostCents);
+          return sum + purchaseOrderLineTotalCents(item.quantity, resolution.product.current_cost ?? 0);
         }, 0);
         const totalProfitCents = totalPriceCents - totalCostCents;
         const totalMarginPct = totalPriceCents > 0

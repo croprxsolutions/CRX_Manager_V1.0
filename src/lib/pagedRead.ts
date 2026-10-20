@@ -42,8 +42,8 @@ export const LIST_CHANGED_WHILE_LOADING = 'The list changed while it was loading
  * while a new row is missed and a deleted one is kept (or, with a sort-key
  * edit, a row that existed throughout is missed). So a read that needed more
  * than one request is returned only once a second whole read matches it row
- * for row: the same ids (or the same rows, when they have no id) in the same
- * order. A one-request read is a single database statement and needs no
+ * for row: the same rows, field for field, in the same order (so a field edit
+ * between pages cannot mix old and new values either). A one-request read is a single database statement and needs no
  * confirming. A wrong count or a mismatch repeats the read, up to
  * MAX_READ_ATTEMPTS, before failing with LIST_CHANGED_WHILE_LOADING rather
  * than returning a list that is wrong.
@@ -68,9 +68,18 @@ export async function fetchAllRows<T>(
   return { data: null, error: { message: LIST_CHANGED_WHILE_LOADING } };
 }
 
+// The whole row, not just its id: an edit landing between pages can leave the
+// ids in place while mixing old and new field values (a ledger recompute sums
+// those values). Keys and embedded lists are sorted, because an embedded
+// list's order is not guaranteed and must not fail a read that did not change.
 function rowKey(row: unknown): string {
-  const id = rowId(row);
-  return id === undefined ? `row:${JSON.stringify(row)}` : `id:${JSON.stringify(id)}`;
+  return JSON.stringify(canonical(row));
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => JSON.stringify(canonical(item))).sort();
+  if (value === null || typeof value !== 'object') return value;
+  return Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]);
 }
 
 function sameKeys(a: string[], b: string[]): boolean {

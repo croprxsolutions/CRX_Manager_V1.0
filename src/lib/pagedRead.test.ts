@@ -141,6 +141,39 @@ describe('fetchAllRows', () => {
     expect((result.data ?? []).map((r) => r.id)).toEqual(s.rows().map((r) => r.id));
   });
 
+  it('does not return a mix of old and new values when fields are edited between pages', async () => {
+    // Two rows on different pages are both edited after the confirming read's
+    // first page (each read is 4 requests, so before request 6). The ids and the
+    // count never change, so an id-only check accepted r00010 at the old value
+    // next to r01500 at the new one.
+    type QtyRow = { id: string; qty: number };
+    const initial: QtyRow[] = ids(2500).map((r) => ({ ...r, qty: 1 }));
+    const s = server(initial as Row[], (call, rows) => (call === 6
+      ? (rows as QtyRow[]).map((r) => (r.id === 'r00010' || r.id === 'r01500' ? { ...r, qty: 2 } : r))
+      : rows));
+    const result = await fetchAllRows<QtyRow>(s.page as never);
+    const qty = (id: string) => result.data?.find((r) => r.id === id)?.qty;
+    // Either the settled list or the visible "changed" error; never a mix.
+    if (result.error) expect(result.error.message).toBe(LIST_CHANGED_WHILE_LOADING);
+    else expect(result.data).toEqual(s.rows());
+    expect(result.data === null || qty('r00010') === qty('r01500')).toBe(true);
+  });
+
+  it('treats a reordered embedded list as the same read', async () => {
+    let call = 0;
+    const rows = ids(1500).map((r) => ({ ...r, items: [{ n: 1 }, { n: 2 }] }));
+    const result = await fetchAllRows(async (from, to) => {
+      call += 1;
+      // The confirming pass gets the embedded items in the other order.
+      const page = rows.slice(from, Math.min(to, from + 999) + 1)
+        .map((r) => (call > 3 ? { items: [...r.items].reverse(), id: r.id } : r));
+      return { data: page, error: null, count: rows.length };
+    });
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(1500);
+    expect(call).toBe(6);
+  });
+
   it('fails instead of returning a list when every multi-page read differs from the last', async () => {
     let n = 0;
     // Before each pass, one record is added and another removed, keeping the count.

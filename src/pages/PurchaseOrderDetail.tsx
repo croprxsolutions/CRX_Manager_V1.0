@@ -1023,7 +1023,8 @@ export default function PurchaseOrderDetail() {
     const parseCostDraft = (draft: string): number | null => {
       if (/[eE]/.test(draft)) return null;
       const cents = parseDollarsToCentsSigned(draft);
-      return cents === null || cents < 0 ? null : cents;
+      // A safe integer only: past 2^53 cents the parser silently rounds (Codex review).
+      return cents === null || cents < 0 || !Number.isSafeInteger(cents) ? null : cents;
     };
     const invalid = items.some((item) => {
       const draft = costDrafts[item.id];
@@ -1031,7 +1032,7 @@ export default function PurchaseOrderDetail() {
       return parseCostDraft(draft) === null;
     });
     if (invalid) {
-      toast('error', `Unit cost cannot be negative. ${MONEY_PRECISION_MESSAGE}`);
+      toast('error', `Unit cost cannot be negative or too large. ${MONEY_PRECISION_MESSAGE}`);
       return;
     }
     const changed = items.flatMap((item) => {

@@ -58,6 +58,13 @@
 --                              allocation gains is_no_return (cheaper than the product's dearest
 --                              open line), which the receiving screen's NO-RETURN badge needs.
 --
+--   Whole-cent CHECKs: set_purchase_order_item_costs writes the legacy numeric-dollar columns
+--   purchase_order_items.unit_cost and purchase_orders.total_cost, so each gains the house finite
+--   whole-cent CHECK, <table>_<column>_whole_cents_chk (docs/workflows/SAFE_DEVELOPMENT_RULES.md):
+--   non-negative, whole cents, finite (NaN and Infinity refused) and equal to its generated cents
+--   column. Live read 2026-10-19: 0 of 194 lines and 0 of 34 purchase orders would fail. The older
+--   *_whole_cents constraints stay; nothing is dropped and no row changes.
+--
 --   The changed functions use the house rename-and-wrap pattern (20261019010000): each live body is
 --   RENAMED unchanged to _<name>_cost_step2_impl, every API role loses EXECUTE on it, and a public
 --   wrapper with the identical signature, defaults and return type takes its name. Admins pass
@@ -84,6 +91,8 @@
 -- ROLLBACK: DROP the three new functions; for each wrapped function DROP the wrapper, RENAME
 --   _<name>_cost_step2_impl back to <name> and GRANT EXECUTE TO authenticated, service_role (the
 --   live grants on 2026-10-19; never PUBLIC or anon). DROP the seven private helpers. No data changes.
+--   ALTER TABLE public.purchase_order_items DROP CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk;
+--   ALTER TABLE public.purchase_orders DROP CONSTRAINT purchase_orders_total_cost_whole_cents_chk;
 
 SET LOCAL lock_timeout = '10s';
 
@@ -601,6 +610,42 @@ BEGIN
 END;
 $function$;
 
+-- The two legacy numeric-dollar columns set_purchase_order_item_costs writes get the house finite
+-- whole-cent CHECK. Re-runnable: an existing one is not re-added; the verify block checks its shape.
+DO $whole_cents$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.purchase_order_items'::regclass
+      AND conname = 'purchase_order_items_unit_cost_whole_cents_chk'
+  ) THEN
+    ALTER TABLE public.purchase_order_items
+      ADD CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk
+      CHECK (
+        unit_cost >= 0
+        AND unit_cost = round(unit_cost, 2)
+        AND unit_cost < 'Infinity'::numeric
+        AND unit_cost = unit_cost_cents::numeric / 100.0
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.purchase_orders'::regclass
+      AND conname = 'purchase_orders_total_cost_whole_cents_chk'
+  ) THEN
+    ALTER TABLE public.purchase_orders
+      ADD CONSTRAINT purchase_orders_total_cost_whole_cents_chk
+      CHECK (
+        total_cost >= 0
+        AND total_cost = round(total_cost, 2)
+        AND total_cost < 'Infinity'::numeric
+        AND total_cost = total_cost_cents::numeric / 100.0
+      );
+  END IF;
+END
+$whole_cents$;
+
 CREATE OR REPLACE FUNCTION public.set_purchase_order_item_costs(
   p_po_id uuid, p_items jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text
 )
@@ -1003,6 +1048,28 @@ BEGIN
     IF pg_get_function_arguments(to_regprocedure(r.wrapper)) IS DISTINCT FROM pg_get_function_arguments(to_regprocedure(r.impl))
        OR pg_get_function_result(to_regprocedure(r.wrapper)) IS DISTINCT FROM pg_get_function_result(to_regprocedure(r.impl)) THEN
       RAISE EXCEPTION 'COST_STEP2_VERIFY: % does not keep the signature of %', r.wrapper, r.impl;
+    END IF;
+  END LOOP;
+
+  -- Each whole-cent CHECK exists, is validated, and is EXACTLY the expected predicate (a same-named
+  -- constraint that already existed with another shape fails closed).
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('public.purchase_order_items', 'purchase_order_items_unit_cost_whole_cents_chk', 'unit_cost'),
+      ('public.purchase_orders', 'purchase_orders_total_cost_whole_cents_chk', 'total_cost')
+    ) AS v(tbl, name, col)
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint c
+      WHERE c.conrelid = r.tbl::regclass
+        AND c.conname = r.name
+        AND c.contype = 'c'
+        AND c.convalidated
+        AND pg_get_constraintdef(c.oid) = format(
+          'CHECK (((%1$s >= (0)::numeric) AND (%1$s = round(%1$s, 2)) AND (%1$s < ''Infinity''::numeric) AND (%1$s = ((%1$s_cents)::numeric / 100.0))))',
+          r.col)
+    ) THEN
+      RAISE EXCEPTION 'COST_STEP2_VERIFY: % is missing, not validated, or not the expected whole-cent CHECK', r.name;
     END IF;
   END LOOP;
 END

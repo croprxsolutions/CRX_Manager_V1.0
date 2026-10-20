@@ -3622,10 +3622,14 @@ export default function JobDetail() {
       const carriesMoney = (parseInt(updated[i].cost_per_unit_cents) || 0) !== 0
         || (parseInt(updated[i].price_per_unit_cents) || 0) !== 0;
       if (carriesMoney && beforeNorm != null && afterNorm != null && beforeNorm !== afterNorm) {
-        updated[i] = { ...updated[i], cost_per_unit_cents: '', price_per_unit_cents: '' };
-        toast('info',
-          `The Unit changed from ${beforeRaw} to ${value}. The line's cost and price were entered per ${beforeRaw}, `
-          + `so they were cleared — re-enter them per ${value} before saving.`);
+        // A non-admin cannot see or enter cost (the server derives it on save), so their line resets
+        // cost to 0, not blank, or the blank-cost gate would block a save they cannot fix (CodeRabbit).
+        updated[i] = { ...updated[i], cost_per_unit_cents: isAdmin ? '' : '0', price_per_unit_cents: '' };
+        toast('info', isAdmin
+          ? `The Unit changed from ${beforeRaw} to ${value}. The line's cost and price were entered per ${beforeRaw}, `
+            + `so they were cleared — re-enter them per ${value} before saving.`
+          : `The Unit changed from ${beforeRaw} to ${value}. The line's price was entered per ${beforeRaw}, `
+            + `so it was cleared — re-enter it per ${value} before saving.`);
       }
     }
     updated[i] = { ...updated[i], [key]: value };

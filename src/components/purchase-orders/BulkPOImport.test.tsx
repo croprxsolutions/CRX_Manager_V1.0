@@ -413,8 +413,10 @@ describe('BulkPOImport', () => {
       target: { files: [new File(['one'], 'INV-REP.pdf', { type: 'application/pdf' })] },
     });
     fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    // Wait for the review table before checking that it has no cost column.
+    const importButton = await screen.findByRole('button', { name: /import 1 po/i });
     expect(screen.queryByText('Unit Cost')).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
+    fireEvent.click(importButton);
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_purchase_order', expect.anything()));
     const call = mocks.rpc.mock.calls.find(([name]) => name === 'save_purchase_order')!;

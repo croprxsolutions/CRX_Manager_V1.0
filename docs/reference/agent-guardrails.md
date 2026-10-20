@@ -356,8 +356,9 @@ separately, the permission change.
    `.claude/worktrees/…` keeps the old breadth at any depth, because every worktree holds its own
    state directory. A delete or move after `cd` into the repo's `.claude` (or below it) is denied
    command-wide, since its own segment names no protected path; an unreadable cd target (`cd $D`)
-   counts when the command names the repo's `.claude`. `.claude/schema-registry.json` is
-   protected by name the same way (delete, move or `>` overwrite), since three schema checks need it. A `.`/`..` segment or a run-time-built part (`$`, a backtick, `%`) anywhere
+   counts when the command names the repo's `.claude`. The guard inputs directly in the repo's
+   `.claude` folder (schema registry, caller graph, active areas) are protected the same way (delete,
+   move or `>` overwrite), since guards read them. A `.`/`..` segment or a run-time-built part (`$`, a backtick, `%`) anywhere
    below `.claude` also counts as the state dir. In the same change, every file a gate trusts is protected by NAME
    (`reviewProofPathMentioned`): the migration reviewer proof `migration-review-*.json`, every
    `owner-approval-*.json`, `AUTOPILOT.on`, `applied-migrations.json` and `hold.json`. Before, `cp`,

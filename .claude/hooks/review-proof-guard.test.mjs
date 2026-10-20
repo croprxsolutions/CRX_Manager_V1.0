@@ -1007,12 +1007,21 @@ for (const command of [
   "echo {} > .claude/schema-registry.json",
   "Remove-Item .claude\\schema-registry.json",
   "node -e \"1\" > .claude/schema-registry.json",
+  // Every .json directly in .claude is a guard input (Codex connector, PR #956).
+  "rm -f .claude/caller-graph.json",
+  "mv .claude/caller-graph.json /tmp/x",
+  "echo {} > .claude/caller-graph.json",
+  "Remove-Item .claude\\caller-graph.json",
+  "rm -f .claude/active-areas.json",
 ]) {
   assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /./, `registry write denied: ${command}`);
 }
 for (const command of [
   "cat .claude/schema-registry.json | head",
   "grep -n customers .claude/schema-registry.json",
+  "cat .claude/caller-graph.json | head",
+  "cp .claude/caller-graph.json /tmp/backup.json",
+  "rm -f src/x.json",
 ]) {
   assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `registry read allowed: ${command}`);
 }

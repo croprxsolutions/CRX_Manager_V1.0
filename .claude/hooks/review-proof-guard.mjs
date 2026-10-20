@@ -257,12 +257,15 @@ function segmentsHitStateDir(value) {
 // the literal-basename proof-path matcher misses (Opus review 2026-08-19, round
 // 5). The wrappers write internally via Node fs and never shell-redirect into the
 // state dir, so any such redirect is illegitimate; fail closed.
-// The schema registry by name: without it generated-column-check and
-// status-enum-check allow every edit and sql-safety fails open, so deleting,
-// moving or overwriting it disables three schema-backed checks. main denied those
-// through the broad `.claude` rule (Codex connector, PR #956). Reads and the
-// regenerate step (a script that writes it itself) are untouched.
-const SCHEMA_REGISTRY_RE = /(?:^|[\s"'=:/\\({,])\.claude[/\\]+schema-registry\.json(?![\w.-])/i;
+// The guard inputs that live directly in the repo's `.claude` folder — every one a
+// hook reads: without `schema-registry.json` three schema checks allow every edit,
+// without `caller-graph.json` grant-change-guard denies every risky REVOKE, and
+// `active-areas.json` drives active-area-guard. main denied deleting, moving or
+// overwriting them through the broad `.claude` rule (Codex connector, PR #956).
+// (The settings files are covered by ENFORCEMENT_SURFACE_RE; `launch.json` is a
+// dev-server config no guard reads.) Reads and the regenerate scripts (which write
+// the file themselves) are untouched.
+const SCHEMA_REGISTRY_RE = /(?:^|[\s"'=:/\\({,])\.claude[/\\]+(?:schema-registry|caller-graph|active-areas)\.json(?![\w.-])/i;
 
 function redirectTargetsStateDir(value) {
   const norm = String(value || "").replace(/\\/g, "/");

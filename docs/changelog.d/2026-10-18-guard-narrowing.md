@@ -157,5 +157,10 @@ er)ge 951'`) is refused by both gates again, and an unreadable cd target (`D=.cl
 both. The recorded cd targets reset on each evaluation. Not changed: a PowerShell backtick
 continuation under a hold (main's hold latch allowed it too).
 
+**Codex connector on `05b24f5f9` (1 regression).** Fixed: deleting, moving or overwriting
+`.claude/caller-graph.json` (grant-change-guard's input) is denied again. The by-name rule now
+covers every guard input directly in the repo's `.claude` folder (schema registry, caller graph,
+active areas), checked against every hook that reads one, instead of one name per review round.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

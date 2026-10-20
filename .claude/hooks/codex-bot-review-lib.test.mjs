@@ -17,6 +17,8 @@ import {
   codexBotFindingsDenial,
   codexBotThreads,
   coderabbitFindingsDenial,
+  coderabbitThreadCount,
+  coderabbitUnreadableDenial,
   collectCodexThreads,
   evaluateCodexBotReview,
   isCodeRabbitLogin,
@@ -54,6 +56,15 @@ eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai" }), thread({ l
   "every unresolved CodeRabbit thread is counted");
 eq(unresolvedCodeRabbitThreads({}), 0, "no thread data reads as zero (fail-open)");
 ok(/CodeRabbit has 2 unresolved comment threads/.test(coderabbitFindingsDenial("X", "5", 2)), "the denial names the count");
+// The count the gates act on: null (fail closed) unless the read is complete.
+eq(coderabbitThreadCount(pr([])), 0, "a complete read with nothing open is 0");
+eq(coderabbitThreadCount(pr([thread({ login: "coderabbitai" })])), 1, "a complete read counts open threads");
+eq(coderabbitThreadCount({ ...pr([]), incomplete: true }), null, "a partial read with nothing seen is null — cannot rule a finding out");
+eq(coderabbitThreadCount({ ...pr([thread({ login: "coderabbitai" })]), incomplete: true }), 1,
+  "a partial read that already shows an open thread still counts it");
+eq(coderabbitThreadCount(pr([], "")), null, "no head means nothing was read — null");
+eq(coderabbitThreadCount(null), null, "no data at all — null");
+ok(/fail closed/.test(coderabbitUnreadableDenial("X", "5")), "the unreadable denial says it fails closed");
 
 // ── the two spellings of the bot's name ──────────────────────────────────────
 // Verified live 2026-09-02 on PR #556: `gh pr view --json reviews` reports

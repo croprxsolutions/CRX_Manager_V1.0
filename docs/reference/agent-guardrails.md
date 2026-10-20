@@ -22,7 +22,8 @@
 > documentation-only change, which needs only the green checks, the pin and base containment. A non-destructive
 > migration apply needs the same conditions minus CodeRabbit. Both merge gates also DENY while any CodeRabbit review
 > thread on the PR is unresolved, on any commit (`unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in
-> `codex-bot-review-lib.mjs`; fail-open on a failed thread read, like the Codex App check), because CodeRabbit never
+> `codex-bot-review-lib.mjs`; unlike the Codex App check this FAILS CLOSED — a failed or partial thread read denies
+> via `coderabbitThreadCount` / `coderabbitUnreadableDenial`, and the agent retries; Luna round 3), because CodeRabbit never
 > re-reviews the fix. Mason sets the `protect-main` ruleset's required approving reviews to 0 himself (required status
 > checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
 > (CodeRabbit only comments), `auto_incremental_review: false` (one review per PR, when opened non-draft or marked

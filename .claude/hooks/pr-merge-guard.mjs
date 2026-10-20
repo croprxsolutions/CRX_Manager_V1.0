@@ -57,9 +57,10 @@ import {
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
   coderabbitFindingsDenial,
+  coderabbitThreadCount,
+  coderabbitUnreadableDenial,
   collectCodexThreads,
   evaluateCodexBotReview,
-  unresolvedCodeRabbitThreads,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
 
@@ -335,7 +336,7 @@ const CODEX_ADVISORY_BUDGET_MS = 12_000;
 // the one `deadlineMs` the caller computed, so N merges spend one budget.
 function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_MS) {
   let codexVerdict = null;
-  let coderabbitOpen = 0;
+  let coderabbitOpen = null; // null = not read completely → fail closed below
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -359,7 +360,7 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
         return JSON.parse(gh(args))?.data?.repository?.pullRequest;
       }, { deadlineMs });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
-      coderabbitOpen = unresolvedCodeRabbitThreads(node);
+      coderabbitOpen = coderabbitThreadCount(node);
     }
   } catch {
     codexVerdict = null; // notice below; never a deny
@@ -367,7 +368,11 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
 
   // CodeRabbit is advisory (2026-10-19): its unanswered threads, on any commit,
   // are the one thing about its review that still blocks. See
-  // unresolvedCodeRabbitThreads(). A failed read leaves this 0 — fail-open.
+  // unresolvedCodeRabbitThreads(). Unlike the Codex App notice, a failed or
+  // partial read DENIES (Luna round 3, HIGH) — the agent retries.
+  if (coderabbitOpen === null) {
+    deny(coderabbitUnreadableDenial("PR MERGE GATE", request.selector));
+  }
   if (coderabbitOpen > 0) {
     deny(coderabbitFindingsDenial("PR MERGE GATE", request.selector, coderabbitOpen));
   }

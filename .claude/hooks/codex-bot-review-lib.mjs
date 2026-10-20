@@ -298,8 +298,9 @@ export function evaluateCodexBotReview(pullRequest) {
 // review moves the head past every thread it opened, and a head-only rule would
 // let all of them through unanswered. The exit is the same as for the Codex App:
 // fix it and resolve the thread, or reply with a one-line reason and resolve it.
-// Fail-open like the rest of this file: a thread read that fails or is partial
-// prints a notice and never denies.
+// Unlike the Codex App check, this FAILS CLOSED (Luna round 3, HIGH): a thread
+// read that fails, or stops before the last page, cannot rule out an unanswered
+// finding, so the gates refuse and the agent retries. Use coderabbitThreadCount().
 export const CODERABBIT_LOGINS = Object.freeze(["coderabbitai", "coderabbitai[bot]"]);
 
 export function isCodeRabbitLogin(login) {
@@ -311,6 +312,25 @@ export function unresolvedCodeRabbitThreads(pullRequest) {
   const nodes = pullRequest?.reviewThreads?.nodes;
   if (!Array.isArray(nodes)) return 0;
   return nodes.map(normalizeThread).filter((thread) => isCodeRabbitLogin(thread.author) && !thread.resolved).length;
+}
+
+// The count the gates act on, or null when the read cannot be trusted as
+// complete. A partial read that already SHOWS an open thread still returns that
+// count — partial evidence of a finding is evidence.
+export function coderabbitThreadCount(pullRequest) {
+  if (!pullRequest || !String(pullRequest.headRefOid || "")) return null;
+  const open = unresolvedCodeRabbitThreads(pullRequest);
+  if (open > 0) return open;
+  return pullRequest.incomplete === true ? null : 0;
+}
+
+export function coderabbitUnreadableDenial(prefix, selector) {
+  const which = selector ? String(selector) : "<number>";
+  return (
+    `${prefix}: could not read this pull request's review threads completely, so unanswered CodeRabbit ` +
+    "findings cannot be ruled out (fail closed, Luna round 3). Retry the merge in a minute; if it keeps " +
+    `failing, check them by hand (gh pr view ${which} --comments) and tell Mason the thread lookup is failing.`
+  );
 }
 
 export function coderabbitFindingsDenial(prefix, selector, count) {

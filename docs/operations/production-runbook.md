@@ -235,7 +235,9 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    A restore adds grants and default privileges after the lockdown, so a privilege change alone cannot be
    relied on to keep the data private while it loads. Anyone who knows the new project's API address could
    otherwise read or change restored data, and pointing Vercel elsewhere does not stop direct requests.
-   Use a control that does not depend on grants: pause the project or disable its Data API in its settings.
+   Use a control that does not depend on grants and leaves the database reachable: disable the project's
+   Data API in its settings. (Do not pause the project: a paused project stops serving its address, so
+   `pg_restore` and the database checks could not connect.)
    (Supabase's database network restrictions cover only direct database and pooler connections, not the
    HTTPS API, so they do not count as isolation.) Keep it off through the load, the schema replay and every
    check that can be done **inside the database** (privileges, policies, roles; see the next paragraph and

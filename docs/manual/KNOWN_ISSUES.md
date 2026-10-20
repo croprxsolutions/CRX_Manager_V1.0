@@ -109,9 +109,10 @@ admins add cost through `get_admin_cost_fields`, quote history comes through `ge
 non-admin's cost, and purchase orders follow Option A (reps order and receive without cost; an admin fills it in with **Enter Unit
 Cost** on the purchase order). Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
 lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
-cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Known step-2 limits: a rep's bulk PO
-import arrives without cost (an admin enters it), and a received line on one of the supplier-cost-basis products cannot be costed
-later without reversing its receipt first. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Known step-2 limits: a new PO line a rep adds (by hand or bulk import)
+takes the product's current cost, not the vendor's quoted price, until an admin corrects it, and on the supplier-cost-basis products
+that cost locks once the line is received (Mason chose this 2026-10-19 over a $0 line that would lock at $0). A lost-response retry of a
+rep's new PO after the product cost changed is refused rather than replayed. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).

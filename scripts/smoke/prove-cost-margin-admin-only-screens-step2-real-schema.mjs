@@ -19,7 +19,8 @@
  *      the stored snapshot; driver refused.
  *   3. save_job: a rep's chemical cost is server-derived (281 per pt, 2250 per gal from 22.50/gal),
  *      the job total follows; an admin's sent cost is stored; a rep re-save keeps the admin's cost.
- *   4. save_purchase_order: a rep's cost is dropped (new line 0, existing line keeps its cost).
+ *   4. save_purchase_order: a rep's cost is dropped (a new line gets the product's current cost,
+ *      an existing line keeps its cost).
  *   5. set_purchase_order_item_costs: admin-only; fills a 0-cost line (also once received);
  *      RECEIVED_PO_LINE_IMMUTABLE; duplicate ids; idempotent replay; key reuse refused.
  *   6. match_quick_receive_items: no unit_cost for a rep; is_no_return for everyone.
@@ -412,7 +413,8 @@ const SCENARIOS = [
   ] },
   { name: '4. save_purchase_order', steps: [
     ['rep creates with unit_cost_cents 999', U.REP, poReply(savePo('NULL', U.REP, poLine(", 'quantity_ordered', 4, 'unit_cost_cents', 999"))), /^ok\|.*\|(true|false)$/, /^ok\|.*\|false$/],
-    ['stored after rep create', 'owner', PO_STORED, 'ok|4:999|3996', 'ok|4:0|0'],
+    // A rep's new line gets the product's current cost (PROD_C: $8.00), never the rep's 999 and never 0.
+    ['stored after rep create', 'owner', PO_STORED, 'ok|4:999|3996', 'ok|4:800|3200'],
     ['admin edit sets 1500', U.ADMIN, poReply(savePo(PONEW, U.ADMIN, `${poLine(", 'quantity_ordered', 4, 'unit_cost_cents', 1500")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, 'same'],
     ['stored after admin edit', 'owner', PO_STORED, 'ok|4:1500|6000', 'same'],
     ['rep edits quantity, no cost keys', U.REP, poReply(savePo(PONEW, U.REP, `${poLine(", 'quantity_ordered', 6")} || jsonb_build_object('id', ${PONEW_LINE})`)), /^ok\|/, /^ok\|.*\|false$/],
@@ -562,7 +564,7 @@ function unapply() {
       public.save_invoice(jsonb, jsonb, text), public.save_purchase_order(uuid, jsonb, jsonb, uuid, text), public.get_chemical_history(uuid, date, date),
       public.match_quick_receive_items(jsonb, text) TO authenticated, service_role;
     DROP FUNCTION public._cost_step2_job_chemicals(uuid, jsonb), public._cost_step2_field_app_chemicals(uuid, jsonb), public._cost_step2_invoice_items(jsonb, jsonb),
-      public._cost_step2_po_items_without_cost(jsonb), public._cost_step2_snapshot_without_cost(jsonb), public._cost_step2_product_cost_cents(uuid), public._cost_step2_try_uuid(text);
+      public._cost_step2_po_items(uuid, jsonb), public._cost_step2_snapshot_without_cost(jsonb), public._cost_step2_product_cost_cents(uuid), public._cost_step2_try_uuid(text);
     COMMIT;`);
   console.log('[prover] (reuse) un-applied the candidate with its ROLLBACK recipe');
 }

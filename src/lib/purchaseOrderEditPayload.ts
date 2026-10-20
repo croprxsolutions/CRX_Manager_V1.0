@@ -15,8 +15,8 @@ export interface PurchaseOrderEditableLine {
 
 /**
  * `includeCost: false` (a non-admin; purchase cost is admin-only, Mason 2026-10-18) sends no
- * cost at all: save_purchase_order keeps each existing line's stored cost and starts a new line
- * at 0 until an admin fills it in.
+ * cost at all: save_purchase_order keeps each existing line's stored cost and gives a new line the
+ * product's current cost, which an admin can change later.
  */
 export function buildPurchaseOrderEditItemsPayload(
   items: PurchaseOrderEditableLine[],

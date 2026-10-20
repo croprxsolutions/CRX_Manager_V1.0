@@ -44,7 +44,8 @@
 --      and receiving, but cannot see or enter unit cost.
 --        save_purchase_order   for a non-admin, unit_cost / unit_cost_cents are dropped from every
 --                              line: an existing line keeps its stored cost (the writer already
---                              hydrates it, 20260726190515) and a new line starts at 0.
+--                              hydrates it, 20260726190515) and a new line gets the product's
+--                              current cost (never 0, so nothing received can lock at $0).
 --        set_purchase_order_item_costs  NEW, admin-only: fill in unit cost later, including on a
 --                              line a rep has already received, provided that line was never costed
 --                              (0). The cost-snapshot trigger still refuses this for the products on
@@ -81,7 +82,7 @@
 -- caller-analysis: save_job :: JobDetail.tsx; admins unchanged, a rep's chemical cost is derived here
 -- caller-analysis: save_field_app_invoice :: FieldApplicationInvoice.tsx; admins unchanged, a rep's chemical cost is derived here
 -- caller-analysis: save_invoice :: InvoiceDetail.tsx; admins unchanged, a rep's line cost is derived here
--- caller-analysis: save_purchase_order :: NewPurchaseOrder.tsx, PurchaseOrderDetail.tsx, BulkPOImport.tsx; admins unchanged, a rep's cost input is ignored
+-- caller-analysis: save_purchase_order :: NewPurchaseOrder.tsx, PurchaseOrderDetail.tsx, BulkPOImport.tsx; admins unchanged, a rep's cost input is ignored (a new line takes the product's current cost)
 -- caller-analysis: get_chemical_history :: Reports.tsx chemical history; admins unchanged, reps lose purchase cost, other roles already got no rows
 -- caller-analysis: match_quick_receive_items :: QuickReceivePanel.tsx, offlineSync.ts; admins unchanged, a rep's reply has no unit_cost
 -- caller-analysis: get_admin_cost_fields :: NEW; src/lib/costFields.ts (admin screens only)
@@ -459,17 +460,32 @@ END;
 $function$;
 
 -- save_purchase_order (non-admin): drop any cost the request carries.
-CREATE OR REPLACE FUNCTION public._cost_step2_po_items_without_cost(p_items jsonb)
+-- save_purchase_order (non-admin): the rep's cost keys are dropped. A line already on this purchase
+-- order keeps its stored cost (the impl fills it in when no cost key is sent). A NEW line gets the
+-- product's current cost, never 0: on the supplier-cost-basis products a received line's cost is
+-- locked, so a rep receiving a $0 line would freeze it at $0 (Sol, 2026-10-19; Mason chose this).
+-- An admin can still change the cost before the line is received.
+CREATE OR REPLACE FUNCTION public._cost_step2_po_items(p_po_id uuid, p_items jsonb)
 RETURNS jsonb
-LANGUAGE sql IMMUTABLE
+LANGUAGE sql STABLE
 SET search_path = public, pg_temp
 AS $function$
   SELECT CASE
     WHEN jsonb_typeof(p_items) IS DISTINCT FROM 'array' THEN p_items
     ELSE COALESCE((
       SELECT jsonb_agg(
-               CASE WHEN jsonb_typeof(e.value) = 'object' THEN e.value - 'unit_cost' - 'unit_cost_cents'
-               ELSE e.value END
+               CASE
+                 WHEN jsonb_typeof(e.value) IS DISTINCT FROM 'object' THEN e.value
+                 WHEN EXISTS (
+                   SELECT 1 FROM public.purchase_order_items poi
+                    WHERE p_po_id IS NOT NULL
+                      AND poi.purchase_order_id = p_po_id
+                      AND poi.id = public._cost_step2_try_uuid(e.value->>'id'))
+                   THEN e.value - 'unit_cost' - 'unit_cost_cents'
+                 ELSE (e.value - 'unit_cost' - 'unit_cost_cents')
+                      || jsonb_build_object('unit_cost_cents', COALESCE(
+                           public._cost_step2_product_cost_cents(public._cost_step2_try_uuid(e.value->>'product_id')), 0))
+               END
                ORDER BY e.ord)
         FROM jsonb_array_elements(p_items) WITH ORDINALITY AS e(value, ord)
     ), '[]'::jsonb)
@@ -509,7 +525,7 @@ REVOKE ALL ON FUNCTION public._cost_step2_product_cost_cents(uuid) FROM PUBLIC, 
 REVOKE ALL ON FUNCTION public._cost_step2_job_chemicals(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._cost_step2_field_app_chemicals(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._cost_step2_invoice_items(jsonb, jsonb) FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public._cost_step2_po_items_without_cost(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._cost_step2_po_items(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._cost_step2_snapshot_without_cost(jsonb) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
@@ -599,13 +615,13 @@ BEGIN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
   -- Reps create and edit purchase orders but cannot enter unit cost: an existing line keeps its
-  -- stored cost and a new line starts at 0 until an admin fills it in.
+  -- stored cost and a new line gets the product's current cost; an admin can change it later.
   IF public.is_admin() THEN
     RETURN public._save_purchase_order_cost_step2_impl(
       p_po_id, p_po_payload, p_items, p_performed_by, p_idempotency_key);
   END IF;
   RETURN public._save_purchase_order_cost_step2_impl(
-    p_po_id, p_po_payload, public._cost_step2_po_items_without_cost(p_items),
+    p_po_id, p_po_payload, public._cost_step2_po_items(p_po_id, p_items),
     p_performed_by, p_idempotency_key);
 END;
 $function$;
@@ -981,7 +997,7 @@ BEGIN
       ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'public._cost_step2_job_chemicals(p_job_id, p_chemicals)'),
       ('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._cost_step2_field_app_chemicals(p_invoice_id, p_chemicals)'),
       ('public.save_invoice(jsonb,jsonb,text)', 'public._cost_step2_invoice_items(p_invoice, p_items)'),
-      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'public._cost_step2_po_items_without_cost(p_items)'),
+      ('public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'public._cost_step2_po_items(p_po_id, p_items)'),
       ('public.get_chemical_history(uuid,date,date)', 'CASE WHEN v_admin OR r.transaction_type IS DISTINCT FROM ''Purchase'' THEN r.unit_price END'),
       ('public.match_quick_receive_items(jsonb,text)', 'a.value - ''unit_cost'''),
       ('public.set_purchase_order_item_costs(uuid,jsonb,uuid,text)', 'PERFORM public.require_admin();'),

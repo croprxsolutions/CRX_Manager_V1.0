@@ -392,6 +392,8 @@ for (const command of [
   // Balanced NESTED substitutions stay one program word (CodeRabbit, PR #956).
   "bash -c '$(echo $(printf g))h pr m$(echo $(printf er))ge 951 --squash'",
   "bash -c 'g$(echo $(printf i))t pu$(echo $(printf sh)) origin HEAD'",
+  // An unclosed `$(` still opens a built name (CodeRabbit, PR #956).
+  "bash -c '$(printf g h pr m$(printf er)ge 951'",
 ]) {
   for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
     const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });

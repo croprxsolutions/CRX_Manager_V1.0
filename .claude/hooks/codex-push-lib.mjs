@@ -4084,8 +4084,18 @@ export function nestedProgramNameGlued(command) {
   // not split the word, then judge the first word alone. The balanced parser keeps
   // a nested `$(echo $(printf g))h` whole; a flat `\$\([^()]*\)` split it at the
   // inner space and missed the glued name (CodeRabbit, PR #956).
-  const marked = splitSubstitutions(String(command || "").trim()).outer
-    .replace(/\$\(\)|`[^`]*`|\$\{[^}]*\}|\$\w+/g, "\u0000");
+  // An unclosed `$(` stays in `outer` as written; mark its opening too, so
+  // `$(printf g h pr m$(printf er)ge 951` still reads as a built name (CodeRabbit,
+  // PR #956). An unclosed arithmetic `$((` is not a command and is left alone.
+  const split = splitSubstitutions(String(command || "").trim());
+  let marked = split.outer;
+  if (split.unclosed !== undefined) {
+    const start = marked.length - split.unclosed.length - 2;
+    if (start >= 0 && marked.slice(start, start + 2) === "$(" && marked[start + 2] !== "(") {
+      marked = `${marked.slice(0, start)}\u0000${marked.slice(start + 2)}`;
+    }
+  }
+  marked = marked.replace(/\$\(\)|`[^`]*`|\$\{[^}]*\}|\$\w+/g, "\u0000");
   const first = (marked.split(/[\s;&|]+/)[0] || "").replace(/["']/g, "");
   return first.includes("\u0000") && first.replace(/\u0000/g, "").length > 0;
 }

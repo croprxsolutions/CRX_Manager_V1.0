@@ -993,6 +993,9 @@ for (const command of [
   "cd \"./.claude/hooks\" && rm -f pr-merge-guard.mjs",
   "cd C:/CRX_Manager/.claude/hooks && rm -f pr-merge-guard.mjs",
   "Set-Location .claude\\hooks; Remove-Item pr-merge-guard.mjs",
+  // An unreadable cd target in a command that names the repo's .claude (CodeRabbit, PR #956).
+  "D=.claude/hooks; cd $D && rm -f pr-merge-guard.mjs",
+  "D=.claude/commands; cd \"$D\"; rm -f ship.md",
 ]) {
   assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /after cd into the repo's \.claude/, `cd-then-delete denied: ${command}`);
 }
@@ -1020,6 +1023,9 @@ for (const command of [
   "cd .claude/hooks && node --test guards.test.mjs",
   "cd src && rm -f x.tmp",
   "cd src && rm -f x.tmp && cd .. && ls",
+  "D=src; cd $D && rm -f x.tmp",
+  "cd $TMPDIR && rm -f x.tmp",
+  "cd $D && ls .claude/hooks",
   "cd ~/.claude/projects/x/memory && rm -f old.md",
 ]) {
   assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `cd allowed: ${command}`);

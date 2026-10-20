@@ -150,5 +150,12 @@ one Linux run had read 21 of 29 blocks and a re-run of the same code passed.
 `.claude/schema-registry.json` by shell (`rm`, `mv`, `Remove-Item`, a `>` redirect) is denied again,
 as main denied it. Without the registry three schema checks allow everything. Reads still pass.
 
+**CodeRabbit and Codex connector on `9ef250cc5` (2 regressions, 1 tidy, 1 not a regression).**
+Fixed: an unclosed `$(` that opens a nested program name (`bash -c '$(printf g h pr m$(printf
+er)ge 951'`) is refused by both gates again, and an unreadable cd target (`D=.claude/hooks; cd $D
+&& rm -f …`) counts as entering `.claude` when the command names the repo's `.claude`; main refused
+both. The recorded cd targets reset on each evaluation. Not changed: a PowerShell backtick
+continuation under a hold (main's hold latch allowed it too).
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

@@ -404,6 +404,9 @@ if (shellTool) {
   // quote-stripped) so a composed verb like `c"d".claude\...` — which becomes
   // `cd.claude\...` only after quotes are removed — is degluated there too.
   const deglue = (t) => t.replace(/(^|[;&|\r\n()"'\\\s])(cd|chdir)([/.\\])/gi, "$1$2 $3");
+  // Start from no recorded targets on every evaluation, so a module imported and
+  // run more than once never judges a command by an earlier one's cd (CodeRabbit, PR #956).
+  cdTargetsSeen.length = 0;
   scanCdInvocations(deglue(spliced));
   scanCdInvocations(deglue(spliced.replace(/["']/g, "")));
 
@@ -514,11 +517,19 @@ if (shellTool) {
   // the pre-narrowing command-wide protection: the later `rm`/`mv` runs inside that
   // folder even though its own segment names no protected path. The home
   // `~/.claude` (agent memory) stays out, matching STATE_DIR_ANCESTOR_RE.
-  const cdEntersRepoClaude = cdTargetsSeen.some((t) => {
-    const p = t.replace(/\\/g, "/");
+  const namesRepoClaude = (t) => {
+    const p = String(t).replace(/["']/g, "").replace(/\\/g, "/");
     return /(?:^|\/)\.claude(?:\/|$)/i.test(p) &&
       !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:)?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p);
-  });
+  };
+  // A cd target the guard cannot read (`D=.claude/hooks; cd $D`, a glob, `%X%`)
+  // counts as entering `.claude` when the command names the repo's `.claude`
+  // anywhere, as the state-dir cd rule above already does for its folder
+  // (CodeRabbit, PR #956).
+  const commandNamesRepoClaude = () =>
+    destructiveViews.some((v) => v.split(/[\s;&|()<>=,{}]+/).some(namesRepoClaude));
+  const cdEntersRepoClaude = cdTargetsSeen.some(namesRepoClaude) ||
+    (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && commandNamesRepoClaude());
   if (cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) {
     deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");
   }

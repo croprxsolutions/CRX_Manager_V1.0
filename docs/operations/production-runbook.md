@@ -204,6 +204,8 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 
 1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
    **Immediately after creating it, and before restoring any users or triggers, turn public signup off**
+   (this is an authentication change, so get Mason's explicit yes in the current conversation when he
+   approves the project in this same step)
    in its Auth settings and confirm a signup attempt is refused. Closing the Data API does not close the
    separate Auth signup endpoint, and the profile trigger copies a signup-supplied role into the profile,
    so someone who found the address could otherwise create an admin account that survives the restore.

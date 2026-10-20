@@ -16,8 +16,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke, mockResetKey } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke, mockResetKey, mockResetKeyFor } = vi.hoisted(() => ({
   mockResetKey: vi.fn(),
+  mockResetKeyFor: vi.fn(),
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   mockToast: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({
     getKey: () => 'test-idem-key',
     getKeyFor: (scope: string) => `test-idem-key:${scope}`,
+    resetKeyFor: mockResetKeyFor,
     resetKey: mockResetKey,
   }),
 }));
@@ -1022,7 +1024,48 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Price saved. Click Create Invoice again to bill this ticket.'));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Pick the quoted price' })).not.toBeInTheDocument());
+    expect(mockResetKeyFor).toHaveBeenCalledWith(`${LINE_ID}:${QI_750}`);
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('says which picks saved when a later one fails, and keeps only the unsaved line open', async () => {
+    const LINE_2 = '55555555-5555-4555-8555-555555555555';
+    const QI_B1 = '66666666-6666-4666-8666-666666666666';
+    const QI_B2 = '77777777-7777-4777-8777-777777777777';
+    await createInvoiceWith({
+      message: 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: pick the price to bill',
+      details: JSON.stringify({
+        products: [
+          { blend_ticket_product_id: LINE_ID, product_name: 'Atrazine 4L',
+            options: [{ quote_item_id: QI_700, price_cents: 700 }, { quote_item_id: QI_750, price_cents: 750 }] },
+          { blend_ticket_product_id: LINE_2, product_name: 'Glyphosate',
+            options: [{ quote_item_id: QI_B1, price_cents: 500 }, { quote_item_id: QI_B2, price_cents: 550 }] },
+        ],
+      }),
+    });
+    mockRpc.mockImplementation((name: string, args: { p_blend_ticket_product_id?: string }) => {
+      if (name === 'set_blend_ticket_product_quote_price') {
+        return Promise.resolve(args.p_blend_ticket_product_id === LINE_ID
+          ? { data: { success: true, unit_price_cents: 750 }, error: null }
+          : { data: null, error: { message: 'BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE: that price is not on this ticket\'s quote for this product' } });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    const picker = await screen.findByRole('dialog', { name: 'Pick the quoted price' });
+    fireEvent.click(within(picker).getByLabelText(/\$7\.50 per unit/));
+    fireEvent.click(within(picker).getByLabelText(/\$5\.50 per unit/));
+    fireEvent.click(within(picker).getByRole('button', { name: 'Save prices' }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'Saved the price for Atrazine 4L, but not for Glyphosate: That price is no longer on this ticket\'s quote for this product. Reload the ticket and try again.',
+    ));
+    const stillOpen = await screen.findByRole('dialog', { name: 'Pick the quoted price' });
+    await waitFor(() => expect(within(stillOpen).queryByText('Atrazine 4L')).not.toBeInTheDocument());
+    expect(within(stillOpen).getByText('Glyphosate')).toBeInTheDocument();
+    expect(mockResetKeyFor).toHaveBeenCalledWith(`${LINE_ID}:${QI_750}`);
+    expect(mockResetKeyFor).not.toHaveBeenCalledWith(`${LINE_2}:${QI_B2}`);
   });
 
   it('shows a plain-English reason when a product has no price on the price list', async () => {

@@ -52,7 +52,7 @@ export default function QuotePriceChoiceModal({ choices, saving, onClose, onConf
           <fieldset key={choice.blendTicketProductId} className="border border-gray-200 rounded-lg p-3">
             <legend className="text-sm font-semibold text-nav-dark px-1">{choice.productName}</legend>
             <div className="space-y-2">
-              {choice.options.map((option, index) => (
+              {choice.options.map((option) => (
                 <label key={option.quoteItemId} className="flex items-center gap-2 text-sm cursor-pointer min-h-[44px]">
                   <input
                     type="radio"
@@ -63,7 +63,6 @@ export default function QuotePriceChoiceModal({ choices, saving, onClose, onConf
                     disabled={saving}
                   />
                   <span>{formatCents(option.priceCents)} per unit</span>
-                  <span className="text-xs text-secondary">(quote line {index + 1})</span>
                 </label>
               ))}
             </div>

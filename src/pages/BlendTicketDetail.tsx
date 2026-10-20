@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, Link2, Unlink, ShoppingCart, ClipboardCheck, RefreshCw, MapPin, FileText } from 'lucide-react';
 import { sanitizeError, supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
-import { blendTicketMissingPriceMessage, getBlendQuotePriceChoices, type BlendQuotePriceChoice } from '../lib/blendTicketPricing';
+import { blendQuotePriceSaveErrorMessage, blendTicketMissingPriceMessage, getBlendQuotePriceChoices, type BlendQuotePriceChoice } from '../lib/blendTicketPricing';
 import { Sentry } from '../lib/sentry';
 import { BLEND_TICKET_PRODUCT_COLUMNS, ORDER_COLUMNS, ORDER_ITEM_COLUMNS, PRODUCT_COLUMNS } from '../lib/costFields';
 import { blockedUnitSaveMessage, type UnitLoadState } from '../lib/units';
@@ -992,25 +992,47 @@ export function BlendTicketDetail() {
     if (!ticket || !profile || !quotePriceChoices) return;
     await runCriticalAction({
       action: async () => {
+        // Each pick is its own database call. If one fails after others saved, reload, keep only
+        // the unsaved lines in the window and say exactly which saved, so nothing is half-hidden.
+        const saved: string[] = [];
         for (const choice of quotePriceChoices) {
           const quoteItemId = picks[choice.blendTicketProductId];
           if (!quoteItemId) throw new Error(`Pick a price for ${choice.productName} first.`);
-          const { data, error } = await supabase.rpc('set_blend_ticket_product_quote_price', {
-            p_blend_ticket_product_id: choice.blendTicketProductId,
-            p_quote_item_id: quoteItemId,
-            p_performed_by: profile.id,
-            p_idempotency_key: quotePriceIdem.getKeyFor(`${choice.blendTicketProductId}:${quoteItemId}`),
-          });
-          if (error) throw error;
-          const result = assertRpcResult<{ success: boolean; unit_price_cents: number }>(data, 'set_blend_ticket_product_quote_price');
-          if (!result.success) throw new Error('The picked price was not saved.');
+          const scope = `${choice.blendTicketProductId}:${quoteItemId}`;
+          try {
+            const { data, error } = await supabase.rpc('set_blend_ticket_product_quote_price', {
+              p_blend_ticket_product_id: choice.blendTicketProductId,
+              p_quote_item_id: quoteItemId,
+              p_performed_by: profile.id,
+              p_idempotency_key: quotePriceIdem.getKeyFor(scope),
+            });
+            if (error) throw error;
+            const result = assertRpcResult<{ success: boolean; unit_price_cents: number }>(data, 'set_blend_ticket_product_quote_price');
+            if (!result.success) throw new Error('The picked price was not saved.');
+          } catch (err: unknown) {
+            const reason = blendQuotePriceSaveErrorMessage(err) ?? sanitizeError(err);
+            if (saved.length === 0) throw new Error(reason);
+            setQuotePriceChoices(quotePriceChoices.filter((c) => !saved.includes(c.blendTicketProductId)));
+            await loadTicketData();
+            const savedNames = quotePriceChoices
+              .filter((c) => saved.includes(c.blendTicketProductId))
+              .map((c) => c.productName)
+              .join(', ');
+            throw new Error(`Saved the price for ${savedNames}, but not for ${choice.productName}: ${reason}`);
+          }
+          // A confirmed save retires its retry key, so picking this same line again later is a
+          // new request rather than a replay of this one.
+          quotePriceIdem.resetKeyFor(scope);
+          saved.push(choice.blendTicketProductId);
         }
         setQuotePriceChoices(null);
         await loadTicketData();
       },
       toast,
       setLoading: setSavingQuotePrices,
-      successMessage: 'Price saved. Click Create Invoice again to bill this ticket.',
+      successMessage: quotePriceChoices.length > 1
+        ? 'Prices saved. Click Create Invoice again to bill this ticket.'
+        : 'Price saved. Click Create Invoice again to bill this ticket.',
       sentryTag: 'set_blend_ticket_product_quote_price',
     });
   }
@@ -1957,7 +1979,7 @@ export function BlendTicketDetail() {
         variant="info"
       />
 
-      {/* Link to Order Modal */}
+      {/* Pick the quoted price (Goal 3 pricing) */}
       <QuotePriceChoiceModal
         choices={quotePriceChoices}
         saving={savingQuotePrices}
@@ -1965,6 +1987,7 @@ export function BlendTicketDetail() {
         onConfirm={handleSaveQuotePrices}
       />
 
+      {/* Link to Order Modal */}
       <Modal open={showLinkModal} onClose={() => setShowLinkModal(false)} title="Link to Existing Order" size="large">
         <div className="space-y-4">
           <p className="text-sm text-gray-600">

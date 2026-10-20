@@ -36,9 +36,18 @@ DECLARE
   v_qi_750 uuid;
   v_qi_t1_a uuid;
   v_qi_t1_b uuid;
-  v_t1 uuid; v_t2 uuid; v_t3 uuid; v_t4 uuid; v_t5 uuid; v_t6 uuid;
+  v_t uuid; v_t1 uuid; v_t2 uuid; v_t3 uuid; v_t4 uuid; v_t5 uuid; v_t6 uuid; v_t7 uuid; v_t8 uuid; v_t9 uuid;
+  v_section_b uuid;
+  v_job2 uuid;
+  v_job3 uuid;
+  v_other_customer uuid;
+  v_other_quote uuid;
+  v_other_section uuid;
+  v_qi_other uuid;
   v_line_full uuid;
   v_line_other uuid;
+  v_line_t7 uuid;
+  v_line_t8 uuid;
   v_json json;
   v_res jsonb;
   v_res2 jsonb;
@@ -125,8 +134,37 @@ BEGIN
   INSERT INTO public.jobs (job_number, customer_id, job_date, status, quote_id, quote_section_id, total_acres)
   VALUES ('E2E-BTP-J-' || v_suffix, v_customer, v_today, 'scheduled', v_quote, v_section, 10) RETURNING id INTO v_job;
 
-  -- Six approved, unbilled tickets (T5 and T6 on the job; T6 names another rep).
-  FOR v_count IN 1..6 LOOP
+  -- A second section of the same quote listing the full product only at prices that are not
+  -- usable: $0, which is how an unpriced quote line looks (price_per_unit is NOT NULL DEFAULT 0).
+  -- (A fraction of a cent cannot be stored: quote_items_price_per_unit_cent_scale_chk.) Today's
+  -- below-cost quote guard refuses a new $0 line, so this recreates a legacy row: as the table owner
+  -- with the quote_items triggers off for this one statement (container only; rolled back).
+  INSERT INTO public.quote_sections (quote_id, section_name, sort_order)
+  VALUES (v_quote, '[E2E] BTP Section B', 1) RETURNING id INTO v_section_b;
+  EXECUTE 'ALTER TABLE public.quote_items DISABLE TRIGGER USER';
+  INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
+  VALUES (v_quote, v_section_b, v_p_full, 0, 0, 20, 10, 2, 'gal/acre');
+  EXECUTE 'ALTER TABLE public.quote_items ENABLE TRIGGER USER';
+  INSERT INTO public.jobs (job_number, customer_id, job_date, status, quote_id, quote_section_id, total_acres)
+  VALUES ('E2E-BTP-J3-' || v_suffix, v_customer, v_today, 'scheduled', v_quote, v_section_b, 10) RETURNING id INTO v_job3;
+
+  -- Another customer's quote, whose section a job of this customer has been pointed at.
+  INSERT INTO public.customers (farm_name, assigned_tier)
+  VALUES ('[E2E] BTP Other Farm ' || v_suffix, 1) RETURNING id INTO v_other_customer;
+  INSERT INTO public.quotes (quote_number, customer_id, created_by, status, is_planned)
+  VALUES ('[E2E] BTP-Q2-' || v_suffix, v_other_customer, v_admin, 'sent', true) RETURNING id INTO v_other_quote;
+  INSERT INTO public.quote_sections (quote_id, section_name, sort_order)
+  VALUES (v_other_quote, '[E2E] BTP Other Section', 0) RETURNING id INTO v_other_section;
+  INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
+  VALUES (v_other_quote, v_other_section, v_p_full, 0, 6.50, 20, 10, 2, 'gal/acre') RETURNING id INTO v_qi_other;
+  INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
+  VALUES (v_other_quote, v_other_section, v_p_full, 1, 6.75, 20, 10, 2, 'gal/acre');
+  INSERT INTO public.jobs (job_number, customer_id, job_date, status, quote_id, quote_section_id, total_acres)
+  VALUES ('E2E-BTP-J2-' || v_suffix, v_customer, v_today, 'scheduled', v_other_quote, v_other_section, 10) RETURNING id INTO v_job2;
+
+  -- Nine approved, unbilled tickets (T5, T6 and T8 on the job; T6 names another rep; T7 on the
+  -- job pointed at another customer's quote; T9 on the job whose quote prices are unusable).
+  FOR v_count IN 1..9 LOOP
     INSERT INTO public.blend_tickets (
       ticket_number, uploaded_by, customer_id, salesman_id, status, review_status,
       payment_status, order_link_status, season, total_acres, source, job_id
@@ -134,17 +172,20 @@ BEGIN
       '[E2E]-BTP-' || v_count || '-' || v_suffix, v_admin, v_customer,
       CASE WHEN v_count = 6 THEN v_other_rep END,
       'completed', 'approved', 'unbilled', 'unlinked', public.current_season(), 10, 'manual',
-      CASE WHEN v_count IN (5, 6) THEN v_job END
-    ) RETURNING id INTO v_t6;
+      CASE WHEN v_count IN (5, 6, 8) THEN v_job WHEN v_count = 7 THEN v_job2 WHEN v_count = 9 THEN v_job3 END
+    ) RETURNING id INTO v_t;
     INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, actual_acres)
-    VALUES (v_t6, v_field, v_customer, 10);
+    VALUES (v_t, v_field, v_customer, 10);
     CASE v_count
-      WHEN 1 THEN v_t1 := v_t6;
-      WHEN 2 THEN v_t2 := v_t6;
-      WHEN 3 THEN v_t3 := v_t6;
-      WHEN 4 THEN v_t4 := v_t6;
-      WHEN 5 THEN v_t5 := v_t6;
-      ELSE NULL;
+      WHEN 1 THEN v_t1 := v_t;
+      WHEN 2 THEN v_t2 := v_t;
+      WHEN 3 THEN v_t3 := v_t;
+      WHEN 4 THEN v_t4 := v_t;
+      WHEN 5 THEN v_t5 := v_t;
+      WHEN 6 THEN v_t6 := v_t;
+      WHEN 7 THEN v_t7 := v_t;
+      WHEN 8 THEN v_t8 := v_t;
+      ELSE v_t9 := v_t;
     END CASE;
   END LOOP;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
@@ -158,6 +199,12 @@ BEGIN
   VALUES (v_t5, v_p_full, '[E2E] BTP t5 two-price', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_full;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
   VALUES (v_t6, v_p_full, '[E2E] BTP t6 other rep', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_other;
+  INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
+  VALUES (v_t7, v_p_full, '[E2E] BTP t7 other quote', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t7;
+  INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
+  VALUES (v_t8, v_p_full, '[E2E] BTP t8 stale pick', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t8;
+  INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
+  VALUES (v_t9, v_p_full, '[E2E] BTP t9 unusable quote', 20, 'GL', 2, 'gal/ac', 1);
 
   -- 1. Order: a tier-2 customer, a product with no tier-2 price -> priced at tier 1, never $0.
   BEGIN
@@ -315,6 +362,74 @@ BEGIN
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
     IF v_err NOT LIKE 'BLEND_TICKET_QUOTE_PRICE_LOCKED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: wrong billed-ticket refusal: %', v_err; END IF;
   END;
+
+  -- 11. A ticket line's price cannot be written directly (as the table owner, the path every
+  --     definer function takes, and as the authenticated role through the office policy); only
+  --     the setter writes it. Clearing to NULL stays allowed.
+  BEGIN
+    UPDATE public.blend_ticket_products SET unit_price_cents = 1 WHERE id = v_line_t8;
+    RAISE EXCEPTION 'SMOKE_FAIL: a ticket line price was written directly, skipping the pick checks';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BLEND_TICKET_PRICE_PICK_REQUIRED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: wrong direct-write refusal: %', v_err; END IF;
+  END;
+  BEGIN
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    UPDATE public.blend_ticket_products SET unit_price_cents = 1 WHERE id = v_line_t8;
+    RAISE EXCEPTION 'SMOKE_FAIL: a ticket line price was written directly through the Data API';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BLEND_TICKET_PRICE_PICK_REQUIRED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: wrong Data API direct-write refusal: %', v_err; END IF;
+  END;
+  IF current_user <> 'postgres' THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: SET LOCAL ROLE did not end with its sub-block (current_user %)', current_user;
+  END IF;
+  UPDATE public.blend_ticket_products SET unit_price_cents = NULL WHERE id = v_line_t8;
+
+  -- 12. A pick must come from a quote of the ticket's own customer, even when the ticket's job
+  --     points at another customer's quote section.
+  BEGIN
+    v_res := public.set_blend_ticket_product_quote_price(v_line_t7, v_qi_other, v_admin, 'e2e-btp-pick-other-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a price from another customer''s quote was accepted as the pick: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: wrong other-customer refusal: %', v_err; END IF;
+  END;
+
+  -- 13. A pick goes stale when the line's product changes: the old price is never billed. Here the
+  --     new product's quote lines share one price, so it bills that quoted price instead.
+  v_res := public.set_blend_ticket_product_quote_price(v_line_t8, v_qi_700, v_admin, 'e2e-btp-pick-t8-' || v_suffix);
+  IF (v_res->>'unit_price_cents')::bigint IS DISTINCT FROM 700 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the T8 pick was not stored: %', v_res;
+  END IF;
+  UPDATE public.blend_ticket_products SET product_id = v_p_t1only WHERE id = v_line_t8;
+  v_res := public.create_invoice_from_blend_ticket(v_t8, v_admin, 'e2e-btp-invoice-8-' || v_suffix);
+  SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_text
+    FROM public.invoice_items ii
+   WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = v_p_t1only;
+  IF v_cents IS DISTINCT FROM 600 OR v_text IS DISTINCT FROM 'quoted' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a stale pick billed % (%) after the product changed, expected 600 cents as quoted', v_cents, v_text;
+  END IF;
+
+  -- 14. A quote price that is not usable ($0, which is how an unpriced quote line looks) is
+  --     neither offered nor billed: the line bills its tier price.
+  --     (Before this change the $0 line won the quote lookup and the below-cost line guard then
+  --     refused the whole invoice.)
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    RAISE EXCEPTION 'SMOKE_FAIL: a line whose quote prices are unusable was refused: %', v_err;
+  END;
+  SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_text
+    FROM public.invoice_items ii
+   WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = v_p_full;
+  IF v_cents IS DISTINCT FROM 900 OR v_text IS DISTINCT FROM 'tier' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a line whose quote prices are unusable billed % (%), expected the 900-cent tier-2 price', v_cents, v_text;
+  END IF;
 
   -- 10. Own name: a sales rep cannot pick a price on another rep's ticket.
   PERFORM set_config('request.jwt.claims',

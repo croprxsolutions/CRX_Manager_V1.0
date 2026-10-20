@@ -218,6 +218,7 @@ function runCovering(phase) {
 const ORDER = '_create_order_from_blend_ticket_replay_impl_20261015';
 const INVOICE = 'create_invoice_from_blend_ticket';
 const SETTER = 'set_blend_ticket_product_quote_price';
+const GUARD_FN = '_guard_blend_ticket_price_pick_20261020';
 function candidateBody(fn) {
   const sql = lf(CANDIDATE);
   const start = sql.search(new RegExp(`CREATE (OR REPLACE )?FUNCTION public\\.${fn}\\(`));
@@ -301,7 +302,7 @@ ROLLBACK;`,
   const INVOICE_CHOICE = between(INVOICE, '  -- (1) The job\'s quote lists a product more than once', '  -- (2) A product billed at its tier price');
   const INVOICE_PRECHECK = between(INVOICE, '  -- (2) A product billed at its tier price', '  IF v_customer_count > 1 THEN');
   const INVOICE_LINE = between(INVOICE, '            -- Goal 3 pricing: the tier price, else the tier-1 price', '          ELSE\n            v_unit_price := 0;');
-  const INVOICE_PROVENANCE = between(INVOICE, '          -- Goal 3 pricing: a price staff picked from this job\'s quote bills as quoted.', '        ELSIF v_quote_section_id IS NOT NULL');
+  const PICK_VALID_CALL = '        IF public._blend_quote_pick_valid_20261020(\n             v_quote_section_id, v_ticket.customer_id, v_btp.product_id, v_btp.unit_price_cents) THEN\n';
   const OLD_ORDER_LINE = '        v_price := CASE v_tier\n          WHEN 1 THEN COALESCE(v_db_product.tier1_price, 0)\n          WHEN 2 THEN COALESCE(v_db_product.tier2_price, 0)\n          WHEN 3 THEN COALESCE(v_db_product.tier3_price, 0)\n          ELSE COALESCE(v_db_product.tier1_price, 0)\n        END;\n';
   const OLD_INVOICE_LINE = '            v_unit_price := CASE v_customer_tier\n              WHEN 1 THEN COALESCE(ROUND(v_btp.tier1_price * 100), 0)\n              WHEN 2 THEN COALESCE(ROUND(v_btp.tier2_price * 100), ROUND(v_btp.tier1_price * 100), 0)\n              WHEN 3 THEN COALESCE(ROUND(v_btp.tier3_price * 100), ROUND(v_btp.tier1_price * 100), 0)\n              ELSE COALESCE(ROUND(v_btp.tier1_price * 100), 0)\n            END;\n';
   const mutations = [
@@ -316,10 +317,23 @@ ROLLBACK;`,
       /SMOKE_FAIL: (a blend-ticket invoice billed an unpriced product|wrong unpriced-invoice refusal)/],
     ['invoice duplicate-quote-line choice', INVOICE, [[INVOICE_CHOICE, '']],
       /SMOKE_FAIL: a blend-ticket invoice picked one of two quoted prices without asking/],
-    ['invoice picked-price provenance', INVOICE, [[INVOICE_PROVENANCE, '']],
-      /SMOKE_FAIL: the picked price billed 750 \(manual, quoted <NULL>\)|SMOKE_FAIL: the picked price billed 750 \(manual/],
-    ['setter quote-section test', SETTER, [['     OR v_quote_item.product_id IS DISTINCT FROM v_line.product_id\n', '']],
+    // Billing honours any stored value again, as before: the stale pick bills the old price.
+    ['invoice valid-pick test', INVOICE, [[PICK_VALID_CALL, '        IF v_btp.unit_price_cents IS NOT NULL THEN\n']],
+      /SMOKE_FAIL: a stale pick billed 700 \(quoted\) after the product changed/],
+    // The quote lookup takes any priced line again: an unusable quote price wins over the tier.
+    ['invoice usable-quote-price filter', INVOICE,
+      [["             AND qi.product_id = v_btp.product_id\n             AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)\n           ORDER BY qi.id LIMIT 1;\n",
+        "             AND qi.product_id = v_btp.product_id\n           ORDER BY qi.id LIMIT 1;\n"]],
+      /SMOKE_FAIL: a line whose quote prices are unusable (billed|was refused)/],
+    // The setter tests the product twice (its own line and the shared valid-pick rule); remove both.
+    ['setter same-product test', SETTER, [['     OR v_quote_item.product_id IS DISTINCT FROM v_line.product_id\n', ''],
+      ['     OR NOT public._blend_quote_pick_valid_20261020(\n              v_section, v_ticket.customer_id, v_line.product_id, (v_quote_item.price_per_unit * 100)::bigint) THEN\n', ' THEN\n']],
       /SMOKE_FAIL: a quote line for another product was accepted as the pick/],
+    ['setter same-customer test', SETTER,
+      [['     OR NOT public._blend_quote_pick_valid_20261020(\n              v_section, v_ticket.customer_id, v_line.product_id, (v_quote_item.price_per_unit * 100)::bigint) THEN\n', ' THEN\n']],
+      /SMOKE_FAIL: a price from another customer's quote was accepted as the pick/],
+    ['price-pick column guard', GUARD_FN, [["  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1' THEN\n", '  IF true THEN\n']],
+      /SMOKE_FAIL: a ticket line price was written directly, skipping the pick checks/],
     ['setter own-name test', SETTER, [["  IF NOT public.is_admin()\n     AND v_ticket.salesman_id IS NOT NULL\n     AND v_ticket.salesman_id IS DISTINCT FROM v_actor THEN\n    RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';\n  END IF;\n", '']],
       /SMOKE_FAIL: a sales rep picked a price on another rep's ticket/],
     ['setter billed-ticket lock', SETTER, [["  IF v_ticket.payment_status IS DISTINCT FROM 'unbilled' OR v_ticket.order_link_status = 'linked' THEN", "  IF false THEN"]],

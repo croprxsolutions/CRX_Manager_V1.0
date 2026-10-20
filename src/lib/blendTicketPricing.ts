@@ -60,6 +60,29 @@ export function getBlendQuotePriceChoices(error: unknown): BlendQuotePriceChoice
 }
 
 /**
+ * Plain-English reason set_blend_ticket_product_quote_price refused a pick, or `null` for an error
+ * this helper does not know (the caller then shows it as usual).
+ */
+export function blendQuotePriceSaveErrorMessage(error: unknown): string | null {
+  if (rpcCodeDetail(error, RpcErrorCodes.BLEND_TICKET_QUOTE_PRICE_LOCKED) !== null) {
+    return 'This ticket has already been billed or linked to an order, so its prices can no longer be picked.';
+  }
+  if (rpcCodeDetail(error, RpcErrorCodes.BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE) !== null) {
+    return 'That price is no longer on this ticket\'s quote for this product. Reload the ticket and try again.';
+  }
+  if (rpcCodeDetail(error, RpcErrorCodes.BLEND_TICKET_PRODUCT_NOT_FOUND) !== null) {
+    return 'That ticket line no longer exists. Reload the ticket and try again.';
+  }
+  if (rpcCodeDetail(error, RpcErrorCodes.SALESMAN_SCOPE_DENIED) !== null) {
+    return 'This ticket belongs to another sales rep, so only they or an admin can pick its prices.';
+  }
+  if (rpcCodeDetail(error, RpcErrorCodes.INSUFFICIENT_ROLE) !== null) {
+    return 'Only an admin or a sales rep can pick a ticket\'s prices.';
+  }
+  return null;
+}
+
+/**
  * Plain-English reason for a blend-ticket order or invoice refused because a product has no price
  * on the price list, or `null` for any other error.
  */

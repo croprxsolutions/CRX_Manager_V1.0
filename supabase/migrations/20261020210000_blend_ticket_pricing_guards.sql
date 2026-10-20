@@ -15,24 +15,40 @@
 --      (ORDER BY qi.id LIMIT 1). It raises BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED with a JSON
 --      DETAIL listing each such ticket line and its quoted prices, before any invoice number is
 --      drawn or row written. Staff pick one; the pick is stored on the ticket line
---      (blend_ticket_products.unit_price_cents, a column billing already honours first and nothing
---      else writes) and bills with price_source 'quoted' and its quoted_price_cents. Two smaller
---      hunks in the same body: (a) a tier-priced line with no usable tier or tier-1 price is
---      refused with BLEND_TICKET_PRICE_MISSING instead of billed at $0, checked before any invoice
---      number; (b) the quote lookup skips quote lines with no price, which used to win the sort and
---      drop the line to its tier price. Matching the exact quoted line automatically is future work
---      (Mason, 2026-10-15) and is not built here.
+--      (blend_ticket_products.unit_price_cents; no app code writes it and 0 live lines carry one)
+--      and bills with price_source 'quoted' and its quoted_price_cents. A stored value counts only
+--      while it still equals a usable price on the CURRENT job's quote section, for the line's
+--      CURRENT product, on a live quote of the ticket's customer (_blend_quote_pick_valid_20261020);
+--      otherwise it is ignored and the choice guard or tier pricing applies again, so editing the
+--      product or job after a pick cannot bill the old price. (Before this change billing honoured
+--      any unit_price_cents first as a 'manual' price; nothing set one.) Also in this body:
+--      (a) a tier-priced line with no usable tier or tier-1 price is refused with
+--      BLEND_TICKET_PRICE_MISSING instead of billed at $0, checked before any invoice number;
+--      (b) only USABLE quote prices count anywhere (above zero, finite, whole cents):
+--      quote_items.price_per_unit is NOT NULL DEFAULT 0, so a $0 quote line is how an unpriced line
+--      looks, and it now falls to the tier price instead of a $0 'quoted' line, which the
+--      below-cost line guard then refused (no invoice at all). Matching the
+--      exact quoted line automatically is future work (Mason, 2026-10-15) and is not built here.
 --   3. New public.set_blend_ticket_product_quote_price(p_blend_ticket_product_id uuid,
 --      p_quote_item_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL): SECURITY
 --      DEFINER, search_path public, pg_temp, EXECUTE for authenticated and service_role only. Admin
 --      or sales rep; a rep only on a ticket that is theirs or unassigned (the billing test). The
---      quote item must be on this ticket's job quote section, for this line's product, with a
---      finite price; the ticket must be unbilled and not linked to an order (the line triggers
---      still refuse a live invoice or application record). The key is required and bound to the
---      caller and request (check_idempotency_intent + _bind_replay_receipt_20261015).
---   4. New private helper public._blend_tier_price_cents_20261020(int, numeric, numeric, numeric):
---      IMMUTABLE SQL, the tier-or-tier-1 rule in whole cents, so both bodies' pre-checks and their
---      line pricing cannot disagree. Executable only by postgres (both callers are definer-rights).
+--      quote item must be on this ticket's job quote section, for this line's product, on a live
+--      quote of the ticket's customer, with a usable price; the ticket must be unbilled and not
+--      linked to an order (the line triggers still refuse a live invoice or application record).
+--      The key is required and bound to the caller and request (check_idempotency_intent +
+--      _bind_replay_receipt_20261015).
+--   4. New private helpers, executable only by postgres (every caller is definer-rights):
+--      _blend_tier_price_cents_20261020(int, numeric, numeric, numeric), IMMUTABLE SQL, the
+--      tier-or-tier-1 rule in whole cents (never rounds; a non-whole-cent price is no price), and
+--      _blend_quote_pick_valid_20261020(uuid, uuid, uuid, bigint), STABLE SQL, the valid-pick rule,
+--      so the pre-checks, the line pricing and the setter cannot disagree.
+--   5. New column guard: trigger blend_ticket_products_price_pick_guard_20261020 (BEFORE INSERT OR
+--      UPDATE OF unit_price_cents) running _guard_blend_ticket_price_pick_20261020() (SECURITY
+--      INVOKER) refuses setting a non-NULL unit_price_cents unless the setter's transaction-local
+--      flag app.crx_blend_quote_price_pick is '1' (BLEND_TICKET_PRICE_PICK_REQUIRED). The office
+--      policy blend_ticket_products_office_all lets reps and admins update rows directly, which
+--      would skip the setter's checks. Clearing a pick (NULL) stays allowed.
 --
 -- WHY (Mason): Goal 3 "Pricing" and the 2026-10-15 decision: "blend-ticket billing that
 --   automatically uses the exact quoted line" is future work, "so Goal 3 adds a small guard: when
@@ -45,25 +61,29 @@
 --
 -- NOT CHANGED: every other line of both bodies; the create_order_from_blend_ticket wrapper, its
 --   receipt binding and the commit-time guard's operation list (the new setter binds its own
---   receipt, so the guard need not list it); save_blend_ticket (it never writes unit_price_cents,
---   so a pick survives a ticket save); every policy, grant and table. No rows change. CREATE OR
---   REPLACE keeps both bodies' OIDs, owners and exact ACLs, and the postflight proves it.
+--   receipt, so the guard need not list it); save_blend_ticket (it never writes unit_price_cents);
+--   every policy, grant and table definition. No rows change. CREATE OR REPLACE keeps both bodies'
+--   OIDs, owners and exact ACLs, and the postflight proves it. The order path does not read quotes
+--   or picks (it prices from tiers, as before).
 --
 -- OVERLOADS: each replaced function has exactly one overload (read live 2026-10-20); the preflight
---   and postflight refuse a second one, and the two new names must not exist yet.
+--   and postflight refuse a second one, and the new names must not exist yet.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): re-emit
 --   _create_order_from_blend_ticket_replay_impl_20261015 from
 --   20260812010000_blend_ticket_order_header_runtime_assert.sql (body only; keep the name and the
 --   postgres-only ACL) and create_invoice_from_blend_ticket from
---   20261015130000_orders_blend_tickets_rep_own_name.sql, then DROP FUNCTION
---   public.set_blend_ticket_product_quote_price(uuid, uuid, uuid, text) and
+--   20261015130000_orders_blend_tickets_rep_own_name.sql, then DROP TRIGGER
+--   blend_ticket_products_price_pick_guard_20261020 ON public.blend_ticket_products and DROP
+--   FUNCTION public._guard_blend_ticket_price_pick_20261020(),
+--   public.set_blend_ticket_product_quote_price(uuid, uuid, uuid, text),
+--   public._blend_quote_pick_valid_20261020(uuid, uuid, uuid, bigint) and
 --   public._blend_tier_price_cents_20261020(integer, numeric, numeric, numeric). Picked prices
---   already stored stay on their lines and keep billing first, as before this change.
+--   already stored would then bill first as 'manual', as before this change.
 --
 -- ORDERING: independent of the pending 20261019235000 (cancel/void replay binding, PR #967): it
 --   touches neither body. scripts/.staging-migrations/20260813020000_round_order_header_money.sql
---   pins the order body's old md5 and will refuse until it is re-based on this one.
+--   names the order body's old md5 only in comments; it pins nothing this file changes.
 --
 -- actor-binding-check: exempt for create_invoice_from_blend_ticket, as in 20261015130000: its
 --   verbatim live body binds p_created_by to auth.uid() ('p_created_by does not match
@@ -142,14 +162,19 @@ BEGIN
           OR (a.attrelid = 'public.jobs'::regclass AND a.attname = 'quote_section_id' AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quote_items'::regclass AND a.attname IN ('section_id', 'product_id') AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quote_items'::regclass AND a.attname = 'price_per_unit' AND a.atttypid = 'numeric'::regtype)
-          OR (a.attrelid = 'public.products'::regclass AND a.attname IN ('tier1_price', 'tier2_price', 'tier3_price') AND a.atttypid = 'numeric'::regtype))) <> 8 THEN
+          OR (a.attrelid = 'public.products'::regclass AND a.attname IN ('tier1_price', 'tier2_price', 'tier3_price') AND a.atttypid = 'numeric'::regtype)
+          OR (a.attrelid = 'public.quote_sections'::regclass AND a.attname = 'quote_id' AND a.atttypid = 'uuid'::regtype)
+          OR (a.attrelid = 'public.quotes'::regclass AND a.attname = 'customer_id' AND a.atttypid = 'uuid'::regtype)
+          OR (a.attrelid = 'public.quotes'::regclass AND a.attname = 'deleted_at' AND a.atttypid = 'timestamptz'::regtype))) <> 11 THEN
     RAISE EXCEPTION 'PREFLIGHT_COLUMN_DRIFT: a pricing column is missing or has an unexpected type';
   END IF;
 
   -- Not re-runnable: the new names must not exist yet.
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
               WHERE n.nspname = 'public'
-                AND p.proname IN ('set_blend_ticket_product_quote_price', '_blend_tier_price_cents_20261020')) THEN
+                AND p.proname IN ('set_blend_ticket_product_quote_price', '_blend_tier_price_cents_20261020',
+                                  '_blend_quote_pick_valid_20261020', '_guard_blend_ticket_price_pick_20261020'))
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'blend_ticket_products_price_pick_guard_20261020') THEN
     RAISE EXCEPTION 'PREFLIGHT_ALREADY_APPLIED: the blend-ticket pricing functions already exist';
   END IF;
 END
@@ -163,19 +188,78 @@ IMMUTABLE
 SET search_path = public, pg_temp
 AS $function$
   -- The customer's tier price when it is above zero, otherwise the tier-1 price, in whole cents;
-  -- NULL when neither is a usable price (missing, zero or below, or rounds to 0 cents). NaN and
-  -- Infinity sort above every number, so "< Infinity" refuses them too.
+  -- NULL when neither is a usable price (missing, zero or below, not whole cents). NaN and
+  -- Infinity sort above every number, so "< Infinity" refuses them too. Never rounds.
   SELECT CASE
     WHEN p_tier IN (2, 3)
+         AND (CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END) > 0
          AND (CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END) < 'Infinity'::numeric
-         AND ROUND((CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END) * 100) > 0
-      THEN ROUND((CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END) * 100)::bigint
-    WHEN p_tier1 < 'Infinity'::numeric AND ROUND(p_tier1 * 100) > 0
-      THEN ROUND(p_tier1 * 100)::bigint
+         AND (CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END)
+             = ROUND((CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END), 2)
+      THEN ((CASE p_tier WHEN 2 THEN p_tier2 ELSE p_tier3 END) * 100)::bigint
+    WHEN p_tier1 > 0 AND p_tier1 < 'Infinity'::numeric AND p_tier1 = ROUND(p_tier1, 2)
+      THEN (p_tier1 * 100)::bigint
   END;
 $function$;
 
 REVOKE ALL ON FUNCTION public._blend_tier_price_cents_20261020(integer, numeric, numeric, numeric) FROM PUBLIC, anon, authenticated, service_role;
+
+-- 4. The valid-pick rule, shared by the invoice's guards, its line pricing and the setter.
+CREATE FUNCTION public._blend_quote_pick_valid_20261020(p_section_id uuid, p_customer_id uuid, p_product_id uuid, p_price_cents bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $function$
+  -- A ticket line's stored pick counts only while it equals a usable price (above zero, finite, whole cents)
+  -- on THIS section, for THIS product, on a live quote of THIS customer. Anything else (no pick,
+  -- a stale pick after the product or job changed, a hand-set value) is no pick.
+  SELECT p_section_id IS NOT NULL
+     AND p_product_id IS NOT NULL
+     AND p_price_cents IS NOT NULL
+     AND EXISTS (
+       SELECT 1
+         FROM quote_items qi
+         JOIN quote_sections qs ON qs.id = qi.section_id
+         JOIN quotes q ON q.id = qs.quote_id
+        WHERE qi.section_id = p_section_id
+          AND qi.product_id = p_product_id
+          AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
+          AND (qi.price_per_unit * 100)::bigint = p_price_cents
+          AND q.customer_id = p_customer_id
+          AND q.deleted_at IS NULL);
+$function$;
+
+REVOKE ALL ON FUNCTION public._blend_quote_pick_valid_20261020(uuid, uuid, uuid, bigint) FROM PUBLIC, anon, authenticated, service_role;
+
+-- 5. Only the setter writes a picked price.
+CREATE FUNCTION public._guard_blend_ticket_price_pick_20261020()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  -- Goal 3 pricing (20261020210000): a ticket line's picked price is written only by
+  -- set_blend_ticket_product_quote_price, which sets this transaction-local flag around its one
+  -- UPDATE. A direct Data API write (the office policy allows reps and admins to update the row)
+  -- would otherwise skip that function's own-name, quote and customer checks. Clearing a pick
+  -- (setting NULL) is always allowed: billing then simply asks again.
+  IF NEW.unit_price_cents IS NULL THEN RETURN NEW; END IF;
+  IF TG_OP = 'UPDATE' AND NEW.unit_price_cents IS NOT DISTINCT FROM OLD.unit_price_cents THEN
+    RETURN NEW;
+  END IF;
+  IF COALESCE(current_setting('app.crx_blend_quote_price_pick', true), '') = '1' THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'BLEND_TICKET_PRICE_PICK_REQUIRED: a blend-ticket line price is set only by picking a quoted price';
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._guard_blend_ticket_price_pick_20261020() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER blend_ticket_products_price_pick_guard_20261020
+  BEFORE INSERT OR UPDATE OF unit_price_cents ON public.blend_ticket_products
+  FOR EACH ROW EXECUTE FUNCTION public._guard_blend_ticket_price_pick_20261020();
 
 -- 1. The order body: verbatim live body plus the pre-check and the tier-1 fallback.
 CREATE OR REPLACE FUNCTION public._create_order_from_blend_ticket_replay_impl_20261015(p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT CURRENT_DATE, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text)
@@ -745,36 +829,49 @@ BEGIN
   -- (1) The job's quote lists a product more than once at different prices. Taking one at
   --     random breaks "sent quotes keep their prices", so stop and hand the screen the choices;
   --     staff pick one with set_blend_ticket_product_quote_price, which stores it on the line.
-  IF v_quote_section_id IS NOT NULL THEN
+  --     A stored pick counts only while it still matches a usable price on THIS job's quote for
+  --     the line's CURRENT product and the ticket's customer (_blend_quote_pick_valid_20261020),
+  --     so editing the product or the job asks again. Only usable quote prices count (finite,
+  --     zero or more, whole cents), each price offered once, and only when some billed share is
+  --     priced per unit (a line billed wholly inside grower-share overrides never uses it).
+  IF v_quote_section_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
+                  WHERE (r.value->>'price_override_cents') IS NULL
+                    AND (r.value->>'share_acres')::numeric > 0) THEN
     SELECT jsonb_agg(jsonb_build_object(
              'blend_ticket_product_id', btp.id,
              'product_id', btp.product_id,
              'product_name', btp.product_name,
              'options', (
                SELECT jsonb_agg(jsonb_build_object(
-                        'quote_item_id', qi.id,
-                        'price_cents', ROUND(qi.price_per_unit * 100)::bigint)
-                      ORDER BY qi.sort_order, qi.id)
-                 FROM quote_items qi
-                WHERE qi.section_id = v_quote_section_id
-                  AND qi.product_id = btp.product_id
-                  AND qi.price_per_unit IS NOT NULL))
+                        'quote_item_id', o.id,
+                        'price_cents', o.price_cents)
+                      ORDER BY o.sort_order, o.id)
+                 FROM (SELECT DISTINCT ON (ROUND(qi.price_per_unit * 100))
+                              qi.id, qi.sort_order, ROUND(qi.price_per_unit * 100)::bigint AS price_cents
+                         FROM quote_items qi
+                        WHERE qi.section_id = v_quote_section_id
+                          AND qi.product_id = btp.product_id
+                          AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
+                        ORDER BY ROUND(qi.price_per_unit * 100), qi.sort_order, qi.id) o))
            ORDER BY btp.sequence_order, btp.id)
       INTO v_price_choices
       FROM blend_ticket_products btp
      WHERE btp.blend_ticket_id = p_blend_ticket_id
        AND btp.product_id IS NOT NULL
-       AND btp.unit_price_cents IS NULL
+       AND NOT public._blend_quote_pick_valid_20261020(
+             v_quote_section_id, v_ticket.customer_id, btp.product_id, btp.unit_price_cents)
        AND (SELECT count(DISTINCT ROUND(qi.price_per_unit * 100))
               FROM quote_items qi
              WHERE qi.section_id = v_quote_section_id
-               AND qi.product_id = btp.product_id) > 1;
+               AND qi.product_id = btp.product_id
+               AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)) > 1;
     IF v_price_choices IS NOT NULL THEN
       RAISE EXCEPTION 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: the quote lists a product more than once at different prices; pick the price to bill'
         USING DETAIL = jsonb_build_object('products', v_price_choices)::text;
     END IF;
   END IF;
-  -- (2) A product billed at its tier price (no picked price, nothing on the quote) for a
+  -- (2) A product billed at its tier price (no valid pick, no usable quote price) for a
   --     customer with a priced share uses that customer's tier price when it is above zero,
   --     otherwise the tier-1 price; a product with neither is refused instead of billed at $0.
   SELECT string_agg(DISTINCT COALESCE(btp.full_product_name, btp.product_name), ', ')
@@ -783,7 +880,8 @@ BEGIN
             FROM blend_ticket_products b
             JOIN products p ON p.id = b.product_id
            WHERE b.blend_ticket_id = p_blend_ticket_id
-             AND b.unit_price_cents IS NULL) btp
+             AND NOT public._blend_quote_pick_valid_20261020(
+                   v_quote_section_id, v_ticket.customer_id, b.product_id, b.unit_price_cents)) btp
     CROSS JOIN LATERAL (
       SELECT DISTINCT COALESCE((c.value->>'tier')::int, 1) AS tier
         FROM jsonb_array_elements(v_customers) AS c(value)
@@ -798,7 +896,7 @@ BEGIN
             WHERE v_quote_section_id IS NOT NULL
               AND qi.section_id = v_quote_section_id
               AND qi.product_id = btp.product_id
-              AND qi.price_per_unit IS NOT NULL)
+              AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2))
      AND public._blend_tier_price_cents_20261020(cust.tier, btp.tier1_price, btp.tier2_price, btp.tier3_price) IS NULL;
   IF v_unpriced IS NOT NULL THEN
     RAISE EXCEPTION 'BLEND_TICKET_PRICE_MISSING: product(s) have no price on the price list: %', v_unpriced;
@@ -930,25 +1028,20 @@ BEGIN
         v_quoted_price := NULL;
         v_price_source := NULL;
 
-        IF v_btp.unit_price_cents IS NOT NULL THEN
+        -- Goal 3 pricing: a price staff picked from this job's quote bills as quoted, but only
+        -- while it still matches the current quote, product and customer; a stale or hand-set
+        -- value is ignored (the pre-checks above already asked again or tier-priced the line).
+        IF public._blend_quote_pick_valid_20261020(
+             v_quote_section_id, v_ticket.customer_id, v_btp.product_id, v_btp.unit_price_cents) THEN
           v_unit_price   := v_btp.unit_price_cents;
-          v_price_source := 'manual';
-          -- Goal 3 pricing: a price staff picked from this job's quote bills as quoted.
-          IF v_quote_section_id IS NOT NULL AND v_btp.product_id IS NOT NULL AND EXISTS (
-               SELECT 1 FROM quote_items qi
-                WHERE qi.section_id = v_quote_section_id
-                  AND qi.product_id = v_btp.product_id
-                  AND qi.price_per_unit IS NOT NULL
-                  AND ROUND(qi.price_per_unit * 100)::bigint = v_btp.unit_price_cents) THEN
-            v_quoted_price := v_unit_price;
-            v_price_source := 'quoted';
-          END IF;
+          v_quoted_price := v_unit_price;
+          v_price_source := 'quoted';
         ELSIF v_quote_section_id IS NOT NULL AND v_btp.product_id IS NOT NULL THEN
           SELECT qi.price_per_unit INTO v_qi_price
             FROM quote_items qi
            WHERE qi.section_id = v_quote_section_id
              AND qi.product_id = v_btp.product_id
-             AND qi.price_per_unit IS NOT NULL
+             AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
            ORDER BY qi.id LIMIT 1;
           IF v_qi_price IS NOT NULL THEN
             v_unit_price   := ROUND(v_qi_price * 100)::bigint;
@@ -1174,23 +1267,30 @@ BEGIN
     SELECT j.quote_section_id INTO v_section FROM public.jobs j WHERE j.id = v_ticket.job_id;
   END IF;
   SELECT * INTO v_quote_item FROM public.quote_items WHERE id = p_quote_item_id;
+  -- The picked line must be on this ticket's job quote section, for this line's product, on a
+  -- live quote of the ticket's own customer, with a usable price (above zero, finite, whole
+  -- cents). The same rule decides at billing whether the stored pick still counts.
   IF NOT FOUND
-     OR v_section IS NULL
-     OR v_line.product_id IS NULL
      OR v_quote_item.section_id IS DISTINCT FROM v_section
      OR v_quote_item.product_id IS DISTINCT FROM v_line.product_id
-     OR v_quote_item.price_per_unit IS NULL
-     OR NOT (v_quote_item.price_per_unit >= 0 AND v_quote_item.price_per_unit < 'Infinity'::numeric) THEN
+     OR NOT (v_quote_item.price_per_unit > 0
+             AND v_quote_item.price_per_unit < 'Infinity'::numeric
+             AND v_quote_item.price_per_unit = ROUND(v_quote_item.price_per_unit, 2))
+     OR NOT public._blend_quote_pick_valid_20261020(
+              v_section, v_ticket.customer_id, v_line.product_id, (v_quote_item.price_per_unit * 100)::bigint) THEN
     RAISE EXCEPTION 'BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE: that price is not on this ticket''s quote for this product';
   END IF;
-  v_price_cents := ROUND(v_quote_item.price_per_unit * 100)::bigint;
+  v_price_cents := (v_quote_item.price_per_unit * 100)::bigint;
 
   -- The line triggers still refuse a ticket with a live invoice, an order link or an
-  -- application record; this changes the one price column and nothing else.
+  -- application record; this changes the one price column and nothing else. The flag lets the
+  -- column guard (_guard_blend_ticket_price_pick_20261020) accept this one write.
+  PERFORM set_config('app.crx_blend_quote_price_pick', '1', true);
   UPDATE public.blend_ticket_products
      SET unit_price_cents = v_price_cents
    WHERE id = v_line.id;
   GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM set_config('app.crx_blend_quote_price_pick', '', true);
   IF v_rows <> 1 THEN RAISE EXCEPTION 'BLEND_TICKET_PRODUCT_NOT_UPDATED'; END IF;
 
   INSERT INTO public.activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id)
@@ -1226,10 +1326,12 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text)', 'create_invoice_from_blend_ticket', 'ca11180cec5b1b2525453a56d112e433', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text)', 'create_invoice_from_blend_ticket', 'db20d7bbe9e02b39f05384fa3b07bf2e', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)', '_create_order_from_blend_ticket_replay_impl_20261015', '4b5ea386b9be7c70c240ffb8efae08e6', 'json', ARRAY['postgres'], true, 'plpgsql'),
-        ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', 'c8dd690e3819592ecda245c57e8dba98', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
-        ('public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', '_blend_tier_price_cents_20261020', 'a4f558a7a8caac8cf92383c0512c9a8f', 'bigint', ARRAY['postgres'], false, 'sql')
+        ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', '9a571eb0ce297ee5de6b0eb839d374e6', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', '_blend_tier_price_cents_20261020', '44e3957c991c1ce20961713051d58e5d', 'bigint', ARRAY['postgres'], false, 'sql'),
+        ('public._blend_quote_pick_valid_20261020(uuid,uuid,uuid,bigint)', '_blend_quote_pick_valid_20261020', '3ee99ffb4a08205c0f2ff0d1e24e4705', 'boolean', ARRAY['postgres'], false, 'sql'),
+        ('public._guard_blend_ticket_price_pick_20261020()', '_guard_blend_ticket_price_pick_20261020', '6a7e2aa3078aa12fa918d0a741d255a2', 'trigger', ARRAY['postgres'], false, 'plpgsql')
       ) AS pin(sig, name, body_md5, ret, acl, definer, lang)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -1254,6 +1356,15 @@ BEGIN
        IS DISTINCT FROM to_regprocedure('public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)')::oid THEN
     RAISE EXCEPTION 'POSTFLIGHT_BLEND_TICKET_PRICING_OID_CHANGED';
   END IF;
+  -- Exactly one enabled guard trigger, as written.
+  IF (SELECT count(*) FROM pg_trigger t
+       WHERE t.tgrelid = 'public.blend_ticket_products'::regclass
+         AND t.tgname = 'blend_ticket_products_price_pick_guard_20261020'
+         AND t.tgenabled = 'O'
+         AND t.tgfoid = to_regprocedure('public._guard_blend_ticket_price_pick_20261020()')
+         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER blend_ticket_products_price_pick_guard_20261020 BEFORE INSERT OR UPDATE OF unit_price_cents ON public.blend_ticket_products FOR EACH ROW EXECUTE FUNCTION _guard_blend_ticket_price_pick_20261020()') <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_BLEND_TICKET_PRICE_PICK_GUARD';
+  END IF;
   -- The rule itself, on fixed inputs.
   IF public._blend_tier_price_cents_20261020(2, 10.00, NULL, NULL) IS DISTINCT FROM 1000::bigint
      OR public._blend_tier_price_cents_20261020(3, 10.00, 9.00, 8.50) IS DISTINCT FROM 850::bigint
@@ -1261,7 +1372,9 @@ BEGIN
      OR public._blend_tier_price_cents_20261020(1, NULL, 9.00, 8.00) IS NOT NULL
      OR public._blend_tier_price_cents_20261020(2, 0, NULL, NULL) IS NOT NULL
      OR public._blend_tier_price_cents_20261020(1, 'NaN', NULL, NULL) IS NOT NULL
-     OR public._blend_tier_price_cents_20261020(1, 0.004, NULL, NULL) IS NOT NULL THEN
+     OR public._blend_tier_price_cents_20261020(1, 0.004, NULL, NULL) IS NOT NULL
+     OR public._blend_tier_price_cents_20261020(1, 10.004, NULL, NULL) IS NOT NULL
+     OR public._blend_tier_price_cents_20261020(2, 10.00, 9.005, NULL) IS DISTINCT FROM 1000::bigint THEN
     RAISE EXCEPTION 'POSTFLIGHT_BLEND_TIER_PRICE_RULE';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';

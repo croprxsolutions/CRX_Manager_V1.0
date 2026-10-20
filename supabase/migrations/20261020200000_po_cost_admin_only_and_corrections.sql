@@ -34,7 +34,7 @@
 --
 --   3. purchase_order_item_cost_changes: append-only history (RLS on; admins read; no API role may
 --      write, update or delete; a trigger refuses UPDATE and DELETE even for the owner's API paths).
---      Trigger trigger_po_item_cost_change_log (AFTER INSERT OR UPDATE OF unit_cost) writes one row
+--      Trigger trigger_po_item_cost_change_log (AFTER INSERT OR UPDATE OF unit_cost, product_id) writes one row
 --      per real cost change: who, when, old and new cents, the quantity already received, the
 --      source (entered / edited by an admin's PO save, catalog_default for a rep's line,
 --      set_by_admin from the function below, with its reason), and the reason. A confirm without a
@@ -54,8 +54,11 @@
 --      only the cost and the purchase order's total: never a quantity, inventory, a receiving
 --      record or the product's catalog cost (Mason, 2026-10-20: catalog cost changes only through
 --      the pricing workbook). A reason (1-500 characters) is required when any line it changes has
---      been received (Mason, 2026-10-20). Same cost on a flagged line = confirm. Key required, bound
---      to the caller and request; takes save_purchase_order's advisory lock (73492009) first.
+--      been received (Mason, 2026-10-20). Same cost on a flagged line = confirm. A cost change is
+--      refused (PO_COST_BASIS_EVIDENCE_IN_USE) on a line that supplier cost-basis evidence cites as
+--      its actual purchase (live read 2026-10-20: none). Each cost must be a JSON number of cents.
+--      Key required, bound to the caller and request; takes save_purchase_order's advisory lock
+--      (73492009) first.
 --
 --   Inventory value and margins do not use purchase-order cost (live read 2026-10-20: inventory
 --   value, the inventory cost report and the dashboard's floor inventory are quantity x
@@ -75,8 +78,15 @@
 -- NOT HERE: save_purchase_order is not changed. The app stops sending cost for a non-admin; a
 --   hand-made request that still carries one is overruled by the trigger (or, on a received line
 --   whose cost it would change, refused as before with RECEIVED_PO_LINE_IMMUTABLE). The column
---   REVOKE (cost step 3) is separate; after this lands it may include the purchase-order cost
---   columns.
+--   REVOKE (cost step 3) is separate. Once this is live, step 3 MUST also revoke the purchase-order
+--   cost columns (purchase_order_items.unit_cost/unit_cost_cents, purchase_orders.total_cost/
+--   total_cost_cents): a rep's line now holds the catalog cost, so leaving them readable would let a
+--   rep read products.current_cost through a throwaway PO line after current_cost is locked.
+--
+-- DEPENDS ON cost step 2 (20261019230000, applied live 2026-10-20 19:36 UTC, ledger version
+--   20261020193610): it calls that file's _cost_step2_try_uuid(text), pinned below; the preflight
+--   refuses the apply if it is missing. The screens in this PR also need step 2's
+--   get_admin_cost_fields. Re-read the live ledger before applying; this sorts above it.
 --
 -- caller-analysis: set_purchase_order_item_costs :: NEW; PurchaseOrderDetail.tsx (admin only)
 -- caller-analysis: save_purchase_order :: unchanged body; NewPurchaseOrder.tsx, PurchaseOrderDetail.tsx, BulkPOImport.tsx now send no cost for a non-admin
@@ -92,6 +102,7 @@
 --   DROP TRIGGER trigger_po_item_cost_change_log ON public.purchase_order_items;
 --   DROP FUNCTION public._po_item_rep_cost(), public._po_item_cost_change_log();
 --   DROP TABLE public.purchase_order_item_cost_changes;   -- after exporting it if it matters
+--   DROP FUNCTION public._po_item_cost_changes_append_only();
 --   ALTER TABLE public.purchase_order_items DROP COLUMN cost_needs_review;
 --   ALTER TABLE public.purchase_order_items DROP CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk;
 --   ALTER TABLE public.purchase_orders DROP CONSTRAINT purchase_orders_total_cost_whole_cents_chk;
@@ -111,7 +122,9 @@ BEGIN
     SELECT * FROM (VALUES
       -- replaced below (only the correction branch is added)
       ('public.capture_purchase_order_item_cost_snapshot()', 'd898f248b20cbe217c6a3ad7a277bae8'),
-      -- hydrates a line's stored cost when a request omits unit_cost/unit_cost_cents
+      -- hydrates a line's stored cost when a request omits unit_cost/unit_cost_cents, and after the
+      -- write recomputes purchase_orders.total_cost from the STORED lines -- which is what keeps a
+      -- rep's PO total equal to the catalog costs the rep trigger writes (vendor bills read it)
       ('public._save_purchase_order_atomic_number_impl(uuid,jsonb,jsonb,uuid,text)', 'ebc897c7df1430fa3b6d828f2b431cd2'),
       -- refuses a changed cost on a received line (RECEIVED_PO_LINE_IMMUTABLE)
       ('public._save_purchase_order_cost_input_impl(uuid,jsonb,jsonb,uuid,text)', '6fa0f26553e3a562ca08e809b82aaa68'),
@@ -136,10 +149,12 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- By name, every overload: to_regproc() is NULL when a name has several.
   IF to_regclass('public.purchase_order_item_cost_changes') IS NOT NULL
-     OR to_regproc('public.set_purchase_order_item_costs') IS NOT NULL
-     OR to_regproc('public._po_item_rep_cost') IS NOT NULL
-     OR to_regproc('public._po_item_cost_change_log') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_proc p
+                 WHERE p.pronamespace = 'public'::regnamespace
+                   AND p.proname IN ('set_purchase_order_item_costs', '_po_item_rep_cost',
+                                     '_po_item_cost_change_log', '_po_item_cost_changes_append_only'))
      OR EXISTS (SELECT 1 FROM information_schema.columns
                  WHERE table_schema = 'public' AND table_name = 'purchase_order_items'
                    AND column_name = 'cost_needs_review') THEN
@@ -225,7 +240,7 @@ GRANT SELECT ON TABLE public.purchase_order_item_cost_changes TO authenticated;
 -- Purchase cost is admin-only (Mason, 2026-10-15 and 2026-10-20).
 CREATE POLICY po_item_cost_changes_admin_select ON public.purchase_order_item_cost_changes
   FOR SELECT TO authenticated
-  USING (public.is_admin());
+  USING ((SELECT public.is_admin()));
 
 CREATE OR REPLACE FUNCTION public._po_item_cost_changes_append_only()
 RETURNS trigger
@@ -242,6 +257,10 @@ CREATE TRIGGER trigger_po_item_cost_changes_append_only
   BEFORE UPDATE OR DELETE ON public.purchase_order_item_cost_changes
   FOR EACH ROW EXECUTE FUNCTION public._po_item_cost_changes_append_only();
 
+CREATE TRIGGER trigger_po_item_cost_changes_no_truncate
+  BEFORE TRUNCATE ON public.purchase_order_item_cost_changes
+  FOR EACH STATEMENT EXECUTE FUNCTION public._po_item_cost_changes_append_only();
+
 -- ---------------------------------------------------------------------------
 -- 2. The rule every writer passes through.
 -- ---------------------------------------------------------------------------
@@ -252,8 +271,11 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 DECLARE
-  -- A signed-in non-admin. The owner (auth.uid() NULL: migrations, provers) is treated as an admin.
-  v_rep boolean := auth.uid() IS NOT NULL AND NOT public.is_admin();
+  -- Anyone who is not an active admin, except the database owner connected directly (no JWT:
+  -- migrations, provers), who is treated as an admin. A request with no user that arrives through
+  -- the API (session_user authenticator) is treated as a rep: fail closed.
+  v_rep boolean := NOT public.is_admin()
+    AND (auth.uid() IS NOT NULL OR session_user NOT IN ('postgres', 'supabase_admin'));
   v_catalog_cents bigint;
 BEGIN
   IF v_rep AND (TG_OP = 'INSERT' OR NEW.product_id IS DISTINCT FROM OLD.product_id) THEN
@@ -328,8 +350,11 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public._po_item_cost_change_log() FROM PUBLIC, anon, authenticated, service_role;
 
+-- OF product_id too: a column trigger fires on the columns the UPDATE names, not on a change a
+-- BEFORE trigger makes, and the rep trigger re-prices a line whose product changes. The function
+-- writes nothing when the cost did not change.
 CREATE TRIGGER trigger_po_item_cost_change_log
-  AFTER INSERT OR UPDATE OF unit_cost ON public.purchase_order_items
+  AFTER INSERT OR UPDATE OF unit_cost, product_id ON public.purchase_order_items
   FOR EACH ROW EXECUTE FUNCTION public._po_item_cost_change_log();
 
 -- ---------------------------------------------------------------------------
@@ -365,8 +390,14 @@ BEGIN
      AND NEW.cost_snapshot_at IS NOT DISTINCT FROM OLD.cost_snapshot_at THEN
     NEW.product_supplier_link_id := NULL;
     NEW.supplier_price_observation_id := NULL;
-    NEW.cost_provenance := 'manual';
-    NEW.cost_snapshot_at := now();
+    -- 'manual' only alongside a conversion snapshot, as every other writer sets it.
+    IF OLD.inventory_units_per_supplier_unit_snapshot IS NOT NULL THEN
+      NEW.cost_provenance := 'manual';
+      NEW.cost_snapshot_at := now();
+    ELSE
+      NEW.cost_provenance := NULL;
+      NEW.cost_snapshot_at := NULL;
+    END IF;
     RETURN NEW;
   END IF;
 
@@ -568,7 +599,9 @@ BEGIN
 
   FOR v_item IN SELECT e.value FROM jsonb_array_elements(p_items) AS e(value)
   LOOP
-    IF jsonb_typeof(v_item) IS DISTINCT FROM 'object' OR NOT (v_item ? 'unit_cost_cents') THEN
+    -- A JSON number: null or "" would otherwise read as no cost, which the parser treats as $0.
+    IF jsonb_typeof(v_item) IS DISTINCT FROM 'object'
+       OR jsonb_typeof(v_item->'unit_cost_cents') IS DISTINCT FROM 'number' THEN
       RAISE EXCEPTION 'PO_UNIT_COST_REQUIRED';
     END IF;
     v_item_id := public._cost_step2_try_uuid(v_item->>'id');
@@ -609,6 +642,14 @@ BEGIN
            COALESCE(v_line.quantity_received, 0) > 0
            OR EXISTS (SELECT 1 FROM public.receiving_records rr WHERE rr.po_item_id = v_item_id)) THEN
         RAISE EXCEPTION 'PO_COST_REASON_REQUIRED: say why the cost of a received line is changing'
+          USING ERRCODE = 'P0001';
+      END IF;
+      -- A supplier cost-basis row (or a pending change row) that cites this line as its actual
+      -- purchase was checked against the line's cost; changing it would leave that evidence
+      -- silently wrong. Refuse; the basis must be replaced first (live read 2026-10-20: none exist).
+      IF EXISTS (SELECT 1 FROM public.product_cost_basis b WHERE b.purchase_order_item_id = v_item_id)
+         OR EXISTS (SELECT 1 FROM public.product_cost_basis_change_rows c WHERE c.purchase_order_item_id = v_item_id) THEN
+        RAISE EXCEPTION 'PO_COST_BASIS_EVIDENCE_IN_USE: supplier cost-basis evidence cites this line; replace that basis before changing its cost'
           USING ERRCODE = 'P0001';
       END IF;
       UPDATE public.purchase_order_items
@@ -680,10 +721,35 @@ BEGIN
      OR NOT has_function_privilege('authenticated', 'public.set_purchase_order_item_costs(uuid,jsonb,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'PO_COST_VERIFY: set_purchase_order_item_costs grants are wrong';
   END IF;
-  IF has_function_privilege('authenticated', 'public._po_item_rep_cost()', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._po_item_cost_change_log()', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._po_item_cost_changes_append_only()', 'EXECUTE') THEN
+  IF EXISTS (
+       SELECT 1
+         FROM unnest(ARRAY['public._po_item_rep_cost()', 'public._po_item_cost_change_log()',
+                           'public._po_item_cost_changes_append_only()']) AS f(sig),
+              unnest(ARRAY['anon', 'authenticated', 'service_role']) AS r(role)
+        WHERE has_function_privilege(r.role, f.sig, 'EXECUTE')) THEN
     RAISE EXCEPTION 'PO_COST_VERIFY: a trigger function is executable by an API role';
+  END IF;
+  IF EXISTS (
+       SELECT 1
+         FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS r(role),
+              unnest(ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) AS p(priv)
+        WHERE has_table_privilege(r.role, 'public.purchase_order_item_cost_changes', p.priv)) THEN
+    RAISE EXCEPTION 'PO_COST_VERIFY: an API role can write the cost history';
+  END IF;
+  IF (SELECT p.prosecdef IS NOT TRUE OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+        FROM pg_proc p WHERE p.oid = 'public.set_purchase_order_item_costs(uuid,jsonb,text,uuid,text)'::regprocedure) THEN
+    RAISE EXCEPTION 'PO_COST_VERIFY: set_purchase_order_item_costs is not SECURITY DEFINER with search_path public, pg_temp';
+  END IF;
+  IF (SELECT count(*) FROM pg_policy WHERE polrelid = 'public.purchase_order_item_cost_changes'::regclass) <> 1
+     OR NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid = 'public.purchase_order_item_cost_changes'::regclass
+                     AND polname = 'po_item_cost_changes_admin_select' AND polcmd = 'r') THEN
+    RAISE EXCEPTION 'PO_COST_VERIFY: the cost history must have exactly its one admin SELECT policy';
+  END IF;
+  -- CREATE OR REPLACE keeps the snapshot trigger function's owner and ACL; prove they are unchanged.
+  IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = 'public.capture_purchase_order_item_cost_snapshot()'::regprocedure)
+     OR has_function_privilege('anon', 'public.capture_purchase_order_item_cost_snapshot()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.capture_purchase_order_item_cost_snapshot()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'PO_COST_VERIFY: capture_purchase_order_item_cost_snapshot is not SECURITY DEFINER or an API role can execute it';
   END IF;
   IF EXISTS (SELECT 1 FROM public.purchase_order_items WHERE cost_needs_review) THEN
     RAISE EXCEPTION 'PO_COST_VERIFY: an existing line was flagged';

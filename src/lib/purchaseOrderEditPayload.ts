@@ -1,7 +1,5 @@
-import {
-  purchaseOrderCentsToDollars,
-  purchaseOrderUnitCostCents,
-} from './purchaseOrderMoney';
+import { purchaseOrderCentsToDollars } from './purchaseOrderMoney';
+import { isWholeCentDollarInput, parseDollarsToCents } from './parseCents';
 
 export interface PurchaseOrderEditableLine {
   id: string;
@@ -36,7 +34,16 @@ export function buildPurchaseOrderEditItemsPayload(
       quantity_received: item.quantity_received || 0,
     };
     if (!includeCost) return line;
-    const unitCostCents = purchaseOrderUnitCostCents(parseFloat(item.unit_cost));
+    // Exact whole cents from the typed text: blank or more than two decimals is refused, never
+    // sent as $0 or rounded (the screen checks first and explains; this is the backstop).
+    const text = item.unit_cost.trim();
+    if (!isWholeCentDollarInput(text)) {
+      throw new Error(`Invalid unit cost for purchase order line ${item.id}`);
+    }
+    const unitCostCents = parseDollarsToCents(text);
+    if (unitCostCents === null || !Number.isSafeInteger(unitCostCents)) {
+      throw new Error(`Invalid unit cost for purchase order line ${item.id}`);
+    }
     return {
       ...line,
       unit_cost: purchaseOrderCentsToDollars(unitCostCents),

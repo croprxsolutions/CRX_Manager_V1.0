@@ -377,7 +377,7 @@ describe('money and inventory gauntlet fixes', () => {
       'const itemsPayload = buildPurchaseOrderEditItemsPayload(editItems, { includeCost: isAdmin })',
     );
     expect(purchaseOrderEditPayload).toContain(
-      'const unitCostCents = purchaseOrderUnitCostCents(',
+      'const unitCostCents = parseDollarsToCents(text);',
     );
     expect(purchaseOrderEditPayload).toContain(
       'unit_cost: purchaseOrderCentsToDollars(unitCostCents)',

@@ -10,10 +10,12 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import {
+  isWholeCentPurchaseOrderCost,
   purchaseOrderCentsToDollars,
   purchaseOrderLineTotalCents,
   purchaseOrderUnitCostCents,
 } from '../lib/purchaseOrderMoney';
+import { MONEY_PRECISION_MESSAGE } from '../lib/parseCents';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { supabase, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
@@ -87,7 +89,11 @@ export default function NewPurchaseOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poIntentHash]);
 
+  // Only the newest load installs products: the load re-runs when the role resolves, so an older
+  // (cost-less) load must not overwrite an admin's costed list (same guard as BulkPOImport).
+  const productLoadSeqRef = useRef(0);
   const fetchProducts = useCallback(async () => {
+    const seq = ++productLoadSeqRef.current;
     const { data, error } = await supabase
       .from('products')
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
@@ -102,6 +108,7 @@ export default function NewPurchaseOrder() {
         loadError = costErr;
       }
     }
+    if (seq !== productLoadSeqRef.current) return;
     if (loadError) {
       Sentry.captureException(loadError, { tags: { source: 'fetch', action: 'load_purchase_order_products' } });
       toast('error', 'Failed to load Products. Retry before creating this purchase order.');
@@ -188,6 +195,12 @@ export default function NewPurchaseOrder() {
     const validItems = items.filter((i) => i.product_id && i.quantity_ordered > 0);
     if (validItems.length === 0) {
       toast('error', 'Add at least one item with a product and quantity');
+      return;
+    }
+
+    // An admin's typed cost must be exact whole cents: more than two decimals is refused, never rounded.
+    if (isAdmin && validItems.some((i) => !isWholeCentPurchaseOrderCost(i.unit_cost))) {
+      toast('error', `Check each unit cost. ${MONEY_PRECISION_MESSAGE}`);
       return;
     }
 

@@ -108,17 +108,24 @@ export default function PurchaseOrders() {
       if (seq !== fetchPOsSeq.current) return;
     }
     // Admins: which purchase orders have a rep line whose catalog cost nobody has confirmed yet.
+    // Cancelled purchase orders are left out: their cost can no longer change. A failure here only
+    // costs the filter its count; the list itself still loads.
     let reviewIds = new Set<string>();
     if (!loadError && isAdmin) {
       const { data: flagged, error: flaggedError } = await fetchAllRows((from, to) => supabase
         .from('purchase_order_items')
-        .select('id, purchase_order_id', { count: 'exact' })
+        .select('id, purchase_order_id, purchase_orders!inner(status)', { count: 'exact' })
         .eq('cost_needs_review', true)
+        .neq('purchase_orders.status', 'cancelled')
         .order('id')
         .range(from, to));
       if (seq !== fetchPOsSeq.current) return;
-      if (flaggedError) loadError = flaggedError;
-      else reviewIds = new Set(((flagged || []) as Array<{ purchase_order_id: string }>).map((r) => r.purchase_order_id));
+      if (flaggedError) {
+        Sentry.captureException(flaggedError, { tags: { source: 'fetch', action: 'load_po_cost_review_flags' } });
+        toast('warning', 'Could not load which purchase orders have costs to confirm.');
+      } else {
+        reviewIds = new Set(((flagged || []) as Array<{ purchase_order_id: string }>).map((r) => r.purchase_order_id));
+      }
     }
     if (loadError) {
       Sentry.captureException(loadError, { tags: { source: 'fetch', action: 'load_purchase_orders' } });

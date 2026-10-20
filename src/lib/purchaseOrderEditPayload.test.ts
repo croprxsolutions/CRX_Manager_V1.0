@@ -53,4 +53,25 @@ describe('buildPurchaseOrderEditItemsPayload', () => {
       quantity_received: 0,
     }], { includeCost: true })).toThrow('Invalid quantity ordered for purchase order line invalid-line');
   });
+
+  it.each(['', '  ', '10.005', '-1', '1e2', '$5'])('refuses unit cost %j instead of sending $0 or rounding', (cost) => {
+    expect(() => buildPurchaseOrderEditItemsPayload([{
+      id: 'cost-line',
+      product_id: 'product-id',
+      product_name: 'Product',
+      unit_size: 'Gal',
+      quantity_ordered: '1',
+      unit_cost: cost,
+      quantity_received: 0,
+    }], { includeCost: true })).toThrow('Invalid unit cost for purchase order line cost-line');
+  });
+
+  it('sends exact cents for a two-decimal cost, and no cost at all for a non-admin', () => {
+    const line = {
+      id: 'cost-line', product_id: 'product-id', product_name: 'Product', unit_size: 'Gal',
+      quantity_ordered: '1', unit_cost: '0.29', quantity_received: 0,
+    };
+    expect(buildPurchaseOrderEditItemsPayload([line], { includeCost: true })[0]).toMatchObject({ unit_cost: 0.29, unit_cost_cents: 29 });
+    expect(buildPurchaseOrderEditItemsPayload([{ ...line, unit_cost: '' }], { includeCost: false })[0]).not.toHaveProperty('unit_cost_cents');
+  });
 });

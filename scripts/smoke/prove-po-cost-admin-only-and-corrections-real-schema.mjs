@@ -356,10 +356,18 @@ const SCENARIOS = [
     ['stored: confirmed', 'owner', STORED(NEWLINE, NEWPO), 'ok|4:0:-|0', 'ok|4:2250:false|9000'],
     ['history: default then confirm', 'owner', HIST(NEWLINE), NO_TABLE, 'ok|catalog_default:->2250:-:b1,confirmed:2250>2250:-:a1'],
     ['same cost on a confirmed line changes nothing', U.ADMIN, setCosts(U.ADMIN, NEWPO, `jsonb_build_array(jsonb_build_object('id', ${NEWLINE}, 'unit_cost_cents', 2250))`, null, 'k2b'), MISSING_FN, 'ok|0:0'],
-    ['cancelled PO', U.ADMIN, setCosts(U.ADMIN, q(PO3), [{ id: POI4, unit_cost_cents: 600 }], 'fix', 'k4'), MISSING_FN, /^P0001\|PO_CANCELLED: /],
+    ['cost-basis evidence cites the received line (fixture)', 'owner', { stmt: `SET LOCAL session_replication_role = replica;
+        INSERT INTO public.product_cost_basis (product_id, basis_type, cost_cents, purchase_order_item_id, selection_source, reason)
+          VALUES ('${PROD_Z}', 'actual_purchase', 950, '${POI2}', 'migration_baseline', '[PROVER] evidence');
+        SET LOCAL session_replication_role = origin; v := 'cited';` }, 'ok|cited', 'same'],
+    ['correcting a line that evidence cites is refused', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI2, unit_cost_cents: 1100 }], REASON, 'k-evidence'), MISSING_FN, /^P0001\|PO_COST_BASIS_EVIDENCE_IN_USE: /],
+    ['stored: the cited line is unchanged', 'owner', LINE(q(POI2)), 'ok|10:950:-', 'ok|10:950:false'],
+    ['cancelled PO', U.ADMIN,setCosts(U.ADMIN, q(PO3), [{ id: POI4, unit_cost_cents: 600 }], 'fix', 'k4'), MISSING_FN, /^P0001\|PO_CANCELLED: /],
     ['a line of another PO', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI1, unit_cost_cents: 600 }], 'fix', 'k5'), MISSING_FN, /^P0001\|PO_ITEM_ID_NOT_IN_PURCHASE_ORDER$/],
     ['negative cents', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: -1 }], 'fix', 'k6'), MISSING_FN, /^22003\|PO_UNIT_COST_NEGATIVE: /],
-    ['dollars only is refused', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost: 21 }], 'fix', 'k6b'), MISSING_FN, /^P0001\|PO_UNIT_COST_REQUIRED$/],
+    ['a null cost is refused, not read as $0', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: null }], 'fix', 'k6c'), MISSING_FN, /^P0001\|PO_UNIT_COST_REQUIRED$/],
+    ['a blank cost is refused, not read as $0', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: '' }], 'fix', 'k6d'), MISSING_FN, /^P0001\|PO_UNIT_COST_REQUIRED$/],
+    ['dollars only is refused',U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost: 21 }], 'fix', 'k6b'), MISSING_FN, /^P0001\|PO_UNIT_COST_REQUIRED$/],
     ['the same line twice, differing in case', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }, { id: POI3.toUpperCase(), unit_cost_cents: 2200 }], 'fix', 'k7'), MISSING_FN, /^P0001\|PO_ITEM_ID_DUPLICATE: /],
     ['no lines', U.ADMIN, setCosts(U.ADMIN, q(PO2), [], 'fix', 'k8'), MISSING_FN, /^P0001\|PO_ITEMS_REQUIRED$/],
     ['reason over 500 characters', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }], 'x'.repeat(501), 'k9'), MISSING_FN, /^P0001\|PO_COST_REASON_TOO_LONG: /],
@@ -376,6 +384,7 @@ const SCENARIOS = [
     ['admin deletes', U.ADMIN, { stmt: 'DELETE FROM public.purchase_order_item_cost_changes; v := \'deleted\';' }, NO_TABLE, NO_WRITE('purchase_order_item_cost_changes')],
     ['owner updates', 'owner', { stmt: 'UPDATE public.purchase_order_item_cost_changes SET reason = \'x\'; v := \'updated\';' }, NO_TABLE, /^P0001\|PO_COST_HISTORY_APPEND_ONLY: /],
     ['owner deletes', 'owner', { stmt: 'DELETE FROM public.purchase_order_item_cost_changes; v := \'deleted\';' }, NO_TABLE, /^P0001\|PO_COST_HISTORY_APPEND_ONLY: /],
+    ['owner truncates', 'owner', { stmt: 'TRUNCATE public.purchase_order_item_cost_changes; v := \'truncated\';' }, NO_TABLE, /^P0001\|PO_COST_HISTORY_APPEND_ONLY: /],
     ['an admin change to a received line without a reason cannot be stored', 'owner', { stmt: `INSERT INTO public.purchase_order_item_cost_changes (purchase_order_id, purchase_order_item_id, new_unit_cost_cents, source, quantity_received_at_change) VALUES ('${PO2}', '${POI2}', 1, 'set_by_admin', 5); v := 'inserted';` },
       NO_TABLE, /^23514\|new row for relation "purchase_order_item_cost_changes" violates check constraint "po_item_cost_changes_received_reason"$/],
   ] },

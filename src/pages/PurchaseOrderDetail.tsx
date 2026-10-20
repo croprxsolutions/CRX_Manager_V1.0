@@ -28,8 +28,8 @@ import { notifyDamagedReceiving, notifyOverReceive } from '../lib/notificationTr
 import { logActivity } from '../lib/activityLogger';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { parseLocalDate } from '../lib/dateUtils';
-import { formatUSD as fmt } from '../lib/money';
-import { MONEY_PRECISION_MESSAGE, parseDollarsToCentsSigned } from '../lib/parseCents';
+import { formatCents, formatUSD as fmt } from '../lib/money';
+import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import HelpTip from '../components/ui/HelpTip';
@@ -1006,6 +1006,12 @@ export default function PurchaseOrderDetail() {
 
   const handleSaveEdit = async () => {
     if (!po || !profile) return;
+    // An admin's typed cost must be exact whole cents: blank or more than two decimals is refused,
+    // never sent as $0 or rounded. A received line's cost is not editable here (it is locked).
+    if (isAdmin && editItems.some((item) => item.quantity_received === 0 && !isWholeCentDollarInput(item.unit_cost.trim()))) {
+      toast('error', `Enter a unit cost for every line. ${MONEY_PRECISION_MESSAGE}`);
+      return;
+    }
     setSaving(true);
 
     // Assigned inside the try so the catch can retire the exact scope it used.
@@ -1045,6 +1051,7 @@ export default function PurchaseOrderDetail() {
       toast('success', 'Purchase order updated');
       setEditOpen(false);
       fetchPO();
+      fetchCostHistory();
     } catch (err: unknown) {
       if (getIdempotencyBindingRejection(err)) {
         if (saveScope) savePOIdem.resetKeyFor(saveScope);
@@ -1062,13 +1069,13 @@ export default function PurchaseOrderDetail() {
     setCostOpen(true);
   };
 
-  // Exact decimal text to whole cents; more than two decimals is refused, never rounded (Luna round 4).
-  // Exponent text ("1e2", which a number input accepts) is refused too: the parser reads it as 0.
+  // Exact decimal text to whole cents through the house shape guard: more than two decimals, a sign,
+  // exponent text or malformed text is refused, never rounded or read as $0 (Luna round 4).
   const parseCostDraft = (draft: string): number | null => {
-    if (/[eE]/.test(draft)) return null;
-    const cents = parseDollarsToCentsSigned(draft);
-    // A safe integer only: past 2^53 cents the parser silently rounds (Codex review).
-    return cents === null || cents < 0 || !Number.isSafeInteger(cents) ? null : cents;
+    const text = draft.trim();
+    if (!isWholeCentDollarInput(text)) return null;
+    const cents = parseDollarsToCents(text);
+    return cents === null || !Number.isSafeInteger(cents) ? null : cents;
   };
 
   /**
@@ -1129,7 +1136,8 @@ export default function PurchaseOrderDetail() {
       if (error) throw error;
       assertRpcResult(data, 'set_purchase_order_item_costs');
       setCostsIdem.resetKeyFor(costScope);
-      toast('success', 'Unit cost saved');
+      const result = data as { lines_changed?: number; lines_confirmed?: number } | null;
+      toast('success', (result?.lines_changed ?? 0) > 0 ? 'Unit cost saved' : 'Unit cost confirmed');
       setCostOpen(false);
       fetchPO();
       fetchCostHistory();
@@ -1436,8 +1444,8 @@ export default function PurchaseOrderDetail() {
                           <td className="px-4 py-3 whitespace-nowrap">{new Date(h.created_at).toLocaleString()}</td>
                           <td className="px-4 py-3">{productName}</td>
                           <td className="px-4 py-3 font-mono whitespace-nowrap">
-                            {h.old_unit_cost_cents === null ? '' : `${fmt(purchaseOrderCentsToDollars(h.old_unit_cost_cents))} → `}
-                            {fmt(purchaseOrderCentsToDollars(h.new_unit_cost_cents))}
+                            {h.old_unit_cost_cents === null ? '' : `${formatCents(h.old_unit_cost_cents)} → `}
+                            {formatCents(h.new_unit_cost_cents)}
                           </td>
                           <td className="px-4 py-3">
                             {COST_CHANGE_SOURCE_LABEL[h.source]}
@@ -1839,7 +1847,7 @@ export default function PurchaseOrderDetail() {
               {editItems.map((item, idx) => {
                 const isReceived = item.quantity_received > 0;
                 return (
-                <div key={item.id || idx} className="grid grid-cols-[1fr_100px_100px] gap-2 items-start">
+                <div key={item.id || idx} className={`grid ${isAdmin ? 'grid-cols-[1fr_100px_100px]' : 'grid-cols-[1fr_100px]'} gap-2 items-start`}>
                   <div>
                     {isReceived ? (
                       <>
@@ -2004,7 +2012,7 @@ export default function PurchaseOrderDetail() {
                 type="number"
                 min="0"
                 step="0.01"
-                aria-label="Unit cost"
+                aria-label={`Unit cost for ${(item.product as unknown as { product_name?: string } | undefined)?.product_name || item.product_name || 'line'}`}
                 value={costDrafts[item.id] ?? ''}
                 onChange={(e) => setCostDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
               />

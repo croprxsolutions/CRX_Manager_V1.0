@@ -215,14 +215,18 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
       .eq('is_active', true)
       .order('product_name');
+    if (seq !== productLoadSeqRef.current) return;
     if (error) {
+      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_bulk_po_products' } });
       toast('error', 'Failed to load products');
       return;
     }
     let prods: PickerProduct[];
     try {
       prods = await withAdminCosts('products', (data || []) as unknown as PickerProduct[], isAdmin);
-    } catch {
+    } catch (costErr) {
+      if (seq !== productLoadSeqRef.current) return;
+      Sentry.captureException(costErr, { tags: { source: 'fetch', action: 'load_bulk_po_product_costs' } });
       toast('error', 'Failed to load products');
       return;
     }

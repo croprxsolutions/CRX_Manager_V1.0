@@ -17,7 +17,7 @@ four purchase-order screens.
   `purchase_order_item_cost_changes`: who, when, old and new cost, quantity received, and why.
 - **Screens.** Purchase order list, new purchase order, purchase order detail and PDF import show
   cost only to admins (the `costFields.test.ts` exemption for these four screens is removed). The
-  detail page gains a Cost History card, Unconfirmed badges and a "Correct / Confirm Cost" window
+  detail page gains a Cost History card, Unconfirmed badges and a unit-cost window ("Correct Unit Cost", or "Confirm / Correct Cost" when a rep line waits)
   with a reason box; the list gains a "Costs to confirm" filter for admins.
 - **Not changed:** inventory value and margins already use the catalog cost, not purchase-order cost
   (live read 2026-10-20), so a correction moves no inventory value. Catalog cost still changes only

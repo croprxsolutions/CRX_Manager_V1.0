@@ -203,6 +203,12 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 > still reachable, or stop and use another durable record when the interval exceeds 30 days.
 
 1. Create a **new** Supabase project (never overwrite production). A second project may cost money: Mason approves.
+   **Immediately after creating it, and before restoring any users or triggers, turn public signup off**
+   in its Auth settings and confirm a signup attempt is refused. Closing the Data API does not close the
+   separate Auth signup endpoint, and the profile trigger copies a signup-supplied role into the profile,
+   so someone who found the address could otherwise create an admin account that survives the restore.
+   Before cutover, list the restored `auth.users` and `profiles` and confirm there are no accounts the dump
+   did not contain.
 2. Clone `masonwells1/CRX_Backups` and choose the archive `backups/crx-backup-YYYY-MM-DD.dump.gpg`:
    the **newest** when the project is lost; for **corruption**, the newest archive taken **before the bad
    change began** (the newest one may already contain the damage). The repo keeps the newest 8 archives (weekly, so about 8 weeks), so corruption older

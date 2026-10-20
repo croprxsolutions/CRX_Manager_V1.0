@@ -247,8 +247,8 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    permission migrations), under a reviewed plan. Then **verify** with a query that the `anon` role holds no
    table or function privileges it should not, and that a signed-out request to the new project's API is
    refused. Do this before the project is exposed to anyone.
-5. Validate. **Future (once the alert design is built):** compare against the baseline file dated on or before the selected dump (never a later one)
-   `baseline-YYYY-MM-DD.json` stored beside the dump. **Today no baseline exists.** If the project
+5. Validate. **Future (once the alert design is built):** compare against the baseline file bound to the **exact selected archive** (its name and checksum are recorded in the file; a file merely dated earlier or later is not valid, because it cannot show that this archive holds all its rows)
+   `baseline-YYYY-MM-DD.json` stored beside the dump. If the selected archive has no such bound file, count validation is unavailable for it and the live-count or lost-project method below applies. **Today no baseline exists.** If the project
    is **lost** (no live database to count), validate without live counts: the restore finishes with no
    errors; the key tables are not empty; no table's newest `created_at` is after the dump date, and the busiest tables (`invoices`, `inventory_transactions`) have one no more than 3 days before the dump date (a season runs October 1 through September 30; outside the busy part of the season a longer gap can be normal, so explain it rather than fail) (do not apply this to low-volume tables such as `allocation_sets` or `prepay_credits`, which may have no new rows for days);
    internal checks hold (for every invoice not in `voided` status, the total equals the sum of its lines; voided invoices keep their lines but have a zero total by design, so check that zero instead; if another status (for example a cancelled invoice) fails the total check, compare it with that status's rules in `.claude/schema-registry.json` and the workflow docs and record the finding rather than assuming corruption or assuming it is fine; every order and invoice points to
@@ -332,7 +332,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
     to staff until the post-restore checklist (4.7) is finished. Otherwise staff or jobs could write against
     week-old state, or writes to the old project could disappear at cutover, creating the duplicates 4.7
     exists to prevent. Write down which approach you used.
-11. **Final gate before cutover.** After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
+11. **Final gate before cutover.** First repeat the full table, function and default-privilege audit from
+    step 4 for every object the schema replay (step 8) added or changed, and only after that audit passes
+    lift the temporary API isolation, then repeat the signed-out refusal request directly against the
+    restored Data API. After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
     step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
     and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for
     one account of every active role (run from an isolated Vercel preview deployment or test host that is
@@ -373,11 +376,11 @@ Not yet rehearsed. Log the first rehearsal in 4.9.
 
 ### 4.9 Drill log (quarterly; the first is overdue)
 
-Targets (Mason, 2026-10-14): **RTO** = back by the next business morning; **RPO** = minutes of lost work (only reachable after Pro + PITR; today the honest answer is "up to about 7 days", so mark RPO as not met until then). Run 4.6 against a throwaway project each quarter, **stopping after step 9**: a drill never performs step 10 (freezing production writers), never touches production jobs, integrations or Vercel settings, and never points the app at the drill project. Those steps, and step 11's cutover, belong only to a real recovery that Mason has approved. Drill the final gate against the isolated preview only. Record the date, backup file, who ran it, minutes
+Targets (Mason, 2026-10-14): **RTO** = back by the next business morning; **RPO** = minutes of lost work (only reachable after Pro + PITR; today the honest answer is "up to about 7 days", so mark RPO as not met until then). Run 4.6 against a throwaway project each quarter, **running steps 1 to 9 and then step 11's checks**: a drill never performs step 10 (freezing production writers), never touches production jobs, integrations or Vercel settings, and never points the app at the drill project. Those, and the cutover action itself, belong only to a real recovery that Mason has approved. Run step 11's final gate (counts, financial and inventory checks, roles, password reset, Realtime) against the isolated preview, so a drill can show whether replay left the finished project usable. A drill measures how long it takes to be **restore-ready**, not the full recovery time, because freezing, reconciliation, job restoration and cutover are not exercised. Record the date, backup file, who ran it, minutes
 per step, whether validation matched, whether logins were present, and problems. Rewind drills
 (after Pro + PITR), file-restore drills (after the file backup exists) and the paper rehearsal go in the same table.
 
-| Date | Type | Backup used | Total time | RTO met (back by next business morning) | RPO met (minutes of loss) | Validation match | Logins present | Notes |
+| Date | Type | Backup used | Time to restore-ready | RTO estimate (restore-ready time plus the untested freeze, reconcile and cutover steps; back by next business morning?) | RPO met (minutes of loss) | Validation match | Logins present | Notes |
 |---|---|---|---|---|---|---|---|---|
 | _none yet_ | | | | | | | | |
 

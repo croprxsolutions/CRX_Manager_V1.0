@@ -477,7 +477,8 @@ ok(
   "the segment loop actually queues the returned request — a gate that hands it back to a caller that drops it is the dead code this pin exists to catch",
 );
 ok(
-  /const advisoryDeadlineMs = Date\.now\(\) \+ CODEX_ADVISORY_BUDGET_MS;/.test(codexGuardSource)
+  // Capped by the hard-gate deadline since #973 (the lookup now fails closed).
+  /const advisoryDeadlineMs = Math\.min\(clock\(\) \+ CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs\);/.test(codexGuardSource)
   && /deadlineMs: advisoryDeadlineMs/.test(codexGuardSource),
   "one deadline is computed once and shared by every deferred lookup, so N merges cannot multiply the budget",
 );
@@ -548,7 +549,7 @@ for (const [label, source] of [["Claude", guardSource], ["Codex", codexGuardSour
     `the ${label} guard's advisory budget (${budgetMs}ms) must stay at or under half its ${hookBudgetMs}ms hook timeout`,
   );
   ok(
-    /collectCodexThreads\([\s\S]{0,2000}?\{ deadlineMs \}\)/.test(source),
+    /collectCodexThreads\([\s\S]{0,2000}?\{ deadlineMs(?:, now: clock)? \}\)/.test(source),
     `the ${label} guard actually PASSES the deadline to collectCodexThreads — declaring a budget it never applies is decoration`,
   );
 }

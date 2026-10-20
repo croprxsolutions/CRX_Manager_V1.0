@@ -2825,6 +2825,48 @@ try {
     nowMs: now,
     runGh: coderabbitThreadGh(true),
   }).blocked, false, "CONTROL: a resolved CodeRabbit thread does not block a green, Sol-proven merge");
+  // The thread lookup runs on the HARD-gate budget (Codex App P1 on #973): a slow
+  // lookup is refused before the hook would be killed, and that DENIES.
+  {
+    let virtualNow = 2_000_000;
+    const slowLookupVerdict = evaluateProductionAction({
+      toolName: "PowerShell",
+      toolInput: { command: `gh pr merge 123 --squash${PIN}` },
+      repoDir: risky.repo,
+      nowMs: now,
+      rawThreads: true,
+      clock: () => virtualNow,
+      hardGateDeadlineMs: virtualNow + 12_500,
+      runGh: (args) => {
+        if (isAdvisoryMetaCall(args)) { virtualNow += 8_000; return advisoryMetaJson; } // slow but successful
+        if (Array.isArray(args) && args.includes("graphql")) return NO_THREADS_JSON;
+        return mainPrJson;
+      },
+    });
+    assert.equal(slowLookupVerdict.blocked, true, "a thread lookup that would outrun the hook is DENIED, never left to be killed");
+  }
+
+  // Resolving ONE review thread is the sanctioned exit from that denial, so the
+  // guard lets exactly that GraphQL mutation through (Codex App P1 on #973).
+  const resolveQuery = 'mutation{resolveReviewThread(input:{threadId:"PRRT_kwDOabc123"}){thread{isResolved}}}';
+  const ghCall = (command) => evaluateProductionAction({ toolName: "Bash", toolInput: { command }, repoDir: risky.repo, nowMs: now, runGh: () => mainPrJson });
+  assert.equal(ghCall(`gh api graphql -f query='${resolveQuery}'`).blocked, false,
+    "resolving one review thread (literal id) is allowed");
+  assert.equal(ghCall(`gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_kw1"}){thread{id isResolved}}}'`).blocked, false,
+    "selecting id and isResolved is allowed too");
+  for (const [label, command] of [
+    ["a second mutation in the same query", `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_1"}){thread{id}} mergePullRequest(input:{pullRequestId:"PR_1"}){clientMutationId}}'`],
+    ["a merge mutation", `gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:"PR_1"}){clientMutationId}}'`],
+    ["an extra method flag", `gh api graphql -X POST -f query='${resolveQuery}'`],
+    ["a body from a file", `gh api graphql --input body.json`],
+    ["an unexpected field", `gh api graphql -f query='${resolveQuery}' -F other=1`],
+    ["two queries", `gh api graphql -f query='${resolveQuery}' -f query='${resolveQuery}'`],
+    ["a different host", `gh api --hostname evil.example graphql -f query='${resolveQuery}'`],
+    ["a wider selection", `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"PRRT_1"}){thread{id pullRequest{id}}}}'`],
+  ]) {
+    assert.equal(ghCall(command).blocked, true, `still blocked: ${label}`);
+  }
+
   // The connector route used to ALLOW a clean, green, proof-backed merge. Since
   // 2026-09-26 it cannot carry the head pin, so even that merge is refused and
   // agents merge through `gh pr merge --match-head-commit`. The fail-open advisory

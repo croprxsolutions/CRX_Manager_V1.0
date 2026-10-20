@@ -11,6 +11,7 @@ import {
   expandNestedCommands,
   extractPatchDestinations,
   ghApiMergeRequest,
+  ghApiIsResolveReviewThreadOnly,
   ghApiMutates,
   commandFedToInterpreter,
   commandFedToInterpreterDenial,
@@ -695,7 +696,10 @@ export function unrecognizedProtectedHarnessAccess(command, workdir = "") {
 export function computedSegmentWithUnrecognizedCommand(command, workdir = "") {
   const text = String(command || "");
   const segments = shellSegments(text);
-  const computed = (segment) => COMPUTED_ARGUMENT_RE.test(segment);
+  // The lone resolve-review-thread call (#973) holds `(` only inside its quoted
+  // GraphQL text; ghApiIsResolveReviewThreadOnly has already proved every word
+  // literal (no `$`, backtick or subexpression can match it), so it is not computed.
+  const computed = (segment) => COMPUTED_ARGUMENT_RE.test(segment) && !ghApiIsResolveReviewThreadOnly(segment);
   const commandComputed = segments.some(computed);
   for (const segment of segments) {
     if (!computed(segment) && !(commandComputed && segmentHeadIsExecutor(segment))) continue;
@@ -1323,7 +1327,7 @@ const CODEX_CALL_TIMEOUT_MS = 5_000;
 // SEC-001): the caller computes it once and passes the same value to each
 // deferred lookup, so N chained merges spend one budget between them rather
 // than N budgets in series.
-function codexAppAdvisory({ request, repoDir, runGh, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_MS }) {
+function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), deadlineMs = clock() + CODEX_ADVISORY_BUDGET_MS }) {
   let codexVerdict = null;
   let coderabbitOpen = null; // null = not read completely → fail closed below
   try {
@@ -1346,7 +1350,7 @@ function codexAppAdvisory({ request, repoDir, runGh, deadlineMs = Date.now() + C
         // Omit `after` on the first page — see the Claude-side note.
         if (cursor) args.push("-F", `after=${cursor}`);
         return JSON.parse(runGh(args, repoDir))?.data?.repository?.pullRequest;
-      }, { deadlineMs });
+      }, { deadlineMs, now: clock });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
     }
@@ -1527,7 +1531,13 @@ export function evaluateProductionAction({
     // out of the per-merge gate — a merge driven through the connector skipped
     // the check a shell merge got, the asymmetry AGENTS.md forbids.
     if (result.advisoryRequest) {
-      const advisory = codexAppAdvisory({ request: result.advisoryRequest, repoDir: actionRepoDir, runGh });
+      // The lookup now carries a fail-closed CodeRabbit check, so it runs on the
+      // HARD-gate budget (Codex App P1 on #973): a call that could not finish
+      // before the hook is killed is refused, which leaves the count unread and
+      // denies, instead of a killed hook that says nothing and so allows.
+      const advisory = codexAppAdvisory({ request: result.advisoryRequest, repoDir: actionRepoDir, runGh: gateRunGh, clock,
+        deadlineMs: Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs) });
+      if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
       if (advisory) return advisory;
     }
     return { blocked: false };
@@ -1869,7 +1879,9 @@ export function evaluateProductionAction({
       if (result.advisoryRequest) deferredAdvisories.push(result.advisoryRequest);
       continue;
     }
-    if (ghApiMutates(segment)) {
+    // Resolving one review thread is the sanctioned exit from the CodeRabbit
+    // thread denial, so that one narrowly-parsed mutation is allowed (#973).
+    if (ghApiMutates(segment) && !ghApiIsResolveReviewThreadOnly(segment)) {
       return denied("CODEX PRODUCTION GATE: unrecognized mutating `gh api` calls are blocked because they can bypass the reviewed branch/push workflow.");
     }
   }
@@ -1934,9 +1946,11 @@ export function evaluateProductionAction({
   // A nested command hands its cleared merges to the outer call, whose allow
   // point is the only one that comes after EVERY hard gate in the command.
   if (nestingDepth > 0) return { blocked: false, deferredAdvisories };
-  const advisoryDeadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_MS;
+  // On the HARD-gate budget since #973: see the connector route above.
+  const advisoryDeadlineMs = Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs);
   for (const request of [...nestedAdvisories, ...deferredAdvisories]) {
-    const advisory = codexAppAdvisory({ request, repoDir: actionRepoDir, runGh, deadlineMs: advisoryDeadlineMs });
+    const advisory = codexAppAdvisory({ request, repoDir: actionRepoDir, runGh: gateRunGh, clock, deadlineMs: advisoryDeadlineMs });
+    if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
     if (advisory) return advisory;
   }
   return { blocked: false };

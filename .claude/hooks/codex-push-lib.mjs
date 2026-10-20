@@ -4394,6 +4394,32 @@ export function hardGateBudgetDenial(prefix, action = "merge") {
 // reason ghApiMergeRequest above already does: a global flag may sit between the
 // binary and the subcommand (`gh -R o/r api -X POST …`), and the old
 // position-anchored `gh\s+api` test did not see that form either.
+// The ONE GraphQL write the Codex guard lets through (Codex App P1 on PR #973):
+// resolving a single review thread. Since 2026-10-19 the merge gates deny while
+// any CodeRabbit thread is unresolved, and resolving is the sanctioned exit, so
+// a Codex session must be able to do it. Deliberately narrow: `gh api graphql`
+// followed only by separate `-f`/`-F` fields, exactly one `query=` whose whole
+// text is a lone resolveReviewThread mutation on a LITERAL thread id, selecting
+// only `id`/`isResolved`. (A `$threadId` variable form is not accepted: the
+// guard's computed-text rule refuses any `$` in the segment anyway.) Anything
+// else stays an unrecognized mutating call.
+const RESOLVE_THREAD_QUERY_RE = new RegExp(
+  "^\\s*mutation\\s*\\{\\s*" +
+  "resolveReviewThread\\s*\\(\\s*input\\s*:\\s*\\{\\s*threadId\\s*:\\s*\"[A-Za-z0-9_=-]+\"\\s*\\}\\s*\\)\\s*" +
+  "\\{\\s*thread\\s*\\{\\s*(?:id|isResolved)(?:\\s+(?:id|isResolved))*\\s*\\}\\s*\\}\\s*\\}\\s*$",
+);
+export function ghApiIsResolveReviewThreadOnly(command) {
+  const words = splitShellArgv(String(command || ""));
+  if (words.length < 5) return false;
+  if (!/^(?:.*[\\/])?gh(?:\.exe)?$/i.test(words[0])) return false;
+  if (words[1] !== "api" || words[2] !== "graphql") return false;
+  // Exactly `gh api graphql -f query=<the mutation>`, nothing more.
+  if (words.length !== 5 || words[3] !== "-f") return false;
+  const value = String(words[4]);
+  if (!value.startsWith("query=")) return false;
+  return RESOLVE_THREAD_QUERY_RE.test(value.slice("query=".length));
+}
+
 export function ghApiMutates(command) {
   const text = String(command || "");
   if (!ghBinaryMentioned(text)) return false;

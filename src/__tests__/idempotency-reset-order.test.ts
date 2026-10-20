@@ -190,9 +190,6 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // OTHER site; 'recovery' excuses only the binding-rejection reset, which classify() verifies on
   // its own line.
   'src/pages/Deliveries.tsx': ['recovery'],
-  // Replay-binding batch 3b (20261019235000): cancel_delivery's and void_delivery's binding-rejection
-  // recovery reset inside their `if (error)` branch; classify() verifies the marker on its own line.
-  'src/pages/DeliveryDetail.tsx': ['recovery'],
   'src/pages/FieldApplicationInvoice.tsx': ['throw-on-error'],
   'src/pages/Fields.tsx': ['throw-on-error'],
   // Two DIFFERENT sites, two different reasons. The post-call reset is throw-on-error;

@@ -57,9 +57,20 @@ describe('replay-binding batch 3b call sites key each retry to the exact request
 
       it('retires the key and reloads on any binding refusal', () => {
         expect(handler).toMatch(new RegExp(
-          `if \\(getIdempotencyBindingRejection\\(error\\)\\) \\{\\n\\s*${hook}\\.resetKeyFor\\(${scope}\\);\\n\\s*${reload}\\(\\);\\n\\s*\\}`,
+          `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) \\{\\n\\s*${hook}\\.resetKeyFor\\(${scope}\\);\\n\\s*${reload}\\(\\);\\n\\s*\\}`,
         ));
         expect(handler).not.toMatch(/bindingRejection === 'intent' \|\| bindingRejection === 'actor'/);
+      });
+
+      it('an empty reply cannot strand the button: the call and its check sit in try, loading resets in finally', () => {
+        const tryAt = handler.indexOf('try {');
+        const callAt = handler.indexOf(`.rpc('${rpc}', {`);
+        const assertAt = handler.indexOf(`'${rpc}');`);
+        const catchAt = handler.indexOf('} catch (', assertAt);
+        expect(tryAt).toBeGreaterThan(-1);
+        expect(callAt).toBeGreaterThan(tryAt);
+        expect(catchAt).toBeGreaterThan(assertAt);
+        expect(handler.slice(catchAt)).toMatch(/\} finally \{\n\s*set(?:Cancelling|Voiding)\(false\);\n\s*\}$/);
       });
     });
   }

@@ -192,9 +192,13 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 
 **Not yet proven, so the step-by-step procedure lives in a draft plan:**
 `docs/plans/2026-10-19-goal6-restore-procedure-draft.md`. It has never been run and every review found
-new gaps, so it moves back here only after the first supervised drill (4.9) proves it. Until then, a
-restore is done by an agent following that draft with Mason, never by anyone alone, and these rules
-always hold:
+new gaps, so it moves back here only after the first supervised drill (4.9) proves it.
+
+**Until then the draft is for practice drills only, against a throwaway project.** It is not an approved
+procedure for a real recovery and must not be followed to restore or replace production. If a real
+project loss happens before the draft is proven, stop: tell Mason, open a Supabase support ticket, keep
+the office on the paper fallback (4.8), and decide the recovery with Mason and Supabase support, not
+from the draft. In a drill, and in any recovery Mason and support agree on, these rules always hold:
 
 - Restore into a **new** project; never overwrite production. A new project, any migration, and any
   change to authentication, permissions, secrets or Vercel settings each need Mason's explicit yes.

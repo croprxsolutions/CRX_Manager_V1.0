@@ -5,16 +5,23 @@ has never been run and review keeps finding gaps. The first restore drill (runbo
 it; only then does it move back into the runbook. Step and section numbers below (4.7, 4.9, 4.11) refer to
 the runbook. The backup alert design is `docs/plans/2026-10-19-goal6-backup-health-alert-design.md`.
 
+**DRILL ONLY.** Until a drill proves it, this draft is used only against a throwaway project. It is not an
+approved procedure for restoring or replacing production; a real loss before then is escalated to Mason
+and Supabase support (runbook 4.6).
+
 **Open items from the final review (fold into the first drill):**
 - **Independent schema check.** Before declaring a restore valid or cutting over, compare the restored
-  constraints, triggers, indexes, functions and policies with an *independent* expected schema (a
+  constraints, triggers, indexes, functions, policies and **views** (with their security settings, such as
+  `profile_public_view`, which the Team Board reads) with an *independent* expected schema (a
   schema-only capture saved beside the dump from the same snapshot, or the repository migrations rebuilt
   up to the dump's ledger version in a scratch database), not with the archive's own contents list. A dump
   missing its post-data section would not list those objects at all. Any schema error that is not on the
   known-platform-conflict list fails the restore.
-- **Jobs during replay.** Replaying migrations can recreate `pg_cron` jobs. Apply each replayed migration
-  in a transaction that ends with `UPDATE cron.job SET active = false` before `COMMIT`, so any job it
-  schedules is committed already inactive and never runs; then check `cron.job` again after replay.
+- **Jobs during replay.** Replaying migrations can recreate `pg_cron` jobs. Step 8's job-safe replay is
+  the only allowed path; the CLI's normal push is not used.
+- **Scheduled-job tables are not restored.** The restore deliberately leaves out `cron` table data, so
+  those tables are a separate class in the count check: they must be empty after the restore, and they
+  are not compared with the source counts.
 
 ## Procedure
 
@@ -122,8 +129,9 @@ the runbook. The backup alert design is `docs/plans/2026-10-19-goal6-backup-heal
    are **repeated as the final gate (step 11)** after the schema update, grants and Auth settings are done.
 7. Work lost is everything written after the dump time: up to about 7 days (as of 2026-10-19, weekly dumps), more if a Sunday run was missed.
 8. **Bring the restored schema up to date first.** (Some migrations call `cron.schedule`, so replay can
-   recreate scheduled jobs. Keep jobs disabled during replay and run the `cron.job` check from step 4 again
-   afterward; any job present stops the restore until it is removed and reconciled.) The dump is only as new as its date, but the current
+   recreate scheduled jobs. Do **not** replay through the CLI's normal push, which commits each file as
+   written and would leave any job it schedules active. Use the job-safe replay below instead, then run the
+   `cron.job` check from step 4 again; any active job stops the restore.) The dump is only as new as its date, but the current
    code and Edge Functions expect every later migration (RPCs, columns, grants, constraints). Deploying
    them against an older schema causes an immediate outage. Follow `supabase/baselines/README.md`
    (section on replay after restore). That script compares against the fixed July baseline, **not** against
@@ -132,7 +140,13 @@ the runbook. The backup alert design is `docs/plans/2026-10-19-goal6-backup-heal
    compare it with the repository to get the migrations the dump is actually missing, then build the filtered
    set from that comparison (use `node scripts/list-post-baseline-migrations.mjs` as input only; never choose migrations by filename date alone, and
    never run the files directly with `psql`, which skips the migration ledger), review the dry run in an
-   isolated Supabase CLI work directory, then push that exact filtered set through the normal gates.
+   isolated Supabase CLI work directory, then apply that exact filtered set with the **job-safe replay**:
+   one migration at a time, oldest first, each in a single transaction that runs the migration file, inserts
+   its `(version, name)` row into `supabase_migrations.schema_migrations` (so the ledger stays correct),
+   and ends with `UPDATE cron.job SET active = false` immediately before `COMMIT`. A job scheduled inside
+   that transaction is invisible to the scheduler until commit and is committed already inactive, so it
+   can never run. Check `SELECT count(*) FROM cron.job WHERE active` is zero after each one. The first drill
+   must prove this sequence before it is ever used for real.
    Confirm the restored `supabase_migrations.schema_migrations` ledger matches the repository before going on.
    **One-shot migrations need special care.** That script deliberately withholds the entries in
    `supabase/baselines/one-shot-migrations.json` (data rewrites specific to production). If the archive is

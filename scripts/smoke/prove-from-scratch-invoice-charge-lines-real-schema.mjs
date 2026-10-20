@@ -393,6 +393,18 @@ function runMatrix(label) {
       ['R7 charge line zero amount', { ...freight, unit_price_cents: 0, extended_cents: 0 }],
       ['R7 charge line blank description', { ...freight, description: '   ' }],
     ]) add(scenario([{ key: k, as: U.ADMIN, call: save(misc, [line], `r7-${k.length}`) }]));
+    // R9: an untyped product-less line from a writer other than save_invoice is typed 'other', so the
+    // shape check refuses a quantity-times-price sale written that way.
+    add(scenario([{ key: 'R9 owner inserts an untyped 10 x $50 line', as: 'owner', stmt: `
+      INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, created_by) VALUES ('${id('907')}', 'PROVER-U-1', '${CUST}', 'misc_charge', 'draft', CURRENT_DATE, '${U.ADMIN}');
+      INSERT INTO public.invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents) VALUES ('${id('907')}', 'Roundup 2.5 gal', 10, 5000, 50000, 0);
+      v := 'inserted';` }]));
+    // R10: an untyped line written while the invoice was soft-deleted (not typed then) blocks the restore.
+    add(scenario([{ key: 'R10 restore over an untyped line', as: 'owner', stmt: `
+      INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, created_by, deleted_at) VALUES ('${id('908')}', 'PROVER-U-2', '${CUST}', 'misc_charge', 'draft', CURRENT_DATE, '${U.ADMIN}', now());
+      INSERT INTO public.invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents) VALUES ('${id('908')}', 'x', 10, 5000, 50000, 0);
+      UPDATE public.invoices SET deleted_at = NULL WHERE id = '${id('908')}';
+      v := 'restored';` }]));
     // R8: a from-scratch invoice that is already posted and then overdue is still covered.
     add(scenario([{ key: 'R8 product line on an overdue from-scratch invoice', as: 'owner', stmt: `
       INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, created_by, salesman_id) VALUES ('${id('906')}', 'PROVER-OD-1', '${CUST}', 'misc_charge', 'draft', CURRENT_DATE, '${U.ADMIN}', '${U.ADMIN}');
@@ -448,7 +460,7 @@ function runMatrix(label) {
       INSERT INTO public.invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents, is_application_fee, sort_order)
         VALUES ('${id('904')}', 'Finance Charge - 18% annual rate on overdue balance', 1, 1234, 1234, 0, false, 1);
       UPDATE public.invoices SET status = 'unposted' WHERE id = '${id('904')}';
-      v := 'stored';` },
+      v := 'stored:' || coalesce((SELECT to_jsonb(ii)->>'charge_type' FROM public.invoice_items ii WHERE ii.invoice_id = '${id('904')}'), '-');` },
     { key: 'A7 finance-charge shaped post', as: U.ADMIN, stmt: `PERFORM ${post('a7p', `'${id('904')}'::uuid`)}; v := 'posted';` },
   ]));
 
@@ -505,6 +517,8 @@ const AFTER = [
   ['R7 charge type on a product line (order invoice)', SHAPE],
   ['R7 charge line blank description', SHAPE],
   ['R8 product line on an overdue from-scratch invoice', REFUSED_PRODUCT],
+  ['R9 owner inserts an untyped 10 x $50 line', SHAPE],
+  ['R10 restore over an untyped line', REFUSED_TYPE],
   ['A3 order-backed edit keeps its product line', OK(OINV)],
   ['A3 order-backed stored lines', OK(`-:${PROD}:2:3000:6000:2250`)],
   ['A3 order-backed post', OK('posted')],
@@ -519,7 +533,7 @@ const AFTER = [
   ['A5 job shaped post', OK('posted')],
   ['A5 posted headers', OK('PROVER-FBT:posted,PROVER-FJOB:posted')],
   ['A6 credit memo with a negative product line', OK('1')],
-  ['A7 finance-charge shaped invoice stored', OK('stored')],
+  ['A7 finance-charge shaped invoice stored', OK('stored:other')],
   ['A7 finance-charge shaped post', OK('posted')],
   ['A8 cancel a from-scratch invoice with a product line', OK('cancelled')],
 ];
@@ -654,7 +668,9 @@ async function main() {
   check('after', runMatrix('after'));
 
   // Grants: the trigger function is reachable by no API role; the writer keeps owner-only EXECUTE.
-  assert.equal(scalar(`SELECT string_agg(r, ',' ORDER BY r) FROM unnest(ARRAY['anon','authenticated','service_role']) r WHERE has_function_privilege(r, 'public._refuse_from_scratch_invoice_product_lines()', 'EXECUTE');`), '');
+  for (const fn of ['public._refuse_from_scratch_invoice_product_lines()', 'public._type_from_scratch_invoice_charge_lines()']) {
+    assert.equal(scalar(`SELECT string_agg(r, ',' ORDER BY r) FROM unnest(ARRAY['anon','authenticated','service_role']) r WHERE has_function_privilege(r, '${fn}', 'EXECUTE');`), '', `${fn} is executable by an API role`);
+  }
   assert.equal(scalar(`SELECT string_agg(r, ',' ORDER BY r) FROM unnest(ARRAY['anon','authenticated','service_role']) r WHERE has_function_privilege(r, '${WRITER}', 'EXECUTE');`), '');
   console.log('[prover] GRANTS: no API role can execute the trigger function or the writer');
 

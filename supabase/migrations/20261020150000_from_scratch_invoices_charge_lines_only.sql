@@ -25,6 +25,11 @@
 --      every create, edit and import path, direct table writes, and posting (single, group and
 --      batch posting all flip invoices.status). SECURITY DEFINER so RLS can never hide the rows
 --      it must see. Cancelled and voided invoices are left alone so they can always be closed.
+--   2b. trg_type_from_scratch_invoice_charge_lines (BEFORE, invoice_items): a product-less, untyped
+--      line written onto such an invoice by any writer other than save_invoice (today only
+--      generate_finance_charges) is typed 'other', so the shape CHECK applies to it; the
+--      after-write check also refuses an untyped line (FROM_SCRATCH_INVOICE_CHARGE_TYPE_REQUIRED).
+--      So on every path such an invoice holds only typed, single-amount charge lines.
 --   3. The save_invoice writer (_save_invoice_lineage_unaware_impl_20260827) stores charge_type,
 --      zeroes a charge line's cost, and on a from-scratch invoice refuses a product line
 --      (FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED) and an untyped line
@@ -41,9 +46,8 @@
 --   and job invoices, all invoice_type = 'field_application') keep their chemical lines; return
 --   credit memos (credit_memo, issued only by issue_return_credit) keep their negative product
 --   lines; every order- or delivery-backed invoice is unchanged. Finance charges
---   (generate_finance_charges) are from-scratch misc_charge invoices whose single line has no
---   product, so the trigger allows them; editing one through save_invoice now needs a charge type
---   (the screen offers "other").
+--   (generate_finance_charges) are from-scratch misc_charge invoices whose single line (no product,
+--   quantity 1, no cost) is now typed 'other' on insert; the function itself is unchanged.
 --
 -- LIVE DATA (read 2026-10-20): no misc_charge invoice exists, and every chemical_sale invoice has
 --   an order, so no stored row is from scratch and nothing live changes meaning.
@@ -55,7 +59,9 @@
 -- ROLLBACK: revert the app first (its screens and PDFs select invoice_items.charge_type), then
 --   DROP TRIGGER trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
 --   DROP TRIGGER trg_refuse_from_scratch_invoice_product_lines_header ON public.invoices;
+--   DROP TRIGGER trg_type_from_scratch_invoice_charge_lines ON public.invoice_items;
 --   DROP FUNCTION public._refuse_from_scratch_invoice_product_lines();
+--   DROP FUNCTION public._type_from_scratch_invoice_charge_lines();
 --   replay only the CREATE OR REPLACE FUNCTION _save_invoice_lineage_unaware_impl_20260827 block of
 --   20260904180000_invoice_season_follows_invoice_date.sql (md5 e3fc9bd9c1da4b2eb8082e91781e4915;
 --   not that whole file, whose own preflight and postflight belong to its run);
@@ -96,6 +102,20 @@ BEGIN
        AND ii.product_id IS NOT NULL
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT: an active invoice with no order or delivery already holds a product line; resolve it before applying';
+  END IF;
+  -- charge_type does not exist yet, so every product-less line on such an invoice would be untyped
+  -- (a finance charge made since the 2026-10-20 read, for example); type them first.
+  IF EXISTS (
+    SELECT 1
+      FROM public.invoices i
+      JOIN public.invoice_items ii ON ii.invoice_id = i.id
+     WHERE i.invoice_type IN ('misc_charge', 'chemical_sale')
+       AND i.order_id IS NULL
+       AND i.delivery_id IS NULL
+       AND i.deleted_at IS NULL
+       AND i.status NOT IN ('cancelled', 'voided')
+  ) THEN
+    RAISE EXCEPTION 'PREFLIGHT: an active invoice with no order or delivery already holds lines that would be untyped; re-read live data and add a typing step before applying';
   END IF;
 END
 $preflight$;
@@ -167,6 +187,21 @@ BEGIN
     RAISE EXCEPTION 'FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED: an invoice with no order or delivery cannot carry product lines; sell product through an order or a quick delivery'
       USING ERRCODE = 'check_violation';
   END IF;
+  IF EXISTS (
+    SELECT 1
+      FROM public.invoices i
+      JOIN public.invoice_items ii ON ii.invoice_id = i.id
+     WHERE i.id = v_invoice_id
+       AND i.invoice_type IN ('misc_charge', 'chemical_sale')
+       AND i.order_id IS NULL
+       AND i.delivery_id IS NULL
+       AND i.deleted_at IS NULL
+       AND i.status NOT IN ('cancelled', 'voided')
+       AND ii.charge_type IS NULL
+  ) THEN
+    RAISE EXCEPTION 'FROM_SCRATCH_INVOICE_CHARGE_TYPE_REQUIRED: every line on an invoice with no order or delivery must be a charge line with a type (freight, application fee, service, other)'
+      USING ERRCODE = 'check_violation';
+  END IF;
   RETURN NULL;
 END;
 $function$;
@@ -190,6 +225,43 @@ CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines_header
         IS DISTINCT FROM (NEW.invoice_type, NEW.order_id, NEW.delivery_id, NEW.status, NEW.deleted_at)
   )
   EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();
+
+-- 2b. Every product-less line on a from-scratch invoice is a typed charge line, on every path.
+-- save_invoice refuses an untyped line outright (below); any other writer (generate_finance_charges
+-- is the one today) gets its line typed 'other', and invoice_items_charge_line_shape_chk then
+-- refuses a line that is not a single charge (quantity 1, no cost, not a machine fee, a positive
+-- amount, a description), so an untyped line can never carry a quantity-times-price sale.
+CREATE FUNCTION public._type_from_scratch_invoice_charge_lines()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.product_id IS NULL
+     AND NEW.charge_type IS NULL
+     AND EXISTS (
+       SELECT 1
+         FROM public.invoices i
+        WHERE i.id = NEW.invoice_id
+          AND i.invoice_type IN ('misc_charge', 'chemical_sale')
+          AND i.order_id IS NULL
+          AND i.delivery_id IS NULL
+          AND i.deleted_at IS NULL
+          AND i.status NOT IN ('cancelled', 'voided')
+     ) THEN
+    NEW.charge_type := 'other';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._type_from_scratch_invoice_charge_lines() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER trg_type_from_scratch_invoice_charge_lines
+  BEFORE INSERT OR UPDATE OF product_id, charge_type ON public.invoice_items
+  FOR EACH ROW
+  EXECUTE FUNCTION public._type_from_scratch_invoice_charge_lines();
 
 -- 3. The save_invoice writer: the live body plus charge lines (search "Goal 3").
 CREATE OR REPLACE FUNCTION public._save_invoice_lineage_unaware_impl_20260827(p_invoice jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)

@@ -8,7 +8,9 @@
   `invoice_items.charge_type` (freight, application fee, service, other) with a shape check (no
   product, quantity 1, no cost, a positive amount); two triggers refuse a product line on such an
   invoice on every write path and at posting (`FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED`); the
-  `save_invoice` writer stores the charge type and refuses an untyped line on such an invoice.
+  `save_invoice` writer stores the charge type and refuses an untyped line on such an invoice; a
+  line from any other writer (today only finance charges) is typed "other" automatically, and the
+  shape check then refuses anything that is not a single charge.
 - The New Invoice page shows **Add Charge** (type, description, amount) instead of Add Product on
   such an invoice and explains why. Order-backed, field-application, blend-ticket and job invoices
   and return credit memos are unchanged.

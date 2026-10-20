@@ -111,11 +111,18 @@ step 2 (Mason, 2026-10-20, option 1 "for now"):** the purchase order screens and
 see and enter purchase cost there. Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
 lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
 cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Step 3 must leave the columns the purchase order screens read (product `current_cost`, purchase order and line cost) unlocked
-until the purchase order project lands (`costFields.test.ts` names those four screens as its only exemption). **TOP-PRIORITY
-FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"): purchase orders as their own project.** Three Sol rounds
-on PR #965 showed any cost a rep's purchase order line is given (the catalog cost, or $0) can be wrong and then locked at receipt
-(the supplier-cost-basis snapshot trigger, and the writer's received-line rule), with no governed way to correct it. The project
-needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+until the purchase order project is LIVE. **TOP-PRIORITY FOLLOW-UP (Mason, 2026-10-20, "dig deeper in future"): purchase
+orders as their own project.** Three Sol rounds on PR #965 showed any cost a rep's purchase order line is given (the catalog cost,
+or $0) can be wrong and then locked at receipt (the supplier-cost-basis snapshot trigger, and the writer's received-line rule),
+with no governed way to correct it. **Built 2026-10-20 (Mason chose "Option B"; migration `20261020200000` plus the four purchase
+order screens; NOT APPLIED, PR pending):** a trigger on every purchase-order line makes a signed-in non-admin's line take the
+product's catalog cost and flags it `cost_needs_review` (any cost a rep sends is overruled; an existing line keeps its cost); the
+new admin-only `set_purchase_order_item_costs` sets, corrects or confirms a line's cost, received lines included (a reason is
+required for a received line), changing only cost and the PO total, never inventory or catalog cost; every cost change lands in
+the admin-only, append-only `purchase_order_item_cost_changes`; the purchase order screens show cost only to admins (the
+`costFields.test.ts` exemption is gone), with a Cost History card, Unconfirmed badges and a "Costs to confirm" filter. Live
+read 2026-10-20: inventory value and margins use the catalog cost, not purchase-order cost, so a correction moves no
+inventory value. Once it is live, step 3 may lock the purchase-order cost columns too. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).

@@ -22,6 +22,7 @@ import type { Product } from '../types';
 import { Sentry } from '../lib/sentry';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
+import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -43,6 +44,9 @@ export default function NewPurchaseOrder() {
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const { toast } = useToast();
+  // Purchase cost is admin-only (Mason, 2026-10-18 and 2026-10-20, Option B): reps create the purchase
+  // order without unit cost; the server gives a rep line the catalog cost and flags it for an admin.
+  const isAdmin = profile?.role === 'admin';
 
   const [vendor, setVendor] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
@@ -86,23 +90,31 @@ export default function NewPurchaseOrder() {
   const fetchProducts = useCallback(async () => {
     const { data, error } = await supabase
       .from('products')
-      .select('*, product_family:product_families(name)')
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
       .eq('is_active', true)
       .order('product_name');
-    if (error) {
-      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_purchase_order_products' } });
+    let prods: PickerProduct[] = [];
+    let loadError: unknown = error;
+    if (!error) {
+      try {
+        prods = await withAdminCosts('products', (data || []) as unknown as PickerProduct[], isAdmin);
+      } catch (costErr) {
+        loadError = costErr;
+      }
+    }
+    if (loadError) {
+      Sentry.captureException(loadError, { tags: { source: 'fetch', action: 'load_purchase_order_products' } });
       toast('error', 'Failed to load Products. Retry before creating this purchase order.');
       setProductsLoading(false);
       return;
     }
-    const prods = (data || []) as unknown as PickerProduct[];
     setProducts(prods);
     const uniqueVendors = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
     setVendors(uniqueVendors.sort());
     setProductsLoading(false);
-  // The catalog loader is intentionally stable for the initial page fetch.
+  // The catalog loader is intentionally stable for the initial page fetch (and the role).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
@@ -179,9 +191,9 @@ export default function NewPurchaseOrder() {
       return;
     }
 
-    // Warn about items with zero cost
+    // Warn about items with zero cost (an admin enters cost; a rep's lines start without it)
     const zeroCostItems = validItems.filter((i) => i.unit_cost === 0);
-    if (zeroCostItems.length > 0) {
+    if (isAdmin && zeroCostItems.length > 0) {
       const prod = products.find((p) => p.id === zeroCostItems[0].product_id);
       toast('warning', `"${prod?.product_name || 'An item'}" has $0 unit cost — verify this is intentional`);
     }
@@ -218,15 +230,20 @@ export default function NewPurchaseOrder() {
           };
 
           const itemsPayload = validItems.map((i) => {
-            const unitCostCents = purchaseOrderUnitCostCents(i.unit_cost);
-            return {
+            const line = {
               product_id: i.product_id,
               product_name: products.find((p) => p.id === i.product_id)?.product_name || null,
               quantity_ordered: i.quantity_ordered,
-              unit_cost: purchaseOrderCentsToDollars(unitCostCents),
-              unit_cost_cents: unitCostCents,
               unit_size: i.unit_size || null,
               quantity_received: 0,
+            };
+            // A non-admin sends no cost; save_purchase_order ignores one anyway.
+            if (!isAdmin) return line;
+            const unitCostCents = purchaseOrderUnitCostCents(i.unit_cost);
+            return {
+              ...line,
+              unit_cost: purchaseOrderCentsToDollars(unitCostCents),
+              unit_cost_cents: unitCostCents,
             };
           });
 
@@ -385,9 +402,9 @@ export default function NewPurchaseOrder() {
                   <tr className="border-b border-gray-100 text-left text-xs text-secondary uppercase tracking-wide">
                     <th className="px-4 py-3 font-medium min-w-[220px]">Product</th>
                     <th className="px-4 py-3 font-medium w-28">Qty</th>
-                    <th className="px-4 py-3 font-medium w-32">Unit Cost</th>
+                    {isAdmin && <th className="px-4 py-3 font-medium w-32">Unit Cost</th>}
                     <th className="px-4 py-3 font-medium w-24">Unit Size</th>
-                    <th className="px-4 py-3 font-medium w-32">Line Total</th>
+                    {isAdmin && <th className="px-4 py-3 font-medium w-32">Line Total</th>}
                     <th className="px-4 py-3 font-medium w-10" />
                   </tr>
                 </thead>
@@ -432,6 +449,7 @@ export default function NewPurchaseOrder() {
                             className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                           />
                         </td>
+                        {isAdmin && (
                         <td className="px-4 py-3">
                           <input
                             type="number"
@@ -444,6 +462,7 @@ export default function NewPurchaseOrder() {
                             className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                           />
                         </td>
+                        )}
                         <td className="px-4 py-3">
                           <input
                             type="text"
@@ -453,11 +472,13 @@ export default function NewPurchaseOrder() {
                             placeholder="Gal"
                           />
                         </td>
+                        {isAdmin && (
                         <td className="px-4 py-3 font-mono text-nav-dark">
                           {fmt(purchaseOrderCentsToDollars(
                             purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
                           ))}
                         </td>
+                        )}
                         <td className="px-4 py-3">
                           {items.length > 1 && (
                             <button
@@ -473,6 +494,7 @@ export default function NewPurchaseOrder() {
                     );
                   })}
                 </tbody>
+                {isAdmin && (
                 <tfoot>
                   <tr className="border-t border-gray-200">
                     <td colSpan={4} className="px-4 py-3 text-right font-medium text-secondary">
@@ -484,6 +506,7 @@ export default function NewPurchaseOrder() {
                     <td />
                   </tr>
                 </tfoot>
+                )}
               </table>
             </div>
           )}
@@ -537,7 +560,7 @@ export default function NewPurchaseOrder() {
                       key={p.id}
                       product={p}
                       onClick={() => assignProduct(productSearchOpen, p)}
-                      trailing={fmt(p.current_cost || 0)}
+                      trailing={isAdmin ? fmt(p.current_cost || 0) : undefined}
                     />
                   ))
                 )}

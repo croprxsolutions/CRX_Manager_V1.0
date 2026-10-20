@@ -113,6 +113,10 @@ describe('sanitizeError', () => {
   it('maps return-credit and customer-scope tokens to operator guidance', () => {
     expect(sanitizeError('CUSTOMER_SCOPE_DENIED')).toBe('You can only work with customers assigned to you');
     expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');
+    expect(sanitizeError('PO_COST_REASON_REQUIRED: say why the cost of a received line is changing'))
+      .toBe('Say why the cost of a received line is changing');
+    expect(sanitizeError('PO_CANCELLED: cannot change cost on a cancelled purchase order'))
+      .toBe('This purchase order is cancelled, so its cost cannot change');
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_OR_ASSIGNED_REP: only an admin or this customer\'s assigned sales rep can change its default commission split'))
       .toBe("Only an admin or this customer's assigned sales rep can change its default commission split");
     expect(sanitizeError('SALESMAN_SCOPE_DENIED')).toBe("Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work");

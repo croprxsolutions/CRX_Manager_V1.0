@@ -1,0 +1,26 @@
+## 2026-10-20 - Purchase-order cost becomes admin-only, with a cost history and governed corrections
+
+Mason chose "Option B" for the purchase-order cost project (KNOWN_ISSUES, the top-priority follow-up
+from PR #965). Migration `20261020200000_po_cost_admin_only_and_corrections` (NOT applied; it must be
+applied before this PR merges, because the screens read its new column and history table) and the
+four purchase-order screens.
+
+- **Reps no longer set purchase cost.** A trigger on every purchase-order line gives a line that a
+  signed-in non-admin adds (or switches to another product) the product's catalog cost and flags it
+  `cost_needs_review`; any cost a rep sends is overruled, and an existing line keeps its cost.
+- **Admins correct or confirm cost, received lines included.** New admin-only
+  `set_purchase_order_item_costs` changes only the line cost and the PO total, never inventory, a
+  receiving record or the product's catalog cost. A received line needs a reason. Saving a flagged
+  line at the same cost confirms it. Before this, a received cost could only be fixed by reversing
+  the receipt, which took the stock back out of inventory.
+- **Cost history.** Every cost change (and every confirm) is written to the admin-only, append-only
+  `purchase_order_item_cost_changes`: who, when, old and new cost, quantity received, and why.
+- **Screens.** Purchase order list, new purchase order, purchase order detail and PDF import show
+  cost only to admins (the `costFields.test.ts` exemption for these four screens is removed). The
+  detail page gains a Cost History card, Unconfirmed badges and a "Correct / Confirm Cost" window
+  with a reason box; the list gains a "Costs to confirm" filter for admins.
+- **Not changed:** inventory value and margins already use the catalog cost, not purchase-order cost
+  (live read 2026-10-20), so a correction moves no inventory value. Catalog cost still changes only
+  through the pricing workbook (Mason, 2026-10-20).
+- Proof: `node scripts/smoke/prove-po-cost-admin-only-and-corrections-real-schema.mjs`
+  (PO_COST_ADMIN_ONLY_CORRECTIONS_PROOF_PASS).

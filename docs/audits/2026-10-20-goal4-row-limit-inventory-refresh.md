@@ -159,6 +159,14 @@ The rest are short on purpose, already signalled, or scoped to one small record:
 
 **Not a row limit, noted.** `pages/OrderDetail.tsx:327` sends every customer id from the M36 reads in one `.in()` list, which could make the request too long at volume. Migration `20261015130000` line 608 takes a `customer_application_rates` row with `LIMIT 1` and no `ORDER BY`, so the pick is arbitrary if two rates exist. Both are outside Goal 4.
 
+The 2026-10-15 audit's other "Found along the way" items are not row limits, and this plan doesn't fix them. Each is still listed there:
+- the likely broken over-received PO check, which belongs with the Part 2 integrity work if it is confirmed;
+- the Prepay manager's unpaid total leaving out overdue invoices;
+- `reconcile_prepay_balances` skipping inactive customers;
+- the blend-ticket quote price chosen with `LIMIT 1`, which belongs to Goal 3's blend-ticket pricing.
+
+The 20-page document-scan limit is the exception: it is scheduled in Part 2.
+
 ## Plan for the rest of Goal 4
 
 Plain-English terms: **paging** means asking for records one batch at a time until none are left, which is what part 1 did. **Server-side paging** means the screen asks the database for just one screenful at a time, plus a total count, instead of loading everything.
@@ -171,13 +179,17 @@ Plain-English terms: **paging** means asking for records one batch at a time unt
 - Notifications (L10-1), with the bell badge (L9) counting unread notifications in the database instead of the 20 it loads;
 - the lookups and per-record reads that are simple full reads:
   - M23, M24, M36, M54, M57, M62, N4, N5, N7, N8, N10, N11 and L17;
-  - M27 and M64, which must show the newest rows, not the oldest.
+  - M27 and M64, which must show the newest rows, not the oldest;
+- the 20-page document-scan limit (`lib/documentOCR.ts:47`, applied at `:61`; the 2026-10-15 audit, "Found along the way").
+  - It hits bulk customer, order, quote and PO imports from PDF.
+  - Either read every page, or stop and tell the user plainly that pages after 20 were not imported. A Sentry warning alone isn't enough.
+  - Proof: a test with a 21-page document, plus the message seen on screen.
 
 Done when each reads past a 1,000-row fake in tests, and a live check with a 10-row page matches the database count, as in part 1. Size: likely two PRs (money and checks first, then the lookups). H36 (dashboard counts) needs the function to return a true count, so it moves to part 4.
 
 **Part 3, item (b): pickers become search boxes.**
 - Add customer and field search pickers beside the existing `ProductSearchPicker`. Each asks the database as you type and loads a saved choice by id.
-- Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the picker entries in M48, M49 and M50, M53, M59, N2, N3 and N6.
+- Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the picker entries in M48, M49 and M50, M59, N2, N3 and N6.
 - Screens that use the whole list are not pickers, and a search box would leave them capped. They keep a full paged read (`fetchAllRows`) or move into a database report instead:
   - Label Data Quality (M49, coverage and batch checks);
   - Brand vs Generic (M49 and N12, the mapping viewer);
@@ -207,6 +219,7 @@ Done when a search finds a record past the old limit on every picker. Probably t
 - Also in part 4:
   - the Office Cockpit tiles (M20), including "Post all clean", which acts on every eligible draft;
   - the Jobs billed-customer column (M52), read per page;
+  - cost-basis purchase candidates (M53): `get_product_cost_basis_workspace` returns only the newest 20, and the price-history screen can choose only from those. It needs a database search or paging of candidates (a function change), not the generic picker;
   - the remaining list-like screens: M11, M18, M19, M21, M22, M25, M55, M56, M61 and M66, Customers (L1), Jobs (L2), and Team Board notes (L10-3).
 
 **Then (d) and (e)** as the plan says: database money totals for the remaining screens (part 1's fixed pages still add up in the browser from the full set), then the workload test.

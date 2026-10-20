@@ -113,17 +113,22 @@ describe('replay-binding batch 3b migration binds the record and the reason', ()
     });
   }
 
-  it('void_order refuses a draft that already carries recorded money before zeroing it', () => {
+  it('void_order zeroes a draft only when no money is recorded on the row it writes, else refuses', () => {
     const start = sql.indexOf('CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(');
     expect(start).toBeGreaterThan(-1);
     const body = sql.slice(start, sql.indexOf('$function$;', start));
-    const refusal = body.indexOf("RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY:");
-    const zeroing = body.indexOf('paid_amount_cents = 0,');
-    expect(refusal).toBeGreaterThan(body.indexOf("IF v_invoice.status = 'draft' THEN"));
-    expect(refusal).toBeLessThan(zeroing);
+    // The zero-money condition sits in the UPDATE's own WHERE (evaluated on the row being written,
+    // so a concurrent write that records money is seen), never only in an earlier read.
+    const update = body.slice(body.indexOf('      UPDATE public.invoices\n        SET status = \'cancelled\','));
+    const statement = update.slice(0, update.indexOf(';\n') + 1);
+    expect(statement).toContain('paid_amount_cents = 0,');
     for (const field of ['paid_amount_cents', 'prepay_applied_cents', 'write_off_cents', 'credit_applied_cents']) {
-      expect(body).toContain(`COALESCE(v_invoice.${field}, 0) <> 0`);
+      expect(statement).toContain(`AND COALESCE(${field}, 0) = 0`);
     }
+    expect(update.slice(statement.length)).toMatch(
+      /^\n\s+IF NOT FOUND THEN\n\s+RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY:/
+    );
+    expect(body).not.toContain('COALESCE(v_invoice.paid_amount_cents');
   });
 
   it('batch cancel keeps cancelling keyless through the renamed body, not the keyed wrapper', () => {

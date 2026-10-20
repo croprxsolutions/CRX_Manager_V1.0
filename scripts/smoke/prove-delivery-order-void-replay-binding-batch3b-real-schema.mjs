@@ -28,8 +28,8 @@
  *   7. MUTATION: with each wrapper's target or reason taken out of its fingerprint, the key
  *      requirement replaced by a keyless pass-through, cancel_delivery's role check removed, or the
  *      batch-cancel body pointed back at the public cancel_delivery, the new chain fails at the step
- *      that proves it; so does void_order's body with either of its two 3b edits taken out (the
- *      draft-cancel zeroing, or the refusal of a draft that already carries recorded money).
+ *      that proves it; so does void_order's body with any one of its three 3b edits taken out (the
+ *      draft-cancel zeroing, the zero-money WHERE on that UPDATE, or the refusal when it updates no row).
  *
  * Run: node scripts/smoke/prove-delivery-order-void-replay-binding-batch3b-real-schema.mjs   (needs Docker)
  * Prints DELIVERY_ORDER_VOID_REPLAY_BINDING_BATCH3B_PROOF_PASS on success.
@@ -40,9 +40,10 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
-// Section 3b's two edits to void_order's pinned body, exactly as the migration writes them.
-const VOID_ORDER_GUARD = "      IF COALESCE(v_invoice.paid_amount_cents, 0) <> 0\n         OR COALESCE(v_invoice.prepay_applied_cents, 0) <> 0\n         OR COALESCE(v_invoice.write_off_cents, 0) <> 0\n         OR COALESCE(v_invoice.credit_applied_cents, 0) <> 0 THEN\n        RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order', v_invoice.invoice_number;\n      END IF;\n";
+// Section 3b's three edits to void_order's pinned body, exactly as the migration writes them.
 const VOID_ORDER_ZEROED = "            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n";
+const VOID_ORDER_ZERO_MONEY_WHERE = "\n        AND COALESCE(paid_amount_cents, 0) = 0\n        AND COALESCE(prepay_applied_cents, 0) = 0\n        AND COALESCE(write_off_cents, 0) = 0\n        AND COALESCE(credit_applied_cents, 0) = 0";
+const VOID_ORDER_NO_ROW_REFUSAL = "      IF NOT FOUND THEN\n        RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order', v_invoice.invoice_number;\n      END IF;\n";
 /** A PostgreSQL E'' literal for `text`. */
 const sqlE = (text) => `E'${text.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/\n/g, '\\n')}'`;
 import { fileURLToPath } from 'node:url';
@@ -429,11 +430,13 @@ function main() {
   assert.match(a.output, /POSTFLIGHT_OK/, `the postflight did not report OK:\n${a.output}`);
   assert.deepEqual(guardOps(), [...prior, ...batch3b], 'APPLY: the guard does not list 24 + 3 operations in order');
   assert.equal(serviceRoleCanRunVoidOrderInner(), 'f', `APPLY: service_role can still run ${VOID_ORDER_INNER}`);
-  // The inner body is the pinned live body plus only section 3b's two edits: the applied-money
-  // refusal and the four zeroing lines.
-  assert.equal(scalar(`SELECT md5(replace(replace(replace(prosrc, chr(13), ''), ${sqlE(VOID_ORDER_GUARD)}, ''), ${sqlE(VOID_ORDER_ZEROED)}, '')) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`),
-    'a0a9151160a6f2b58624b30435322b94', `APPLY: ${VOID_ORDER_INNER} is not the pinned body plus only the two draft-branch edits`);
-  assert.equal(scalar(`SELECT strpos(prosrc, ${sqlE(VOID_ORDER_GUARD)}) > 0 FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), 't', `APPLY: ${VOID_ORDER_INNER} does not carry the applied-money refusal`);
+  // The inner body is the pinned live body plus only section 3b's three edits: the four zeroing
+  // lines, the zero-money WHERE on that UPDATE, and the refusal when it updates no row.
+  assert.equal(scalar(`SELECT md5(replace(replace(replace(replace(prosrc, chr(13), ''), ${sqlE(VOID_ORDER_NO_ROW_REFUSAL)}, ''), ${sqlE(VOID_ORDER_ZERO_MONEY_WHERE)}, ''), ${sqlE(VOID_ORDER_ZEROED)}, '')) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`),
+    'a0a9151160a6f2b58624b30435322b94', `APPLY: ${VOID_ORDER_INNER} is not the pinned body plus only the three draft-branch edits`);
+  for (const [label, edit] of [['zero-money WHERE', VOID_ORDER_ZERO_MONEY_WHERE], ['no-row refusal', VOID_ORDER_NO_ROW_REFUSAL]]) {
+    assert.equal(scalar(`SELECT strpos(prosrc, ${sqlE(edit)}) > 0 FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), 't', `APPLY: ${VOID_ORDER_INNER} does not carry the ${label}`);
+  }
   assert.equal(scalar(`SELECT (length(prosrc) - length(replace(prosrc, 'total_amount_cents = 0,', ''))) / length('total_amount_cents = 0,') FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), '1', `APPLY: ${VOID_ORDER_INNER} does not carry exactly one zeroing edit`);
   for (const api of ['anon', 'authenticated', 'service_role']) {
     for (const impl of IMPLS) {
@@ -514,7 +517,7 @@ function main() {
     assert.match(r.fail, expected, `MUTATION ${label}: wrong failure: ${r.fail}`);
     console.log(`[prover] MUTATION: without the ${label} hunk the chain fails: ${r.fail}`);
   }
-  // Section 3b makes two edits to void_order's pinned body. Each mutation removes exactly one of them.
+  // Section 3b makes three edits to void_order's pinned body. Each mutation removes exactly one of them.
   const unfix = (edit) => `DO $unfix$
 DECLARE v_src text;
 BEGIN
@@ -526,7 +529,8 @@ END
 $unfix$;`;
   for (const [label, edit, expected] of [
     ['draft-cancel zeroing', VOID_ORDER_ZEROED, /SMOKE_FAIL: void_order could not void a fulfilled order with a draft invoice: ORDER_INVOICE_TERMINAL/],
-    ['applied-money refusal', VOID_ORDER_GUARD, /SMOKE_FAIL: void_order voided an order whose draft invoice carries a recorded payment/],
+    ['zero-money WHERE', VOID_ORDER_ZERO_MONEY_WHERE, /SMOKE_FAIL: void_order voided an order whose draft invoice carries a recorded payment/],
+    ['no-row refusal', VOID_ORDER_NO_ROW_REFUSAL, /SMOKE_FAIL: void_order voided an order whose draft invoice carries a recorded payment/],
   ]) {
     const unfixed = chain(CHAIN, unfix(edit));
     assert.ok(!unfixed.pass, `MUTATION void_order ${label}: the chain still passed without it`);

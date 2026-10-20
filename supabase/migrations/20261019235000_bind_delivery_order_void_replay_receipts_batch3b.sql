@@ -78,13 +78,14 @@
 --   the draft's money fields are zero (ORDER_INVOICE_TERMINAL, whole call rolled back; 6 live
 --   fulfilled orders had such a draft on 2026-10-19, and no order has ever been voided live).
 --   Section 3b makes the same edit cancel_order's body already has: that one UPDATE also zeroes total,
---   paid, prepay and write-off cents. Sol review on this batch (HIGH): zeroing must never erase money
---   already recorded on a draft, so the same branch first refuses (ORDER_VOID_DRAFT_HAS_APPLIED_MONEY,
---   whole call rolled back) a draft whose paid, prepay, write-off or credit cents are nonzero (live
---   had none of 9 drafts on 2026-10-20). Written out in full: the md5-pinned live body plus only
---   those two edits.
+--   paid, prepay and write-off cents. Sol review on this batch (HIGH, two rounds): zeroing must never
+--   erase money recorded on a draft, even by a write that lands while the void runs, so the UPDATE
+--   itself matches only a draft whose paid, prepay, write-off and credit cents are all zero, and the
+--   branch refuses (ORDER_VOID_DRAFT_HAS_APPLIED_MONEY, whole call rolled back) when it updates no
+--   row (live had none of 9 drafts with such amounts on 2026-10-20). Written out in full: the
+--   md5-pinned live body plus only those three edits.
 --
--- WHAT DOES NOT CHANGE: apart from those two draft-branch edits, no money, stock, commission or invoice logic is
+-- WHAT DOES NOT CHANGE: apart from those three draft-branch edits, no money, stock, commission or invoice logic is
 --   retyped (the three bodies are renamed, pinned by md5 below); no table, row,
 --   policy or receipt changes; every keyed legitimate call (first call, exact retry) returns what it
 --   returns today. A keyless call to the three public names is now refused (IDEMPOTENCY_KEY_REQUIRED).
@@ -548,13 +549,16 @@ GRANT EXECUTE ON FUNCTION public.void_order(uuid, uuid, text, text) TO authentic
 --     makes the one same edit here, to the pinned live body (written out below), and the postflight proves nothing
 --     else in it changed. A never-posted draft has no financial impact (the body's own comment);
 --     the audit row above it still records the draft's original total. The zeroing is only safe on a
---     draft with no money recorded against it, so the branch first refuses a draft whose paid, prepay,
---     write-off or credit cents are nonzero (ORDER_VOID_DRAFT_HAS_APPLIED_MONEY); before this batch such
---     a void also rolled back, so a recorded amount is never erased.
+--     draft with no money recorded against it, so the UPDATE's own WHERE requires paid, prepay,
+--     write-off and credit cents to be zero on the row it writes (a concurrent write that records
+--     money is seen there, after its row lock), and the branch refuses with
+--     ORDER_VOID_DRAFT_HAS_APPLIED_MONEY when no row was updated. Before this batch such a void also
+--     rolled back, so a recorded amount is never erased.
 -- ---------------------------------------------------------------------------------------------
 -- The full body is written out (the pinned live body, md5 a0a9151160a6f2b58624b30435322b94 checked in
--- the preflight, plus only the applied-money refusal and the four zeroing lines) so every migration
--- scanner reads it. The postflight re-checks that removing those two edits gives back the pinned md5.
+-- the preflight, plus only the zeroing lines, the zero-money WHERE and the no-row refusal) so every
+-- migration scanner reads it. The postflight re-checks that removing those three edits gives back
+-- the pinned md5.
 -- CREATE OR REPLACE keeps the owner and the ACL (service_role was revoked above).
 CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT 'Voided by admin'::text, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
@@ -753,12 +757,6 @@ BEGIN
   LOOP
     IF v_invoice.status = 'draft' THEN
       -- never-posted draft has no financial impact: cancel (allowed transition), do not void.
-      IF COALESCE(v_invoice.paid_amount_cents, 0) <> 0
-         OR COALESCE(v_invoice.prepay_applied_cents, 0) <> 0
-         OR COALESCE(v_invoice.write_off_cents, 0) <> 0
-         OR COALESCE(v_invoice.credit_applied_cents, 0) <> 0 THEN
-        RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order', v_invoice.invoice_number;
-      END IF;
       UPDATE public.invoices
         SET status = 'cancelled',
             void_reason = 'Order ' || v_order.order_number || ' voided. ' || p_reason,
@@ -767,7 +765,14 @@ BEGIN
             prepay_applied_cents = 0,
             write_off_cents = 0,
             updated_at = now()
-      WHERE id = v_invoice.id;
+      WHERE id = v_invoice.id
+        AND COALESCE(paid_amount_cents, 0) = 0
+        AND COALESCE(prepay_applied_cents, 0) = 0
+        AND COALESCE(write_off_cents, 0) = 0
+        AND COALESCE(credit_applied_cents, 0) = 0;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order', v_invoice.invoice_number;
+      END IF;
 
       INSERT INTO public.financial_audit_log (
         operation_type,
@@ -983,18 +988,21 @@ BEGIN
        AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
        AND pg_get_function_arguments(p.oid) = 'p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT ''Voided by admin''::text, p_idempotency_key text DEFAULT NULL::text'
        AND p.prorettype = 'jsonb'::regtype
-       -- Its only changes are the draft branch's two 3b edits: the applied-money refusal and the
-       -- UPDATE zeroing the four money fields. Stripping both must give back the pinned md5.
-       AND strpos(p.prosrc, E'      IF COALESCE(v_invoice.paid_amount_cents, 0) <> 0\n         OR COALESCE(v_invoice.prepay_applied_cents, 0) <> 0\n         OR COALESCE(v_invoice.write_off_cents, 0) <> 0\n         OR COALESCE(v_invoice.credit_applied_cents, 0) <> 0 THEN\n        RAISE EXCEPTION ''ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order'', v_invoice.invoice_number;\n      END IF;\n') > 0
+       -- Its only changes are the draft branch's 3b edits: the UPDATE zeroing the four money fields,
+       -- only on a row with no recorded money (its WHERE), and the refusal when it updates no row.
+       -- Stripping all three must give back the pinned md5.
        AND strpos(p.prosrc, E'            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n') > 0
-       AND md5(replace(replace(replace(p.prosrc, chr(13), ''),
-                       E'      IF COALESCE(v_invoice.paid_amount_cents, 0) <> 0\n         OR COALESCE(v_invoice.prepay_applied_cents, 0) <> 0\n         OR COALESCE(v_invoice.write_off_cents, 0) <> 0\n         OR COALESCE(v_invoice.credit_applied_cents, 0) <> 0 THEN\n        RAISE EXCEPTION ''ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order'', v_invoice.invoice_number;\n      END IF;\n', ''),
+       AND strpos(p.prosrc, E'\n        AND COALESCE(paid_amount_cents, 0) = 0\n        AND COALESCE(prepay_applied_cents, 0) = 0\n        AND COALESCE(write_off_cents, 0) = 0\n        AND COALESCE(credit_applied_cents, 0) = 0') > 0
+       AND strpos(p.prosrc, E'      IF NOT FOUND THEN\n        RAISE EXCEPTION ''ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order'', v_invoice.invoice_number;\n      END IF;\n') > 0
+       AND md5(replace(replace(replace(replace(p.prosrc, chr(13), ''),
+                       E'      IF NOT FOUND THEN\n        RAISE EXCEPTION ''ORDER_VOID_DRAFT_HAS_APPLIED_MONEY: draft invoice % carries a recorded payment, prepay, write-off or credit; reverse it before voiding the order'', v_invoice.invoice_number;\n      END IF;\n', ''),
+                       E'\n        AND COALESCE(paid_amount_cents, 0) = 0\n        AND COALESCE(prepay_applied_cents, 0) = 0\n        AND COALESCE(write_off_cents, 0) = 0\n        AND COALESCE(credit_applied_cents, 0) = 0', ''),
                        E'            total_amount_cents = 0,\n            paid_amount_cents = 0,\n            prepay_applied_cents = 0,\n            write_off_cents = 0,\n',
                        '')) = 'a0a9151160a6f2b58624b30435322b94'
        AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['postgres']::text[]) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_IMPL_CONTRACT: _void_order_impl_20260714 must be its reviewed body plus only the draft branch''s applied-money refusal and money-field zeroing, and callable only by postgres';
+    RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_IMPL_CONTRACT: _void_order_impl_20260714 must be its reviewed body plus only the draft branch''s guarded money-field zeroing and no-row refusal, and callable only by postgres';
   END IF;
 
   -- The batch-cancel body: still postgres-only, and its only change is the retargeted call.

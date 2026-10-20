@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold } from "./hold-latch-lib.mjs";
+import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold, holdDecision } from "./hold-latch-lib.mjs";
 import { classifySql } from "./live-testdata-lib.mjs";
-import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid } from "./codex-push-lib.mjs";
+import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid, programAssembledAtRuntime } from "./codex-push-lib.mjs";
 import { DENY_TOOLNAME_RE } from "./autopilot-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,9 +43,80 @@ ok(isHoldPhrase("pause this loop"), "pause");
 ok(isHoldPhrase("im just scoping a future session, dont build yet"), "scope-only");
 ok(!isHoldPhrase("build me the invoices page"), "normal build is not a hold");
 ok(isResumePhrase("ok go ahead and continue"), "resume phrase");
-ok(isBuildActionUnderHold("Edit", { file_path: "src/pages/Foo.tsx" }), "edit source blocked under hold");
-ok(isBuildActionUnderHold("Bash", { command: "git commit -m x" }), "commit blocked under hold");
+// Local, reversible work WARNS under a hold; outward actions stay denied (2026-10-18).
+eq(holdDecision("Edit", { file_path: "src/pages/Foo.tsx" }), "warn", "edit source warns under hold");
+eq(holdDecision("Bash", { command: "git commit -m x" }), "warn", "commit warns under hold");
+eq(holdDecision("Bash", { command: "git -C C:/x rebase origin/main" }), "warn", "local rebase warns under hold");
+eq(holdDecision("Bash", { command: "npm run test" }), "allow", "tests stay plainly allowed");
+// The autonomous-landing merge and global-option pushes were MISSED before
+// (adversarial review 2026-10-18); a "stop" must hold them now.
+for (const command of [
+  "gh pr merge 951 --squash --match-head-commit 37222b56b0000000000000000000000000000000",
+  "gh -R masonwells1/CRX_Manager_V1.0 pr merge 951 --squash",
+  "git -C \"C:/CRX Manager/wt\" push origin HEAD",
+  "git push origin HEAD",
+  "git.exe push origin HEAD",
+  "git commit -m x && git push",
+  "gh pr create --fill",
+  "gh api repos/o/r/pulls/1/merge -X PUT",
+  "gh api repos/o/r/issues/1/comments -f body=hi",
+  "git branch -D old",
+  "rm -rf src",
+  "vercel deploy --prod",
+  // Luna, PR #956 round 1: long-form gh api fields and REST clients that write.
+  "gh api repos/o/r/issues/1/comments --field body=hi",
+  "gh api repos/o/r/issues/1/comments --raw-field body=hi",
+  "gh api repos/o/r/issues/1/comments --input body.json",
+  "curl -X POST -H \"Authorization: Bearer $GH_TOKEN\" --data '{\"body\":\"hi\"}' https://api.github.com/repos/o/r/issues/1/comments",
+  "curl --json '{\"a\":1}' https://api.github.com/x",
+  "Invoke-RestMethod -Method Post -Uri https://api.github.com/x -Body '{}'",
+  // Luna, PR #956 round 2.
+  "gh pr update-branch 951",
+  "gh workflow run ci.yml",
+  "gh secret set X --body y",
+  "curl -T artifact.zip https://example.test/upload",
+  "wget --method=PUT --body-file=x https://example.test/x",
+  // Luna, PR #956 round 3: a shell database client.
+  "psql \"$DATABASE_URL\" -f /tmp/erase-invoice.sql",
+  // Codex connector, PR #956: gh global options before `api`.
+  "gh --hostname github.com api repos/o/r/issues/1 -f title=x",
+  "gh -R o/r api repos/o/r/issues/1 --field title=x",
+  "gh api repos/o/r/issues/1/comments -fbody=x",
+  "curl -dfoo https://example.test/x",
+  "curl -Ffoo=bar https://example.test/x",
+  "curl -Tfile https://example.test/x",
+  "curl --form-string body=hi https://example.test/upload",
+  "curl --data-ascii foo https://example.test/x",
+  // CodeRabbit, PR #956: a backslash-newline continuation.
+  "curl -X POST \\\n  --data '{}' https://api.github.com/x",
+]) eq(holdDecision("Bash", { command }), "deny", `outward under hold: ${command}`);
+eq(holdDecision("Bash", { command: "curl -s https://api.github.com/repos/o/r" }), "allow", "curl GET allowed under hold");
+eq(holdDecision("Bash", { command: "gh pr view 951 --json state" }), "allow", "gh read allowed under hold");
+eq(holdDecision("Bash", { command: "gh api repos/o/r/pulls/1" }), "allow", "gh api GET allowed under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "select public.void_invoice(42)" }), "deny",
+  "mutating RPC inside a SELECT is denied under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "grant execute on function f() to anon" }), "deny",
+  "GRANT is denied under hold");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "SELECT * INTO public.hold_probe FROM invoices" }), "deny",
+  "SELECT INTO (creates a table) is denied under hold (CodeRabbit, PR #956)");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "SELECT ';' INTO public.hold_probe" }), "deny",
+  "SELECT INTO behind a semicolon inside a string literal is denied under hold (CodeRabbit, PR #956)");
+eq(holdDecision("mcp__supabase__execute_sql", { query: "select count(*) from invoices" }), "allow",
+  "plain read SQL allowed under hold");
 ok(isBuildActionUnderHold("mcp__supabase__apply_migration", {}), "apply blocked under hold");
+// Every GitHub MCP write tool is held; GitHub reads are not (Codex connector, PR #956).
+for (const tool of [
+  "create_pull_request", "update_pull_request", "add_issue_comment", "pull_request_review_write",
+  "issue_write", "update_pull_request_branch", "create_branch", "add_comment_to_pending_review",
+  "add_reply_to_pull_request_comment", "sub_issue_write", "actions_run_trigger", "fork_repository",
+  "create_repository", "merge_pull_request", "push_files",
+  // Ends in `_read` but changes state (CodeRabbit, PR #975).
+  "mark_all_notifications_read",
+]) eq(holdDecision(`mcp__github__${tool}`, {}), "deny", `GitHub MCP write held: ${tool}`);
+for (const tool of [
+  "get_file_contents", "list_pull_requests", "search_code", "pull_request_read", "issue_read",
+  "actions_get", "actions_list", "get_job_logs",
+]) eq(holdDecision(`mcp__github__${tool}`, {}), "allow", `GitHub MCP read allowed under hold: ${tool}`);
 // The file-bytes live-apply door is a Bash command, not an MCP tool, so the
 // tool-name set never sees it. Codex (P1, PR #460) verified the predicate returned
 // false for this exact invocation — a mid-session "stop" would NOT have paused a
@@ -86,6 +157,25 @@ ok(isBuildActionUnderHold("mcp__github__delete_file", {}), "GitHub delete_file b
 ok(isBuildActionUnderHold("mcp__github__merge_pull_request", {}), "GitHub merge_pull_request blocked under hold");
 ok(isBuildActionUnderHold("mcp__supabase__delete_branch", {}), "delete_branch blocked under hold");
 ok(isBuildActionUnderHold("mcp__supabase__rebase_branch", {}), "rebase_branch blocked under hold");
+
+// ── program name assembled at run time (Codex connector, PR #956) ─────────
+for (const command of [
+  "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
+  "a=gi; b=t; c=pu; d=sh; $a$b $c$d origin HEAD:main",
+  "export P=gh && $P pr merge 1",
+  "$p = 'gh'; & $p pr merge 1",
+  "$(printf g)h pr m$(printf er)ge 951 --squash",
+  "$(printf g)it pu$(printf sh) origin HEAD:main",
+  "`printf g`h pr m`printf er`ge 951 --squash",
+  "`printf g`it pu`printf sh` origin HEAD:main",
+]) ok(programAssembledAtRuntime(command), `assembled program name refused: ${command}`);
+for (const command of [
+  'for f in scripts/*.mjs; do node "$f" --check; done',
+  'F=$(git rev-parse --show-toplevel); ls "$F"',
+  'eval "$(fnm env)" && node -v',
+  'bash -c "$CMD"',
+  "i=$(($i+1)); git status",
+]) ok(!programAssembledAtRuntime(command), `ordinary shape not refused: ${command}`);
 
 // ── live-testdata ────────────────────────────────────────────────────────
 ok(classifySql("INSERT INTO customers (name) VALUES ('Acme Farm')").block, "real customer insert blocked");
@@ -307,6 +397,56 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
 r = runHook("codex-push-guard.mjs", { tool_name: "Bash", tool_input: { command: "git status" } });
 eq(r.status, 0, "codex-push-guard exits 0 on non-push command");
 eq(r.stdout.trim(), "", "codex-push-guard silent on non-push command");
+// A program name assembled inside a NESTED command is refused by both gates, not
+// only an outer one (Codex connector, PR #956).
+for (const command of [
+  "bash -c '$(printf g)h pr m$(printf er)ge 951 --squash'",
+  "bash -c 'g$(printf i)t pu$(printf sh) origin HEAD'",
+  // Balanced NESTED substitutions stay one program word (CodeRabbit, PR #956).
+  "bash -c '$(echo $(printf g))h pr m$(echo $(printf er))ge 951 --squash'",
+  "bash -c 'g$(echo $(printf i))t pu$(echo $(printf sh)) origin HEAD'",
+  // An unclosed `$(` still opens a built name (CodeRabbit, PR #956).
+  "bash -c '$(printf g h pr m$(printf er)ge 951'",
+]) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    ok(res.stdout.includes("deny"), `${hook} denies a nested assembled program name: ${command}`);
+  }
+}
+// Inline runtime code behind a short-option cluster or `deno eval`, through the REAL
+// merge and push guards (Codex connector, PR #956; Luna on the follow-up).
+for (const command of [
+  "node -pe \"require('child_process').execSync('gh pr merge 951 --squash')\"",
+  "node -pe \"require('child_process').execSync('git push origin HEAD:main')\"",
+  "perl -0e \"system('gh pr merge 951')\"",
+  "deno eval \"new Deno.Command('gh',{args:['pr','merge','951']}).outputSync()\"",
+  "deno --quiet eval \"new Deno.Command('git',{args:['push','origin','HEAD:main']}).outputSync()\"",
+  // A global option with a detached value before `eval` (Codex connector, PR #975).
+  "deno -L debug eval \"new Deno.Command('git',{args:['push']}).outputSync()\"",
+  "deno --log-level info eval \"new Deno.Command('gh',{args:['pr','merge','951']}).outputSync()\"",
+]) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    ok(res.stdout.includes("deny"), `${hook} denies inline runtime code reaching a gated action: ${command}`);
+  }
+}
+for (const command of ['node -pe "1+1"', 'perl -0e "print 1"', 'deno --quiet eval "console.log(1)"', 'deno -L debug eval "console.log(1)"']) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    eq(res.stdout.trim(), "", `${hook} silent on harmless inline runtime code: ${command}`);
+  }
+}
+for (const command of [
+  "bash -c 'echo $(date)'",
+  "bash -c 'eval \"$(fnm env)\" && node -v'",
+  "eval \"$(fnm env)\" && node -v",
+  "i=$(($i+1)); git status",
+]) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    eq(res.stdout.trim(), "", `${hook} silent on a substitution that builds no program name: ${command}`);
+  }
+}
 
 // codex-push-guard: a configured mirror remote denies EVERY push form, not just
 // a main-bound one. Regression test for a placement bug found on 2026-08-05:

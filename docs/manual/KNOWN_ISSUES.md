@@ -82,7 +82,7 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
-## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; steps 2–3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
+## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; step 2 written as `20261019230000`, not applied; step 3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
 
 Mason decided on 2026-10-15 that cost and margin are admin-only, including on a rep's own quotes and invoices
 (`docs/plans/2026-10-13-direction-and-goals.md`, Goal 1). A read-only live inventory on 2026-10-18 found three kinds of
@@ -103,8 +103,19 @@ exposure (full list in the PR for step 1):
 
 **Order of work.** Step 2: the screens stop reading whole rows on those tables (about 80 call sites in 40 files would break
 under a column lock, admins included), admin screens read cost through an admin-only function, and the three saves above derive
-cost on the server for non-admins. Step 3: the column lock, applied only after step 2's screens are live, then live per-role
-refusal checks. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+cost on the server for non-admins. **Step 2 is written (2026-10-19, migration `20261019230000` plus the screens; not applied, PR
+pending):** every screen now lists the non-cost columns it reads (`src/lib/costFields.ts`, guarded by `costFields.test.ts`),
+admins add cost through `get_admin_cost_fields`, quote history comes through `get_quote_versions`, the three saves derive a
+non-admin's cost, and chemical history and Quick Receive no longer show purchase cost to reps. **Purchase orders are NOT part of
+step 2 (Mason, 2026-10-20, option 1 "for now"):** the purchase order screens and `save_purchase_order` are unchanged, so reps still
+see and enter purchase cost there. Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
+lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
+cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Step 3 must leave the columns the purchase order screens read (product `current_cost`, purchase order and line cost) unlocked
+until the purchase order project lands (`costFields.test.ts` names those four screens as its only exemption). **TOP-PRIORITY
+FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"): purchase orders as their own project.** Three Sol rounds
+on PR #965 showed any cost a rep's purchase order line is given (the catalog cost, or $0) can be wrong and then locked at receipt
+(the supplier-cost-basis snapshot trigger, and the writer's received-line rule), with no governed way to correct it. The project
+needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
@@ -123,7 +134,25 @@ authorized RPC (or widen the policy for an assigned driver's open delivery); a s
 queue would also cover it. Found by the Codex GitHub review on #955. Source:
 `src/pages/DeliveryDetail.tsx`, `src/pages/FieldStop.tsx` (receipt send after completion).
 
-## OPEN 2026-10-18 (MED) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
+## FIXED 2026-10-19 (migration `20261019220000` pending apply) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
+
+**Fix (2026-10-19):** new RPC `start_and_complete_delivery` (migration
+`20261019220000_start_and_complete_delivery`) starts a scheduled delivery (by calling
+`confirm_delivery`) and completes it (by calling `complete_delivery`) in ONE transaction, so the
+delivery ends completed or nothing changed. Neither existing function is edited. It takes the chosen
+business date (`p_delivered_on`, America/Chicago): "today" completes at the server's clock, an
+earlier date at 17:00 UTC of that date (the value the app already sent), and a later date, one more
+than a year back, or a non-finite one is refused. So a "today" request that reaches the server just
+after Chicago midnight keeps the chosen day. It runs `complete_delivery`'s authorization test before
+its receipt lookup, so a reassigned driver or deactivated account cannot replay. Its retry key is required and bound to the
+caller and the exact request (date included), and `complete_delivery` runs under a key derived from
+it. The Deliveries list (`handleCompleteConfirm`) now makes this one call after the signal check
+and keeps the dialog-session, "details changed" and `runCriticalAction` guards. Proof: container
+chain `smoke-start-and-complete-delivery.sql` via
+`node scripts/smoke/prove-start-and-complete-delivery-real-schema.mjs`
+(START_AND_COMPLETE_DELIVERY_PROOF_PASS: a completion refused after the start leaves the delivery
+scheduled; seven mutations each turn it red), and the browser preview with the reply dropped after
+the server committed (see the changelog entry). The original entry follows.
 
 Goal 5 (completing a delivery needs a signal) shipped as an app-only change. The Deliveries list's
 **Mark Delivered** on a *scheduled* delivery makes two server calls: `confirm_delivery` (scheduled →
@@ -149,9 +178,10 @@ applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #94
 `982bc0dda`). The nine batch-1 functions (listed below, out of the unbound table) now refuse a reused key for a different
 caller or request (`IDEMPOTENCY_ACTOR_MISMATCH` / `IDEMPOTENCY_INTENT_MISMATCH`); an exact retry still
 replays. Proof: live postconditions read and the rollback-only live chain
-`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). Gap (CodeRabbit on PR #950): that chain
-checks an exact retry for eight of the nine functions; for `edit_prepay_credit` it checks only the
-mismatch refusal, so its exact-retry replay is not yet proven live. **Live body re-check 2026-10-18
+`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). The chain now checks an exact retry
+for all nine functions: the `edit_prepay_credit` step (the gap CodeRabbit raised on PR #950) was added
+and passed live 2026-10-20 00:35 UTC (SMOKE_PASS_ROLLBACK; the retry returned the saved answer and
+wrote no second audit row, no second receipt and no balance change). **Live body re-check 2026-10-18
 11:56 UTC** (read-only `pg_proc` read, migration-history row 951): all nine live wrappers bind the
 caller (`auth.uid()`, forged `p_performed_by` refused) and the request fingerprint through
 `check_idempotency_intent` before any saved result can come back (eight call their saved-result body;
@@ -160,7 +190,7 @@ left is `apply_prepay_to_invoice` inside `batch_apply_prepayments`, covered by t
 key. `_bind_replay_receipt_20261015`,
 the other batch-1 helpers and the nine renamed bodies have no EXECUTE for anon, authenticated,
 service_role or PUBLIC. None of the nine public functions was found unbound on a keyed call. This is a
-read of the deployed source, not an exercised retry, so the `edit_prepay_credit` gap above stays open. Batches 3–4 below are still open.
+read of the deployed source, not an exercised retry; the exercised `edit_prepay_credit` retry is the 2026-10-20 chain run above. Batches 3–4 below are still open.
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions
@@ -360,6 +390,14 @@ Mason's words. On 2026-10-15 two reports containing "Stop" (a list of hook event
 report shape also counts as Mason speaking and can clear a hold he set. Reproduced by replaying both
 real reports minus the preamble line through `origin/main`'s hooks.
 
+**Impact reduced 2026-10-18.** Seen twice more on 2026-10-18 (4:46 PM and 4:59 PM Central), both
+times from another session's helper report, each freezing a building session until Mason replied.
+Since that day's guard narrowing, a latched hold blocks outward actions (push, merge, PR publishing,
+migration apply, deploy, live SQL writes) and selected destructive local commands (such as a
+recursive delete or a forced branch delete). Ordinary source edits and commits get a warning.
+So a false latch now delays landing; it no longer stops all work. The root cause below is
+unchanged.
+
 **Why not fixed yet.** A text-shape fix (recognise the exact harness frame at the start of the prompt)
 was tried on PR #940 and removed: Sol blocked it because a user-typed message of the same shape with
 an indented "stop" would no longer latch. Sol's direction, which Mason chose: decide by trusted
@@ -460,8 +498,10 @@ shell rule matches protected names in the command text, so a command that spells
 recognised. Two `gpt-5.6-sol` rounds showed that, combined with a hard link made through the alias, an
 agent could rewrite a proof's `base_sha`, timestamp, model or verdict, and the push guard would accept
 it, because proof validation trusts those fields without checking who wrote them. That would defeat the
-expiry and moved-base rules of the protected-review gate. (Merging into `main` still also needs
-CodeRabbit's APPROVED review of the exact head, which a rewritten proof does not supply.)
+expiry and moved-base rules of the protected-review gate. (Until 2026-10-19 merging into `main` also
+needed CodeRabbit's APPROVED review of the exact head, which a rewritten proof does not supply. Since
+2026-10-19 CodeRabbit is advisory and that backstop is gone: a rewritten Sol proof plus green checks is
+enough for the merge gates, so this gap is now more exposed.)
 
 **The 8.3 alias is one route, not the whole problem.** The same write-up records that the review-proof
 guard is a named-access speed bump against mistakes and casual self-certification, NOT a
@@ -924,24 +964,31 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Jobs and Customers show a banner when capped. Deliveries stops silently.
-  - Paging is by position, so records changing during a long load are handled three ways:
+  - Paging is by position, so records changing during a long load are handled four ways:
     - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
     - every list read asks the server for its exact count (`{ count: 'exact' }`, enforced by
       `src/lib/pagedReadCallSites.test.ts`). A read whose distinct rows differ from the count changed
       mid-read, so it is repeated up to three times and then shown as an error, never as a wrong
       list. This covers a record whose sort date is edited into the part already read, and a burst
       of inserts;
+    - **Fixed 2026-10-19 (the insert+delete swap accepted on 2026-10-18):** a list that needed more
+      than one request is read a second time and returned only when two back-to-back reads match row
+      for row (every field of every row, array fields in order, rows in the same order), so a field
+      edited between pages cannot mix old and new values either. An insert and a delete between two
+      pages keep the count equal, so the count alone could show a just-deleted record and miss a
+      just-added one (or, with a sort-date edit, miss a record that existed throughout). Two reads
+      that disagree, or a read with the wrong count, restart the confirmation within the same three
+      attempts, and a list that never settles is shown as an error. A
+      list that fits in one request (every live list on 2026-10-19) is a single database statement
+      and is still read once; only lists that need more than one request (past the 1,000-row page, or
+      a smaller server cap) pay the second read. A list changed
+      identically during both reads is the remaining theoretical gap; a true snapshot needs
+      server-side paging (later Goal 4 step);
     - Customer Transaction Review's function rows have no `id`, so its running-balance chain is also
       checked (`src/lib/transactionLedger.ts`).
   - A list that keeps growing as fast as it is read stops after twice its starting size plus one
     page and is reported as changed. Customer Transaction Review also checks that the server's
     current last row is its own last row whenever it read more than one page.
-  - **Still open (accepted residual, 2026-10-18; both review models rated it HIGH):** an insert and
-    a delete landing between two page reads of the same load can keep the count equal while
-    swapping one row, so the list can show a just-deleted record and miss a just-added one until the
-    next refresh. This needs more than 1,000 rows in the list plus both changes in that window.
-    Live volumes on 2026-10-18 were at most 151 rows. The fix is a consistent snapshot (cursor
-    paging or a database-side read), which is the later Goal 4 step along with server-side search.
   - Deferred from the same reviews:
     - Every page asks for an exact count, which costs one counting pass per page. That is fine at
       today's sizes, but loading around 100,000 rows would count the table about 100 times. Server
@@ -2337,9 +2384,8 @@ from an agent; the guards can only refuse the *commands* that would use it.
 state directly rather than inferring it (**corrected 2026-09-26:** they no longer require
 `reviewDecision === "APPROVED"` — no approving review has been required since 2026-09-02;
 `.claude/hooks/pr-merge-guard.mjs` refuses
-`CHANGES_REQUESTED` and requires `mergeStateStatus` CLEAN with every check green; the landing path
-in `.claude/commands/ship.md` Step 8 still requires the `ready-for-coderabbit` review of the frozen
-head before merge — only the GitHub *approval* requirement was removed), and deny the
+`CHANGES_REQUESTED` and requires `mergeStateStatus` CLEAN with every check green; since 2026-10-19
+CodeRabbit is advisory and no CodeRabbit review or approval is required before merge), and deny the
 `/pulls/<n>/merge` REST endpoint and the `mergePullRequest` GraphQL mutation by destination
 regardless of transport. That closes every route found so far, and it is an honest-mistake net —
 **not a security boundary.** A command shape nobody has thought of, or an indirection that never
@@ -2410,8 +2456,10 @@ three careful passes.
 **What actually protects this path** (do not treat the hook as load-bearing) — and it differs by residual:
 
 - **For the novel-lexical and non-hooked tool-path gaps** (rows 5 and 6
-  above): the exact-SHA `gpt-6-sol` proof on migration diffs and the CodeRabbit final review are the
-  controls that always apply. The post-apply sweep predicates are a **partial, conditional** control here,
+  above): the exact-SHA `gpt-6-sol` proof on migration diffs is the control that always applies.
+  (**Since 2026-10-19 the CodeRabbit review is advisory and not guaranteed:** it reviews a PR once when
+  marked ready, skips `docs(` titles, and the merge does not wait for it, so "the CodeRabbit review" in
+  the rows below is a best-effort extra layer, not a guaranteed one.) The post-apply sweep predicates are a **partial, conditional** control here,
   not a third guaranteed one, and the condition must be stated rather than implied. They consider such a
   routine at all only because it carries no `ACTOR_MISMATCH` token — but they then fire only on their own
   sinks: the actor parameter near COALESCE/`auth.uid()`/role text, or a `financial_audit_log` write in the
@@ -3454,7 +3502,7 @@ live ledger.** `20260914101000`..`101300` are on `main` since #850 and LIVE sinc
 landing this higher stamp first would strand them. Full
 order: `20260914100700`, `100800`, `100900` (all three live as of 2026-09-28), `101000`..`101300`,
 then this file. **Apply authority (Mason, 2026-09-27): no separate in-chat yes.** Once the hold lifts it applies
-under the autonomous-landing rule (#804): CodeRabbit APPROVED on the final head, a fresh exact-SHA
+under the autonomous-landing rule (#804; CodeRabbit APPROVED no longer required since 2026-10-19): a fresh exact-SHA
 `gpt-6-sol` review clean, every required check green, and the migration-apply-guard proofs. Until then a rep's Remove on
 the live Documents tab (shipped in PR #764) is refused.
 

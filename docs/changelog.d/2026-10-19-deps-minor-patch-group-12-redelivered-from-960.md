@@ -1,8 +1,9 @@
 ## 2026-10-19 — Library updates: minor-and-patch group of 12 (re-delivered from #960)
 
-Dependabot PR #960 bumped twelve libraries. CodeRabbit skips bot-authored PRs ("Bot user detected"),
-and the merge gates require CodeRabbit APPROVED on the exact head, so this PR re-applies the same
-versions on top of current `main`, as #879 and #886 did for earlier Dependabot groups.
+Dependabot PR #960 bumped twelve libraries. CodeRabbit skips bot-authored PRs ("Bot user detected")
+and Dependabot's PR has no candidate birth record, so this PR re-applies the same versions on top of
+current `main` as an ordinary agent-authored PR, as #879 and #886 did for earlier Dependabot groups.
+CodeRabbit is advisory and its approval is not a merge requirement.
 
 | Package | From | To |
 | --- | --- | --- |

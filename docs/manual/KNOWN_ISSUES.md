@@ -956,7 +956,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
       miss a just-added one (or, with a sort-date edit, miss a record that existed throughout). Two
       reads that disagree are retried within the same three attempts and then shown as an error. A
       list that fits in one request (every live list on 2026-10-19) is a single database statement
-      and is still read once; only lists over 1,000 rows pay the second read. A list changed
+      and is still read once; only lists that need more than one request (past the 1,000-row page, or
+      a smaller server cap) pay the second read. A list changed
       identically during both reads is the remaining theoretical gap; a true snapshot needs
       server-side paging (later Goal 4 step);
     - Customer Transaction Review's function rows have no `id`, so its running-balance chain is also

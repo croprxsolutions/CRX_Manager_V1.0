@@ -187,11 +187,11 @@ the runbook. The backup alert design is `docs/plans/2026-10-19-goal6-backup-heal
     back). Only when that proof passes, turn the API on for the short window described in step 4, run the
     signed-out refusal request and the browser role checks from the isolated preview, and turn it off again
     at once if anything unexpected appears. Leave it on for cutover only with Mason's approval.
-    After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
-    step 5 validation (internal consistency, recent invoice numbers, and the exact archive row counts
-    taken **before** reconciliation, because schema updates and one-shot recovery plans change the data
-    after step 5 ran). Reconciliation in step 10 legitimately adds rows after the dump, so after it,
-    validate the reconciled delta against the external records (payments, deliveries, stock, email logs)
+    The exact archive row-count comparison is done **once, in step 5, right after the raw restore**, and is
+    not repeated here: the step 8 replay and recovery plans and the step 10 reconciliation legitimately
+    change rows afterwards. After steps 4, 6, 8, 9 and 10, repeat on the finished project the step 5
+    internal-consistency checks and recent invoice numbers, and check that every row change since step 5
+    is explained by a planned migration or recovery plan or by reconciliation: validate the reconciled delta against the external records (payments, deliveries, stock, email logs)
     and the business invariants instead of expecting dump-time counts; a real sign-in and allow/deny check for
     one account of every active interactive role (service-only profiles are checked by invariants, not passwords) (run from an isolated Vercel preview deployment or test host that is
     configured with the restored project's environment variables and security policy, because production

@@ -295,8 +295,11 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    every required secret (from the password manager, never pasted into chat), and smoke-test each function
    **safely**: use isolated test fixtures (synthetic records), non-production recipients and sandbox
    credentials or stubbed integrations, because `send-email`, the user-management functions and the OCR
-   functions have real external or database side effects, and OCR is not safe to repeat. Delete every test
-   record before the row-count validation in step 11 so counts and email logs are not polluted
+   functions have real external or database side effects, and OCR is not safe to repeat. Remove every test
+   record before the row-count validation in step 11 so counts and email logs are not polluted. Deleting
+   data needs Mason's explicit approval first, so list the exact test records and get his yes before
+   deleting any; in the new, not-yet-live project, the cleaner route is to do the smoke tests before the
+   final data load or to restart from a fresh restore
    (`send-email`, `create-user`, `reset-user-password`, `process-document`, `process-blend-ticket`,
    `customer-document-files`, `epa-lookup`, `setup-blend-tickets-storage`; the directory listing is
    authoritative). The Content Security Policy in `vercel.json` allows connections only to the current project's host

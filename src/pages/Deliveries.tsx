@@ -1038,6 +1038,18 @@ export default function Deliveries() {
       </div>
     );
 
+    // A failed load must never read as "no deliveries assigned to you".
+    if (loadFailed) {
+      return (
+        <div className="space-y-6 bg-gray-900 -m-4 sm:-m-6 p-4 sm:p-6 min-h-screen">
+          <h2 className="text-xl font-bold text-white">My Deliveries</h2>
+          <p role="alert" className="rounded-xl bg-red-950 border border-red-800 px-4 py-6 text-center text-sm text-red-200">
+            Your deliveries could not be loaded. Reload to try again.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-6 bg-gray-900 -m-4 sm:-m-6 p-4 sm:p-6 min-h-screen">
         {/* Header */}
@@ -1060,6 +1072,12 @@ export default function Deliveries() {
             <Badge variant="info">{deliveries.filter((d) => d.status !== 'cancelled' && d.status !== 'completed').length} Active</Badge>
           </div>
         </div>
+
+        {shortageCheckFailed && (
+          <p role="alert" className="rounded-xl bg-amber-950 border border-amber-800 px-4 py-3 text-sm text-amber-200">
+            Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
+          </p>
+        )}
 
         {/* Today */}
         <div>

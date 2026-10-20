@@ -100,6 +100,8 @@ function deliveries(): Row[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  H.auth.role = 'admin';
+  H.auth.profile = { id: 'user-1', role: 'admin' };
   H.failPage = null;
   H.ranges = [];
   H.tables = {
@@ -158,6 +160,26 @@ describe('Deliveries list past the 1,000-row server cap', () => {
     expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Stock shortage warnings could not be checked');
     // The list itself still loaded in full.
     expect(screen.getByTestId('table-rows')).toHaveTextContent(String(TOTAL));
+  }, 30000);
+
+  it("shows a driver an error, not \"no deliveries\", when their list fails to load", async () => {
+    H.auth.role = 'driver';
+    H.auth.profile = { id: 'driver-1', role: 'driver' };
+    H.failPage = { table: 'deliveries', from: 1 };
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+
+    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Your deliveries could not be loaded');
+    expect(screen.queryByText('No deliveries scheduled for today.')).not.toBeInTheDocument();
+  }, 30000);
+
+  it('keeps the stock-check warning on the driver dashboard too', async () => {
+    H.auth.role = 'driver';
+    H.auth.profile = { id: 'driver-1', role: 'driver' };
+    H.failPage = { table: 'inventory', from: 0 };
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+
+    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Stock shortage warnings could not be checked');
+    expect(screen.getAllByText('DEL-1499').length).toBeGreaterThan(0);
   }, 30000);
 
   it('shows an error when the item counts cannot be read, instead of zero items', async () => {

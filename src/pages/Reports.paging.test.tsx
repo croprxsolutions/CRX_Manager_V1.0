@@ -24,6 +24,8 @@ const H = vi.hoisted(() => ({
   // A table or function whose pages from this offset on fail, like a dropped connection.
   failPage: null as { source: string; from: number } | null,
   reads: [] as string[],
+  // The columns each read sorted on, by table or function.
+  orders: {} as Record<string, string[]>,
   toast: vi.fn(),
   exportToCSV: vi.fn(),
 }));
@@ -36,7 +38,10 @@ function serverRead(source: string, all: () => Row[]): Record<string, unknown> {
   let range: [number, number] | null = null;
   const b: Record<string, unknown> = {};
   const self = () => b;
-  for (const m of ['eq', 'neq', 'order', 'limit', 'not', 'is', 'gte', 'lte']) b[m] = self;
+  for (const m of ['eq', 'neq', 'limit', 'not', 'is', 'gte', 'lte']) b[m] = self;
+  const sorted: string[] = [];
+  H.orders[source] = sorted;
+  b.order = (column: string) => { sorted.push(column); return b; };
   b.select = (_columns: string, options?: { count?: string }) => { countRequested = Boolean(options?.count); return b; };
   b.in = (column: string, values: unknown[]) => {
     if (column !== 'status') rows = rows.filter((r) => values.includes(r[column]));
@@ -109,6 +114,7 @@ beforeEach(() => {
   H.auth.profile = { id: 'admin-1', role: 'admin' };
   H.failPage = null;
   H.reads = [];
+  H.orders = {};
   H.tables = {};
   H.functions = {};
 });
@@ -145,6 +151,8 @@ describe('Reports past the 1,000-row server cap', () => {
     await openTab('Financial', 'Customer Balance');
 
     await waitFor(() => expect(screen.getByTestId('rows:No outstanding balances')).toHaveTextContent(String(TOTAL)));
+    // Pages are separate calls: the function's order, then its unique customer id.
+    expect(H.orders.get_customer_balance_listing).toEqual(['outstanding_balance', 'customer_id']);
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
     expect(H.exportToCSV).toHaveBeenCalledTimes(1);
     const exported = H.exportToCSV.mock.calls[0][0] as Row[];

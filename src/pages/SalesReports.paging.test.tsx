@@ -19,6 +19,8 @@ const H = vi.hoisted(() => ({
   failPage: null as { source: string; from: number } | null,
   // While set, report-function reads wait for it, like a slow network.
   hold: null as Promise<void> | null,
+  // The columns each read sorted on, by table or function.
+  orders: {} as Record<string, string[]>,
   toast: vi.fn(),
 }));
 
@@ -29,7 +31,10 @@ function serverRead(source: string, all: Row[]): Record<string, unknown> {
   let range: [number, number] | null = null;
   const b: Record<string, unknown> = {};
   const self = () => b;
-  for (const m of ['eq', 'order', 'limit', 'not', 'in']) b[m] = self;
+  for (const m of ['eq', 'limit', 'not', 'in']) b[m] = self;
+  const sorted: string[] = [];
+  H.orders[source] = sorted;
+  b.order = (column: string) => { sorted.push(column); return b; };
   b.select = (_columns: string, options?: { count?: string }) => { countRequested = Boolean(options?.count); return b; };
   b.range = (from: number, to: number) => { range = [from, to]; return b; };
   const settle = () => {
@@ -78,6 +83,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   H.failPage = null;
   H.hold = null;
+  H.orders = {};
   H.tables = {
     // 1,500 active customers: the customer filter used to list only the first 1,000.
     customers: Array.from({ length: TOTAL }, (_, i) => ({ id: `c${i}`, farm_name: `Farm ${String(i).padStart(4, '0')}` })),
@@ -98,6 +104,15 @@ describe('Sales Reports past the 1,000-row server cap', () => {
     // 1,500 lines at $10.00: a read stopped at 1,000 would show $10,000.00 and 1,000 orders.
     expect(card('Total Revenue')).toHaveTextContent('$15,000');
     expect(card('Orders')).toHaveTextContent('1,500');
+  });
+
+  it('sorts the paged report on every column it returns, so pages cannot shift between calls', async () => {
+    render(<MemoryRouter><SalesReports /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId('table-rows')).toHaveTextContent(String(TOTAL)));
+
+    const sortedOn = H.orders.get_sales_detail_report;
+    expect(sortedOn.slice(0, 3)).toEqual(['order_date', 'customer_name', 'product_name']);
+    expect([...sortedOn].sort()).toEqual(Object.keys(line(0)).sort());
   });
 
   it('cannot export while a report is still loading', async () => {

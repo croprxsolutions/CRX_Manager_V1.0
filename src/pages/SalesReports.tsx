@@ -221,6 +221,27 @@ export default function SalesReports() {
     if (tab === 'detail') {
       const { data, error } = await fetchAllRows<SalesDetailRow>((from, to) => supabase
         .rpc('get_sales_detail_report', params, { count: 'exact' })
+        // Pages are separate calls: the report's own order (newest date, farm, product), then
+        // every other column, so the rows come back in one fixed sequence and none repeats or
+        // goes missing at a page seam (rows equal in every column are interchangeable).
+        .order('order_date', { ascending: false })
+        .order('customer_name')
+        .order('product_name')
+        .order('order_number')
+        .order('customer_id')
+        .order('product_id')
+        .order('sku')
+        .order('category')
+        .order('quantity')
+        .order('unit')
+        .order('unit_price')
+        .order('total_price')
+        .order('cost')
+        .order('profit')
+        .order('margin_pct')
+        .order('sales_rep_name')
+        .order('invoice_number')
+        .order('season')
         .range(from, to));
       if (requestId !== reportRequestId.current) return;
       if (error) {
@@ -241,6 +262,16 @@ export default function SalesReports() {
         .rpc('get_sales_summary_report', {
           ...params, p_group_by: groupByMap[tab],
         }, { count: 'exact' })
+        // The report's own order (largest revenue first), then every other column (see above).
+        .order('total_revenue', { ascending: false })
+        .order('group_key')
+        .order('group_id')
+        .order('total_quantity')
+        .order('total_cost')
+        .order('total_profit')
+        .order('margin_pct')
+        .order('order_count')
+        .order('line_count')
         .range(from, to));
       if (requestId !== reportRequestId.current) return;
       if (error) {

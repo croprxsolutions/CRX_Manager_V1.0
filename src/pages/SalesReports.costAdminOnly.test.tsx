@@ -61,11 +61,13 @@ vi.mock('../lib/db', () => ({
         H.holdNextRpc = null;
         pending = hold ? hold.then(() => result) : Promise.resolve(result);
       }
-      return {
+      const paged = {
+        order: () => paged,
         range: (from: number, to: number) => pending.then((r) => (r.data
           ? { data: r.data.slice(from, to + 1), error: null, count: r.data.length }
           : r)),
       };
+      return paged;
     },
   },
   assertRpcResult: <T,>(data: T) => data,

@@ -489,14 +489,17 @@ export default function Reports() {
   }, [profitTab, isAdmin, fetchCustomerProfitability, fetchProductProfitability, fetchCommissions, fetchRevenue]);
 
   // ─── FINANCIAL sub-fetchers ─────────────────────────────────
-  // The report functions return one row per line, group, customer or product, and the
-  // server cuts a function's rows off at its row cap too, so each is read page by page.
+  // The report functions return one row per group, customer, product or transaction, and the
+  // server cuts a function's rows off at its row cap too, so each is read page by page. Pages
+  // are separate calls, so each read sorts on every column after the report's own order: the
+  // rows then come back in one fixed sequence on every call, and no row can repeat or go
+  // missing at a page seam (rows equal in every column are interchangeable).
   const fetchPnL = useCallback(async () => {
     if (!startDate || !endDate) { setPnlData([]); reportLoaded('financial:pnl'); return; }
     const seq = reportLoadSeq.current;
-    const { data, error } = await fetchAllRows<PnLRow>((from, to) => supabase
-      .rpc('get_bottom_line_pnl', { p_start_date: startDate, p_end_date: endDate }, { count: 'exact' })
-      .range(from, to));
+    // P&L is a fixed handful of line items, far below the row cap, whose function order is the
+    // order the cards show; one call keeps that order.
+    const { data, error } = await supabase.rpc('get_bottom_line_pnl', { p_start_date: startDate, p_end_date: endDate });
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setPnlData([]);
@@ -517,6 +520,13 @@ export default function Reports() {
         p_end_date: endDate,
         p_group_by: grossSalesGroupBy,
       }, { count: 'exact' })
+      .order('total_revenue', { ascending: false })
+      .order('group_name')
+      .order('total_cost')
+      .order('gross_profit')
+      .order('margin_pct')
+      .order('units_sold')
+      .order('order_count')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
     if (error) {
@@ -534,6 +544,9 @@ export default function Reports() {
     const seq = reportLoadSeq.current;
     const { data, error } = await fetchAllRows<CustomerBalanceRow>((from, to) => supabase
       .rpc('get_customer_balance_listing', { p_as_of_date: asOf }, { count: 'exact' })
+      // The function's own order (largest balance first), then the unique customer id.
+      .order('outstanding_balance', { ascending: false })
+      .order('customer_id')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
     if (error) {
@@ -617,6 +630,15 @@ export default function Reports() {
         p_start_date: startDate,
         p_end_date: endDate,
       }, { count: 'exact' })
+      .order('transaction_date', { ascending: false })
+      .order('transaction_type')
+      .order('reference_number')
+      .order('customer_name')
+      .order('quantity')
+      .order('unit')
+      .order('unit_price')
+      .order('total_amount')
+      .order('notes')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
     if (error) {
@@ -633,6 +655,9 @@ export default function Reports() {
     const seq = reportLoadSeq.current;
     const { data, error } = await fetchAllRows<InventoryCostRow>((from, to) => supabase
       .rpc('get_inventory_cost_report', undefined, { count: 'exact' })
+      // The function's own order (product name), then the unique product id.
+      .order('product_name')
+      .order('product_id')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
     if (error) {

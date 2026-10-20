@@ -233,9 +233,15 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    A restore adds grants and default privileges after the lockdown, so a privilege change alone cannot be
    relied on to keep the data private while it loads. Anyone who knows the new project's API address could
    otherwise read or change restored data, and pointing Vercel elsewhere does not stop direct requests.
-   Use a control that does not depend on grants (restrict network access to the restoring machine, or
-   pause or disable the project's Data API in its settings), keep it in place until the privilege check below
-   passes and a signed-out API request is refused, and record that result. Details of the
+   Use a control that does not depend on grants: pause the project or disable its Data API in its settings.
+   (Supabase's database network restrictions cover only direct database and pooler connections, not the
+   HTTPS API, so they do not count as isolation.) Keep it off through the load, the schema replay and every
+   check that can be done **inside the database** (privileges, policies, roles; see the next paragraph and
+   step 11). Because the signed-out request and the browser role checks need the API to be on, there is one
+   short, deliberate exposure: turn the API on only after the in-database proof passes (no `anon` or
+   `authenticated` privilege or policy that exposes data beyond what production allows, row-level security
+   on every table), distribute no project keys, run the signed-out refusal request immediately, and turn the
+   API off again at once if anything unexpected is returned. Record the times it was on. Details of the
    access lockdown from `supabase/baselines/README.md` (step 3, "ACL lockdown"): a new
    Supabase project gives the anonymous (signed-out) role full read/write on every table and the right to
    run every function, and a restore only adds grants, never removes those. Changing privileges is a
@@ -274,12 +280,16 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    profiles, roles or records. Either restore the original user IDs, or relink and validate every
    identity-dependent row before cutover (this needs its own reviewed plan and Mason's approval; stop and
    escalate rather than improvising). Record which case applied. Matching rows are not proof: before
-   cutover, **sign in with a real password for one account of every active role** (admin, sales rep, and
-   each other role in use) and check each can open the screens and data that role should, and cannot open
+   cutover, **sign in with a real password for one account of every active interactive role** (admin, sales rep, and
+   each other human role in use; service-only profiles such as entity commission recipients have no usable
+   password by design, so never make them login-capable: check them through their ID and commission
+   invariants instead) and check each can open the screens and data that role should, and cannot open
    what it should not. One admin test is not enough. These checks describe the schema as restored, so they
    are **repeated as the final gate (step 11)** after the schema update, grants and Auth settings are done.
 7. Work lost is everything written after the dump time: up to about 7 days today, more if a Sunday run was missed.
-8. **Bring the restored schema up to date first.** The dump is only as new as its date, but the current
+8. **Bring the restored schema up to date first.** (Some migrations call `cron.schedule`, so replay can
+   recreate scheduled jobs. Keep jobs disabled during replay and run the `cron.job` check from step 4 again
+   afterward; any job present stops the restore until it is removed and reconciled.) The dump is only as new as its date, but the current
    code and Edge Functions expect every later migration (RPCs, columns, grants, constraints). Deploying
    them against an older schema causes an immediate outage. Follow `supabase/baselines/README.md`
    (section on replay after restore). That script compares against the fixed July baseline, **not** against
@@ -333,12 +343,17 @@ moment **before the bad change began** (4.5), which may be earlier than when any
     week-old state, or writes to the old project could disappear at cutover, creating the duplicates 4.7
     exists to prevent. Write down which approach you used.
 11. **Final gate before cutover.** First repeat the full table, function and default-privilege audit from
-    step 4 for every object the schema replay (step 8) added or changed, and only after that audit passes
-    lift the temporary API isolation, then repeat the signed-out refusal request directly against the
-    restored Data API. After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
+    step 4 for every object the schema replay (step 8) added or changed, including row-level-security
+    policies as well as grants. **Do this audit inside the database first, with the API still off**
+    (`has_table_privilege` and `has_function_privilege` for `anon` and `authenticated`, the policy list, and
+    row-level security on every table; test role behavior with `SET ROLE` in a transaction that is rolled
+    back). Only when that proof passes, turn the API on for the short window described in step 4, run the
+    signed-out refusal request and the browser role checks from the isolated preview, and turn it off again
+    at once if anything unexpected appears. Leave it on for cutover only with Mason's approval.
+    After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
     step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
     and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for
-    one account of every active role (run from an isolated Vercel preview deployment or test host that is
+    one account of every active interactive role (service-only profiles are checked by invariants, not passwords) (run from an isolated Vercel preview deployment or test host that is
     configured with the restored project's environment variables and security policy, because production
     Vercel still points at the old project until cutover, so checks run from it would test the wrong
     project); the signed-out request refusal; the ledger match; and a password

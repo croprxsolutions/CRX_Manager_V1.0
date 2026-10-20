@@ -4,7 +4,7 @@
 > `list_migrations` observation is at the top of this file, immediately below.
 > Do not scroll for it, and do not treat any older dated block as the latest.
 
-**Live capture — 2026-10-20 02:25 UTC (9:25 PM America/Chicago, 2026-10-19; read-only `execute_sql` on `supabase_migrations.schema_migrations`, after row 955 applied): 1037 rows / 1030 distinct names, `max(version)` `20261020022222`, from the row `20261019220000_start_and_complete_delivery` (row 955).**
+**Live capture — 2026-10-20 02:25 UTC (9:25 PM America/Chicago, 2026-10-19; read-only `execute_sql` on `supabase_migrations.schema_migrations`, after row 955 applied): 1037 rows / 1030 distinct names, `max(version)` `20261020022222`, from the row `20261019220000_start_and_complete_delivery` (row 955, applied 2026-10-20 02:22:22 UTC through `scripts/apply-migration-file.mjs --confirm`, PR #964). Effective ordering high-water, computed row by row from each name's leading 14-digit stamp with the version as fallback (re-read 2026-10-20 09:45 UTC, still 1037 rows): `20261019220000`, from that same row; a new candidate must sort strictly above it. The 20:55 UTC capture below predates this apply.**
 
 **Live capture — 2026-10-19 20:55 UTC (3:55 PM America/Chicago; read-only `execute_sql` on `supabase_migrations.schema_migrations`, after row 954 applied): 1036 rows / 1029 distinct names, `max(version)` `20261019205246`, from the row `20261019200000_bind_delivery_job_replay_receipts_batch3a` (row 954, applied 2026-10-19 20:52:46 UTC through `scripts/apply-migration-file.mjs --confirm` on Mason's own `I approve`, PR #954). Effective ordering high-water: `20261019200000`, from that same row; a new candidate must sort strictly above it. The 18:35 UTC capture below predates this apply.**
 

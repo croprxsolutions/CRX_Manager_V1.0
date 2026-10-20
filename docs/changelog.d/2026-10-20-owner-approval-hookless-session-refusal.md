@@ -28,4 +28,7 @@ session; a marker written on every message is a sound signal.
 
 **Residual.** An agent could write the marker by hand; like faking the reply itself, that is the
 deliberate forgery Mason accepted, not the silent loss this catches. A session already open before
-this change has no marker until its next message.
+this change has no marker until its next message. The marker proves the hook ran for some message in
+the session, not that it will run for the next one (Luna MED, round 1, deferred): every silent session
+seen so far ran no message hooks at all, and a time limit would refuse long sessions that work. If a
+session ever drops hooks midway, add a freshness window then.

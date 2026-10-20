@@ -592,7 +592,8 @@ export function hooklessSessionRefusal({ checkout, sessionId }) {
   return [
     "owner-approve-migration: REFUSED — do NOT ask Mason to reply \"I approve\" in this conversation.",
     `No message in this session (${sessionId}) has reached the approval hook: there is no ${promptHookSeenName(sessionId)}`,
-    `in ${path.join(checkout, ".claude", "session-state")}. Claude Code is not running message hooks here, so his reply would be lost without a word.`,
+    `in ${path.join(checkout, ".claude", "session-state")}. Usually Claude Code is not running message hooks here (or the hook could not save`,
+    "its marker in that folder); either way his reply could be lost without a word.",
     "Tell Mason in plain English, then the fix: open a Terminal tab in this same folder,",
     `  ${checkout}`,
     "start a fresh `claude` there, and run this script from that session; he replies in that terminal conversation.",

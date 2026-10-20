@@ -419,8 +419,10 @@ while (gateQueue.length) {
 // REVERSED by Mason, 2026-10-18 ("Change permissions to not always prompt me
 // allow it"; DECISION_LOG): the Edit/Write prompts on these files are removed.
 // What still stands between an edit and production: the review-proof guard
-// refuses SHELL writes to every one of them (Edit/Write stay visible in the
-// transcript), and nothing reaches main without the PR path. Pin the reversal so
+// refuses SHELL writes to every one of them except `package.json` (guarding it
+// breaks installs and merges; the proof minters joined that guard in PR #974),
+// Edit/Write stay visible in the transcript, and nothing reaches main without
+// the PR path. Pin the reversal so
 // a prompt is not silently re-added without a decision, and so the derived set
 // keeps being computed (it documents what an unreviewed local edit could reach).
 const promptedGateFiles = [...gateClosure]

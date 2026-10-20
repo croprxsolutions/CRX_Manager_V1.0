@@ -13,5 +13,12 @@ it") into this PR, which he merges himself.
 change the guard back before any PR diff shows it. What still stands: shell writes to guard files are
 refused, Edit/Write calls stay in the transcript, and nothing reaches `main` without the PR path.
 
+**Codex connector on `1a5abee75` (P1, fixed).** Three files that lost their prompt had no shell-write
+deny either: the migration proof minter `scripts/write-apply-proofs.mjs`, its `-lib`, and
+`scripts/supplier-pricing-phase3-private-artifacts.mjs`. A session could have rewritten the minter,
+minted reviewer proofs, and restored it. All three now join `review-proof-guard.mjs`'s enforcement
+surface (shell and path-field writes refused; running and reading allowed). A check of all 38
+unprompted paths finds only `package.json` uncovered, by design.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load settings from the main checkout.

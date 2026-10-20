@@ -37,10 +37,13 @@ const HEAD = "53e9c07142a4428848a3cebc0c31d2c1b83334c9";
 const OLD = "306d1e263e0000000000000000000000000000aa";
 
 // Build a GraphQL-shaped reviewThread node.
-const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = false, totalCount } = {}) => ({
+// A resolved thread carries a reply by default (resolved AND answered is the
+// handled state since #973); pass totalCount explicitly to test otherwise, or
+// null to omit the field.
+const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = false, totalCount = resolved ? 2 : 1 } = {}) => ({
   isResolved: resolved,
   isOutdated: false,
-  comments: { ...(totalCount === undefined ? {} : { totalCount }), nodes: [{ author: { login }, originalCommit: { oid } }] },
+  comments: { ...(totalCount === null ? {} : { totalCount }), nodes: [{ author: { login }, originalCommit: { oid } }] },
 });
 const pr = (threads, headRefOid = HEAD) => ({ headRefOid, reviewThreads: { nodes: threads } });
 
@@ -54,8 +57,12 @@ eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: tru
   "a thread resolved WITH a reply is handled");
 eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: 1 })])), 1,
   "a thread resolved with NO reply still counts as unanswered (Luna rounds 4–6)");
-eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true })])), 1,
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: null })])), 1,
   "an unknown comment count is treated as no reply");
+// A thread whose opening author cannot be read is unreadable, not clean (Luna round 7).
+eq(coderabbitThreadCount(pr([{ isResolved: false, comments: null }])), null, "a thread with no readable comments makes the count null");
+eq(coderabbitThreadCount(pr([{ isResolved: false, comments: { totalCount: 1, nodes: [{ author: null }] } }])), null,
+  "a thread whose author is null makes the count null");
 eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: false, totalCount: 3 })])), 1,
   "a reply alone, without resolving, is still open");
 eq(unresolvedCodeRabbitThreads(pr([thread()])), 0, "a Codex App thread is not a CodeRabbit thread");
@@ -201,7 +208,11 @@ ok(oidMatchesHead(HEAD.toUpperCase(), HEAD), "oid match is case-insensitive");
 ok(oidMatchesHead(` ${HEAD} `, HEAD), "oid match tolerates surrounding whitespace");
 ok(!isStandingAtHead({ resolved: false, oid: "" }, ""), "MUST NOT BLOCK: unknown-vs-unknown is not a standing finding");
 ok(isStandingAtHead({ resolved: false, oid: HEAD }, HEAD), "unresolved at the head IS a standing finding");
-ok(!isStandingAtHead({ resolved: true, oid: HEAD }, HEAD), "MUST NOT BLOCK: resolved at the head is not standing");
+ok(!isStandingAtHead({ resolved: true, replies: 1, oid: HEAD }, HEAD), "MUST NOT BLOCK: resolved and answered at the head is not standing");
+ok(isStandingAtHead({ resolved: true, replies: 0, oid: HEAD }, HEAD),
+  "resolved with NO reply at the head is still standing — a silent resolve does not clear a finding (Luna round 7)");
+eq(evaluateCodexBotReview(pr([thread({ resolved: true, totalCount: 1, oid: HEAD })])).status, "findings-at-head",
+  "a Codex App thread resolved without a reply still blocks");
 
 // An unknown oid must never compare equal to a head, in either direction.
 eq(

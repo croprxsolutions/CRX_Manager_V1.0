@@ -263,7 +263,11 @@ export function oidMatchesHead(oid, head) {
 // The blocking condition, in one place: an unresolved Codex thread raised
 // against the exact commit being merged.
 export function isStandingAtHead(thread, head) {
-  return thread?.resolved !== true && oidMatchesHead(thread?.oid, head);
+  // Handled = resolved AND answered (at least one reply). Since #973 a Codex
+  // session may resolve threads, so a silent resolve must not clear a finding
+  // (Luna round 7) — the same rule as CodeRabbit's threads.
+  const handled = thread?.resolved === true && Number(thread?.replies) >= 1;
+  return !handled && oidMatchesHead(thread?.oid, head);
 }
 
 // Classify the Codex App's position on the head that is about to merge.
@@ -341,6 +345,11 @@ export function coderabbitThreadCount(pullRequest) {
   if (!pullRequest || !String(pullRequest.headRefOid || "")) return null;
   // No thread list at all is a malformed answer, not an empty one (Luna round 4).
   if (!Array.isArray(pullRequest?.reviewThreads?.nodes)) return null;
+  // A thread whose opening comment's author cannot be read could be CodeRabbit's
+  // — unreadable, not clean (Luna round 7).
+  if (pullRequest.reviewThreads.nodes.some((node) => !String(node?.comments?.nodes?.[0]?.author?.login ?? "").trim())) {
+    return null;
+  }
   const open = unresolvedCodeRabbitThreads(pullRequest);
   if (open > 0) return open;
   return pullRequest.incomplete === true ? null : 0;
@@ -382,7 +391,7 @@ export function codexBotFindingsDenial(prefix, selector, count) {
     `  1. Read them:  gh pr view ${which} --comments      (author: chatgpt-codex-connector)\n` +
     "  2. Fix each real issue and push.\n" +
     "  3. For a genuine nitpick, reply with a one-line reason and RESOLVE the thread — resolving is\n" +
-    "     the intended exit here, not a workaround.\n\n" +
+    "     the intended exit here, not a workaround. A thread resolved with no reply still blocks.\n\n" +
     "Only unresolved comments on the exact head block a merge. Threads already resolved, and findings " +
     "raised against earlier commits, do not."
   );

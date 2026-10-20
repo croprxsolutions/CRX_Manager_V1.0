@@ -284,6 +284,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 9. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install
    every required secret (from the password manager, never pasted into chat), and smoke-test each function
+   **safely**: use isolated test fixtures (synthetic records), non-production recipients and sandbox
+   credentials or stubbed integrations, because `send-email`, the user-management functions and the OCR
+   functions have real external or database side effects, and OCR is not safe to repeat. Delete every test
+   record before the row-count validation in step 11 so counts and email logs are not polluted
    (`send-email`, `create-user`, `reset-user-password`, `process-document`, `process-blend-ticket`,
    `customer-document-files`, `epa-lookup`, `setup-blend-tickets-storage`; the directory listing is
    authoritative). The Content Security Policy in `vercel.json` allows connections only to the current project's host

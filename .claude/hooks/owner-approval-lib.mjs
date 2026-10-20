@@ -207,6 +207,31 @@ const PLAIN_REPLY_RE = /^\s*(?:i\s+approve(?:\s+it)?|approve|approved|yes\s*[,.!
 /** True when the whole message is a plain approval with no code. */
 export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(prompt ?? ""));
 
+// The desktop app puts a whole <system-reminder> block (its "Linked sessions now"
+// note) in front of Mason's words, and the hook's prompt carries it. On 2026-10-20
+// five of his replies arrived that way and none matched the whole-message forms
+// above, so the hook said nothing and an urgent apply stalled for an hour. Whole
+// blocks at the start or end are not his words; what is left must still be
+// exactly the reply. Each block ends at its first closing tag, so a block can
+// never swallow the words after it.
+const LEADING_REMINDERS_RE = /^(?:\s*<system-reminder>[\s\S]*?<\/system-reminder>)+\s*/;
+const TRAILING_REMINDERS_RE = /(?:<system-reminder>(?:(?!<\/?system-reminder>)[\s\S])*<\/system-reminder>\s*)+$/;
+
+/** Mason's reply without the whole reminder blocks Claude Code or the app put around it. */
+export const replyWithoutReminders = (prompt) =>
+  String(prompt ?? "").replace(LEADING_REMINDERS_RE, "").replace(TRAILING_REMINDERS_RE, "");
+
+/**
+ * "code" or "plain" when the message is not a whole reply but its last line is
+ * one (other words or an envelope came with it), else null. The hook then says
+ * it did not count instead of staying silent (2026-10-20).
+ */
+export function approvalAttemptIn(prompt) {
+  const last = replyWithoutReminders(prompt).trim().split(/\r?\n/).pop() ?? "";
+  if (approvalCodeFromReply(last)) return "code";
+  return isPlainApprovalReply(last) ? "plain" : null;
+}
+
 const textOf = (content) => (typeof content === "string" ? content
   : Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join("\n") : "");
 const isTextOnly = (content) => typeof content === "string" || (Array.isArray(content) && content.every((b) => b?.type === "text"));

@@ -86,7 +86,10 @@
 > the `reply: I approve` line and the `Reference <code>` line; the agent explains the change before running the script,
 > because text in the same reply joins the summary's message), so
 > he is always told why it waited for him, and a message that adds a question or note, only cites an old reference, or
-> puts those words inside other prose does not count. Only spacing, blank lines, wrapping and a code fence around the
+> puts those words inside other prose does not count. A whole `<system-reminder>` block the desktop app puts
+> around his words (its "Linked sessions now" note) is not part of his message (2026-10-20: five replies arrived
+> behind one and the hook said nothing); a message whose last line is a reply but which carries other text is
+> refused with a visible `OWNER APPROVAL NOT RECORDED`, never silently. Only spacing, blank lines, wrapping and a code fence around the
 > whole summary may differ; no markdown is interpreted, so bold, code or quote marks mean it does not count. That
 > message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;

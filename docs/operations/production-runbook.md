@@ -206,7 +206,9 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 2. Clone `masonwells1/CRX_Backups` and choose the archive `backups/crx-backup-YYYY-MM-DD.dump.gpg`:
    the **newest** when the project is lost; for **corruption**, the newest archive taken **before the bad
    change began** (the newest one may already contain the damage). The repo keeps the newest 8 archives (weekly, so about 8 weeks), so corruption older
-   than about 8 weeks cannot be undone this way. Say which you chose and why in the drill log.
+   than about 8 weeks cannot be undone this way. If decryption, restore or validation of the chosen
+   archive fails (a truncated dump can pass today's backup job), try the next older archive and keep going
+   back, recording each failure in the drill log. Say which you chose and why in the drill log.
 3. Decrypt with the passphrase from Mason's password manager. Never paste it into chat or a file. Stream the decrypted dump straight into `pg_restore` where possible; if a plaintext file is unavoidable, keep it in private temporary storage with owner-only permissions (not a shared folder) and delete it as soon as validation finishes unless Mason approves keeping it.
 4. Restore with `pg_restore` using the **Session pooler** connection string (IPv4). Keep
    scheduled jobs **off during reconciliation**. The dump itself can carry the `cron.job` rows (the pg_cron
@@ -244,7 +246,7 @@ moment **before the bad change began** (4.5), which may be earlier than when any
    read live row counts for `customers`, `invoices`, `orders`, `inventory_transactions`, `allocation_sets` and `prepay_credits` (the live payment tables; the old `payments` table is dead and must not be used)
    just before the drill and note the dump date. Treat a table as **append-only** only if no one can delete from it; today
    that is just `inventory_transactions` (confirm against the delete rules at drill time). For it, the restored
-   count must be at or below live and close to it (rows written since the dump are missing, never extra).
+   count must equal the live count of rows whose `created_at` is at or before the dump time (a stricter, exact rule; rows written since the dump are the only ones missing, never extra). If the project is lost, compare with the most recent saved Monday count and explain any difference from the activity since.
    Everything else, including `allocation_sets` and `prepay_credits` (admins can delete from both; count
    voided rows too, since voiding changes status, not row count), `customers`, `orders` and `invoices`,
    is mutable: the restored count may be above live if records were deleted after the dump: list the difference and
@@ -315,7 +317,10 @@ moment **before the bad change began** (4.5), which may be earlier than when any
 11. **Final gate before cutover.** After steps 4, 6, 8, 9 and 10, repeat on the finished project: the
     step 5 validation (row counts, internal consistency, recent invoice numbers), because schema updates
     and one-shot recovery plans change the data after step 5 ran; a real sign-in and allow/deny check for
-    one account of every active role; the signed-out request refusal; the ledger match; and a password
+    one account of every active role (run from an isolated Vercel preview deployment or test host that is
+    configured with the restored project's environment variables and security policy, because production
+    Vercel still points at the old project until cutover, so checks run from it would test the wrong
+    project); the signed-out request refusal; the ledger match; and a password
     reset test; and a live-update test using a synthetic team-note fixture (post a team note in one browser and see it, and a notification, appear in another without reloading; delete the fixture and its notification and activity rows afterwards and record that they were removed). Only if all pass does the Vercel cutover go ahead, and the scheduled jobs go back last (4.7).
 
 ### 4.7 After any restore: nothing may happen twice
@@ -344,19 +349,19 @@ The office keeps working while CRX is down overnight:
 - **Dispatch:** the last printed delivery schedule, plus phone calls to drivers.
 - **Deliveries:** a paper ticket recording customer, product, quantity, date, signer name and signature. Photograph it.
 - **Payments:** a paper log of checks and cash: customer, invoice number, amount, date, method.
-- Afterward, enter everything through the normal screens, oldest first, ticking each off the log.
+- Afterward, enter everything through the normal screens, oldest first, ticking each off the log. Give every paper record a stable identifier (ticket number or log line number) and write it into the entered record's notes; before entering one, search for that identifier so nothing is entered twice, and tick it off only after the entered record is checked against the paper.
 
 Not yet rehearsed. Log the first rehearsal in 4.9.
 
 ### 4.9 Drill log (quarterly; the first is overdue)
 
-Run 4.6 against a throwaway project each quarter. Record the date, backup file, who ran it, minutes
+Targets (Mason, 2026-10-14): **RTO** = back by the next business morning; **RPO** = minutes of lost work (only reachable after Pro + PITR; today the honest answer is "up to about 7 days", so mark RPO as not met until then). Run 4.6 against a throwaway project each quarter. Record the date, backup file, who ran it, minutes
 per step, whether validation matched, whether logins were present, and problems. Rewind drills
 (after Pro + PITR), file-restore drills (after the file backup exists) and the paper rehearsal go in the same table.
 
-| Date | Type | Backup used | Total time | Validation match | Logins present | Notes |
-|---|---|---|---|---|---|---|
-| _none yet_ | | | | | | |
+| Date | Type | Backup used | Total time | RTO met (back by next business morning) | RPO met (minutes of loss) | Validation match | Logins present | Notes |
+|---|---|---|---|---|---|---|---|---|
+| _none yet_ | | | | | | | | |
 
 ### 4.10 What is NOT in any backup
 

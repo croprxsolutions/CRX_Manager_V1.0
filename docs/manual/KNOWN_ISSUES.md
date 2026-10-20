@@ -665,8 +665,11 @@ leave these open:
   invoice with no order or delivery behind it (the New Invoice page's two types)
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
-  (`DECISION_LOG.md`), and so do credit memos (return credits). Still open until Goal 3
-  of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
+  (`DECISION_LOG.md`), and so do credit memos (return credits). **Fix written 2026-10-20, not yet
+  applied:** migration `20261020150000_from_scratch_invoices_charge_lines_only` refuses a product
+  line on such an invoice on every write path and at posting, and the New Invoice page offers typed
+  charge lines (freight, application fee, service, other) instead of products. Open until it is
+  applied live and its PR merges.
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or
   inserted between two pages can shift the next page by one, so a single run can miss or repeat a

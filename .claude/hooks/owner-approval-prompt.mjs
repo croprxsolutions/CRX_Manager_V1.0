@@ -12,7 +12,8 @@
 //   - Any other message, or the reply in another session → nothing is approved.
 //     A whole <system-reminder> block the app puts in front of his words is not
 //     part of the message; a message with a reply on one of its lines but other
-//     text as well is refused out loud, never silently (2026-10-20).
+//     text as well is refused out loud, never silently (2026-10-20), except a
+//     plain "I approve" line with no request waiting, which is ordinary chat.
 // Claude Code runs this on each message sent into a session. Nothing stops an
 // agent running it by hand with a made-up message; that is the deliberate
 // forgery Mason accepted as the residual (owner-approval-lib.mjs header).

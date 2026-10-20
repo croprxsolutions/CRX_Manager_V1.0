@@ -89,7 +89,8 @@
 > puts those words inside other prose does not count. A whole `<system-reminder>` block the desktop app puts
 > in front of his words (its "Linked sessions now" note) is not part of his message (2026-10-20: five replies
 > arrived behind one and the hook said nothing), unless a reminder tag is left after it; a message with a reply
-> on one of its lines (any line break counts, a bare CR and U+2028/U+2029 too) but other text as well is refused with a visible `OWNER APPROVAL NOT RECORDED`, never silently. Only spacing, blank lines, wrapping and a code fence around the
+> on one of its lines (any line break counts, a bare CR and U+2028/U+2029 too) but other text as well is refused with a visible `OWNER APPROVAL NOT RECORDED`, never silently (a plain `I approve` line with no request
+> waiting in that session stays ordinary chat). Only spacing, blank lines, wrapping and a code fence around the
 > whole summary may differ; no markdown is interpreted, so bold, code or quote marks mean it does not count. That
 > message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;

@@ -18,10 +18,10 @@ not timing out. A session-id mismatch after the compaction would have printed a 
   reminder tag is left after them, so text inside a note that closes it early can never become his
   reply (Luna BLOCKER). What is left must still be exactly the reply. `approvalAttemptIn` spots a
   reply on any line of a message that carries other text too, splitting on every line break
-  including a bare CR and U+2028/U+2029 (Luna MED, rounds 1 and 2). Luna round 2's two HIGHs were
-  refuted: the strip has no end anchor, so it does not backtrack (20,000 stacked blocks clear in
-  about 1 ms), and the apply's transcript read-back already drops whole reminder blocks (the
-  end-to-end test verifies a reply behind one at the apply).
+  including a bare CR and U+2028/U+2029 (Luna MED, rounds 1 and 2).
+- Checked and left as is: the strip has no end anchor, so it does not backtrack (measured: 20,000
+  stacked blocks, 700 KB, in about 1 ms); the apply's transcript read-back already drops whole
+  reminder blocks, which the end-to-end test exercises at the apply.
 - `.claude/hooks/owner-approval-prompt.mjs`: matches the cleaned reply, and refuses a reply line that
   came with other text with a visible `OWNER APPROVAL NOT RECORDED` (for plain `I approve`, only when
   a request is waiting in that session, so ordinary chat stays quiet).

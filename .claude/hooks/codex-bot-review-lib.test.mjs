@@ -76,6 +76,12 @@ for (const reviewThreads of [undefined, null, {}, { nodes: null }]) {
 }
 eq(coderabbitThreadCount(collectCodexThreads(() => ({ headRefOid: HEAD, reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } }))), 0,
   "CONTROL: a well-formed empty page through the pager counts 0");
+// Only an explicit hasNextPage:false proves the read complete (Luna round 5, HIGH).
+for (const pageInfo of [undefined, null, {}, { hasNextPage: null }, { hasNextPage: "false" }]) {
+  const walked = collectCodexThreads(() => ({ headRefOid: HEAD, reviewThreads: { nodes: [], pageInfo } }));
+  eq(walked.incomplete, true, `pageInfo=${JSON.stringify(pageInfo)} leaves the walk incomplete`);
+  eq(coderabbitThreadCount(walked), null, `…so the CodeRabbit count is null for pageInfo=${JSON.stringify(pageInfo)}`);
+}
 ok(/fail closed/.test(coderabbitUnreadableDenial("X", "5")), "the unreadable denial says it fails closed");
 
 // ── the two spellings of the bot's name ──────────────────────────────────────

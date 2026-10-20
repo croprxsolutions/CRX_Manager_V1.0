@@ -199,7 +199,14 @@ export function collectCodexThreads(runQuery, { deadlineMs = null, now = Date.no
       break;
     }
     nodes.push(...threads.nodes);
-    if (threads?.pageInfo?.hasNextPage !== true) break;
+    // Only an explicit `hasNextPage: false` ends the walk as COMPLETE; a missing
+    // or malformed pageInfo cannot prove there is nothing more (Luna round 5).
+    const hasNextPage = threads?.pageInfo?.hasNextPage;
+    if (hasNextPage === false) break;
+    if (hasNextPage !== true) {
+      incomplete = true;
+      break;
+    }
     const next = String(threads?.pageInfo?.endCursor || "");
     // No cursor but "hasNextPage" would loop forever on the same page — and
     // there IS more, which this walk cannot reach.

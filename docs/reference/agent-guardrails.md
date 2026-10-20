@@ -25,7 +25,8 @@
 > `codex-bot-review-lib.mjs`; unlike the Codex App check this FAILS CLOSED — a failed or partial thread read denies
 > via `coderabbitThreadCount` / `coderabbitUnreadableDenial`, and the agent retries; Luna round 3; an answer with no
 > thread list at all counts as unreadable, not as zero, Luna round 4; `collectCodexThreads` marks a page with a missing
-> or null `reviewThreads` list incomplete, Codex App review of PR #973). The Codex guard runs this lookup on its HARD-gate
+> or null `reviewThreads` list incomplete, Codex App review of PR #973, and ends a walk as complete only on an explicit
+> `pageInfo.hasNextPage: false`, Luna round 5). The Codex guard runs this lookup on its HARD-gate
 > time budget, so a slow lookup denies instead of being killed, and it allows exactly one GraphQL write,
 > `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`
 > (`ghApiIsResolveReviewThreadOnly` in `codex-push-lib.mjs`; bare `gh`/`gh.exe` only, and no `$` or backtick anywhere in

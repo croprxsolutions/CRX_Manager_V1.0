@@ -505,8 +505,8 @@ function main() {
     assert.match(r.fail, expected, `MUTATION ${label}: wrong failure: ${r.fail}`);
     console.log(`[prover] MUTATION: without the ${label} hunk the chain fails: ${r.fail}`);
   }
-  // The void_order draft-cancel fix (section 3b) is applied by text substitution, so its mutation
-  // puts the live body's original UPDATE back the same way.
+  // The void_order draft-cancel fix (section 3b) adds four zeroing lines to the pinned body, so its mutation
+  // removes exactly those lines, putting the live body's original UPDATE back.
   const zeroed = "            total_amount_cents = 0,\\n            paid_amount_cents = 0,\\n            prepay_applied_cents = 0,\\n            write_off_cents = 0,\\n";
   const unfix = `DO $unfix$
 DECLARE v_src text;

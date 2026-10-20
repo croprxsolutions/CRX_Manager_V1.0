@@ -95,7 +95,9 @@
 > `--selftest`) refuses with a plain-English `REFUSED` when this session has none, because some desktop sessions never
 > run message hooks (2026-10-20, session `980692b3`: two replies reached nothing; a marker the hook could not save looks
 > the same, and the refusal says so); the marker proves the hook ran for some message, not the next one (Luna MED,
-> deferred: every silent session seen ran none); the fix it prints is a fresh `claude`
+> deferred: every silent session seen ran none). A desktop session in a worktree runs these hooks from the MAIN checkout
+> (`C:\CRX_Manager`, observed 2026-10-20), so a main checkout behind `main` also leaves no marker: fast-forward it after a
+> hook change merges. The fix it prints is a fresh `claude`
 > in a Terminal tab in the same folder. Only spacing, blank lines, wrapping and a code fence around the
 > whole summary may differ; no markdown is interpreted, so bold, code or quote marks mean it does not count. That
 > message is read from the session transcript the hook is

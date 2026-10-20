@@ -597,7 +597,9 @@ export function hooklessSessionRefusal({ checkout, sessionId }) {
     "Tell Mason in plain English, then the fix: open a Terminal tab in this same folder,",
     `  ${checkout}`,
     "start a fresh `claude` there, and run this script from that session; he replies in that terminal conversation.",
-    "(If this conversation started before this check existed, any new message into it records the marker; then run this again.)",
+    "(If this conversation started before this check existed, any new message into it records the marker; then run this again.",
+    "A desktop session in a worktree may run the hooks from the repository's MAIN checkout: if that checkout is behind main,",
+    "its older hook writes no marker, so fast-forward it to main, then any new message records the marker.)",
   ].join("\n");
 }
 

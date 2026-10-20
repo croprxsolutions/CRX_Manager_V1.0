@@ -26,6 +26,12 @@ session; a marker written on every message is a sound signal.
   message in another session does not unlock it. Removing either the script's check or the hook's
   write makes these tests fail.
 
+**Found while proving it.** The session that built this ran UserPromptSubmit hooks (they printed on an
+app message) yet wrote no marker in its worktree: desktop worktree sessions here run the hooks from the
+MAIN checkout `C:\CRX_Manager`, which still had the old hook. So session `980692b3` may have run the
+pre-#979 hook from the main checkout (silent behind the app's note) rather than no hook at all; the marker
+catches both. The refusal names this cause, and the main checkout must be fast-forwarded after this merges.
+
 **Residual.** An agent could write the marker by hand; like faking the reply itself, that is the
 deliberate forgery Mason accepted, not the silent loss this catches. A session already open before
 this change has no marker until its next message. The marker proves the hook ran for some message in

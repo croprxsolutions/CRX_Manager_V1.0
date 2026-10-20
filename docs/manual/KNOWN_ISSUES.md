@@ -259,6 +259,16 @@ It also fixes a pre-existing failure: voiding a fulfilled order that still had a
 back with `ORDER_INVOICE_TERMINAL` (6 live orders qualified on 2026-10-19; no order has ever been voided live).
 The three stay in the table below until the apply is confirmed live.
 
+**Open follow-up: voiding an order with a governed SPLIT draft invoice still fails** (Codex GitHub review on #967,
+verified against the live definitions 2026-10-20). A draft made by `create_split_invoices_from_order` has a
+`split_invoice_provenance` row, and `guard_split_invoice_provenance_identity` lets its total change only under a
+same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one through
+`_cancel_order_provenance_wrapper_20260719` (lock, claim, refresh the provenance, drop the claim); `void_order` does
+not, so its zeroing UPDATE is refused with `SPLIT_INVOICE_PROVENANCE_IMMUTABLE` and the whole void rolls back
+cleanly. This is not a regression: before batch 3b every nonzero draft already failed. Live impact today is none:
+live has 0 `split_invoice_provenance` rows (read 2026-10-20). Fix: give `void_order` the same governed-invoice
+locking, claim and provenance refresh as `cancel_order`, in its own reviewed migration, before split billing is used.
+
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
 
 **Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batches 1, 2 and 3a list 72 functions (15 in batch 3, then 50 and 7 in batch 4; a row can name a function whose create path alone is unbound; after batches 1 and 2 they listed 74, after batch 1 alone 87). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.

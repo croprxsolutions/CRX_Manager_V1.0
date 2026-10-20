@@ -354,7 +354,8 @@ separately, the permission change.
    a glob directly under it, Bash extglob `@(…)`/`+(…)`/`!(…)` included; an extglob that obscures the
    `.claude` name itself, such as `.clau@(de)`, counts too). It never counts the user-home `~/.claude` (Claude's memory).
    `.claude/worktrees/…` keeps the old breadth at any depth, because every worktree holds its own
-   state directory. A `.`/`..` segment or a run-time-built part (`$`, a backtick, `%`) anywhere
+   state directory. A delete or move after `cd` into the repo's `.claude` (or below it) is denied
+   command-wide, since its own segment names no protected path. A `.`/`..` segment or a run-time-built part (`$`, a backtick, `%`) anywhere
    below `.claude` also counts as the state dir. In the same change, every file a gate trusts is protected by NAME
    (`reviewProofPathMentioned`): the migration reviewer proof `migration-review-*.json`, every
    `owner-approval-*.json`, `AUTOPILOT.on`, `applied-migrations.json` and `hold.json`. Before, `cp`,

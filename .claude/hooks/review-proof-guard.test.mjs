@@ -974,9 +974,38 @@ for (const command of [
 // and also contains a destructive word anywhere still denies, even as a read.
 // Telling a read from a write there needs the verb-to-target parser this file
 // declines to write; naming the state dir is rare in ordinary work.
-assert.match(run({ tool_name: "Bash", tool_input: { command: "ls .claude/session-state | grep del" } }).stdout, /"permissionDecision":"deny"/);
+assertEntrypointDenied({ tool_name: "Bash", tool_input: { command: "ls .claude/session-state | grep del" } }, /./, "known over-block");
 // Reading agents/commands stays allowed, and Edit/Write remain the way to change them.
-assert.equal(run({ tool_name: "Bash", tool_input: { command: "cat .claude/agents/rls-security-reviewer.md" } }).stdout, "");
-assert.equal(run({ tool_name: "Edit", tool_input: { file_path: ".claude/commands/ship.md" } }).stdout, "");
+assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command: "cat .claude/agents/rls-security-reviewer.md" } }, "agent read allowed");
+assertEntrypointAllowed({ tool_name: "Edit", tool_input: { file_path: ".claude/commands/ship.md" } }, "command edit allowed");
+
+// A delete or move AFTER cd into the repo's .claude names no protected path in its own
+// segment; the cd target carries the protection across `&&`/`;` (Codex connector, PR #956).
+// Main's guard denied every one of these.
+for (const command of [
+  "cd .claude/hooks && rm -f pr-merge-guard.mjs",
+  "cd .claude/hooks; rm -f pr-merge-guard.mjs",
+  "cd .claude/commands && rm -f ship.md",
+  "cd .claude/agents && mv x.md y.md",
+  "cd .claude/skills && rm -f codex-review/SKILL.md",
+  "cd .claude/workflows && rm -f x.js",
+  "pushd .claude/hooks && rm -f pr-merge-guard.mjs",
+  "cd \"./.claude/hooks\" && rm -f pr-merge-guard.mjs",
+  "cd C:/CRX_Manager/.claude/hooks && rm -f pr-merge-guard.mjs",
+  "Set-Location .claude\\hooks; Remove-Item pr-merge-guard.mjs",
+]) {
+  assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /after cd into the repo's \.claude/, `cd-then-delete denied: ${command}`);
+}
+// Reading after that cd, and deleting after a cd elsewhere, stay allowed.
+for (const command of [
+  "cd .claude/hooks && ls",
+  "cd .claude/hooks && cat pr-merge-guard.mjs | head",
+  "cd .claude/hooks && node --test guards.test.mjs",
+  "cd src && rm -f x.tmp",
+  "cd src && rm -f x.tmp && cd .. && ls",
+  "cd ~/.claude/projects/x/memory && rm -f old.md",
+]) {
+  assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `cd allowed: ${command}`);
+}
 
 console.log("OK - review proof guard checks passed.");

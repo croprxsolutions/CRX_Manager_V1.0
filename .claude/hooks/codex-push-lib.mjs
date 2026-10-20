@@ -4081,10 +4081,11 @@ export function programAssembledAtRuntime(command) {
 // `$(fnm env)`) is not glued and stays allowed, as on the outer command.
 export function nestedProgramNameGlued(command) {
   // Mark substitutions and variables first, so a space inside `$(fnm env)` does
-  // not split the word, then judge the first word alone.
-  const marked = String(command || "")
-    .trim()
-    .replace(/\$\([^()]*\)|`[^`]*`|\$\{[^}]*\}|\$\w+/g, "\u0000");
+  // not split the word, then judge the first word alone. The balanced parser keeps
+  // a nested `$(echo $(printf g))h` whole; a flat `\$\([^()]*\)` split it at the
+  // inner space and missed the glued name (CodeRabbit, PR #956).
+  const marked = splitSubstitutions(String(command || "").trim()).outer
+    .replace(/\$\(\)|`[^`]*`|\$\{[^}]*\}|\$\w+/g, "\u0000");
   const first = (marked.split(/[\s;&|]+/)[0] || "").replace(/["']/g, "");
   return first.includes("\u0000") && first.replace(/\u0000/g, "").length > 0;
 }

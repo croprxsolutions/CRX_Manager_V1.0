@@ -389,15 +389,25 @@ eq(r.stdout.trim(), "", "codex-push-guard silent on non-push command");
 for (const command of [
   "bash -c '$(printf g)h pr m$(printf er)ge 951 --squash'",
   "bash -c 'g$(printf i)t pu$(printf sh) origin HEAD'",
+  // Balanced NESTED substitutions stay one program word (CodeRabbit, PR #956).
+  "bash -c '$(echo $(printf g))h pr m$(echo $(printf er))ge 951 --squash'",
+  "bash -c 'g$(echo $(printf i))t pu$(echo $(printf sh)) origin HEAD'",
 ]) {
   for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
     const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
     ok(res.stdout.includes("deny"), `${hook} denies a nested assembled program name: ${command}`);
   }
 }
-for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
-  const res = runHook(hook, { tool_name: "Bash", tool_input: { command: "bash -c 'echo $(date)'" } });
-  eq(res.stdout.trim(), "", `${hook} silent on a nested substitution that builds no program name`);
+for (const command of [
+  "bash -c 'echo $(date)'",
+  "bash -c 'eval \"$(fnm env)\" && node -v'",
+  "eval \"$(fnm env)\" && node -v",
+  "i=$(($i+1)); git status",
+]) {
+  for (const hook of ["pr-merge-guard.mjs", "codex-push-guard.mjs"]) {
+    const res = runHook(hook, { tool_name: "Bash", tool_input: { command } });
+    eq(res.stdout.trim(), "", `${hook} silent on a substitution that builds no program name: ${command}`);
+  }
 }
 
 // codex-push-guard: a configured mirror remote denies EVERY push form, not just

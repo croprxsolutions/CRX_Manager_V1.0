@@ -135,5 +135,16 @@ name glued from a substitution and letters INSIDE a computed nested command
 `eval "$(fnm env)"` and `$((i+1))` still pass. Brace expansion `{.claude/s@(ession-)state,x}` counts
 as a path below `.claude`. The decision log now says unmatched actions are allowed, not warned.
 
+**Codex connector and CodeRabbit on `eea1af79b` (2 regressions, 1 test tidy).** Fixed: a delete or
+move after `cd` into the repo's `.claude` (`cd .claude/hooks && rm -f pr-merge-guard.mjs`, the
+`commands`/`agents`/`skills`/`workflows` twins, `pushd`, `Set-Location`) is denied again; each
+segment named no protected path, so the narrowed rule had missed what main denied. The cd target now
+carries the protection across `&&`/`;`; reads after that cd and deletes after `cd src` still pass,
+and the home `~/.claude` stays out. `nestedProgramNameGlued` reads balanced nested substitutions
+(`bash -c '$(echo $(printf g))h pr m$(echo $(printf er))ge 951'`) through `splitSubstitutions`, so
+both gates refuse it again. Three single-case checks in `review-proof-guard.test.mjs` use the
+entrypoint helpers. CI: the sweep runner now waits for its ~300 KB print to flush before exiting;
+one Linux run had read 21 of 29 blocks and a re-run of the same code passed.
+
 **Takes effect** only after `C:/CRX_Manager` is fast-forwarded past the merge, because worktree
 sessions load hooks and settings from the main checkout.

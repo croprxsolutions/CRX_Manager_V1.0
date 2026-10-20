@@ -313,6 +313,13 @@ function decodeAnsiCQuotes(text) {
     }));
 }
 
+// Every readable cd target the scans saw. The narrowed destructive rule below
+// judges each `&&`/`;` segment on its own text, so `cd .claude/hooks && rm -f
+// pr-merge-guard.mjs` names no protected path in its `rm` segment; these targets
+// let that rule see the working directory a later segment runs in (Codex
+// connector, PR #956).
+const cdTargetsSeen = [];
+
 function scanCdInvocations(scan) {
   for (const match of scan.matchAll(CD_CMD_RE)) {
     let target = "";
@@ -335,6 +342,7 @@ function scanCdInvocations(scan) {
     // 2). Check the decoded form too; the RAW form still covers Windows
     // `\`-separated paths, where the backslash is a real separator.
     const decoded = target.replace(/\\(.)/g, "$1");
+    cdTargetsSeen.push(target, decoded);
     // Statically unresolvable: variable expansion ($VAR/%VAR%/backtick),
     // shell glob/brace expansion (Opus review 2026-08-19 — `cd .clau[d]e/...`
     // resolves at runtime to a path the literal matcher never sees), and an
@@ -491,6 +499,19 @@ if (shellTool) {
     reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDirNarrow(v);
   if (destructiveViews.some((v) => (hitsDestructiveVerb(v) && namesStateDir(v)) || redirectTargetsStateDir(v))) {
     deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
+  }
+  // A destructive verb anywhere in a command that cds into the repo's `.claude`
+  // (or below it: hooks, commands, agents, skills, workflows, the state dir) keeps
+  // the pre-narrowing command-wide protection: the later `rm`/`mv` runs inside that
+  // folder even though its own segment names no protected path. The home
+  // `~/.claude` (agent memory) stays out, matching STATE_DIR_ANCESTOR_RE.
+  const cdEntersRepoClaude = cdTargetsSeen.some((t) => {
+    const p = t.replace(/\\/g, "/");
+    return /(?:^|\/)\.claude(?:\/|$)/i.test(p) &&
+      !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:)?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p);
+  });
+  if (cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) {
+    deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");
   }
 
   // The enforcement surfaces that live OUTSIDE `.claude`. Added 2026-09-01, when

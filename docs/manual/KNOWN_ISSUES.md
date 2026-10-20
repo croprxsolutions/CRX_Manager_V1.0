@@ -167,9 +167,10 @@ applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #94
 `982bc0dda`). The nine batch-1 functions (listed below, out of the unbound table) now refuse a reused key for a different
 caller or request (`IDEMPOTENCY_ACTOR_MISMATCH` / `IDEMPOTENCY_INTENT_MISMATCH`); an exact retry still
 replays. Proof: live postconditions read and the rollback-only live chain
-`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). Gap (CodeRabbit on PR #950): that chain
-checks an exact retry for eight of the nine functions; for `edit_prepay_credit` it checks only the
-mismatch refusal, so its exact-retry replay is not yet proven live. **Live body re-check 2026-10-18
+`smoke-money-replay-binding-batch1.sql` (SMOKE_PASS_ROLLBACK). The chain now checks an exact retry
+for all nine functions: the `edit_prepay_credit` step (the gap CodeRabbit raised on PR #950) was added
+and passed live 2026-10-20 00:35 UTC (SMOKE_PASS_ROLLBACK; the retry returned the saved answer and
+wrote no second audit row, no second receipt and no balance change). **Live body re-check 2026-10-18
 11:56 UTC** (read-only `pg_proc` read, migration-history row 951): all nine live wrappers bind the
 caller (`auth.uid()`, forged `p_performed_by` refused) and the request fingerprint through
 `check_idempotency_intent` before any saved result can come back (eight call their saved-result body;
@@ -178,7 +179,7 @@ left is `apply_prepay_to_invoice` inside `batch_apply_prepayments`, covered by t
 key. `_bind_replay_receipt_20261015`,
 the other batch-1 helpers and the nine renamed bodies have no EXECUTE for anon, authenticated,
 service_role or PUBLIC. None of the nine public functions was found unbound on a keyed call. This is a
-read of the deployed source, not an exercised retry, so the `edit_prepay_credit` gap above stays open. Batches 3–4 below are still open.
+read of the deployed source, not an exercised retry; the exercised `edit_prepay_credit` retry is the 2026-10-20 chain run above. Batches 3–4 below are still open.
 
 **The problem in one line.** When an action is retried, `check_idempotency` (and the copy-pasted
 `SELECT result FROM idempotency_keys WHERE idempotency_key = … AND operation = …` that many functions
@@ -377,6 +378,14 @@ Mason's words. On 2026-10-15 two reports containing "Stop" (a list of hook event
 `hold.json` in the main checkout, which every session whose hooks run from there shares; the same
 report shape also counts as Mason speaking and can clear a hold he set. Reproduced by replaying both
 real reports minus the preamble line through `origin/main`'s hooks.
+
+**Impact reduced 2026-10-18.** Seen twice more on 2026-10-18 (4:46 PM and 4:59 PM Central), both
+times from another session's helper report, each freezing a building session until Mason replied.
+Since that day's guard narrowing, a latched hold blocks outward actions (push, merge, PR publishing,
+migration apply, deploy, live SQL writes) and selected destructive local commands (such as a
+recursive delete or a forced branch delete). Ordinary source edits and commits get a warning.
+So a false latch now delays landing; it no longer stops all work. The root cause below is
+unchanged.
 
 **Why not fixed yet.** A text-shape fix (recognise the exact harness frame at the start of the prompt)
 was tried on PR #940 and removed: Sol blocked it because a user-typed message of the same shape with
@@ -942,24 +951,31 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Jobs and Customers show a banner when capped. Deliveries stops silently.
-  - Paging is by position, so records changing during a long load are handled three ways:
+  - Paging is by position, so records changing during a long load are handled four ways:
     - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
     - every list read asks the server for its exact count (`{ count: 'exact' }`, enforced by
       `src/lib/pagedReadCallSites.test.ts`). A read whose distinct rows differ from the count changed
       mid-read, so it is repeated up to three times and then shown as an error, never as a wrong
       list. This covers a record whose sort date is edited into the part already read, and a burst
       of inserts;
+    - **Fixed 2026-10-19 (the insert+delete swap accepted on 2026-10-18):** a list that needed more
+      than one request is read a second time and returned only when two back-to-back reads match row
+      for row (every field of every row, array fields in order, rows in the same order), so a field
+      edited between pages cannot mix old and new values either. An insert and a delete between two
+      pages keep the count equal, so the count alone could show a just-deleted record and miss a
+      just-added one (or, with a sort-date edit, miss a record that existed throughout). Two reads
+      that disagree, or a read with the wrong count, restart the confirmation within the same three
+      attempts, and a list that never settles is shown as an error. A
+      list that fits in one request (every live list on 2026-10-19) is a single database statement
+      and is still read once; only lists that need more than one request (past the 1,000-row page, or
+      a smaller server cap) pay the second read. A list changed
+      identically during both reads is the remaining theoretical gap; a true snapshot needs
+      server-side paging (later Goal 4 step);
     - Customer Transaction Review's function rows have no `id`, so its running-balance chain is also
       checked (`src/lib/transactionLedger.ts`).
   - A list that keeps growing as fast as it is read stops after twice its starting size plus one
     page and is reported as changed. Customer Transaction Review also checks that the server's
     current last row is its own last row whenever it read more than one page.
-  - **Still open (accepted residual, 2026-10-18; both review models rated it HIGH):** an insert and
-    a delete landing between two page reads of the same load can keep the count equal while
-    swapping one row, so the list can show a just-deleted record and miss a just-added one until the
-    next refresh. This needs more than 1,000 rows in the list plus both changes in that window.
-    Live volumes on 2026-10-18 were at most 151 rows. The fix is a consistent snapshot (cursor
-    paging or a database-side read), which is the later Goal 4 step along with server-side search.
   - Deferred from the same reviews:
     - Every page asks for an exact count, which costs one counting pass per page. That is fine at
       today's sizes, but loading around 100,000 rows would count the table about 100 times. Server

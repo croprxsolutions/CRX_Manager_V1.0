@@ -46,7 +46,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -391,7 +391,16 @@ function runMatrix(label) {
       ['R7 charge line quantity 2', { ...freight, quantity: 2, extended_cents: 5000 }],
       ['R7 charge line unknown type', { ...freight, charge_type: 'tax' }],
       ['R7 charge line zero amount', { ...freight, unit_price_cents: 0, extended_cents: 0 }],
+      ['R7 charge line blank description', { ...freight, description: '   ' }],
     ]) add(scenario([{ key: k, as: U.ADMIN, call: save(misc, [line], `r7-${k.length}`) }]));
+    // R8: a from-scratch invoice that is already posted and then overdue is still covered.
+    add(scenario([{ key: 'R8 product line on an overdue from-scratch invoice', as: 'owner', stmt: `
+      INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, created_by, salesman_id) VALUES ('${id('906')}', 'PROVER-OD-1', '${CUST}', 'misc_charge', 'draft', CURRENT_DATE, '${U.ADMIN}', '${U.ADMIN}');
+      SET LOCAL app.admin_override = 'true';
+      UPDATE public.invoices SET status = 'posted', posted_at = now(), posted_by = '${U.ADMIN}' WHERE id = '${id('906')}';
+      UPDATE public.invoices SET status = 'overdue' WHERE id = '${id('906')}';
+      INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents) VALUES ('${id('906')}', '${PROD}', 'x', 1, 3000, 3000, 0);
+      v := 'inserted';` }]));
     add(scenario([{ key: 'R7 charge type on a product line (order invoice)', as: U.ADMIN, stmt: `v := (public.save_invoice(jsonb_build_object('id', '${OINV}', 'customer_id', '${CUST}', 'invoice_type', 'chemical_sale', 'salesman_id', '${U.ADMIN}', 'invoice_date', ${TODAY}), ${j([{ id: OINV_ITEM, order_item_id: OI, ...productLine, charge_type: 'freight' }])}, 'r7p'))::text;` }]));
   }
 
@@ -494,6 +503,8 @@ const AFTER = [
   ['R7 charge line unknown type', SHAPE],
   ['R7 charge line zero amount', SHAPE],
   ['R7 charge type on a product line (order invoice)', SHAPE],
+  ['R7 charge line blank description', SHAPE],
+  ['R8 product line on an overdue from-scratch invoice', REFUSED_PRODUCT],
   ['A3 order-backed edit keeps its product line', OK(OINV)],
   ['A3 order-backed stored lines', OK(`-:${PROD}:2:3000:6000:2250`)],
   ['A3 order-backed post', OK('posted')],
@@ -549,13 +560,92 @@ function check(label, got) {
   assert.equal(failed, 0, `${failed} ${label} check(s) failed`);
 }
 
-function main() {
+// The candidate's preflight DO block, for EXECUTE inside a probe.
+const PREFLIGHT_EXEC = `$q$DO $p$${lf(CANDIDATE).split('$preflight$')[1]}$p$$q$`;
+
+// One psql session running in the background (a second database connection).
+function psqlAsync(sql) {
+  return new Promise((resolve) => {
+    const child = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (status) => resolve({ status, out }));
+    child.stdin.end(sql);
+  });
+}
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+// RACES (two real connections, committed data, cleaned up after): a product-line insert and the
+// restore of a soft-deleted from-scratch draft, in both orders. The second statement waits on the
+// first transaction's row lock and then refuses. MUTATION: without the line trigger's FOR SHARE
+// lock, the restore does not wait, and both commit.
+async function races() {
+  const AS = `SELECT set_config('request.jwt.claims', '{"sub":"${U.ADMIN}","role":"authenticated"}', false);`;
+  const draft = (n) => `INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, created_by, salesman_id, deleted_at)
+    VALUES ('${id(n)}', 'PROVER-RACE-${n}', '${CUST}', 'misc_charge', 'draft', CURRENT_DATE, '${U.ADMIN}', '${U.ADMIN}', now());`;
+  const line = (n) => `INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents) VALUES ('${id(n)}', '${PROD}', 'x', 1, 3000, 3000, 0);`;
+  const restore = (n) => `UPDATE public.invoices SET deleted_at = NULL WHERE id = '${id(n)}';`;
+  const state = (n) => scalar(`SELECT (SELECT deleted_at IS NULL FROM public.invoices WHERE id = '${id(n)}')::text || ':' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = '${id(n)}');`);
+  const cleanup = (ns) => psql(`${AS} SET app.admin_override = 'true';
+    ALTER TABLE public.invoice_items DISABLE TRIGGER USER; DELETE FROM public.invoice_items WHERE invoice_id IN (${ns.map((n) => `'${id(n)}'`).join(',')});
+    ALTER TABLE public.invoice_items ENABLE TRIGGER USER;
+    ALTER TABLE public.invoices DISABLE TRIGGER USER; DELETE FROM public.invoices WHERE id IN (${ns.map((n) => `'${id(n)}'`).join(',')});
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;`);
+  psql(`${AS} ${draft('a01')} ${draft('a02')} ${draft('a03')}`);
+
+  // Line first, restore second.
+  let first = psqlAsync(`${AS} BEGIN; ${line('a01')} SELECT pg_sleep(4); COMMIT;`);
+  await sleep(1500);
+  let second = await psqlAsync(`${AS} ${restore('a01')}`);
+  let firstDone = await first;
+  assert.equal(firstDone.status, 0, `race 1 line insert failed:\n${firstDone.out}`);
+  assert.match(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `race 1 restore was not refused:\n${second.out}`);
+  assert.equal(state('a01'), 'false:1');
+
+  // Restore first, line second.
+  first = psqlAsync(`${AS} BEGIN; ${restore('a02')} SELECT pg_sleep(4); COMMIT;`);
+  await sleep(1500);
+  second = await psqlAsync(`${AS} ${line('a02')}`);
+  firstDone = await first;
+  assert.equal(firstDone.status, 0, `race 2 restore failed:\n${firstDone.out}`);
+  assert.match(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `race 2 line insert was not refused:\n${second.out}`);
+  assert.equal(state('a02'), 'true:0');
+  console.log('[prover] RACES: a product line and a restore in two connections, in both orders, never leave an active from-scratch invoice with a product line');
+
+  // MUTATION: drop the FOR SHARE lock; the line-first race now lets both commit.
+  const fn = lf(CANDIDATE).split('CREATE FUNCTION public._refuse_from_scratch_invoice_product_lines()')[1].split('$function$;')[0];
+  const unlocked = fn.replace(/\n\s*PERFORM 1 FROM public\.invoices WHERE id = v_invoice_id FOR SHARE;/, '');
+  assert.notEqual(unlocked, fn, 'mutation did not remove the FOR SHARE lock');
+  const recreate = (body) => psql(`CREATE OR REPLACE FUNCTION public._refuse_from_scratch_invoice_product_lines()${body}$function$;`);
+  recreate(unlocked);
+  try {
+    first = psqlAsync(`${AS} BEGIN; ${line('a03')} SELECT pg_sleep(4); COMMIT;`);
+    await sleep(1500);
+    second = await psqlAsync(`${AS} ${restore('a03')}`);
+    firstDone = await first;
+    assert.equal(firstDone.status, 0);
+    assert.doesNotMatch(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `MUTATION: without the lock the restore should slip through:\n${second.out}`);
+    assert.equal(state('a03'), 'true:1');
+  } finally {
+    recreate(fn);
+    cleanup(['a01', 'a02', 'a03']);
+  }
+  assert.equal(scalar("SELECT position('FOR SHARE' in prosrc) > 0 FROM pg_proc WHERE oid = 'public._refuse_from_scratch_invoice_product_lines()'::regprocedure;"), 't');
+  console.log('[prover] MUTATION: without the FOR SHARE lock the same race leaves a restored from-scratch invoice holding a product line, so the lock is what closes it');
+}
+
+async function main() {
   const started = Date.now();
   if (!REUSE) buildContainer();
   if (scalar("SELECT to_regproc('public._refuse_from_scratch_invoice_product_lines') IS NULL;") === 't') {
     fidelity();
     if (scalar("SELECT count(*) FROM public.profiles WHERE id::text LIKE '7d300000-%';") === '0') seed();
     check('before', runMatrix('before'));
+    // The preflight refuses to apply over an existing from-scratch invoice with a product line.
+    const dirty = scenario([{ key: 'preflight over a from-scratch product line', as: 'owner', stmt: `EXECUTE ${PREFLIGHT_EXEC}; v := 'applied';` }], legacy('801', 'misc_charge'));
+    assert.match(dirty['preflight over a from-scratch product line'], /^P0001\|PREFLIGHT: an active invoice with no order or delivery already holds a product line/);
+    console.log('[prover] PREFLIGHT: the apply is refused while an active from-scratch invoice holds a product line');
     stageText('candidate.sql', lf(CANDIDATE));
     const a = apply('candidate.sql');
     assert.equal(a.status, 0, `the candidate failed to apply:\n${a.output}`);
@@ -571,10 +661,12 @@ function main() {
   // Preflight: a drifted writer refuses the apply.
   const drift = scenario([{ key: 'preflight on a drifted writer', as: 'owner', stmt: `
     CREATE OR REPLACE FUNCTION ${WRITER.replace('(jsonb,jsonb,text)', '(p_invoice jsonb, p_items jsonb DEFAULT \'[]\'::jsonb, p_idempotency_key text DEFAULT NULL::text)')} RETURNS uuid LANGUAGE plpgsql AS $x$ BEGIN RETURN NULL; END $x$;
-    EXECUTE ${"$q$" + lf(CANDIDATE).split('$preflight$')[1].replace(/^\s*;?\s*/, 'DO $p$') + "$p$$q$"};
+    EXECUTE ${PREFLIGHT_EXEC};
     v := 'applied';` }]);
   assert.match(drift['preflight on a drifted writer'], /^P0001\|PREFLIGHT: _save_invoice_lineage_unaware_impl_20260827 body drifted/);
   console.log('[prover] PREFLIGHT: a drifted writer body refuses the apply');
+
+  await races();
 
   // MUTATION: without the item trigger the owner's direct insert goes through.
   const mutated = scenario([{ key: 'R6 without the trigger', as: 'owner', stmt: `
@@ -589,5 +681,5 @@ function main() {
   console.log('FROM_SCRATCH_CHARGE_LINES_PROOF_PASS');
 }
 
-try { main(); }
+try { await main(); }
 finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

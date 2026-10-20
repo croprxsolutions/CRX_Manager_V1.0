@@ -13,14 +13,15 @@
 --
 --   1. invoice_items.charge_type (new, nullable text): freight | application_fee | service | other.
 --      A charge line (charge_type set) has no product, no order line, no return-credit source,
---      quantity exactly 1, cost 0, is not a field-application machine fee, and a positive amount
+--      a non-blank description, quantity exactly 1, cost 0, is not a field-application machine fee, and a positive amount
 --      equal to its extended amount (CHECK invoice_items_charge_line_shape_chk). Existing rows all
 --      have charge_type NULL, so both CHECKs validate instantly.
 --   2. trg_refuse_from_scratch_invoice_product_lines on invoice_items (insert, or a change of
 --      product_id / invoice_id) and trg_refuse_from_scratch_invoice_product_lines_header on
---      invoices (a change of invoice_type, order_id, delivery_id, status or deleted_at into an
---      active status): refuses FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED whenever an active
---      (draft, unposted or posted) from-scratch invoice would hold a product line. This covers
+--      invoices (a real change of invoice_type, order_id, delivery_id, status or deleted_at):
+--      refuses FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED whenever a from-scratch invoice that is
+--      not deleted, cancelled or voided would hold a product line. A line write locks its invoice
+--      row (FOR SHARE) so it serializes with a concurrent header change. This covers
 --      every create, edit and import path, direct table writes, and posting (single, group and
 --      batch posting all flip invoices.status). SECURITY DEFINER so RLS can never hide the rows
 --      it must see. Cancelled and voided invoices are left alone so they can always be closed.
@@ -29,6 +30,12 @@
 --      (FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED) and an untyped line
 --      (FROM_SCRATCH_INVOICE_CHARGE_TYPE_REQUIRED) before it touches the stored lines. Its body is
 --      otherwise the live body unchanged (md5 pinned below, read live 2026-10-20).
+--
+-- "From scratch" means no order_id and no delivery_id, exactly the Goal 3 text. A blend_ticket_id
+--   alone does not count as a source here (blend-ticket invoices are field_application; none of
+--   type misc_charge or chemical_sale exist live). Naming an unrelated open order on a new
+--   invoice through a direct save_invoice call is the order-level quantity cap's job (Goal 3
+--   "Quantity caps"), not this file's.
 --
 -- NOT COVERED, by design (Goal 3 text): field-application invoices (direct field-app, blend-ticket
 --   and job invoices, all invoice_type = 'field_application') keep their chemical lines; return
@@ -45,14 +52,20 @@
 -- caller-analysis: save_invoice :: InvoiceDetail.tsx; order-backed and field invoices unchanged, a from-scratch invoice now sends typed charge lines
 -- caller-analysis: post_invoice, post_invoice_group, batch_post_invoices :: InvoiceDetail.tsx, Invoices.tsx, OfficeCockpit, OrderDetail; refused only for a from-scratch invoice holding a product line (none exist live)
 --
--- ROLLBACK: DROP TRIGGER trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
+-- ROLLBACK: revert the app first (its screens and PDFs select invoice_items.charge_type), then
+--   DROP TRIGGER trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
 --   DROP TRIGGER trg_refuse_from_scratch_invoice_product_lines_header ON public.invoices;
 --   DROP FUNCTION public._refuse_from_scratch_invoice_product_lines();
---   re-create _save_invoice_lineage_unaware_impl_20260827 from
---   20260904180000_invoice_season_follows_invoice_date.sql (md5 e3fc9bd9c1da4b2eb8082e91781e4915);
+--   replay only the CREATE OR REPLACE FUNCTION _save_invoice_lineage_unaware_impl_20260827 block of
+--   20260904180000_invoice_season_follows_invoice_date.sql (md5 e3fc9bd9c1da4b2eb8082e91781e4915;
+--   not that whole file, whose own preflight and postflight belong to its run);
 --   ALTER TABLE public.invoice_items DROP COLUMN charge_type (loses only the charge types).
 
--- PREFLIGHT: the writer must still be the body this file was written against.
+-- PREFLIGHT: the writer must still be the body this file was written against, and no active
+-- from-scratch invoice may already hold a product line. The lock (released at commit) keeps a
+-- concurrent writer from adding one between this check and the triggers below.
+LOCK TABLE public.invoices, public.invoice_items IN SHARE ROW EXCLUSIVE MODE;
+
 DO $preflight$
 DECLARE
   v_md5 text;
@@ -69,6 +82,21 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT: invoice_items.charge_type already exists';
   END IF;
+  -- The triggers below judge each later write against the whole invoice; an invoice that already
+  -- breaks the rule would make every later write to it fail, so refuse to apply over one.
+  IF EXISTS (
+    SELECT 1
+      FROM public.invoices i
+      JOIN public.invoice_items ii ON ii.invoice_id = i.id
+     WHERE i.invoice_type IN ('misc_charge', 'chemical_sale')
+       AND i.order_id IS NULL
+       AND i.delivery_id IS NULL
+       AND i.deleted_at IS NULL
+       AND i.status NOT IN ('cancelled', 'voided')
+       AND ii.product_id IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'PREFLIGHT: an active invoice with no order or delivery already holds a product line; resolve it before applying';
+  END IF;
 END
 $preflight$;
 
@@ -76,7 +104,7 @@ $preflight$;
 ALTER TABLE public.invoice_items ADD COLUMN charge_type text;
 
 COMMENT ON COLUMN public.invoice_items.charge_type IS
-  'Charge line type (Goal 3, Mason 2026-10-15): freight, application_fee, service or other. Set only on a charge line: no product, quantity 1, cost 0, positive amount. Every line of an invoice made from scratch (misc_charge or chemical_sale with no order and no delivery) is a charge line.';
+  'Charge line type (Goal 3, Mason 2026-10-15): freight, application_fee, service or other. Set only on a charge line: no product, a description, quantity 1, cost 0, positive amount. save_invoice requires one on every line of an invoice made from scratch (misc_charge or chemical_sale with no order and no delivery); the database refuses a product line on such an invoice on every path.';
 
 ALTER TABLE public.invoice_items
   ADD CONSTRAINT invoice_items_charge_type_check
@@ -90,6 +118,7 @@ ALTER TABLE public.invoice_items
       product_id IS NULL
       AND order_item_id IS NULL
       AND return_credit_source_item_id IS NULL
+      AND btrim(description) <> ''
       AND quantity = 1
       AND cost_cents = 0
       AND is_application_fee IS NOT TRUE
@@ -113,6 +142,11 @@ BEGIN
     v_invoice_id := NEW.id;
   ELSE
     v_invoice_id := NEW.invoice_id;
+    -- Serialize with a concurrent header change (a restore, a status or order change): a line
+    -- write holds the invoice row, so the header trigger of the other transaction runs after this
+    -- one commits and sees this line, or this check runs after that change and sees it. The
+    -- foreign key's KEY SHARE lock does not conflict with a header UPDATE, so lock explicitly.
+    PERFORM 1 FROM public.invoices WHERE id = v_invoice_id FOR SHARE;
   END IF;
 
   IF EXISTS (
@@ -123,7 +157,7 @@ BEGIN
        AND i.order_id IS NULL
        AND i.delivery_id IS NULL
        AND i.deleted_at IS NULL
-       AND i.status IN ('draft', 'unposted', 'posted')
+       AND i.status NOT IN ('cancelled', 'voided')
        AND EXISTS (
          SELECT 1 FROM public.invoice_items ii
           WHERE ii.invoice_id = i.id
@@ -150,7 +184,7 @@ CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines_header
   -- Only on a real change: save_invoice's header UPDATE names invoice_type even when it keeps it,
   -- and must not be refused before it replaces an old product line with charge lines.
   WHEN (
-    NEW.status IN ('draft', 'unposted', 'posted')
+    NEW.status NOT IN ('cancelled', 'voided')
     AND NEW.deleted_at IS NULL
     AND (OLD.invoice_type, OLD.order_id, OLD.delivery_id, OLD.status, OLD.deleted_at)
         IS DISTINCT FROM (NEW.invoice_type, NEW.order_id, NEW.delivery_id, NEW.status, NEW.deleted_at)

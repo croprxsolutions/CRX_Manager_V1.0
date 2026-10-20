@@ -16,7 +16,7 @@ describe('isFromScratchInvoice', () => {
 });
 
 describe('fromScratchLinesProblem', () => {
-  const charge = { product_id: null, charge_type: 'freight' as const, description: 'Freight', unit_price_cents: 2500 };
+  const charge = { product_id: null, charge_type: 'freight' as const, description: 'Freight', quantity: 1, unit_price_cents: 2500 };
 
   it('passes typed charges with a description and an amount', () => {
     expect(fromScratchLinesProblem([charge, { ...charge, charge_type: 'other' }])).toBeNull();
@@ -28,6 +28,7 @@ describe('fromScratchLinesProblem', () => {
     expect(fromScratchLinesProblem([{ ...charge, charge_type: null }])).toBe('Pick a charge type for every line.');
     expect(fromScratchLinesProblem([{ ...charge, description: '  ' }])).toBe('Add a description to every charge.');
     expect(fromScratchLinesProblem([{ ...charge, unit_price_cents: 0 }])).toBe('Every charge needs an amount above $0.00.');
+    expect(fromScratchLinesProblem([{ ...charge, quantity: 2 }])).toMatch(/one amount/);
   });
 });
 

@@ -1496,6 +1496,25 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
 
+  it('turns an older untyped line into a single charge when a type is picked', async () => {
+    setupInvoice({}, [{
+      id: 'item-old', product_id: null, description: 'Finance charge', quantity: 2,
+      unit_price_cents: 1234, extended_cents: 2468, cost_cents: 0, sort_order: 0, is_application_fee: true,
+    }]);
+    mockIntentAwareRpc({ data: 'inv-scratch', error: null });
+    renderInvoiceDetail('inv-scratch');
+    await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'other' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
+      expect(saveCall?.[1].p_items).toEqual([expect.objectContaining({
+        id: 'item-old', charge_type: 'other', quantity: 1, unit_price_cents: 1234, extended_cents: 1234, is_application_fee: false,
+      })]);
+    });
+  });
+
   it('keeps Add Product on an order-backed invoice', async () => {
     setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1' });
     renderInvoiceDetail('inv-scratch');

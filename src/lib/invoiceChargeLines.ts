@@ -33,6 +33,7 @@ interface ChargeLineCheck {
   product_id: string | null;
   charge_type?: InvoiceChargeType | null;
   description: string;
+  quantity: number;
   unit_price_cents: number;
 }
 
@@ -52,6 +53,9 @@ export function fromScratchLinesProblem(lines: ChargeLineCheck[]): string | null
   }
   if (lines.some((line) => !(line.unit_price_cents > 0))) {
     return 'Every charge needs an amount above $0.00.';
+  }
+  if (lines.some((line) => line.quantity !== 1)) {
+    return 'A charge is one amount: set its type again to reset it to a single charge.';
   }
   return null;
 }

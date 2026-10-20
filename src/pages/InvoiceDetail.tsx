@@ -861,6 +861,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       if (field === 'quantity' || field === 'unit_price_cents') {
         item.extended_cents = Math.round(item.quantity * item.unit_price_cents);
       }
+      // Typing an older product-less line makes it a charge line: quantity 1, the amount is the
+      // line total, and it is not a machine fee (the database's charge-line shape check).
+      if (field === 'charge_type' && value) {
+        item.quantity = 1;
+        item.extended_cents = item.unit_price_cents;
+        item.is_application_fee = false;
+      }
       updated[index] = item;
       return updated;
     });

@@ -174,14 +174,26 @@ Done when each reads past a 1,000-row fake in tests, and a live check with a 10-
 
 **Part 3, item (b): pickers become search boxes.**
 - Add customer and field search pickers beside the existing `ProductSearchPicker`. Each asks the database as you type and loads a saved choice by id.
-- Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the M48/M49/M50 lists, M59, N2, N3 and N6.
+- Swap them into the open pickers, invoice customer (M29) first, since it feeds the PDF address and email. That covers M17, M29–M34, M37, M38, M43–M45, M47, the picker entries in M48, M49 and M50, M59, N2, N3 and N6.
+- Screens that use the whole list are not pickers, and a search box would leave them capped. They keep a full paged read (`fetchAllRows`) or move into a database report instead:
+  - Label Data Quality (M49, coverage and batch checks);
+  - Brand vs Generic (M49 and N12, the mapping viewer);
+  - the Compliance acre total (M50);
+  - Product Detail's choice lists (M60), which should come from a database query of distinct values.
 - Bulk imports (in M48 and M49) should match names in the database.
 - The blend-ticket scanner (M51) is an Edge Function. Changing it needs a deploy, which needs Mason's OK at that time.
 
 Done when a search finds a record past the old limit on every picker. Probably two PRs.
 
 **Part 4, item (c): real server-side paging for the big lists.**
-- Customers, Jobs, Invoices, Orders, Deliveries, Quotes, Notifications, Dispatch Board, Receiving, Call Lists, Fields and Watchdog get one screenful at a time with a database search and an exact total. The stable order is the record's date plus its id, so rows aren't missed or repeated while records change.
+- Customers, Jobs, Invoices, Orders, Deliveries, Quotes, Notifications, Dispatch Board, Receiving, Call Lists, Fields and Watchdog get one screenful at a time with a database search and an exact total.
+- How "next page" works must be designed before building, because the Goal 4 test requires no missed or repeated rows while records are added and edited. A fixed sort (date plus id) is not enough on its own:
+  - counting rows to skip ("offset") shifts when a row is added or deleted;
+  - continuing after the last row seen ("keyset") can skip a row whose date is edited to fall behind that point.
+- The design must say how each case is handled. For example:
+  - page on a value that never changes once set (creation time plus id);
+  - re-check the exact total and reload when it moves, as part 1 does;
+  - tell the user the list changed instead of showing a silently wrong page.
 - This replaces part 1's "load everything" approach before history grows, and removes part 1's per-page counting cost (KNOWN_ISSUES "Deferred").
 - It likely needs new database search functions, which are non-destructive migrations, and the dashboard queue count (H36).
 

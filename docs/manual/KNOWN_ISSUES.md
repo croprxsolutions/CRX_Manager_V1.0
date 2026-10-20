@@ -1,7 +1,11 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-19 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-19 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
+**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-20 21:29 UTC: 1038 rows / 1031 names, `max(version)` `20261020193610` =
+`20261019230000_cost_margin_admin_only_screens_step2`; the two changes since the 2026-10-19 20:55 UTC read are
+`20261019220000_start_and_complete_delivery` (ledger `20261020022222`) and cost step 2 (ledger `20261020193610`),
+and both entries below already say so; Goal 3's `20261020150000` is written, not applied; at 2026-10-19 20:55 UTC:
+1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
 replay-binding entry below (both wrappers, both renamed bodies and the 24-operation guard read live); at 18:35 UTC:
 1035 rows / 1028 names; the one change since the 12:50 UTC read is that the

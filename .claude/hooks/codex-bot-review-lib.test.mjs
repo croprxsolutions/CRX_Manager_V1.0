@@ -14,7 +14,13 @@ import {
   CODEX_BOT_LOGINS,
   CODEX_THREADS_QUERY,
   CODEX_THREAD_MAX_PAGES,
+  CODERABBIT_REQUIRED_LABEL,
   codexBotFindingsDenial,
+  coderabbitCompletedCommit,
+  coderabbitRequirementArgs,
+  coderabbitReviewMissingDenial,
+  evaluateCodeRabbitRequirement,
+  isMoneyPath,
   codexBotThreads,
   coderabbitFindingsDenial,
   coderabbitThreadCount,
@@ -600,5 +606,72 @@ eq(
   "b".repeat(40),
   "a deadline that has not passed leaves the walk untouched",
 );
+
+// ── Money PRs need a completed CodeRabbit review of the head (2026-10-21) ────
+const MID = "4a1b2c3d4e5f60718293a4b5c6d7e8f901234567";
+const crStatus = (description, { login = "coderabbitai", state = "SUCCESS", context = "CodeRabbit" } = {}) =>
+  ({ context, state, description, creator: { login } });
+const commit = (oid, { parents = 1, statuses = [] } = {}) =>
+  ({ commit: { oid, parents: { totalCount: parents }, status: statuses === null ? null : { contexts: statuses } } });
+const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
+  headRefOid = HEAD, filesTotal = files.length } = {}) => ({
+  headRefOid,
+  labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
+  files: { totalCount: filesTotal, nodes: files.map((filePath) => ({ path: filePath })) },
+  commits: { totalCount: commits.length, nodes: commits },
+});
+
+// Which PRs qualify.
+ok(isMoneyPath("src/lib/invoiceMath.ts") && isMoneyPath("src/pages/Inventory.tsx") && isMoneyPath("src\\lib\\prepayApply.ts"),
+  "src money/inventory paths qualify, either slash");
+ok(isMoneyPath("supabase/migrations/20261021000000_anything.sql") && isMoneyPath("supabase/functions/send-email/index.ts"),
+  "every migration and Edge Function qualifies");
+ok(!isMoneyPath("docs/reference/invoices.md") && !isMoneyPath(".claude/hooks/x.mjs") && !isMoneyPath("src/lib/pagedRead.ts")
+  && !isMoneyPath("src/components/Map.tsx"), "docs, hooks and non-money src files do not");
+eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md", "src/components/Map.tsx"], commits: [commit(HEAD)] })).status,
+  "not-required", "a non-money PR with no label is not gated");
+eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], labels: [CODERABBIT_REQUIRED_LABEL], commits: [commit(HEAD)] })).status,
+  "missing", "the needs-coderabbit label makes any PR qualify");
+eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], filesTotal: 250, commits: [commit(HEAD)] })).status,
+  "missing", "a cut-short file list cannot prove the PR is not a money PR");
+
+// The DENY direction: a money PR with no completed review is refused.
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD)] })).status, "missing", "no CodeRabbit status at all is missing");
+for (const description of ["Review rate limited", "Review skipped: incremental reviews are disabled", "Review in progress"]) {
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crStatus(description)] })] })).status,
+    "missing", `"${description}" is not a completed review`);
+}
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crStatus("Review completed", { login: "masonwells1" })] })] })).status,
+  "missing", "a 'Review completed' status posted by anyone but CodeRabbit (an agent via Mason's account) does not count");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crStatus("Review completed", { context: "CodeRabbit-fake" })] })] })).status,
+  "missing", "another context name does not count");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crStatus("Review completed", { state: "PENDING" })] })] })).status,
+  "missing", "a non-success state does not count");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] })).status,
+  "missing", "an ordinary commit after the reviewed one needs a new review");
+
+// The ALLOW direction.
+const reviewedHead = evaluateCodeRabbitRequirement(facts());
+eq([reviewedHead.status, reviewedHead.reviewedOid], ["reviewed", HEAD], "a completed review of the head passes");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }),
+  commit(MID, { parents: 2 }), commit(HEAD, { parents: 2, statuses: [crStatus("Review skipped: incremental reviews are disabled")] })] })).status,
+  "reviewed", "only merge commits after the reviewed commit keep the earlier review");
+ok(coderabbitCompletedCommit({ status: { contexts: [crStatus("Review completed", { login: "coderabbitai[bot]" })] } }),
+  "both CodeRabbit login spellings count");
+
+// Unreadable answers fail closed.
+eq(evaluateCodeRabbitRequirement(null).status, "unreadable", "no data is unreadable");
+eq(evaluateCodeRabbitRequirement({ headRefOid: HEAD }).status, "unreadable", "missing lists are unreadable");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] })] })).status,
+  "unreadable", "a commit list that does not end at the head is not trusted");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [] })).status, "unreadable", "an empty commit list is not trusted");
+
+// The query and denial carry what the agent needs.
+ok(coderabbitRequirementArgs("o", "r", 5).includes("number=5")
+  && /status \{ contexts \{ context state description creator/.test(coderabbitRequirementArgs("o", "r", 5)[3]),
+  "the query reads each commit's status contexts with their creator");
+ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it changes money", HEAD))
+  && /pr comment 7/.test(coderabbitReviewMissingDenial("X", "7", "w", HEAD)),
+  "the denial tells the agent the exact one request to post");
 
 console.log(`codex-bot-review-lib: ${pass} assertions passed`);

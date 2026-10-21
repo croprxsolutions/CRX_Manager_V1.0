@@ -378,6 +378,154 @@ export function coderabbitFindingsDenial(prefix, selector, count) {
   );
 }
 
+// ── Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21) ──
+// A PR that touches money, invoices, payments, inventory or costs, or one Mason
+// names, merges only with a clean CodeRabbit review of its current head
+// (docs/reference/coderabbit-native-review.md). "Clean" is the thread rule above;
+// THIS check adds "a review exists at all", because with no review there are no
+// threads to block (Sol, PR #1009). Both merge gates and the migration landing
+// gate call it, and it FAILS CLOSED like the thread count: an unreadable answer
+// refuses.
+//
+// WHY A COMMIT STATUS, NOT A REVIEW OBJECT  (measured 2026-10-21, PRs #970–#1002)
+// CodeRabbit files an empty COMMENTED review object every time it answers a
+// thread reply, at whatever commit is the head then (#1002: ddc030a24, #995:
+// 54ed8a737), so "a CodeRabbit review exists on the head" would be satisfied by
+// a chat reply. Its commit status is exact: context "CodeRabbit", set by
+// coderabbitai, description "Review completed" only on a commit it reviewed, and
+// "Review rate limited" / "Review skipped: …" otherwise. The creator is checked
+// because anyone with write access can post a status with any context name —
+// including an agent through Mason's account.
+export const CODERABBIT_REQUIRED_LABEL = "needs-coderabbit";
+
+// Lower-case substrings of a src/ path that mark it as money, invoice, payment,
+// inventory or cost code. Deliberately broad ("when unsure, it qualifies"):
+// a false positive costs one CodeRabbit request, a miss lands money code with
+// no second reviewer. Anything this list misses is what the label is for.
+export const MONEY_PATH_WORDS = Object.freeze([
+  "invoice", "payment", "prepay", "credit", "money", "cents", "price", "pricing", "cost", "margin",
+  "inventory", "stock", "commission", "bill", "purchase", "bulkpo", "refund", "return", "deposit",
+  "ledger", "tax", "aging", "statement", "quote", "order", "delivery", "blend", "split", "cash",
+  "charge", "discount", "payable", "receivable", "receipt", "financ", "profit", "sales", "booking",
+  "cyclecount", "lotrpc", "idempot",
+]);
+
+// Every database migration and Edge Function qualifies: financial and inventory
+// invariants live in PostgreSQL (AGENTS.md), so a path list cannot tell a money
+// migration from any other.
+export function isMoneyPath(path) {
+  const p = String(path || "").replace(/\\/g, "/").trim().toLowerCase();
+  if (/^supabase\/(?:migrations|functions)\//.test(p)) return true;
+  if (!p.startsWith("src/")) return false;
+  return MONEY_PATH_WORDS.some((word) => p.includes(word));
+}
+
+// One GraphQL read: labels, changed files, and the PR's commits with their
+// parent counts and latest commit statuses (newest commit last).
+export const CODERABBIT_REQUIREMENT_QUERY = `
+query($owner:String!, $name:String!, $number:Int!) {
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$number) {
+      headRefOid
+      labels(first:100) { totalCount nodes { name } }
+      files(first:100) { totalCount nodes { path } }
+      commits(last:100) {
+        totalCount
+        nodes { commit { oid parents { totalCount } status { contexts { context state description creator { login } } } } }
+      }
+    }
+  }
+}`;
+
+// The gh arguments for that read, so the three callers cannot drift.
+export function coderabbitRequirementArgs(owner, name, number) {
+  return [
+    "api", "graphql",
+    "-f", `query=${CODERABBIT_REQUIREMENT_QUERY}`,
+    "-F", `owner=${owner}`,
+    "-F", `name=${name}`,
+    "-F", `number=${number}`,
+  ];
+}
+
+// Did CodeRabbit itself mark this commit "Review completed"?
+export function coderabbitCompletedCommit(commit) {
+  const contexts = commit?.status?.contexts;
+  if (!Array.isArray(contexts)) return false;
+  return contexts.some((context) =>
+    String(context?.context || "").trim().toLowerCase() === "coderabbit"
+    && isCodeRabbitLogin(context?.creator?.login)
+    && String(context?.state || "").trim().toUpperCase() === "SUCCESS"
+    && /^review completed\b/i.test(String(context?.description || "").trim()));
+}
+
+// Returns { status, why, headOid, reviewedOid } where status is
+// "not-required" | "reviewed" | "missing" | "unreadable".
+//
+// "reviewed" = CodeRabbit completed a review of the head, or of an earlier PR
+// commit followed ONLY by merge commits (a plain merge of main keeps an earlier
+// clean review, Mason 2026-10-21). A merge commit's content is not checked here;
+// the Sol carry-forward refuses a merge carrying any other edit, and a full Sol
+// review covers the rest.
+export function evaluateCodeRabbitRequirement(pullRequest) {
+  const headOid = String(pullRequest?.headRefOid || "").trim().toLowerCase();
+  const unreadable = (why = "") => ({ status: "unreadable", why, headOid, reviewedOid: "" });
+  if (!headOid) return unreadable();
+  const labels = pullRequest?.labels?.nodes;
+  const files = pullRequest?.files?.nodes;
+  const commits = pullRequest?.commits?.nodes;
+  if (!Array.isArray(labels) || !Array.isArray(files) || !Array.isArray(commits)) return unreadable();
+
+  const labelled = labels.some((label) => String(label?.name || "").trim().toLowerCase() === CODERABBIT_REQUIRED_LABEL);
+  const moneyFile = files.map((file) => file?.path).find(isMoneyPath);
+  // A file list that may be cut short cannot prove the PR is not a money PR.
+  const total = pullRequest?.files?.totalCount;
+  const filesComplete = Number.isInteger(total) && total <= files.length;
+  let why = "";
+  if (labelled) why = `it carries the "${CODERABBIT_REQUIRED_LABEL}" label`;
+  else if (moneyFile) why = `it changes money, invoice, payment, inventory or cost files (e.g. ${moneyFile})`;
+  else if (!filesComplete) why = "its changed-file list could not be read completely";
+  else return { status: "not-required", why: "", headOid, reviewedOid: "" };
+
+  const list = commits.map((node) => node?.commit);
+  if (list.length === 0 || String(list[list.length - 1]?.oid || "").trim().toLowerCase() !== headOid) {
+    return unreadable(why);
+  }
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const commit = list[i];
+    if (coderabbitCompletedCommit(commit)) {
+      return { status: "reviewed", why, headOid, reviewedOid: String(commit.oid).trim().toLowerCase() };
+    }
+    const parents = commit?.parents?.totalCount;
+    // Only a merge commit may sit between the reviewed commit and the head.
+    if (!(Number.isInteger(parents) && parents >= 2)) break;
+  }
+  return { status: "missing", why, headOid, reviewedOid: "" };
+}
+
+export function coderabbitRequirementUnreadableDenial(prefix, selector) {
+  const which = selector ? String(selector) : "<number>";
+  return (
+    `${prefix}: could not read this pull request's labels, files and commit statuses completely, so it cannot ` +
+    "tell whether it is a money PR that needs a CodeRabbit review (fail closed). Retry the merge in a minute; if " +
+    `it keeps failing, tell Mason the lookup is failing (gh pr view ${which}).`
+  );
+}
+
+export function coderabbitReviewMissingDenial(prefix, selector, why, headOid) {
+  const which = selector ? String(selector) : "<number>";
+  const head = String(headOid || "").slice(0, 12) || "the head";
+  return (
+    `${prefix}: this pull request needs a clean CodeRabbit review of its current head before it merges ` +
+    `(Mason, 2026-10-21), because ${why || "it qualifies"}, and CodeRabbit has not completed a review of ${head} ` +
+    "(or of an earlier commit followed only by merges of main).\n\n" +
+    "  1. If CodeRabbit's status shows a review in progress, wait up to 15 minutes.\n" +
+    `  2. Otherwise post ONCE:  gh pr comment ${which} --body "@coderabbitai full review"\n` +
+    "     (one retry after a stated rate-limit wait; rules: docs/reference/coderabbit-native-review.md).\n" +
+    "  3. Fix or answer every thread it opens, reply, resolve, then retry the merge."
+  );
+}
+
 // The deny text for "findings-at-head". Kept here so the Claude and Codex
 // guards cannot drift into two different explanations of the same refusal.
 export function codexBotFindingsDenial(prefix, selector, count) {

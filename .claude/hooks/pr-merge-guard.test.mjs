@@ -721,6 +721,13 @@ ok(/let coderabbitOpen = null;/.test(guardSource)
   "the Claude merge guard denies a PR with unresolved CodeRabbit threads");
 ok(/if \(coderabbitOpen === null\) \{\s*deny\(coderabbitUnreadableDenial\("PR MERGE GATE"/.test(guardSource),
   "…and fails CLOSED when the thread read failed or was partial (Luna round 3)");
+// Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21);
+// behaviour is proven in codex-bot-review-lib.test.mjs, this pins the wiring.
+ok(/let coderabbitReview = null;/.test(guardSource)
+  && /coderabbitReview = verdict;/.test(guardSource)
+  && /if \(!coderabbitReview \|\| coderabbitReview\.status === "unreadable"\) \{\s*deny\(coderabbitRequirementUnreadableDenial\("PR MERGE GATE"/.test(guardSource)
+  && /if \(coderabbitReview\.status === "missing"\) \{\s*deny\(coderabbitReviewMissingDenial\("PR MERGE GATE"/.test(guardSource),
+  "the Claude merge guard refuses a money PR with no completed CodeRabbit review, and fails closed on an unreadable answer");
 ok(/if\s*\(\s*!pullRequestChecksGreen\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "the green-pipeline denial is unconditional (no --auto exemption left)");
 ok(!/riskyFiles|contentIsRisky|advisoryQueue\.push\(request\);\s*return;\s*\}\s*\/\/[^\n]*risky/i.test(gateRequestSource),

@@ -18,7 +18,8 @@
 > **Exception: money PRs and PRs Mason names need a clean CodeRabbit review (Mason, 2026-10-21).**
 > A PR qualifies when it touches money, invoices, payments, inventory, or costs in any way (code,
 > database, or workflow; when unsure, it qualifies), or when Mason asks the session for a
-> CodeRabbit review. Such a PR merges only with a **clean CodeRabbit review of its current head**,
+> CodeRabbit review. The merge gates find most qualifying PRs by their files; for one they would
+> miss (and for any PR Mason names) the agent adds the `needs-coderabbit` label. Such a PR merges only with a **clean CodeRabbit review of its current head**,
 > plus the clean Sol review every non-documentation change needs (a documentation-only PR Mason
 > names gets the CodeRabbit review and keeps its Sol exemption). The agent requests the review
 > itself; Mason never posts it by hand. This replaces, for qualifying PRs only, the advisory
@@ -54,12 +55,24 @@
 >    merges a week and CodeRabbit allows only a few reviews an hour, and the Sol carry-forward
 >    collision check covers the interaction with the new main.
 >
-> **Enforcement is written, not mechanical (Mason, 2026-10-21, "keep it simple").** No hook or
-> merge gate checks for this review: the merge gates read CodeRabbit threads, not reviews of the
-> head, and the legacy `CodeRabbit candidate lifecycle` job is not a required check. Nothing blocks
-> the request comment either (checked 2026-10-21). While a merge-coordinator session runs, the
-> session reports `CR-CLEAN #<PR> head <sha>` before it gets a GO. A hard merge-gate check is a
-> separate follow-up.
+> **The merge gates enforce it (Mason, 2026-10-21, "build the merge-gate enforcement into #1009").**
+> Both agent merge gates (`.claude/hooks/pr-merge-guard.mjs`, `.codex/hooks/production-action-guard.mjs`)
+> and the migration landing gate call `evaluateCodeRabbitRequirement()` in
+> `.claude/hooks/codex-bot-review-lib.mjs`. A PR qualifies when it changes any
+> `supabase/migrations/` or `supabase/functions/` file, a `src/` file whose path contains a money
+> word (`MONEY_PATH_WORDS`: invoice, payment, prepay, credit, price, cost, inventory, stock,
+> order, delivery, …), or carries the `needs-coderabbit` label. **When Mason asks for a CodeRabbit
+> review of any other PR, the agent adds that label** (`gh pr edit <n> --add-label needs-coderabbit`)
+> so the gate holds it too. A qualifying PR merges (or applies its migration) only when CodeRabbit
+> itself set its `CodeRabbit` commit status to "Review completed" on the head, or on an earlier
+> PR commit followed only by merge commits. The status, not a review object, is the evidence:
+> CodeRabbit files an empty review object whenever it answers a thread reply, while its status
+> says "Review rate limited" or "Review skipped: …" when it did not review. A status posted by
+> anyone other than CodeRabbit (an agent through Mason's account, for example) does not count.
+> An unreadable answer refuses (fail closed). The existing thread rule (every CodeRabbit thread
+> replied to and resolved) still applies. A merge commit's content is not checked by this gate;
+> the Sol carry-forward refuses a merge that carries any other edit. Nothing blocks the request
+> comment itself (checked 2026-10-21).
 >
 > Every other PR keeps the advisory rule above: no `@coderabbitai` commands, and no waiting for a
 > review that has not arrived.

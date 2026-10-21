@@ -61,9 +61,13 @@ import {
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
   coderabbitFindingsDenial,
+  coderabbitRequirementArgs,
+  coderabbitRequirementUnreadableDenial,
+  coderabbitReviewMissingDenial,
   coderabbitThreadCount,
   coderabbitUnreadableDenial,
   collectCodexThreads,
+  evaluateCodeRabbitRequirement,
   evaluateCodexBotReview,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
@@ -354,6 +358,7 @@ const CODEX_ADVISORY_BUDGET_MS = 12_000;
 function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_MS) {
   let codexVerdict = null;
   let coderabbitOpen = null; // null = not read completely → fail closed below
+  let coderabbitReview = null; // null = not read → fail closed below
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -378,6 +383,16 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
       }, { deadlineMs });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
+      // Money PRs need a completed CodeRabbit review of the head (Mason,
+      // 2026-10-21). Read inside the same budget; past it, stay null and refuse.
+      if (Date.now() < deadlineMs) {
+        const facts = JSON.parse(gh(coderabbitRequirementArgs(slug[1], slug[2], meta.number)))?.data?.repository?.pullRequest;
+        const verdict = evaluateCodeRabbitRequirement(facts);
+        // Both reads must describe the same head, or neither is trusted.
+        if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
+          coderabbitReview = verdict;
+        }
+      }
     }
   } catch {
     codexVerdict = null; // notice below; never a deny
@@ -392,6 +407,14 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
   }
   if (coderabbitOpen > 0) {
     deny(coderabbitFindingsDenial("PR MERGE GATE", request.selector, coderabbitOpen));
+  }
+  // A money PR (or one carrying the needs-coderabbit label) needs a completed
+  // CodeRabbit review of its head; an unreadable answer refuses.
+  if (!coderabbitReview || coderabbitReview.status === "unreadable") {
+    deny(coderabbitRequirementUnreadableDenial("PR MERGE GATE", request.selector));
+  }
+  if (coderabbitReview.status === "missing") {
+    deny(coderabbitReviewMissingDenial("PR MERGE GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
   }
 
   // The one blocking case: it flagged THIS commit and nobody answered. Not

@@ -56,9 +56,13 @@ import {
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
   coderabbitFindingsDenial,
+  coderabbitRequirementArgs,
+  coderabbitRequirementUnreadableDenial,
+  coderabbitReviewMissingDenial,
   coderabbitThreadCount,
   coderabbitUnreadableDenial,
   collectCodexThreads,
+  evaluateCodeRabbitRequirement,
   evaluateCodexBotReview,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
@@ -1334,6 +1338,7 @@ const CODEX_CALL_TIMEOUT_MS = 5_000;
 function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), deadlineMs = clock() + CODEX_ADVISORY_BUDGET_MS }) {
   let codexVerdict = null;
   let coderabbitOpen = null; // null = not read completely → fail closed below
+  let coderabbitReview = null; // null = not read → fail closed below
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -1357,6 +1362,15 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
       }, { deadlineMs, now: clock });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
+      // Money PRs need a completed CodeRabbit review of the head — mirror of
+      // pr-merge-guard.mjs, inside the same budget; past it, stay null and refuse.
+      if (clock() < deadlineMs) {
+        const facts = JSON.parse(runGh(coderabbitRequirementArgs(slug[1], slug[2], meta.number), repoDir))?.data?.repository?.pullRequest;
+        const verdict = evaluateCodeRabbitRequirement(facts);
+        if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
+          coderabbitReview = verdict;
+        }
+      }
     }
   } catch {
     codexVerdict = null; // never a deny
@@ -1368,6 +1382,12 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
   }
   if (coderabbitOpen > 0) {
     return denied(coderabbitFindingsDenial("CODEX PRODUCTION GATE", request.selector, coderabbitOpen));
+  }
+  if (!coderabbitReview || coderabbitReview.status === "unreadable") {
+    return denied(coderabbitRequirementUnreadableDenial("CODEX PRODUCTION GATE", request.selector));
+  }
+  if (coderabbitReview.status === "missing") {
+    return denied(coderabbitReviewMissingDenial("CODEX PRODUCTION GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
   }
   if (codexVerdict?.status === "findings-at-head") {
     return denied(codexBotFindingsDenial("CODEX PRODUCTION GATE", request.selector, codexVerdict.unresolvedAtHead));

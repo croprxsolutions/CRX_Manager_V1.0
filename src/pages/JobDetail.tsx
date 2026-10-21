@@ -379,6 +379,10 @@ export default function JobDetail() {
   // neither can fall back to legacy total_acres while it is unavailable.
   const [fieldsLookupReady, setFieldsLookupReady] = useState(false);
   const [allProducts, setAllProducts] = useState<PickerProduct[]>([]);
+  // Which of the customers/fields/products lists failed to load (Goal 4). While any
+  // did, editing and saving are closed: those lists pick the customer, size the
+  // fields and price the chemicals, and an empty one must never pass for "none".
+  const [lookupLoadFailures, setLookupLoadFailures] = useState<string[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [applicators, setApplicators] = useState<Profile[]>([]);
   // Staff-held license rows per profile (B5 license gates)
@@ -1650,25 +1654,41 @@ export default function JobDetail() {
 
   const loadLookups = useCallback(async () => {
     setFieldsLookupReady(false);
+    // Customers, fields and products are read page by page (Goal 4): these lists
+    // name billed customers, size fields and price chemicals across the page, so
+    // one request cut off at the server's row cap would silently drop records.
     const [custResult, fieldResult, prodResult, vehicleResult, appResult, recipeResult] = await Promise.all([
-      supabase.from('customers').select('*').eq('is_active', true).order('farm_name'),
-      supabase.from('fields').select('*').order('field_name'),
-      supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`).eq('is_active', true).order('product_name'),
+      fetchAllRows((from, to) => supabase.from('customers').select('*', { count: 'exact' }).eq('is_active', true).order('farm_name').order('id').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('fields').select('*', { count: 'exact' }).order('field_name').order('id').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' }).eq('is_active', true).order('product_name').order('id').range(from, to)),
       supabase.from('vehicles').select('*').eq('status', 'active').order('vehicle_name'),
       // PR-07 follow-up: applicator picker only uses a.id + a.full_name + a.role; safe via view.
       supabase.from('profile_public_view').select('id, full_name, role, is_active').in('role', ['applicator', 'admin', 'sales_rep']).eq('is_active', true).order('full_name'),
       supabase.from('blend_recipes').select('*').eq('is_active', true).order('name'),
     ]);
-    setCustomers((custResult.data || []) as Customer[]);
+    const failures: string[] = [];
+    if (custResult.error) {
+      Sentry.captureException(custResult.error, { tags: { source: 'fetch', action: 'load_job_customers' } });
+      toast('error', 'Failed to load Customers. Retry before editing this job.');
+      failures.push('customers');
+    }
+    // A failed read clears the list: never keep a previous or partial one.
+    setCustomers(custResult.error ? [] : (custResult.data || []) as Customer[]);
     if (!fieldResult.error) {
       setAllFields((fieldResult.data || []) as Field[]);
       setFieldsLookupReady(true);
+    } else {
+      Sentry.captureException(fieldResult.error, { tags: { source: 'fetch', action: 'load_job_fields' } });
+      toast('error', 'Failed to load Fields. Retry before editing this job.');
+      setAllFields([]);
+      failures.push('fields');
     }
     if (prodResult.error) {
       Sentry.captureException(prodResult.error, { tags: { source: 'fetch', action: 'load_job_products' } });
       toast('error', 'Failed to load Products. Retry before editing job chemicals.');
+      failures.push('products');
     }
-    let productRows = (prodResult.data || []) as unknown as PickerProduct[];
+    let productRows = prodResult.error ? [] : (prodResult.data || []) as unknown as PickerProduct[];
     try {
       productRows = await withAdminCosts('products', productRows, isAdmin);
     } catch (costErr) {
@@ -1676,8 +1696,10 @@ export default function JobDetail() {
       Sentry.captureException(costErr, { tags: { source: 'fetch', action: 'load_job_product_costs' } });
       toast('error', 'Failed to load Products. Retry before editing job chemicals.');
       productRows = [];
+      if (!failures.includes('products')) failures.push('products');
     }
     setAllProducts(productRows);
+    setLookupLoadFailures(failures);
     setVehicles((vehicleResult.data || []) as Vehicle[]);
     setApplicators((appResult.data || []) as Profile[]);
     setRecipes((recipeResult.data || []) as BlendRecipe[]);
@@ -2392,6 +2414,10 @@ export default function JobDetail() {
   // admin-override modal (admins only) so the save proceeds only with a LOGGED reason; a
   // non-admin is told to fix the rate (no silent corruption).
   const handleSave = async () => {
+    if (lookupLoadFailures.length > 0) {
+      toast('error', `This job's ${lookupLoadFailures.join(', ')} could not be loaded. Retry before saving.`);
+      return;
+    }
     // §5 (Codex r6): FAIL CLOSED while the guardrail mode / by-id label data are still
     // loading and the mix has products — an early Save must not skip a block-mode override.
     if (chemRows.some((c) => c.product_id) && (!guardrailModeLoaded || !jobLabelsLoaded)) {
@@ -3709,7 +3735,8 @@ export default function JobDetail() {
     );
   }
 
-  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress');
+  // A failed customers/fields/products read closes editing until a retry succeeds.
+  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0;
   // U12: the assigned applicator (job-level applicator_id match — mirrors the
   // existing AppliedRecordsManager canEdit gate a few hundred lines down) can
   // see Start/Complete on THEIR OWN job even though isEditable is office-only.
@@ -3874,6 +3901,13 @@ export default function JobDetail() {
           )}
         </div>
       </div>
+
+      {lookupLoadFailures.length > 0 && (
+        <div role="alert" className="flex items-center justify-between gap-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <span>The {lookupLoadFailures.join(', ')} list could not be loaded, so this job cannot be edited or saved yet.</span>
+          <Button size="sm" variant="secondary" onClick={() => { void loadLookups(); }}>Retry</Button>
+        </div>
+      )}
 
       {/* §2 Watchdog — inline advisory flags for this job (auto-refreshes on open) */}
       {!isNew && id && <WatchdogFlagBanner jobId={id} autoRefresh />}

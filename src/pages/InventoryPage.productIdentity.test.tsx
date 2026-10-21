@@ -47,7 +47,7 @@ const siblings = [
 
 function query(data: unknown) {
   const builder: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'or', 'order', 'in', 'update']) {
+  for (const method of ['select', 'eq', 'or', 'order', 'in', 'update', 'range']) {
     builder[method] = vi.fn(() => builder);
   }
   builder.then = (resolve: (value: unknown) => void) =>
@@ -156,6 +156,34 @@ describe('InventoryPage Product identity writers', () => {
       'manual_inventory_add',
       expect.objectContaining({ p_product_id: 'product-b' }),
     ));
+  });
+
+  it('a failed product reload clears the earlier list and blocks Add Inventory (Goal 4 part 3)', async () => {
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /add inventory/i }));
+    let dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
+    expect(await within(dialog).findByRole('button', { name: /SKU-A.*Family: Family A/i })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /add.*inventory/i })).not.toBeInTheDocument());
+
+    // The next read of the product list fails.
+    mocks.from.mockImplementation((table: string) => {
+      if (table !== 'products') return query([]);
+      const failing: Record<string, unknown> = {};
+      for (const method of ['select', 'eq', 'order', 'range']) failing[method] = vi.fn(() => failing);
+      failing.then = (resolve: (value: unknown) => void) =>
+        Promise.resolve({ data: null, error: { message: 'connection reset' }, count: null }).then(resolve);
+      return failing;
+    });
+    fireEvent.click(screen.getByRole('button', { name: /add inventory/i }));
+    dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Products could not be loaded');
+    expect(within(dialog).queryByRole('button', { name: /SKU-A/i })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /SKU-B/i })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /^add inventory$/i })).toBeDisabled();
+    expect(mocks.toast).toHaveBeenCalledWith('error', 'Failed to load products. Please try again.');
+    expect(mocks.rpc).not.toHaveBeenCalledWith('manual_inventory_add', expect.anything());
   });
 
   it('distinguishes siblings and sends exact UUID B to create_inventory_hold', async () => {

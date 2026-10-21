@@ -478,4 +478,22 @@ describe('ManualTicketCreate retry-safe atomic creation', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(defaultProps.onComplete).not.toHaveBeenCalled();
   });
+
+  it('a failed product catalog read blocks adding products and creating the ticket (Goal 4)', async () => {
+    mocks.from.mockImplementation((table: string) => chainable(
+      table === 'products'
+        ? { data: null, error: { message: 'catalog read failed' } }
+        : table === 'unit_conversions'
+          ? { data: TEST_UNIT_CONVERSIONS, error: null }
+          : { data: [], error: null },
+    ));
+
+    render(<ManualTicketCreate {...defaultProps} />);
+    expect(await screen.findByText('Failed to load Products. Retry before creating this ticket.'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add product/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /create ticket/i })).toBeDisabled();
+    expect(screen.queryByRole('combobox', { name: /Quantity unit for/ })).toBeNull();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
 });

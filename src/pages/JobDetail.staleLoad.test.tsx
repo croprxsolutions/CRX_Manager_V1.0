@@ -769,3 +769,44 @@ describe('JobDetail cross-record stale-load guard', () => {
     expect(mockNotifyCreditLimit).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('JobDetail customer/field/product lookups (Goal 4)', () => {
+  it('a failed customers read after a successful one clears the list and closes editing and saving', async () => {
+    // First load: customers succeed, products fail (so the Retry banner shows).
+    // Retry: products succeed, customers fail. The earlier customer list must not survive.
+    // Flipped just before Retry. A paged read may ask more than once per load, so the
+    // switch is a flag, not a call count.
+    let retried = false;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        return retried
+          ? buildChain({ data: null, error: { message: 'customers read failed' } })
+          : buildChain({ data: [{ id: 'cust-1', farm_name: 'Farm Alpha', is_active: true }], error: null });
+      }
+      if (table === 'products') {
+        return retried
+          ? buildChain({ data: [], error: null })
+          : buildChain({ data: null, error: { message: 'products read failed' } });
+      }
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((fn: string) => (fn === 'next_job_number'
+      ? Promise.resolve({ data: 'J-NEWNEW-9999', error: null })
+      : Promise.resolve({ data: null, error: null })));
+
+    mountAt('/jobs/new');
+    await screen.findByRole('option', { name: 'Farm Alpha' });
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('products');
+    expect(screen.queryByRole('button', { name: /Save Job/ })).toBeNull();
+
+    retried = true;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('customers'));
+    expect(screen.getByRole('alert').textContent).not.toContain('products');
+    expect(screen.queryByRole('option', { name: 'Farm Alpha' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Save Job/ })).toBeNull();
+    expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load Customers. Retry before editing this job.');
+  });
+});

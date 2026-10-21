@@ -16,10 +16,13 @@ vi.mock('../../lib/db', () => {
     select: vi.fn(),
     eq: vi.fn(),
     order: vi.fn(),
+    range: vi.fn(),
   };
   builder.select.mockReturnValue(builder);
   builder.eq.mockReturnValue(builder);
-  builder.order.mockResolvedValue({ data: [], error: null });
+  builder.order.mockReturnValue(builder);
+  // The product list is read page by page and ends in .range().
+  builder.range.mockResolvedValue({ data: [], error: null, count: 0 });
 
   return {
     supabase: { from: vi.fn(() => builder), rpc: vi.fn() },

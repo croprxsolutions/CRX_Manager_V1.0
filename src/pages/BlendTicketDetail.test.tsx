@@ -198,13 +198,54 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     });
   });
 
-  it('queries blend_ticket_products and customers to populate the form', async () => {
+  it('queries blend_ticket_products to populate the form and names the customer from the ticket, not a customer list', async () => {
     renderTicket();
-    await waitFor(() => {
-      const tablesQueried = mockFrom.mock.calls.map((c) => c[0] as string);
-      expect(tablesQueried).toContain('blend_ticket_products');
-      expect(tablesQueried).toContain('customers');
+    // Goal 4: the customer picker searches as you type; the saved customer's
+    // name comes from the ticket's own customer join.
+    expect(await screen.findByRole('combobox', { name: 'Customer' })).toHaveValue('Farm Alpha');
+    const tablesQueried = mockFrom.mock.calls.map((c) => c[0] as string);
+    expect(tablesQueried).toContain('blend_ticket_products');
+    expect(tablesQueried).not.toContain('customers');
+  });
+
+  it('blocks saving and billing when the saved customer row did not load', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: { ...baseTicket, customer: null }, error: null });
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
     });
+    renderTicket();
+    expect(await screen.findByText(/saved customer could not be loaded/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+  });
+
+  it('a failed catalog re-read after a successful one clears the catalog and blocks products and saving', async () => {
+    const catalogProduct = { id: 'p-cat', product_name: 'Catalog Gamma', is_active: true, product_form: 'liquid' };
+    let catalogFails = false;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      if (table === 'blend_ticket_products') {
+        return buildChain({ data: [{ ...baseProduct, product_id: 'p-cat', product_name: 'Catalog Gamma' }], error: null });
+      }
+      if (table === 'products') {
+        return catalogFails
+          ? buildChain({ data: null, error: { message: 'catalog read failed' } })
+          : buildChain({ data: [catalogProduct], error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+    renderTicket();
+    expect(await screen.findByDisplayValue(/Product ID: p-cat/)).toBeInTheDocument();
+
+    // Saving re-reads the ticket; this time the catalog read fails.
+    catalogFails = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByText(/Product catalog could not be loaded, so products cannot be added/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByDisplayValue(/Product ID: p-cat/)).toBeNull());
+    expect(screen.getByRole('button', { name: 'Add Product' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
   });
 
   it('queries the application_services table on load (Phase 1 picker source)', async () => {

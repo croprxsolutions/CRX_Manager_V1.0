@@ -43,7 +43,7 @@ const siblings = [
 
 function productQuery() {
   const builder: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'order']) builder[method] = vi.fn(() => builder);
+  for (const method of ['select', 'eq', 'order', 'range']) builder[method] = vi.fn(() => builder);
   builder.then = (resolve: (value: unknown) => void) =>
     Promise.resolve({ data: siblings, error: null }).then(resolve);
   return builder;

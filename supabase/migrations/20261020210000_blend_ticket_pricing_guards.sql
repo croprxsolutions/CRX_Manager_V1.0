@@ -182,13 +182,13 @@ BEGIN
   IF (SELECT count(*) FROM pg_attribute a
        WHERE NOT a.attisdropped AND (
              (a.attrelid = 'public.blend_ticket_products'::regclass AND a.attname = 'unit_price_cents' AND a.atttypid = 'bigint'::regtype AND NOT a.atthasdef)
-          OR (a.attrelid = 'public.jobs'::regclass AND a.attname = 'quote_section_id' AND a.atttypid = 'uuid'::regtype)
+          OR (a.attrelid = 'public.jobs'::regclass AND a.attname IN ('quote_section_id', 'quote_id') AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quote_items'::regclass AND a.attname IN ('section_id', 'product_id') AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quote_items'::regclass AND a.attname = 'price_per_unit' AND a.atttypid = 'numeric'::regtype)
           OR (a.attrelid = 'public.products'::regclass AND a.attname IN ('tier1_price', 'tier2_price', 'tier3_price') AND a.atttypid = 'numeric'::regtype)
           OR (a.attrelid = 'public.quote_sections'::regclass AND a.attname = 'quote_id' AND a.atttypid = 'uuid'::regtype)
           OR (a.attrelid = 'public.quotes'::regclass AND a.attname = 'customer_id' AND a.atttypid = 'uuid'::regtype)
-          OR (a.attrelid = 'public.quotes'::regclass AND a.attname = 'deleted_at' AND a.atttypid = 'timestamptz'::regtype))) <> 11 THEN
+          OR (a.attrelid = 'public.quotes'::regclass AND a.attname = 'deleted_at' AND a.atttypid = 'timestamptz'::regtype))) <> 12 THEN
     RAISE EXCEPTION 'PREFLIGHT_COLUMN_DRIFT: a pricing column is missing or has an unexpected type';
   END IF;
 
@@ -685,6 +685,7 @@ DECLARE
   v_price_choices       jsonb;
   v_unpriced            text;
   v_zero_line           jsonb;
+  v_zero_lines          jsonb;
   v_zero_quoted         boolean;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
@@ -869,13 +870,15 @@ BEGIN
   IF v_ticket.job_id IS NOT NULL THEN
     SELECT j.quote_section_id INTO v_quote_section_id FROM jobs j WHERE j.id = v_ticket.job_id;
   END IF;
-  -- Goal 3 pricing (20261020210000): a job pointed at another customer's quote, or at a deleted
-  -- quote, supplies no quoted price (and no choices); the lines bill their tier prices instead.
+  -- Goal 3 pricing (20261020210000): a job pointed at another customer's quote, at a deleted
+  -- quote, or at a section of a quote other than the job's own quote, supplies no quoted price (and
+  -- no choices); the lines bill their tier prices instead.
   IF v_quote_section_id IS NOT NULL AND NOT EXISTS (
        SELECT 1 FROM quote_sections qs JOIN quotes q ON q.id = qs.quote_id
         WHERE qs.id = v_quote_section_id
           AND q.customer_id = v_ticket.customer_id
-          AND q.deleted_at IS NULL) THEN
+          AND q.deleted_at IS NULL
+          AND q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)) THEN
     v_quote_section_id := NULL;
   END IF;
 
@@ -962,20 +965,20 @@ BEGIN
   --     error shape the trigger uses, so the screen shows its approval window before any invoice
   --     number is drawn. It finds the price exactly as the line pricing below does (a valid pick,
   --     else the first usable quote line), for a line some priced share will bill per unit.
+  --     The detail names the first $0 line in the trigger's fields and lists EVERY $0 line in
+  --     zero_lines (Mason, 2026-10-20: "list every $0 line"), so the approval window shows
+  --     every line the one reason approves.
   IF v_quote_section_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                   WHERE (r.value->>'price_override_cents') IS NULL
                     AND (r.value->>'share_acres')::numeric > 0) THEN
-    SELECT jsonb_build_object(
-             'operation', 'create_invoice_from_blend_ticket',
-             'entity_type', 'blend_ticket',
-             'entity_id', p_blend_ticket_id,
+    SELECT jsonb_agg(jsonb_build_object(
              'line_id', z.id,
              'product_id', z.product_id,
              'product_name', z.product_name,
-             'unit_price_cents', 0,
-             'locked_unit_cost_cents', z.cost_cents)
-      INTO v_zero_line
+             'cost_cents', z.cost_cents)
+           ORDER BY z.sequence_order, z.id)
+      INTO v_zero_lines
       FROM (SELECT btp.id, btp.product_id, btp.sequence_order,
                    COALESCE(p.product_name, btp.product_name) AS product_name,
                    ROUND(p.current_cost * 100)::bigint AS cost_cents,
@@ -994,10 +997,19 @@ BEGIN
              WHERE btp.blend_ticket_id = p_blend_ticket_id
                AND COALESCE(btp.rate_per_acre, 0) > 0
                AND p.current_cost > 0 AND p.current_cost < 'Infinity'::numeric) z
-     WHERE z.price_cents = 0
-     ORDER BY z.sequence_order, z.id
-     LIMIT 1;
-    IF v_zero_line IS NOT NULL THEN
+     WHERE z.price_cents = 0;
+    IF v_zero_lines IS NOT NULL THEN
+      v_zero_line := jsonb_build_object(
+        'operation', 'create_invoice_from_blend_ticket',
+        'entity_type', 'blend_ticket',
+        'entity_id', p_blend_ticket_id,
+        'line_id', v_zero_lines -> 0 -> 'line_id',
+        'product_id', v_zero_lines -> 0 -> 'product_id',
+        'product_name', v_zero_lines -> 0 -> 'product_name',
+        'unit_price_cents', 0,
+        'locked_unit_cost_cents', v_zero_lines -> 0 -> 'cost_cents',
+        'zero_lines', (SELECT jsonb_agg(e.value - 'cost_cents' ORDER BY e.ord)
+                         FROM jsonb_array_elements(v_zero_lines) WITH ORDINALITY AS e(value, ord)));
       IF NOT public.is_admin() THEN
         -- Cost is admin-only (Mason, 2026-10-15): a non-admin's detail never carries it.
         RAISE EXCEPTION USING ERRCODE = 'P0001',
@@ -1396,7 +1408,12 @@ BEGIN
     RAISE EXCEPTION 'BLEND_TICKET_PRODUCT_NOT_FOUND';
   END IF;
   IF v_ticket.job_id IS NOT NULL THEN
-    SELECT j.quote_section_id INTO v_section FROM public.jobs j WHERE j.id = v_ticket.job_id;
+    -- The job's section counts only when it belongs to the job's own quote (as billing requires).
+    SELECT j.quote_section_id INTO v_section
+      FROM public.jobs j
+      JOIN public.quote_sections qs ON qs.id = j.quote_section_id
+     WHERE j.id = v_ticket.job_id
+       AND qs.quote_id = j.quote_id;
   END IF;
   SELECT * INTO v_quote_item FROM public.quote_items WHERE id = p_quote_item_id;
   -- The picked line must be on this ticket's job quote section, for this line's product, on a
@@ -1458,9 +1475,9 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text)', 'create_invoice_from_blend_ticket', '1e02a1a03636967d64e79cd2dc4d1d0d', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text)', 'create_invoice_from_blend_ticket', 'aae1f885847766f6510426cc164a6eed', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)', '_create_order_from_blend_ticket_replay_impl_20261015', '4b5ea386b9be7c70c240ffb8efae08e6', 'json', ARRAY['postgres'], true, 'plpgsql'),
-        ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', '4a8e4dfaf0ffd1f0a898033db9ed337e', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
+        ('public.set_blend_ticket_product_quote_price(uuid,uuid,uuid,text)', 'set_blend_ticket_product_quote_price', '0fb39fc92185c02645a1e3b877c5a63e', 'jsonb', ARRAY['authenticated', 'postgres', 'service_role'], true, 'plpgsql'),
         ('public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', '_blend_tier_price_cents_20261020', '44e3957c991c1ce20961713051d58e5d', 'bigint', ARRAY['postgres'], false, 'sql'),
         ('public._blend_quote_pick_valid_20261020(uuid,uuid,uuid,bigint)', '_blend_quote_pick_valid_20261020', '1c6d054540071835fdf145185cc46f5c', 'boolean', ARRAY['postgres'], false, 'sql'),
         ('public._guard_blend_ticket_price_pick_20261020()', '_guard_blend_ticket_price_pick_20261020', '92155bb50d09deab206c4ed79caf8a79', 'trigger', ARRAY['postgres'], false, 'plpgsql')

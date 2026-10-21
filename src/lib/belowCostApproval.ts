@@ -47,6 +47,13 @@ function parseDetail(raw: string): BelowCostApprovalDetail | null {
       product_name: nullableString(detail.product_name),
       unit_price_cents: nullableInteger(detail.unit_price_cents),
       locked_unit_cost_cents: nullableInteger(detail.locked_unit_cost_cents),
+      zero_line_product_names: Array.isArray(detail.zero_lines)
+        ? detail.zero_lines
+            .map((line: unknown) => (line && typeof line === 'object'
+              ? nullableString((line as Record<string, unknown>).product_name)
+              : null))
+            .filter((name): name is string => name !== null)
+        : [],
     };
   } catch {
     return null;

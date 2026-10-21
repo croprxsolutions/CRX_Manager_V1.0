@@ -1034,6 +1034,10 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
       operation: 'create_invoice_from_blend_ticket', entity_type: 'blend_ticket', entity_id: 'tk-1',
       line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L',
       unit_price_cents: 0, locked_unit_cost_cents: 500,
+      zero_lines: [
+        { line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L' },
+        { line_id: 'line-2', product_id: 'prod-2', product_name: 'Roundup PowerMax' },
+      ],
     };
     mockFrom.mockReset();
     mockFrom.mockImplementation((table: string) => {
@@ -1065,6 +1069,10 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
 
     const approval = await screen.findByRole('dialog', { name: 'Approve below-cost price' });
     expect(within(approval).getByText(/billed free of charge/)).toBeInTheDocument();
+    // Every $0 product the one reason approves is listed (Mason, 2026-10-20).
+    expect(within(approval).getByText(/covers every product below/)).toBeInTheDocument();
+    const listed = within(approval).getAllByRole('listitem').map((item) => item.textContent);
+    expect(listed).toEqual(['Atrazine 4L', 'Roundup PowerMax']);
     expect(mockNavigate).not.toHaveBeenCalled();
     fireEvent.change(within(approval).getByLabelText(/Approval reason/), { target: { value: 'free sample' } });
     fireEvent.click(within(approval).getByRole('button', { name: 'Approve and Retry' }));

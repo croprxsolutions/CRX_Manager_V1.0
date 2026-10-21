@@ -29,11 +29,20 @@ export default function NotificationsPanel() {
   // Unread notifications in the database; null when the count could not be read.
   const [unreadCount, setUnreadCount] = useState<number | null>(0);
   const loadSeq = useRef(0);
+  // The last list read failed: the dropdown says so instead of "No notifications".
+  const [listFailed, setListFailed] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = useCallback(async () => {
-    if (!profile) return;
     const seq = ++loadSeq.current;
+    if (!profile) {
+      // Signed out: drop the last account's list and count, and (via the bumped
+      // sequence) any read of theirs still in flight.
+      setNotifications([]);
+      setUnreadCount(0);
+      setListFailed(false);
+      return;
+    }
 
     // The dropdown shows the newest 20 on purpose; the badge counts every unread
     // notification in the database (it used to count only the unread among those 20).
@@ -63,18 +72,19 @@ export default function NotificationsPanel() {
       toast('error', 'Failed to load notifications');
       // Never leave an earlier list (possibly another signed-in account's) on screen.
       setNotifications([]);
+      setListFailed(true);
       setLoading(false);
       return;
     }
     setNotifications((listRes.data || []) as Notification[]);
+    setListFailed(false);
     setLoading(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   useEffect(() => {
-    if (profile) {
-      fetchNotifications();
-    }
+    // Runs signed out too, so the last account's notifications are cleared.
+    fetchNotifications();
   }, [profile, fetchNotifications]);
 
   useEffect(() => {
@@ -238,6 +248,9 @@ export default function NotificationsPanel() {
                   </div>
                 ))}
               </div>
+            ) : listFailed ? (
+              // Not "No notifications": a failed read must not look like an empty inbox.
+              <p role="alert" className="p-8 text-center text-sm text-red-600">Notifications could not be loaded.</p>
             ) : notifications.length === 0 ? (
               <div className="p-8 text-center">
                 <Bell className="w-12 h-12 text-gray-300 mx-auto mb-2" />

@@ -52,6 +52,8 @@ export default function LogbookReport() {
   // Only the newest logbook load, and the newest tab's picker list, may set state.
   const logbookLoadSeq = useRef(0);
   const entityLoadSeq = useRef(0);
+  // The current tab's picker choices failed to load.
+  const [entitiesFailed, setEntitiesFailed] = useState(false);
   // The tab whose picker the current choice (entityId) was made in.
   const entityTabRef = useRef<LogbookTab>(tab);
 
@@ -59,6 +61,7 @@ export default function LogbookReport() {
   useEffect(() => {
     setEntityId('');
     setEntities([]);
+    setEntitiesFailed(false);
     setData([]);
     setFaaData([]);
     setLoadFailed(false);
@@ -79,7 +82,7 @@ export default function LogbookReport() {
           .order('id')
           .range(from, to));
         if (seq !== entityLoadSeq.current) return;
-        if (error) { toast('error', 'Failed to load customers'); return; }
+        if (error) { toast('error', 'Failed to load customers'); setEntitiesFailed(true); return; }
         setEntities((rows || []).map((r) => ({ id: r.id, label: r.farm_name })));
       } else if (tab === 'applicator') {
         // PR-07 follow-up: profile_public_view exposes only id/full_name/role/is_active.
@@ -92,7 +95,7 @@ export default function LogbookReport() {
           .order('id')
           .range(from, to));
         if (seq !== entityLoadSeq.current) return;
-        if (error) { toast('error', 'Failed to load applicators'); return; }
+        if (error) { toast('error', 'Failed to load applicators'); setEntitiesFailed(true); return; }
         setEntities((rows || []).map((r) => ({ id: r.id ?? '', label: r.full_name ?? '' })));
       } else if (tab === 'field') {
         const { data: rows, error } = await fetchAllRows((from, to) => supabase
@@ -103,7 +106,7 @@ export default function LogbookReport() {
           .order('id')
           .range(from, to));
         if (seq !== entityLoadSeq.current) return;
-        if (error) { toast('error', 'Failed to load fields'); return; }
+        if (error) { toast('error', 'Failed to load fields'); setEntitiesFailed(true); return; }
         // Supabase's inferred type for the embedded customer join doesn't narrow
         // cleanly, so assert the exact row shape we selected (no `any`).
         type FieldEntityRow = { id: string; field_name: string; customer: { farm_name: string } | null };
@@ -383,6 +386,10 @@ export default function LogbookReport() {
                   <option key={e.id} value={e.id}>{e.label}</option>
                 ))}
               </select>
+              {/* An empty picker after a failed read must not look like "no choices". */}
+              {entitiesFailed && (
+                <p role="alert" className="mt-1 text-xs text-red-600">The choices could not be loaded. Reload the page to try again.</p>
+              )}
             </div>
           ) : undefined
         }

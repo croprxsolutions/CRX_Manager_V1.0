@@ -90,7 +90,12 @@
 > the gate cannot know what Mason said in chat or stop a label being removed. Those stay written
 > rules. The one-retry cap is a written rule too: the gate's refusal repeats the cap, but it does
 > not count comments. The commit read covers the PR's last 100 commits; an older review than that
-> reads as missing (a false refusal, never a false pass).
+> reads as missing (a false refusal, never a false pass). Two more limits Mason accepted on
+> 2026-10-21 ("I'll merge it", merging #1009 by hand over the final Sol review's last finding):
+> the agent safety tooling (`.claude/hooks/`, `scripts/`) is not classified as money code, so a PR
+> changing only those needs the label to be gated; and a commit status belongs to a commit, not a
+> PR, so two open PRs with the identical head could share one "Review completed" (CodeRabbit's
+> status carries no PR link to bind it to).
 >
 > Every other PR keeps the advisory rule above: no `@coderabbitai` commands, and no waiting for a
 > review that has not arrived.

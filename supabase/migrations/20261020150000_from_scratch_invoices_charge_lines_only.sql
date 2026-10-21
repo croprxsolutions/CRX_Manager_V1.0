@@ -17,7 +17,7 @@
 --      equal to its extended amount (CHECK invoice_items_charge_line_shape_chk). Existing rows all
 --      have charge_type NULL, so both CHECKs validate instantly.
 --   2. trg_refuse_from_scratch_invoice_product_lines on invoice_items (insert, or a change of
---      product_id / invoice_id) and trg_refuse_from_scratch_invoice_product_lines_header on
+--      product_id / invoice_id / charge_type) and trg_refuse_from_scratch_invoice_product_lines_header on
 --      invoices (a real change of invoice_type, order_id, delivery_id, status or deleted_at):
 --      refuses FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED whenever a from-scratch invoice that is
 --      not deleted, cancelled or voided would hold a product line. A line write locks its invoice

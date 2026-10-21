@@ -162,10 +162,17 @@ function buildContainer() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   const files = plan();
   let replayed = 0;
+  // Each ledger-only stem is ledgered once: when the replay reaches it or passes it, or at the end.
+  const ledgered = new Set();
+  const ledgerOnce = (only) => {
+    if (ledgered.has(only)) return;
+    ledger(path.basename(only, '.sql'));
+    ledgered.add(only);
+  };
   for (const [i, file] of files.entries()) {
     const base = path.basename(file);
     if (PARKED.has(base)) continue;
-    for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    for (const only of LEDGER_ONLY) if (only <= base) ledgerOnce(only);
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
@@ -173,6 +180,7 @@ function buildContainer() {
     ledger(path.basename(file, '.sql'));
     replayed += 1;
   }
+  for (const only of LEDGER_ONLY) ledgerOnce(only);
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
   console.log(`[prover] replayed ${replayed} post-baseline migrations before the candidate (skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
@@ -588,7 +596,15 @@ function psqlAsync(sql) {
     child.stdin.end(sql);
   });
 }
-const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+// Wait until the first connection is inside its pg_sleep, so it already holds its row lock when the
+// second statement starts (a fixed pause can lose to a slow docker exec on a loaded host).
+async function holdingSleep() {
+  for (let i = 0; i < 100; i += 1) {
+    if (scalar("SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND state = 'active' AND query LIKE '%pg_sleep(4)%';") !== '0') return;
+    await new Promise((r) => { setTimeout(r, 100); });
+  }
+  throw new Error('the first race connection never reached its pg_sleep');
+}
 
 // RACES (two real connections, committed data, cleaned up after): a product-line insert and the
 // restore of a soft-deleted from-scratch draft, in both orders. The second statement waits on the
@@ -606,44 +622,47 @@ async function races() {
     ALTER TABLE public.invoice_items ENABLE TRIGGER USER;
     ALTER TABLE public.invoices DISABLE TRIGGER USER; DELETE FROM public.invoices WHERE id IN (${ns.map((n) => `'${id(n)}'`).join(',')});
     ALTER TABLE public.invoices ENABLE TRIGGER USER;`);
-  psql(`${AS} ${draft('a01')} ${draft('a02')} ${draft('a03')}`);
-
-  // Line first, restore second.
-  let first = psqlAsync(`${AS} BEGIN; ${line('a01')} SELECT pg_sleep(4); COMMIT;`);
-  await sleep(1500);
-  let second = await psqlAsync(`${AS} ${restore('a01')}`);
-  let firstDone = await first;
-  assert.equal(firstDone.status, 0, `race 1 line insert failed:\n${firstDone.out}`);
-  assert.match(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `race 1 restore was not refused:\n${second.out}`);
-  assert.equal(state('a01'), 'false:1');
-
-  // Restore first, line second.
-  first = psqlAsync(`${AS} BEGIN; ${restore('a02')} SELECT pg_sleep(4); COMMIT;`);
-  await sleep(1500);
-  second = await psqlAsync(`${AS} ${line('a02')}`);
-  firstDone = await first;
-  assert.equal(firstDone.status, 0, `race 2 restore failed:\n${firstDone.out}`);
-  assert.match(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `race 2 line insert was not refused:\n${second.out}`);
-  assert.equal(state('a02'), 'true:0');
-  console.log('[prover] RACES: a product line and a restore in two connections, in both orders, never leave an active from-scratch invoice with a product line');
-
-  // MUTATION: drop the FOR SHARE lock; the line-first race now lets both commit.
   const fn = lf(CANDIDATE).split('CREATE FUNCTION public._refuse_from_scratch_invoice_product_lines()')[1].split('$function$;')[0];
-  const unlocked = fn.replace(/\n\s*PERFORM 1 FROM public\.invoices WHERE id = v_invoice_id FOR SHARE;/, '');
-  assert.notEqual(unlocked, fn, 'mutation did not remove the FOR SHARE lock');
   const recreate = (body) => psql(`CREATE OR REPLACE FUNCTION public._refuse_from_scratch_invoice_product_lines()${body}$function$;`);
-  recreate(unlocked);
+  let first;
+  let second;
+  let firstDone;
+  // Every committed fixture is removed and the real function restored, whichever step fails.
   try {
+    psql(`${AS} ${draft('a01')} ${draft('a02')} ${draft('a03')}`);
+
+    // Line first, restore second.
+    first = psqlAsync(`${AS} BEGIN; ${line('a01')} SELECT pg_sleep(4); COMMIT;`);
+    await holdingSleep();
+    second = await psqlAsync(`${AS} ${restore('a01')}`);
+    firstDone = await first;
+    assert.equal(firstDone.status, 0, `race 1 line insert failed:\n${firstDone.out}`);
+    assert.match(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `race 1 restore was not refused:\n${second.out}`);
+    assert.equal(state('a01'), 'false:1');
+
+    // Restore first, line second.
+    first = psqlAsync(`${AS} BEGIN; ${restore('a02')} SELECT pg_sleep(4); COMMIT;`);
+    await holdingSleep();
+    second = await psqlAsync(`${AS} ${line('a02')}`);
+    firstDone = await first;
+    assert.equal(firstDone.status, 0, `race 2 restore failed:\n${firstDone.out}`);
+    assert.match(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `race 2 line insert was not refused:\n${second.out}`);
+    assert.equal(state('a02'), 'true:0');
+    console.log('[prover] RACES: a product line and a restore in two connections, in both orders, never leave an active from-scratch invoice with a product line');
+
+    // MUTATION: drop the FOR SHARE lock; the line-first race now lets both commit.
+    const unlocked = fn.replace(/\n\s*PERFORM 1 FROM public\.invoices WHERE id = v_invoice_id FOR SHARE;/, '');
+    assert.notEqual(unlocked, fn, 'mutation did not remove the FOR SHARE lock');
+    recreate(unlocked);
     first = psqlAsync(`${AS} BEGIN; ${line('a03')} SELECT pg_sleep(4); COMMIT;`);
-    await sleep(1500);
+    await holdingSleep();
     second = await psqlAsync(`${AS} ${restore('a03')}`);
     firstDone = await first;
     assert.equal(firstDone.status, 0);
     assert.doesNotMatch(second.out, /FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED/, `MUTATION: without the lock the restore should slip through:\n${second.out}`);
     assert.equal(state('a03'), 'true:1');
   } finally {
-    recreate(fn);
-    cleanup(['a01', 'a02', 'a03']);
+    try { recreate(fn); } finally { cleanup(['a01', 'a02', 'a03']); }
   }
   assert.equal(scalar("SELECT position('FOR SHARE' in prosrc) > 0 FROM pg_proc WHERE oid = 'public._refuse_from_scratch_invoice_product_lines()'::regprocedure;"), 't');
   console.log('[prover] MUTATION: without the FOR SHARE lock the same race leaves a restored from-scratch invoice holding a product line, so the lock is what closes it');
@@ -653,10 +672,10 @@ async function races() {
   const charge = (n) => `INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, charge_type) VALUES ('${id(n)}', NULL, 'Freight', 1, 2500, 2500, 0, 'freight');`;
   const untype = (n) => `UPDATE public.invoice_items SET charge_type = NULL WHERE invoice_id = '${id(n)}';`;
   const untyped = (n) => scalar(`SELECT (SELECT deleted_at IS NULL FROM public.invoices WHERE id = '${id(n)}')::text || ':' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = '${id(n)}' AND charge_type IS NULL);`);
-  psql(`${AS} ${draft('a04')} ${draft('a05')} ${draft('a06')} ${charge('a04')} ${charge('a05')} ${charge('a06')}`);
   try {
+    psql(`${AS} ${draft('a04')} ${draft('a05')} ${draft('a06')} ${charge('a04')} ${charge('a05')} ${charge('a06')}`);
     first = psqlAsync(`${AS} BEGIN; ${untype('a04')} SELECT pg_sleep(4); COMMIT;`);
-    await sleep(1500);
+    await holdingSleep();
     second = await psqlAsync(`${AS} ${restore('a04')}`);
     firstDone = await first;
     assert.equal(firstDone.status, 0, `race 3 untype failed:\n${firstDone.out}`);
@@ -664,7 +683,7 @@ async function races() {
     assert.equal(untyped('a04'), 'false:1');
 
     first = psqlAsync(`${AS} BEGIN; ${restore('a05')} SELECT pg_sleep(4); COMMIT;`);
-    await sleep(1500);
+    await holdingSleep();
     second = await psqlAsync(`${AS} ${untype('a05')}`);
     firstDone = await first;
     assert.equal(firstDone.status, 0, `race 4 restore failed:\n${firstDone.out}`);
@@ -678,7 +697,7 @@ async function races() {
       CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines AFTER INSERT OR UPDATE OF product_id, invoice_id ON public.invoice_items
       FOR EACH ROW EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();`);
     first = psqlAsync(`${AS} BEGIN; ${untype('a06')} SELECT pg_sleep(4); COMMIT;`);
-    await sleep(1500);
+    await holdingSleep();
     second = await psqlAsync(`${AS} ${restore('a06')}`);
     firstDone = await first;
     assert.equal(firstDone.status, 0);
@@ -686,10 +705,11 @@ async function races() {
     assert.equal(untyped('a06'), 'true:1');
     console.log('[prover] MUTATION: without charge_type on the line trigger the same race leaves a restored from-scratch invoice holding an untyped line, so listing it is what closes it');
   } finally {
-    psql(`DROP TRIGGER IF EXISTS trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
-      CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines AFTER INSERT OR UPDATE OF product_id, invoice_id, charge_type ON public.invoice_items
-      FOR EACH ROW EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();`);
-    cleanup(['a04', 'a05', 'a06']);
+    try {
+      psql(`DROP TRIGGER IF EXISTS trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
+        CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines AFTER INSERT OR UPDATE OF product_id, invoice_id, charge_type ON public.invoice_items
+        FOR EACH ROW EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();`);
+    } finally { cleanup(['a04', 'a05', 'a06']); }
   }
 }
 

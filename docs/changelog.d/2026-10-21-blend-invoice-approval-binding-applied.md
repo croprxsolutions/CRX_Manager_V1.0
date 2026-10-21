@@ -9,3 +9,8 @@ anon may not.
 
 Docs: migration-history row 961 marked APPLIED LIVE with a fresh ledger capture (1043 rows);
 `docs/manual/CURRENT_STATE.md` and `docs/manual/KNOWN_ISSUES.md` re-stamped from the same read.
+
+`.claude/schema-registry.json` regenerated from live introspection (2026-10-21 ~20:50 UTC, all six queries):
+high-water `20261021204100`, the four 2026-10-20/21 migrations added to the applied names, and
+`below_cost_approvals.operation` now lists `create_invoice_from_blend_ticket` (added live by
+`20261020210000`). Section counts are unchanged (38 status lists, 120 parsed checks).

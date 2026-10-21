@@ -46,7 +46,8 @@
 > `.claude/hooks/codex-bot-review-lib.mjs`): a PR that changes a migration, an Edge Function, a money-named `src/` file,
 > or carries the `needs-coderabbit` label needs CodeRabbit's own "Review completed" commit status on the head, or on an
 > earlier commit followed only by merges whose PR-own changes (three-dot compare, per-file blob) are identical at both
-> commits; a PR over 100 files is read in full over REST; an unreadable answer, or a lookup that could outlive the
+> commits; each gate reads that status BEFORE the review threads, so a review finishing mid-check cannot pair with a
+> stale thread list; a PR over 100 files is read in full over REST; an unreadable answer, or a lookup that could outlive the
 > hook, refuses (rules: `docs/reference/coderabbit-native-review.md`). The guidance check pins the trigger sentence in `AGENTS.md`
 > and, in that reference, the timing, the in-progress wait, the `docs(` title step, the stated wait and the retry cap. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
 > blocker; accepted loss: its "edit to an already-applied migration" check no longer blocks (the mandatory Sol review

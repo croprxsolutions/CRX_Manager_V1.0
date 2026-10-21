@@ -371,6 +371,14 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
     const meta = JSON.parse(gh(metaArgs));
     const slug = String(meta?.url || "").match(/[/]([^/]+)[/]([^/]+)[/]pull[/]/);
     if (slug && Number.isInteger(meta?.number)) {
+      // Money PRs need a completed CodeRabbit review of the head (Mason,
+      // 2026-10-21). Read the completion status BEFORE the threads (Codex App
+      // P1 on #1009): read the other way round, a review finishing between the
+      // two reads would pair "Review completed" with the empty thread list from
+      // before it. A throw leaves it null → refuse.
+      const verdict = readCodeRabbitRequirement((args) => gh(args, REQUIREMENT_CALL_TIMEOUT_MS), {
+        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, callTimeoutMs: REQUIREMENT_CALL_TIMEOUT_MS,
+      });
       const node = collectCodexThreads((cursor) => {
         const args = [
           "api", "graphql",
@@ -387,11 +395,6 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
       }, { deadlineMs });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
-      // Money PRs need a completed CodeRabbit review of the head (Mason,
-      // 2026-10-21). Read inside the same budget; a throw leaves it null → refuse.
-      const verdict = readCodeRabbitRequirement((args) => gh(args, REQUIREMENT_CALL_TIMEOUT_MS), {
-        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, callTimeoutMs: REQUIREMENT_CALL_TIMEOUT_MS,
-      });
       // Both reads must describe the same head, or neither is trusted.
       if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
         coderabbitReview = verdict;

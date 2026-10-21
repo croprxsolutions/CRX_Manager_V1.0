@@ -1346,6 +1346,14 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
     const meta = JSON.parse(runGh(metaArgs, repoDir));
     const slug = String(meta?.url || "").match(/[/]([^/]+)[/]([^/]+)[/]pull[/]/);
     if (slug && Number.isInteger(meta?.number)) {
+      // Money PRs need a completed CodeRabbit review of the head — mirror of
+      // pr-merge-guard.mjs: read the completion status BEFORE the threads (Codex
+      // App P1 on #1009), inside the same budget; a throw leaves it null → refuse.
+      // Each call also passes the hard-gate budget's admit() inside runGh, which
+      // refuses a call that could outlive the hook.
+      const verdict = readCodeRabbitRequirement((args) => runGh(args, repoDir), {
+        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, now: clock,
+      });
       const node = collectCodexThreads((cursor) => {
         const args = [
           "api", "graphql",
@@ -1361,13 +1369,6 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
       }, { deadlineMs, now: clock });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
-      // Money PRs need a completed CodeRabbit review of the head — mirror of
-      // pr-merge-guard.mjs, inside the same budget; past it, stay null and refuse.
-      // Each call also passes the hard-gate budget's admit() inside runGh, which
-      // refuses a call that could outlive the hook.
-      const verdict = readCodeRabbitRequirement((args) => runGh(args, repoDir), {
-        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, now: clock,
-      });
       if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
         coderabbitReview = verdict;
       }

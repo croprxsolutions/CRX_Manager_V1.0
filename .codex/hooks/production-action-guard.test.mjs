@@ -35,9 +35,18 @@ const NO_THREADS_JSON = JSON.stringify({ data: { repository: { pullRequest: {
 } } } });
 function withThreadDefault(runGh) {
   if (typeof runGh !== "function") return runGh;
-  let threadHead = "f".repeat(40); // the head the last thread answer described
+  // The head the fixture's answers describe: learned from its PR JSON (read by
+  // the hard gates first) or its thread answer, so the default thread and
+  // requirement answers agree with it — the gate reads the requirement BEFORE
+  // the threads and trusts them only when both name the same head.
+  let threadHead = "f".repeat(40);
   return (args, ...rest) => {
     const out = runGh(args, ...rest);
+    try {
+      const parsed = JSON.parse(out);
+      const seen = parsed?.headRefOid || parsed?.data?.repository?.pullRequest?.headRefOid;
+      if (typeof seen === "string" && /^[0-9a-f]{40}$/i.test(seen)) threadHead = seen;
+    } catch { /* not JSON — nothing to learn */ }
     // The thread lookup first asks `gh pr view --json number,url`; a fixture that
     // answers every call with the PR JSON has no url, so supply one.
     if (Array.isArray(args) && args.includes("number,url")) {
@@ -50,13 +59,12 @@ function withThreadDefault(runGh) {
     if (Array.isArray(args) && args[0] === "api" && args[1] === "graphql" && args.some((a) => /reviewThreads/.test(String(a)))) {
       try {
         const pr = JSON.parse(out)?.data?.repository?.pullRequest;
-        if (pr && typeof pr === "object" && "reviewThreads" in pr) {
-          threadHead = String(pr.headRefOid || threadHead);
-          return out;
-        }
+        if (pr && typeof pr === "object" && "reviewThreads" in pr) return out;
       } catch { /* not thread data — fall through to the default */ }
-      threadHead = "f".repeat(40);
-      return NO_THREADS_JSON;
+      return JSON.stringify({ data: { repository: { pullRequest: {
+        headRefOid: threadHead,
+        reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+      } } } });
     }
     // The money-PR CodeRabbit requirement read (Mason, 2026-10-21): default to a
     // non-money PR at the head the thread answer described, unless the fixture
@@ -429,16 +437,16 @@ try {
     nowMs: Date.now(), runGh: withRequirement(answer),
   });
   const crDone = (login = "coderabbitai") => [{ context: "CodeRabbit", state: "SUCCESS", description: "Review completed", creator: { login } }];
-  const unreviewed = moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"] }));
+  const unreviewed = moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }));
   assert.equal(unreviewed.blocked, true, "a money PR with no completed CodeRabbit review of its head is refused");
   assert.match(unreviewed.reason, /needs a clean CodeRabbit review of its current head/, "and the denial says why");
   assert.match(unreviewed.reason, /@coderabbitai full review/, "and names the one request to post");
-  assert.equal(moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"],
+  assert.equal(moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"],
     statuses: [{ context: "CodeRabbit", state: "SUCCESS", description: "Review rate limited", creator: { login: "coderabbitai" } }] })).blocked,
   true, "a rate-limited CodeRabbit status is not a review");
-  assert.equal(moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"], statuses: crDone("masonwells1") })).blocked,
+  assert.equal(moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"], statuses: crDone("masonwells1") })).blocked,
     true, "a 'Review completed' status posted from Mason's account (an agent) does not count");
-  assert.equal(moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"], statuses: crDone() })).blocked,
+  assert.equal(moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"], statuses: crDone() })).blocked,
     false, "a money PR CodeRabbit completed a review of merges");
   assert.equal(moneyMerge(() => { throw new Error("gh down"); }).blocked, true,
     "a failed requirement read refuses (fail closed)");

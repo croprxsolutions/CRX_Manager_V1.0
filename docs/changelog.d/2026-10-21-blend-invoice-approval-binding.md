@@ -12,7 +12,8 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
   positive whole-cent cost on the Price List; otherwise the invoice is refused, as before.) The
   approval window says which lines are inside a grower-share price instead of "free of charge",
   and gives both reasons for a line quoted at $0 on one share and inside a grower-share price on
-  another. Blend invoices are now dated with the Chicago business day, not the UTC date.
+  another. Blend invoices are now dated with the Chicago business day, not the UTC date, and a
+  ticket with no season files its invoice in the season of that same Chicago date.
 - The $0 approval is bound to the lines it showed. The screen sends back the approved lines
   (`p_approved_zero_lines`), each with why it is $0, its cost, and a fingerprint of its rate, the
   product's units and the fields' acres and per-acre prices, as shown; if any of those changed in

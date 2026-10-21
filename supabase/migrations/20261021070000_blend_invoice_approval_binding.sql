@@ -23,6 +23,10 @@
 --   5. The ticket's lines are locked (FOR UPDATE) with the ticket, so a direct line edit cannot
 --      land between the $0 check and the billing loop.
 --
+-- actor-binding-check: exempt for create_invoice_from_blend_ticket, as in 20261020210000: its
+--   body (the live body plus the changes above) binds p_created_by to auth.uid() ('p_created_by
+--   does not match authenticated user') before any write.
+--
 -- DEPLOY ORDER: apply immediately before the merge (ship.md). Until the new screen loads, an
 -- admin's $0 approval from the old screen is refused (BELOW_COST_APPROVAL_STALE, fails closed);
 -- 0 unbilled tickets had a $0 quoted line on 2026-10-21. A product with no cost (or a cost that is
@@ -49,7 +53,10 @@
 --   9. An "included in grower share" chemical line records the chemical's catalog cost
 --      (cost_cents) and adds it to the invoice's total_cost_cents; before, it recorded $0 cost,
 --      overstating margin. The ticket's product rows are locked FOR SHARE before the $0 check, so
---      the cost an approval is bound to is the cost billed and recorded.
+--      the catalog cost an approval is bound to cannot change before the line trigger records
+--      it. Known and kept: a $0 QUOTED line (like every per-unit line, unchanged from the live
+--      body) records the ticket line's cost copy (unit_cost_cents) when set, so its cost_cents
+--      can differ from the catalog cost the approval showed (margin reporting only; follow-up).
 --  10. Each approved line is bound to its kind and cost as well as its line and product: an
 --      admin's detail lists each $0 line's cost_cents, the screen sends the lines back as shown,
 --      and a change in cost or in why a line is $0 is refused as stale. A non-admin's detail
@@ -59,7 +66,9 @@
 --      the window is open is refused as stale too.
 --  11. The invoice is dated with the Chicago business day ((now() AT TIME ZONE 'America/Chicago')
 --      ::date) instead of CURRENT_DATE (the session's UTC date), so an evening invoice is not
---      dated tomorrow.
+--      dated tomorrow. A ticket with no season takes the season of that same Chicago date
+--      (compute_season), for the invoice and for the application-rate lookup, instead of
+--      current_season()'s UTC date.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -613,7 +622,7 @@ BEGIN
       invoice_date, invoice_group_id, application_service_id
     ) VALUES (
       p_blend_ticket_id, v_customer_id, 'field_application', 'draft',
-      COALESCE(v_ticket.season, current_season()),
+      COALESCE(v_ticket.season, public.compute_season((now() AT TIME ZONE 'America/Chicago')::date)),
       v_invoice_number, v_ticket.salesman_id, p_created_by,
       0, 0,
       (now() AT TIME ZONE 'America/Chicago')::date, v_invoice_group_id, v_ticket.application_service_id
@@ -809,7 +818,7 @@ BEGIN
         FROM customer_application_rates car
        WHERE car.customer_id            = v_customer_id
          AND car.application_service_id = v_ticket.application_service_id
-         AND car.season                 = COALESCE(v_ticket.season, current_season())
+         AND car.season                 = COALESCE(v_ticket.season, public.compute_season((now() AT TIME ZONE 'America/Chicago')::date))
        LIMIT 1;
       IF v_fee_rate IS NULL THEN v_fee_rate := v_app_service.default_rate_per_acre_cents; END IF;
 
@@ -924,7 +933,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'ec63e96ea60904b4ce21432cd696151c'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '51ee478f1fd43f2001647dff1d8d38e2'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

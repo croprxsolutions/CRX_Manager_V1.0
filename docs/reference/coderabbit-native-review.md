@@ -35,9 +35,10 @@
 >    `@coderabbitai resume`.
 > 4. **No answer:** if CodeRabbit answers that it is rate-limited, wait the time it states, then
 >    check back; if it is silent or says it skipped, wait 30 minutes, then check back. Post once
->    more only if that head still has no review. If that second try also gets no review, stop and
->    report the PR stuck (to the coordinator, or `NEEDS MASON - ACTION REQUIRED`); never keep
->    re-posting.
+>    more only if that head still has no review. This one retry is part of the same single request
+>    that every short copy of this rule calls "once", not a second request. If that second try also
+>    gets no review, stop and report the PR stuck (to the coordinator, or
+>    `NEEDS MASON - ACTION REQUIRED`); never keep re-posting.
 > 5. **Clean** means every comment in that review (inline, review body, failed pre-merge check)
 >    was refuted with evidence and needed no code change, then replied to and resolved, or there
 >    were no comments. The final Sol review reads those replies.

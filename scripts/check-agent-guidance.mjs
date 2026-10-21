@@ -134,10 +134,19 @@ record(
     && /fix or refute every comment/i.test(protectedDelivery)
     // One sentence must carry both triggers and the requirement, so dropping a trigger fails.
     && /A PR that touches money, invoices, payments, inventory, or costs[^.]*, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its current head plus a clean Sol/i.test(protectedDelivery)
-    && /post `@coderabbitai full review` once/i.test(protectedDelivery)
+    && /if its frozen, green head has none, post `@coderabbitai full review` once/i.test(protectedDelivery)
     && /On any other PR[^.]*never post `@coderabbitai` commands/i.test(protectedDelivery)
     && /never ask Mason to comment, label, or click for CodeRabbit/i.test(protectedDelivery),
   "CodeRabbit is advisory (Mason, 2026-10-19) except on money or Mason-named PRs, which need one clean full review of the current head (Mason, 2026-10-21); never ask Mason to",
+);
+// The detailed request rules AGENTS.md points to: timing and the one-retry cap.
+const coderabbitRules = readChecked("docs/reference/coderabbit-native-review.md");
+record(
+  /after the head is frozen and every required check is green/i.test(coderabbitRules)
+    && /This one retry is part of the same single request/i.test(coderabbitRules)
+    && /If that second try also\s*(?:>\s*)?gets no review, stop and report the PR stuck/i.test(coderabbitRules)
+    && /never keep re-posting/i.test(coderabbitRules),
+  "CodeRabbit full-review requests wait for a frozen, green head and stop after one retry (Mason, 2026-10-21)",
 );
 record(
   /Post it to Mason, then proceed without waiting for his confirmation/i.test(shipWorkflow)

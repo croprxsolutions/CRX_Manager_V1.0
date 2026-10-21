@@ -17,6 +17,6 @@
   `.agents/` copies), the hook landing-policy text in `.claude/hooks/prompt-source-lib.mjs`,
   `.coderabbit.yaml` comments, `docs/reference/coderabbit-native-review.md` (full rules),
   `docs/reference/agent-guardrails.md`, `docs/reference/gotchas.md`,
-  `docs/workflows/SAFE_DEVELOPMENT_RULES.md`, and `docs/manual/DECISION_LOG.md`.
+  `docs/workflows/SAFE_DEVELOPMENT_RULES.md`, `docs/manual/DECISION_LOG.md`, and `docs/manual/KNOWN_ISSUES.md` (the deferred merge gate).
 - Checked: no hook, permission rule, or required check blocks an agent from posting the comment.
   The merge gates still deny any open or unreplied CodeRabbit thread.

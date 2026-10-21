@@ -1,6 +1,6 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
+**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (2026-10-21: one agent-process entry added, the CodeRabbit-review merge gate follow-up; no ledger re-read) (read-only
 `execute_sql`, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
@@ -85,6 +85,19 @@ with `where name ~ '^[0-9]{14}'`.
 **Update triggers:** when a finding is parked/resolved, a migration is parked/applied, or an owner decision lands. Agents must update THIS file, not create new issue lists. Do not re-discover or re-fix something listed here as already known — read the pointer first.
 
 This file consolidates (does not replace) the source documents it points to. If this file and a source disagree, trust the source and fix this file.
+
+---
+
+## OPEN 2026-10-21 (MED; accepted by Mason, follow-up) — no merge gate checks the clean CodeRabbit review money PRs need
+
+Since 2026-10-21 a PR that touches money, invoices, payments, inventory, or costs, or one Mason
+names, needs a clean CodeRabbit review of its current head before it merges
+(`docs/reference/coderabbit-native-review.md`). That is a written rule only: the merge gates read
+CodeRabbit threads, not whether the head was reviewed, so an agent that skips the request can still
+merge such a PR with green checks and a clean Sol. Mason chose this ("keep it simple"; "go with
+recommendations", 2026-10-21) after Sol and Luna both flagged it; a merge-coordinator session
+asking for `CR-CLEAN #<PR> head <sha>` is the interim check. **Fix:** a separate PR that teaches
+the merge gates to recognise a qualifying PR and require a CodeRabbit review on its exact head.
 
 ---
 

@@ -1,8 +1,8 @@
 # CRX Manager — Current State
 
 **Last verified:** 2026-10-21 (America/Chicago) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-21 20:06 UTC (3:06 PM Central): 1042 rows, `max(version)` `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`), applied 20:05:26 UTC under the autonomous-landing rule, after `20261021030000` (ledger `20261021191058`, PR #987); earlier, 2026-10-21 05:13 UTC (12:13 AM Central): unchanged since
-the 04:01 UTC read; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+both unchanged since the 04:01 UTC read; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
 `max(version)` `20261021040052` = `20261020210000_blend_ticket_pricing_guards` (Goal 3 blend-ticket pricing, PR #982 merged
 as `948f238ad`), applied 2026-10-21 04:00:52 UTC under the autonomous-landing rule: an order made from a blend ticket
 never prices a product at $0 for a missing tier price, a blend invoice asks staff to pick when the job's quote lists a

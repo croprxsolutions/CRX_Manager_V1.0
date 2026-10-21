@@ -4,22 +4,25 @@
  *
  * The strip used to ask get_ar_aging for `new Date().toISOString().slice(0, 10)`, a UTC date.
  * From about 7pm Central UTC is already tomorrow, so the strip asked for tomorrow's aging
- * while the table under it asked for today's. The clock below is pinned to 8:30pm Central,
- * and the computer's own timezone to UTC, so a screen reading either clock asks for the
- * wrong day here.
+ * while the table under it asked for the browser's today. The clock below is pinned to 8:30pm
+ * Central, and the computer's own timezone to UTC, so a screen reading either clock asks for
+ * the wrong day here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const H = vi.hoisted(() => ({ rpcCalls: [] as Array<[string, unknown]> }));
+const H = vi.hoisted(() => ({
+  rpcCalls: [] as Array<[string, unknown]>,
+  functions: {} as Record<string, unknown[]>,
+}));
 
-// Every query chain, table or function, answers with no rows.
-const emptyReply = () => {
+// Every query chain, table or function, answers with its rows (none unless a test sets some).
+const reply = (rows: unknown[] = []) => {
   const chain: object = new Proxy({}, {
     get: (_target, prop) => (prop === 'then'
       ? (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
-        Promise.resolve({ data: [], error: null, count: 0 }).then(resolve, reject)
+        Promise.resolve({ data: rows, error: null, count: rows.length }).then(resolve, reject)
       : () => chain),
   });
   return chain;
@@ -30,10 +33,10 @@ vi.mock('../lib/db', async () => {
   return {
     ...actual,
     supabase: {
-      from: () => emptyReply(),
+      from: () => reply(),
       rpc: (name: string, args: unknown) => {
         H.rpcCalls.push([name, args]);
-        return emptyReply();
+        return reply(H.functions[name]);
       },
     },
   };
@@ -46,11 +49,16 @@ vi.mock('../contexts/AuthContext', () => ({
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 import AccountsReceivable from './AccountsReceivable';
+import ARaging from './ARaging';
 
 const originalTz = process.env.TZ;
+const agingDates = () => H.rpcCalls
+  .filter(([name]) => name === 'get_ar_aging')
+  .map(([, args]) => (args as { p_as_of_date: string }).p_as_of_date);
 
 beforeEach(() => {
   H.rpcCalls = [];
+  H.functions = {};
   // A computer set to UTC (as CI is, or a viewer's laptop could be).
   process.env.TZ = 'UTC';
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -61,18 +69,39 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  process.env.TZ = originalTz;
+  // Assigning undefined would set the string "undefined", not unset it.
+  if (originalTz === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTz;
 });
 
 describe('Accounts Receivable in the evening, Central time', () => {
-  it("the summary strip and the AR Aging tab both ask for Chicago's date, not tomorrow's", async () => {
-    render(<MemoryRouter initialEntries={['/']}><AccountsReceivable /></MemoryRouter>);
+  it("the summary strip asks for Chicago's date, not tomorrow's", async () => {
+    // On another tab only the strip asks for the aging.
+    render(<MemoryRouter initialEntries={['/?tab=payments']}><AccountsReceivable /></MemoryRouter>);
+    await waitFor(() => expect(agingDates()).toEqual(['2026-10-20']));
+  });
 
-    // One call from the strip, one from the AR Aging tab (the default tab).
-    await waitFor(() => expect(H.rpcCalls.filter(([name]) => name === 'get_ar_aging').length).toBeGreaterThanOrEqual(2));
-    const asOfDates = H.rpcCalls
-      .filter(([name]) => name === 'get_ar_aging')
-      .map(([, args]) => (args as { p_as_of_date: string }).p_as_of_date);
-    expect(new Set(asOfDates)).toEqual(new Set(['2026-10-20']));
+  it("the AR Aging table asks for Chicago's date, not the computer's", async () => {
+    render(<MemoryRouter><ARaging /></MemoryRouter>);
+    await waitFor(() => expect(agingDates()).toEqual(['2026-10-20']));
+  });
+
+  it('on the AR Aging tab, the strip and the table ask for the same day', async () => {
+    render(<MemoryRouter initialEntries={['/']}><AccountsReceivable /></MemoryRouter>);
+    await waitFor(() => expect(agingDates()).toHaveLength(2));
+    expect(agingDates()).toEqual(['2026-10-20', '2026-10-20']);
+  });
+
+  it('Batch Print starts on the same Chicago date that Email Statements uses', async () => {
+    H.functions.get_ar_aging = [{
+      customer_id: 'c1', farm_name: 'Big Farm', current_amount: 10, days_30: 0, days_60: 0, days_90: 0,
+      over_90: 0, total_outstanding: 10, prepay_balance_cents: 0, open_credit_cents: 0,
+    }];
+    render(<MemoryRouter><ARaging /></MemoryRouter>);
+    // The customer's row has the table's only checkbox.
+    fireEvent.click((await screen.findAllByRole('checkbox'))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /Batch Print \(1\)/ }));
+    const dateBox = (await screen.findByText('Statement As-of Date')).parentElement!.querySelector('input[type="date"]') as HTMLInputElement;
+    expect(dateBox.value).toBe('2026-10-20');
   });
 });

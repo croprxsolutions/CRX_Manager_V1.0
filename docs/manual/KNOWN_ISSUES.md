@@ -1567,7 +1567,7 @@ error. Narrow window and pre-existing, but it is a safety path, not a report fil
 cannot see that anything was skipped.
 
 **The cosmetic ones** — report/dialog defaults the user can change in the UI:
-`ARaging.tsx:80`, `CropPrograms.tsx:55`, `FieldProfitability.tsx:62`, `YearEndSummaryDialog.tsx:26`,
+`ARaging.tsx:82` (line as of 2026-10-20), `CropPrograms.tsx:55`, `FieldProfitability.tsx:62`, `YearEndSummaryDialog.tsx:26`,
 `ReportShell.tsx:20-29`, `ApplicationRecords.tsx:36`, `Reports.tsx:118,122`,
 `SalesReports.tsx:29,33,100`. `CustomerContextCard.tsx:46` similarly passes a **UTC**
 `toISOString().slice(0,10)` as an as-of date. (The Accounts Receivable summary strip did too; since

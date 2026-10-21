@@ -1148,6 +1148,8 @@ export default function ARaging() {
         onClose={() => setShowStatementDialog(false)}
         onGenerate={handlePrintStatement}
         loading={printingStatement}
+        // Same Chicago date as Email Statements, not the browser's.
+        defaultDate={asOfDate}
       />
 
       {/* Batch Statement Print Dialog */}
@@ -1156,6 +1158,7 @@ export default function ARaging() {
         onClose={() => setShowBatchStatementDialog(false)}
         onGenerate={handleBatchStatements}
         loading={batchPrinting}
+        defaultDate={asOfDate}
       />
 
       {/* Finance Charge Preview Modal */}

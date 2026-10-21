@@ -144,6 +144,8 @@ const coderabbitRules = readChecked("docs/reference/coderabbit-native-review.md"
 record(
   /after the head is frozen and every required check is green/i.test(coderabbitRules)
     && /touches money, invoices, payments, inventory, or costs in any way \(code,\s*(?:>\s*)?database, or workflow; when unsure, it qualifies\)/i.test(coderabbitRules)
+    && /review still in progress, wait up to 15 minutes/i.test(coderabbitRules)
+    && /remove that from a qualifying PR's\s*(?:>\s*)?title before marking it ready/i.test(coderabbitRules)
     && /rate-limited, wait the time it states/i.test(coderabbitRules)
     && /Post once\s*(?:>\s*)?more only if that head still has no review/i.test(coderabbitRules)
     && /This one retry is part of the same single request/i.test(coderabbitRules)

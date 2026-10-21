@@ -44,7 +44,7 @@
 > retry after a stated wait; a code fix moves the head and needs a new request; drop `docs(` from the title before
 > marking it ready). Written rule only: no merge gate checks it yet (`docs/manual/KNOWN_ISSUES.md`, 2026-10-21;
 > rules: `docs/reference/coderabbit-native-review.md`). The guidance check pins the trigger sentence in `AGENTS.md`
-> and the timing, wait and retry cap in that reference. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
+> and, in that reference, the timing, the in-progress wait, the `docs(` title step, the stated wait and the retry cap. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
 > blocker; accepted loss: its "edit to an already-applied migration" check no longer blocks (the mandatory Sol review
 > of any migration change and the CI migration check remain). Mentions of CodeRabbit APPROVED below are history.
 >

@@ -1104,7 +1104,9 @@
       "covers": [
         "guard_invoice_terminal_order",
         "create_split_invoices_from_order",
-        "post_invoice_group"
+        "post_invoice_group",
+        "void_invoice_group",
+        "create_invoice_from_order"
       ],
       "area": [
         "billing",

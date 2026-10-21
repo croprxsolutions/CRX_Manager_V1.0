@@ -92,6 +92,6 @@ describe('20261021150000 split invoice cross-customer lineage', () => {
     expect(spec.chain).toBe('smoke-split-invoice-cross-customer-lineage.sql');
     expect(spec.container_only).toBe(true);
     expect(spec.container_prover).toBe('prove-split-invoice-cross-customer-lineage-real-schema.mjs');
-    expect(spec.covers).toEqual(expect.arrayContaining(['guard_invoice_terminal_order', 'create_split_invoices_from_order', 'post_invoice_group']));
+    expect(spec.covers).toEqual(expect.arrayContaining(['guard_invoice_terminal_order', 'create_split_invoices_from_order', 'post_invoice_group', 'void_invoice_group', 'create_invoice_from_order']));
   });
 });

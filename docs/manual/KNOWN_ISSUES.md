@@ -136,7 +136,7 @@ differs from the order's (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), split draft
 onto another customer's field rolled back. Live, read-only 2026-10-21: 0 field-allocated orders and 0
 split invoices, so nobody hit it. `20261021150000` lets a governed split invoice name such an owner,
 only inside the split call's creation claim for a customer the order's field split resolves to, and
-afterwards only under its `split_invoice_provenance` row. This is the 2026-10-13 item "Splitting an
+afterward only under its `split_invoice_provenance` row. This is the 2026-10-13 item "Splitting an
 order's bill to a landlord always fails" (Mason: "landlord yes"). Found again while building
 `20261021120000` (PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006
 required this first. Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs`.

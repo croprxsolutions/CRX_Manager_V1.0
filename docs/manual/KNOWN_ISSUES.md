@@ -1,7 +1,9 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+**Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-21 17:07 UTC (12:07 PM Central): 1040 rows / 1033 names, unchanged since the 04:01 UTC read; the
+pending candidate `20261021120000_order_invoice_refuses_field_split` is not applied. At 2026-10-21 04:01 UTC (11:01 PM
+Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
@@ -126,6 +128,20 @@ needs a governed way to correct, or at least track, a received line's cost, then
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
+
+## OPEN 2026-10-21 (MED; latent, no live order affected) — split billing cannot bill a field owner who is not the order's customer
+
+`create_split_invoices_from_order` bills each field owner their share of a field-allocated order, but
+the invoice trigger `guard_invoice_terminal_order` (since `20260721014858`) refuses any invoice whose
+customer differs from its order's customer (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), split drafts
+included, so a split onto another customer's field rolls back with that error. A split onto the
+ordering customer's own fields works. Live, read-only 2026-10-21 17:10 UTC: 0 orders carry a field
+allocation and 0 split invoices exist, so nobody has hit it. Found while building
+`20261021120000_order_invoice_refuses_field_split` (its container chain bills a field the ordering
+customer owns for this reason). **Fix:** let the lineage guard accept a governed split draft (one
+inside its `split_invoice_creation_claims` claim, for a customer the allocation resolves to), or move
+the customer test into the split implementation; prove a two-owner split end to end. Source:
+`guard_invoice_terminal_order()`, `_create_split_invoices_from_order_provenance_impl_20260719`.
 
 ## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
 

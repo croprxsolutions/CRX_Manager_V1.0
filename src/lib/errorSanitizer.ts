@@ -59,6 +59,14 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Return credits are briefly paused while an accounting update finishes. Retry in a moment'],
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
+  // create_invoice_from_order refuses an order split across fields (20261021120000): it is billed
+  // per field owner. The page offers that path once it sees the order's field allocations.
+  [/^ORDER_HAS_FIELD_SPLIT\b/,
+   "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
+  // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
+  // (this also stops a field split onto another customer's field, KNOWN_ISSUES.md 2026-10-21).
+  [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,
+   "Nothing was billed. An invoice made from an order can only be for that order's customer, and this one would bill someone else. Ask an admin to review the order's field split"],
   // void_order refuses rather than erase money already recorded on the order's draft invoice.
   [/^ORDER_VOID_DRAFT_HAS_APPLIED_MONEY\b/,
    'Nothing was changed. This order\'s draft invoice already has a payment, prepay, write-off or credit recorded. Reverse that first, then void the order'],

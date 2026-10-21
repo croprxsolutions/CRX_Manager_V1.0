@@ -44,6 +44,10 @@
 --   7. An approval (a reason, a line list or both) when no line is $0 any more (a price changed in
 --      between) is refused with BELOW_COST_APPROVAL_STALE instead of billing a price the window
 --      never showed.
+--   8. The job's quote section is locked (FOR UPDATE) and its items (FOR SHARE) before the $0
+--      check, so a quote edit cannot change a price between the check and the billing loop.
+--   9. An "included in grower share" chemical line records the chemical's cost (cost_cents) and
+--      adds it to the invoice's total_cost_cents; before, it recorded $0 cost, overstating margin.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -372,6 +376,12 @@ BEGIN
           AND q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)) THEN
     v_quote_section_id := NULL;
   END IF;
+  -- 20261021050000: hold the quote prices still until this invoice commits, so the $0 check
+  -- below and the billing loop read the same prices (an approval covers only what it showed).
+  IF v_quote_section_id IS NOT NULL THEN
+    PERFORM 1 FROM quote_sections WHERE id = v_quote_section_id FOR UPDATE;
+    PERFORM 1 FROM quote_items WHERE section_id = v_quote_section_id FOR SHARE;
+  END IF;
 
   -- Goal 3 pricing (20261020210000), both before any invoice number or row:
   -- (1) The job's quote lists a product more than once at different prices. Taking one at
@@ -662,6 +672,10 @@ BEGIN
           PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);
           PERFORM set_config('app.crx_below_cost_reason', COALESCE(btrim(p_below_cost_reason), ''), true);
         END IF;
+        -- 20261021050000: the chemical is billed inside the per-acre price, but it still costs
+        -- money; record its cost so the invoice margin is right.
+        v_unit_cost := COALESCE(v_btp.unit_cost_cents,
+                                ROUND(COALESCE(v_btp.product_cost, 0) * 100)::bigint, 0);
         INSERT INTO invoice_items (
           invoice_id, product_id, description, quantity, unit_size,
           unit_price_cents, extended_cents, cost_cents,
@@ -671,7 +685,7 @@ BEGIN
           v_invoice_id, v_btp.product_id,
           COALESCE(v_btp.full_product_name, v_btp.product_name) || ' — included in grower share',
           ROUND(v_chem_qty_a_conv, 4), v_inv_unit_line,
-          0, 0, 0,
+          0, 0, v_unit_cost,
           v_btp.sequence_order, v_rate, v_rate_unit_line,
           false, 'manual'
         );
@@ -679,6 +693,7 @@ BEGIN
           PERFORM set_config('app.crx_below_cost_operation', '', true);
           PERFORM set_config('app.crx_below_cost_reason', '', true);
         END IF;
+        v_invoice_cost := v_invoice_cost + safe_cents_qty(v_unit_cost, v_chem_qty_a_conv);
       END IF;
 
       IF v_chem_qty_b > 0 THEN
@@ -878,7 +893,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '316309fb43c4e7c7d15c40c355999873'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'fb28acbfdd5ebcd58347abe26273eea9'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

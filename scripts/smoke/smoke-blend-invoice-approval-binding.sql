@@ -784,6 +784,17 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: the grower-share invoice lines are wrong: %',
       (SELECT jsonb_agg(to_jsonb(ii)) FROM public.invoice_items ii WHERE ii.invoice_id = v_invoice2);
   END IF;
+  --     The included chemical still costs money: 2 gal/ac x 10 ac x $5.00 = $100.00 of cost, on
+  --     its line and in the invoice cost, so the margin is not overstated.
+  IF (SELECT ii.cost_cents FROM public.invoice_items ii
+       WHERE ii.invoice_id = v_invoice2 AND ii.description LIKE '% — included in grower share') IS DISTINCT FROM 500::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the included chemical line records no cost: %',
+      (SELECT jsonb_agg(to_jsonb(ii)) FROM public.invoice_items ii WHERE ii.invoice_id = v_invoice2);
+  END IF;
+  IF (SELECT total_cost_cents FROM public.invoices WHERE id = v_invoice2) IS DISTINCT FROM 10000::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the grower-share invoice cost leaves out the included chemical: %',
+      (SELECT total_cost_cents FROM public.invoices WHERE id = v_invoice2);
+  END IF;
   IF (SELECT count(*) FROM public.below_cost_approvals a
        JOIN public.invoice_items ii ON ii.id = a.line_id
       WHERE a.operation = 'create_invoice_from_blend_ticket'

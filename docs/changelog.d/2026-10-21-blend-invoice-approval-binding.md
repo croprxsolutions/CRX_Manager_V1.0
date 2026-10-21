@@ -15,6 +15,10 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
   (`p_approved_zero_lines`); if the $0 lines changed in between, nothing is invoiced and staff see
   "The $0 lines on this ticket changed while the approval was open". The same refusal applies when
   a $0 line got a real price in between and no line is $0 any more.
+- The job's quote prices are held still while the invoice is made, so a quote edit cannot change a
+  price between the approval check and billing.
+- An "included in grower share" chemical line now records the chemical's cost, and the invoice's
+  cost includes it, so the invoice margin is not overstated.
 - A retry key is now required (`IDEMPOTENCY_KEY_REQUIRED`), so a lost reply can always be replayed
   instead of being refused as already billed. The screen always sends one.
 - The Blend Ticket screen explains these refusals, and a product with no cost entered
@@ -28,5 +32,5 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
 
 Live state when written: 0 grower-share overrides, 0 "included in grower share" lines ever, 0 blend
 lines without a product. Proof: `node scripts/smoke/prove-blend-invoice-approval-binding-real-schema.mjs`
-(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 11 mutations). Docs: migration-history row 959,
+(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 13 mutations). Docs: migration-history row 959,
 `docs/reference/rpc-functions.md`, `docs/manual/KNOWN_ISSUES.md`.

@@ -763,8 +763,8 @@ BEGIN
   ) RETURNING id INTO v_t11;
   INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, actual_acres)
   VALUES (v_t11, v_field2, v_customer, 10);
-  INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t11, v_p_full, '[E2E] BTP t11 in grower share', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t11;
+  INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order, unit_cost_cents)
+  VALUES (v_t11, v_p_full, '[E2E] BTP t11 in grower share', 20, 'GL', 2, 'gal/ac', 1, 100) RETURNING id INTO v_line_t11;
   --  a. With no reason the admin is asked first, and the window lists the included chemical.
   BEGIN
     v_res := public.create_invoice_from_blend_ticket(v_t11, v_admin, 'e2e-btp-invoice-11a-' || v_suffix);
@@ -805,7 +805,8 @@ BEGIN
       (SELECT jsonb_agg(to_jsonb(ii)) FROM public.invoice_items ii WHERE ii.invoice_id = v_invoice2);
   END IF;
   --     The included chemical still costs money: 2 gal/ac x 10 ac x $5.00 = $100.00 of cost, on
-  --     its line and in the invoice cost, so the margin is not overstated.
+  --     its line and in the invoice cost, at the catalog cost the approval showed (the ticket
+  --     line's own editable copy says $1.00), so the margin is not overstated.
   IF (SELECT ii.cost_cents FROM public.invoice_items ii
        WHERE ii.invoice_id = v_invoice2 AND ii.description LIKE '% — included in grower share') IS DISTINCT FROM 500::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the included chemical line records no cost: %',

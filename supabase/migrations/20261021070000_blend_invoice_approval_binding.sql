@@ -46,8 +46,10 @@
 --      never showed.
 --   8. The job's quote section is locked (FOR UPDATE) and its items (FOR SHARE) before the $0
 --      check, so a quote edit cannot change a price between the check and the billing loop.
---   9. An "included in grower share" chemical line records the chemical's cost (cost_cents) and
---      adds it to the invoice's total_cost_cents; before, it recorded $0 cost, overstating margin.
+--   9. An "included in grower share" chemical line records the chemical's catalog cost
+--      (cost_cents) and adds it to the invoice's total_cost_cents; before, it recorded $0 cost,
+--      overstating margin. The ticket's product rows are locked FOR SHARE before the $0 check, so
+--      the cost an approval is bound to is the cost billed and recorded.
 --  10. Each approved line is bound to its kind and cost as well as its line and product: an
 --      admin's detail lists each $0 line's cost_cents, the screen sends the lines back as shown,
 --      and a change in cost or in why a line is $0 is refused as stale. A non-admin's detail
@@ -386,6 +388,13 @@ BEGIN
     PERFORM 1 FROM quote_sections WHERE id = v_quote_section_id FOR UPDATE;
     PERFORM 1 FROM quote_items WHERE section_id = v_quote_section_id FOR SHARE;
   END IF;
+  -- 20261021070000: hold the ticket's product costs still too (FOR SHARE, as the below-cost line
+  -- trigger takes them; in id order), so the cost an approval was bound to is the cost billed.
+  PERFORM 1 FROM products p
+   WHERE p.id IN (SELECT btp.product_id FROM blend_ticket_products btp
+                   WHERE btp.blend_ticket_id = p_blend_ticket_id AND btp.product_id IS NOT NULL)
+   ORDER BY p.id
+     FOR SHARE OF p;
 
   -- Goal 3 pricing (20261020210000), both before any invoice number or row:
   -- (1) The job's quote lists a product more than once at different prices. Taking one at
@@ -680,9 +689,9 @@ BEGIN
           PERFORM set_config('app.crx_below_cost_reason', COALESCE(btrim(p_below_cost_reason), ''), true);
         END IF;
         -- 20261021070000: the chemical is billed inside the per-acre price, but it still costs
-        -- money; record its cost so the invoice margin is right.
-        v_unit_cost := COALESCE(v_btp.unit_cost_cents,
-                                ROUND(COALESCE(v_btp.product_cost, 0) * 100)::bigint, 0);
+        -- money; record its catalog cost (locked above: the cost the approval showed and the line
+        -- trigger records, not the ticket line's editable copy) so the invoice margin is right.
+        v_unit_cost := ROUND(COALESCE(v_btp.product_cost, 0) * 100)::bigint;
         INSERT INTO invoice_items (
           invoice_id, product_id, description, quantity, unit_size,
           unit_price_cents, extended_cents, cost_cents,
@@ -900,7 +909,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'f9fd247bc2066f8bbde99727b3a97be8'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '855113e18bc733d65a9b97e22d02129f'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

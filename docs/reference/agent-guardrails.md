@@ -64,7 +64,8 @@
 > (`codex_ran: false`, `carried_forward: true`, `carry.mode` `disjoint` or `collision_check`, `carry.from_head` /
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
 > hours old) and today's origin/main: with no model call when the PR's files and main's new files do not overlap and
-> neither side touches `supabase/`, `.claude/hooks/` or `.codex/hooks/` against non-documentation changes on the other
+> neither side touches a hot path (`CARRY_HOT_PATHS`: `supabase/`, `.claude/hooks/`, `.codex/hooks/`,
+> `.github/workflows/`, the hook settings and the proof-writing scripts) against non-documentation changes on the other
 > side, otherwise only after a focused Sol collision check returns CLEAN. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 30-minute terms as a full proof, so both merge gates, the
 > push gate and the migration landing gate honour it; `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows

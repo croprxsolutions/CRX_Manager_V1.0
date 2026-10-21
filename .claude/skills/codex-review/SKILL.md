@@ -415,9 +415,11 @@ decision only) immediately before the merge. It mints a carried proof for the ne
   content is exactly the conflict-free `git merge-tree` of those two (a resolved conflict or any hand
   edit refuses);
 - the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours old;
-- and EITHER the PR's files and main's new files do not overlap and neither side touches `supabase/`,
-  `.claude/hooks/` or `.codex/hooks/` while the other side changes anything beyond plain documentation
-  (no model call), OR a focused Sol collision check of just the interaction returns CLEAN.
+- and EITHER the PR's files and main's new files do not overlap and neither side touches a hot path
+  (`CARRY_HOT_PATHS` in the script: `supabase/`, `.claude/hooks/`, `.codex/hooks/`, `.github/workflows/`,
+  the hook settings and the proof-writing scripts) while the other side changes anything beyond plain
+  documentation (no model call), OR a focused Sol collision check returns CLEAN. That check centres on
+  the interaction but counts any other blocker it sees.
 
 Anything else refuses, and the full Step 3B review above is the answer. The carried proof states
 `codex_ran: false, carried_forward: true`, names the head and base it came from, and still expires

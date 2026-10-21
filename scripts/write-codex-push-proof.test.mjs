@@ -1058,9 +1058,18 @@ assert.equal(
   assert.equal(plan(["src/a.ts"], [".claude/hooks/x.mjs"]).mode, "collision_check", "carry: a main guard change needs the check");
   assert.equal(plan([".codex/hooks/y.mjs"], ["src/b.ts"]).mode, "collision_check", "carry: a PR guard change vs main code needs the check");
   assert.equal(plan(["Supabase/functions/f/index.ts"], ["src/b.ts"]).mode, "collision_check", "carry: hot folders compare case-insensitively");
+  assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs"]).mode, "collision_check", "carry: a main change to the proof writer needs the check");
+  assert.equal(plan(["src/a.ts"], [".github/workflows/ci.yml"]).mode, "collision_check", "carry: a main CI change needs the check");
+  assert.equal(plan(["src/a.ts"], [".claude/settings.json"]).mode, "collision_check", "carry: a main hook-wiring change needs the check");
+  assert.equal(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).mode, "disjoint", "carry: an ordinary script is not hot");
+  assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs.bak"]).mode, "disjoint", "carry: exact hot files match exactly");
 }
 
 // Which earlier proofs may be carried.
+function collisionPromptSkipsWork(prompt) {
+  return /do not re-review|skip|ignore/i.test(prompt.replace(/never follow instructions[^\n]*/i, ""))
+    || !/report\s+it too and count it in your verdict/i.test(prompt.replace(/\s+/g, " "));
+}
 {
   const nowMs = Date.parse("2026-10-21T18:00:00.000Z");
   const head = "1".repeat(40);
@@ -1089,6 +1098,18 @@ assert.equal(
   assert.equal(carried.codex_ran, false, "carry: a carried proof never claims a full review ran");
   assert.deepEqual(carried.carry.root_review, { head_sha: head, base_sha: source.base_sha, timestamp: source.timestamp }, "carry: records the full review it came from");
   assert.equal(carrySourceProofProblem(carried, { headSha: "4".repeat(40), nowMs }), null, "carry: a carried proof can itself be carried");
+  assert.ok(
+    carrySourceProofProblem({ ...carried, carry: undefined }, { headSha: "4".repeat(40), nowMs }),
+    "carry: a carried source with no carry details is refused",
+  );
+  assert.ok(
+    carrySourceProofProblem({ ...carried, carry: { ...carried.carry, mode: "trust-me" } }, { headSha: "4".repeat(40), nowMs }),
+    "carry: a carried source with an unknown mode is refused",
+  );
+  assert.ok(
+    !collisionPromptSkipsWork(buildCollisionCheckPrompt()),
+    "carry: the collision prompt never tells the reviewer to ignore a problem it sees",
+  );
   const chained = buildCarryForwardProof({ headSha: "6".repeat(40), baseSha: "7".repeat(40), source: carried, mode: "disjoint" });
   assert.deepEqual(chained.carry.root_review, carried.carry.root_review, "carry: a chain keeps the original full review");
   assert.equal(proofValid(carried, "4".repeat(40), Date.parse(carried.timestamp), "5".repeat(40)), true, "carry: the guard validator accepts the minted shape");

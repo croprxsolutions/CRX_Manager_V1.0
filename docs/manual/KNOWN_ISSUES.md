@@ -276,10 +276,10 @@ operations; `idempotency_keys` holds zero receipts for the three operations; and
 random uuid was refused with `IDEMPOTENCY_KEY_REQUIRED`.
 
 **Fix written, NOT applied: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (migration
-`20261021030000_void_order_governed_split_draft_claims`, PR #987; until it is applied the paragraph below is current). The fix
+`20261021030000_void_order_governed_split_draft_claims`, PR #987; until it is applied the description after "Found by" is current). The fix
 gives `void_order` the same lock, claim, provenance refresh and claim drop as `cancel_order`, reusing the
 `'cancel_order'` claim operation (the guard's exact-cancel shape is the one write the void makes; anyone tightening that
-shape in `guard_split_invoice_provenance_identity` must keep `void_order`'s draft cancel inside it). Found by the Codex
+shape in `guard_split_invoice_provenance_identity` must keep `void_order`'s draft cancel inside it). (Found by the Codex
 GitHub review on #967,
 verified against the live definitions 2026-10-20). A draft made by `create_split_invoices_from_order` has a
 `split_invoice_provenance` row, and `guard_split_invoice_provenance_identity` lets its total change only under a

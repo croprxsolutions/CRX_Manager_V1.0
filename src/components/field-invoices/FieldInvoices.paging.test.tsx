@@ -8,7 +8,7 @@
  * reply at 1,000 rows like the real one, so these tests fail against the old panels.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery, SERVER_ROW_CAP } from '../../test-utils/inMemoryQuery';
 
@@ -28,6 +28,9 @@ vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin' }, role: 'admin', deniedPages: [] }),
 }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
+// The phone layout draws a second copy of every row; these tests read the desktop table
+// and footer, so skip it (drawing 1,010 rows twice ran past the timeout under CI coverage).
+vi.mock('../ui/MobileCardList', () => ({ default: ({ desktop }: { desktop: React.ReactNode }) => <>{desktop}</> }));
 
 import FieldInvoicesUnpostedPanel from './FieldInvoicesUnpostedPanel';
 import FieldInvoicesPostedPanel from './FieldInvoicesPostedPanel';
@@ -35,8 +38,11 @@ import FieldInvoicesListPanel from './FieldInvoicesListPanel';
 
 // Past the server cap, so a single read cannot hold them all.
 const TOTAL = SERVER_ROW_CAP + 10;
-// Drawing and posting over 1,000 invoices can pass the 5-second default when the whole suite runs at once.
-vi.setConfig({ testTimeout: 30_000 });
+// Drawing and posting over 1,000 invoices is slow when the whole suite runs at once, and
+// CI's coverage run is several times slower again (one test took 31 s there).
+vi.setConfig({ testTimeout: 120_000 });
+// findBy / waitFor give up after 1 s by default; allow for the same slowdown.
+configure({ asyncUtilTimeout: 30_000 });
 
 function fieldInvoice(i: number, status: string) {
   const n = String(i).padStart(4, '0');

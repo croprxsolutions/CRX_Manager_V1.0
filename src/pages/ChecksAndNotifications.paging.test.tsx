@@ -10,7 +10,7 @@
  * at 1,000 like the real one, so each test fails against the old screen.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery, pagedRpcReply, SERVER_ROW_CAP } from '../test-utils/inMemoryQuery';
 
@@ -85,8 +85,11 @@ import Notifications from './Notifications';
 import NotificationsPanel from '../components/team/NotificationsPanel';
 
 const TOTAL = SERVER_ROW_CAP + 10;
-// Drawing over 1,000 rows can pass the 5-second default when the whole suite runs at once.
-vi.setConfig({ testTimeout: 30_000 });
+// Drawing over 1,000 rows is slow when the whole suite runs at once, and CI's coverage run
+// is several times slower again.
+vi.setConfig({ testTimeout: 120_000 });
+// findBy / waitFor give up after 1 s by default; allow for the same slowdown.
+configure({ asyncUtilTimeout: 30_000 });
 const pad = (i: number) => String(i).padStart(4, '0');
 const many = (make: (i: number) => Row): Row[] => Array.from({ length: TOTAL }, (_, i) => make(i));
 
@@ -121,7 +124,7 @@ describe('integrity cleanup past the 1,000-row server cap (H29, H30)', () => {
     // Negative stock, unbilled deliveries and stock made at delivery: 1,010 rows each.
     await waitFor(() => expect(screen.getAllByText(`(${TOTAL} rows)`)).toHaveLength(3));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  }, 20000);
+  });
 
   it('finds an over-received PO line past row 1,000 (the old column-to-text filter never matched)', async () => {
     // Every line received in full except the last, received one over. The old query
@@ -206,7 +209,7 @@ describe('notifications past the 1,000-row server cap (L9, L10-1)', () => {
     // The oldest one, past both the old 200 limit and the server cap, is listed.
     expect(await screen.findByText(`Note ${pad(TOTAL - 1)}`)).toBeInTheDocument();
     expect(screen.getAllByText(/^Note \d{4}$/)).toHaveLength(TOTAL);
-  }, 20000);
+  });
 
   it('the bell counts every unread notification in the database, not the unread among the 20 it loads', async () => {
     H.tables.notifications = many(notification);

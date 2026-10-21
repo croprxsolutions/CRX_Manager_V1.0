@@ -9,7 +9,7 @@
  * against the old screen and passes against the paged one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery, pagedRpcReply, SERVER_ROW_CAP } from '../test-utils/inMemoryQuery';
 
@@ -57,8 +57,11 @@ import PrepayWorkspacePanel from '../components/prepay/PrepayWorkspacePanel';
 
 // Past the server cap, so one read cannot hold them all.
 const TOTAL = SERVER_ROW_CAP + 10;
-// Drawing over 1,000 rows can pass the 5-second default when the whole suite runs at once.
-vi.setConfig({ testTimeout: 30_000 });
+// Drawing over 1,000 rows is slow when the whole suite runs at once, and CI's coverage run
+// is several times slower again.
+vi.setConfig({ testTimeout: 120_000 });
+// findBy / waitFor give up after 1 s by default; allow for the same slowdown.
+configure({ asyncUtilTimeout: 30_000 });
 const pad = (i: number) => String(i).padStart(4, '0');
 const many = <T,>(make: (i: number) => T): T[] => Array.from({ length: TOTAL }, (_, i) => make(i));
 
@@ -148,7 +151,7 @@ describe('money screens past the 1,000-row server cap', () => {
 
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'Big' } });
     fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
-    expect(await screen.findByText(`(${TOTAL} invoices, $1,010.00 outstanding)`, {}, { timeout: 10000 })).toBeInTheDocument();
+    expect(await screen.findByText(`(${TOTAL} invoices, $1,010.00 outstanding)`, {}, { timeout: 60000 })).toBeInTheDocument();
 
     // A $1,010.00 check auto-allocates across every invoice, the oldest past row 1,000 included:
     // capped at 200 invoices, $810.00 of it would have had nowhere to go.
@@ -156,7 +159,7 @@ describe('money screens past the 1,000-row server cap', () => {
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '1010.00' } });
     fireEvent.click(screen.getByRole('button', { name: /Auto-Allocate/ }));
     await waitFor(() => expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$1,010.00'));
-  }, 20000);
+  });
 
   it('a check cannot be applied while the open invoices failed to load (it would all go to prepay)', async () => {
     const search: Record<string, unknown> = {};

@@ -35,9 +35,8 @@ import {
 import {
   CODEX_THREADS_QUERY,
   CODEX_THREAD_PAGE_SIZE,
-  coderabbitRequirementArgs,
   coderabbitThreadCount,
-  evaluateCodeRabbitRequirement,
+  readCodeRabbitRequirement,
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 
@@ -210,9 +209,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees }) {
   // otherwise production could take a migration whose PR cannot merge.
   let coderabbitReview;
   try {
-    coderabbitReview = evaluateCodeRabbitRequirement(
-      JSON.parse(gh(coderabbitRequirementArgs("{owner}", "{repo}", pr.number)))?.data?.repository?.pullRequest,
-    );
+    coderabbitReview = readCodeRabbitRequirement(gh, { owner: "{owner}", name: "{repo}", number: pr.number });
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not read ${number}'s labels, files and commit statuses to check the CodeRabbit review requirement (${error?.message || error}); fail closed.`);

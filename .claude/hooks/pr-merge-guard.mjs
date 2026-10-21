@@ -61,14 +61,13 @@ import {
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
   coderabbitFindingsDenial,
-  coderabbitRequirementArgs,
   coderabbitRequirementUnreadableDenial,
   coderabbitReviewMissingDenial,
   coderabbitThreadCount,
   coderabbitUnreadableDenial,
   collectCodexThreads,
-  evaluateCodeRabbitRequirement,
   evaluateCodexBotReview,
+  readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
 
@@ -290,15 +289,20 @@ const hardGateBudget = createHardGateBudget({
   callTimeoutMs: GH_CALL_TIMEOUT_MS,
 });
 
-function gh(args) {
+function gh(args, timeout = GH_CALL_TIMEOUT_MS) {
   return execFileSync("gh", args, {
     cwd: projectDir,
     encoding: "utf8",
-    timeout: GH_CALL_TIMEOUT_MS,
+    timeout,
     stdio: ["ignore", "pipe", "ignore"],
     maxBuffer: 16 * 1024 * 1024,
   });
 }
+
+// The money-PR CodeRabbit requirement read makes up to three calls inside the
+// advisory budget, so each gets a shorter cap: a call is only started if it can
+// finish before the budget ends (readCodeRabbitRequirement).
+const REQUIREMENT_CALL_TIMEOUT_MS = 5_000;
 
 // Every gh call a HARD gate makes goes through here. deny() exits, so a refused
 // call can never be caught and reinterpreted by the gate that made it.
@@ -384,14 +388,13 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
       // Money PRs need a completed CodeRabbit review of the head (Mason,
-      // 2026-10-21). Read inside the same budget; past it, stay null and refuse.
-      if (Date.now() < deadlineMs) {
-        const facts = JSON.parse(gh(coderabbitRequirementArgs(slug[1], slug[2], meta.number)))?.data?.repository?.pullRequest;
-        const verdict = evaluateCodeRabbitRequirement(facts);
-        // Both reads must describe the same head, or neither is trusted.
-        if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
-          coderabbitReview = verdict;
-        }
+      // 2026-10-21). Read inside the same budget; a throw leaves it null → refuse.
+      const verdict = readCodeRabbitRequirement((args) => gh(args, REQUIREMENT_CALL_TIMEOUT_MS), {
+        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, callTimeoutMs: REQUIREMENT_CALL_TIMEOUT_MS,
+      });
+      // Both reads must describe the same head, or neither is trusted.
+      if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
+        coderabbitReview = verdict;
       }
     }
   } catch {

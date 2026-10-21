@@ -21,6 +21,8 @@ import {
   coderabbitReviewMissingDenial,
   evaluateCodeRabbitRequirement,
   isMoneyPath,
+  prOwnChangesUnchanged,
+  readCodeRabbitRequirement,
   codexBotThreads,
   coderabbitFindingsDenial,
   coderabbitThreadCount,
@@ -665,6 +667,54 @@ eq(evaluateCodeRabbitRequirement({ headRefOid: HEAD }).status, "unreadable", "mi
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] })] })).status,
   "unreadable", "a commit list that does not end at the head is not trusted");
 eq(evaluateCodeRabbitRequirement(facts({ commits: [] })).status, "unreadable", "an empty commit list is not trusted");
+
+// A label list cut short cannot prove the label is absent (Luna round 5).
+eq(evaluateCodeRabbitRequirement({ ...facts({ files: ["docs/x.md"], commits: [commit(HEAD)] }),
+  labels: { totalCount: 150, nodes: [] } }).status, "missing", "an incomplete label list makes the PR qualify");
+
+// The merge walk is only provisional (Luna round 5, BLOCKER): the PR's own
+// changes must be byte-identical at the reviewed commit and at the head.
+const BASE40 = "b".repeat(40);
+const walkFacts = { ...facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD, { parents: 2 })] }), baseRefOid: BASE40 };
+const prFiles = [{ filename: "src/lib/invoiceMath.ts", status: "modified", sha: "1".repeat(40) }];
+const fakeGh = ({ atReview = prFiles, atHead = prFiles, onCall = () => {} } = {}) => (args) => {
+  onCall(args);
+  const target = String(args[1] || "");
+  if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: walkFacts } } });
+  if (target.endsWith(`...${OLD}`)) return JSON.stringify(atReview);
+  if (target.endsWith(`...${HEAD}`)) return JSON.stringify(atHead);
+  throw new Error(`unexpected gh ${args.join(" ")}`);
+};
+const read = (gh, extra = {}) => readCodeRabbitRequirement(gh, { owner: "o", name: "r", number: 9, ...extra });
+eq(read(fakeGh()).status, "reviewed", "a merge-only walk with identical PR changes keeps the earlier review");
+eq(read(fakeGh({ atHead: [{ ...prFiles[0], sha: "2".repeat(40) }] })).status, "missing",
+  "a merge that changed a PR file voids the earlier review");
+eq(read(fakeGh({ atHead: [...prFiles, { filename: "src/lib/newMoney.ts", status: "added", sha: "3".repeat(40) }] })).status, "missing",
+  "a merge that added a file to the PR's own changes voids the earlier review");
+{
+  // Identical on both sides, so only the cap can refuse it.
+  const capped = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}`, status: "modified", sha: "4".repeat(40) }));
+  eq(read(fakeGh({ atReview: capped, atHead: capped })).status,
+    "missing", "a compare at GitHub's 300-file cap cannot prove anything, even when both sides match");
+}
+ok(read(fakeGh({ onCall: (args) => ok(!String(args[1]).includes("compare/") || /compare\/b{40}\.\.\./.test(args[1]), "compares against the PR's base") })),
+  "the compare is three-dot against the PR's base");
+eq(prOwnChangesUnchanged(null, prFiles), false, "an unreadable compare is never 'unchanged'");
+// A review AT the head needs no compare at all.
+{
+  let calls = 0;
+  const headGh = (args) => { calls += 1; if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: { ...facts(), baseRefOid: BASE40 } } } }); throw new Error("no compare expected"); };
+  eq(read(headGh).status, "reviewed", "a review of the head passes");
+  eq(calls, 1, "…with a single GitHub call");
+}
+// Budget: a call is not started unless it can finish before the deadline.
+{
+  let threw = false;
+  try { read(fakeGh(), { deadlineMs: 10_000, callTimeoutMs: 5_000, now: () => 6_000 }); } catch { threw = true; }
+  ok(threw, "a call that could outlive the budget is not started — the read throws (callers refuse)");
+  eq(read(fakeGh(), { deadlineMs: 10_000, callTimeoutMs: 5_000, now: () => 1_000 }).status, "reviewed",
+    "a call that fits the budget runs");
+}
 
 // The query and denial carry what the agent needs.
 ok(coderabbitRequirementArgs("o", "r", 5).includes("number=5")

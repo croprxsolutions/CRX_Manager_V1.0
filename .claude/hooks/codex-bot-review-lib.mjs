@@ -427,6 +427,7 @@ query($owner:String!, $name:String!, $number:Int!) {
   repository(owner:$owner, name:$name) {
     pullRequest(number:$number) {
       headRefOid
+      baseRefOid
       labels(first:100) { totalCount nodes { name } }
       files(first:100) { totalCount nodes { path } }
       commits(last:100) {
@@ -464,9 +465,10 @@ export function coderabbitCompletedCommit(commit) {
 //
 // "reviewed" = CodeRabbit completed a review of the head, or of an earlier PR
 // commit followed ONLY by merge commits (a plain merge of main keeps an earlier
-// clean review, Mason 2026-10-21). A merge commit's content is not checked here;
-// the Sol carry-forward refuses a merge carrying any other edit, and a full Sol
-// review covers the rest.
+// clean review, Mason 2026-10-21). This function only sees parent COUNTS, so a
+// merge-walk "reviewed" is provisional: readCodeRabbitRequirement() then proves
+// the PR's own changes are byte-identical at the reviewed commit and the head
+// (Luna round 5, BLOCKER: a merge commit can carry new code).
 export function evaluateCodeRabbitRequirement(pullRequest) {
   const headOid = String(pullRequest?.headRefOid || "").trim().toLowerCase();
   const unreadable = (why = "") => ({ status: "unreadable", why, headOid, reviewedOid: "" });
@@ -476,13 +478,16 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   const commits = pullRequest?.commits?.nodes;
   if (!Array.isArray(labels) || !Array.isArray(files) || !Array.isArray(commits)) return unreadable();
 
-  const labelled = labels.some((label) => String(label?.name || "").trim().toLowerCase() === CODERABBIT_REQUIRED_LABEL);
+  // A label list cut short cannot prove the label is absent (Luna round 5).
+  const labelTotal = pullRequest?.labels?.totalCount;
+  const labelled = labels.some((label) => String(label?.name || "").trim().toLowerCase() === CODERABBIT_REQUIRED_LABEL)
+    || !(Number.isInteger(labelTotal) && labelTotal <= labels.length);
   const moneyFile = files.map((file) => file?.path).find(isMoneyPath);
   // A file list that may be cut short cannot prove the PR is not a money PR.
   const total = pullRequest?.files?.totalCount;
   const filesComplete = Number.isInteger(total) && total <= files.length;
   let why = "";
-  if (labelled) why = `it carries the "${CODERABBIT_REQUIRED_LABEL}" label`;
+  if (labelled) why = `it carries the "${CODERABBIT_REQUIRED_LABEL}" label (or its labels could not all be read)`;
   else if (moneyFile) why = `it changes money, invoice, payment, inventory or cost files (e.g. ${moneyFile})`;
   else if (!filesComplete) why = "its changed-file list could not be read completely";
   else return { status: "not-required", why: "", headOid, reviewedOid: "" };
@@ -503,6 +508,61 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   return { status: "missing", why, headOid, reviewedOid: "" };
 }
 
+// The PR's own changes relative to main, as {filename: "status:blobsha"}. The
+// compare API's three-dot form diffs from the merge base, so merging main in
+// does not change it unless the merge itself edits a PR file.
+export const COMPARE_FILE_CAP = 300; // GitHub's compare API returns at most 300 files
+export function coderabbitCompareArgs(owner, name, base, sha) {
+  return ["api", `repos/${owner}/${name}/compare/${base}...${sha}`,
+    "--jq", "[.files[] | {filename, status, sha}]"];
+}
+export function prOwnChangesUnchanged(atReview, atHead) {
+  const index = (files) => {
+    if (!Array.isArray(files) || files.length >= COMPARE_FILE_CAP) return null;
+    const map = new Map();
+    for (const file of files) {
+      const filename = String(file?.filename || "");
+      if (!filename) return null;
+      map.set(filename, `${String(file?.status || "")}:${String(file?.sha || "")}`);
+    }
+    return map;
+  };
+  const before = index(atReview);
+  const after = index(atHead);
+  if (!before || !after || before.size !== after.size) return false;
+  for (const [filename, value] of before) if (after.get(filename) !== value) return false;
+  return true;
+}
+
+// The whole requirement read, shared by all three gates. `runGh(args)` returns
+// gh's stdout. Throws on an exhausted budget or a failed call; the callers turn a
+// throw into a fail-closed refusal. `callTimeoutMs` is the longest one gh call
+// may take: a call is not STARTED unless it can finish before `deadlineMs`, because
+// a hook killed mid-call emits nothing, and a hook that emits nothing allows
+// (Luna round 5, HIGH).
+export function readCodeRabbitRequirement(runGh, { owner, name, number, deadlineMs = null, callTimeoutMs = 0, now = Date.now }) {
+  const call = (args) => {
+    if (deadlineMs !== null && now() + callTimeoutMs >= deadlineMs) {
+      throw new Error("CodeRabbit requirement lookup would exceed the hook's time budget");
+    }
+    return runGh(args);
+  };
+  const pullRequest = JSON.parse(call(coderabbitRequirementArgs(owner, name, number)))?.data?.repository?.pullRequest;
+  const verdict = evaluateCodeRabbitRequirement(pullRequest);
+  if (verdict.status !== "reviewed" || verdict.reviewedOid === verdict.headOid) return verdict;
+  const base = String(pullRequest?.baseRefOid || "").trim();
+  if (!/^[0-9a-f]{40}$/i.test(base)) return { ...verdict, status: "unreadable" };
+  const atReview = JSON.parse(call(coderabbitCompareArgs(owner, name, base, verdict.reviewedOid)));
+  const atHead = JSON.parse(call(coderabbitCompareArgs(owner, name, base, verdict.headOid)));
+  if (prOwnChangesUnchanged(atReview, atHead)) return verdict;
+  return {
+    ...verdict,
+    status: "missing",
+    reviewedOid: "",
+    why: `${verdict.why}; the PR's own changes differ between the reviewed commit and the head, so a merge since the review changed them`,
+  };
+}
+
 export function coderabbitRequirementUnreadableDenial(prefix, selector) {
   const which = selector ? String(selector) : "<number>";
   return (
@@ -520,8 +580,11 @@ export function coderabbitReviewMissingDenial(prefix, selector, why, headOid) {
     `(Mason, 2026-10-21), because ${why || "it qualifies"}, and CodeRabbit has not completed a review of ${head} ` +
     "(or of an earlier commit followed only by merges of main).\n\n" +
     "  1. If CodeRabbit's status shows a review in progress, wait up to 15 minutes.\n" +
-    `  2. Otherwise post ONCE:  gh pr comment ${which} --body "@coderabbitai full review"\n` +
-    "     (one retry after a stated rate-limit wait; rules: docs/reference/coderabbit-native-review.md).\n" +
+    `  2. Otherwise post ONCE for this head:  gh pr comment ${which} --body "@coderabbitai full review"\n` +
+    "     If it answers rate-limited, wait the time it states; if it is silent or skips, wait 30 minutes.\n" +
+    "     Then post once more only if this head still has no review. If you have ALREADY posted twice\n" +
+    "     for this head, do not post again: report the PR stuck (NEEDS MASON - ACTION REQUIRED).\n" +
+    "     Rules: docs/reference/coderabbit-native-review.md.\n" +
     "  3. Fix or answer every thread it opens, reply, resolve, then retry the merge."
   );
 }

@@ -70,9 +70,17 @@
 > says "Review rate limited" or "Review skipped: …" when it did not review. A status posted by
 > anyone other than CodeRabbit (an agent through Mason's account, for example) does not count.
 > An unreadable answer refuses (fail closed). The existing thread rule (every CodeRabbit thread
-> replied to and resolved) still applies. A merge commit's content is not checked by this gate;
-> the Sol carry-forward refuses a merge that carries any other edit. Nothing blocks the request
-> comment itself (checked 2026-10-21).
+> replied to and resolved) still applies. An earlier review carries across merge commits only when
+> the PR's own changes (GitHub's three-dot compare against the base: every file's status and blob)
+> are identical at the reviewed commit and the head, so a merge that edits a PR file, or slips in a
+> new one, needs a new review. Nothing blocks the request comment itself (checked 2026-10-21).
+>
+> **Limits, on purpose.** The file test is a word list, so money code in a generically named file
+> (`src/lib/math.ts`) is not caught by the gate; the agent's duty to add the label covers it, and
+> the gate cannot know what Mason said in chat or stop a label being removed. Those stay written
+> rules. The one-retry cap is a written rule too: the gate's refusal repeats the cap, but it does
+> not count comments. The commit read covers the PR's last 100 commits; an older review than that
+> reads as missing (a false refusal, never a false pass).
 >
 > Every other PR keeps the advisory rule above: no `@coderabbitai` commands, and no waiting for a
 > review that has not arrived.

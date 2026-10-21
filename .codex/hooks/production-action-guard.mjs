@@ -56,14 +56,13 @@ import {
   CODEX_THREAD_PAGE_SIZE,
   codexBotFindingsDenial,
   coderabbitFindingsDenial,
-  coderabbitRequirementArgs,
   coderabbitRequirementUnreadableDenial,
   coderabbitReviewMissingDenial,
   coderabbitThreadCount,
   coderabbitUnreadableDenial,
   collectCodexThreads,
-  evaluateCodeRabbitRequirement,
   evaluateCodexBotReview,
+  readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
 
@@ -1364,12 +1363,13 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
       coderabbitOpen = coderabbitThreadCount(node);
       // Money PRs need a completed CodeRabbit review of the head — mirror of
       // pr-merge-guard.mjs, inside the same budget; past it, stay null and refuse.
-      if (clock() < deadlineMs) {
-        const facts = JSON.parse(runGh(coderabbitRequirementArgs(slug[1], slug[2], meta.number), repoDir))?.data?.repository?.pullRequest;
-        const verdict = evaluateCodeRabbitRequirement(facts);
-        if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
-          coderabbitReview = verdict;
-        }
+      // Each call also passes the hard-gate budget's admit() inside runGh, which
+      // refuses a call that could outlive the hook.
+      const verdict = readCodeRabbitRequirement((args) => runGh(args, repoDir), {
+        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, now: clock,
+      });
+      if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
+        coderabbitReview = verdict;
       }
     }
   } catch {

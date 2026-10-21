@@ -158,15 +158,18 @@ describe('PrivatePhoto', () => {
     // Fire "online" the moment the failed placeholder reaches the page, before React runs its
     // deferred effects: a listener attached after paint would miss it. Firing it later only
     // caught that gap when CI was slow (a one-off failure on 2026-10-21).
+    let fired = false;
     const observer = new MutationObserver(() => {
       if (!document.querySelector('[aria-label="Delivery photo unavailable"]')) return;
       observer.disconnect();
+      fired = true;
       window.dispatchEvent(new Event('online'));
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
     try {
       render(<PrivatePhoto bucket="delivery-photos" path="delivery-photos/d1/1.jpg" alt="Delivery photo" />);
       await screen.findByRole('img', { name: 'Delivery photo' });
+      expect(fired).toBe(true);
       expect(H.download).toHaveBeenCalledTimes(2);
     } finally {
       observer.disconnect();

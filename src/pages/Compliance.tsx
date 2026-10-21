@@ -68,10 +68,13 @@ export default function Compliance() {
   const [rupSales, setRUPSales] = useState<RUPSalesRecord[]>([]);
   // The last register load failed: an error shows instead of an empty register.
   const [rupFailed, setRupFailed] = useState(false);
+  // A register load is in flight (its own flag: the page-wide one can be cleared by an older load).
+  const [rupLoading, setRupLoading] = useState(false);
   // Only the newest register load may set state.
   const rupLoadSeq = useRef(0);
   // The last license load failed: an error shows instead of zero counts.
   const [licensesFailed, setLicensesFailed] = useState(false);
+  const licenseLoadSeq = useRef(0);
   const [rupStartDate, setRUPStartDate] = useState(() => {
     // Default: current season start (Oct 1 of previous year or current year)
     const now = new Date();
@@ -121,6 +124,9 @@ export default function Compliance() {
   const [saving, setSaving] = useState(false);
 
   const fetchLicenses = useCallback(async () => {
+    // Only the newest load may set state: the refresh after adding a license can
+    // overlap an earlier load, which must not put back the older list.
+    const seq = ++licenseLoadSeq.current;
     const [licRes, staffRes] = await Promise.all([
       // Every license, page by page: the expired / expiring counts come from this list.
       fetchAllRows((from, to) => supabase
@@ -136,6 +142,7 @@ export default function Compliance() {
         .eq('is_active', true)
         .order('full_name'),
     ]);
+    if (seq !== licenseLoadSeq.current) return;
 
     if (licRes.error) {
       toast('error', 'Failed to load licenses');
@@ -183,6 +190,10 @@ export default function Compliance() {
 
   const fetchRUPSales = useCallback(async () => {
     const seq = ++rupLoadSeq.current;
+    // The previous dates' rows must not stay up (or export) as if they were this range's.
+    setRUPSales([]);
+    setRupFailed(false);
+    setRupLoading(true);
     // Read every page: the server cuts a function's rows off at 1,000.
     const { data, error } = await fetchAllRows((from, to) => supabase
       .rpc('get_rup_sales_register', {
@@ -197,6 +208,7 @@ export default function Compliance() {
       .range(from, to));
     // Newer dates or a newer filter were picked while this one loaded.
     if (seq !== rupLoadSeq.current) return;
+    setRupLoading(false);
 
     if (error) {
       toast('error', 'Failed to load RUP sales register');
@@ -803,7 +815,7 @@ export default function Compliance() {
               <DataTable<RUPSalesRecord>
                 columns={rupSalesColumns}
                 data={rupSales}
-                loading={loading}
+                loading={loading || rupLoading}
                 searchable
                 searchPlaceholder="Search RUP sales..."
                 searchKeys={['buyer_name', 'product_name', 'epa_registration', 'buyer_certification_number']}

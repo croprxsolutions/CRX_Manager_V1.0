@@ -149,7 +149,34 @@ describe('money screens past the 1,000-row server cap', () => {
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'Big' } });
     fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
     expect(await screen.findByText(`(${TOTAL} invoices, $1,010.00 outstanding)`, {}, { timeout: 10000 })).toBeInTheDocument();
+
+    // A $1,010.00 check auto-allocates across every invoice, the oldest past row 1,000 included:
+    // capped at 200 invoices, $810.00 of it would have had nowhere to go.
+    // The Check Amount box is the first "0.00" field; each invoice row has one after it.
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '1010.00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Auto-Allocate/ }));
+    await waitFor(() => expect(screen.getByText('Allocated:').parentElement!).toHaveTextContent('$1,010.00'));
   }, 20000);
+
+  it('a check cannot be applied while the open invoices failed to load (it would all go to prepay)', async () => {
+    const search: Record<string, unknown> = {};
+    for (const m of ['select', 'eq', 'or', 'order', 'limit']) search[m] = () => search;
+    search.then = (resolve: (v: unknown) => unknown) =>
+      Promise.resolve({ data: [{ id: 'c1', farm_name: 'Big Farm', account_number: null, prepay_balance_cents: 0 }], error: null }).then(resolve);
+    H.custom.customers = search;
+    const failing: Record<string, unknown> = {};
+    for (const m of ['select', 'eq', 'in', 'gt', 'is', 'order', 'range']) failing[m] = () => failing;
+    failing.then = (resolve: (v: unknown) => unknown) =>
+      Promise.resolve({ data: null, error: { message: 'connection reset' }, count: null }).then(resolve);
+    H.custom.invoices = failing;
+    renderAt(<PaymentAllocation />, '/payments');
+
+    fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
+    expect(await screen.findByText(/Open invoices could not be loaded/)).toBeInTheDocument();
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '500.00' } });
+    expect(screen.getByRole('button', { name: /Apply Payment/ })).toBeDisabled();
+  });
 
   it('the Prepayment Manager lists every prepay customer and all their unpaid invoices (H20)', async () => {
     H.tables.customers = many((i) => ({ id: `c${pad(i)}`, farm_name: `Farm ${pad(i)}`, prepay_balance_cents: 100, is_active: true }));

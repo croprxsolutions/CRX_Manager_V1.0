@@ -136,7 +136,12 @@ export default function IntegrityCleanupPanel() {
   const [verifyConfirmId, setVerifyConfirmId] = useState<string | null>(null);
   const reconcileInFlightRef = useRef(new Set<string>());
 
+  // Only the newest load may set state: a refresh after a cleanup action can
+  // overlap an earlier one, which must not restore rows that were just fixed.
+  const fetchSeq = useRef(0);
   const fetchAll = useCallback(async () => {
+    const seq = ++fetchSeq.current;
+    const isStale = () => seq !== fetchSeq.current;
     setRefreshing(true);
     setInvoiceCoverageFailed(false);
     try {
@@ -196,6 +201,7 @@ export default function IntegrityCleanupPanel() {
       const unbilledRes = unbilledSettled.status === 'fulfilled' ? unbilledSettled.value : { data: null, error: unbilledSettled.reason };
       const manufacturedRes = manufacturedSettled.status === 'fulfilled' ? manufacturedSettled.value : { data: null, error: manufacturedSettled.reason };
       const alertsRes = alertsSettled.status === 'fulfilled' ? alertsSettled.value : { data: null, error: alertsSettled.reason };
+      if (isStale()) return;
       setFailedSections([
         ['integrity alerts', alertsRes],
         ['negative inventory', negRes],
@@ -345,6 +351,7 @@ export default function IntegrityCleanupPanel() {
             fetchActiveInvoiceCoveragePages(orderIds),
             fetchBilledOutsideCrxDeliveryIds(),
           ]);
+          if (isStale()) return;
           const invoiceCoverageError = coverageError ?? externalBillingRes.error;
           if (invoiceCoverageError) {
             Sentry.captureException(invoiceCoverageError);
@@ -378,6 +385,7 @@ export default function IntegrityCleanupPanel() {
             const { data: splitIds, error: splitError } = await fetchSplitBillingOrderIds(
               filtered.map((d) => d.order_id),
             );
+            if (isStale()) return;
             if (splitError) {
               // Fail OPEN: keep the buttons. The server still refuses, and the
               // refusal now reaches the operator intact (see handleBackfillInvoice).
@@ -401,10 +409,13 @@ export default function IntegrityCleanupPanel() {
       }
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
-      toast('error', 'Failed to load cleanup data');
+      if (!isStale()) toast('error', 'Failed to load cleanup data');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      // A superseded load leaves the spinner to the newer one still running.
+      if (!isStale()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [toast]);
 
@@ -644,7 +655,9 @@ export default function IntegrityCleanupPanel() {
           record, fix it if needed, then mark the alert resolved (a brand-new problem of the
           same kind will alert again).
         </p>
-        {alerts.length === 0 ? (
+        {failedSections.includes('integrity alerts') ? (
+          <p className="text-sm text-red-600 ml-7">Could not be loaded, so this is not known to be clear.</p>
+        ) : alerts.length === 0 ? (
           <p className="text-sm text-gray-500 ml-7">No open alerts. The daily sweep found nothing new.</p>
         ) : (
           <div className="rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
@@ -690,7 +703,9 @@ export default function IntegrityCleanupPanel() {
           <h2 className="text-lg font-semibold text-gray-900">Negative inventory</h2>
           <span className="text-sm text-gray-500">({negatives.length} rows)</span>
         </header>
-        {negatives.length === 0 ? (
+        {failedSections.includes('negative inventory') ? (
+          <p className="text-sm text-red-600 ml-7">Could not be loaded, so this is not known to be clear.</p>
+        ) : negatives.length === 0 ? (
           <p className="text-sm text-gray-500 ml-7">No rows. Inventory bucket values are non-negative.</p>
         ) : (
           <div className="rounded-lg border border-red-200 bg-red-50 overflow-hidden">
@@ -772,7 +787,9 @@ export default function IntegrityCleanupPanel() {
           the over-shipment was kept or returned to the vendor; no automated action is
           provided since the inventory side has already been recorded.
         </p>
-        {overReceived.length === 0 ? (
+        {failedSections.includes('over-received POs') ? (
+          <p className="text-sm text-red-600 ml-7">Could not be loaded, so this is not known to be clear.</p>
+        ) : overReceived.length === 0 ? (
           <p className="text-sm text-gray-500 ml-7">No rows. PO receiving totals match orders.</p>
         ) : (
           <div className="rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
@@ -883,7 +900,9 @@ export default function IntegrityCleanupPanel() {
           body raises rather than auto-creates, so this list should normally stay empty;
           rows here usually mean a regression or an older code path manufactured them.
         </p>
-        {manufactured.length === 0 ? (
+        {failedSections.includes('stock made at delivery') ? (
+          <p className="text-sm text-red-600 ml-7">Could not be loaded, so this is not known to be clear.</p>
+        ) : manufactured.length === 0 ? (
           <p className="text-sm text-gray-500 ml-7">No phantom rows. Inventory rows have a verified origin.</p>
         ) : (
           <div className="rounded-lg border border-purple-200 bg-purple-50 overflow-hidden">

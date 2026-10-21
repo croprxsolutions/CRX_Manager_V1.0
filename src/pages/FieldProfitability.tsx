@@ -219,7 +219,7 @@ export default function FieldProfitability() {
           </div>
         ) : loadFailed ? (
           // Not "no data": a failed read must not look like an empty season.
-          <p role="alert" className="py-16 text-center text-sm text-red-600">Field profitability could not be loaded. Pick the season again to retry.</p>
+          <p role="alert" className="py-16 text-center text-sm text-red-600">Field profitability could not be loaded. Reload the page to try again.</p>
         ) : rows.length === 0 ? (
           <div className="py-16 text-center">
             <p className="font-medium text-nav-dark">No field profitability data</p>

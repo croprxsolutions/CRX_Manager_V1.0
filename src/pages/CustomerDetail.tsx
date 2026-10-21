@@ -2092,7 +2092,7 @@ export default function CustomerDetail() {
           ) : historyFailed ? (
             // Not "no purchase history": a failed read must not look like a new customer.
             <div className="px-5 pb-5">
-              <p role="alert" className="text-sm text-red-600">Purchase history could not be loaded. Open the tab again to retry.</p>
+              <p role="alert" className="text-sm text-red-600">Purchase history could not be loaded. Reload the page to try again.</p>
             </div>
           ) : history.length === 0 ? (
             <div className="px-5 pb-5">

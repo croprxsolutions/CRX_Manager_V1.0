@@ -286,7 +286,7 @@ export default function PrepayWorkspacePanel() {
 
       {selectedCustomerId && !loading && loadFailed && (
         <Card>
-          <p role="alert" className="text-center text-red-600 py-8 text-sm">This customer&apos;s credits and invoices could not be loaded. Pick the customer again to retry.</p>
+          <p role="alert" className="text-center text-red-600 py-8 text-sm">This customer&apos;s credits and invoices could not be loaded. Reload the page to try again.</p>
         </Card>
       )}
 

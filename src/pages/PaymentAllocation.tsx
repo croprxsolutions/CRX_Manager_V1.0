@@ -275,8 +275,16 @@ export default function PaymentAllocation() {
 
   /* ── Submit payment ──────────────────────────────────────────────── */
 
+  // Without the customer's open invoices on screen, a check would go entirely to
+  // prepay credit by default, so nothing is applied until they have loaded.
+  const invoicesNotReady = loadingInvoices || invoicesFailed;
+
   const handleSubmit = async () => {
     if (!selectedCustomer || !profile) return;
+    if (invoicesNotReady) {
+      toast('error', 'Wait for the open invoices to load before applying the check.');
+      return;
+    }
     if (checkAmountRefused) {
       toast('error', MONEY_PRECISION_MESSAGE);
       return;
@@ -305,6 +313,10 @@ export default function PaymentAllocation() {
   const executeSubmit = async () => {
     if (!selectedCustomer || !profile) return;
     setPrepayConfirmOpen(false);
+    if (invoicesNotReady) {
+      toast('error', 'Wait for the open invoices to load before applying the check.');
+      return;
+    }
     setSubmitting(true);
     try {
       const allocations = invoices
@@ -564,7 +576,7 @@ export default function PaymentAllocation() {
                 ) : invoicesFailed ? (
                   // Not "no open invoices": a failed read must not look like a paid-up customer.
                   <p role="alert" className="text-center py-12 text-red-600 text-sm">
-                    Open invoices could not be loaded. Pick the customer again to retry.
+                    Open invoices could not be loaded, so the check cannot be applied. Search for the customer and pick them again to retry.
                   </p>
                 ) : invoices.length === 0 ? (
                   <div className="text-center py-12 text-secondary text-sm">
@@ -681,6 +693,7 @@ export default function PaymentAllocation() {
                     onClick={handleSubmit}
                     loading={submitting}
                     disabled={
+                      invoicesNotReady ||
                       remaining < 0 ||
                       hasValidationError ||
                       checkCents <= 0 ||

@@ -61,6 +61,8 @@ export default function NotificationsPanel() {
     }
     if (listRes.error) {
       toast('error', 'Failed to load notifications');
+      // Never leave an earlier list (possibly another signed-in account's) on screen.
+      setNotifications([]);
       setLoading(false);
       return;
     }

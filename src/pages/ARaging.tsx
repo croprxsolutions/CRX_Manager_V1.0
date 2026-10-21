@@ -122,7 +122,11 @@ export default function ARaging() {
       setLoading(false);
       return;
     }
-    setAgingData(assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging'));
+    const rows = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging');
+    setAgingData(rows);
+    // Batch statements act on the selection: keep only customers on this date's list.
+    const onList = new Set(rows.map((r) => r.customer_id));
+    setSelectedCustomers((prev) => new Set([...prev].filter((id) => onList.has(id))));
     setAgingFailed(false);
     setLoading(false);
   }, [asOfDate, toast]);

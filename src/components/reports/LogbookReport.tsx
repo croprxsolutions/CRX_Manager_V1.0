@@ -52,6 +52,8 @@ export default function LogbookReport() {
   // Only the newest logbook load, and the newest tab's picker list, may set state.
   const logbookLoadSeq = useRef(0);
   const entityLoadSeq = useRef(0);
+  // The tab whose picker the current choice (entityId) was made in.
+  const entityTabRef = useRef<LogbookTab>(tab);
 
   // Load entity options when tab changes
   useEffect(() => {
@@ -119,6 +121,9 @@ export default function LogbookReport() {
   const fetchLogbook = useCallback(async () => {
     const seq = ++logbookLoadSeq.current;
     setLoading(true);
+    // The previous selection's records must not stay exportable under the new
+    // selection's title and dates while this one loads.
+    setData([]);
     // PR-19 follow-up: per-branch literal rpc names so the assertRpcCoverage
     // regex can match each capture (it only counts string literals, not
     // variable references). Was a single `supabase.rpc(rpcName, ...)` call
@@ -165,6 +170,7 @@ export default function LogbookReport() {
   const fetchFAA = useCallback(async () => {
     const seq = ++logbookLoadSeq.current;
     setLoading(true);
+    setFaaData([]);
     const { data: rows, error } = await fetchAllRows((from, to) => supabase
       .rpc('get_logbook_faa', { p_start_date: startDate, p_end_date: endDate }, { count: 'exact' })
       .order('application_date', { ascending: false })
@@ -188,7 +194,9 @@ export default function LogbookReport() {
     if (tab === 'faa') {
       if (startDate && endDate) fetchFAA();
     } else {
-      if (entityId && startDate && endDate) fetchLogbook();
+      // On a tab switch this effect still sees the previous tab's choice for one
+      // render (its reset to '' lands next render); never send it to this tab's logbook.
+      if (entityId && entityTabRef.current === tab && startDate && endDate) fetchLogbook();
     }
   }, [tab, entityId, startDate, endDate, fetchFAA, fetchLogbook]);
 
@@ -356,8 +364,8 @@ export default function LogbookReport() {
 
       <ReportShell
         onDateChange={handleDateChange}
-        onExportCSV={currentData.length > 0 ? handleCSV : undefined}
-        onExportPDF={currentData.length > 0 ? handlePDF : undefined}
+        onExportCSV={!loading && currentData.length > 0 ? handleCSV : undefined}
+        onExportPDF={!loading && currentData.length > 0 ? handlePDF : undefined}
         extraControls={
           tab !== 'faa' ? (
             <div>
@@ -366,7 +374,7 @@ export default function LogbookReport() {
               </label>
               <select
                 value={entityId}
-                onChange={(e) => setEntityId(e.target.value)}
+                onChange={(e) => { entityTabRef.current = tab; setEntityId(e.target.value); }}
                 aria-label={`Select ${tab}`}
                 className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green min-w-[200px]"
               >

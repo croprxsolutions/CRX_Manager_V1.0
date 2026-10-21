@@ -16,33 +16,49 @@
 > review of any migration change and the CI migration check remain.
 >
 > **Exception: money PRs and PRs Mason names need a clean CodeRabbit review (Mason, 2026-10-21).**
-> A PR qualifies when it changes how money, invoices, payments, inventory, or costs are
-> calculated, stored, or shown, or when Mason asks the session for a CodeRabbit review. Such a PR
-> merges only with a **clean CodeRabbit review of its current head** as well as the clean Sol
-> review. The agent requests that review itself; Mason never posts it by hand.
+> A PR qualifies when it touches money, invoices, payments, inventory, or costs in any way (code,
+> database, or workflow; when unsure, it qualifies), or when Mason asks the session for a
+> CodeRabbit review. Such a PR merges only with a **clean CodeRabbit review of its current head**,
+> plus the clean Sol review every non-documentation change needs (a documentation-only PR Mason
+> names gets the CodeRabbit review and keeps its Sol exemption). The agent requests the review
+> itself; Mason never posts it by hand. This replaces, for qualifying PRs only, the advisory
+> "proceed without it" and "later commits are not reviewed" rules elsewhere.
 >
 > 1. **When:** after the head is frozen and every required check is green, and only if CodeRabbit
 >    has not already reviewed that exact head (the automatic review on the ready switch counts).
-> 2. **What:** post exactly `@coderabbitai full review` once for that head
+>    If its status comment shows a review still in progress, wait up to 15 minutes for it before
+>    requesting anything.
+> 2. **Title:** CodeRabbit skips titles containing `docs(`, so remove that from a qualifying PR's
+>    title before marking it ready or requesting the review.
+> 3. **What:** post exactly `@coderabbitai full review` once for that head
 >    (`gh pr comment <n> --body "@coderabbitai full review"`). Never `@coderabbitai review` or
 >    `@coderabbitai resume`.
-> 3. **Rate limit:** if CodeRabbit answers that it is rate-limited, wait the time it states, then
->    check back. Post once more only if that head still has no review. If that second try is also
->    refused, stop and report the PR stuck; never keep re-posting.
-> 4. **Clean** means the review's every comment (inline, review body, failed pre-merge check) is
->    refuted with evidence and needed no code change, then replied to and resolved, or there were
->    no comments.
-> 5. **Fixes move the head.** If CodeRabbit's comments lead to a code change, the new head needs a
+> 4. **No answer:** if CodeRabbit answers that it is rate-limited, wait the time it states, then
+>    check back; if it is silent or says it skipped, wait 30 minutes, then check back. Post once
+>    more only if that head still has no review. If that second try also gets no review, stop and
+>    report the PR stuck (to the coordinator, or `NEEDS MASON - ACTION REQUIRED`); never keep
+>    re-posting.
+> 5. **Clean** means every comment in that review (inline, review body, failed pre-merge check)
+>    was refuted with evidence and needed no code change, then replied to and resolved, or there
+>    were no comments. The final Sol review reads those replies.
+> 6. **Fixes move the head.** If CodeRabbit's comments lead to a code change, the new head needs a
 >    fresh Sol review (carry-forward covers only a merge of main) and one new full review, by the
 >    same steps. If that second review still asks for code changes, stop and hand over under the
 >    `AGENTS.md` stop rule.
-> 6. A merge of main alone into a head CodeRabbit already reviewed clean does not need a new
->    CodeRabbit review; the Sol carry-forward rules apply as usual.
+> 7. **A merge of main alone** into a head CodeRabbit already reviewed clean does not need a new
+>    CodeRabbit review (Mason, 2026-10-21, accepting the recommendation): main takes dozens of
+>    merges a week and CodeRabbit allows only a few reviews an hour, and the Sol carry-forward
+>    collision check covers the interaction with the new main.
+>
+> **Enforcement is written, not mechanical (Mason, 2026-10-21, "keep it simple").** No hook or
+> merge gate checks for this review: the merge gates read CodeRabbit threads, not reviews of the
+> head, and the legacy `CodeRabbit candidate lifecycle` job is not a required check. Nothing blocks
+> the request comment either (checked 2026-10-21). While a merge-coordinator session runs, the
+> session reports `CR-CLEAN #<PR> head <sha>` before it gets a GO. A hard merge-gate check is a
+> separate follow-up.
 >
 > Every other PR keeps the advisory rule above: no `@coderabbitai` commands, and no waiting for a
-> review that has not arrived. No hook or check blocks the request comment (checked 2026-10-21):
-> the merge gates read CodeRabbit threads, not commands, and the legacy `CodeRabbit candidate
-> lifecycle` job is not a required check.
+> review that has not arrived.
 >
 > History: from 2026-09-26 to 2026-10-19 CodeRabbit reviewed every non-draft push, the ruleset
 > required one approving review of the latest push, the merge gates required CodeRabbit `APPROVED`

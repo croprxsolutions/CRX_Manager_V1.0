@@ -132,7 +132,8 @@ record(/Codex and Claude both proceed after a short plan without waiting for app
 record(
   /CodeRabbit is advisory/i.test(protectedDelivery)
     && /fix or refute every comment/i.test(protectedDelivery)
-    && /needs a clean CodeRabbit review of its current head plus a clean Sol/i.test(protectedDelivery)
+    // One sentence must carry both triggers and the requirement, so dropping a trigger fails.
+    && /A PR that touches money, invoices, payments, inventory, or costs[^.]*, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its current head plus a clean Sol/i.test(protectedDelivery)
     && /post `@coderabbitai full review` once/i.test(protectedDelivery)
     && /On any other PR[^.]*never post `@coderabbitai` commands/i.test(protectedDelivery)
     && /never ask Mason to comment, label, or click for CodeRabbit/i.test(protectedDelivery),

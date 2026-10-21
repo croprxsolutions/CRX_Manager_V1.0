@@ -260,7 +260,11 @@ It also fixes a pre-existing failure: voiding a fulfilled order that still had a
 back with `ORDER_INVOICE_TERMINAL` (6 live orders qualified on 2026-10-19; no order has ever been voided live).
 The three stay in the table below until the apply is confirmed live.
 
-**Open follow-up: voiding an order with a governed SPLIT draft invoice still fails** (Codex GitHub review on #967,
+**Fix written, NOT applied: voiding an order with a governed SPLIT draft invoice still fails** (migration
+`20261021030000_void_order_governed_split_draft_claims`; until it is applied the paragraph below is current). The fix
+gives `void_order` the same lock, claim, provenance refresh and claim drop as `cancel_order`, reusing the
+`'cancel_order'` claim operation (the guard's exact-cancel shape is the one write the void makes). Found by the Codex
+GitHub review on #967,
 verified against the live definitions 2026-10-20). A draft made by `create_split_invoices_from_order` has a
 `split_invoice_provenance` row, and `guard_split_invoice_provenance_identity` lets its total change only under a
 same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one through

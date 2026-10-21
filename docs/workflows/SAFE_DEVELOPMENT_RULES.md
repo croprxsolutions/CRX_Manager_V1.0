@@ -187,7 +187,7 @@ live. That exception covers those two columns only; the mirror form is **not** a
 shape, and anything new or changed uses the predicate above. See the 2026-08-19 entry. Because
 `20261021140000` (purchase-order cost corrections) adds a new writer to both columns, it also gives
 each the finite whole-cent CHECK (`purchase_order_items_unit_cost_whole_cents_chk`,
-`purchase_orders_total_cost_whole_cents_chk`: non-negative, whole cents, below `'Infinity'`, and equal
+`purchase_orders_total_cost_whole_cents_chk`: the full predicate above, plus non-negative and equal
 to the cents column); the mirror CHECKs stay.
 
 **Never add one as `NOT VALID` over a column that still holds dirty rows.** `NOT VALID` only skips

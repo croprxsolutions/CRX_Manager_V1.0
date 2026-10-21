@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-21 (America/Chicago) for the migration ledger only (read-only
+**Last verified:** 2026-10-20 (America/Chicago; 2026-10-21 UTC) for the migration ledger only (read-only
 `execute_sql` against project `rhyzpcqhnizqbxphqdkr`; re-read 2026-10-21 04:58 UTC (11:58 PM Central, 2026-10-20): unchanged at 1040 rows / 1033 names, `20261021140000` and `20261021141000` (purchase-order cost and its column lock, PR #980) not applied; the read before it, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
 `max(version)` `20261021040052` = `20261020210000_blend_ticket_pricing_guards` (Goal 3 blend-ticket pricing, PR #982 merged
 as `948f238ad`), applied 2026-10-21 04:00:52 UTC under the autonomous-landing rule: an order made from a blend ticket

@@ -175,6 +175,9 @@ export default function PurchaseOrderDetail() {
 
   /* Edit modal state */
   const [editOpen, setEditOpen] = useState(false);
+  // Whether the edit form was filled while the viewer was an admin, so it holds the real costs. A rep's
+  // form holds "0" for every cost; if the session is promoted before Save, those must not be sent (Codex).
+  const [editHasCosts, setEditHasCosts] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [editForm, setEditForm] = useState({
@@ -999,6 +1002,7 @@ export default function PurchaseOrderDetail() {
       quantity_received: item.quantity_received,
       product: (item.product || null) as unknown as PickerProduct | null,
     })));
+    setEditHasCosts(isAdmin);
     setEditProductSearch(null);
     setEditProductQuery('');
     setEditOpen(true);
@@ -1030,9 +1034,10 @@ export default function PurchaseOrderDetail() {
 
   const handleSaveEdit = async () => {
     if (!po || !profile) return;
+    const includeCost = isAdmin && editHasCosts;
     // An admin's typed cost must be exact whole cents: blank or more than two decimals is refused,
     // never sent as $0 or rounded. A received line's cost is not editable here (it is locked).
-    if (isAdmin && editItems.some((item) => item.quantity_received === 0 && !isWholeCentDollarInput(item.unit_cost.trim()))) {
+    if (includeCost && editItems.some((item) => item.quantity_received === 0 && !isWholeCentDollarInput(item.unit_cost.trim()))) {
       toast('error', `Enter a unit cost for every line. ${MONEY_PRECISION_MESSAGE}`);
       return;
     }
@@ -1043,7 +1048,7 @@ export default function PurchaseOrderDetail() {
     try {
       // Keep received lines in-place and preserve the exact selected Product UUID
       // for editable lines when the RPC updates this PO atomically.
-      const itemsPayload = buildPurchaseOrderEditItemsPayload(editItems, { includeCost: isAdmin });
+      const itemsPayload = buildPurchaseOrderEditItemsPayload(editItems, { includeCost });
 
       const poPayload = {
         vendor: editForm.vendor,
@@ -1107,6 +1112,9 @@ export default function PurchaseOrderDetail() {
    * added (cost_needs_review) whose cost is kept as is, which confirms it. Sorted by line id so a
    * lost-response retry rebuilds the same request whatever order the lines reloaded in (Luna round 3).
    */
+  // A line with any receiving record counts as received even after a reversal took its quantity back
+  // to zero: the server requires a reason for those too (Luna).
+  const receivedLineIds = new Set(receivingHistory.map((r) => r.po_item_id));
   const costChanges = items.flatMap((item) => {
     const draft = costDrafts[item.id];
     if (draft === undefined || draft.trim() === '') return [];
@@ -1114,7 +1122,7 @@ export default function PurchaseOrderDetail() {
     if (cents === null) return [];
     const changed = cents !== purchaseOrderUnitCostCents(item.unit_cost ?? 0);
     return changed || item.cost_needs_review
-      ? [{ id: item.id, unit_cost_cents: cents, changed, received: item.quantity_received > 0 }]
+      ? [{ id: item.id, unit_cost_cents: cents, changed, received: item.quantity_received > 0 || receivedLineIds.has(item.id) }]
       : [];
   }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // A change to a received line must say why (Mason, 2026-10-20); the server refuses it otherwise.
@@ -1877,7 +1885,7 @@ export default function PurchaseOrderDetail() {
               {editItems.map((item, idx) => {
                 const isReceived = item.quantity_received > 0;
                 return (
-                <div key={item.id || idx} className={`grid ${isAdmin ? 'grid-cols-[1fr_100px_100px]' : 'grid-cols-[1fr_100px]'} gap-2 items-start`}>
+                <div key={item.id || idx} className={`grid ${isAdmin && editHasCosts ? 'grid-cols-[1fr_100px_100px]' : 'grid-cols-[1fr_100px]'} gap-2 items-start`}>
                   <div>
                     {isReceived ? (
                       <>
@@ -1955,7 +1963,7 @@ export default function PurchaseOrderDetail() {
                       }}
                     />
                   </div>
-                  {isAdmin && (
+                  {isAdmin && editHasCosts && (
                   <div>
                     <label className="block text-xs text-secondary mb-1">Cost</label>
                     <Input

@@ -179,21 +179,15 @@ $preflight$;
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.purchase_order_items
   ADD CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk
-  CHECK (
-    unit_cost >= 0
-    AND unit_cost = round(unit_cost, 2)
-    AND unit_cost < 'Infinity'::numeric
-    AND unit_cost = unit_cost_cents::numeric / 100.0
-  );
+  CHECK (unit_cost IS NULL OR (unit_cost = ROUND(unit_cost, 2) AND unit_cost > '-Infinity' AND unit_cost < 'Infinity'
+    AND unit_cost >= 0
+    AND unit_cost = unit_cost_cents::numeric / 100.0));
 
 ALTER TABLE public.purchase_orders
   ADD CONSTRAINT purchase_orders_total_cost_whole_cents_chk
-  CHECK (
-    total_cost >= 0
-    AND total_cost = round(total_cost, 2)
-    AND total_cost < 'Infinity'::numeric
-    AND total_cost = total_cost_cents::numeric / 100.0
-  );
+  CHECK (total_cost IS NULL OR (total_cost = ROUND(total_cost, 2) AND total_cost > '-Infinity' AND total_cost < 'Infinity'
+    AND total_cost >= 0
+    AND total_cost = total_cost_cents::numeric / 100.0));
 
 -- ---------------------------------------------------------------------------
 -- 1. The review flag.

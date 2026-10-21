@@ -70,6 +70,8 @@ export default function PurchaseOrders() {
   /* Admins: purchase orders with a rep line at an unconfirmed catalog cost (20261021140000) */
   const [costReviewPoIds, setCostReviewPoIds] = useState<Set<string>>(new Set());
   const [costReviewOnly, setCostReviewOnly] = useState(false);
+  // False when the flag read failed: the filter is then off and disabled, never an empty queue that hides every PO.
+  const [costReviewFlagsLoaded, setCostReviewFlagsLoaded] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -111,6 +113,7 @@ export default function PurchaseOrders() {
     // Cancelled purchase orders are left out: their cost can no longer change. A failure here only
     // costs the filter its count; the list itself still loads.
     let reviewIds = new Set<string>();
+    let flagsLoaded = true;
     if (!loadError && isAdmin) {
       const { data: flagged, error: flaggedError } = await fetchAllRows((from, to) => supabase
         .from('purchase_order_items')
@@ -123,6 +126,7 @@ export default function PurchaseOrders() {
       if (flaggedError) {
         Sentry.captureException(flaggedError, { tags: { source: 'fetch', action: 'load_po_cost_review_flags' } });
         toast('warning', 'Could not load which purchase orders have costs to confirm.');
+        flagsLoaded = false;
       } else {
         reviewIds = new Set(((flagged || []) as Array<{ purchase_order_id: string }>).map((r) => r.purchase_order_id));
       }
@@ -135,6 +139,8 @@ export default function PurchaseOrders() {
     }
     setPos(rows);
     setCostReviewPoIds(reviewIds);
+    setCostReviewFlagsLoaded(flagsLoaded);
+    if (!flagsLoaded) setCostReviewOnly(false);
     setLoading(false);
   }, [toast, isAdmin]);
 
@@ -234,7 +240,7 @@ export default function PurchaseOrders() {
   const filtered = pos.filter((p) => {
     if (statusFilter && p.status !== statusFilter) return false;
     // Admin-only: a role change mid-session hides the button, so the filter must stop applying too.
-    if (isAdmin && costReviewOnly && !costReviewPoIds.has(p.id)) return false;
+    if (isAdmin && costReviewOnly && costReviewFlagsLoaded && !costReviewPoIds.has(p.id)) return false;
     return true;
   });
 
@@ -716,12 +722,13 @@ export default function PurchaseOrders() {
                       <button
                         type="button"
                         onClick={() => setCostReviewOnly((on) => !on)}
+                        disabled={!costReviewFlagsLoaded}
                         aria-pressed={costReviewOnly}
-                        className={`px-3 py-2 text-sm rounded-lg border transition-colors ${costReviewOnly
+                        className={`px-3 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${costReviewOnly
                           ? 'border-amber-300 bg-amber-50 text-amber-800'
                           : 'border-gray-200 text-secondary hover:text-nav-dark'}`}
                       >
-                        Costs to confirm ({costReviewPoIds.size})
+                        Costs to confirm ({costReviewFlagsLoaded ? costReviewPoIds.size : '?'})
                       </button>
                     )}
                     {canBulkAction && filtered.length > 0 && (

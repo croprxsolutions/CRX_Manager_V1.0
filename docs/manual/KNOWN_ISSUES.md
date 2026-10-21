@@ -1,6 +1,6 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
+**Last verified: 2026-10-20 (America/Chicago; 2026-10-21 UTC) against the live migration ledger** (read-only
 `execute_sql`, re-read 2026-10-21 04:58 UTC: unchanged at 1040 rows / 1033 names, `20261021140000` and `20261021141000` (PR #980) not applied; the read before it, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19

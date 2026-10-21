@@ -665,6 +665,22 @@ ok(coderabbitCompletedCommit({ status: { contexts: [crStatus("Review completed",
 // Unreadable answers fail closed.
 eq(evaluateCodeRabbitRequirement(null).status, "unreadable", "no data is unreadable");
 eq(evaluateCodeRabbitRequirement({ headRefOid: HEAD }).status, "unreadable", "missing lists are unreadable");
+// A partial answer is never "not required" (Sol, PR #1009).
+{
+  const partialFiles = facts({ files: ["docs/x.md"], commits: [commit(HEAD)] });
+  partialFiles.files.nodes.push({ path: null });
+  partialFiles.files.totalCount = 2;
+  eq(evaluateCodeRabbitRequirement(partialFiles).status, "unreadable", "a file entry with no path is unreadable, not exempt");
+  const partialLabels = facts({ files: ["docs/x.md"], commits: [commit(HEAD)] });
+  partialLabels.labels = { totalCount: 1, nodes: [{ name: null }] };
+  eq(evaluateCodeRabbitRequirement(partialLabels).status, "unreadable", "a label entry with no name is unreadable, not exempt");
+  let threw = false;
+  try {
+    readCodeRabbitRequirement(() => JSON.stringify({ errors: [{ message: "partial" }],
+      data: { repository: { pullRequest: facts({ files: ["docs/x.md"], commits: [commit(HEAD)] }) } } }), { owner: "o", name: "r", number: 1 });
+  } catch { threw = true; }
+  ok(threw, "a GraphQL answer carrying errors is refused even when it includes data");
+}
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] })] })).status,
   "unreadable", "a commit list that does not end at the head is not trusted");
 eq(evaluateCodeRabbitRequirement(facts({ commits: [] })).status, "unreadable", "an empty commit list is not trusted");

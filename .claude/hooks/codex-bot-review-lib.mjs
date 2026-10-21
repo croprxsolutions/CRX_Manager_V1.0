@@ -483,6 +483,12 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   const files = pullRequest?.files?.nodes;
   const commits = pullRequest?.commits?.nodes;
   if (!Array.isArray(labels) || !Array.isArray(files) || !Array.isArray(commits)) return unreadable();
+  // A file or label entry with no readable name could be the money file or the
+  // label: a partial answer is unreadable, never "not required" (Sol, PR #1009).
+  if (files.some((file) => typeof file?.path !== "string" || !file.path.trim())
+    || labels.some((label) => typeof label?.name !== "string" || !label.name.trim())) {
+    return unreadable();
+  }
 
   // A label list cut short cannot prove the label is absent (Luna round 5).
   const labelTotal = pullRequest?.labels?.totalCount;
@@ -561,7 +567,12 @@ export function readCodeRabbitRequirement(runGh, { owner, name, number, deadline
     }
     return runGh(args);
   };
-  const pullRequest = JSON.parse(call(coderabbitRequirementArgs(owner, name, number)))?.data?.repository?.pullRequest;
+  const answer = JSON.parse(call(coderabbitRequirementArgs(owner, name, number)));
+  // GraphQL can return partial data alongside errors; never decide on that (Sol, PR #1009).
+  if (Array.isArray(answer?.errors) && answer.errors.length > 0) {
+    throw new Error("GitHub returned errors with the CodeRabbit requirement read");
+  }
+  const pullRequest = answer?.data?.repository?.pullRequest;
   // GraphQL returns at most 100 files. For a bigger PR, read the full list over
   // REST (paginated) so a large non-money PR is not refused for a cut-short list
   // (Luna round 6). If the count still does not match, it stays incomplete and

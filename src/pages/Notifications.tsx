@@ -22,14 +22,23 @@ export default function Notifications() {
   const [loadFailed, setLoadFailed] = useState(false);
   // Only the newest load may set state.
   const loadSeq = useRef(0);
+  // Whose notifications are on screen (null: nobody's).
+  const shownProfileId = useRef<string | null>(null);
 
   const fetchNotifications = useCallback(async () => {
+    // A new person (or none) supersedes any read still in flight, and the last
+    // person's list leaves the screen at once rather than when the new read lands.
+    const seq = ++loadSeq.current;
+    if (shownProfileId.current !== (profile?.id ?? null)) {
+      shownProfileId.current = profile?.id ?? null;
+      setNotifications([]);
+      setLoadFailed(false);
+    }
     // Guard: Ensure profile is loaded
     if (!profile) {
       setLoading(false);
       return;
     }
-    const seq = ++loadSeq.current;
 
     // Every notification, newest first, page by page: the page showed only the
     // newest 200 while some staff have over 1,000 unread (2026-10-20).
@@ -53,7 +62,8 @@ export default function Notifications() {
   }, [profile]);
 
   useEffect(() => {
-    if (profile) fetchNotifications();
+    // Runs signed out too, so the last person's notifications are cleared.
+    fetchNotifications();
   }, [profile, fetchNotifications]);
 
   const markAsRead = async (notification: NotificationType) => {

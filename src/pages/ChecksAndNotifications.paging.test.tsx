@@ -20,7 +20,19 @@ const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   functions: {} as Record<string, Row[]>,
   toast: vi.fn(),
+  // The signed-in person; a test may swap it to model another account signing in.
+  profile: { id: 'user-1', role: 'admin', full_name: 'Admin', is_active: true },
+  // While set, table reads wait for it, like a slow network.
+  hold: null as Promise<void> | null,
 }));
+
+// Delay a query's answer until H.hold (if set when the read is awaited) settles.
+function heldQuery(query: Record<string, unknown>): Record<string, unknown> {
+  const answer = query.then as (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) => unknown;
+  query.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+    (H.hold ?? Promise.resolve()).then(() => answer(resolve, reject));
+  return query;
+}
 
 // Tables a test fills are served by the capped in-memory server; any other table
 // (lookups these screens make on the side) answers with no rows.
@@ -37,7 +49,7 @@ function emptyQuery(): Record<string, unknown> {
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const client = {
-    from: (table: string) => (table in H.tables ? buildInMemoryQuery(H.tables[table]) : emptyQuery()),
+    from: (table: string) => (table in H.tables ? heldQuery(buildInMemoryQuery(H.tables[table])) : emptyQuery()),
     rpc: (name: string) => pagedRpcReply({ data: H.functions[name] ?? [], error: null }),
   };
   return { ...actual, supabase: client, supabaseUntyped: client };
@@ -45,7 +57,7 @@ vi.mock('../lib/db', async () => {
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Admin', is_active: true }, role: 'admin', deniedPages: [] }),
+  useAuth: () => ({ profile: H.profile, role: 'admin', deniedPages: [] }),
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 vi.mock('../hooks/useRealtimeSubscription', () => ({ useRealtimeNotifications: () => undefined }));
@@ -82,6 +94,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   H.tables = {};
   H.functions = {};
+  H.hold = null;
+  H.profile = { id: 'user-1', role: 'admin', full_name: 'Admin', is_active: true };
 });
 afterEach(cleanup);
 
@@ -201,5 +215,23 @@ describe('notifications past the 1,000-row server cap (L9, L10-1)', () => {
     expect(await screen.findByText(`${TOTAL.toLocaleString()} unread`)).toBeInTheDocument();
     // The dropdown still shows only the newest 20.
     expect(screen.getAllByText(/^Note \d{4}$/)).toHaveLength(20);
+  });
+
+  it("another person signing in clears the last person's notifications at once, before their own read lands", async () => {
+    H.tables.notifications = [notification(0), notification(1)];
+    const view = render(<MemoryRouter><NotificationsPanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByTitle('Notifications'));
+    expect(await screen.findByText('Note 0000')).toBeInTheDocument();
+
+    // user-2's reads are slow; user-1's list must not stay up, clickable, meanwhile.
+    let release = () => {};
+    H.hold = new Promise<void>((r) => { release = r; });
+    H.profile = { id: 'user-2', role: 'admin', full_name: 'Second', is_active: true };
+    view.rerender(<MemoryRouter><NotificationsPanel /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByText('Note 0000')).not.toBeInTheDocument());
+
+    release();
+    // user-2 has none of user-1's notifications.
+    expect(await screen.findByText('No notifications')).toBeInTheDocument();
   });
 });

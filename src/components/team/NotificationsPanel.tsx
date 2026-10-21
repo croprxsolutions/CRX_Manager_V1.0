@@ -29,20 +29,25 @@ export default function NotificationsPanel() {
   // Unread notifications in the database; null when the count could not be read.
   const [unreadCount, setUnreadCount] = useState<number | null>(0);
   const loadSeq = useRef(0);
+  // Whose notifications are on screen (null: nobody's).
+  const shownProfileId = useRef<string | null>(null);
   // The last list read failed: the dropdown says so instead of "No notifications".
   const [listFailed, setListFailed] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = useCallback(async () => {
     const seq = ++loadSeq.current;
-    if (!profile) {
-      // Signed out: drop the last account's list and count, and (via the bumped
-      // sequence) any read of theirs still in flight.
+    // Signed out, or another person signed in: drop the last account's list and
+    // count at once (the bumped sequence also discards any read of theirs still in
+    // flight), rather than leaving them up, clickable, until the new read lands.
+    if (shownProfileId.current !== (profile?.id ?? null)) {
+      shownProfileId.current = profile?.id ?? null;
       setNotifications([]);
       setUnreadCount(0);
       setListFailed(false);
-      return;
+      setLoading(Boolean(profile));
     }
+    if (!profile) return;
 
     // The dropdown shows the newest 20 on purpose; the badge counts every unread
     // notification in the database (it used to count only the unread among those 20).

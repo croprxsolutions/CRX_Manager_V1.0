@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase, assertRpcResult } from '../lib/db';
 import { formatUSD } from '../lib/money';
+import { todayInBusinessTz } from '../lib/dateUtils';
 import Card from '../components/ui/Card';
 import PageHeader from '../components/ui/PageHeader';
 import ARaging from './ARaging';
@@ -42,7 +43,9 @@ export default function AccountsReceivable() {
     let cancelled = false;
     (async () => {
       try {
-        const today = new Date().toISOString().slice(0, 10);
+        // Chicago's date, not UTC's: from about 7pm Central, UTC is already tomorrow,
+        // and the strip would ask for tomorrow's aging above today's AR Aging table.
+        const today = todayInBusinessTz();
         const { data: arData } = await supabase.rpc('get_ar_aging', { p_as_of_date: today });
         const arRows = assertRpcResult<Array<{ total_outstanding?: number }>>(arData, 'get_ar_aging');
         const owedSum = (arRows || []).reduce((s, r) => s + Number(r.total_outstanding || 0), 0);

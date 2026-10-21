@@ -32,7 +32,7 @@ import StatementPrintDialog from '../components/statements/StatementPrintDialog'
 import FinanceChargePreviewModal from '../components/invoices/FinanceChargePreviewModal';
 import { useAuth } from '../contexts/AuthContext';
 import { computeSeason } from '../utils/season';
-import { localToday, parseLocalDate, localDatePlusDays } from '../lib/dateUtils';
+import { localToday, parseLocalDate, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
 
@@ -66,7 +66,9 @@ export default function ARaging() {
 
   // Aging
   const [agingData, setAgingData] = useState<ARAgingRow[]>([]);
-  const [asOfDate, setAsOfDate] = useState(localToday());
+  // Chicago's date, the same day the Accounts Receivable summary strip asks for,
+  // so the strip and this table agree whatever the viewer's own clock says.
+  const [asOfDate, setAsOfDate] = useState(() => todayInBusinessTz());
 
   // Statement
   const [customers, setCustomers] = useState<{ id: string; farm_name: string }[]>([]);

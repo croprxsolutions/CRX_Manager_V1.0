@@ -1,9 +1,8 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 19:13 UTC (2:13 PM Central): the one change since the 04:01 UTC read is that
-`20261021030000` (PR #987) is now applied (counts in `docs/reference/migration-history.md`); `20261021070000` (PR #995)
-is not applied; at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+`execute_sql`, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
@@ -283,8 +282,8 @@ draft is zeroed only when it carries no paid, prepay, write-off or credit cents,
 operations; `idempotency_keys` holds zero receipts for the three operations; and a keyless live `void_order` call on a
 random uuid was refused with `IDEMPOTENCY_KEY_REQUIRED`.
 
-**Fix written, NOT applied: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (migration
-`20261021030000_void_order_governed_split_draft_claims`, PR #987; until it is applied the description after "Found by" is current). The fix
+**FIXED, applied live 2026-10-21 19:10:58 UTC (2:10 PM Central): voiding an order with a governed SPLIT draft invoice no longer fails** (migration
+`20261021030000_void_order_governed_split_draft_claims`, ledger `20261021191058`, PR #987 merged as `05fdc3e40`; live `void_order` md5 `960b7306`, `_void_order_impl_20260714` md5 `8ad84bdc`, one overload each, `void_order` EXECUTE for `authenticated` and not `anon`, read 2026-10-21; the description after "Found by" is the pre-fix history). The fix
 gives `void_order` the same lock, claim, provenance refresh and claim drop as `cancel_order`, reusing the
 `'cancel_order'` claim operation (the guard's exact-cancel shape is the one write the void makes; anyone tightening that
 shape in `guard_split_invoice_provenance_identity` must keep `void_order`'s draft cancel inside it). (Found by the Codex
@@ -295,8 +294,7 @@ same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one 
 `_cancel_order_provenance_wrapper_20260719` (lock, claim, refresh the provenance, drop the claim); `void_order` does
 not, so its zeroing UPDATE is refused with `SPLIT_INVOICE_PROVENANCE_IMMUTABLE` and the whole void rolls back
 cleanly. This is not a regression: before batch 3b, now live, every nonzero draft already failed. Live impact today is none:
-live has 0 `split_invoice_provenance` rows (read 2026-10-20). Fix: give `void_order` the same governed-invoice
-locking, claim and provenance refresh as `cancel_order`, in its own reviewed migration, before split billing is used.
+live had 0 `split_invoice_provenance` rows (read 2026-10-20 and again 2026-10-21 before the apply), so no real order was ever affected.
 
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
 
@@ -711,8 +709,9 @@ leave these open:
   invoice with no order or delivery behind it (the New Invoice page's two types)
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
-  (`DECISION_LOG.md`), and so do credit memos (return credits). Still open until Goal 3
-  of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
+  (`DECISION_LOG.md`), and so do credit memos (return credits). **Closed 2026-10-21:** migration
+  `20261021050000` (PR #983, ledger `20261021200526`) enforces it in the database on every write path,
+  and the New Invoice page offers only typed charge lines (freight, application fee, service, other).
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or
   inserted between two pages can shift the next page by one, so a single run can miss or repeat a

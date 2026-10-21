@@ -27,3 +27,5 @@
 - Restamped 2026-10-21 from 20261020150000 to 20261021050000: PR #982's blend-ticket migration
   (20261020210000) was applied first, and the ordering guard refuses a file below the live authored
   high-water. Content unchanged.
+- A new charge line starts with no type (and no quantity box), and the page refuses to save until
+  staff pick one, so a charge is never filed as freight by default (Codex connector P2 on PR #983).

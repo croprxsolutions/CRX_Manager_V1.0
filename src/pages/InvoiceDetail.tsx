@@ -842,7 +842,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         tote_number: null,
         price_source: null,
         quoted_price_cents: null,
-        charge_type: 'freight',
+        // No default: staff pick the type, and fromScratchLinesProblem refuses a save until they do.
+        charge_type: null,
         is_application_fee: false,
         rate_unit: null,
         total_applied: null,
@@ -2099,7 +2100,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       )}
                     </td>
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id && !item.charge_type ? (
+                      {editable && !item.billing_line_id && !item.charge_type && !(isFromScratch && !item.product_id) ? (
                         <input
                           type="number"
                           value={item.quantity}

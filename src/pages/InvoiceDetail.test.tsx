@@ -1491,8 +1491,25 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'freight' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Add a description to every charge.'));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
+  });
+
+  it('a new charge starts with no type and cannot be saved until staff pick one', async () => {
+    setupInvoice({});
+    mockIntentAwareRpc({ data: 'inv-scratch', error: null });
+    renderInvoiceDetail('inv-scratch');
+    await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    expect(screen.getByRole('combobox', { name: 'Charge type' })).toHaveValue('');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Pick a charge type for every line.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
 

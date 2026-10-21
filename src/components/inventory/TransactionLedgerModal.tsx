@@ -127,6 +127,8 @@ export default function TransactionLedgerModal({ open, onClose, productId, produ
     setLoading(true);
     setError('');
     setPosition(null);
+    // Clear the last product's rows so a failed read never shows them under this product.
+    setTransactions([]);
 
     // PR-07 follow-up: dropped performer FK embed; resolved via profile_public_view.
     // Only the newest load (the product last opened) may fill the modal.
@@ -213,7 +215,7 @@ export default function TransactionLedgerModal({ open, onClose, productId, produ
         <p className="text-sm text-secondary py-8 text-center">No transactions found for this product.</p>
       )}
 
-      {!loading && transactions.length > 0 && (
+      {!loading && !error && transactions.length > 0 && (
         <>
           <div className="max-h-[65vh] overflow-y-auto border rounded-lg">
             <table className="w-full text-sm">

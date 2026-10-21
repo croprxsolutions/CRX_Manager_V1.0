@@ -1,0 +1,13 @@
+## 2026-10-21 - Lookups and per-record reads read every record; long PDFs are refused, not cut short (Goal 4, part 2b)
+
+The rest of Goal 4 part 2: lookups and per-record reads now go page by page through `src/lib/pagedRead.ts`, with `{ count: 'exact' }`, a fixed sort ending in a unique key, and an error (or a stopped action) instead of a short result. Frontend only, no migration.
+
+- **Statements** (M57): a customer's statement on AR Aging and Customer Detail reads through the new `src/lib/customerStatement.ts`. The statement function's rows have no id, so they are paged in the function's own order and each read is checked two ways: every running balance must equal the sum of the amounts so far, and a read longer than one page must end on the server's current last row. A read that fails a check is tried once more, then shown as an error.
+- **Customer Detail** (M27, M64): the recent-transactions card says "the latest 50 of N"; the interaction history reads every interaction, newest first (it kept the newest 50, so its type and outcome filters missed older ones) and shows an error when it cannot load.
+- **Orders and deliveries** (M36, M62, and the scheduled-quantity read from N13): an order's field allocations, active fields, field-billing defaults and allocation customers, and the pick list's stock; when a scheduled delivery is edited, the quantities other deliveries already claim (a failed read stops the edit instead of allowing too much).
+- **Inventory** (M23, M24, M54): a product's ledger and its performer names, a new cycle count's stock and a count's lines, and the Office Cockpit's lapsed crop-program holds with their quote numbers and product names.
+- **Jobs and compliance** (N4, N5, N7, N8, N11): the Jobs list's applicator and customer filters (their dispatch and share reads ignored errors; a failure now stops the load), the Dispatch Board and Field View map boundaries, and the license check on a job (a license past the cap read as missing; a failed read now says so).
+- **Returns and credit** (N10, L17): the return form's "pick an order", and the credit-limit warning's open-invoice balance (a failed read goes to the existing fail-closed warning instead of counting as zero).
+- **Document scanning** (`src/lib/documentOCR.ts`): a PDF over 20 pages is refused before any page is read, with a plain message to split it into files of 20 pages or fewer. It used to scan only the first 20 pages, so an import silently dropped every line after page 20, with only a Sentry warning.
+
+`src/lib/pagedReadCallSites.test.ts` now also checks `customerStatement.ts`, `useGuardrails.ts`, `CustomerContacts.tsx` and `TransactionLedgerModal.tsx`.

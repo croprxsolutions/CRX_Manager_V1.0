@@ -478,6 +478,8 @@ export default function Jobs() {
         .range(from, to));
       if (dispError) {
         Sentry.captureException(dispError, { tags: { source: 'fetch', action: 'load_jobs_applicator_filter' } });
+        // Clear the list: the last one loaded does not match the filters now applied.
+        setJobs([]);
         toast('error', 'Failed to load jobs');
         setLoading(false);
         return;
@@ -507,6 +509,8 @@ export default function Jobs() {
         .range(from, to));
       if (shareError) {
         Sentry.captureException(shareError, { tags: { source: 'fetch', action: 'load_jobs_customer_filter' } });
+        // Clear the list: the last one loaded does not match the filters now applied.
+        setJobs([]);
         toast('error', 'Failed to load jobs');
         setLoading(false);
         return;
@@ -522,6 +526,7 @@ export default function Jobs() {
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_jobs' } });
+      setJobs([]);
       toast('error', 'Failed to load jobs');
       setLoading(false);
       return;

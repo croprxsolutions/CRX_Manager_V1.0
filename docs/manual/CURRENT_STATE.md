@@ -5,7 +5,7 @@
 1032 names, `max(version)` `20261021024020` = `20261019235000_bind_delivery_order_void_replay_receipts_batch3b`
 (replay-binding batch 3b, PR #967 head `ed2bd8733`), applied 2026-10-21 02:40:20 UTC on Mason's in-chat owner
 approval: `cancel_delivery`, `void_delivery` and `void_order` now require a retry key and replay a saved result only
-for the same person and the exact same request. Re-read 2026-10-21 03:04 UTC: unchanged; `20261020200000` and `20261020210000` (purchase-order cost and its column lock, PR #980) are not applied. The 2026-10-20 19:41 UTC read before it had 1038 rows / 1031 names,
+for the same person and the exact same request. Re-read 2026-10-21 03:04 UTC: unchanged; `20261020200000` and `20261020205000` (purchase-order cost and its column lock, PR #980) are not applied. The 2026-10-20 19:41 UTC read before it had 1038 rows / 1031 names,
 `max(version)` `20261020193610` = `20261019230000_cost_margin_admin_only_screens_step2` (Goal 1 part 3, step 2 of 3: screens read
 cost only through the admin-only `get_admin_cost_fields`, except the four purchase-order screens, and job, field-invoice
 and invoice saves work out a non-admin's cost on the server), applied 2026-10-20 19:36:10 UTC; PR #965 merged the

@@ -3,7 +3,7 @@
 **Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
 `execute_sql`, 2026-10-21 02:43 UTC (9:43 PM Central, 2026-10-20): 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
-PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied (`20261020200000` and `20261020210000`, PR #980, are not; re-read 03:04 UTC); batch 3b
+PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied (`20261020200000` and `20261020205000`, PR #980, are not; re-read 03:04 UTC); batch 3b
 re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
 live at 02:40 UTC); at 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
@@ -128,7 +128,7 @@ the admin-only, append-only `purchase_order_item_cost_changes`; the purchase ord
 `costFields.test.ts` exemption is gone), with a Cost History card, Unconfirmed badges and a "Costs to confirm" filter. Live
 read 2026-10-20: inventory value and margins use the catalog cost, not purchase-order cost, so a correction moves no
 inventory value. **The purchase-order cost columns are locked in the same PR (Mason, 2026-10-20, "Add the lock now",
-after Sol blocked the project on it):** migration `20261020210000` (NOT APPLIED, PR pending; applied right after
+after Sol blocked the project on it):** migration `20261020205000` (NOT APPLIED, PR pending; applied right after
 `20261020200000`) carves `purchase_order_items.unit_cost`/`unit_cost_cents` and `purchase_orders.total_cost`/`total_cost_cents`
 out of the Data API grants for every signed-in or signed-out caller, admins included; admins read them through
 `get_admin_cost_fields`. Step 3 no longer needs to cover purchase orders, but `products.current_cost` stays readable until
@@ -3004,6 +3004,20 @@ makes the first one reachable more often by emitting several order lines per pro
    defect today, independent of PR #404 — multi-line bookings already exist as quote data whether or
    not the draw splits order lines. Deliberately not fixed in PR #404: it needs its own design
    decision about how a ticket quantity is split across tiers.
+   **Guarded 2026-10-20 (Goal 3, migration `20261020210000_blend_ticket_pricing_guards`, not yet
+   applied when written; live state in `docs/reference/migration-history.md`).** Mason (2026-10-15)
+   made automatic exact-line matching future work and asked for a small guard instead: when the
+   job's quote lists the product more than once at *different* prices, the invoice now stops before
+   anything is written and the Blend Ticket screen asks staff to pick the quoted price; the pick is
+   stored on the ticket line and bills as `quoted`, only while it still matches the current quote,
+   product and customer. Same-price duplicates bill as before. A product the quote lists at $0
+   bills at $0 (Mason, 2026-10-20: "$0 of $0 but flag it in system and alert before save"): before
+   any invoice number, an admin must approve it with a written reason in the below-cost window, and
+   each $0 line is recorded in `below_cost_approvals`; a sales rep cannot bill it. (Before, the
+   below-cost guard refused the $0 line and blocked the invoice.)
+   Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
+   stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
+   price; the line bills its tier price.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

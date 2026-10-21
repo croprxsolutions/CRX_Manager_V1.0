@@ -1,5 +1,5 @@
 -- =====================================================================================================
--- 20261020210000_po_cost_columns_admin_only.sql
+-- 20261020205000_po_cost_columns_admin_only.sql
 --
 -- WHAT: purchase-order cost becomes unreadable through the Data API for everyone but the owner roles.
 --   The four cost columns -- purchase_order_items.unit_cost / unit_cost_cents and

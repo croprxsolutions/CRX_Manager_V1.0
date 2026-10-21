@@ -91,7 +91,7 @@ export function blendQuotePriceSaveErrorMessage(error: unknown): string | null {
 
 /**
  * Plain-English reason create_invoice_from_blend_ticket refused for a reason added after Goal 3
- * pricing (migration 20261021050000), or `null` for any other error. `productNameById` names the
+ * pricing (migration 20261021070000), or `null` for any other error. `productNameById` names the
  * product a COST_BASIS_REQUIRED refusal points at (the database sends only its id).
  */
 export function blendTicketInvoiceRefusalMessage(

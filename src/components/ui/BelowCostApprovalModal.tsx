@@ -23,7 +23,7 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
   const zeroLines = detail?.zero_line_product_names ?? [];
   const shortfall = hasMoney ? cost - price : null;
   // A blend-ticket chemical on a grower-share field is billed inside that field's per-acre price,
-  // so its own line is $0 without being free (20261021050000).
+  // so its own line is $0 without being free (20261021070000).
   const zeroLineDetails = detail?.zero_lines ?? [];
   const isGrowerShare = (kind: string | null) => kind?.includes('grower_share') ?? false;
   const anyGrowerShare = zeroLineDetails.some((line) => isGrowerShare(line.kind));

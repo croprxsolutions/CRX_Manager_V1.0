@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261021050000 candidate (Goal 3 follow-ups to 20261020210000): a
+ * Full-chain proof for the 20261021070000 candidate (Goal 3 follow-ups to 20261020210000): a
  * blend-ticket invoice refuses a line with no product, binds the $0 approval to the exact lines it
  * was shown, and bills a grower-share override ticket's $0 "included in grower share" chemical
  * behind the same approval instead of being refused by the below-cost line guard.
@@ -35,7 +35,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261021050000_blend_invoice_approval_binding.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261021070000_blend_invoice_approval_binding.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -288,12 +288,12 @@ ROLLBACK;`,
   console.log('[prover] RE-APPLY: refused by the preflight, nothing changed');
 
   // 6. MUTATION: each hunk is what its chain step proves.
-  const UNMATCHED = between(INVOICE, '  -- 20261021050000: every line must be a catalog product.', '  v_quote_section_id := NULL;\n  IF v_ticket.job_id IS NOT NULL THEN\n');
+  const UNMATCHED = between(INVOICE, '  -- 20261021070000: every line must be a catalog product.', '  v_quote_section_id := NULL;\n  IF v_ticket.job_id IS NOT NULL THEN\n');
   const GROWER_TERM = "                 EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)\n                          WHERE (r.value->>'price_override_cents') IS NOT NULL\n                            AND (r.value->>'share_acres')::numeric > 0) AS in_grower_share\n";
   const KIND = "           'cost_cents', z.cost_cents,\n           'kind', CASE WHEN z.quoted_zero AND z.in_grower_share THEN 'quoted_zero_and_grower_share'\n                        WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END)\n";
   const STALE_SET = between(INVOICE, "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')", "  ELSIF p_approved_zero_lines IS NOT NULL OR");
   const STALE_NONE = between(INVOICE, "  ELSIF p_approved_zero_lines IS NOT NULL OR", '  END IF;\n\n  IF v_customer_count > 1 THEN');
-  const KEY_REQUIRED = between(INVOICE, '  -- 20261021050000: a retry key is required', '  IF p_idempotency_key IS NOT NULL THEN\n    v_existing');
+  const KEY_REQUIRED = between(INVOICE, '  -- 20261021070000: a retry key is required', '  IF p_idempotency_key IS NOT NULL THEN\n    v_existing');
   const STALE_TYPE = between(INVOICE, "    IF jsonb_typeof(p_approved_zero_lines) IS DISTINCT FROM 'array' THEN\n", "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')");
   const KEY = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id')";
   const mutations = [

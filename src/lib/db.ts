@@ -314,7 +314,7 @@ export const RpcErrorCodes = {
   BLEND_TICKET_PRICE_MISSING: 'BLEND_TICKET_PRICE_MISSING',
   // create_invoice_from_blend_ticket — the quote lists a product twice at different prices
   BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED',
-  // create_invoice_from_blend_ticket (20261021050000) — a line has no product; the $0 lines changed
+  // create_invoice_from_blend_ticket (20261021070000) — a line has no product; the $0 lines changed
   // between the approval window and Approve
   BLEND_TICKET_PRODUCT_UNMATCHED: 'BLEND_TICKET_PRODUCT_UNMATCHED',
   BELOW_COST_APPROVAL_STALE: 'BELOW_COST_APPROVAL_STALE',

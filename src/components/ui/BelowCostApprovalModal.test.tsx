@@ -21,7 +21,7 @@ function renderWith(detail: BelowCostApprovalDetail) {
   return screen.getByRole('dialog', { name: 'Approve below-cost price' });
 }
 
-describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021050000)', () => {
+describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', () => {
   it('does not call a grower-share chemical free of charge', () => {
     const dialog = renderWith({
       ...base,

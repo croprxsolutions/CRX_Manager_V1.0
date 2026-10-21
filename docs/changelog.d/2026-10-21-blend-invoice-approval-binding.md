@@ -1,7 +1,7 @@
 ## 2026-10-21 — blend-ticket invoices: unmatched lines, grower-share tickets and a bound $0 approval
 
 The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982), in one migration,
-`20261021050000_blend_invoice_approval_binding` (not applied when written):
+`20261021070000_blend_invoice_approval_binding` (not applied when written):
 
 - A ticket line that is not matched to a catalog product is refused with
   `BLEND_TICKET_PRODUCT_UNMATCHED` before anything is written. It used to bill $0 with no approval.

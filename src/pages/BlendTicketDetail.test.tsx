@@ -1081,7 +1081,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     const calls = mockRpc.mock.calls.filter(([name]) => name === 'create_invoice_from_blend_ticket');
     expect(calls).toHaveLength(2);
     expect(calls[0][1]).toEqual({ p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key' });
-    // The approval names exactly the $0 lines the window showed (20261021050000).
+    // The approval names exactly the $0 lines the window showed (20261021070000).
     expect(calls[1][1]).toEqual({
       p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key',
       p_below_cost_reason: 'free sample',
@@ -1171,7 +1171,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
       'A line on this ticket is not matched to a product, so nothing was invoiced. Match every line to a product, then try again.'],
     ['COST_BASIS_REQUIRED:99999999-9999-4999-8999-999999999999',
       'A product on this ticket has no cost entered, so nothing was invoiced. Enter its cost on the Price List, then try again.'],
-  ])('shows a plain-English reason for %s (20261021050000)', async (message, expected) => {
+  ])('shows a plain-English reason for %s (20261021070000)', async (message, expected) => {
     await createInvoiceWith({ message });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expected));
   });

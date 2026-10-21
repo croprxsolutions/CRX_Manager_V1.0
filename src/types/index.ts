@@ -4131,7 +4131,7 @@ export interface BelowCostApprovalDetail {
   zero_line_product_names: string[];
   /**
    * The same $0 lines as line and product ids. create_invoice_from_blend_ticket takes them back
-   * with the reason, so an approval covers exactly the lines it showed (20261021050000).
+   * with the reason, so an approval covers exactly the lines it showed (20261021070000).
    */
   zero_lines: BelowCostZeroLine[];
 }

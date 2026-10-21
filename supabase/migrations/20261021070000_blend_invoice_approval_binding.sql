@@ -158,7 +158,7 @@ DECLARE
   v_zero_line           jsonb;
   v_zero_lines          jsonb;
   v_zero_quoted         boolean;
-  -- Blend invoice approval binding (20261021050000)
+  -- Blend invoice approval binding (20261021070000)
   v_unmatched           int;
   v_zero_grower         boolean;
 BEGIN
@@ -187,7 +187,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- 20261021050000: a retry key is required, so a lost reply can always be replayed instead of
+  -- 20261021070000: a retry key is required, so a lost reply can always be replayed instead of
   -- refused as already billed (the screen always sends one).
   IF NULLIF(btrim(COALESCE(p_idempotency_key, '')), '') IS NULL THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_invoice_from_blend_ticket requires p_idempotency_key' USING ERRCODE = '22023';
@@ -224,7 +224,7 @@ BEGIN
      AND deleted_at IS NULL
    FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Blend ticket not found: %', p_blend_ticket_id; END IF;
-  -- 20261021050000: hold the ticket's lines too, so a line edited between the $0 approval
+  -- 20261021070000: hold the ticket's lines too, so a line edited between the $0 approval
   -- check below and the billing loop cannot bill something the approval never covered (the
   -- office policy lets staff update these rows directly).
   PERFORM 1 FROM blend_ticket_products btp WHERE btp.blend_ticket_id = p_blend_ticket_id FOR UPDATE;
@@ -350,7 +350,7 @@ BEGIN
                          AND COALESCE(v_app_service.is_active, false);
   END IF;
 
-  -- 20261021050000: every line must be a catalog product. A line with no product has no price or
+  -- 20261021070000: every line must be a catalog product. A line with no product has no price or
   -- cost to check, so it billed $0 with no approval; refuse it, as the order path
   -- (create_order_from_blend_ticket) already does, before any invoice number or row.
   SELECT count(*) INTO v_unmatched
@@ -376,7 +376,7 @@ BEGIN
           AND q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)) THEN
     v_quote_section_id := NULL;
   END IF;
-  -- 20261021050000: hold the quote prices still until this invoice commits, so the $0 check
+  -- 20261021070000: hold the quote prices still until this invoice commits, so the $0 check
   -- below and the billing loop read the same prices (an approval covers only what it showed).
   IF v_quote_section_id IS NOT NULL THEN
     PERFORM 1 FROM quote_sections WHERE id = v_quote_section_id FOR UPDATE;
@@ -469,7 +469,7 @@ BEGIN
   --     The detail names the first $0 line in the trigger's fields and lists EVERY $0 line in
   --     zero_lines (Mason, 2026-10-20: "list every $0 line"), so the approval window shows
   --     every line the one reason approves.
-  --     (20261021050000) A product line billed inside a grower-share override goes on the
+  --     (20261021070000) A product line billed inside a grower-share override goes on the
   --     invoice at $0 ("included in grower share": the per-acre override carries the price), so it
   --     is below cost too and takes the same approval. Before, it reached the line trigger with no
   --     approval context and was refused, so such a ticket could not be invoiced at all.
@@ -663,7 +663,7 @@ BEGIN
       END IF;
 
       IF v_chem_qty_a > 0 THEN
-        -- 20261021050000: the included line is $0, below cost; it carries the admin's reason (asked
+        -- 20261021070000: the included line is $0, below cost; it carries the admin's reason (asked
         -- for above) to the line trigger, which re-checks it and records the approval. Only this
         -- insert gets the context.
         v_zero_grower := v_btp.product_id IS NOT NULL
@@ -672,7 +672,7 @@ BEGIN
           PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);
           PERFORM set_config('app.crx_below_cost_reason', COALESCE(btrim(p_below_cost_reason), ''), true);
         END IF;
-        -- 20261021050000: the chemical is billed inside the per-acre price, but it still costs
+        -- 20261021070000: the chemical is billed inside the per-acre price, but it still costs
         -- money; record its cost so the invoice margin is right.
         v_unit_cost := COALESCE(v_btp.unit_cost_cents,
                                 ROUND(COALESCE(v_btp.product_cost, 0) * 100)::bigint, 0);
@@ -893,7 +893,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'fb28acbfdd5ebcd58347abe26273eea9'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'a2b7ab6298ea00c27df05dc7b683088e'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

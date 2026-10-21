@@ -1,5 +1,5 @@
 -- ============================================================================
--- CONTAINER ONLY smoke chain for 20261021050000_blend_invoice_approval_binding.
+-- CONTAINER ONLY smoke chain for 20261021070000_blend_invoice_approval_binding.
 -- Run through scripts/smoke/prove-blend-invoice-approval-binding-real-schema.mjs, never against
 -- the live database: it creates orders and invoices, which draw customer-visible order and invoice
 -- numbers from sequences that a rollback does not return.
@@ -73,7 +73,7 @@ DECLARE
   v_cents bigint;
   v_numeric numeric;
   v_text text;
-  -- 20261021050000
+  -- 20261021070000
   v_t11 uuid;
   v_t12 uuid;
   v_field2 uuid;
@@ -241,7 +241,7 @@ BEGIN
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
   VALUES (v_t9, v_p_t1only, '[E2E] BTP t9 zero or six', 20, 'GL', 2, 'gal/ac', 2) RETURNING id INTO v_line_t9_t1;
 
-  -- 0. (20261021050000) A ticket line with no product is refused before any invoice row. Before
+  -- 0. (20261021070000) A ticket line with no product is refused before any invoice row. Before
   --    this change it billed $0 with no approval (a product-less line has no cost to check).
   INSERT INTO public.blend_tickets (
     ticket_number, uploaded_by, customer_id, status, review_status,
@@ -269,7 +269,7 @@ BEGIN
      OR (SELECT payment_status FROM public.blend_tickets WHERE id = v_t12) IS DISTINCT FROM 'unbilled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused unmatched-line invoice left an invoice behind or billed the ticket';
   END IF;
-  --  b. (20261021050000) With every line matched (tier priced, no $0 line): a retry key is
+  --  b. (20261021070000) With every line matched (tier priced, no $0 line): a retry key is
   --     required, and an approval naming $0 lines when none is $0 any more (a price changed after
   --     the window) is refused instead of billing a price the window never showed.
   UPDATE public.blend_ticket_products SET product_id = v_p_full WHERE blend_ticket_id = v_t12 AND product_id IS NULL;
@@ -627,7 +627,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.below_cost_approvals WHERE operation = 'create_invoice_from_blend_ticket') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused $0 invoice left an invoice or an approval behind';
   END IF;
-  --  d0. (20261021050000) The approval names the exact $0 lines it was shown, line and product.
+  --  d0. (20261021070000) The approval names the exact $0 lines it was shown, line and product.
   --      Missing a line, naming another product, sending none, or sending something that is not
   --      a list is refused (BELOW_COST_APPROVAL_STALE) and writes nothing: a re-pick between the
   --      window and Approve never bills lines the admin did not see.
@@ -725,7 +725,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: the below-cost context was left set after the invoice';
   END IF;
 
-  -- 16. (20261021050000) A grower-share override ticket can be invoiced. The field bills its
+  -- 16. (20261021070000) A grower-share override ticket can be invoiced. The field bills its
   --     customer a flat $25.00/acre that includes the chemicals, so the chemical goes on the
   --     invoice at $0 ("included in grower share"). Before this change the below-cost line guard
   --     refused that line with no approval context (BELOW_COST_CONTEXT_REQUIRED), so the ticket

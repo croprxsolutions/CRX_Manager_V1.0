@@ -26,5 +26,9 @@ four purchase-order screens.
   admin's unit or product edit that keeps the cost leaves it flagged; a fractional cent is refused
   by name (`PO_UNIT_COST_FRACTIONAL_CENT`); the Cost History card says "Loading" or "Could not
   load" instead of claiming no changes after a pending or failed load.
+- **Column lock (Mason, 2026-10-20, "Add the lock now"):** migration `20261020210000` stops every
+  Data API caller, admins included, from reading purchase-order line cost and PO totals directly;
+  admins read them through the admin-only `get_admin_cost_fields`. No screen changed: none reads those
+  columns. Sol and the Codex PR review had blocked the project on this gap.
 - Proof: `node scripts/smoke/prove-po-cost-admin-only-and-corrections-real-schema.mjs`
   (PO_COST_ADMIN_ONLY_CORRECTIONS_PROOF_PASS).

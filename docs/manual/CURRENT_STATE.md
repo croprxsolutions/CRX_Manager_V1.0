@@ -1,7 +1,7 @@
 # CRX Manager — Current State
 
 **Last verified:** 2026-10-20 (America/Chicago) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, re-read 2026-10-20 21:12 UTC with the same 1038 rows / 1031 names: `20261020200000` (purchase-order cost, PR #980) is not applied; the 19:41 UTC read: 1038 rows / 1031 names, `max(version)`
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, re-read 2026-10-20 21:12 UTC with the same 1038 rows / 1031 names: `20261020200000` and `20261020210000` (purchase-order cost and its column lock, PR #980) are not applied; the 19:41 UTC read: 1038 rows / 1031 names, `max(version)`
 `20261020193610` = `20261019230000_cost_margin_admin_only_screens_step2` (Goal 1 part 3, step 2 of 3: screens read
 cost only through the admin-only `get_admin_cost_fields`, except the four purchase-order screens, and job, field-invoice
 and invoice saves work out a non-admin's cost on the server), applied 2026-10-20 19:36:10 UTC; PR #965 merged the

@@ -123,10 +123,12 @@ required for a received line), changing only cost and the PO total, never invent
 the admin-only, append-only `purchase_order_item_cost_changes`; the purchase order screens show cost only to admins (the
 `costFields.test.ts` exemption is gone), with a Cost History card, Unconfirmed badges and a "Costs to confirm" filter. Live
 read 2026-10-20: inventory value and margins use the catalog cost, not purchase-order cost, so a correction moves no
-inventory value. **Once it is live, step 3 MUST also lock the purchase-order cost columns**
-(`purchase_order_items.unit_cost`/`unit_cost_cents`, `purchase_orders.total_cost`/`total_cost_cents`): a rep's line now
-holds the catalog cost, so leaving them readable would let a rep read a product's cost through a throwaway PO line after
-`products.current_cost` is locked. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+inventory value. **The purchase-order cost columns are locked in the same PR (Mason, 2026-10-20, "Add the lock now",
+after Sol blocked the project on it):** migration `20261020210000` (NOT APPLIED, PR pending; applied right after
+`20261020200000`) carves `purchase_order_items.unit_cost`/`unit_cost_cents` and `purchase_orders.total_cost`/`total_cost_cents`
+out of the Data API grants for every signed-in or signed-out caller, admins included; admins read them through
+`get_admin_cost_fields`. Step 3 no longer needs to cover purchase orders, but `products.current_cost` stays readable until
+step 3, so a rep can still read a product's catalog cost there. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).

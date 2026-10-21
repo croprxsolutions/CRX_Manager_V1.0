@@ -43,6 +43,15 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261020200000_po_cost_admin_only_and_corrections.sql');
+// Applied after the candidate's phases: the purchase-order cost column lock (Mason, 2026-10-20).
+const LOCK = path.join(MIGRATIONS, '20261020210000_po_cost_columns_admin_only.sql');
+// The column lists the screens read (src/lib/costFields.ts), proven readable under the lock.
+const COST_FIELDS = readFileSync(path.join(ROOT, 'src', 'lib', 'costFields.ts'), 'utf8');
+const screenColumns = (name) => {
+  const m = COST_FIELDS.match(new RegExp(`export const ${name} = '([^']+)'`));
+  assert.ok(m, `${name} not found in src/lib/costFields.ts`);
+  return m[1];
+};
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -116,7 +125,9 @@ function plan() {
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
   const before = all.slice(0, at);
+  assert.ok(all.includes(LOCK), 'the column lock must be selected for post-baseline replay');
   for (const file of all.slice(at + 1)) {
+    if (file === LOCK) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
   }
   for (const name of PARKED) {
@@ -478,6 +489,61 @@ function preflightRefusesDrift(phase) {
   console.log(`[prover] PREFLIGHT (${phase}): ${cases.length} drifted state(s) each abort the candidate${phase === 'after' ? ' (a second apply is refused)' : ''}`);
 }
 
+// ------------------------------------------------------------------------------------------------
+// 7. The column lock (20261020210000): no API role reads a cost column, every screen's columns still
+// read, admins read cost through get_admin_cost_fields, the writers still work.
+function lockPhase() {
+  const COLUMN_DENIED = (table) => new RegExp(`^42501\\|permission denied for table ${table}$`);
+  const POI_COLS = screenColumns('PURCHASE_ORDER_ITEM_COLUMNS');
+  const PO_COLS = screenColumns('PURCHASE_ORDER_COLUMNS');
+  const steps = [];
+  for (const [label, as] of [['rep', U.REP], ['admin', U.ADMIN], ['signed-out', 'anon']]) {
+    for (const [table, col] of [['purchase_order_items', 'unit_cost'], ['purchase_order_items', 'unit_cost_cents'], ['purchase_orders', 'total_cost'], ['purchase_orders', 'total_cost_cents']]) {
+      steps.push([`${label} reads ${table}.${col}`, as, `(SELECT string_agg(${col}::text, ',') FROM public.${table})`, COLUMN_DENIED(table)]);
+    }
+    steps.push([`${label} reads whole line rows`, as, '(SELECT count(*) FROM (SELECT poi.* FROM public.purchase_order_items poi) s)', COLUMN_DENIED('purchase_order_items')]);
+    steps.push([`${label} reads whole PO rows`, as, '(SELECT count(*) FROM (SELECT po.* FROM public.purchase_orders po) s)', COLUMN_DENIED('purchase_orders')]);
+  }
+  const visible = { rep: 'ok|4', admin: 'ok|4', 'signed-out': 'ok|0' };
+  for (const [label, as] of [['rep', U.REP], ['admin', U.ADMIN], ['signed-out', 'anon']]) {
+    steps.push([`${label} reads the line screen columns`, as, `(SELECT count(*) FROM (SELECT ${POI_COLS} FROM public.purchase_order_items) s)`, visible[label]]);
+    steps.push([`${label} reads the PO screen columns`, as, `(SELECT count(*) FROM (SELECT ${PO_COLS} FROM public.purchase_orders) s)`, label === 'signed-out' ? 'ok|0' : 'ok|3']);
+  }
+  steps.push(
+    ['admin reads line cost through get_admin_cost_fields', U.ADMIN, `public.get_admin_cost_fields('purchase_order_items', ARRAY['${POI2}']::uuid[]) -> '${POI2}' ->> 'unit_cost_cents'`, 'ok|950'],
+    ['admin reads PO total through get_admin_cost_fields', U.ADMIN, `public.get_admin_cost_fields('purchase_orders', ARRAY['${PO2}']::uuid[]) -> '${PO2}' ->> 'total_cost_cents'`, 'ok|17500'],
+    ['rep is refused get_admin_cost_fields', U.REP, `public.get_admin_cost_fields('purchase_order_items', ARRAY['${POI2}']::uuid[])::text`, DENIED],
+    ['rep still creates a PO', U.REP, createPo(U.REP, lineJson(PROD, 4)), 'ok|saved'],
+    ['stored: rep line has the catalog cost, flagged', 'owner', LINE(NEWLINE), 'ok|4:2250:true'],
+    ['admin still sets a cost', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }], null, 'k-lock'), 'ok|1:0'],
+  );
+  const res = scenario(steps.map(([key, as, call]) => ({ key, as, call })));
+  const failures = [];
+  for (const [key, , , want] of steps) {
+    const got = res[key];
+    const ok = want instanceof RegExp ? want.test(got) : got === want;
+    if (!ok) failures.push(`${key}: got "${got}", expected ${want}`);
+  }
+  assert.deepEqual(failures, [], `LOCKED failed:\n  ${failures.join('\n  ')}`);
+  console.log(`[prover] LOCKED: all ${steps.length} steps as expected (no API role reads a cost column; every screen column list reads; admins read cost through get_admin_cost_fields; both writers work)`);
+
+  // A second apply is harmless (grants are idempotent) and changes nothing.
+  stageText('lock.sql', lf(LOCK));
+  const again = apply('lock.sql');
+  assert.equal(again.status, 0, `the lock failed to re-apply:\n${again.output}`);
+  // A column the grant list does not know about refuses the lock (it would be left unreadable).
+  const drift = docker([...psqlArgs()], { input: 'BEGIN;\nALTER TABLE public.purchase_order_items ADD COLUMN zz_new text;\n\\i /tmp/lock.sql\nROLLBACK;', allowFailure: true });
+  assert.notEqual(drift.status, 0, 'the lock applied over an unknown column');
+  assert.match(drift.stderr, /PO_COST_LOCK_PREFLIGHT: purchase_order_items columns are not the ones this grant list covers/);
+  console.log('[prover] LOCK PREFLIGHT: re-apply is harmless; an unknown column refuses the lock');
+
+  // MUTATION: the lock is what refuses the rep.
+  const mut = scenario([{ key: 'rep reads cost, table grant restored', as: U.REP, call: `(SELECT unit_cost_cents::text FROM public.purchase_order_items WHERE id = '${POI2}')` }],
+    'GRANT SELECT ON public.purchase_order_items TO authenticated;');
+  assert.equal(mut['rep reads cost, table grant restored'], 'ok|950', `MUTATION: with the table grant restored a rep should read 950, got ${mut['rep reads cost, table grant restored']}`);
+  console.log('[prover] MUTATION: with the table-level grant restored a rep reads the cost -- so the refusal comes from the lock');
+}
+
 function main() {
   const started = Date.now();
   if (!REUSE) buildContainer();
@@ -508,6 +574,13 @@ function main() {
   ], 'DROP TRIGGER trigger_a_po_item_rep_cost ON public.purchase_order_items;');
   assert.equal(trig.stored, 'ok|4:999:false', `MUTATION: with the rep trigger dropped a rep's 999 should be stored, got ${trig.stored}`);
   console.log('[prover] MUTATION: require_admin() emptied lets a rep set cost; the rep trigger dropped lets a rep store 999 -- so each refusal comes from the guard it names');
+
+  stageText('lock.sql', lf(LOCK));
+  const l = apply('lock.sql');
+  assert.equal(l.status, 0, `the column lock failed to apply:\n${l.output}`);
+  console.log('[prover] column lock applied');
+  check('after', runMatrix('locked (the after matrix, re-run)'));
+  lockPhase();
 
   console.log(`[prover] finished in ${Math.round((Date.now() - started) / 1000)}s`);
   console.log('PO_COST_ADMIN_ONLY_CORRECTIONS_PROOF_PASS');

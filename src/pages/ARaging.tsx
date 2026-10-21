@@ -1177,16 +1177,19 @@ export default function ARaging() {
 
       {/* Statement Print Dialog */}
       <StatementPrintDialog
+        // The dialog reads defaultDate once, so start it afresh when the table's date changes.
+        key={`print-${asOfDate}`}
         open={showStatementDialog}
         onClose={() => setShowStatementDialog(false)}
         onGenerate={handlePrintStatement}
         loading={printingStatement}
-        // Same Chicago date as Email Statements, not the browser's.
+        // Same date as the table and Email Statements, not the browser's.
         defaultDate={asOfDate}
       />
 
       {/* Batch Statement Print Dialog */}
       <StatementPrintDialog
+        key={`batch-print-${asOfDate}`}
         open={showBatchStatementDialog}
         onClose={() => setShowBatchStatementDialog(false)}
         onGenerate={handleBatchStatements}

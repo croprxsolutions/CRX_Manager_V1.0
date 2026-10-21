@@ -109,4 +109,19 @@ describe('Accounts Receivable in the evening, Central time', () => {
     // Loaded once: a reload would swap in the loading placeholder and take the pop-up with it.
     expect(agingDates()).toEqual(['2026-10-20']);
   });
+
+  it('after the As of Date is changed, Batch Print starts on the new date', async () => {
+    H.functions.get_ar_aging = [{
+      customer_id: 'c1', farm_name: 'Big Farm', current_amount: 10, days_30: 0, days_60: 0, days_90: 0,
+      over_90: 0, total_outstanding: 10, prepay_balance_cents: 0, open_credit_cents: 0,
+    }];
+    const { container } = render(<MemoryRouter><ARaging /></MemoryRouter>);
+    await screen.findAllByRole('checkbox');
+    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-09-30' } });
+    await waitFor(() => expect(agingDates()).toEqual(['2026-10-20', '2026-09-30']));
+    fireEvent.click((await screen.findAllByRole('checkbox'))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /Batch Print \(1\)/ }));
+    const dateBox = (await screen.findByText('Statement As-of Date')).parentElement!.querySelector('input[type="date"]') as HTMLInputElement;
+    expect(dateBox.value).toBe('2026-09-30');
+  });
 });

@@ -15,6 +15,9 @@ import { MemoryRouter } from 'react-router-dom';
 const H = vi.hoisted(() => ({
   rpcCalls: [] as Array<[string, unknown]>,
   functions: {} as Record<string, unknown[]>,
+  // One toast function for the whole run, as the real useToast gives: ARaging reloads the
+  // aging whenever `toast` changes, so a new one per render would reload it endlessly.
+  toast: vi.fn(),
 }));
 
 // Every query chain, table or function, answers with its rows (none unless a test sets some).
@@ -46,7 +49,7 @@ vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Admin' }, role: 'admin', deniedPages: [] }),
 }));
-vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 
 import AccountsReceivable from './AccountsReceivable';
 import ARaging from './ARaging';
@@ -103,5 +106,7 @@ describe('Accounts Receivable in the evening, Central time', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Batch Print \(1\)/ }));
     const dateBox = (await screen.findByText('Statement As-of Date')).parentElement!.querySelector('input[type="date"]') as HTMLInputElement;
     expect(dateBox.value).toBe('2026-10-20');
+    // Loaded once: a reload would swap in the loading placeholder and take the pop-up with it.
+    expect(agingDates()).toEqual(['2026-10-20']);
   });
 });

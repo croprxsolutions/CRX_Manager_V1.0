@@ -16,7 +16,7 @@
 -- it must land before split billing is used.
 --
 -- WHAT CHANGES: (1) the public void_order wrapper (CREATE OR REPLACE, same signature, same owner,
--- attributes and grants), and (2) one WHERE line in _void_order_impl_20260714 (see section 2). Its batch-3b contract is unchanged and runs first: key required, actor and
+-- attributes and grants), and (2) two WHERE lines in _void_order_impl_20260714 (see section 2). Its batch-3b contract is unchanged and runs first: key required, actor and
 -- role checks, fingerprint {actor_id, order_id, reason}, check_idempotency_intent, receipt binding
 -- after the body. On a fresh (non-replay) call it now also:
 --   1. locks the order, then every non-deleted governed DRAFT invoice of the order (FOR UPDATE, by id),
@@ -250,13 +250,14 @@ $function$;
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. _void_order_impl_20260714: the draft-cancel UPDATE also requires status = 'draft' (CodeRabbit
---    on #967, defense in depth). The loop reads the order's drafts without row locks, so an invoice
---    posted between that read and this UPDATE must not be matched. Live, posted -> cancelled is
+--    on #967) and deleted_at IS NULL (Luna on #987), defense in depth. The loop reads the order's
+--    drafts without row locks, so an invoice posted or soft-deleted between that read and this
+--    UPDATE must not be matched (a soft-deleted draft must never be cancelled and zeroed). Live, posted -> cancelled is
 --    already refused by _enforce_invoice_status_transition while app.admin_override is off; this
---    makes the UPDATE itself match only a row that is still a draft, so it updates no row and the
+--    makes the UPDATE itself match only a row that is still a live draft, so it updates no row and the
 --    branch refuses with ORDER_VOID_DRAFT_HAS_APPLIED_MONEY (nothing is cancelled). The full body is
 --    written out: the pinned live body (md5 a2dd87f5ebfffe7a7a328acce66ee528, checked in the
---    preflight) plus only that one WHERE line, which the postflight re-checks. CREATE OR REPLACE
+--    preflight) plus only those two WHERE lines, which the postflight re-checks. CREATE OR REPLACE
 --    keeps its postgres-only EXECUTE.
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public._void_order_impl_20260714(p_order_id uuid, p_performed_by uuid, p_reason text DEFAULT 'Voided by admin'::text, p_idempotency_key text DEFAULT NULL::text)
@@ -466,6 +467,7 @@ BEGIN
             updated_at = now()
       WHERE id = v_invoice.id
         AND status = 'draft'
+        AND deleted_at IS NULL
         AND COALESCE(paid_amount_cents, 0) = 0
         AND COALESCE(prepay_applied_cents, 0) = 0
         AND COALESCE(write_off_cents, 0) = 0
@@ -583,18 +585,18 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_CONTRACT: void_order is not the reviewed body with its live grants';
   END IF;
 
-  -- The inner body is its reviewed live body plus only the status line, callable only by postgres.
+  -- The inner body is its reviewed live body plus only the status and not-deleted lines, callable only by postgres.
   IF NOT EXISTS (
        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public' AND p.proname = '_void_order_impl_20260714'
           AND p.proowner = 'postgres'::regrole AND p.prosecdef
           AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
-          AND md5(replace(p.prosrc, chr(13), '')) = '2c8e539218a34be7344026e9348a47df'
-          AND md5(replace(replace(p.prosrc, chr(13), ''), E'        AND status = ''draft''\n        AND COALESCE(paid_amount_cents, 0) = 0\n', E'        AND COALESCE(paid_amount_cents, 0) = 0\n')) = 'a2dd87f5ebfffe7a7a328acce66ee528'
+          AND md5(replace(p.prosrc, chr(13), '')) = '8ad84bdc6a0f8b814575f61a4f615293'
+          AND md5(replace(replace(p.prosrc, chr(13), ''), E'        AND status = ''draft''\n        AND deleted_at IS NULL\n        AND COALESCE(paid_amount_cents, 0) = 0\n', E'        AND COALESCE(paid_amount_cents, 0) = 0\n')) = 'a2dd87f5ebfffe7a7a328acce66ee528'
           AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                       FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
               IS NOT DISTINCT FROM ARRAY['postgres']::text[]) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_IMPL_CONTRACT: _void_order_impl_20260714 must be its reviewed body plus only the draft-cancel status line, callable only by postgres';
+    RAISE EXCEPTION 'POSTFLIGHT_VOID_ORDER_IMPL_CONTRACT: _void_order_impl_20260714 must be its reviewed body plus only the draft-cancel status and not-deleted lines, callable only by postgres';
   END IF;
 
   -- Nothing else changed.

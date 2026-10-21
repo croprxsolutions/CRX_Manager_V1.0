@@ -8,9 +8,10 @@
   Live impact was none (no governed split invoices exist live); it must land before split billing is used.
 - No claims CHECK or guard change: the guard already accepts a `'cancel_order'` claim only for the
   exact draft-to-cancelled, money-zeroed write the void makes.
-- Defense in depth (CodeRabbit on #967): `_void_order_impl_20260714`'s draft-cancel UPDATE also requires
-  `status = 'draft'`, so an invoice posted between the loop's read and the UPDATE is never matched (live
-  already refuses posted to cancelled through the status-transition trigger). The postflight checks the
-  body is its live pin plus only that line.
+- Defense in depth: `_void_order_impl_20260714`'s draft-cancel UPDATE also requires `status = 'draft'`
+  (CodeRabbit on #967) and `deleted_at IS NULL` (Luna on #987), so an invoice posted or soft-deleted between
+  the loop's read and the UPDATE is never matched (live already refuses posted to cancelled through the
+  status-transition trigger; a soft-deleted draft could otherwise be cancelled and zeroed). The postflight
+  checks the body is its live pin plus only those two lines.
 - Proof: `scripts/smoke/prove-void-order-governed-split-drafts-real-schema.mjs` (Docker, real schema) with
   the new chain `scripts/smoke/smoke-void-order-governed-split-drafts.sql` (CONTAINER ONLY).

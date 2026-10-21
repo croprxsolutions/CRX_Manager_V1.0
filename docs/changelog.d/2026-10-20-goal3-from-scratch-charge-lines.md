@@ -4,7 +4,7 @@
   New Invoice page) can no longer carry product lines (Mason, 2026-10-14 decision 6e and
   2026-10-15). Product is sold through an order and a delivery; a counter sale uses a quick
   delivery.
-- Migration `20261020150000_from_scratch_invoices_charge_lines_only` (not applied yet): new column
+- Migration `20261021050000_from_scratch_invoices_charge_lines_only` (not applied yet): new column
   `invoice_items.charge_type` (freight, application fee, service, other) with a shape check (no
   product, quantity 1, no cost, a positive amount); two triggers refuse a product line on such an
   invoice on every write path and at posting (`FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED`); the
@@ -24,3 +24,6 @@
   invoice while someone restores it cannot leave an active invoice with an untyped line (Codex
   connector P2 on PR #983; the real-schema proof races it in both orders and shows the gap reopens
   without the fix).
+- Restamped 2026-10-21 from 20261020150000 to 20261021050000: PR #982's blend-ticket migration
+  (20261020210000) was applied first, and the ordering guard refuses a file below the live authored
+  high-water. Content unchanged.

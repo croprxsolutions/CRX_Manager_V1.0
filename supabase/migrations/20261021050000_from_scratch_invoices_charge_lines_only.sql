@@ -280,8 +280,8 @@ DECLARE
   v_total_cost bigint := 0;
   v_is_field boolean := false;
   v_is_fee boolean;
-  v_from_scratch boolean := false;  -- Goal 3 (20261020150000)
-  v_charge_type text;               -- Goal 3 (20261020150000)
+  v_from_scratch boolean := false;  -- Goal 3 (20261021050000)
+  v_charge_type text;               -- Goal 3 (20261021050000)
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
   IF NOT (is_admin() OR is_sales_rep()) THEN

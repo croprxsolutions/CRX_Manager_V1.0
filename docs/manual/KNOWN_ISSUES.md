@@ -3,7 +3,7 @@
 **Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
 `execute_sql`, 2026-10-21 02:43 UTC (9:43 PM Central, 2026-10-20): 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
-PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; Goal 3's `20261020150000` is written, not applied; batch 3b
+PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; Goal 3's `20261021050000` is written, not applied; batch 3b
 re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
 live at 02:40 UTC); at 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
@@ -696,7 +696,7 @@ leave these open:
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
   (`DECISION_LOG.md`), and so do credit memos (return credits). **Fix written 2026-10-20, not yet
-  applied:** migration `20261020150000_from_scratch_invoices_charge_lines_only` refuses a product
+  applied:** migration `20261021050000_from_scratch_invoices_charge_lines_only` refuses a product
   line on such an invoice on every write path and at posting, and the New Invoice page offers typed
   charge lines (freight, application fee, service, other) instead of products. Open until it is
   applied live and its PR merges.

@@ -4,7 +4,7 @@ import type { InvoiceChargeType, InvoiceType } from '../types';
  * Charge lines on invoices made from scratch (Goal 3; Mason, 2026-10-14 decision 6e and
  * 2026-10-15). An invoice with no order and no delivery behind it carries no product lines,
  * only typed charge lines: a type, a description and a dollar amount, with no product, cost or
- * tax. PostgreSQL enforces the same rule (migration 20261020150000); this module only keeps the
+ * tax. PostgreSQL enforces the same rule (migration 20261021050000); this module only keeps the
  * screen in step with it.
  */
 export const CHARGE_TYPE_OPTIONS: ReadonlyArray<{ value: InvoiceChargeType; label: string }> = [

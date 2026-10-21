@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261020150000 candidate: Goal 3 "Invoices made from scratch"
+ * Full-chain proof for the 20261021050000 candidate: Goal 3 "Invoices made from scratch"
  * (docs/plans/2026-10-13-direction-and-goals.md, done-test "Caps and orderless invoices"; Mason,
  * 2026-10-14 decision 6e and 2026-10-15). A misc_charge or chemical_sale invoice with no order and
  * no delivery behind it carries no product lines, only typed charge lines.
@@ -58,7 +58,7 @@ const VERBOSE = process.env.CRX_PROVER_VERBOSE === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261020150000_from_scratch_invoices_charge_lines_only.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261021050000_from_scratch_invoices_charge_lines_only.sql');
 const WRITER = 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)';
 const WRITER_MD5 = 'e3fc9bd9c1da4b2eb8082e91781e4915';
 const PARKED = new Set([

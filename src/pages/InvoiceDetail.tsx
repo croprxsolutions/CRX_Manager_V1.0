@@ -163,7 +163,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     && !invoice.blend_ticket_id;
   const isInvoiceTypeLocked = isMiscChargeLocked || isOrderlessMiscCharge;
   // Goal 3: no order and no delivery behind it -> charge lines only (the database refuses product
-  // lines on such an invoice, migration 20261020150000). Never on the field-invoices route.
+  // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
   const [items, setItems] = useState<LineItem[]>([]);
   const [loading, setLoading] = useState(!isNew);

@@ -1108,6 +1108,8 @@ export const CARRY_HOT_PATHS = Object.freeze([
   "scripts/write-codex-push-proof.mjs",
   "scripts/write-apply-proofs.mjs",
   "scripts/run-claude-review.mjs",
+  "package.json",
+  "package-lock.json",
 ]);
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 
@@ -1134,6 +1136,14 @@ export function carrySourceProofProblem(data, { headSha, nowMs = Date.now() } = 
   if (!Number.isFinite(t)) return "the reviewed head's proof has no usable timestamp";
   const age = nowMs - t;
   if (age < 0 || age > CARRY_SOURCE_MAX_AGE_MS) return "the reviewed head's Sol proof is older than 24 hours";
+  // Each carry gets a fresh timestamp, so the 24 hours must also bind the FULL
+  // review at the root of the chain, or chained carries would never expire.
+  if (data.codex_ran !== true) {
+    const rootT = Date.parse(data.carry?.root_review?.timestamp || "");
+    if (!Number.isFinite(rootT)) return "the carried proof does not record its original full review";
+    const rootAge = nowMs - rootT;
+    if (rootAge < 0 || rootAge > CARRY_SOURCE_MAX_AGE_MS) return "the original full Sol review is older than 24 hours";
+  }
   return null;
 }
 
@@ -1323,10 +1333,19 @@ function runCarryForward(root, options) {
   }
 
   const mint = () => {
-    // A collision check can run for minutes; the source must still be young enough now.
-    const ageProblem = carrySourceProofProblem(facts.source, { headSha: facts.fromHead, nowMs: Date.now() });
-    if (ageProblem) {
-      process.stderr.write(`Carry-forward refused at write time: ${ageProblem}. No proof written — run the full review.\n`);
+    // A collision check can run for minutes: the source proof on disk must still
+    // be the one we checked, and still young enough, at the moment we write.
+    let current = null;
+    try {
+      current = JSON.parse(readFileSync(codexPushProofPath(root, facts.fromHead), "utf8"));
+    } catch {
+      current = null;
+    }
+    const writeProblem = JSON.stringify(current) !== JSON.stringify(facts.source)
+      ? "the reviewed head's proof changed or disappeared during the check"
+      : carrySourceProofProblem(current, { headSha: facts.fromHead, nowMs: Date.now() });
+    if (writeProblem) {
+      process.stderr.write(`Carry-forward refused at write time: ${writeProblem}. No proof written — run the full review.\n`);
       return 1;
     }
     const proofPath = codexPushProofPath(root, facts.headSha);

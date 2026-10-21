@@ -1062,6 +1062,8 @@ assert.equal(
   assert.equal(plan(["src/a.ts"], [".github/workflows/ci.yml"]).mode, "collision_check", "carry: a main CI change needs the check");
   assert.equal(plan(["src/a.ts"], [".claude/settings.json"]).mode, "collision_check", "carry: a main hook-wiring change needs the check");
   assert.equal(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).mode, "disjoint", "carry: an ordinary script is not hot");
+  assert.equal(plan(["src/a.ts"], ["package.json"]).mode, "collision_check", "carry: a main dependency change needs the check");
+  assert.equal(plan(["src/a.ts"], ["package-lock.json"]).mode, "collision_check", "carry: a main lockfile change needs the check");
   assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs.bak"]).mode, "disjoint", "carry: exact hot files match exactly");
 }
 
@@ -1101,6 +1103,16 @@ function collisionPromptSkipsWork(prompt) {
   assert.ok(
     carrySourceProofProblem({ ...carried, carry: undefined }, { headSha: "4".repeat(40), nowMs }),
     "carry: a carried source with no carry details is refused",
+  );
+  const oldRoot = { ...carried.carry.root_review, timestamp: new Date(nowMs - CARRY_SOURCE_MAX_AGE_MS - 1).toISOString() };
+  assert.match(
+    carrySourceProofProblem({ ...carried, timestamp: new Date(nowMs).toISOString(), carry: { ...carried.carry, root_review: oldRoot } }, { headSha: "4".repeat(40), nowMs }),
+    /original full Sol review is older than 24 hours/,
+    "carry: a fresh carry of a full review older than 24 hours is refused (chains expire)",
+  );
+  assert.ok(
+    carrySourceProofProblem({ ...carried, carry: { ...carried.carry, root_review: undefined } }, { headSha: "4".repeat(40), nowMs }),
+    "carry: a carried source that does not record its full review is refused",
   );
   assert.ok(
     carrySourceProofProblem({ ...carried, carry: { ...carried.carry, mode: "trust-me" } }, { headSha: "4".repeat(40), nowMs }),

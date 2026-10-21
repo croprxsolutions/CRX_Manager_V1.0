@@ -414,10 +414,11 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - the new head is a merge whose parents are the Sol-reviewed head and today's origin/main, and its
   content is exactly the conflict-free `git merge-tree` of those two (a resolved conflict or any hand
   edit refuses);
-- the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours old;
+- the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours
+  old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and neither side touches a hot path
   (`CARRY_HOT_PATHS` in the script: `supabase/`, `.claude/hooks/`, `.codex/hooks/`, `.github/workflows/`,
-  the hook settings and the proof-writing scripts) while the other side changes anything beyond plain
+  the hook settings, the proof-writing scripts, `package.json` and its lockfile) while the other side changes anything beyond plain
   documentation (no model call), OR a focused Sol collision check returns CLEAN. That check centres on
   the interaction but counts any other blocker it sees.
 

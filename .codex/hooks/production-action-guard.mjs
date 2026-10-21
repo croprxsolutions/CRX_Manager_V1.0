@@ -1064,8 +1064,9 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
         `CODEX PRODUCTION GATE: this pull request needs a Sol proof and its head ${headSha.slice(0, 12)} does not ` +
         `contain the base it will merge onto (${baseSha.slice(0, 12)}), so the reviewed diff cannot cover ` +
         `everything the merge lands (fail closed). Update the branch first — merge origin/main into it (or ` +
-        `rebase onto it) and push — then run \`node scripts/write-codex-push-proof.mjs --carry-forward\` to keep an ` +
-        `earlier clean Sol review of this branch (it says when only the full review will do).`
+        `rebase onto it) and push. After a plain merge of origin/main (not a rebase), ` +
+        `\`node scripts/write-codex-push-proof.mjs --carry-forward\` can keep an earlier clean Sol review of this ` +
+        `branch (it says when only the full review will do); after a rebase, re-run the full review.`
       );
     }
   }

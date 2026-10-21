@@ -168,7 +168,7 @@ export default function PurchaseOrderDetail() {
   const [costDrafts, setCostDrafts] = useState<Record<string, string>>({});
   const [costReason, setCostReason] = useState('');
   /* Admin-only cost history (purchase_order_item_cost_changes; RLS returns nothing to anyone else) */
-  const [costHistory, setCostHistory] = useState<Array<PurchaseOrderItemCostChange & { changed_by_name: string }>>([]);
+  const [costHistory, setCostHistory] = useState<Array<PurchaseOrderItemCostChange & { changed_by_name: string; product_name: string }>>([]);
   // "No cost changes" is shown only after a load succeeded; a pending or failed load says so.
   const [costHistoryStatus, setCostHistoryStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
@@ -422,7 +422,22 @@ export default function PurchaseOrderDetail() {
       if (!isCurrentFetch()) return;
       (people || []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) nameById[p.id] = p.full_name ?? ''; });
     }
-    setCostHistory(rows.map((r) => ({ ...r, changed_by_name: r.changed_by ? nameById[r.changed_by] || 'Unknown' : 'System' })));
+    // Each entry names the product it was recorded under, not the line's product today.
+    const productIds = [...new Set(rows.map((r) => r.product_id).filter(Boolean) as string[])];
+    const productNameById: Record<string, string> = {};
+    if (productIds.length > 0) {
+      const { data: products } = await supabase
+        .from('products')
+        .select('id, product_name')
+        .in('id', productIds);
+      if (!isCurrentFetch()) return;
+      (products || []).forEach((p: { id: string; product_name: string | null }) => { productNameById[p.id] = p.product_name ?? ''; });
+    }
+    setCostHistory(rows.map((r) => ({
+      ...r,
+      changed_by_name: r.changed_by ? nameById[r.changed_by] || 'Unknown' : 'System',
+      product_name: (r.product_id && productNameById[r.product_id]) || 'Unknown product',
+    })));
     setCostHistoryStatus('ready');
   }, [id, isAdmin, toast]);
 
@@ -1450,13 +1465,10 @@ export default function PurchaseOrderDetail() {
                   </thead>
                   <tbody>
                     {costHistory.map((h) => {
-                      const line = items.find((item) => item.id === h.purchase_order_item_id);
-                      const productName = (line?.product as unknown as { product_name?: string } | undefined)?.product_name
-                        || line?.product_name || 'Removed line';
                       return (
                         <tr key={h.id} className="border-b border-gray-50">
                           <td className="px-4 py-3 whitespace-nowrap">{new Date(h.created_at).toLocaleString()}</td>
-                          <td className="px-4 py-3">{productName}</td>
+                          <td className="px-4 py-3">{h.product_name}</td>
                           <td className="px-4 py-3 font-mono whitespace-nowrap">
                             {h.old_unit_cost_cents === null ? '' : `${formatCents(h.old_unit_cost_cents)} → `}
                             {formatCents(h.new_unit_cost_cents)}

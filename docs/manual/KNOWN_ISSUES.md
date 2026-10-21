@@ -3022,6 +3022,12 @@ makes the first one reachable more often by emitting several order lines per pro
    Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
    stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
    price; the line bills its tier price.
+   **Follow-ups, 2026-10-21 (migration `20261021050000_blend_invoice_approval_binding`, not yet
+   applied when written; live state in `docs/reference/migration-history.md` row 959):** a ticket
+   line with no product is refused instead of billing $0; a grower-share override ticket's $0
+   "included in grower share" chemical takes the same admin approval instead of blocking the
+   invoice; and the approval names the exact $0 lines it was shown, so a re-pick in between is
+   refused ("the $0 lines changed") instead of billing lines the admin never saw.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

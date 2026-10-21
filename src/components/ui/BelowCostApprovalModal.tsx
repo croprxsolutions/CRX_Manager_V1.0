@@ -22,6 +22,18 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
   const hasMoney = price != null && cost != null;
   const zeroLines = detail?.zero_line_product_names ?? [];
   const shortfall = hasMoney ? cost - price : null;
+  // A blend-ticket chemical on a grower-share field is billed inside that field's per-acre price,
+  // so its own line is $0 without being free (20261021050000).
+  const zeroLineDetails = detail?.zero_lines ?? [];
+  const isGrowerShare = (kind: string | null) => kind?.includes('grower_share') ?? false;
+  const anyGrowerShare = zeroLineDetails.some((line) => isGrowerShare(line.kind));
+  const allGrowerShare = zeroLineDetails.length > 0 && zeroLineDetails.every((line) => isGrowerShare(line.kind));
+  const listedLines = zeroLineDetails.length === zeroLines.length && zeroLineDetails.length > 0
+    ? zeroLineDetails.map((line, index) => ({
+        name: line.product_name ?? zeroLines[index],
+        note: isGrowerShare(line.kind) ? ' (included in a grower-share per-acre price)' : '',
+      }))
+    : zeroLines.map((name) => ({ name, note: '' }));
 
   return (
     <Modal
@@ -50,13 +62,19 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
             <div>
               <p className="font-medium">{detail?.product_name || 'This product'} is priced below its locked cost.</p>
               {price === 0 && (
-                <p className="mt-1">It is priced at $0, so it will be billed free of charge.</p>
+                <p className="mt-1">
+                  {allGrowerShare
+                    ? 'It is included in a grower-share per-acre price, so its own line is billed at $0.'
+                    : anyGrowerShare
+                      ? 'Each line below is billed at $0: quoted at $0, or included in a grower-share per-acre price.'
+                      : 'It is priced at $0, so it will be billed free of charge.'}
+                </p>
               )}
-              {zeroLines.length > 1 && (
+              {listedLines.length > 1 && (
                 <div className="mt-2">
                   <p className="font-medium">Your approval covers every product below, each billed at $0:</p>
                   <ul className="mt-1 list-disc pl-5">
-                    {zeroLines.map((name, index) => <li key={`${index}-${name}`}>{name}</li>)}
+                    {listedLines.map((line, index) => <li key={`${index}-${line.name}`}>{line.name}{line.note}</li>)}
                   </ul>
                 </div>
               )}

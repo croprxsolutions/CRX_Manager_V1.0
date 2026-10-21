@@ -1,7 +1,12 @@
 # CRX Manager — Current State
 
 **Last verified:** 2026-10-20 (America/Chicago) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-21 02:43 UTC (9:43 PM Central, 2026-10-20): 1039 rows /
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
+`max(version)` `20261021040052` = `20261020210000_blend_ticket_pricing_guards` (Goal 3 blend-ticket pricing, PR #982 merged
+as `948f238ad`), applied 2026-10-21 04:00:52 UTC under the autonomous-landing rule: an order made from a blend ticket
+never prices a product at $0 for a missing tier price, a blend invoice asks staff to pick when the job's quote lists a
+product at two prices, and a $0 quoted line bills $0 only with an admin's below-cost reason. The read before it,
+2026-10-21 02:43 UTC (9:43 PM Central, 2026-10-20): 1039 rows /
 1032 names, `max(version)` `20261021024020` = `20261019235000_bind_delivery_order_void_replay_receipts_batch3b`
 (replay-binding batch 3b, PR #967 head `ed2bd8733`), applied 2026-10-21 02:40:20 UTC on Mason's in-chat owner
 approval: `cancel_delivery`, `void_delivery` and `void_order` now require a retry key and replay a saved result only

@@ -59,6 +59,19 @@
 > `ask` tier. `sol-exempt-lib.test.mjs` checks it against the readable list and requires every loosened mutant in its list to fail. A change to
 > the rule touches `.claude/`, so it always needs Sol.
 >
+> **Sol carry-forward (Mason, 2026-10-21: "go with carry-forward").** A moved main no longer forces a full Sol
+> re-review. `node scripts/write-codex-push-proof.mjs --carry-forward` mints a carried proof
+> (`codex_ran: false`, `carried_forward: true`, `carry.mode` `disjoint` or `collision_check`, `carry.from_head` /
+> `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
+> hours old, as is the original full review behind a chain of carries) and today's origin/main: with no model call
+> only when the PR's files and main's new files do not overlap and one side is plain documentation (the Sol-exempt
+> definition, which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
+> after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
+> rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
+> accepts that shape on the same exact-head, exact-base and 30-minute terms as a full proof, so both merge gates, the
+> push gate and the migration landing gate honour it; `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows
+> one. The minter is the same protected wrapper, so `review-proof-guard.mjs` still blocks hand-written proofs.
+>
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
 > differ.** (1) `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` merge route now deny any merge into
 > `main` unless (until 2026-10-19 only: CodeRabbit's latest verdict was APPROVED on the exact `headRefOid`,
@@ -90,7 +103,15 @@
 > in front of his words (its "Linked sessions now" note) is not part of his message (2026-10-20: five replies
 > arrived behind one and the hook said nothing), unless a reminder tag is left after it; a message with a reply
 > on one of its lines (any line break counts, a bare CR and U+2028/U+2029 too) but other text as well is refused with a visible `OWNER APPROVAL NOT RECORDED`, never silently (a plain `I approve` line with no request
-> waiting in that session stays ordinary chat, and a line inside the note itself is never read as his). Only spacing, blank lines, wrapping and a code fence around the
+> waiting in that session stays ordinary chat, and a line inside the note itself is never read as his). The reply hook also
+> writes `owner-approval-hook-seen-<session id>.json` on every message it sees, and the request script (normal and
+> `--selftest`) refuses with a plain-English `REFUSED` when this session has none, because some desktop sessions never
+> run message hooks (2026-10-20, session `980692b3`: two replies reached nothing; a marker the hook could not save looks
+> the same, and the refusal says so); the marker proves the hook ran for some message, not the next one (Luna MED,
+> deferred: every silent session seen ran none). A desktop session in a worktree runs these hooks from the MAIN checkout
+> (`C:\CRX_Manager`, observed 2026-10-20), so a main checkout behind `main` also leaves no marker: fast-forward it after a
+> hook change merges. The fix it prints is a fresh `claude`
+> in a Terminal tab in the same folder. Only spacing, blank lines, wrapping and a code fence around the
 > whole summary may differ; no markdown is interpreted, so bold, code or quote marks mean it does not count. That
 > message is read from the session transcript the hook is
 > given (`transcript_path`: the final main-thread assistant message the model wrote, its entries grouped by message id;

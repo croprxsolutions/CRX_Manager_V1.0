@@ -587,6 +587,10 @@ BEGIN
     RETURN v_replay -> 'result';
   END IF;
 
+  -- Item first, then parent PO: the receiving/reversal and cost-basis apply lock order, so a
+  -- correction never deadlocks with them.
+  PERFORM 1 FROM public.purchase_order_items poi
+   WHERE poi.purchase_order_id = p_po_id ORDER BY poi.id FOR UPDATE;
   SELECT status, po_number INTO v_status, v_po_number
     FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
   IF NOT FOUND THEN
@@ -701,10 +705,44 @@ COMMENT ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid
   'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
 
 -- ---------------------------------------------------------------------------
+-- 6. save_purchase_order: the live wrapper (md5-pinned above) plus one step. A non-admin never sets
+--    cost (the rep trigger overrules it) and must not learn a stored cost either: the received-line
+--    check further down compares a SENT cost with the stored one, so a rep's guess would come back
+--    as "saved" or RECEIVED_PO_LINE_IMMUTABLE. Strip the cost keys a non-admin sends before that
+--    check, so the writer hydrates the stored cost and a guess reveals nothing (Sol, 2026-10-21).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.save_purchase_order(
+  p_po_id uuid, p_po_payload jsonb, p_items jsonb, p_performed_by uuid,
+  p_idempotency_key text DEFAULT NULL
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_items jsonb := p_items;
+BEGIN
+  PERFORM pg_advisory_xact_lock(73492009);
+  IF NOT public.is_admin() AND jsonb_typeof(p_items) = 'array' THEN
+    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e) = 'object' THEN t.e - 'unit_cost' - 'unit_cost_cents' ELSE t.e END
+                              ORDER BY t.o), '[]'::jsonb)
+      INTO v_items
+      FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o);
+  END IF;
+  RETURN public._section9_save_purchase_order_serialized(
+    p_po_id, p_po_payload, v_items, p_performed_by, p_idempotency_key
+  );
+END;
+$function$;
+
+-- ---------------------------------------------------------------------------
 -- VERIFY
 -- ---------------------------------------------------------------------------
 DO $verify$
 BEGIN
+  IF position('unit_cost_cents' IN (SELECT prosrc FROM pg_proc WHERE oid = 'public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)'::regprocedure)) = 0
+     OR NOT (SELECT prosecdef FROM pg_proc WHERE oid = 'public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
+     OR has_function_privilege('anon', 'public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.save_purchase_order(uuid,jsonb,jsonb,uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'PO_COST_VERIFY: save_purchase_order is not the cost-stripping wrapper with its grants';
+  END IF;
   IF (SELECT array_agg(tgname::text ORDER BY tgname) FROM pg_trigger
        WHERE tgrelid = 'public.purchase_order_items'::regclass AND NOT tgisinternal)
      IS DISTINCT FROM ARRAY['trg_po_items_recompute_on_order', 'trigger_a_po_item_rep_cost',

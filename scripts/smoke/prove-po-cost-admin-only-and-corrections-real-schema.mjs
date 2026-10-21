@@ -330,8 +330,13 @@ const SCENARIOS = [
       /^P0001\|RECEIVED_PO_LINE_IMMUTABLE: /, 'same'],
     ['rep re-saves the PO with no cost keys', U.REP, editPo(PO2, U.REP, [withId(lineJson(PROD_Z, 10), POI2), withId(lineJson(PROD, 4), POI3)]), 'ok|saved', 'same'],
     ['stored: both lines unchanged', 'owner', `${LINE(q(POI2))} || ',' || ${LINE(q(POI3))} || '|' || ${TOTAL(q(PO2))}`, 'ok|10:950:-,4:2000:-|17500', 'ok|10:950:false,4:2000:false|17500'],
-    ['rep sends a cost on the received line', U.REP, editPo(PO2, U.REP, [withId(lineJson(PROD_Z, 10, ", 'unit_cost_cents', 1"), POI2), withId(lineJson(PROD, 4), POI3)]),
-      /^P0001\|RECEIVED_PO_LINE_IMMUTABLE: /, 'same'],
+    // No cost oracle: before, a wrong guess was refused and the right one saved; after, a rep's sent
+    // cost is stripped, so a wrong and a right guess look the same and the stored cost never moves.
+    ['rep sends a wrong cost guess on the received line', U.REP, editPo(PO2, U.REP, [withId(lineJson(PROD_Z, 10, ", 'unit_cost_cents', 1"), POI2), withId(lineJson(PROD, 4), POI3)]),
+      /^P0001\|RECEIVED_PO_LINE_IMMUTABLE: /, 'ok|saved'],
+    ['rep sends the right cost guess on the received line', U.REP, editPo(PO2, U.REP, [withId(lineJson(PROD_Z, 10, ", 'unit_cost_cents', 950"), POI2), withId(lineJson(PROD, 4), POI3)]),
+      'ok|saved', 'ok|saved'],
+    ['stored: guesses changed nothing', 'owner', `${LINE(q(POI2))} || '|' || ${TOTAL(q(PO2))}`, 'ok|10:950:-|17500', 'ok|10:950:false|17500'],
   ] },
   { name: '3a. set_purchase_order_item_costs: who may call it', steps: [
     ['rep', U.REP, setCosts(U.REP, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }], null, 'k-rep'), MISSING_FN, DENIED],
@@ -567,13 +572,22 @@ function main() {
   const MUTANT_GATE = 'CREATE OR REPLACE FUNCTION public.require_admin() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$ BEGIN END; $$;';
   const gate = scenario([{ key: 'rep, require_admin emptied', as: U.REP, call: setCosts(U.REP, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }], null, 'k-mut') }], MUTANT_GATE);
   assert.equal(gate['rep, require_admin emptied'], 'ok|1:0', `MUTATION: with require_admin() emptied a rep should set cost, got ${gate['rep, require_admin emptied']}`);
-  // MUTATION 2: the rep trigger is what overrules a rep's cost.
+  // The live save wrapper, without the cost stripping (used by mutations 2 and 3).
+  const MUTANT_WRAPPER = `CREATE OR REPLACE FUNCTION public.save_purchase_order(p_po_id uuid, p_po_payload jsonb, p_items jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    BEGIN PERFORM pg_advisory_xact_lock(73492009);
+      RETURN public._section9_save_purchase_order_serialized(p_po_id, p_po_payload, p_items, p_performed_by, p_idempotency_key); END; $$;`;
+  // MUTATION 2: the rep trigger is what overrules a rep's cost (the wrapper's stripping removed too,
+  // since it is a second layer that also drops the sent cost).
   const trig = scenario([
     { key: 'rep create, trigger dropped', as: U.REP, call: createPo(U.REP, lineJson(PROD, 4, ", 'unit_cost_cents', 999")) },
     { key: 'stored', as: 'owner', call: LINE(NEWLINE) },
-  ], 'DROP TRIGGER trigger_a_po_item_rep_cost ON public.purchase_order_items;');
+  ], `DROP TRIGGER trigger_a_po_item_rep_cost ON public.purchase_order_items;\n${MUTANT_WRAPPER}`);
   assert.equal(trig.stored, 'ok|4:999:false', `MUTATION: with the rep trigger dropped a rep's 999 should be stored, got ${trig.stored}`);
-  console.log('[prover] MUTATION: require_admin() emptied lets a rep set cost; the rep trigger dropped lets a rep store 999 -- so each refusal comes from the guard it names');
+  // MUTATION 3: the wrapper's cost stripping is what removes the received-line cost oracle.
+  const oracle = scenario([{ key: 'rep wrong guess, old wrapper', as: U.REP, call: editPo(PO2, U.REP, [withId(lineJson(PROD_Z, 10, ", 'unit_cost_cents', 1"), POI2), withId(lineJson(PROD, 4), POI3)]) }], MUTANT_WRAPPER);
+  assert.match(oracle['rep wrong guess, old wrapper'], /^P0001\|RECEIVED_PO_LINE_IMMUTABLE: /, `MUTATION: with the old wrapper a rep's wrong guess should be refused, got ${oracle['rep wrong guess, old wrapper']}`);
+  console.log('[prover] MUTATION: require_admin() emptied lets a rep set cost; the rep trigger dropped lets a rep store 999; the old save wrapper refuses a wrong guess (the oracle) -- so each refusal comes from the guard it names');
 
   stageText('lock.sql', lf(LOCK));
   const l = apply('lock.sql');

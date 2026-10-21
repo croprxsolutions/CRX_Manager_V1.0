@@ -26,6 +26,9 @@ four purchase-order screens.
   admin's unit or product edit that keeps the cost leaves it flagged; a fractional cent is refused
   by name (`PO_UNIT_COST_FRACTIONAL_CENT`); the Cost History card says "Loading" or "Could not
   load" instead of claiming no changes after a pending or failed load.
+- Sol fixes (2026-10-21): a rep's cost sent on a received line is now stripped before the
+  received-line check, so a rep cannot guess a received cost by watching which guess saves; the
+  admin correction locks a PO's lines before the PO, the same order receiving and cost-basis use.
 - **Column lock (Mason, 2026-10-20, "Add the lock now"):** migration `20261020205000` stops every
   Data API caller, admins included, from reading purchase-order line cost and PO totals directly;
   admins read them through the admin-only `get_admin_cost_fields`. No screen changed: none reads those

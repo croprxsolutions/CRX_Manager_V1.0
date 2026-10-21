@@ -95,4 +95,13 @@ describe('fetchCustomerStatement past the 1,000-row server cap (M57)', () => {
     expect(data).toBeNull();
     expect(error?.message).toBe('connection reset');
   });
+
+  it('a page with neither rows nor an error is an error, never an empty statement', async () => {
+    // The silent-denial shape assertRpcResult guards against; the paging helper would
+    // otherwise read the null page as "no rows".
+    H.rpc = () => pagedRpcReply({ data: null, error: null });
+    const { data, error } = await fetchCustomerStatement('c1', '2026-01-01', '2026-12-31');
+    expect(data).toBeNull();
+    expect(error?.message).toMatch(/get_customer_statement returned no data/);
+  });
 });

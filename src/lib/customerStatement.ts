@@ -46,9 +46,17 @@ export async function fetchCustomerStatement(
 ): Promise<{ data: CustomerStatementRow[] | null; error: { message: string } | null }> {
   const args = { p_customer_id: customerId, p_start_date: startDate, p_end_date: endDate };
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const result = await fetchAllRows<CustomerStatementRow>((from, to) => supabase
-      .rpc('get_customer_statement', args, { count: 'exact' })
-      .range(from, to));
+    const result = await fetchAllRows<CustomerStatementRow>(async (from, to) => {
+      const page = await supabase
+        .rpc('get_customer_statement', args, { count: 'exact' })
+        .range(from, to);
+      // A page with neither rows nor an error is a silent denial, which the paging
+      // helper would otherwise read as "no rows" (an empty statement).
+      if (!page.error && (page.data === null || page.data === undefined)) {
+        return { data: null, error: { message: 'get_customer_statement returned no data' }, count: null };
+      }
+      return page;
+    });
     if (result.error) return { data: null, error: result.error };
     const rows = assertRpcResult<CustomerStatementRow[]>(result.data, 'get_customer_statement');
     if (!isStatementContinuous(rows)) continue;

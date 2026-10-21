@@ -337,7 +337,15 @@ function main() {
       assert.equal(scalar(`SELECT has_function_privilege('${api}', (SELECT p.oid FROM pg_proc p WHERE p.proname = '${fn}'), 'EXECUTE');`), 'f', `APPLY: ${api} can run ${fn}`);
     }
   }
-  console.log('[prover] candidate applied; POSTFLIGHT_OK; void_order keeps EXECUTE for authenticated and service_role only; no API role can run the inner bodies');
+  // The inner body is the live pin plus only the draft-cancel status line (CodeRabbit on #967).
+  const STATUS_LINE = "      WHERE id = v_invoice.id\n        AND status = 'draft'\n        AND COALESCE(paid_amount_cents, 0) = 0\n";
+  const sqlE = (text) => `E'${text.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/\n/g, '\\n')}'`;
+  assert.equal(md5Of(VOID_ORDER_INNER), '2c8e539218a34be7344026e9348a47df', `APPLY: ${VOID_ORDER_INNER} is not the reviewed new body`);
+  assert.equal(scalar(`SELECT (length(prosrc) - length(replace(prosrc, ${sqlE(STATUS_LINE)}, ''))) / length(${sqlE(STATUS_LINE)}) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`), '1',
+    `APPLY: ${VOID_ORDER_INNER} does not carry the status line on its draft-cancel UPDATE exactly once`);
+  assert.equal(scalar(`SELECT md5(replace(replace(prosrc, chr(13), ''), ${sqlE(STATUS_LINE)}, ${sqlE("      WHERE id = v_invoice.id\n        AND COALESCE(paid_amount_cents, 0) = 0\n")})) FROM pg_proc WHERE proname = '${VOID_ORDER_INNER}';`),
+    'a2dd87f5ebfffe7a7a328acce66ee528', `APPLY: ${VOID_ORDER_INNER} differs from its live pin by more than the status line`);
+  console.log('[prover] candidate applied; POSTFLIGHT_OK; void_order keeps EXECUTE for authenticated and service_role only; no API role can run the inner bodies; the inner body is its live pin plus only the draft-cancel status line');
 
   // 4. AFTER.
   const seqBefore = sequences();

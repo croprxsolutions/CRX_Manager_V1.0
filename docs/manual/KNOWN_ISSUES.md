@@ -1,7 +1,13 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-19 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-19 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
+**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
+02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
+20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
+PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; batch 3b
+re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
+live at 02:40 UTC); at 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
 replay-binding entry below (both wrappers, both renamed bodies and the 24-operation guard read live); at 18:35 UTC:
 1035 rows / 1028 names; the one change since the 12:50 UTC read is that the
@@ -172,7 +178,7 @@ and sending a client timestamp would either stamp completions at noon or fail on
 Source:
 `src/pages/Deliveries.tsx` `handleCompleteConfirm`, `src/lib/connectivity.ts`.
 
-## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16; batch 2 (the stock row) LIVE 2026-10-19; batches 3–4 open) — about 75 live functions replay a saved result matched on the retry key alone (74 left after batches 1 and 2, counted from the table below)
+## OPEN 2026-10-15 (HIGH on money paths; batch 1 LIVE 2026-10-16; batch 2 (the stock row) LIVE 2026-10-19; batch 3a LIVE 2026-10-19 and batch 3b LIVE 2026-10-20 (part of the batch-3 money row); the rest of batches 3–4 open) — about 75 live functions replay a saved result matched on the retry key alone (69 left after batches 1, 2, 3a and 3b, counted from the table below)
 
 **Batch 1 shipped live 2026-10-16.** Migration `20261016060000_bind_money_replay_receipts_batch1`
 applied 12:12:53 UTC (ledger `20261016121253`, migration-history row 951; PR #942 merged as
@@ -251,15 +257,40 @@ recorded in the batch-1 paragraph above.
 **Bound by batch 3a (migration `20261019200000`, applied live 2026-10-19 20:52:46 UTC (3:52 PM Central), ledger `20261019205246`).** The table's batch-3 money group is
 split into smaller PRs; this first cut bound `complete_delivery` and `complete_job`, which left the table below, and
 extended the same commit-time guard (24 operations). Both now require a retry key, and a retry replays a saved
-result only for the same person and the exact same request. `cancel_delivery` goes in a later cut.
+result only for the same person and the exact same request.
+
+**Bound by batch 3b (migration `20261019235000`, APPLIED LIVE 2026-10-21 02:40:20 UTC (9:40 PM Central, 2026-10-20), ledger
+`20261021024020`, PR #967 head `ed2bd8733`, on Mason's in-chat owner approval).** The second cut bound `cancel_delivery`
+(and moved its role check ahead of any replay), `void_delivery` and `void_order`, which left the table below, and grew
+the guard to 27 operations. `batch_cancel_deliveries` keeps its keyless per-delivery cancel by calling the renamed body
+directly. It also fixes a pre-existing failure: voiding a fulfilled order that still had a nonzero draft invoice always
+rolled back with `ORDER_INVOICE_TERMINAL` (6 live orders qualified on 2026-10-19; no order has ever been voided live); the
+draft is zeroed only when it carries no paid, prepay, write-off or credit cents, else the void refuses with
+`ORDER_VOID_DRAFT_HAS_APPLIED_MONEY`. Read live after apply: the three public functions are SECURITY DEFINER wrappers
+(`search_path=public, pg_temp`; EXECUTE authenticated, postgres, service_role) calling `check_idempotency_intent` and
+`_bind_replay_receipt_20261015`; the three renamed bodies, `_batch_cancel_deliveries_replay_impl_20261015` and
+`_void_order_impl_20260714` are SECURITY DEFINER and executable by postgres only (`service_role` revoked from
+`_void_order_impl_20260714`, which carries the zero-money condition and the refusal); the deferred guard lists 27
+operations; `idempotency_keys` holds zero receipts for the three operations; and a keyless live `void_order` call on a
+random uuid was refused with `IDEMPOTENCY_KEY_REQUIRED`.
+
+**Open follow-up: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (Codex GitHub review on #967,
+verified against the live definitions 2026-10-20). A draft made by `create_split_invoices_from_order` has a
+`split_invoice_provenance` row, and `guard_split_invoice_provenance_identity` lets its total change only under a
+same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one through
+`_cancel_order_provenance_wrapper_20260719` (lock, claim, refresh the provenance, drop the claim); `void_order` does
+not, so its zeroing UPDATE is refused with `SPLIT_INVOICE_PROVENANCE_IMMUTABLE` and the whole void rolls back
+cleanly. This is not a regression: before batch 3b, now live, every nonzero draft already failed. Live impact today is none:
+live has 0 `split_invoice_provenance` rows (read 2026-10-20). Fix: give `void_order` the same governed-invoice
+locking, claim and provenance refresh as `cancel_order`, in its own reviewed migration, before split billing is used.
 
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
 
-**Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batches 1, 2 and 3a list 72 functions (15 in batch 3, then 50 and 7 in batch 4; a row can name a function whose create path alone is unbound; after batches 1 and 2 they listed 74, after batch 1 alone 87). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.
+**Unbound — ranked, with the batch each is fixed in.** Counting the names in the table, the rows after batches 1, 2, 3a and 3b list 69 functions (12 in batch 3, then 50 and 7 in batch 4; a row can name a function whose create path alone is unbound; after batches 1, 2 and 3a they listed 72, after batches 1 and 2 74, after batch 1 alone 87). The heading's "about 75" is the first estimate, kept so references to this entry still match; read the table, not the heading, for the remaining work.
 
 | Batch | Function (what a mismatched retry does today) | Impact |
 |---|---|---|
-| 3 | `void_order`, `void_delivery`, `cancel_delivery` (replays before its role check), `unpost_invoice`, `transfer_invoice_to_job`, `price_order`, `update_order_items`, `save_field_app_invoice`, `update_field_app_invoice_billing`, `transition_rebate_claim`, `create_rebate_claim`, `close_accounting_period` | HIGH money |
+| 3 | `unpost_invoice`, `transfer_invoice_to_job`, `price_order`, `update_order_items`, `save_field_app_invoice`, `update_field_app_invoice_billing`, `transition_rebate_claim`, `create_rebate_claim`, `close_accounting_period` | HIGH money |
 | 3 | `apply_credit_memo_to_invoice` is bound before its lock, but its after-lock re-check is plain (race window only) | HIGH (race) |
 | 3 | `record_job_pre_notifications`, `record_job_post_notifications` return job A's recipients; `JobDetail.tsx:607-640` then emails job A's customers about job B and overwrites A's audit text | MED, customer-facing |
 | 4 | MED: `admin_update_profile` (a role change or deactivation silently skipped), `assign_job_applicator`, `batch_reschedule_deliveries`, `cancel_cycle_count`, `cancel_purchase_order`, `delete_purchase_order`, `submit_purchase_order`, `save_purchase_order` (create path), `confirm_delivery` (replays before its role check), `consolidate_draft_invoices`, `create_blend_ticket`, `create_delivery_with_items`, `create_followup_delivery`, `admin_save_application_service` (create path), `delete_vendor`, `reactivate_vendor`, `save_vendor`, `dispatch_job_locations`, `undispatch_job_locations`, `duplicate_quote`, `generate_rup_sales_records`, `link_blend_ticket_to_order`, `unlink_blend_ticket_from_order`, `link_fields_to_parent`, `unlink_field_from_parent`, `load_recipe_into_job`, `reassign_delivery`, `review_customer_fact`, `supersede_customer_fact`, `save_blend_recipe` (replays before its edit check), `save_blend_ticket`, `save_blend_ticket_fields`, `save_field`, `save_field_polygons`, `set_application_record_lots`, `set_field_boundary`, `set_field_override_acres`, `update_blend_ticket_billing_status`, `update_field_app_applied_info`, `batch_approve_blend_tickets`, `batch_reject_blend_tickets`, `commit_label_draft`, `create_job_from_quote_section`, `create_quote_from_template`, `edit_delivery`, `mark_inventory_row_verified` (replays before login), `reopen_accounting_period`, `reverse_blend_ticket_approval`, `rollover_quote_to_season` (a replay returns `{status: duplicate}` with no quote id, so `QuoteBuilder.tsx:2054` navigates to `/quotes/undefined`; a concurrent first call gets a raw unique violation; when fixed, start from the post-PR #938 body, md5 `eb9b65e556f3054d0751f3a7c08dce3f`, and keep its two `crx.quote_rollover_source` marker lines), `start_job` (replays before its job check) | MED |
@@ -948,17 +979,31 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
     (`SalesReports.tsx`: the detail and summary functions and the customer, sales-rep and category
     filters). A failed read shows an error and blocks that report's export. The Deliveries driver
     dashboard's "next 20 unassigned" panel is deliberately still 20.
+  - **Fixed 2026-10-20 (Goal 4, part 2a — money, checks, compliance, notifications):** these read every
+    row through `src/lib/pagedRead.ts`, and a failed read shows an error (never zeros or a short list):
+    - Field Invoices' three tabs (`src/components/field-invoices/`), so Post All and Unpost All reach every
+      invoice, plus the split-invoice location lookups;
+    - AR: the summary strip (`AccountsReceivable.tsx`), AR Aging (`ARaging.tsx`), the finance-charge
+      preview (`FinanceChargePreviewModal.tsx`), check allocation (`PaymentAllocation.tsx`, was a
+      customer's first 200 open invoices), the Prepayment Manager (was 500 customers, each with an
+      unchecked invoice read) and the prepay workspace's Apply step; a customer's aging card and purchase
+      history (`CustomerDetail.tsx`; the aging card now asks for that one customer's row);
+    - AP Aging (`AccountsPayable.tsx`) and Field Profitability;
+    - integrity checks 5, 6, 9 and 10 (`src/lib/reconciliation.ts`) and the cleanup panel's lists. The
+      cleanup panel's over-received PO list had never worked: its filter compared a column with text,
+      so the server refused it every time and the section showed 0 rows (15 rows live on 2026-10-20);
+    - the RUP sales register and license counts (`Compliance.tsx`), and the application logbooks with
+      their customer, field and applicator pickers (`LogbookReport.tsx`);
+    - Notifications: the page lists every notification, and the bell counts unread notifications in the
+      database (it counted only the unread among the 20 it loads); a count that cannot be read shows "!".
   - Still capped (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`; the pages
     fixed above are removed):
     - 1000: Customers (shows a banner).
     - 500: Jobs (shows a banner) and Field Setup.
-    - 200: Notifications.
   - Pages that cap one of several queries:
     - Crop Programs: its product list, 500.
     - Dispatch Board: the job list is capped at 500, but its dispatch and chemical rows are paged with
       `.range()` and are not capped.
-    - Reports' Application Logbook (`src/components/reports/LogbookReport.tsx`): its customer and field
-      pickers load 500 and its applicator picker 200 (not part of the 2026-10-20 fix).
   - Record pickers inside detail and editor pages (checked 2026-10-04): Customer Detail's parent-customer
     selector, Invoice Detail's customer selector and Order Detail's share editor each load 500 customers; the
     split field-invoice editor (`FieldAppSplitInvoiceEditor.tsx`) loads 1,000 fields, 1,000 products and the
@@ -966,8 +1011,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Complete current inventory (2026-10-20, after part 1): `docs/audits/2026-10-20-goal4-row-limit-inventory-refresh.md`.
-    Notifications is already past its limit: four staff accounts each have over 1,000 unread notifications, the page
-    shows the newest 200 and the bell badge counts only the 20 it loads.
+    Part 2a above fixed its Field Invoices, AR/AP/prepay, integrity, compliance and Notifications items; part 2b
+    (the lookups and per-record reads, and the 20-page document-scan limit) is next.
   - Jobs and Customers show a banner when capped.
   - Paging is by position, so records changing during a long load are handled four ways:
     - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
@@ -1538,10 +1583,12 @@ error. Narrow window and pre-existing, but it is a safety path, not a report fil
 cannot see that anything was skipped.
 
 **The cosmetic ones** — report/dialog defaults the user can change in the UI:
-`ARaging.tsx:80`, `CropPrograms.tsx:55`, `FieldProfitability.tsx:62`, `YearEndSummaryDialog.tsx:26`,
+`ARaging.tsx:82` (line as of 2026-10-20), `CropPrograms.tsx:55`, `FieldProfitability.tsx:62`, `YearEndSummaryDialog.tsx:26`,
 `ReportShell.tsx:20-29`, `ApplicationRecords.tsx:36`, `Reports.tsx:118,122`,
-`SalesReports.tsx:29,33,100`. `AccountsReceivable.tsx:45` and `CustomerContextCard.tsx:46` similarly
-pass a **UTC** `toISOString().slice(0,10)` as an as-of date.
+`SalesReports.tsx:29,33,100`. `CustomerContextCard.tsx:46` similarly passes a **UTC**
+`toISOString().slice(0,10)` as an as-of date. (The Accounts Receivable summary strip did too; since
+2026-10-20 it and the AR Aging table's default as-of date both use Chicago's date,
+`todayInBusinessTz()`, so they always ask for the same day.)
 
 **Not user-changeable, but low impact:** `invoiceSeasonWindow.ts` (the invoice lists' season
 window; replaced `FieldInvoices.tsx:44` on 2026-10-09). These lists have no season control, but
@@ -2963,6 +3010,20 @@ makes the first one reachable more often by emitting several order lines per pro
    defect today, independent of PR #404 — multi-line bookings already exist as quote data whether or
    not the draw splits order lines. Deliberately not fixed in PR #404: it needs its own design
    decision about how a ticket quantity is split across tiers.
+   **Guarded 2026-10-20 (Goal 3, migration `20261020210000_blend_ticket_pricing_guards`, applied
+   live 2026-10-21 04:00:52 UTC, ledger `20261021040052`, PR #982 merged as `948f238ad`).** Mason (2026-10-15)
+   made automatic exact-line matching future work and asked for a small guard instead: when the
+   job's quote lists the product more than once at *different* prices, the invoice now stops before
+   anything is written and the Blend Ticket screen asks staff to pick the quoted price; the pick is
+   stored on the ticket line and bills as `quoted`, only while it still matches the current quote,
+   product and customer. Same-price duplicates bill as before. A product the quote lists at $0
+   bills at $0 (Mason, 2026-10-20: "$0 of $0 but flag it in system and alert before save"): before
+   any invoice number, an admin must approve it with a written reason in the below-cost window, and
+   each $0 line is recorded in `below_cost_approvals`; a sales rep cannot bill it. (Before, the
+   below-cost guard refused the $0 line and blocked the invoice.)
+   Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
+   stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
+   price; the line bills its tier price.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

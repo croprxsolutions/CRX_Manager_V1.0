@@ -10,4 +10,10 @@ The rest of Goal 4 part 2: lookups and per-record reads now go page by page thro
 - **Returns and credit** (N10, L17): the return form's "pick an order", and the credit-limit warning's open-invoice balance (a failed read goes to the existing fail-closed warning instead of counting as zero).
 - **Document scanning** (`src/lib/documentOCR.ts`): a PDF over 20 pages is refused before any page is read, with a plain message to split it into files of 20 pages or fewer. It used to scan only the first 20 pages, so an import silently dropped every line after page 20, with only a Sentry warning.
 
+A failed read on the Jobs list now also clears the list (it left the previous, differently filtered jobs on screen), and the inventory ledger clears the last product's rows when the next product opens, so a failed read never shows them under the wrong name.
+
+Tests: seven new `*.paging.test.*` files (credit limit, statement module, AR Aging statement, interaction history, inventory ledger, the return form's order picker, the Jobs applicator filter) use 1,005 or 1,205 rows against the 1,000-row fake server. Run against the old code, every one of their screen tests failed (the statement module is new, so its screen-level test stands in); all pass now. The 20-page scan test uses a 21-page PDF. Three existing tests whose fakes answered without paging (`TransactionLedgerModal.test.ts` and the two Cycle Counts race tests) now answer `.range` with a count.
+
+Live check on 2026-10-21 with a temporary 10-row page (local app, live database, read-only): a product's ledger 34 transactions (database 34, four pages); a cycle count's lines 83 (database 83, nine pages); the return form's order picker for one customer 6 orders, newest first (database 6); a 21-line order's page and a customer's 90-day statement loaded with no error. Live statements are at most a few rows, so the multi-page statement path is proven by the tests only.
+
 `src/lib/pagedReadCallSites.test.ts` now also checks `customerStatement.ts`, `useGuardrails.ts`, `CustomerContacts.tsx` and `TransactionLedgerModal.tsx`.

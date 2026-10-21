@@ -36,7 +36,8 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
   const listedLines = zeroLineDetails.length === zeroLines.length && zeroLineDetails.length > 0
     ? zeroLineDetails.map((line, index) => ({
         name: line.product_name ?? zeroLines[index],
-        note: lineNote(line.kind),
+        // Each approved line's own cost per unit (admins only; the database never sends it to a rep).
+        note: `${line.cost_cents != null ? ` — cost ${formatCents(line.cost_cents)} per unit` : ''}${lineNote(line.kind)}`,
       }))
     : zeroLines.map((name) => ({ name, note: '' }));
 

@@ -43,8 +43,8 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
     });
     expect(within(dialog).getByText(/quoted at \$0, or included in a grower-share per-acre price/)).toBeInTheDocument();
     expect(within(dialog).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-      'Atrazine 4L',
-      'Roundup (included in a grower-share per-acre price)',
+      'Atrazine 4L — cost $5.00 per unit',
+      'Roundup — cost $7.00 per unit (included in a grower-share per-acre price)',
     ]);
   });
 
@@ -77,8 +77,8 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
       ],
     });
     expect(within(dialog).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-      'Atrazine 4L (quoted at $0 on one share, included in a grower-share per-acre price on another)',
-      'Roundup (included in a grower-share per-acre price)',
+      'Atrazine 4L — cost $5.00 per unit (quoted at $0 on one share, included in a grower-share per-acre price on another)',
+      'Roundup — cost $7.00 per unit (included in a grower-share per-acre price)',
     ]);
   });
 });

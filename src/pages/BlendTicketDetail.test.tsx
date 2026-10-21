@@ -1072,7 +1072,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     // Every $0 product the one reason approves is listed (Mason, 2026-10-20).
     expect(within(approval).getByText(/covers every product below/)).toBeInTheDocument();
     const listed = within(approval).getAllByRole('listitem').map((item) => item.textContent);
-    expect(listed).toEqual(['Atrazine 4L', 'Roundup PowerMax']);
+    expect(listed).toEqual(['Atrazine 4L — cost $5.00 per unit', 'Roundup PowerMax — cost $7.00 per unit']);
     expect(mockNavigate).not.toHaveBeenCalled();
     fireEvent.change(within(approval).getByLabelText(/Approval reason/), { target: { value: 'free sample' } });
     fireEvent.click(within(approval).getByRole('button', { name: 'Approve and Retry' }));

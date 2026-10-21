@@ -553,7 +553,7 @@ jobs:
   lint-typecheck-test:
     name: Lint, Type Check, Test, Build
     runs-on: ubuntu-latest
-    needs: [phase3-private-artifact-containment, ci-scope, sql-validation, lint-typecheck-build, unit-tests, regression-tests]
+    needs: [phase3-private-artifact-containment, ci-scope, sql-validation, lint-typecheck-build, unit-tests, regression-tests, phase3c-containment-windows, guard-hooks-windows]
     # This is a required branch-protection context. It must execute and turn a
     # failed prerequisite red; a conditionally skipped job reports success.
     if: ${{ always() }}
@@ -567,6 +567,8 @@ jobs:
           LINT_BUILD_RESULT: ${{ needs.lint-typecheck-build.result }}
           UNIT_TESTS_RESULT: ${{ needs.unit-tests.result }}
           REGRESSION_TESTS_RESULT: ${{ needs.regression-tests.result }}
+          WINDOWS_PACKET_RESULT: ${{ needs.phase3c-containment-windows.result }}
+          WINDOWS_GUARD_RESULT: ${{ needs.guard-hooks-windows.result }}
           FULL_CI: ${{ needs.ci-scope.outputs.full_ci }}
         run: |
           test "$CONTAINMENT_RESULT" = "success" || { echo "Private-artifact containment did not pass: $CONTAINMENT_RESULT" >&2; exit 1; }
@@ -582,6 +584,8 @@ jobs:
           esac
           test "$UNIT_TESTS_RESULT" = "$expected_tests" || { echo "Unit tests: expected $expected_tests, got $UNIT_TESTS_RESULT (full_ci=$FULL_CI)" >&2; exit 1; }
           test "$REGRESSION_TESTS_RESULT" = "$expected_tests" || { echo "Regression tests: expected $expected_tests, got $REGRESSION_TESTS_RESULT (full_ci=$FULL_CI)" >&2; exit 1; }
+          test "$WINDOWS_PACKET_RESULT" = "$expected_tests" || { echo "Windows packet tests: expected $expected_tests, got $WINDOWS_PACKET_RESULT (full_ci=$FULL_CI)" >&2; exit 1; }
+          test "$WINDOWS_GUARD_RESULT" = "$expected_tests" || { echo "Windows guard tests: expected $expected_tests, got $WINDOWS_GUARD_RESULT (full_ci=$FULL_CI)" >&2; exit 1; }
 
       - name: Report trusted CI route
         env:

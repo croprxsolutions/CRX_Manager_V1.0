@@ -372,7 +372,11 @@ for (const requiredFragment of [
   '--github-output "$classifier_output"; then',
   'cat "$classifier_output" >> "$GITHUB_OUTPUT"',
   'needs: [phase3-private-artifact-containment, ci-scope]',
-  'needs: [phase3-private-artifact-containment, ci-scope, sql-validation, lint-typecheck-build, unit-tests, regression-tests]',
+  'needs: [phase3-private-artifact-containment, ci-scope, sql-validation, lint-typecheck-build, unit-tests, regression-tests, phase3c-containment-windows, guard-hooks-windows]',
+  'WINDOWS_PACKET_RESULT: ${{ needs.phase3c-containment-windows.result }}',
+  'WINDOWS_GUARD_RESULT: ${{ needs.guard-hooks-windows.result }}',
+  'test "$WINDOWS_PACKET_RESULT" = "$expected_tests"',
+  'test "$WINDOWS_GUARD_RESULT" = "$expected_tests"',
   'CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}',
   'LINT_BUILD_RESULT: ${{ needs.lint-typecheck-build.result }}',
   'UNIT_TESTS_RESULT: ${{ needs.unit-tests.result }}',
@@ -388,7 +392,7 @@ for (const requiredFragment of [
   equal(workflow.includes(requiredFragment), true, `workflow contract: ${requiredFragment}`);
 }
 equal(
-  /^  lint-typecheck-test:\r?\n    name: Lint, Type Check, Test, Build\r?\n    runs-on: ubuntu-latest\r?\n    needs: \[phase3-private-artifact-containment, ci-scope, sql-validation, lint-typecheck-build, unit-tests, regression-tests\]\r?\n(?:    #.*\r?\n){2}    if: \$\{\{ always\(\) \}\}/m.test(workflow),
+  /^  lint-typecheck-test:\r?\n    name: Lint, Type Check, Test, Build\r?\n    runs-on: ubuntu-latest\r?\n    needs: \[phase3-private-artifact-containment, ci-scope, sql-validation, lint-typecheck-build, unit-tests, regression-tests, phase3c-containment-windows, guard-hooks-windows\]\r?\n(?:    #.*\r?\n){2}    if: \$\{\{ always\(\) \}\}/m.test(workflow),
   true,
   'required lint job must execute even after a failed dependency',
 );

@@ -9,7 +9,9 @@
   `sql-validation`, and splits Windows into `phase3c-containment-windows` and
   `guard-hooks-windows`. Every test and check still runs; no skip rule was added.
 - The required check keeps its name, "Lint, Type Check, Test, Build". It now runs last, is red
-  unless containment, routing, SQL validation, and every part passed (test parts may be skipped
-  only on the documentation-only route), and alone publishes the full-CI proof.
+  unless containment, routing, SQL validation, every Ubuntu part, and both Windows jobs passed
+  (test and Windows jobs may be skipped only on the documentation-only route), and alone
+  publishes the full-CI proof. Binding the Windows jobs is new: before, a red Windows job did not
+  turn the required check red (the agent merge gate still blocked on it).
 - `scripts/classify-ci-scope.test.mjs` and `scripts/supplier-pricing-phase3-private-artifacts.test.mjs`
   assert the new job graph.

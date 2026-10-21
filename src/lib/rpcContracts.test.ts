@@ -3033,7 +3033,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     when 20260813050000 is promoted back to supabase/migrations.
   //   _crx_payout_assert_impl_20260809 / _crx_payout_assert_replay_20260809 — 20260811130000
   //     landed on main and applied live; it drops both helpers before finishing.
-  // 20261021060000 (purchase-order cost history, not yet applied): a trigger-returning function,
+  // 20261021140000 (purchase-order cost history, not yet applied): a trigger-returning function,
   // so it never reaches the generated types; prune this entry once the registry high-water passes it.
   _po_item_cost_change_log:
     'AFTER INSERT/UPDATE trigger on purchase_order_items that appends one purchase_order_item_cost_changes row per cost change; the calling write (save_purchase_order or set_purchase_order_item_costs) owns idempotency, and every API-role EXECUTE is revoked',

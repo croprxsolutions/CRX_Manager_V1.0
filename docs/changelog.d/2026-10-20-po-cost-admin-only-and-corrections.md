@@ -1,7 +1,7 @@
 ## 2026-10-20 - Purchase-order cost becomes admin-only, with a cost history and governed corrections
 
 Mason chose "Option B" for the purchase-order cost project (KNOWN_ISSUES, the top-priority follow-up
-from PR #965). Migration `20261021060000_po_cost_admin_only_and_corrections` (NOT applied; it must be
+from PR #965). Migration `20261021140000_po_cost_admin_only_and_corrections` (NOT applied; it must be
 applied before this PR merges, because the screens read its new column and history table) and the
 four purchase-order screens.
 
@@ -31,7 +31,7 @@ four purchase-order screens.
   admin correction locks a PO's lines before the PO, the same order receiving and cost-basis use.
   A correction that would leave active vendor bills more than 5% over the lowered PO total is
   refused (`PO_COST_BELOW_BILLED`), matching the bill-creation control.
-- **Column lock (Mason, 2026-10-20, "Add the lock now"):** migration `20261021061000` stops every
+- **Column lock (Mason, 2026-10-20, "Add the lock now"):** migration `20261021141000` stops every
   Data API caller, admins included, from reading purchase-order line cost and PO totals directly;
   admins read them through the admin-only `get_admin_cost_fields`. No screen changed: none reads those
   columns. Sol and the Codex PR review had blocked the project on this gap.

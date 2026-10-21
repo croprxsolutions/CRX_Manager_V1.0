@@ -35,7 +35,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'You can only change or post invoices under your own name'],
   [/^CUSTOMER_HAS_OPEN_INVOICES\b/i,
    'This customer has posted or overdue invoices. Resolve them before deactivating the customer'],
-  // Purchase-order cost corrections (20261021060000, Mason 2026-10-20).
+  // Purchase-order cost corrections (20261021140000, Mason 2026-10-20).
   [/^PO_COST_REASON_REQUIRED\b/i,
    'Say why the cost of a received line is changing'],
   [/^PO_COST_REASON_TOO_LONG\b/i,

@@ -67,7 +67,7 @@ export default function PurchaseOrders() {
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
-  /* Admins: purchase orders with a rep line at an unconfirmed catalog cost (20261021060000) */
+  /* Admins: purchase orders with a rep line at an unconfirmed catalog cost (20261021140000) */
   const [costReviewPoIds, setCostReviewPoIds] = useState<Set<string>>(new Set());
   const [costReviewOnly, setCostReviewOnly] = useState(false);
   const [importOpen, setImportOpen] = useState(false);

@@ -1326,7 +1326,7 @@ export interface PurchaseOrderItem {
   product?: Product;
 }
 
-/** One row of the admin-only, append-only purchase-order cost history (20261021060000). */
+/** One row of the admin-only, append-only purchase-order cost history (20261021140000). */
 export type PurchaseOrderCostChangeSource = 'entered' | 'edited' | 'catalog_default' | 'set_by_admin' | 'confirmed';
 
 export interface PurchaseOrderItemCostChange {

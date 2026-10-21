@@ -198,7 +198,7 @@ The normal path is `draft` → `submitted` → `fully_received`, passing through
 - `purchase_order_items` — line items with quantity_ordered, quantity_received, unit_cost, cost_needs_review
 - `purchase_order_item_cost_changes` — admin-only, append-only history of every line cost change (who, when, old/new, reason)
 
-### Purchase cost (admin-only; `20261021060000`, Mason 2026-10-20)
+### Purchase cost (admin-only; `20261021140000`, Mason 2026-10-20)
 - A line a sales rep adds (or switches to another product) takes the product's catalog cost and is flagged
   `cost_needs_review`; a rep never changes a stored cost.
 - Admins set, correct or confirm cost with `set_purchase_order_item_costs`, received lines included (a received

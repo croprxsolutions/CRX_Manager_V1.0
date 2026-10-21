@@ -37,14 +37,17 @@ try {
     const entry = actorEntries.find((candidate) => candidate.predicate === 'actor-forgery' && candidate.violation_key === added);
     check(entry?.suspect_param === 'p_performed_by', `${added}: reviewed cost/margin step-2 exception present on p_performed_by`);
   }
-  // The field-invoice justification relies on the inner writer's own actor binding and its role helpers.
-  const fieldInvoice = actorEntries.find((entry) => entry.violation_key.startsWith('save_field_app_invoice('));
-  for (const pinned of [
-    'public._save_field_app_invoice_impl_20260714(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)',
-    'public.is_admin()',
-    'public.is_sales_rep()',
+  // Each justification relies on these exact pins (wrapper, private body, inner writer, identity and role
+  // helpers); dropping one would let a change on the unpinned path keep clearing the row.
+  const fieldArgs = '(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)';
+  const jobArgs = '(p_job_id uuid, p_job_payload jsonb, p_fields jsonb, p_chemicals jsonb, p_performed_by uuid, p_idempotency_key text)';
+  for (const [prefix, pins] of [
+    ['save_field_app_invoice(', [`public.save_field_app_invoice${fieldArgs}`, `public._save_field_app_invoice_cost_step2_impl${fieldArgs}`,
+      `public._save_field_app_invoice_impl_20260714${fieldArgs}`, 'auth.uid()', 'public.is_admin()', 'public.is_sales_rep()']],
+    ['save_job(', [`public.save_job${jobArgs}`, `public._save_job_cost_step2_impl${jobArgs}`, 'auth.uid()', 'public.is_admin()']],
   ]) {
-    check(Object.hasOwn(fieldInvoice.reviewed_contracts, pinned), `save_field_app_invoice must pin ${pinned}`);
+    const entry = actorEntries.find((candidate) => candidate.violation_key.startsWith(prefix));
+    equal(Object.keys(entry.reviewed_contracts).sort(), [...pins].sort(), `${prefix}) pins exactly the contracts its justification relies on`);
   }
   check(!actorEntries.some((entry) => entry.predicate === 'actor-forgery-fin-audit' && entry.violation_key.startsWith('cancel_delivery(')), 'remove the retired fin-audit cancel_delivery exemption');
   check(!actorEntries.some((entry) => entry.violation_key.startsWith('complete_job(')), 'remove the retired complete_job exemption');

@@ -40,3 +40,5 @@
     re-binds the user from `auth.uid()`, refuses a mismatch, requires admin or sales rep, and refuses a
     non-admin who names another salesperson. The `actor-forgery` predicate was re-run live with the new
     pin list: still 21 rows, 21 allowlisted.
+  - Luna review round 3: one MED fixed — the test now asserts each new exception pins exactly the
+    contracts its justification relies on.

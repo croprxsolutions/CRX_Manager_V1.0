@@ -459,11 +459,17 @@ export default function OrderDetail() {
     if (!order || !customer) return;
     setPrintingPickList(true);
     try {
-      // Fetch customer addresses + inventory in parallel. Every inventory row is read,
-      // page by page: one request stops at the server's row cap, and a product past it
-      // would print as out of stock (Goal 4 M62).
+      // Fetch customer addresses + inventory in parallel. Every row is read, page by
+      // page: one request stops at the server's row cap, and a product past it would
+      // print as out of stock (Goal 4 M62).
       const [addrRes, invRes] = await Promise.all([
-        supabase.from('customer_addresses').select('*').eq('customer_id', customer.id).order('is_default', { ascending: false }),
+        fetchAllRows((from, to) => supabase
+          .from('customer_addresses')
+          .select('*', { count: 'exact' })
+          .eq('customer_id', customer.id)
+          .order('is_default', { ascending: false })
+          .order('id')
+          .range(from, to)),
         fetchAllRows<{ id: string; product_id: string; quantity_available: number; quantity_prebooked: number }>((from, to) => supabase
           .from('inventory')
           .select('id, product_id, quantity_available, quantity_prebooked', { count: 'exact' })
@@ -472,6 +478,7 @@ export default function OrderDetail() {
       ]);
       // A pick list printed from part of the stock would flag false shortages.
       if (invRes.error) throw new Error(`Stock could not be loaded: ${invRes.error.message}`);
+      if (addrRes.error) throw new Error(`Customer addresses could not be loaded: ${addrRes.error.message}`);
 
       // Build inventory map
       const invMap: Record<string, { available: number; prebooked: number }> = {};

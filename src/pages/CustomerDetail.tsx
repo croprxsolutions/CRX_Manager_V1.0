@@ -667,7 +667,14 @@ export default function CustomerDetail() {
         if (isStale()) return;
         setTransactions((txnRows ?? []) as TxnRow[]);
 
-        const { data: prepayData, error: prepayError } = await supabase.from('prepay_credits').select('*').eq('customer_id', id!).gt('balance_cents', 0);
+        // Every open prepay credit, page by page, so the prepay total is never short.
+        const { data: prepayData, error: prepayError } = await fetchAllRows((from, to) => supabase
+          .from('prepay_credits')
+          .select('*', { count: 'exact' })
+          .eq('customer_id', id!)
+          .gt('balance_cents', 0)
+          .order('id')
+          .range(from, to));
         if (prepayError) throw prepayError;
         if (isStale()) return;
         setPrepayCredits((prepayData || []) as PrepayRow[]);

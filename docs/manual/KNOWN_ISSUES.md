@@ -1000,9 +1000,10 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
     a failed read shows an error or stops the action instead of a short result:
     - a customer's statement (`src/lib/customerStatement.ts`, used by AR Aging and Customer Detail; its
       rows have no id, so each read is checked with the running balance and the server's last row);
-    - Customer Detail's recent-transactions card (now says "the latest 50 of N") and the interaction
-      history (was the newest 50, so its filters missed older ones);
-    - an order's field allocations, field-billing defaults and pick-list stock (`OrderDetail.tsx`), and the
+    - Customer Detail's recent-transactions card (now says "the latest 50 of N"), the interaction
+      history (was the newest 50, so its filters missed older ones) and the open prepay credits;
+    - an order's field allocations, field-billing defaults, pick-list stock and pick-list customer
+      addresses (`OrderDetail.tsx`), and the
       quantities other deliveries already claim when a scheduled delivery is edited (`DeliveryDetail.tsx`);
     - a product's inventory ledger, a new cycle count's stock and a count's lines;
     - the Office Cockpit's lapsed crop-program holds with their quotes and products;

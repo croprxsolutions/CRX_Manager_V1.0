@@ -44,7 +44,15 @@
 >    was refuted with evidence and needed no change, then replied to and resolved, or there were no
 >    comments. Each refutation reply cites its evidence (file and line, test, or document) so Mason
 >    or a later reviewer can check it; the Sol review sees only the code, not GitHub threads, so it
->    does not check these replies.
+>    does not check these replies. **What the gates enforce, and what stays written:** the merge
+>    gates enforce "a completed review of the head exists" and "every CodeRabbit thread is replied
+>    to and resolved". Findings CodeRabbit leaves only in its review body (outside-diff remarks,
+>    nitpicks) or as a warning-mode pre-merge check have no thread to resolve, so they stay a
+>    written duty: before merging, the agent posts one PR comment answering each such item (fixed,
+>    or why it is wrong, with evidence). That is Mason's 2026-10-20 decision (DECISION_LOG,
+>    2026-10-19 entry: summary-only notes are handled by the agent and no code check gates them),
+>    kept on purpose: a gate on a warning that is wrong would hold a PR forever, because CodeRabbit
+>    never re-reviews to clear it.
 > 6. **Fixes move the head.** If CodeRabbit's comments lead to any new commit (code, documentation,
 >    or configuration; only a plain merge of main is exempt, item 7), the new head needs a
 >    fresh Sol review (carry-forward covers only a merge of main) and one new full review, by the

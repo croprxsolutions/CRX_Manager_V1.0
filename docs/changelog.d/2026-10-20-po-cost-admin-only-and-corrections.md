@@ -22,5 +22,9 @@ four purchase-order screens.
 - **Not changed:** inventory value and margins already use the catalog cost, not purchase-order cost
   (live read 2026-10-20), so a correction moves no inventory value. Catalog cost still changes only
   through the pricing workbook (Mason, 2026-10-20).
+- Review fixes: only a real cost change (logged) or the confirm button clears "unconfirmed" — an
+  admin's unit or product edit that keeps the cost leaves it flagged; a fractional cent is refused
+  by name (`PO_UNIT_COST_FRACTIONAL_CENT`); the Cost History card says "Loading" or "Could not
+  load" instead of claiming no changes after a pending or failed load.
 - Proof: `node scripts/smoke/prove-po-cost-admin-only-and-corrections-real-schema.mjs`
   (PO_COST_ADMIN_ONLY_CORRECTIONS_PROOF_PASS).

@@ -169,6 +169,8 @@ export default function PurchaseOrderDetail() {
   const [costReason, setCostReason] = useState('');
   /* Admin-only cost history (purchase_order_item_cost_changes; RLS returns nothing to anyone else) */
   const [costHistory, setCostHistory] = useState<Array<PurchaseOrderItemCostChange & { changed_by_name: string }>>([]);
+  // "No cost changes" is shown only after a load succeeded; a pending or failed load says so.
+  const [costHistoryStatus, setCostHistoryStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   /* Edit modal state */
   const [editOpen, setEditOpen] = useState(false);
@@ -217,6 +219,7 @@ export default function PurchaseOrderDetail() {
     setItems([]);
     setReceivingHistory([]);
     setCostHistory([]);
+    setCostHistoryStatus('loading');
     setLoading(true);
     setHistoryLoading(true);
   }, [id]);
@@ -405,6 +408,7 @@ export default function PurchaseOrderDetail() {
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_po_cost_history' } });
       toast('error', 'Could not load the cost history.');
+      setCostHistoryStatus('error');
       return;
     }
     const rows = (data || []) as PurchaseOrderItemCostChange[];
@@ -419,6 +423,7 @@ export default function PurchaseOrderDetail() {
       (people || []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) nameById[p.id] = p.full_name ?? ''; });
     }
     setCostHistory(rows.map((r) => ({ ...r, changed_by_name: r.changed_by ? nameById[r.changed_by] || 'Unknown' : 'System' })));
+    setCostHistoryStatus('ready');
   }, [id, isAdmin, toast]);
 
   useEffect(() => {
@@ -1419,8 +1424,17 @@ export default function PurchaseOrderDetail() {
         <Card padding={false}>
           <div className="p-5">
             <CardHeader title="Cost" accent="History" />
-            {costHistory.length === 0 ? (
-              <p className="text-sm text-secondary py-4">No cost changes recorded yet.</p>
+            {costHistoryStatus === 'error' ? (
+              <div className="py-4 text-sm text-red-600">
+                Could not load the cost history.{' '}
+                <button type="button" className="underline font-medium" onClick={() => { setCostHistoryStatus('loading'); fetchCostHistory(); }}>
+                  Try again
+                </button>
+              </div>
+            ) : costHistory.length === 0 ? (
+              <p className="text-sm text-secondary py-4">
+                {costHistoryStatus === 'loading' ? 'Loading cost history…' : 'No cost changes recorded yet.'}
+              </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

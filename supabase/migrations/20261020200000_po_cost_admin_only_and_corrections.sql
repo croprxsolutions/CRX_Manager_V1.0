@@ -24,8 +24,9 @@
 --        * a signed-in NON-admin never sets cost: a new line, or a line switched to another product,
 --          takes the product's catalog cost (products.current_cost, whole cents; 0 if none) and is
 --          flagged for review; any other change keeps the stored cost (a unit change is flagged);
---        * an admin (or the database owner, auth.uid() NULL: migrations, provers) setting the cost,
---          product or unit clears the flag;
+--        * an admin (or the database owner, auth.uid() NULL: migrations, provers) changing the
+--          cost clears the flag (the change is logged); an admin product or unit change that keeps
+--          the cost leaves the flag as it was, so a line is never confirmed without a record;
 --        * the flag cannot be cleared without changing the cost except by
 --          set_purchase_order_item_costs ("confirm"), which names the line in a transaction-local
 --          setting, crx.po_cost_set_item.
@@ -295,10 +296,8 @@ BEGIN
     -- A rep never changes cost; a unit change makes the stored cost questionable.
     NEW.unit_cost := OLD.unit_cost;
     NEW.cost_needs_review := OLD.cost_needs_review OR NEW.unit_size IS DISTINCT FROM OLD.unit_size;
-  ELSIF NEW.unit_cost IS DISTINCT FROM OLD.unit_cost
-     OR NEW.product_id IS DISTINCT FROM OLD.product_id
-     OR NEW.unit_size IS DISTINCT FROM OLD.unit_size THEN
-    -- An admin set the cost, product or unit: the line's cost is the admin's.
+  ELSIF NEW.unit_cost IS DISTINCT FROM OLD.unit_cost THEN
+    -- An admin changed the cost: the line's cost is the admin's, and the change is logged.
     NEW.cost_needs_review := false;
   ELSIF NEW.cost_needs_review IS DISTINCT FROM OLD.cost_needs_review
      AND current_setting('crx.po_cost_set_item', true) IS DISTINCT FROM NEW.id::text THEN
@@ -603,6 +602,11 @@ BEGIN
     IF jsonb_typeof(v_item) IS DISTINCT FROM 'object'
        OR jsonb_typeof(v_item->'unit_cost_cents') IS DISTINCT FROM 'number' THEN
       RAISE EXCEPTION 'PO_UNIT_COST_REQUIRED';
+    END IF;
+    -- An integer: 10.5 cents is refused by name, never cast or rounded.
+    IF (v_item->>'unit_cost_cents')::numeric IS DISTINCT FROM trunc((v_item->>'unit_cost_cents')::numeric) THEN
+      RAISE EXCEPTION 'PO_UNIT_COST_FRACTIONAL_CENT: unit cost must resolve to whole cents'
+        USING ERRCODE = '22003';
     END IF;
     v_item_id := public._cost_step2_try_uuid(v_item->>'id');
     -- Whole cents, not negative (the PO writer's own parser); cents only, never dollars.

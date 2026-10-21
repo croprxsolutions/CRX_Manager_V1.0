@@ -818,6 +818,28 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t11) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused changed-price approval left an invoice behind';
   END IF;
+  --  a3. The product's inventory unit changes from gallons to ounces while the window is open
+  --      (128 times the billed quantity and cost): refused the same way, then restored.
+  DECLARE
+    v_old_unit text;
+  BEGIN
+    SELECT inventory_unit INTO v_old_unit FROM public.products WHERE id = v_p_full;
+    UPDATE public.products SET inventory_unit = 'OZ' WHERE id = v_p_full;
+    BEGIN
+      v_res := public.create_invoice_from_blend_ticket(v_t11, v_admin, 'e2e-btp-invoice-11u-' || v_suffix, 'package price', v_detail->'zero_lines');
+      RAISE EXCEPTION 'SMOKE_FAIL: a grower-share approval billed after the product unit changed: %', v_res;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong refusal for a changed product unit: %', v_err;
+      END IF;
+    END;
+    UPDATE public.products SET inventory_unit = v_old_unit WHERE id = v_p_full;
+  END;
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t11) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused changed-unit approval left an invoice behind';
+  END IF;
   --  b. Approved, it bills the $25.00/acre share and the chemical at $0, and records the approval.
   BEGIN
     v_res := public.create_invoice_from_blend_ticket(v_t11, v_admin, 'e2e-btp-invoice-11b-' || v_suffix, 'package price', v_detail->'zero_lines');

@@ -53,9 +53,13 @@
 --  10. Each approved line is bound to its kind and cost as well as its line and product: an
 --      admin's detail lists each $0 line's cost_cents, the screen sends the lines back as shown,
 --      and a change in cost or in why a line is $0 is refused as stale. A non-admin's detail
---      still carries no cost. Each line also carries a 'basis' (md5 of its rate per acre, its
---      rate unit and every field's acres and per-acre price), so a change to the billed quantity
---      or the grower-share charge while the window is open is refused as stale too.
+--      still carries no cost. Each line also carries a 'basis' (md5 of its rate per acre and rate
+--      unit, the product's rate unit, inventory unit, unit size and form, and every field's acres
+--      and per-acre price), so a change to the billed quantity or the grower-share charge while
+--      the window is open is refused as stale too.
+--  11. The invoice is dated with the Chicago business day ((now() AT TIME ZONE 'America/Chicago')
+--      ::date) instead of CURRENT_DATE (the session's UTC date), so an evening invoice is not
+--      dated tomorrow.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -498,9 +502,11 @@ BEGIN
            'cost_cents', z.cost_cents,
            'kind', CASE WHEN z.quoted_zero AND z.in_grower_share THEN 'quoted_zero_and_grower_share'
                         WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END,
-           -- What sets this line's billed quantity and the grower-share charge: its rate, and every
-           -- field's acres and per-acre price. The approval must send it back unchanged.
-           'basis', md5(concat_ws('|', z.rate_per_acre::text, z.rate_per_acre_unit,
+           -- What sets this line's billed quantity and the grower-share charge: its rate and rate
+           -- unit, the product's units and form (the quantity conversion), and every field's acres
+           -- and per-acre price. The approval must send it back unchanged.
+           'basis', md5(format('%L|%L|%L|%L|%L|%L|%L', z.rate_per_acre, z.rate_per_acre_unit,
+                      z.p_rate_unit, z.p_inventory_unit, z.p_unit_size, z.p_product_form,
                       (SELECT string_agg(r.value::text, ',' ORDER BY r.value::text)
                          FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)))))
          ORDER BY z.sequence_order, z.id)
@@ -514,6 +520,8 @@ BEGIN
                           WHERE (r.value->>'price_override_cents') IS NOT NULL
                             AND (r.value->>'share_acres')::numeric > 0) AS in_grower_share
             FROM (SELECT btp.id, btp.product_id, btp.sequence_order, btp.rate_per_acre, btp.rate_per_acre_unit,
+                         p.rate_unit AS p_rate_unit, p.inventory_unit AS p_inventory_unit,
+                         p.unit_size AS p_unit_size, p.product_form AS p_product_form,
                          COALESCE(p.product_name, btp.product_name) AS product_name,
                          ROUND(p.current_cost * 100)::bigint AS cost_cents,
                          CASE WHEN v_quote_section_id IS NULL THEN NULL
@@ -608,7 +616,7 @@ BEGIN
       COALESCE(v_ticket.season, current_season()),
       v_invoice_number, v_ticket.salesman_id, p_created_by,
       0, 0,
-      CURRENT_DATE, v_invoice_group_id, v_ticket.application_service_id
+      (now() AT TIME ZONE 'America/Chicago')::date, v_invoice_group_id, v_ticket.application_service_id
     ) RETURNING id INTO v_invoice_id;
 
     v_invoice_ids := array_append(v_invoice_ids, v_invoice_id);
@@ -916,7 +924,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'fb2ac2920c82b49581d3418b863ade7c'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'ec63e96ea60904b4ce21432cd696151c'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

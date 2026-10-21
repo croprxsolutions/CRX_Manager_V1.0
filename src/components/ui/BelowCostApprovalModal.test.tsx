@@ -56,4 +56,29 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
     });
     expect(within(dialog).getByText(/billed free of charge/)).toBeInTheDocument();
   });
+
+  it('gives both reasons for a line quoted at $0 on one share and in a grower-share price on another', () => {
+    const dialog = renderWith({
+      ...base,
+      zero_line_product_names: ['Atrazine 4L'],
+      zero_lines: [{ line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'quoted_zero_and_grower_share', cost_cents: 500, basis: 'b1' }],
+    });
+    expect(within(dialog).getByText(/quoted at \$0 on one share and included in a grower-share per-acre price on another/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/^It is included in a grower-share per-acre price/)).not.toBeInTheDocument();
+  });
+
+  it('notes both reasons on a mixed line in the list', () => {
+    const dialog = renderWith({
+      ...base,
+      zero_line_product_names: ['Atrazine 4L', 'Roundup'],
+      zero_lines: [
+        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'quoted_zero_and_grower_share', cost_cents: 500, basis: 'b1' },
+        { line_id: 'l2', product_id: 'p2', product_name: 'Roundup', kind: 'grower_share', cost_cents: 700, basis: 'b2' },
+      ],
+    });
+    expect(within(dialog).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Atrazine 4L (quoted at $0 on one share, included in a grower-share per-acre price on another)',
+      'Roundup (included in a grower-share per-acre price)',
+    ]);
+  });
 });

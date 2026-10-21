@@ -76,9 +76,10 @@
 --   purpose; the mirror alone was the settled exception for the old writers. Live read 2026-10-20:
 --   0 of 194 lines and 0 of 34 purchase orders would fail. Nothing is dropped.
 --
--- NOT HERE: save_purchase_order is not changed. The app stops sending cost for a non-admin; a
---   hand-made request that still carries one is overruled by the trigger (or, on a received line
---   whose cost it would change, refused as before with RECEIVED_PO_LINE_IMMUTABLE). The column
+-- save_purchase_order: section 6 replaces only its thin wrapper (same signature, same advisory
+--   lock), which now strips unit_cost/unit_cost_cents from a non-admin's items before calling the
+--   unchanged _section9_save_purchase_order_serialized. The app also stops sending cost for a
+--   non-admin; any cost that still reaches a line is overruled by the trigger. The column
 --   REVOKE (cost step 3) is separate. Once this is live, step 3 MUST also revoke the purchase-order
 --   cost columns (purchase_order_items.unit_cost/unit_cost_cents, purchase_orders.total_cost/
 --   total_cost_cents): a rep's line now holds the catalog cost, so leaving them readable would let a
@@ -90,7 +91,7 @@
 --   get_admin_cost_fields. Re-read the live ledger before applying; this sorts above it.
 --
 -- caller-analysis: set_purchase_order_item_costs :: NEW; PurchaseOrderDetail.tsx (admin only)
--- caller-analysis: save_purchase_order :: unchanged body; NewPurchaseOrder.tsx, PurchaseOrderDetail.tsx, BulkPOImport.tsx now send no cost for a non-admin
+-- caller-analysis: save_purchase_order :: wrapper strips a non-admin's item cost, inner body unchanged; NewPurchaseOrder.tsx, PurchaseOrderDetail.tsx, BulkPOImport.tsx now send no cost for a non-admin
 --
 -- GRANTS: set_purchase_order_item_costs EXECUTE to authenticated only (revoked from PUBLIC, anon,
 --   service_role); SECURITY DEFINER, search_path = public, pg_temp. The trigger functions are
@@ -108,7 +109,9 @@
 --   ALTER TABLE public.purchase_order_items DROP CONSTRAINT purchase_order_items_unit_cost_whole_cents_chk;
 --   ALTER TABLE public.purchase_orders DROP CONSTRAINT purchase_orders_total_cost_whole_cents_chk;
 --   and re-create capture_purchase_order_item_cost_snapshot from
---   20260722080226_lock_received_po_cost_snapshot_across_product_reassignment.sql (its live body).
+--   20260722080226_lock_received_po_cost_snapshot_across_product_reassignment.sql (its live body),
+--   and CREATE OR REPLACE save_purchase_order from 20260726190515_section9_po_ap_high_remediation.sql
+--   (the wrapper that takes advisory lock 73492009 and passes p_items through unchanged).
 
 SET LOCAL lock_timeout = '10s';
 

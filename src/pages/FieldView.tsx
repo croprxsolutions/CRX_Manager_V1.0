@@ -303,9 +303,16 @@ export default function FieldView() {
         const fieldIds = Array.from(new Set(Array.from(f2j.keys())));
         if (fieldIds.length === 0) { if (!cancelled) setMapFields([]); return; }
         // Every requested field, page by page (one reply stopped at the server's row cap, Goal 4 N8).
-        const { data: geoData, error: geoErr } = await fetchAllRows((from, to) => supabase
-          .rpc('get_fields_geojson_by_ids', { p_field_ids: fieldIds }, { count: 'exact' })
-          .order('field_name').order('id').range(from, to));
+        // A page with neither rows nor an error is a silent denial: reported, not read as "no fields".
+        const { data: geoData, error: geoErr } = await fetchAllRows(async (from, to) => {
+          const page = await supabase
+            .rpc('get_fields_geojson_by_ids', { p_field_ids: fieldIds }, { count: 'exact' })
+            .order('field_name').order('id').range(from, to);
+          if (!page.error && (page.data === null || page.data === undefined)) {
+            return { data: null, error: { message: 'get_fields_geojson_by_ids returned no data' }, count: null };
+          }
+          return page;
+        });
         if (geoErr) throw geoErr;
         const fRows = (assertRpcResult<Array<Field>>(geoData, 'get_fields_geojson_by_ids') || []) as unknown as Field[];
         if (!cancelled) setMapFields(fRows);

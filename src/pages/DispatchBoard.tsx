@@ -459,9 +459,16 @@ export default function DispatchBoard() {
         setAllFields([]);
       } else {
         // Every requested field, page by page (one reply stopped at the server's row cap, Goal 4 N7).
-        const { data: fieldsData, error: fieldsErr } = await fetchAllRows((from, to) => supabase
-          .rpc('get_fields_geojson_by_ids', { p_field_ids: mapFieldIds }, { count: 'exact' })
-          .order('field_name').order('id').range(from, to));
+        // A page with neither rows nor an error is a silent denial: reported, not read as "no fields".
+        const { data: fieldsData, error: fieldsErr } = await fetchAllRows(async (from, to) => {
+          const page = await supabase
+            .rpc('get_fields_geojson_by_ids', { p_field_ids: mapFieldIds }, { count: 'exact' })
+            .order('field_name').order('id').range(from, to);
+          if (!page.error && (page.data === null || page.data === undefined)) {
+            return { data: null, error: { message: 'get_fields_geojson_by_ids returned no data' }, count: null };
+          }
+          return page;
+        });
         if (fieldsErr) {
           Sentry.captureException(fieldsErr, { tags: { source: 'fetch', action: 'dispatch_map_fields' } });
           setAllFields([]);

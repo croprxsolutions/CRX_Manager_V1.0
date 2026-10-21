@@ -35,6 +35,7 @@ import RelatedNotes from '../components/team/RelatedNotes';
 import HelpTip from '../components/ui/HelpTip';
 import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemCostChange, PurchaseOrderCostChangeSource, POStatus, ReceivingRecord, ReceivingCondition, LinkedEntityType } from '../types';
 import { Sentry } from '../lib/sentry';
+import { fetchAllRows } from '../lib/pagedRead';
 import { getIdempotencyMismatchResult } from '../lib/idempotency';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
@@ -399,11 +400,14 @@ export default function PurchaseOrderDetail() {
     const isCurrentFetch = () =>
       costHistoryFetchTokenRef.current === token && routeIdRef.current === startedForId;
 
-    const { data, error } = await supabase
+    // Paged: one request stops at the row cap, which would silently drop the oldest entries.
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('purchase_order_item_cost_changes')
-      .select('id, purchase_order_id, purchase_order_item_id, product_id, old_unit_cost_cents, new_unit_cost_cents, quantity_received_at_change, source, reason, changed_by, created_at')
+      .select('id, purchase_order_id, purchase_order_item_id, product_id, old_unit_cost_cents, new_unit_cost_cents, quantity_received_at_change, source, reason, changed_by, created_at', { count: 'exact' })
       .eq('purchase_order_id', id!)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to));
     if (!isCurrentFetch()) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_po_cost_history' } });
@@ -411,7 +415,7 @@ export default function PurchaseOrderDetail() {
       setCostHistoryStatus('error');
       return;
     }
-    const rows = (data || []) as PurchaseOrderItemCostChange[];
+    const rows = (data ?? []) as PurchaseOrderItemCostChange[];
     const actorIds = [...new Set(rows.map((r) => r.changed_by).filter(Boolean) as string[])];
     const nameById: Record<string, string> = {};
     if (actorIds.length > 0) {

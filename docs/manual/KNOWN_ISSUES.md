@@ -1,11 +1,12 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 05:03 UTC (12:03 AM Central): 1040 rows / 1033 names, no change since the 04:01 UTC read; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+`execute_sql`, 2026-10-21 05:13 UTC (12:13 AM Central): unchanged since the 04:01 UTC read, 1040 rows / 1033 names,
+`max(version)` `20261021040052`, and still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
-PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; Goal 3's `20261021050000` is written, not applied; batch 3b
+PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; batch 3b
 re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
 live at 02:40 UTC); at 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
@@ -274,7 +275,12 @@ draft is zeroed only when it carries no paid, prepay, write-off or credit cents,
 operations; `idempotency_keys` holds zero receipts for the three operations; and a keyless live `void_order` call on a
 random uuid was refused with `IDEMPOTENCY_KEY_REQUIRED`.
 
-**Open follow-up: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (Codex GitHub review on #967,
+**Fix written, NOT applied: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (migration
+`20261021030000_void_order_governed_split_draft_claims`, PR #987; until it is applied the description after "Found by" is current). The fix
+gives `void_order` the same lock, claim, provenance refresh and claim drop as `cancel_order`, reusing the
+`'cancel_order'` claim operation (the guard's exact-cancel shape is the one write the void makes; anyone tightening that
+shape in `guard_split_invoice_provenance_identity` must keep `void_order`'s draft cancel inside it). (Found by the Codex
+GitHub review on #967,
 verified against the live definitions 2026-10-20). A draft made by `create_split_invoices_from_order` has a
 `split_invoice_provenance` row, and `guard_split_invoice_provenance_identity` lets its total change only under a
 same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one through
@@ -697,11 +703,8 @@ leave these open:
   invoice with no order or delivery behind it (the New Invoice page's two types)
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
-  (`DECISION_LOG.md`), and so do credit memos (return credits). **Fix written 2026-10-20, not yet
-  applied:** migration `20261021050000_from_scratch_invoices_charge_lines_only` refuses a product
-  line on such an invoice on every write path and at posting, and the New Invoice page offers typed
-  charge lines (freight, application fee, service, other) instead of products. Open until it is
-  applied live and its PR merges.
+  (`DECISION_LOG.md`), and so do credit memos (return credits). Still open until Goal 3
+  of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or
   inserted between two pages can shift the next page by one, so a single run can miss or repeat a
@@ -990,7 +993,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
       preview (`FinanceChargePreviewModal.tsx`), check allocation (`PaymentAllocation.tsx`, was a
       customer's first 200 open invoices), the Prepayment Manager (was 500 customers, each with an
       unchecked invoice read) and the prepay workspace's Apply step; a customer's aging card and purchase
-      history (`CustomerDetail.tsx`; the aging card now asks for that one customer's row);
+      history (`CustomerDetail.tsx`; the aging card now asks for that one customer's row), and since
+      2026-10-21 the Team Board notes' customer card (`CustomerContextCard.tsx`) asks for its one row too;
     - AP Aging (`AccountsPayable.tsx`) and Field Profitability;
     - integrity checks 5, 6, 9 and 10 (`src/lib/reconciliation.ts`) and the cleanup panel's lists. The
       cleanup panel's over-received PO list had never worked: its filter compared a column with text,

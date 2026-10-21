@@ -1,9 +1,8 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 19:13 UTC (2:13 PM Central): the one change since the 04:01 UTC read is that
-`20261021030000` (PR #987) is now applied (counts in `docs/reference/migration-history.md`); `20261021070000` (PR #995)
-is not applied; at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+`execute_sql`, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
@@ -703,8 +702,9 @@ leave these open:
   invoice with no order or delivery behind it (the New Invoice page's two types)
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
-  (`DECISION_LOG.md`), and so do credit memos (return credits). Still open until Goal 3
-  of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
+  (`DECISION_LOG.md`), and so do credit memos (return credits). **Closed 2026-10-21:** migration
+  `20261021050000` (PR #983, ledger `20261021200526`) enforces it in the database on every write path,
+  and the New Invoice page offers only typed charge lines (freight, application fee, service, other).
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or
   inserted between two pages can shift the next page by one, so a single run can miss or repeat a
@@ -1003,6 +1003,28 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
       their customer, field and applicator pickers (`LogbookReport.tsx`);
     - Notifications: the page lists every notification, and the bell counts unread notifications in the
       database (it counted only the unread among the 20 it loads); a count that cannot be read shows "!".
+  - **Fixed 2026-10-21 (Goal 4, part 2b — lookups and per-record reads):** these also read every row, and
+    a failed read shows an error or stops the action instead of a short result:
+    - a customer's statement (`src/lib/customerStatement.ts`, used by AR Aging and Customer Detail; its
+      rows have no id, so each read is checked with the running balance and the server's last row);
+    - Customer Detail's recent-transactions card (now says "the latest 50 of N"), the interaction
+      history (was the newest 50, so its filters missed older ones) and the open prepay credits;
+    - an order's field allocations, field-billing defaults, pick-list stock and pick-list customer
+      addresses (`OrderDetail.tsx`), and the
+      quantities other deliveries already claim when a scheduled delivery is edited (`DeliveryDetail.tsx`);
+    - a product's inventory ledger, a new cycle count's stock and a count's lines;
+    - the Office Cockpit's lapsed crop-program holds with their quotes and products;
+    - the Jobs list's applicator and customer filters (their dispatch and share reads ignored errors), the
+      Dispatch Board and Field View map boundaries, the license check on a job, the return form's
+      "pick an order", and the credit-limit warning's open-invoice balance;
+    - document scanning (`src/lib/documentOCR.ts`): a PDF over 20 pages is refused with a plain message
+      ("split it into files of 20 pages or fewer"); it used to scan only the first 20 pages and drop the
+      rest without telling anyone.
+    - Open (deferred to part 4, server-side paging): the Jobs list's applicator and customer filters put
+      every matching job id into one `.or('id.in.(...)')` request. Around 1,000 matching jobs that request
+      address grows past about 37 KB and could be refused by the server or a proxy (a failed load then
+      shows "Failed to load jobs", never a short list). On 2026-10-21 there were 2 dispatches and 5 field
+      shares, so it cannot trigger yet.
   - Still capped (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`; the pages
     fixed above are removed):
     - 1000: Customers (shows a banner).
@@ -1018,8 +1040,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Complete current inventory (2026-10-20, after part 1): `docs/audits/2026-10-20-goal4-row-limit-inventory-refresh.md`.
-    Part 2a above fixed its Field Invoices, AR/AP/prepay, integrity, compliance and Notifications items; part 2b
-    (the lookups and per-record reads, and the 20-page document-scan limit) is next.
+    Parts 2a and 2b above fixed its part 2 items; next is part 3 (pickers as search boxes), then part 4
+    (server-side paging, including H36's dashboard queue counts).
   - Jobs and Customers show a banner when capped.
   - Paging is by position, so records changing during a long load are handled four ways:
     - repeats are dropped by `id`, and each page re-reads a 50-row overlap;

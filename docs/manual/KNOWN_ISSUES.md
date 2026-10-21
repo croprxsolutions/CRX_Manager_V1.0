@@ -1,11 +1,11 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+**Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, re-read 2026-10-21 04:58 UTC: unchanged at 1040 rows / 1033 names, `20261021060000` and `20261021061000` (PR #980) not applied; the read before it, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
-PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied (`20261020200000` and `20261020205000`, PR #980, are not; re-read 03:04 UTC); batch 3b
+PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied (`20261021060000` and `20261021061000`, PR #980, are not; re-read 03:04 UTC); batch 3b
 re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
 live at 02:40 UTC); at 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
@@ -121,7 +121,7 @@ cost columns, because reps can still write `job_chemicals` and `invoice_items` r
 until the purchase order project is LIVE. **TOP-PRIORITY FOLLOW-UP (Mason, 2026-10-20, "dig deeper in future"): purchase
 orders as their own project.** Three Sol rounds on PR #965 showed any cost a rep's purchase order line is given (the catalog cost,
 or $0) can be wrong and then locked at receipt (the supplier-cost-basis snapshot trigger, and the writer's received-line rule),
-with no governed way to correct it. **Built 2026-10-20 (Mason chose "Option B"; migration `20261020200000` plus the four purchase
+with no governed way to correct it. **Built 2026-10-20 (Mason chose "Option B"; migration `20261021060000` plus the four purchase
 order screens; NOT APPLIED, PR pending):** a trigger on every purchase-order line makes a signed-in non-admin's line take the
 product's catalog cost and flags it `cost_needs_review` (any cost a rep sends is overruled; an existing line keeps its cost); the
 new admin-only `set_purchase_order_item_costs` sets, corrects or confirms a line's cost, received lines included (a reason is
@@ -130,8 +130,8 @@ the admin-only, append-only `purchase_order_item_cost_changes`; the purchase ord
 `costFields.test.ts` exemption is gone), with a Cost History card, Unconfirmed badges and a "Costs to confirm" filter. Live
 read 2026-10-20: inventory value and margins use the catalog cost, not purchase-order cost, so a correction moves no
 inventory value. **The purchase-order cost columns are locked in the same PR (Mason, 2026-10-20, "Add the lock now",
-after Sol blocked the project on it):** migration `20261020205000` (NOT APPLIED, PR pending; applied right after
-`20261020200000`) carves `purchase_order_items.unit_cost`/`unit_cost_cents` and `purchase_orders.total_cost`/`total_cost_cents`
+after Sol blocked the project on it):** migration `20261021061000` (NOT APPLIED, PR pending; applied right after
+`20261021060000`) carves `purchase_order_items.unit_cost`/`unit_cost_cents` and `purchase_orders.total_cost`/`total_cost_cents`
 out of the Data API grants for every signed-in or signed-out caller, admins included; admins read them through
 `get_admin_cost_fields`. Step 3 no longer needs to cover purchase orders, but `products.current_cost` stays readable until
 step 3, so a rep can still read a product's catalog cost there. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply

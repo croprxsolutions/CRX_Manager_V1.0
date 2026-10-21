@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261020200000 candidate: purchase-order cost is admin-only, with a cost
+ * Full-chain proof for the 20261021060000 candidate: purchase-order cost is admin-only, with a cost
  * history and a governed correction of a received cost (Mason, 2026-10-20, Option B).
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
@@ -42,9 +42,9 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261020200000_po_cost_admin_only_and_corrections.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261021060000_po_cost_admin_only_and_corrections.sql');
 // Applied after the candidate's phases: the purchase-order cost column lock (Mason, 2026-10-20).
-const LOCK = path.join(MIGRATIONS, '20261020205000_po_cost_columns_admin_only.sql');
+const LOCK = path.join(MIGRATIONS, '20261021061000_po_cost_columns_admin_only.sql');
 // The column lists the screens read (src/lib/costFields.ts), proven readable under the lock.
 const COST_FIELDS = readFileSync(path.join(ROOT, 'src', 'lib', 'costFields.ts'), 'utf8');
 const screenColumns = (name) => {
@@ -495,7 +495,7 @@ function preflightRefusesDrift(phase) {
 }
 
 // ------------------------------------------------------------------------------------------------
-// 7. The column lock (20261020205000): no API role reads a cost column, every screen's columns still
+// 7. The column lock (20261021061000): no API role reads a cost column, every screen's columns still
 // read, admins read cost through get_admin_cost_fields, the writers still work.
 function lockPhase() {
   const COLUMN_DENIED = (table) => new RegExp(`^42501\\|permission denied for table ${table}$`);

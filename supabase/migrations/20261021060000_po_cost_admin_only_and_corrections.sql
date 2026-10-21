@@ -369,7 +369,7 @@ DECLARE
   v_inventory_unit text;
   v_phase2_enabled boolean;
 BEGIN
-  -- Governed correction (set_purchase_order_item_costs, 20261020200000): that function names the
+  -- Governed correction (set_purchase_order_item_costs, 20261021060000): that function names the
   -- line in crx.po_cost_set_item and changes ONLY unit_cost. On a received line the conversion
   -- snapshot stays (the unit did not change); the supplier ids no longer describe the cost.
   IF TG_OP = 'UPDATE'

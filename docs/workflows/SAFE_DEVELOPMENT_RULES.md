@@ -185,7 +185,7 @@ it treats `NaN` as equal to `NaN` and greater than every finite value. That make
 column. Mason accepted those two on 2026-08-19 after the guarantee was proven read-only against
 live. That exception covers those two columns only; the mirror form is **not** a second approved
 shape, and anything new or changed uses the predicate above. See the 2026-08-19 entry. Because
-`20261020200000` (purchase-order cost corrections) adds a new writer to both columns, it also gives
+`20261021060000` (purchase-order cost corrections) adds a new writer to both columns, it also gives
 each the finite whole-cent CHECK (`purchase_order_items_unit_cost_whole_cents_chk`,
 `purchase_orders_total_cost_whole_cents_chk`: non-negative, whole cents, below `'Infinity'`, and equal
 to the cents column); the mirror CHECKs stay.

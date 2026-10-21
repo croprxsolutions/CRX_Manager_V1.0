@@ -1,5 +1,5 @@
 -- =====================================================================================================
--- 20261020205000_po_cost_columns_admin_only.sql
+-- 20261021061000_po_cost_columns_admin_only.sql
 --
 -- WHAT: purchase-order cost becomes unreadable through the Data API for everyone but the owner roles.
 --   The four cost columns -- purchase_order_items.unit_cost / unit_cost_cents and
@@ -11,12 +11,12 @@
 --   directly (src/lib/costFields.ts, guarded by costFields.test.ts).
 --
 -- WHY (Mason, 2026-10-20, "Add the lock now"): hiding cost in the screens does not stop a rep from
---   asking the Data API for it, and since 20261020200000 a rep's new line holds the product's catalog
---   cost. Sol (gate) and the Codex PR review both blocked 20261020200000 on this. This is the
+--   asking the Data API for it, and since 20261021060000 a rep's new line holds the product's catalog
+--   cost. Sol (gate) and the Codex PR review both blocked 20261021060000 on this. This is the
 --   purchase-order part of the cost column lock (Goal 1 part 3, step 3); the other tables' lock is
 --   still step 3's.
 --
--- DEPENDS ON 20261020200000 (adds purchase_order_items.cost_needs_review, granted here). Apply it first.
+-- DEPENDS ON 20261021060000 (adds purchase_order_items.cost_needs_review, granted here). Apply it first.
 --
 -- HOW: a table-level grant implies every column and REVOKE (col) cannot subtract from it, so each
 --   privilege is revoked table-wide and re-granted on the explicit non-cost list. Each privilege carries
@@ -54,7 +54,7 @@ BEGIN
        'inventory_units_per_supplier_unit_snapshot,notes,product_id,product_name,product_supplier_link_id,'
        'purchase_order_id,quantity_ordered,quantity_received,supplier_price_observation_id,unit_cost,'
        'unit_cost_cents,unit_size' THEN
-    RAISE EXCEPTION 'PO_COST_LOCK_PREFLIGHT: purchase_order_items columns are not the ones this grant list covers (apply 20261020200000 first, or re-read the columns): %', v_items;
+    RAISE EXCEPTION 'PO_COST_LOCK_PREFLIGHT: purchase_order_items columns are not the ones this grant list covers (apply 20261021060000 first, or re-read the columns): %', v_items;
   END IF;
   IF v_pos IS DISTINCT FROM 'cancel_reason,cancelled_at,cancelled_by,created_at,created_by,expected_delivery_date,'
        'id,notes,po_number,status,submitted_date,total_cost,total_cost_cents,updated_at,vendor' THEN

@@ -76,7 +76,9 @@
 > new one, needs a new review. Nothing blocks the request comment itself (checked 2026-10-21).
 >
 > **Limits, on purpose.** The file test is a word list, so money code in a generically named file
-> (`src/lib/math.ts`) is not caught by the gate; the agent's duty to add the label covers it, and
+> (`src/lib/math.ts`) is not caught by the gate. Mason accepted this gap on 2026-10-21 ("money
+> only, accept the gap"), choosing it over gating every `src/` change after the final Sol review
+> raised it; the agent's duty to add the label covers such a file, and
 > the gate cannot know what Mason said in chat or stop a label being removed. Those stay written
 > rules. The one-retry cap is a written rule too: the gate's refusal repeats the cap, but it does
 > not count comments. The commit read covers the PR's last 100 commits; an older review than that

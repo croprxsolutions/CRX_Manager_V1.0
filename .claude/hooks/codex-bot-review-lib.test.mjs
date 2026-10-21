@@ -626,6 +626,7 @@ const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [], commits = [com
 // Which PRs qualify.
 ok(isMoneyPath("src/lib/invoiceMath.ts") && isMoneyPath("src/pages/Inventory.tsx") && isMoneyPath("src\\lib\\prepayApply.ts"),
   "src money/inventory paths qualify, either slash");
+ok(isMoneyPath("src/lib/chemCalculator.ts"), "the chemical calculator (quantities x unit prices) qualifies (Sol, PR #1009)");
 ok(isMoneyPath("supabase/migrations/20261021000000_anything.sql") && isMoneyPath("supabase/functions/send-email/index.ts"),
   "every migration and Edge Function qualifies");
 ok(!isMoneyPath("docs/reference/invoices.md") && !isMoneyPath(".claude/hooks/x.mjs") && !isMoneyPath("src/lib/pagedRead.ts")

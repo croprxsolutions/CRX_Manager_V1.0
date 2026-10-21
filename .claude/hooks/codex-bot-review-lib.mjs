@@ -402,12 +402,18 @@ export const CODERABBIT_REQUIRED_LABEL = "needs-coderabbit";
 // inventory or cost code. Deliberately broad ("when unsure, it qualifies"):
 // a false positive costs one CodeRabbit request, a miss lands money code with
 // no second reviewer. Anything this list misses is what the label is for.
+// ACCEPTED GAP (Mason, 2026-10-21, "money only, accept the gap", choosing this
+// over gating every src/ change): money logic in a generically named file is
+// not caught here; the agent's duty to add the label is the only cover for it.
 export const MONEY_PATH_WORDS = Object.freeze([
   "invoice", "payment", "prepay", "credit", "money", "cents", "price", "pricing", "cost", "margin",
   "inventory", "stock", "commission", "bill", "purchase", "bulkpo", "refund", "return", "deposit",
   "ledger", "tax", "aging", "statement", "quote", "order", "delivery", "blend", "split", "cash",
   "charge", "discount", "payable", "receivable", "receipt", "financ", "profit", "sales", "booking",
   "cyclecount", "lotrpc", "idempot",
+  // src/lib/chemCalculator.ts turns quantities and per-unit prices into billed
+  // amounts (Sol, PR #1009).
+  "calculator",
 ]);
 
 // Every database migration and Edge Function qualifies: financial and inventory

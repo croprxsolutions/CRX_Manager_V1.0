@@ -203,3 +203,39 @@ describe('money screens past the 1,000-row server cap', () => {
     await waitFor(() => expect(screen.getByText('Unpaid Invoices').parentElement!).toHaveTextContent('$1,010.00'));
   });
 });
+
+// The 6am cron (mark_overdue_invoices) flips past-due posted invoices to 'overdue'; they
+// still owe money and apply_prepay_to_invoice accepts them, so both prepay screens count
+// them. Void and draft invoices stay out.
+describe('prepay screens include overdue invoices', () => {
+  const invoice = (id: string, status: string, cents: number) => ({
+    id, invoice_number: id.toUpperCase(), customer_id: 'c1', status, deleted_at: null,
+    total_amount_cents: cents, balance_cents: cents, due_date: '2026-09-01', created_at: '2026-08-01T12:00:00Z',
+  });
+  const mixedInvoices = () => [
+    invoice('inv-posted', 'posted', 100),
+    invoice('inv-overdue', 'overdue', 200),
+    invoice('inv-void', 'void', 400),
+    invoice('inv-draft', 'draft', 800),
+  ];
+
+  it('the Prepayment Manager counts an overdue invoice as unpaid', async () => {
+    H.tables.customers = [{ id: 'c1', farm_name: 'Big Farm', prepay_balance_cents: 500, is_active: true }];
+    H.tables.invoices = mixedInvoices();
+    renderAt(<PrepaymentManagerPanel />);
+    // Posted $1.00 + overdue $2.00; a posted-only read showed $1.00 and 1 invoice.
+    await waitFor(() => expect(blockOf('Total Unpaid Invoices').parentElement!).toHaveTextContent('$3.00'));
+    expect(blockOf('Total Unpaid Invoices').parentElement!).toHaveTextContent('2 invoice(s)');
+  });
+
+  it("the prepay workspace's Apply step lists an overdue invoice", async () => {
+    H.custom.customers = buildInMemoryQuery([{ id: 'c1', farm_name: 'Big Farm', prepay_balance_cents: 500, is_active: true }]);
+    H.tables.prepay_credits = [{ id: 'pc1', customer_id: 'c1', reference_number: '1001', bucket_label: null, original_amount_cents: 500, balance_cents: 500, created_at: '2026-10-01T12:00:00Z' }];
+    H.tables.invoices = mixedInvoices();
+    renderAt(<PrepayWorkspacePanel />, '/?customer=c1');
+    await waitFor(() => expect(screen.getByText('Unpaid Invoices').parentElement!).toHaveTextContent('$3.00'));
+    expect(screen.getByText(/INV-OVERDUE/)).toBeInTheDocument();
+    expect(screen.queryByText(/INV-VOID/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/INV-DRAFT/)).not.toBeInTheDocument();
+  });
+});

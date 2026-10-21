@@ -65,7 +65,7 @@
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
 > hours old, as is the original full review behind a chain of carries) and today's origin/main: with no model call
 > only when the PR's files and main's new files do not overlap and one side is plain documentation (the Sol-exempt
-> definition, which excludes every rule file); otherwise, including any two code changes in different files, only
+> definition, which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
 > after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 30-minute terms as a full proof, so both merge gates, the

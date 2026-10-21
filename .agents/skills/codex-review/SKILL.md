@@ -417,7 +417,7 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and one side is plain documentation
-  (the `docs/reference/sol-exempt-paths.md` definition, which excludes every rule file) — no model
+  (the `docs/reference/sol-exempt-paths.md` definition, which excludes every rule file, and only regular non-executable files: a symlink, submodule or executable named `*.md` is not documentation) — no model
   call — OR a focused Sol collision check returns CLEAN. Two code or configuration changes always
   get the check, even in different files (Mason, 2026-10-21). The check centres on the interaction,
   starting from the database, guard, CI, dependency and rule files (`CARRY_HOT_PATHS`), and counts

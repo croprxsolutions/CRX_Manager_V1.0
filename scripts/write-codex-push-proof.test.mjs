@@ -14,6 +14,7 @@ import {
   buildCollisionCheckPrompt,
   CARRY_SOURCE_MAX_AGE_MS,
   carrySourceProofProblem,
+  parseRawDiff,
   planCarryForward,
   buildCodexPushProof,
   buildCodexReviewPrompt,
@@ -1045,7 +1046,24 @@ assert.equal(
 // ── carry-forward (Mason, 2026-10-21) ───────────────────────────────────────
 // The decision rules.
 {
-  const plan = (prFiles, mainFiles) => planCarryForward({ prFiles, mainFiles });
+  const reg = (p) => ({ path: p, oldMode: "100644", newMode: "100644" });
+  const plan = (prFiles, mainFiles) => planCarryForward({ prFiles: prFiles.map(reg), mainFiles: mainFiles.map(reg) });
+  // File modes: only a regular, non-executable file is documentation (Sol HIGH, PR #1002).
+  const withMain = (entry) => planCarryForward({ prFiles: [reg("src/a.ts")], mainFiles: [entry] }).mode;
+  assert.equal(withMain({ path: "docs/manual/notes.md", oldMode: "100644", newMode: "120000" }), "collision_check", "carry: a symlink named .md is not documentation");
+  assert.equal(withMain({ path: "docs/manual/notes.md", oldMode: "000000", newMode: "100755" }), "collision_check", "carry: an executable named .md is not documentation");
+  assert.equal(withMain({ path: "docs/manual/notes.md", oldMode: "000000", newMode: "160000" }), "collision_check", "carry: a submodule named .md is not documentation");
+  assert.equal(withMain({ path: "docs/manual/notes.md", oldMode: "000000", newMode: "100644" }), "disjoint", "carry: an added regular .md is documentation");
+  assert.equal(withMain({ path: "docs/manual/notes.md", oldMode: "100644", newMode: "000000" }), "disjoint", "carry: a deleted regular .md is documentation");
+  assert.equal(planCarryForward({ prFiles: ["src/a.ts"], mainFiles: ["docs/manual/notes.md"] }).mode, "collision_check", "carry: a path with no recorded mode fails closed");
+  assert.deepEqual(
+    parseRawDiff(`:100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} M\0docs/x.md\0:000000 120000 ${"0".repeat(40)} ${"c".repeat(40)} A\0link.md\0`),
+    [{ path: "docs/x.md", oldMode: "100644", newMode: "100644" }, { path: "link.md", oldMode: "000000", newMode: "120000" }],
+    "carry: raw diff records parse with their modes",
+  );
+  assert.throws(() => parseRawDiff("garbage\0x\0"), /unexpected/, "carry: a malformed raw diff fails closed");
+  assert.throws(() => parseRawDiff(`:100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} M\0`), /unexpected/, "carry: a record with no path fails closed");
+  assert.deepEqual(parseRawDiff(""), [], "carry: an empty raw diff is no changes");
   // Two code changes never carry freely, even in different files (Sol HIGH, PR #1002).
   assert.equal(plan(["src/a.ts"], ["src/b.ts"]).mode, "collision_check", "carry: separate code files still need the check");
   assert.equal(plan(["src/pages/Quotes.tsx"], ["src/lib/money.ts"]).mode, "collision_check", "carry: a quote screen vs a shared money helper needs the check");

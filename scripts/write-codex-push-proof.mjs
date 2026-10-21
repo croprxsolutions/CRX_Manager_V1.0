@@ -1183,14 +1183,35 @@ export function carrySourceProofProblem(data, { headSha, nowMs = Date.now() } = 
 // PR #1002; Mason, 2026-10-21: "do your recommendation"). The hot paths no
 // longer decide the mode; they point the collision check at the riskiest files.
 // Paths compare case-insensitively: Windows checks them out over each other.
-export function planCarryForward({ prFiles = [], mainFiles = [] } = {}) {
+//
+// Each changed file is { path, oldMode, newMode } (Git modes from `diff --raw`).
+// A file counts as documentation only when Git records it as a regular,
+// non-executable file on both sides (100644, or 000000 where it is added or
+// deleted) — a symlink, submodule or executable named `x.md` is not a document
+// (Sol HIGH, PR #1002; the same rule as the documentation-only exemption). A
+// bare path with no modes is never documentation: fail closed.
+const REGULAR_OR_ABSENT_MODES = new Set(["100644", "000000"]);
+function changedEntry(file) {
+  return typeof file === "string" ? { path: file, oldMode: null, newMode: null } : file;
+}
+function plainDocEntry(entry) {
+  return REGULAR_OR_ABSENT_MODES.has(String(entry.oldMode))
+    && REGULAR_OR_ABSENT_MODES.has(String(entry.newMode))
+    && !(entry.oldMode === "000000" && entry.newMode === "000000")
+    && !isHotPath(entry.path)
+    && solExemptPathProblem(entry.path) === null;
+}
+export function planCarryForward({ prFiles: rawPr = [], mainFiles: rawMain = [] } = {}) {
+  const prEntries = rawPr.map(changedEntry);
+  const mainEntries = rawMain.map(changedEntry);
+  const prFiles = prEntries.map((entry) => entry.path);
+  const mainFiles = mainEntries.map((entry) => entry.path);
   const prSet = new Map(prFiles.map((file) => [String(file).toLowerCase(), file]));
   const overlap = [...new Set(mainFiles.filter((file) => prSet.has(String(file).toLowerCase())))].sort();
   const prHot = prFiles.filter(isHotPath).sort();
   const mainHot = mainFiles.filter(isHotPath).sort();
-  const plainDoc = (file) => !isHotPath(file) && solExemptPathProblem(file) === null;
-  const prOnlyDocs = prFiles.every(plainDoc);
-  const mainOnlyDocs = mainFiles.every(plainDoc);
+  const prOnlyDocs = prEntries.every(plainDocEntry);
+  const mainOnlyDocs = mainEntries.every(plainDocEntry);
   const reasons = [];
   if (overlap.length > 0) reasons.push(`both sides changed ${overlap.length} file(s)`);
   if (!prOnlyDocs && !mainOnlyDocs) reasons.push("both this PR and main's new commits changed code or configuration");
@@ -1280,10 +1301,30 @@ function gitOk(args, cwd) {
   }
 }
 
-function gitNameList(args, cwd) {
-  const result = runTrustedGit(args, { cwd, timeout: 60_000, stdio: ["ignore", "pipe", "ignore"] });
-  if (result.error || result.status !== 0) throw new Error(`git ${args[0]} failed`);
-  return String(result.stdout || "").split("\0").filter(Boolean);
+// Parse `git diff --raw -z --no-renames` into { path, oldMode, newMode }. With
+// -z every record is ":<old> <new> <oldsha> <newsha> <status>" NUL "<path>" NUL;
+// anything else fails closed (throws), so a malformed listing never reads as
+// "only documentation changed".
+export function parseRawDiff(stdout) {
+  const parts = String(stdout || "").split("\0");
+  if (parts[parts.length - 1] === "") parts.pop();
+  if (parts.length % 2 !== 0) throw new Error("unexpected git diff --raw output");
+  const entries = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const match = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ [A-Z]\d*$/.exec(parts[i]);
+    if (!match || !parts[i + 1]) throw new Error("unexpected git diff --raw record");
+    entries.push({ path: parts[i + 1], oldMode: match[1], newMode: match[2] });
+  }
+  return entries;
+}
+
+function gitChangedEntries(fromRef, toRef, cwd) {
+  const result = runTrustedGit(
+    ["diff", "--raw", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", fromRef, toRef],
+    { cwd, timeout: 60_000, stdio: ["ignore", "pipe", "ignore"] },
+  );
+  if (result.error || result.status !== 0) throw new Error("git diff failed");
+  return parseRawDiff(result.stdout);
 }
 
 // Everything the carry needs from Git, checked. Returns { problem } or the facts.
@@ -1331,8 +1372,8 @@ function resolveCarry(root, nowMs) {
   let prFiles;
   let mainFiles;
   try {
-    prFiles = gitNameList(["diff", "--name-only", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", fromBase, fromHead], root);
-    mainFiles = gitNameList(["diff", "--name-only", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", fromBase, baseSha], root);
+    prFiles = gitChangedEntries(fromBase, fromHead, root);
+    mainFiles = gitChangedEntries(fromBase, baseSha, root);
   } catch {
     return { problem: "could not list the changed files" };
   }

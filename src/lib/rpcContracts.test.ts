@@ -3029,11 +3029,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     when 20260813050000 is promoted back to supabase/migrations.
   //   _crx_payout_assert_impl_20260809 / _crx_payout_assert_replay_20260809 — 20260811130000
   //     landed on main and applied live; it drops both helpers before finishing.
-  // Pre-apply window: 20261019235000 (replay-binding batch 3b) recreates this private body with its
-  // keyless per-delivery cancel retargeted. Prune once that migration is applied and the registry
-  // high-water moves past it (it is absent from the generated types, so it leaves the inventory).
-  _batch_cancel_deliveries_replay_impl_20261015:
-    'private batch-cancel body (replay-binding batch 2); the required-key batch_cancel_deliveries wrapper owns idempotency and binds its receipt, and every API-role EXECUTE is revoked',
   _insert_commissions_for_job: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   _insert_commissions_for_order: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   // _guard_delivery_completion_authorized is also parked with Wave A in

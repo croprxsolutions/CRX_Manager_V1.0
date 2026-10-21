@@ -700,6 +700,12 @@ eq(read(fakeGh({ atHead: [...prFiles, { filename: "src/lib/newMoney.ts", status:
 ok(read(fakeGh({ onCall: (args) => ok(!String(args[1]).includes("compare/") || /compare\/b{40}\.\.\./.test(args[1]), "compares against the PR's base") })),
   "the compare is three-dot against the PR's base");
 eq(prOwnChangesUnchanged(null, prFiles), false, "an unreadable compare is never 'unchanged'");
+{
+  const renamed = (from) => [{ filename: "src/lib/newName.ts", status: "renamed", sha: "5".repeat(40), previous_filename: from }];
+  eq(prOwnChangesUnchanged(renamed("src/lib/a.ts"), renamed("src/lib/a.ts")), true, "the same rename is unchanged");
+  eq(prOwnChangesUnchanged(renamed("src/lib/a.ts"), renamed("src/lib/b.ts")), false,
+    "a rename from a different source path is a different change (Codex App P2)");
+}
 // A review AT the head needs no compare at all.
 {
   let calls = 0;

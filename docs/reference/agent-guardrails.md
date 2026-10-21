@@ -45,7 +45,7 @@
 > marking it ready). Both merge gates and the migration landing gate enforce it (`evaluateCodeRabbitRequirement()` in
 > `.claude/hooks/codex-bot-review-lib.mjs`): a PR that changes a migration, an Edge Function, a money-named `src/` file,
 > or carries the `needs-coderabbit` label needs CodeRabbit's own "Review completed" commit status on the head, or on an
-> earlier commit followed only by merges whose PR-own changes (three-dot compare, per-file blob) are identical at both
+> earlier commit followed only by merges whose PR-own changes (three-dot compare, per-file status, blob and rename source) are identical at both
 > commits; each gate reads that status BEFORE the review threads, so a review finishing mid-check cannot pair with a
 > stale thread list; a PR over 100 files is read in full over REST; an unreadable answer, or a lookup that could outlive the
 > hook, refuses (rules: `docs/reference/coderabbit-native-review.md`). The guidance check pins the trigger sentence in `AGENTS.md`

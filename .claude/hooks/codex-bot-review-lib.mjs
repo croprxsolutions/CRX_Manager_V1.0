@@ -514,7 +514,7 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
 export const COMPARE_FILE_CAP = 300; // GitHub's compare API returns at most 300 files
 export function coderabbitCompareArgs(owner, name, base, sha) {
   return ["api", `repos/${owner}/${name}/compare/${base}...${sha}`,
-    "--jq", "[.files[] | {filename, status, sha}]"];
+    "--jq", "[.files[] | {filename, status, sha, previous_filename}]"];
 }
 // Every changed file's path, one per line, over REST (up to GitHub's 3000-file
 // limit for this endpoint).
@@ -529,7 +529,9 @@ export function prOwnChangesUnchanged(atReview, atHead) {
     for (const file of files) {
       const filename = String(file?.filename || "");
       if (!filename) return null;
-      map.set(filename, `${String(file?.status || "")}:${String(file?.sha || "")}`);
+      // A rename's source is part of its identity (Codex App P2 on #1009): the
+      // same destination and blob renamed from a different path is a different change.
+      map.set(filename, `${String(file?.status || "")}:${String(file?.sha || "")}:${String(file?.previous_filename || "")}`);
     }
     return map;
   };

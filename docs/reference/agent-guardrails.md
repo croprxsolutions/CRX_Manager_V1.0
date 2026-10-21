@@ -65,7 +65,7 @@
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
 > hours old) and today's origin/main: with no model call when the PR's files and main's new files do not overlap and
 > neither side touches a hot path (`CARRY_HOT_PATHS`: `supabase/`, `.claude/hooks/`, `.codex/hooks/`,
-> `.github/workflows/`, the hook settings, the proof-writing scripts, `package.json` and its lockfile; a chain of carries
+> `.github/`, the hook settings, the proof-writing scripts, `package.json` and its lockfile; a chain of carries
 > expires 24 hours after its original full review) against non-documentation changes on the other
 > side, otherwise only after a focused Sol collision check returns CLEAN. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 30-minute terms as a full proof, so both merge gates, the

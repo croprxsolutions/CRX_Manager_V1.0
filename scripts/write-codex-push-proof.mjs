@@ -1102,7 +1102,7 @@ export const CARRY_HOT_PATHS = Object.freeze([
   "supabase/",
   ".claude/hooks/",
   ".codex/hooks/",
-  ".github/workflows/",
+  ".github/",
   ".claude/settings.json",
   ".codex/hooks.json",
   "scripts/write-codex-push-proof.mjs",
@@ -1140,7 +1140,10 @@ export function carrySourceProofProblem(data, { headSha, nowMs = Date.now() } = 
   // review at the root of the chain, or chained carries would never expire.
   if (data.codex_ran !== true) {
     const rootT = Date.parse(data.carry?.root_review?.timestamp || "");
-    if (!Number.isFinite(rootT)) return "the carried proof does not record its original full review";
+    const root = data.carry?.root_review;
+    if (!Number.isFinite(rootT) || !CARRY_SHA_RE.test(String(root?.head_sha || "")) || !CARRY_SHA_RE.test(String(root?.base_sha || ""))) {
+      return "the carried proof does not record its original full review";
+    }
     const rootAge = nowMs - rootT;
     if (rootAge < 0 || rootAge > CARRY_SOURCE_MAX_AGE_MS) return "the original full Sol review is older than 24 hours";
   }
@@ -1217,7 +1220,7 @@ export function buildCollisionCheckPrompt() {
     "Inspect only this packet. Do not traverse outside this directory. Do NOT modify anything,",
     "push, deploy, or run any write/network command — this is a read-only check.",
     "",
-    "Decide ONLY whether the COMBINATION is broken: does anything in the branch's changes conflict",
+    "Your main question is whether the COMBINATION is broken: does anything in the branch's changes conflict",
     "with, contradict, duplicate, or silently depend on something MAIN_DELTA.patch changed? Examples:",
     "renamed or removed functions, columns, status values or RPC signatures; two migrations changing",
     "the same table, function or policy in an order that breaks one of them; money, idempotency or",

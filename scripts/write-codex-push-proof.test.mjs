@@ -1063,6 +1063,7 @@ assert.equal(
   assert.equal(plan(["src/a.ts"], [".claude/settings.json"]).mode, "collision_check", "carry: a main hook-wiring change needs the check");
   assert.equal(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).mode, "disjoint", "carry: an ordinary script is not hot");
   assert.equal(plan(["src/a.ts"], ["package.json"]).mode, "collision_check", "carry: a main dependency change needs the check");
+  assert.equal(plan(["src/a.ts"], [".github/actions/setup/action.yml"]).mode, "collision_check", "carry: a main local-action change needs the check");
   assert.equal(plan(["src/a.ts"], ["package-lock.json"]).mode, "collision_check", "carry: a main lockfile change needs the check");
   assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs.bak"]).mode, "disjoint", "carry: exact hot files match exactly");
 }
@@ -1114,6 +1115,11 @@ function collisionPromptSkipsWork(prompt) {
     carrySourceProofProblem({ ...carried, carry: { ...carried.carry, root_review: undefined } }, { headSha: "4".repeat(40), nowMs }),
     "carry: a carried source that does not record its full review is refused",
   );
+  assert.ok(
+    carrySourceProofProblem({ ...carried, carry: { ...carried.carry, root_review: { ...carried.carry.root_review, head_sha: "x" } } }, { headSha: "4".repeat(40), nowMs }),
+    "carry: a carried source whose full-review record names no real head is refused",
+  );
+  assert.equal(/Decide ONLY/i.test(buildCollisionCheckPrompt()), false, "carry: the collision prompt does not narrow the reviewer to ONLY the interaction");
   assert.ok(
     carrySourceProofProblem({ ...carried, carry: { ...carried.carry, mode: "trust-me" } }, { headSha: "4".repeat(40), nowMs }),
     "carry: a carried source with an unknown mode is refused",

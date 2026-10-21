@@ -528,10 +528,13 @@ export function coderabbitCompareArgs(owner, name, base, sha) {
   return ["api", `repos/${owner}/${name}/compare/${base}...${sha}`,
     "--jq", "[.files[] | {filename, status, sha, previous_filename}]"];
 }
-// Every changed file's path, one per line, over REST (up to GitHub's 3000-file
-// limit for this endpoint).
+// Every changed file, one per line as "path<TAB>previous path" (empty unless
+// renamed), over REST (up to GitHub's 3000-file limit for this endpoint). GraphQL
+// does not report a rename's source, and a money file renamed to a generic name
+// is still a money change (Sol, PR #1009).
 export function coderabbitFileListArgs(owner, name, number) {
-  return ["api", `repos/${owner}/${name}/pulls/${number}/files?per_page=100`, "--paginate", "--jq", ".[].filename"];
+  return ["api", `repos/${owner}/${name}/pulls/${number}/files?per_page=100`, "--paginate",
+    "--jq", ".[] | [.filename, (.previous_filename // \"\")] | @tsv"];
 }
 
 export function prOwnChangesUnchanged(atReview, atHead) {
@@ -573,14 +576,27 @@ export function readCodeRabbitRequirement(runGh, { owner, name, number, deadline
     throw new Error("GitHub returned errors with the CodeRabbit requirement read");
   }
   const pullRequest = answer?.data?.repository?.pullRequest;
-  // GraphQL returns at most 100 files. For a bigger PR, read the full list over
-  // REST (paginated) so a large non-money PR is not refused for a cut-short list
-  // (Luna round 6). If the count still does not match, it stays incomplete and
-  // the PR qualifies (fail closed).
+  // Always read the file list over REST as well: it is complete past GraphQL's
+  // 100 (Luna round 6) and it names each rename's SOURCE, so a money file renamed
+  // to a generic path still qualifies (Sol, PR #1009). Both paths of a rename are
+  // classified. If the REST count does not match GitHub's total, the GraphQL list
+  // stays and an incomplete one makes the PR qualify (fail closed).
   const fileTotal = pullRequest?.files?.totalCount;
-  if (Number.isInteger(fileTotal) && Array.isArray(pullRequest?.files?.nodes) && fileTotal > pullRequest.files.nodes.length) {
-    const names = String(call(coderabbitFileListArgs(owner, name, number))).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    if (names.length === fileTotal) pullRequest.files.nodes = names.map((path) => ({ path }));
+  if (Number.isInteger(fileTotal) && Array.isArray(pullRequest?.files?.nodes)) {
+    const rows = String(call(coderabbitFileListArgs(owner, name, number))).split(/\r?\n/).filter((line) => line.trim());
+    if (rows.length === fileTotal) {
+      const paths = [];
+      for (const row of rows) {
+        const [current, previous] = row.split("\t");
+        paths.push(String(current || "").trim());
+        if (String(previous || "").trim()) paths.push(String(previous).trim());
+      }
+      pullRequest.files.nodes = paths.map((path) => ({ path }));
+    } else {
+      // A REST list that disagrees with the total cannot prove anything.
+      pullRequest.files.nodes = [];
+      pullRequest.files.totalCount = Math.max(fileTotal, 1);
+    }
   }
   const verdict = evaluateCodeRabbitRequirement(pullRequest);
   if (verdict.status !== "reviewed" || verdict.reviewedOid === verdict.headOid) return verdict;

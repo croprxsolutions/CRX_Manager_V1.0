@@ -1612,6 +1612,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      // The REST file list the requirement read always makes (rename sources).
+      if (args[0] === "api" && String(args[1]).includes("/files?per_page")) {
+        assert.ok(String(args[1]).startsWith(`repos/{owner}/{repo}/pulls/${pr.number ?? 900}/files`));
+        return `supabase/migrations/${MIG}.sql\t\n`;
+      }
       if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /status \{ contexts/.test(String(a)))) {
         if (crError) throw crError;
         assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));

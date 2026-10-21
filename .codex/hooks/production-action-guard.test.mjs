@@ -76,6 +76,11 @@ function withThreadDefault(runGh) {
       } catch { /* not requirement data — fall through to the default */ }
       return requirementJson({ head: threadHead });
     }
+    // The REST file list the requirement read always makes (rename sources):
+    // default to the default requirement answer's one non-money file.
+    if (Array.isArray(args) && args.some((a) => String(a).includes("/files?per_page"))) {
+      return /^[\[{]/.test(String(out).trim()) ? "docs/readme.md\t\n" : out;
+    }
     return out;
   };
 }
@@ -428,10 +433,14 @@ try {
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
   // Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21).
   // Same merge-ready, Sol-proven PR; only the requirement answer changes.
-  const withRequirement = (answer) => (args) => (
-    Array.isArray(args) && args[0] === "api" && args.some((a) => /status \{ contexts/.test(String(a)))
-      ? (typeof answer === "function" ? answer() : answer)
-      : ordinaryPrJson);
+  const withRequirement = (answer) => (args) => {
+    if (Array.isArray(args) && args[0] === "api" && args.some((a) => /status \{ contexts/.test(String(a)))) {
+      return typeof answer === "function" ? answer() : answer;
+    }
+    // The REST file list (rename sources): the money file these fixtures change.
+    if (Array.isArray(args) && args.some((a) => String(a).includes("/files?per_page"))) return "src/lib/invoiceMath.ts\t\n";
+    return ordinaryPrJson;
+  };
   const moneyMerge = (answer) => evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: withRequirement(answer),

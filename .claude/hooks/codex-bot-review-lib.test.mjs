@@ -698,6 +698,7 @@ const fakeGh = ({ atReview = prFiles, atHead = prFiles, onCall = () => {} } = {}
   onCall(args);
   const target = String(args[1] || "");
   if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: walkFacts } } });
+  if (target.includes("/files?per_page")) return "src/lib/invoiceMath.ts\t\n";
   if (target.endsWith(`...${OLD}`)) return JSON.stringify(atReview);
   if (target.endsWith(`...${HEAD}`)) return JSON.stringify(atHead);
   throw new Error(`unexpected gh ${args.join(" ")}`);
@@ -726,9 +727,27 @@ eq(prOwnChangesUnchanged(null, prFiles), false, "an unreadable compare is never 
 // A review AT the head needs no compare at all.
 {
   let calls = 0;
-  const headGh = (args) => { calls += 1; if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: { ...facts(), baseRefOid: BASE40 } } } }); throw new Error("no compare expected"); };
+  const headGh = (args) => {
+    calls += 1;
+    if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: { ...facts(), baseRefOid: BASE40 } } } });
+    if (String(args[1]).includes("/files?per_page")) return "src/lib/invoiceMath.ts\t";
+    throw new Error("no compare expected");
+  };
   eq(read(headGh).status, "reviewed", "a review of the head passes");
-  eq(calls, 1, "…with a single GitHub call");
+  eq(calls, 2, "…with the GraphQL read and the file list only (no compare)");
+}
+// A money file renamed to a generic name and edited still qualifies (Sol, PR #1009):
+// GraphQL reports only the new path; the REST list names the source too.
+{
+  const renameFacts = { ...facts({ files: ["src/lib/math.ts"], commits: [commit(HEAD)] }), baseRefOid: BASE40 };
+  const renameGh = (rows) => (args) => (args[1] === "graphql"
+    ? JSON.stringify({ data: { repository: { pullRequest: structuredClone(renameFacts) } } })
+    : rows);
+  eq(read(renameGh("src/lib/math.ts\tsrc/lib/invoiceMath.ts\n")).status, "missing",
+    "invoiceMath.ts renamed to math.ts qualifies through its source path");
+  eq(read(renameGh("src/lib/math.ts\t\n")).status, "not-required", "CONTROL: the same generic file with no money source does not");
+  eq(read(renameGh("src/lib/math.ts\t\nsrc/lib/other.ts\t\n")).status, "missing",
+    "a REST list whose count disagrees with GitHub's total cannot prove the PR exempt");
 }
 // A PR with more than 100 files: the full list is read over REST (Luna round 6).
 {

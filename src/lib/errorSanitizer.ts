@@ -42,6 +42,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Keep the reason to 500 characters'],
   [/^PO_CANCELLED\b/i,
    'This purchase order is cancelled, so its cost cannot change'],
+  [/^PO_COST_BELOW_BILLED\b/i,
+   'This would put the purchase order more than 5% below its vendor bills. Void or adjust the bill first'],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,

@@ -389,6 +389,18 @@ const SCENARIOS = [
     ['no lines', U.ADMIN, setCosts(U.ADMIN, q(PO2), [], 'fix', 'k8'), MISSING_FN, /^P0001\|PO_ITEMS_REQUIRED$/],
     ['reason over 500 characters', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }], 'x'.repeat(501), 'k9'), MISSING_FN, /^P0001\|PO_COST_REASON_TOO_LONG: /],
   ] },
+  { name: '3d. the vendor-bill control', steps: [
+    ['a $175.00 active vendor bill on PO 2 (fixture)', 'owner', { stmt: `SET LOCAL session_replication_role = replica;
+        INSERT INTO public.vendors (id, name) VALUES ('${id('301')}', '[PROVER] bill vendor');
+        INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents)
+          VALUES ('${id('301')}', '${PO2}', 'PROVER-BILL-1', CURRENT_DATE, CURRENT_DATE + 30, 17500, 17500);
+        SET LOCAL session_replication_role = origin; v := 'billed';` }, 'ok|billed', 'same'],
+    ['lowering the total below the bill by more than 5 percent is refused', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 1000 }], null, 'k-bill1'), MISSING_FN, /^22023\|PO_COST_BELOW_BILLED: /],
+    ['stored: unchanged', 'owner', `${LINE(q(POI3))} || '|' || ${TOTAL(q(PO2))}`, 'ok|4:2000:-|17500', 'ok|4:2000:false|17500'],
+    ['lowering to within 5 percent of the bill is allowed', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 1900 }], null, 'k-bill2'), MISSING_FN, 'ok|1:0'],
+    ['raising the total is allowed', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 2500 }], null, 'k-bill3'), MISSING_FN, 'ok|1:0'],
+    ['stored: after both', 'owner', `${LINE(q(POI3))} || '|' || ${TOTAL(q(PO2))}`, 'ok|4:2000:-|17500', 'ok|4:2500:false|19500'],
+  ] },
   { name: '4. the cost history table', steps: [
     ['admin writes one row', U.ADMIN, setCosts(U.ADMIN, q(PO2), [{ id: POI3, unit_cost_cents: 2100 }], null, 'k10'), MISSING_FN, 'ok|1:0'],
     ['rep reads it', U.REP, '(SELECT count(*) FROM public.purchase_order_item_cost_changes)', NO_TABLE, 'ok|0'],

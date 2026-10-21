@@ -539,6 +539,9 @@ DECLARE
   v_changed integer := 0;
   v_confirmed integer := 0;
   v_result jsonb;
+  v_old_total bigint;
+  v_new_total bigint;
+  v_billed bigint;
 BEGIN
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: set_purchase_order_item_costs requires p_idempotency_key'
@@ -591,7 +594,7 @@ BEGIN
   -- correction never deadlocks with them.
   PERFORM 1 FROM public.purchase_order_items poi
    WHERE poi.purchase_order_id = p_po_id ORDER BY poi.id FOR UPDATE;
-  SELECT status, po_number INTO v_status, v_po_number
+  SELECT status, po_number, total_cost_cents INTO v_status, v_po_number, v_old_total
     FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Purchase order not found: %', p_po_id;
@@ -677,7 +680,20 @@ BEGIN
                FROM public.purchase_order_items poi
               WHERE poi.purchase_order_id = po.id), 0)::numeric / 100.0,
            updated_at = now()
-     WHERE po.id = p_po_id;
+     WHERE po.id = p_po_id
+    RETURNING total_cost_cents INTO v_new_total;
+
+    -- The vendor-bill control (bills over 105% of the PO total need a confirmed reason) runs when a
+    -- bill is created; a correction that LOWERS the total must not create that overage silently.
+    -- The PO row lock above serializes this with bill creation, which locks the PO too (Sol, 2026-10-21).
+    SELECT COALESCE(SUM(vb.total_cents), 0)::bigint INTO v_billed
+      FROM public.vendor_bills vb
+     WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
+    IF v_new_total < v_old_total AND v_billed > 0 AND v_billed * 100 > v_new_total * 105 THEN
+      RAISE EXCEPTION 'PO_COST_BELOW_BILLED: this correction would leave the active vendor bills more than 5%% over the purchase order total; void or adjust the bill first'
+        USING ERRCODE = '22023',
+              DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'active_billed_cents', v_billed)::text;
+    END IF;
   END IF;
 
   IF v_changed > 0 OR v_confirmed > 0 THEN

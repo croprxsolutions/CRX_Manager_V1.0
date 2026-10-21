@@ -2018,6 +2018,7 @@ export default function OrderDetail() {
                       setNewShareCustomerId(c?.id ?? '');
                       setNewShareCustomerName(c?.farm_name ?? '');
                     }}
+                    excludeIds={shares.map((s) => s.customer_id)}
                     placeholder="Search customer..."
                     ariaLabel="Bill split customer"
                   />

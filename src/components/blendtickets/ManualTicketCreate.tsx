@@ -302,7 +302,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         .range(from, to));
       if (prodError) {
         Sentry.captureException(new Error(String(prodError.message)), { extra: { context: 'Failed to load products' } });
-        setError('Failed to load Products. Retry before creating this ticket.');
+        setError('Failed to load Products. Close this window and open it again to retry.');
         // Never keep a previous or partial catalog; products and saving stay blocked.
         setAllProducts([]);
         setCatalogLoadFailed(true);
@@ -420,7 +420,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
     }
 
     if (catalogLoadFailed) {
-      setError('Failed to load Products. Retry before creating this ticket.');
+      setError('Failed to load Products. Close this window and open it again to retry.');
       return;
     }
 

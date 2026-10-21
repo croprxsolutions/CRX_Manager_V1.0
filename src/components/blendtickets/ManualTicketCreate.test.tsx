@@ -489,7 +489,7 @@ describe('ManualTicketCreate retry-safe atomic creation', () => {
     ));
 
     render(<ManualTicketCreate {...defaultProps} />);
-    expect(await screen.findByText('Failed to load Products. Retry before creating this ticket.'))
+    expect(await screen.findByText('Failed to load Products. Close this window and open it again to retry.'))
       .toBeInTheDocument();
     expect(screen.getByRole('button', { name: /add product/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /create ticket/i })).toBeDisabled();

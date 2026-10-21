@@ -1,7 +1,9 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 05:13 UTC (12:13 AM Central): unchanged since the 04:01 UTC read, 1040 rows / 1033 names,
+`execute_sql`, 2026-10-21 19:42 UTC (2:42 PM Central): 1041 rows / 1034 names, `max(version)` `20261021191058` =
+`20261021030000_void_order_governed_split_draft_claims` (PR #987); the pending candidate
+`20261021150000_split_invoice_cross_customer_lineage` is not applied. At 05:13 UTC (12:13 AM Central): unchanged since the 04:01 UTC read, 1040 rows / 1033 names,
 `max(version)` `20261021040052`, and still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
@@ -127,6 +129,18 @@ needs a governed way to correct, or at least track, a received line's cost, then
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
+
+## FIXED 2026-10-21 (migration `20261021150000`, pending apply) — split billing could not bill a field owner who is not the order's customer
+
+`create_split_invoices_from_order` bills each field owner its share of a field-allocated order, but
+`guard_invoice_terminal_order` (since `20260721014858`) refused any order invoice whose customer
+differs from the order's (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), split drafts included, so a split
+onto another customer's field rolled back. Live, read-only 2026-10-21: 0 field-allocated orders and 0
+split invoices, so nobody hit it. `20261021150000` lets a governed split invoice name such an owner,
+only inside the split call's creation claim for a customer the order's field split resolves to, and
+afterwards only under its `split_invoice_provenance` row. Found while building `20261021120000`
+(PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006 required this
+first. Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs`.
 
 ## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
 

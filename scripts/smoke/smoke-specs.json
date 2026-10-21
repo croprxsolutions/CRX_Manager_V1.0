@@ -1080,6 +1080,21 @@
         "lifecycle"
       ]
     },
+    "split_invoice_cross_customer_lineage": {
+      "chain": "smoke-split-invoice-cross-customer-lineage.sql",
+      "container_only": true,
+      "container_prover": "prove-split-invoice-cross-customer-lineage-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs, never through run-smoke.mjs against the live database: the chain creates and posts invoices, which draw customer-visible invoice numbers from non-transactional sequences that a rollback does not return. 20261021150000: guard_invoice_terminal_order lets a governed split invoice name a field owner other than the order's customer, and nothing else. create_split_invoices_from_order on an order for A whose first line is on a field billed 50/50 to A and B and whose second line is on C's field creates three governed drafts (A 10.00, B 10.00, C 20.00, one group, provenance each), replays exactly, and post_invoice_group posts all three. Refused with INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID: a plain invoice for B on A's unsplit order; a grouped invoice for D (owning no field of the split) inside a hand-made creation claim on the split order; a grouped invoice for B inside a hand-made claim on A's unsplit order; re-pointing A's ordinary invoice to B; re-pointing a posted split invoice (or SPLIT_INVOICE_PROVENANCE_IMMUTABLE). Fail-first against the pre-fix guard. Uses the earliest active admin; prices its own [E2E] product through the governed pricing RPCs; terminal rollback.",
+      "covers": [
+        "guard_invoice_terminal_order",
+        "create_split_invoices_from_order",
+        "post_invoice_group"
+      ],
+      "area": [
+        "billing",
+        "lifecycle"
+      ]
+    },
     "unpost_invoice_group": {
       "chain": "smoke-unpost-invoice-group.sql",
       "description": "Field-app remediation Wave 2a FIX 4 (REQUIRES 20260629170000): ALL-OR-NOTHING split-group unpost. Proves through the REAL unpost_invoice_group: HAPPY (a posted 2-member split group unposts in ONE call — both members posted->unposted, posted_by/at cleared, one invoice_unposted audit row per member, one invoice_group_unposted activity row); ALL-OR-NOTHING (a posted group where one member is PAID/money-applied -> the whole call RAISES the money-guard error and NOTHING changes — both still posted, 0 unpost audit rows; no half-unpost reachable); ROLE GATE (an applicator caller -> 'admin or sales role required'); ACTOR GATE (forged p_performed_by -> ACTOR_MISMATCH, no mutation); GRANTS (anon has NO EXECUTE, authenticated does). Self-contained fixtures.",

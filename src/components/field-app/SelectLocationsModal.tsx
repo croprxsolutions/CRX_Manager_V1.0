@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { X, MapPin, Search } from 'lucide-react';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
@@ -38,8 +38,10 @@ export default function SelectLocationsModal({
   const [customerFilterName, setCustomerFilterName] = useState('');
   const [searchText, setSearchText] = useState('');
   const [cropFilter, setCropFilter] = useState('');
+  const loadSeqRef = useRef(0);
 
   const fetchFields = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     // Every active field, page by page: this list feeds the map, the table and the
     // local filters, and one read stops at the server's row cap.
@@ -50,6 +52,8 @@ export default function SelectLocationsModal({
       .order('field_name')
       .order('id')
       .range(from, to));
+    // A slower read from an earlier open must not overwrite this one.
+    if (seq !== loadSeqRef.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', component: 'SelectLocationsModal' } });

@@ -484,6 +484,62 @@ describe('QuoteBuilder', () => {
     await waitFor(() => expect(fieldBox).toHaveValue(''));
   });
 
+  it('clears a saved section field of the original customer when it loads after another customer was picked', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const savedSection = { ...section, field_id: 'field-1' };
+    // The by-id read of the saved section's field is held open until the test releases it.
+    let releaseFieldRead!: (result: { data: unknown; error: unknown }) => void;
+    const fieldRead = new Promise<{ data: unknown; error: unknown }>((resolve) => { releaseFieldRead = resolve; });
+    let fieldReadsById = 0;
+    const fieldsChain = () => {
+      let byId = false;
+      const self: Record<string, unknown> = {};
+      for (const m of ['select', 'eq', 'neq', 'or', 'not', 'order', 'limit', 'range', 'ilike', 'is']) self[m] = () => self;
+      self.in = () => { byId = true; fieldReadsById += 1; return self; };
+      const settle = () => (byId ? fieldRead : Promise.resolve({ data: [], error: null }));
+      self.then = (...args: Parameters<Promise<unknown>['then']>) => settle().then(...args);
+      self.catch = (...args: Parameters<Promise<unknown>['catch']>) => settle().catch(...args);
+      self.finally = (...args: Parameters<Promise<unknown>['finally']>) => settle().finally(...args);
+      return self;
+    };
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [savedSection]
+          : table === 'quote_items'
+            ? [item]
+            : table === 'customers'
+              ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    })));
+
+    renderQuoteBuilder(quote.id);
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(fieldReadsById).toBeGreaterThan(0));
+
+    // While the saved field is still loading, the user picks a different customer.
+    const customerBox = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customerBox, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    expect(customerBox).toHaveValue('Far Field Farm');
+
+    // The saved field then arrives: it belongs to the ORIGINAL customer, so the section drops it.
+    await act(async () => {
+      releaseFieldRead({
+        data: [{ id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 80, measured_acres: null, override_acres: null }],
+        error: null,
+      });
+      await fieldRead;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(fieldBox).toHaveValue('');
+    expect(screen.queryByDisplayValue('Home Quarter')).not.toBeInTheDocument();
+  });
+
   it('clears the product list and blocks new lines when a reload of the products fails', async () => {
     let productsFail = false;
     let failedReads = 0;

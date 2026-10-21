@@ -1378,12 +1378,19 @@ export default function QuoteBuilder() {
         }
         const rows = (data || []) as unknown as FieldOption[];
         if (rows.length > 0) setFields((known) => ({ ...known, ...Object.fromEntries(rows.map((row) => [row.id, row])) }));
+        // The customer may have changed while these were loading: a field that belongs to another
+        // customer is cleared, as a pick would have cleared it.
+        const currentCustomerId = customerIdRef.current;
+        const foreign = new Set(rows.filter((row) => currentCustomerId && row.customer_id !== currentCustomerId).map((row) => row.id));
+        if (foreign.size > 0) {
+          setSections((prev) => prev.map((sec) => (sec.field_id && foreign.has(sec.field_id) ? { ...sec, field_id: null } : sec)));
+        }
         if (rows.length < ids.length) {
           setFieldLoadError('A field on this quote no longer exists. Choose the section\'s field again before saving.');
         }
       });
     return () => { cancelled = true; };
-  }, [unresolvedFieldKey]);
+  }, [unresolvedFieldKey, customerIdRef]);
 
   const handleCustomerChange = (cust: QuoteCustomer | null) => {
     if (!cust) {

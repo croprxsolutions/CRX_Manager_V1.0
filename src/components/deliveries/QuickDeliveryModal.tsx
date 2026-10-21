@@ -77,6 +77,7 @@ export default function QuickDeliveryModal({
   const [productsFailed, setProductsFailed] = useState(false);
   // The catalog is re-read on every open; until it lands nothing may be added or priced from it.
   const [productsLoading, setProductsLoading] = useState(false);
+  const loadSeqRef = useRef(0);
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [items, setItems] = useState<QuickItem[]>([]);
@@ -104,6 +105,7 @@ export default function QuickDeliveryModal({
     setProducts([]);
     setProductsFailed(false);
     setProductsLoading(true);
+    const seq = ++loadSeqRef.current;
     const fetchData = async () => {
       try {
         const [prodResult, driverResult] = await Promise.all([
@@ -120,6 +122,8 @@ export default function QuickDeliveryModal({
           // PR-07 follow-up: driver picker only uses d.id + d.full_name; safe via view.
           supabase.from('profile_public_view').select('id, full_name, role, is_active').in('role', ['driver', 'admin', 'sales_rep']).eq('is_active', true).order('full_name'),
         ]);
+        // A slower load from an earlier open must not overwrite this one.
+        if (seq !== loadSeqRef.current) return;
         // No product list rather than an old or partial one: adding and pricing items
         // stay blocked until the modal is reopened and the list loads.
         setProductsFailed(Boolean(prodResult.error));
@@ -137,6 +141,7 @@ export default function QuickDeliveryModal({
           setSelectedDriver(profile.id);
         }
       } catch (err) {
+        if (seq !== loadSeqRef.current) return;
         setProducts([]);
         setProductsFailed(true);
         setProductsLoading(false);

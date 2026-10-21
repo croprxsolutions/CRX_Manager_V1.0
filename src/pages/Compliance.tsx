@@ -218,7 +218,9 @@ export default function Compliance() {
     setRupFailed(false);
   }, [rupStartDate, rupEndDate, rupComplianceFilter, toast]);
 
+  const fieldListingSeqRef = useRef(0);
   const fetchFieldListings = useCallback(async () => {
+    const seq = ++fieldListingSeqRef.current;
     // Every field, page by page: the counts and the Total Acres card add up this
     // list, and one read stops silently at the server's 1,000-row cap.
     const { data, error } = await fetchAllRows((from, to) => supabase
@@ -228,6 +230,8 @@ export default function Compliance() {
       .order('field_name')
       .order('id')
       .range(from, to));
+    // A slower read from an earlier visit must not overwrite this one.
+    if (seq !== fieldListingSeqRef.current) return;
 
     if (error) {
       toast('error', 'Failed to load fields');

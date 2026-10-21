@@ -52,6 +52,7 @@ import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import { generateIdempotencyKey } from '../lib/idempotency';
 import type { Json } from '../types/supabase';
@@ -457,7 +458,10 @@ export default function DispatchBoard() {
       if (mapFieldIds.length === 0) {
         setAllFields([]);
       } else {
-        const { data: fieldsData, error: fieldsErr } = await supabase.rpc('get_fields_geojson_by_ids', { p_field_ids: mapFieldIds });
+        // Every requested field, page by page (one reply stopped at the server's row cap, Goal 4 N7).
+        const { data: fieldsData, error: fieldsErr } = await fetchAllRows((from, to) => supabase
+          .rpc('get_fields_geojson_by_ids', { p_field_ids: mapFieldIds }, { count: 'exact' })
+          .order('field_name').order('id').range(from, to));
         if (fieldsErr) {
           Sentry.captureException(fieldsErr, { tags: { source: 'fetch', action: 'dispatch_map_fields' } });
           setAllFields([]);

@@ -93,6 +93,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getOfflineStorageErrorMessage, queueAction } from '../lib/offlineQueue';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
+import { fetchAllRows } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import {
@@ -301,7 +302,10 @@ export default function FieldView() {
         if (!cancelled) setFieldToJob(f2j);
         const fieldIds = Array.from(new Set(Array.from(f2j.keys())));
         if (fieldIds.length === 0) { if (!cancelled) setMapFields([]); return; }
-        const { data: geoData, error: geoErr } = await supabase.rpc('get_fields_geojson_by_ids', { p_field_ids: fieldIds });
+        // Every requested field, page by page (one reply stopped at the server's row cap, Goal 4 N8).
+        const { data: geoData, error: geoErr } = await fetchAllRows((from, to) => supabase
+          .rpc('get_fields_geojson_by_ids', { p_field_ids: fieldIds }, { count: 'exact' })
+          .order('field_name').order('id').range(from, to));
         if (geoErr) throw geoErr;
         const fRows = (assertRpcResult<Array<Field>>(geoData, 'get_fields_geojson_by_ids') || []) as unknown as Field[];
         if (!cancelled) setMapFields(fRows);

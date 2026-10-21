@@ -2024,7 +2024,8 @@ export default function PurchaseOrderDetail() {
       </Modal>
 
       {/* Unit cost: set, correct or confirm (admins only) */}
-      <Modal open={costOpen} onClose={() => setCostOpen(false)} title="Unit" accent="Cost">
+      {/* Gated on isAdmin too: a role change mid-session must not leave loaded costs on screen. */}
+      <Modal open={isAdmin && costOpen} onClose={() => setCostOpen(false)} title="Unit" accent="Cost">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
             Unit cost per line, received lines included. This changes only the purchase order&apos;s cost and total:

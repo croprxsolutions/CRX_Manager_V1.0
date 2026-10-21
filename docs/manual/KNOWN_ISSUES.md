@@ -138,7 +138,10 @@ included, so a split onto another customer's field rolls back with that error. A
 ordering customer's own fields works. Live, read-only 2026-10-21 17:10 UTC: 0 orders carry a field
 allocation and 0 split invoices exist, so nobody has hit it. Found while building
 `20261021120000_order_invoice_refuses_field_split` (its container chain bills a field the ordering
-customer owns for this reason). **Fix:** let the lineage guard accept a governed split draft (one
+customer owns for this reason). Once that migration is applied, `create_invoice_from_order` refuses
+such an order too (`ORDER_HAS_FIELD_SPLIT`), so an order split onto another customer's field cannot be
+invoiced from the order at all until this is fixed: refused on purpose, rather than billed entirely to
+the ordering customer as before (Luna on the PR, MED, accepted). **Fix:** let the lineage guard accept a governed split draft (one
 inside its `split_invoice_creation_claims` claim, for a customer the allocation resolves to), or move
 the customer test into the split implementation; prove a two-owner split end to end. Source:
 `guard_invoice_terminal_order()`, `_create_split_invoices_from_order_provenance_impl_20260719`.

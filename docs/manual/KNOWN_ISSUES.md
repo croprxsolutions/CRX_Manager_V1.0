@@ -1,11 +1,12 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-20 (America/Chicago; 2026-10-21 UTC) against the live migration ledger** (read-only
-`execute_sql`, re-read 2026-10-21 04:58 UTC: unchanged at 1040 rows / 1033 names, `20261021140000` and `20261021141000` (PR #980) not applied; the read before it, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+**Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-21 05:13 UTC (12:13 AM Central): unchanged since the 04:01 UTC read, 1040 rows / 1033 names,
+`max(version)` `20261021040052`, and still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
-PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied (`20261021140000` and `20261021141000`, PR #980, are not; re-read 03:04 UTC); batch 3b
+PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; batch 3b
 re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
 live at 02:40 UTC); at 20:55 UTC: 1036 rows / 1029 names; the one change since the 18:35 UTC read is that
 replay-binding batch 3a `20261019200000` (ledger `20261019205246`, PR #954) is now applied, which re-certified the
@@ -118,23 +119,11 @@ step 2 (Mason, 2026-10-20, option 1 "for now"):** the purchase order screens and
 see and enter purchase cost there. Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
 lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
 cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Step 3 must leave the columns the purchase order screens read (product `current_cost`, purchase order and line cost) unlocked
-until the purchase order project is LIVE. **TOP-PRIORITY FOLLOW-UP (Mason, 2026-10-20, "dig deeper in future"): purchase
-orders as their own project.** Three Sol rounds on PR #965 showed any cost a rep's purchase order line is given (the catalog cost,
-or $0) can be wrong and then locked at receipt (the supplier-cost-basis snapshot trigger, and the writer's received-line rule),
-with no governed way to correct it. **Built 2026-10-20 (Mason chose "Option B"; migration `20261021140000` plus the four purchase
-order screens; NOT APPLIED, PR pending):** a trigger on every purchase-order line makes a signed-in non-admin's line take the
-product's catalog cost and flags it `cost_needs_review` (any cost a rep sends is overruled; an existing line keeps its cost); the
-new admin-only `set_purchase_order_item_costs` sets, corrects or confirms a line's cost, received lines included (a reason is
-required for a received line), changing only cost and the PO total, never inventory or catalog cost; every cost change lands in
-the admin-only, append-only `purchase_order_item_cost_changes`; the purchase order screens show cost only to admins (the
-`costFields.test.ts` exemption is gone), with a Cost History card, Unconfirmed badges and a "Costs to confirm" filter. Live
-read 2026-10-20: inventory value and margins use the catalog cost, not purchase-order cost, so a correction moves no
-inventory value. **The purchase-order cost columns are locked in the same PR (Mason, 2026-10-20, "Add the lock now",
-after Sol blocked the project on it):** migration `20261021141000` (NOT APPLIED, PR pending; applied right after
-`20261021140000`) carves `purchase_order_items.unit_cost`/`unit_cost_cents` and `purchase_orders.total_cost`/`total_cost_cents`
-out of the Data API grants for every signed-in or signed-out caller, admins included; admins read them through
-`get_admin_cost_fields`. Step 3 no longer needs to cover purchase orders, but `products.current_cost` stays readable until
-step 3, so a rep can still read a product's catalog cost there. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+until the purchase order project lands (`costFields.test.ts` names those four screens as its only exemption). **TOP-PRIORITY
+FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"): purchase orders as their own project.** Three Sol rounds
+on PR #965 showed any cost a rep's purchase order line is given (the catalog cost, or $0) can be wrong and then locked at receipt
+(the supplier-cost-basis snapshot trigger, and the writer's received-line rule), with no governed way to correct it. The project
+needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
@@ -286,7 +275,12 @@ draft is zeroed only when it carries no paid, prepay, write-off or credit cents,
 operations; `idempotency_keys` holds zero receipts for the three operations; and a keyless live `void_order` call on a
 random uuid was refused with `IDEMPOTENCY_KEY_REQUIRED`.
 
-**Open follow-up: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (Codex GitHub review on #967,
+**Fix written, NOT applied: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (migration
+`20261021030000_void_order_governed_split_draft_claims`, PR #987; until it is applied the description after "Found by" is current). The fix
+gives `void_order` the same lock, claim, provenance refresh and claim drop as `cancel_order`, reusing the
+`'cancel_order'` claim operation (the guard's exact-cancel shape is the one write the void makes; anyone tightening that
+shape in `guard_split_invoice_provenance_identity` must keep `void_order`'s draft cancel inside it). (Found by the Codex
+GitHub review on #967,
 verified against the live definitions 2026-10-20). A draft made by `create_split_invoices_from_order` has a
 `split_invoice_provenance` row, and `guard_split_invoice_provenance_identity` lets its total change only under a
 same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one through

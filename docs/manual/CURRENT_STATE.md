@@ -1,7 +1,8 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-20 (America/Chicago; 2026-10-21 UTC) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`; re-read 2026-10-21 04:58 UTC (11:58 PM Central, 2026-10-20): unchanged at 1040 rows / 1033 names, `20261021140000` and `20261021141000` (purchase-order cost and its column lock, PR #980) not applied; the read before it, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
+**Last verified:** 2026-10-21 (America/Chicago) for the migration ledger only (read-only
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-21 05:13 UTC (12:13 AM Central): unchanged since
+the 04:01 UTC read; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
 `max(version)` `20261021040052` = `20261020210000_blend_ticket_pricing_guards` (Goal 3 blend-ticket pricing, PR #982 merged
 as `948f238ad`), applied 2026-10-21 04:00:52 UTC under the autonomous-landing rule: an order made from a blend ticket
 never prices a product at $0 for a missing tier price, a blend invoice asks staff to pick when the job's quote lists a
@@ -10,7 +11,7 @@ product at two prices, and a $0 quoted line bills $0 only with an admin's below-
 1032 names, `max(version)` `20261021024020` = `20261019235000_bind_delivery_order_void_replay_receipts_batch3b`
 (replay-binding batch 3b, PR #967 head `ed2bd8733`), applied 2026-10-21 02:40:20 UTC on Mason's in-chat owner
 approval: `cancel_delivery`, `void_delivery` and `void_order` now require a retry key and replay a saved result only
-for the same person and the exact same request. Re-read 2026-10-21 03:04 UTC: unchanged; `20261021140000` and `20261021141000` (purchase-order cost and its column lock, PR #980) are not applied. The 2026-10-20 19:41 UTC read before it had 1038 rows / 1031 names,
+for the same person and the exact same request. The 2026-10-20 19:41 UTC read before it had 1038 rows / 1031 names,
 `max(version)` `20261020193610` = `20261019230000_cost_margin_admin_only_screens_step2` (Goal 1 part 3, step 2 of 3: screens read
 cost only through the admin-only `get_admin_cost_fields`, except the four purchase-order screens, and job, field-invoice
 and invoice saves work out a non-admin's cost on the server), applied 2026-10-20 19:36:10 UTC; PR #965 merged the

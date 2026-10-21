@@ -1,6 +1,6 @@
 # Agent Onboarding — How Not to Fail Here
 
-**Last verified: 2026-10-14**
+**Last verified: 2026-10-21**
 **Update triggers: when a new recurring failure class is identified or the guard system changes.**
 
 You are a new coding agent starting your first session in CRX Manager. This file is the front door. It assumes you've already read the short shared contract in `AGENTS.md` and exists to make you behave like a senior engineer on this codebase instead of a junior one, on your very first turn.

@@ -647,6 +647,50 @@ async function races() {
   }
   assert.equal(scalar("SELECT position('FOR SHARE' in prosrc) > 0 FROM pg_proc WHERE oid = 'public._refuse_from_scratch_invoice_product_lines()'::regprocedure;"), 't');
   console.log('[prover] MUTATION: without the FOR SHARE lock the same race leaves a restored from-scratch invoice holding a product line, so the lock is what closes it');
+
+  // Clearing a typed charge's charge_type while the soft-deleted invoice is restored (Codex
+  // connector P2): both orders refuse; with charge_type dropped from the line trigger, both commit.
+  const charge = (n) => `INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, charge_type) VALUES ('${id(n)}', NULL, 'Freight', 1, 2500, 2500, 0, 'freight');`;
+  const untype = (n) => `UPDATE public.invoice_items SET charge_type = NULL WHERE invoice_id = '${id(n)}';`;
+  const untyped = (n) => scalar(`SELECT (SELECT deleted_at IS NULL FROM public.invoices WHERE id = '${id(n)}')::text || ':' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = '${id(n)}' AND charge_type IS NULL);`);
+  psql(`${AS} ${draft('a04')} ${draft('a05')} ${draft('a06')} ${charge('a04')} ${charge('a05')} ${charge('a06')}`);
+  try {
+    first = psqlAsync(`${AS} BEGIN; ${untype('a04')} SELECT pg_sleep(4); COMMIT;`);
+    await sleep(1500);
+    second = await psqlAsync(`${AS} ${restore('a04')}`);
+    firstDone = await first;
+    assert.equal(firstDone.status, 0, `race 3 untype failed:\n${firstDone.out}`);
+    assert.match(second.out, /FROM_SCRATCH_INVOICE_CHARGE_TYPE_REQUIRED/, `race 3 restore was not refused:\n${second.out}`);
+    assert.equal(untyped('a04'), 'false:1');
+
+    first = psqlAsync(`${AS} BEGIN; ${restore('a05')} SELECT pg_sleep(4); COMMIT;`);
+    await sleep(1500);
+    second = await psqlAsync(`${AS} ${untype('a05')}`);
+    firstDone = await first;
+    assert.equal(firstDone.status, 0, `race 4 restore failed:\n${firstDone.out}`);
+    assert.match(second.out, /FROM_SCRATCH_INVOICE_CHARGE_TYPE_REQUIRED/, `race 4 untype was not refused:\n${second.out}`);
+    assert.equal(untyped('a05'), 'true:0');
+    console.log('[prover] RACES: clearing a charge type and a restore in two connections, in both orders, never leave an active from-scratch invoice with an untyped line');
+
+    const TRG = 'CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines\n  AFTER INSERT OR UPDATE OF product_id, invoice_id, charge_type ON public.invoice_items';
+    assert.ok(lf(CANDIDATE).includes(TRG), 'the candidate no longer lists charge_type on the line trigger');
+    psql(`DROP TRIGGER trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
+      CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines AFTER INSERT OR UPDATE OF product_id, invoice_id ON public.invoice_items
+      FOR EACH ROW EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();`);
+    first = psqlAsync(`${AS} BEGIN; ${untype('a06')} SELECT pg_sleep(4); COMMIT;`);
+    await sleep(1500);
+    second = await psqlAsync(`${AS} ${restore('a06')}`);
+    firstDone = await first;
+    assert.equal(firstDone.status, 0);
+    assert.doesNotMatch(second.out, /FROM_SCRATCH_INVOICE_CHARGE_TYPE_REQUIRED/, `MUTATION: without charge_type on the trigger the restore should slip through:\n${second.out}`);
+    assert.equal(untyped('a06'), 'true:1');
+    console.log('[prover] MUTATION: without charge_type on the line trigger the same race leaves a restored from-scratch invoice holding an untyped line, so listing it is what closes it');
+  } finally {
+    psql(`DROP TRIGGER IF EXISTS trg_refuse_from_scratch_invoice_product_lines ON public.invoice_items;
+      CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines AFTER INSERT OR UPDATE OF product_id, invoice_id, charge_type ON public.invoice_items
+      FOR EACH ROW EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();`);
+    cleanup(['a04', 'a05', 'a06']);
+  }
 }
 
 async function main() {

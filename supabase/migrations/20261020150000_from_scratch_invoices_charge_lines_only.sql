@@ -208,8 +208,11 @@ $function$;
 
 REVOKE ALL ON FUNCTION public._refuse_from_scratch_invoice_product_lines() FROM PUBLIC, anon, authenticated, service_role;
 
+-- charge_type is listed too: clearing a line's type on a soft-deleted invoice while another
+-- transaction restores it must take the same invoice lock and recheck, or both commit and leave an
+-- active from-scratch invoice holding an untyped line (Codex connector P2 on PR #983).
 CREATE TRIGGER trg_refuse_from_scratch_invoice_product_lines
-  AFTER INSERT OR UPDATE OF product_id, invoice_id ON public.invoice_items
+  AFTER INSERT OR UPDATE OF product_id, invoice_id, charge_type ON public.invoice_items
   FOR EACH ROW
   EXECUTE FUNCTION public._refuse_from_scratch_invoice_product_lines();
 

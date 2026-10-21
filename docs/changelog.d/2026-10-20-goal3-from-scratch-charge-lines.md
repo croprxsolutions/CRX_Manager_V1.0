@@ -20,3 +20,7 @@
   production schema baseline plus every migration in a throwaway database and checks every refusal
   and every still-allowed case of the Goal 3 done-test, before and after the migration.
 - Not in this change: the quick-delivery improvements (quantities below 1 unit, "completed now").
+- The line trigger also runs when a line's charge type changes, so clearing a type on a deleted
+  invoice while someone restores it cannot leave an active invoice with an untyped line (Codex
+  connector P2 on PR #983; the real-schema proof races it in both orders and shows the gap reopens
+  without the fix).

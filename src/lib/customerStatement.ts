@@ -39,6 +39,12 @@ function sameStatementRow(a: CustomerStatementRow, b: CustomerStatementRow): boo
  * must also end on the server's current last row. A read that fails either
  * check is tried once more, then reported as an error, never as a statement.
  */
+// A reply with neither rows nor an error is the silent-denial shape
+// assertRpcResult guards against. It is returned as this error: the paging
+// helper would read it as "no rows" (an empty statement), and assertRpcResult
+// would throw past this module's error result.
+const NO_DATA = { message: 'get_customer_statement returned no data' };
+
 export async function fetchCustomerStatement(
   customerId: string,
   startDate: string,
@@ -50,11 +56,7 @@ export async function fetchCustomerStatement(
       const page = await supabase
         .rpc('get_customer_statement', args, { count: 'exact' })
         .range(from, to);
-      // A page with neither rows nor an error is a silent denial, which the paging
-      // helper would otherwise read as "no rows" (an empty statement).
-      if (!page.error && (page.data === null || page.data === undefined)) {
-        return { data: null, error: { message: 'get_customer_statement returned no data' }, count: null };
-      }
+      if (!page.error && (page.data === null || page.data === undefined)) return { data: null, error: NO_DATA, count: null };
       return page;
     });
     if (result.error) return { data: null, error: result.error };
@@ -68,6 +70,7 @@ export async function fetchCustomerStatement(
         .rpc('get_customer_statement', args, { count: 'exact' })
         .range(rows.length - 1, rows.length - 1);
       if (tail.error) return { data: null, error: tail.error };
+      if (tail.data === null || tail.data === undefined) return { data: null, error: NO_DATA };
       const tailRows = assertRpcResult<CustomerStatementRow[]>(tail.data, 'get_customer_statement');
       if (tail.count !== rows.length || tailRows.length !== 1 || !sameStatementRow(tailRows[0], rows[rows.length - 1])) continue;
     }

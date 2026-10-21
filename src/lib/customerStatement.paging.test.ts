@@ -104,4 +104,21 @@ describe('fetchCustomerStatement past the 1,000-row server cap (M57)', () => {
     expect(data).toBeNull();
     expect(error?.message).toMatch(/get_customer_statement returned no data/);
   });
+
+  it("an empty answer to the last-row check is returned as an error, not thrown", async () => {
+    H.rows = statement(TOTAL);
+    type Ranged = { range: (from: number, to: number) => unknown };
+    H.rpc = () => {
+      const reply = pagedRpcReply({ data: H.rows, error: null });
+      const range = (reply as Ranged).range;
+      // Only the one-row tail request comes back with neither rows nor an error.
+      reply.range = (from: number, to: number) => (from === to
+        ? (pagedRpcReply({ data: null, error: null }) as Ranged).range(from, to)
+        : range(from, to));
+      return reply;
+    };
+    const { data, error } = await fetchCustomerStatement('c1', '2026-01-01', '2026-12-31');
+    expect(data).toBeNull();
+    expect(error?.message).toMatch(/get_customer_statement returned no data/);
+  });
 });

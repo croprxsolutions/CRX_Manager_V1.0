@@ -35,3 +35,8 @@
   - Luna review round 1: one HIGH (asked for an `is_sales_rep()` pin) refuted — neither private body
     calls it; the role check is the inline `profiles` lookup inside the pinned body, now stated in both
     justifications. The MED (no presence check) and LOW (UTC date) were fixed.
+  - Luna review round 2: HIGH accepted. The field-invoice exception now also pins the inner writer
+    `_save_field_app_invoice_impl_20260714` and the `is_sales_rep()` helper it calls. That writer
+    re-binds the user from `auth.uid()`, refuses a mismatch, requires admin or sales rep, and refuses a
+    non-admin who names another salesperson. The `actor-forgery` predicate was re-run live with the new
+    pin list: still 21 rows, 21 allowlisted.

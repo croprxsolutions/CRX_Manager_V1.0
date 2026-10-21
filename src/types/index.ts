@@ -4145,6 +4145,8 @@ export interface BelowCostZeroLine {
   kind: string | null;
   /** The line's cost per unit in cents (admins only; null when not sent). Sent back as shown. */
   cost_cents: number | null;
+  /** Opaque fingerprint of the line's rate and the fields' acres and per-acre prices; sent back as shown. */
+  basis: string | null;
 }
 
 export interface BelowCostApprovalError {

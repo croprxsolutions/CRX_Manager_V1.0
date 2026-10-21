@@ -12,8 +12,9 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
   positive whole-cent cost on the Price List; otherwise the invoice is refused, as before.) The
   approval window says which lines are inside a grower-share price instead of "free of charge".
 - The $0 approval is bound to the lines it showed. The screen sends back the approved lines
-  (`p_approved_zero_lines`), each with why it is $0 and its cost as shown; if the $0 lines, their
-  reason or their cost changed in between, nothing is invoiced and staff see
+  (`p_approved_zero_lines`), each with why it is $0, its cost, and a fingerprint of its rate and
+  the fields' acres and per-acre prices, as shown; if any of those changed in between (for
+  example a field's per-acre price set to $0), nothing is invoiced and staff see
   "The $0 lines on this ticket changed while the approval was open". The same refusal applies when
   a $0 line got a real price in between and no line is $0 any more.
 - The job's quote prices and the ticket's product costs are held still while the invoice is made,
@@ -33,5 +34,5 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
 
 Live state when written: 0 grower-share overrides, 0 "included in grower share" lines ever, 0 blend
 lines without a product. Proof: `node scripts/smoke/prove-blend-invoice-approval-binding-real-schema.mjs`
-(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 16 mutations). Docs: migration-history row 959,
+(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 17 mutations). Docs: migration-history row 959,
 `docs/reference/rpc-functions.md`, `docs/manual/KNOWN_ISSUES.md`.

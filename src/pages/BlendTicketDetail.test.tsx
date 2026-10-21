@@ -1035,8 +1035,8 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
       line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L',
       unit_price_cents: 0, locked_unit_cost_cents: 500,
       zero_lines: [
-        { line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L', kind: 'quoted_zero', cost_cents: 500 },
-        { line_id: 'line-2', product_id: 'prod-2', product_name: 'Roundup PowerMax', kind: 'quoted_zero', cost_cents: 700 },
+        { line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L', kind: 'quoted_zero', cost_cents: 500, basis: 'b1' },
+        { line_id: 'line-2', product_id: 'prod-2', product_name: 'Roundup PowerMax', kind: 'quoted_zero', cost_cents: 700, basis: 'b2' },
       ],
     };
     mockFrom.mockReset();
@@ -1087,8 +1087,8 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
       p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key',
       p_below_cost_reason: 'free sample',
       p_approved_zero_lines: [
-        { line_id: LINE_ID, product_id: 'prod-1', kind: 'quoted_zero', cost_cents: 500 },
-        { line_id: 'line-2', product_id: 'prod-2', kind: 'quoted_zero', cost_cents: 700 },
+        { line_id: LINE_ID, product_id: 'prod-1', kind: 'quoted_zero', cost_cents: 500, basis: 'b1' },
+        { line_id: 'line-2', product_id: 'prod-2', kind: 'quoted_zero', cost_cents: 700, basis: 'b2' },
       ],
     });
   });

@@ -53,7 +53,9 @@
 --  10. Each approved line is bound to its kind and cost as well as its line and product: an
 --      admin's detail lists each $0 line's cost_cents, the screen sends the lines back as shown,
 --      and a change in cost or in why a line is $0 is refused as stale. A non-admin's detail
---      still carries no cost.
+--      still carries no cost. Each line also carries a 'basis' (md5 of its rate per acre, its
+--      rate unit and every field's acres and per-acre price), so a change to the billed quantity
+--      or the grower-share charge while the window is open is refused as stale too.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -495,7 +497,12 @@ BEGIN
            'product_name', z.product_name,
            'cost_cents', z.cost_cents,
            'kind', CASE WHEN z.quoted_zero AND z.in_grower_share THEN 'quoted_zero_and_grower_share'
-                        WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END)
+                        WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END,
+           -- What sets this line's billed quantity and the grower-share charge: its rate, and every
+           -- field's acres and per-acre price. The approval must send it back unchanged.
+           'basis', md5(concat_ws('|', z.rate_per_acre::text, z.rate_per_acre_unit,
+                      (SELECT string_agg(r.value::text, ',' ORDER BY r.value::text)
+                         FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)))))
          ORDER BY z.sequence_order, z.id)
     INTO v_zero_lines
     FROM (SELECT y.*,
@@ -506,7 +513,7 @@ BEGIN
                  EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                           WHERE (r.value->>'price_override_cents') IS NOT NULL
                             AND (r.value->>'share_acres')::numeric > 0) AS in_grower_share
-            FROM (SELECT btp.id, btp.product_id, btp.sequence_order,
+            FROM (SELECT btp.id, btp.product_id, btp.sequence_order, btp.rate_per_acre, btp.rate_per_acre_unit,
                          COALESCE(p.product_name, btp.product_name) AS product_name,
                          ROUND(p.current_cost * 100)::bigint AS cost_cents,
                          CASE WHEN v_quote_section_id IS NULL THEN NULL
@@ -554,9 +561,9 @@ BEGIN
     END IF;
     -- Each approved line is bound to what the window showed for it: line, product, why it is $0
     -- (kind) and its cost; a change to any of them asks again.
-    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')
+    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '') || ':' || COALESCE(e.value->>'basis', '')
                FROM jsonb_array_elements(p_approved_zero_lines) AS e(value) ORDER BY 1)
-       IS DISTINCT FROM ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')
+       IS DISTINCT FROM ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '') || ':' || COALESCE(e.value->>'basis', '')
                FROM jsonb_array_elements(v_zero_lines) AS e(value) ORDER BY 1) THEN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || v_zero_line::text;
@@ -909,7 +916,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '855113e18bc733d65a9b97e22d02129f'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'fb2ac2920c82b49581d3418b863ade7c'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

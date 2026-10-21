@@ -290,14 +290,15 @@ ROLLBACK;`,
   // 6. MUTATION: each hunk is what its chain step proves.
   const UNMATCHED = between(INVOICE, '  -- 20261021070000: every line must be a catalog product.', '  v_quote_section_id := NULL;\n  IF v_ticket.job_id IS NOT NULL THEN\n');
   const GROWER_TERM = "                 EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)\n                          WHERE (r.value->>'price_override_cents') IS NOT NULL\n                            AND (r.value->>'share_acres')::numeric > 0) AS in_grower_share\n";
-  const KIND = "           'cost_cents', z.cost_cents,\n           'kind', CASE WHEN z.quoted_zero AND z.in_grower_share THEN 'quoted_zero_and_grower_share'\n                        WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END)\n";
+  const KIND = "           'kind', CASE WHEN z.quoted_zero AND z.in_grower_share THEN 'quoted_zero_and_grower_share'\n                        WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END,\n";
   const STALE_SET = between(INVOICE, "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')", "  ELSIF p_approved_zero_lines IS NOT NULL OR");
   const STALE_NONE = between(INVOICE, "  ELSIF p_approved_zero_lines IS NOT NULL OR", '  END IF;\n\n  IF v_customer_count > 1 THEN');
   const KEY_REQUIRED = between(INVOICE, '  -- 20261021070000: a retry key is required', '  IF p_idempotency_key IS NOT NULL THEN\n    v_existing');
   const STALE_TYPE = between(INVOICE, "    IF jsonb_typeof(p_approved_zero_lines) IS DISTINCT FROM 'array' THEN\n", "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')");
-  const KEY = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')";
-  const KEY_NO_COST = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '')";
-  const KEY_NO_KIND = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'cost_cents', '')";
+  const KEY = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '') || ':' || COALESCE(e.value->>'basis', '')";
+  const KEY_NO_COST = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'basis', '')";
+  const KEY_NO_KIND = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'cost_cents', '') || ':' || COALESCE(e.value->>'basis', '')";
+  const KEY_NO_BASIS = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')";
   const mutations = [
     ['unmatched-line refusal', [[UNMATCHED, '']],
       /SMOKE_FAIL: a blend-ticket invoice billed a line with no product/],
@@ -308,7 +309,7 @@ ROLLBACK;`,
     ['grower-share line in the approval', [[GROWER_TERM, '                 false AS in_grower_share\n']],
       /SMOKE_FAIL: (the grower-share approval does not list the included chemical|the grower-share ticket was refused instead of asking for approval: BELOW_COST_CONTEXT_REQUIRED)/],
     // The window can no longer tell a $0 quoted line from a grower-share line.
-    ['each $0 line says why it is $0', [[KIND, "           'cost_cents', z.cost_cents)\n"]],
+    ['each $0 line says why it is $0', [[KIND, '']],
       /SMOKE_FAIL: the approval request does not list every \$0 line/],
     ['grower-share line context', [["        IF v_zero_grower THEN\n          PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);\n", "        IF false THEN\n          PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);\n"]],
       /SMOKE_FAIL: the approved grower-share invoice was refused: BELOW_COST_CONTEXT_REQUIRED/],
@@ -322,6 +323,8 @@ ROLLBACK;`,
       /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(cost\)/],
     ['approval bound to each line\'s kind', [[`    IF ARRAY(SELECT DISTINCT ${KEY}\n`, `    IF ARRAY(SELECT DISTINCT ${KEY_NO_KIND}\n`], [`       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY}\n`, `       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY_NO_KIND}\n`]],
       /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(kind\)/],
+    ['approval bound to each line\'s basis', [[`    IF ARRAY(SELECT DISTINCT ${KEY}\n`, `    IF ARRAY(SELECT DISTINCT ${KEY_NO_BASIS}\n`], [`       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY}\n`, `       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY_NO_BASIS}\n`]],
+      /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(basis\)/],
     ['retry key required', [[KEY_REQUIRED, '']],
       /SMOKE_FAIL: a blend-ticket invoice was made with no retry key/],
     ['approval with no $0 line left', [[STALE_NONE, '']],

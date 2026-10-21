@@ -597,7 +597,10 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: the $0 approval request handed to the screen is wrong: %', v_err;
     END IF;
     -- Every $0 line is listed (Mason, 2026-10-20: "list every $0 line"), in ticket order.
-    IF (v_detail->'zero_lines') IS DISTINCT FROM jsonb_build_array(
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_detail->'zero_lines') AS e(value)
+              WHERE length(COALESCE(e.value->>'basis', '')) <> 32)
+     OR (SELECT jsonb_agg(e.value - 'basis' ORDER BY e.ord)
+           FROM jsonb_array_elements(v_detail->'zero_lines') WITH ORDINALITY AS e(value, ord)) IS DISTINCT FROM jsonb_build_array(
          jsonb_build_object('line_id', v_line_t9_full, 'product_id', v_p_full, 'product_name', '[E2E] BTP Full ' || v_suffix, 'kind', 'quoted_zero', 'cost_cents', 500),
          jsonb_build_object('line_id', v_line_t9_t1, 'product_id', v_p_t1only, 'product_name', '[E2E] BTP Tier1Only ' || v_suffix, 'kind', 'quoted_zero', 'cost_cents', 500)) THEN
       RAISE EXCEPTION 'SMOKE_FAIL: the approval request does not list every $0 line: %', v_detail->'zero_lines';
@@ -670,6 +673,16 @@ BEGIN
       IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
       IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
         RAISE EXCEPTION 'SMOKE_FAIL: wrong stale-approval refusal (kind): %', v_err;
+      END IF;
+    END;
+    BEGIN
+      v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9sbasis-' || v_suffix, 'free sample', jsonb_build_array(jsonb_set(v_zero->0, '{basis}', to_jsonb('x'::text)), v_zero->1));
+      RAISE EXCEPTION 'SMOKE_FAIL: an approval that does not name exactly the shown $0 lines billed (basis): %', v_res;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong stale-approval refusal (basis): %', v_err;
       END IF;
     END;
     BEGIN
@@ -777,13 +790,33 @@ BEGIN
     END IF;
   END;
   v_detail := substr(v_err, length('BELOW_COST_REASON_REQUIRED:') + 1)::jsonb;
-  IF (v_detail->'zero_lines') IS DISTINCT FROM jsonb_build_array(
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_detail->'zero_lines') AS e(value)
+              WHERE length(COALESCE(e.value->>'basis', '')) <> 32)
+     OR (SELECT jsonb_agg(e.value - 'basis' ORDER BY e.ord)
+           FROM jsonb_array_elements(v_detail->'zero_lines') WITH ORDINALITY AS e(value, ord)) IS DISTINCT FROM jsonb_build_array(
        jsonb_build_object('line_id', v_line_t11, 'product_id', v_p_full, 'product_name', '[E2E] BTP Full ' || v_suffix, 'kind', 'grower_share', 'cost_cents', 500))
      OR v_detail->>'entity_type' IS DISTINCT FROM 'blend_ticket' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the grower-share approval does not list the included chemical: %', v_err;
   END IF;
   IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t11) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the grower-share approval request left an invoice behind';
+  END IF;
+  --  a2. (20261021070000) The per-acre price drops to $0 while the window is open: the approval
+  --      was bound to the $25.00/acre basis it showed, so it is refused and writes nothing.
+  UPDATE public.field_billing_defaults SET price_override_cents = 0 WHERE field_id = v_field2;
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t11, v_admin, 'e2e-btp-invoice-11s-' || v_suffix, 'package price', v_detail->'zero_lines');
+    RAISE EXCEPTION 'SMOKE_FAIL: a grower-share approval billed after its per-acre price changed: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong refusal for a changed per-acre price: %', v_err;
+    END IF;
+  END;
+  UPDATE public.field_billing_defaults SET price_override_cents = 2500 WHERE field_id = v_field2;
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t11) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused changed-price approval left an invoice behind';
   END IF;
   --  b. Approved, it bills the $25.00/acre share and the chemical at $0, and records the approval.
   BEGIN

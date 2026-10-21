@@ -1,7 +1,9 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-20 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 02:43 UTC (9:43 PM Central, 2026-10-20): 1039 rows / 1032 names; the changes since the 2026-10-19
+`execute_sql`, 2026-10-21 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
+02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
 PR #965 via #976) and replay-binding batch 3b `20261019235000` (ledger `20261021024020`, PR #967) are now applied; batch 3b
 re-certified the replay-binding entry below (three wrappers, five postgres-only bodies and the 27-operation guard read
@@ -977,17 +979,31 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
     (`SalesReports.tsx`: the detail and summary functions and the customer, sales-rep and category
     filters). A failed read shows an error and blocks that report's export. The Deliveries driver
     dashboard's "next 20 unassigned" panel is deliberately still 20.
+  - **Fixed 2026-10-20 (Goal 4, part 2a — money, checks, compliance, notifications):** these read every
+    row through `src/lib/pagedRead.ts`, and a failed read shows an error (never zeros or a short list):
+    - Field Invoices' three tabs (`src/components/field-invoices/`), so Post All and Unpost All reach every
+      invoice, plus the split-invoice location lookups;
+    - AR: the summary strip (`AccountsReceivable.tsx`), AR Aging (`ARaging.tsx`), the finance-charge
+      preview (`FinanceChargePreviewModal.tsx`), check allocation (`PaymentAllocation.tsx`, was a
+      customer's first 200 open invoices), the Prepayment Manager (was 500 customers, each with an
+      unchecked invoice read) and the prepay workspace's Apply step; a customer's aging card and purchase
+      history (`CustomerDetail.tsx`; the aging card now asks for that one customer's row);
+    - AP Aging (`AccountsPayable.tsx`) and Field Profitability;
+    - integrity checks 5, 6, 9 and 10 (`src/lib/reconciliation.ts`) and the cleanup panel's lists. The
+      cleanup panel's over-received PO list had never worked: its filter compared a column with text,
+      so the server refused it every time and the section showed 0 rows (15 rows live on 2026-10-20);
+    - the RUP sales register and license counts (`Compliance.tsx`), and the application logbooks with
+      their customer, field and applicator pickers (`LogbookReport.tsx`);
+    - Notifications: the page lists every notification, and the bell counts unread notifications in the
+      database (it counted only the unread among the 20 it loads); a count that cannot be read shows "!".
   - Still capped (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`; the pages
     fixed above are removed):
     - 1000: Customers (shows a banner).
     - 500: Jobs (shows a banner) and Field Setup.
-    - 200: Notifications.
   - Pages that cap one of several queries:
     - Crop Programs: its product list, 500.
     - Dispatch Board: the job list is capped at 500, but its dispatch and chemical rows are paged with
       `.range()` and are not capped.
-    - Reports' Application Logbook (`src/components/reports/LogbookReport.tsx`): its customer and field
-      pickers load 500 and its applicator picker 200 (not part of the 2026-10-20 fix).
   - Record pickers inside detail and editor pages (checked 2026-10-04): Customer Detail's parent-customer
     selector, Invoice Detail's customer selector and Order Detail's share editor each load 500 customers; the
     split field-invoice editor (`FieldAppSplitInvoiceEditor.tsx`) loads 1,000 fields, 1,000 products and the
@@ -995,8 +1011,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Complete current inventory (2026-10-20, after part 1): `docs/audits/2026-10-20-goal4-row-limit-inventory-refresh.md`.
-    Notifications is already past its limit: four staff accounts each have over 1,000 unread notifications, the page
-    shows the newest 200 and the bell badge counts only the 20 it loads.
+    Part 2a above fixed its Field Invoices, AR/AP/prepay, integrity, compliance and Notifications items; part 2b
+    (the lookups and per-record reads, and the 20-page document-scan limit) is next.
   - Jobs and Customers show a banner when capped.
   - Paging is by position, so records changing during a long load are handled four ways:
     - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
@@ -2994,8 +3010,8 @@ makes the first one reachable more often by emitting several order lines per pro
    defect today, independent of PR #404 — multi-line bookings already exist as quote data whether or
    not the draw splits order lines. Deliberately not fixed in PR #404: it needs its own design
    decision about how a ticket quantity is split across tiers.
-   **Guarded 2026-10-20 (Goal 3, migration `20261020210000_blend_ticket_pricing_guards`, not yet
-   applied when written; live state in `docs/reference/migration-history.md`).** Mason (2026-10-15)
+   **Guarded 2026-10-20 (Goal 3, migration `20261020210000_blend_ticket_pricing_guards`, applied
+   live 2026-10-21 04:00:52 UTC, ledger `20261021040052`, PR #982 merged as `948f238ad`).** Mason (2026-10-15)
    made automatic exact-line matching future work and asked for a small guard instead: when the
    job's quote lists the product more than once at *different* prices, the invoice now stops before
    anything is written and the Blend Ticket screen asks staff to pick the quoted price; the pick is

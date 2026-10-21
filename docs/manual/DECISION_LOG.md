@@ -8,6 +8,12 @@ settled calls. Newest first, roughly — a few entries from the same week sit sl
 order, so search by date and title rather than position. Each entry is a decision, why it was made, and the operative
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 
+## 2026-10-21 — A moved main carries a clean Sol review forward instead of buying a new one
+
+**Decision (Mason, in chat: "go with carry-forward").** When another PR lands after a PR's clean Sol review, the agent merges the new main into the branch and runs `node scripts/write-codex-push-proof.mjs --carry-forward` instead of a second full Sol review. It carries the review with no model call when the two sides share no files and neither touches the database or guard folders against code on the other side; otherwise it runs a focused Sol collision check of just the interaction; it refuses (full review) when the merge had conflicts, carried any other edit, or the earlier review is over 24 hours old.
+**Why.** Main took 81 merges in the week to 2026-10-21. The proof is bound to one head and one base, so every landing voided every waiting PR's Sol review and parallel sessions kept cancelling each other's paid reviews. CodeRabbit was not the repeat cost: it reviews a PR once since 2026-10-19.
+**What this forbids/implies:** the carried proof never claims a full review ran (`codex_ran: false`), is minted only by the protected wrapper, and still binds to the exact head and GitHub's real base with the 30-minute window; CI must still be green on the merged head. Accepted residual risk: two PRs that share no file can still clash in meaning; CI type checks and tests, the database/guard rule and each PR's own full Sol review cover most of it. A commit with any change beyond the merge of main still needs a fresh full Sol review.
+
 ## 2026-10-20 — Report grouping look-alikes may be reviewed actor-forgery exceptions (reverses 2026-09-02)
 
 **Decision (Mason, in chat: "Yes mark them as reviewed").** The actor-forgery sweep's name-pattern collisions on the report grouping setting `p_group_by` (`get_gross_sales_report`, `get_profitability_report`, `get_sales_summary_report`) are recorded as reviewed exceptions in `scripts/db-invariant-sweeps/allowlist.json`, instead of staying visible. This reverses the 2026-09-02 call recorded in `predicates/actor-forgery.sql` and `docs/audits/2026-09-02-actor-forgery-predicate-triage.md` ("fix the checker rather than add exceptions"). It also ratifies the two entries PR #850 added on 2026-09-30 without recording a reversal.

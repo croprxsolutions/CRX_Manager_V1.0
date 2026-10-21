@@ -3,13 +3,18 @@
 // Run: node scripts/write-codex-push-proof.test.mjs
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  buildCarryForwardProof,
   buildCodexExecArgs,
+  buildCollisionCheckPrompt,
+  CARRY_SOURCE_MAX_AGE_MS,
+  carrySourceProofProblem,
+  planCarryForward,
   buildCodexPushProof,
   buildCodexReviewPrompt,
   CODEX_VERDICT_TOKEN,
@@ -1035,6 +1040,140 @@ assert.equal(
   assert.equal(outcome.codexBin, "F", "runner: reports the binary that produced the result");
   assert.equal(outcome.result, cleanReview, "runner: returns the fallback's result untouched");
   assert.ok(notices.length === 1 && /NOTICE/.test(notices[0]) && notices[0].includes("P") && notices[0].includes("F"), "runner: one notice naming both binaries");
+}
+
+// ── carry-forward (Mason, 2026-10-21) ───────────────────────────────────────
+// The decision rules.
+{
+  const plan = (prFiles, mainFiles) => planCarryForward({ prFiles, mainFiles });
+  assert.equal(plan(["src/a.ts"], ["src/b.ts"]).mode, "disjoint", "carry: separate code files carry freely");
+  const shared = plan(["src/a.ts", "docs/manual/x.md"], ["src/a.ts"]);
+  assert.equal(shared.mode, "collision_check", "carry: a shared file needs the collision check");
+  assert.deepEqual(shared.overlap, ["src/a.ts"], "carry: the shared file is named");
+  assert.equal(plan(["src/A.ts"], ["src/a.ts"]).mode, "collision_check", "carry: shared files compare case-insensitively");
+  assert.equal(plan(["src/a.ts"], ["supabase/migrations/1_x.sql"]).mode, "collision_check", "carry: a new main migration needs the check");
+  assert.equal(plan(["docs/manual/x.md"], ["supabase/migrations/1_x.sql"]).mode, "disjoint", "carry: docs-only PR vs main migration carries");
+  assert.equal(plan(["supabase/migrations/2_y.sql"], ["src/b.ts"]).mode, "collision_check", "carry: PR migration vs main code needs the check");
+  assert.equal(plan(["supabase/migrations/2_y.sql"], ["docs/manual/y.md"]).mode, "disjoint", "carry: PR migration vs docs-only main carries");
+  assert.equal(plan(["src/a.ts"], [".claude/hooks/x.mjs"]).mode, "collision_check", "carry: a main guard change needs the check");
+  assert.equal(plan([".codex/hooks/y.mjs"], ["src/b.ts"]).mode, "collision_check", "carry: a PR guard change vs main code needs the check");
+  assert.equal(plan(["Supabase/functions/f/index.ts"], ["src/b.ts"]).mode, "collision_check", "carry: hot folders compare case-insensitively");
+}
+
+// Which earlier proofs may be carried.
+{
+  const nowMs = Date.parse("2026-10-21T18:00:00.000Z");
+  const head = "1".repeat(40);
+  const source = {
+    codex_ran: true, verdict: "clean", model: CODEX_REVIEW_MODEL, reasoning_effort: CODEX_REVIEW_EFFORT,
+    head_sha: head, base_sha: "2".repeat(40), timestamp: new Date(nowMs - 60_000).toISOString(),
+  };
+  assert.equal(carrySourceProofProblem(source, { headSha: head, nowMs }), null, "carry: a fresh clean Sol proof carries");
+  assert.equal(
+    carrySourceProofProblem({ ...source, timestamp: new Date(nowMs - 2 * 60 * 60 * 1000).toISOString() }, { headSha: head, nowMs }),
+    null,
+    "carry: a source past the 30-minute merge window still carries",
+  );
+  assert.match(
+    carrySourceProofProblem({ ...source, timestamp: new Date(nowMs - CARRY_SOURCE_MAX_AGE_MS - 1).toISOString() }, { headSha: head, nowMs }),
+    /older than 24 hours/,
+    "carry: a source older than 24 hours is refused",
+  );
+  assert.ok(carrySourceProofProblem(null, { headSha: head, nowMs }), "carry: no source proof is refused");
+  assert.ok(carrySourceProofProblem({ ...source, verdict: "blockers" }, { headSha: head, nowMs }), "carry: a non-clean source is refused");
+  assert.ok(carrySourceProofProblem({ ...source, model: "gpt-6-luna" }, { headSha: head, nowMs }), "carry: a Luna source is refused");
+  assert.ok(carrySourceProofProblem({ ...source, codex_ran: false }, { headSha: head, nowMs }), "carry: a source no review produced is refused");
+  assert.ok(carrySourceProofProblem({ ...source, head_sha: "3".repeat(40) }, { headSha: head, nowMs }), "carry: a source for another head is refused");
+  assert.ok(carrySourceProofProblem({ ...source, base_sha: "" }, { headSha: head, nowMs }), "carry: a source with no base is refused");
+  const carried = buildCarryForwardProof({ headSha: "4".repeat(40), baseSha: "5".repeat(40), source, mode: "disjoint" });
+  assert.equal(carried.codex_ran, false, "carry: a carried proof never claims a full review ran");
+  assert.deepEqual(carried.carry.root_review, { head_sha: head, base_sha: source.base_sha, timestamp: source.timestamp }, "carry: records the full review it came from");
+  assert.equal(carrySourceProofProblem(carried, { headSha: "4".repeat(40), nowMs }), null, "carry: a carried proof can itself be carried");
+  const chained = buildCarryForwardProof({ headSha: "6".repeat(40), baseSha: "7".repeat(40), source: carried, mode: "disjoint" });
+  assert.deepEqual(chained.carry.root_review, carried.carry.root_review, "carry: a chain keeps the original full review");
+  assert.equal(proofValid(carried, "4".repeat(40), Date.parse(carried.timestamp), "5".repeat(40)), true, "carry: the guard validator accepts the minted shape");
+  const collisionPrompt = buildCollisionCheckPrompt();
+  assert.ok(collisionPrompt.includes("MAIN_DELTA.patch") && collisionPrompt.includes("COLLISION_FOCUS.json"), "carry: the collision prompt names its packet files");
+  assert.ok(collisionPrompt.trim().endsWith(`Output the ${CODEX_VERDICT_TOKEN} token exactly once, on the last line only.`), "carry: the collision prompt keeps the verdict contract");
+  assert.equal(parseArgs(["--carry-forward"]).carryForward, true, "carry: --carry-forward parses");
+  assert.equal(parseArgs([]).carryForward, false, "carry: off by default");
+}
+
+// End to end on a throwaway repository: the disjoint path runs no model, so the
+// real script can mint (or refuse) here.
+{
+  const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
+  const repo = mkdtempSync(path.join(tmpdir(), "crx-carry-forward-"));
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
+    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const carry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-forward", ...extra], { cwd: repo, encoding: "utf8" });
+  const writeSourceProof = (headSha, baseSha, timestamp = new Date().toISOString()) => {
+    const proofPath = codexPushProofPath(repo, headSha);
+    mkdirSync(path.dirname(proofPath), { recursive: true });
+    writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({ headSha, baseSha, verdict: "clean", timestamp })));
+  };
+  try {
+    git("init", "-q", "-b", "main");
+    // The script's isolated Git ignores the workstation's global autocrlf; pin
+    // it locally so a branch switch here does not read as a dirty worktree.
+    git("config", "core.autocrlf", "false");
+    writeFileSync(path.join(repo, ".gitignore"), ".claude/session-state/\n");
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 1;\n");
+    git("add", ".");
+    git("commit", "-qm", "base");
+    const reviewedBase = git("rev-parse", "HEAD");
+    git("switch", "-q", "-c", "feature");
+    writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 2;\n");
+    git("commit", "-qam", "pr change");
+    const reviewedHead = git("rev-parse", "HEAD");
+    git("switch", "-q", "main");
+    writeFileSync(path.join(repo, "src", "b.ts"), "export const b = 1;\n");
+    git("add", ".");
+    git("commit", "-qm", "another PR landed");
+    const newBase = git("rev-parse", "HEAD");
+    git("update-ref", "refs/remotes/origin/main", newBase);
+    git("switch", "-q", "feature");
+
+    writeSourceProof(reviewedHead, reviewedBase);
+    const notMerged = carry();
+    assert.equal(notMerged.status, 1, "carry e2e: refuses before main is merged in");
+    assert.match(notMerged.stderr, /not a merge of origin\/main/, "carry e2e: says why");
+
+    git("merge", "-q", "--no-edit", "origin/main");
+    const mergedHead = git("rev-parse", "HEAD");
+    const dry = carry("--dry-run");
+    assert.equal(dry.status, 0, "carry e2e: dry run succeeds");
+    assert.match(dry.stdout, /no overlap/, "carry e2e: dry run reports the decision");
+    assert.equal(existsSync(codexPushProofPath(repo, mergedHead)), false, "carry e2e: dry run writes nothing");
+
+    const ok = carry();
+    assert.equal(ok.status, 0, `carry e2e: disjoint carry succeeds (${ok.stderr})`);
+    const minted = JSON.parse(readFileSync(codexPushProofPath(repo, mergedHead), "utf8"));
+    assert.equal(minted.carry.mode, "disjoint", "carry e2e: minted as a disjoint carry");
+    assert.equal(minted.carry.from_head, reviewedHead, "carry e2e: names the reviewed head");
+    assert.equal(proofValid(minted, mergedHead, Date.now(), newBase), true, "carry e2e: the guard accepts it for the merged head and new base");
+    assert.equal(proofValid(minted, mergedHead, Date.now(), reviewedBase), false, "carry e2e: and not for the old base");
+
+    // A merge commit carrying an extra hand edit must not carry.
+    writeFileSync(path.join(repo, "src", "c.ts"), "export const sneaky = true;\n");
+    git("add", ".");
+    git("commit", "-q", "--amend", "--no-edit");
+    const tampered = carry();
+    assert.equal(tampered.status, 1, "carry e2e: an edited merge commit is refused");
+    assert.match(tampered.stderr, /something else changed/, "carry e2e: says the content differs");
+    assert.equal(existsSync(codexPushProofPath(repo, git("rev-parse", "HEAD"))), false, "carry e2e: nothing minted for the edited merge");
+
+    // A source proof older than 24 hours must not carry.
+    git("reset", "-q", "--hard", mergedHead);
+    writeSourceProof(reviewedHead, reviewedBase, new Date(Date.now() - CARRY_SOURCE_MAX_AGE_MS - 60_000).toISOString());
+    const stale = carry();
+    assert.equal(stale.status, 1, "carry e2e: a stale source is refused");
+    assert.match(stale.stderr, /older than 24 hours/, "carry e2e: says the source is too old");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 }
 
 console.log("OK - write-codex-push-proof helpers passed.");

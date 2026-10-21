@@ -1046,7 +1046,13 @@ assert.equal(
 // The decision rules.
 {
   const plan = (prFiles, mainFiles) => planCarryForward({ prFiles, mainFiles });
-  assert.equal(plan(["src/a.ts"], ["src/b.ts"]).mode, "disjoint", "carry: separate code files carry freely");
+  // Two code changes never carry freely, even in different files (Sol HIGH, PR #1002).
+  assert.equal(plan(["src/a.ts"], ["src/b.ts"]).mode, "collision_check", "carry: separate code files still need the check");
+  assert.equal(plan(["src/pages/Quotes.tsx"], ["src/lib/money.ts"]).mode, "collision_check", "carry: a quote screen vs a shared money helper needs the check");
+  assert.equal(plan(["src/a.ts"], ["docs/manual/notes.md"]).mode, "disjoint", "carry: code vs a docs-only main carries freely");
+  assert.equal(plan(["docs/plans/p.md"], ["src/b.ts"]).mode, "disjoint", "carry: a docs-only PR vs main code carries freely");
+  assert.equal(plan(["docs/plans/p.md"], ["docs/plans/p.md"]).mode, "collision_check", "carry: a shared docs file still needs the check");
+  assert.equal(plan(["src/a.ts"], []).mode, "disjoint", "carry: an empty main delta carries freely");
   const shared = plan(["src/a.ts", "docs/manual/x.md"], ["src/a.ts"]);
   assert.equal(shared.mode, "collision_check", "carry: a shared file needs the collision check");
   assert.deepEqual(shared.overlap, ["src/a.ts"], "carry: the shared file is named");
@@ -1061,7 +1067,8 @@ assert.equal(
   assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs"]).mode, "collision_check", "carry: a main change to the proof writer needs the check");
   assert.equal(plan(["src/a.ts"], [".github/workflows/ci.yml"]).mode, "collision_check", "carry: a main CI change needs the check");
   assert.equal(plan(["src/a.ts"], [".claude/settings.json"]).mode, "collision_check", "carry: a main hook-wiring change needs the check");
-  assert.equal(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).mode, "disjoint", "carry: an ordinary script is not hot");
+  assert.equal(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).mode, "collision_check", "carry: an ordinary script is code, so it needs the check");
+  assert.deepEqual(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).hotFiles, [], "carry: an ordinary script is not a focus file");
   assert.equal(plan(["src/a.ts"], ["package.json"]).mode, "collision_check", "carry: a main dependency change needs the check");
   assert.equal(plan(["src/a.ts"], [".github/actions/setup/action.yml"]).mode, "collision_check", "carry: a main local-action change needs the check");
   for (const ruleFile of ["AGENTS.md", "CLAUDE.md", "src/lib/AGENTS.md", ".claude/commands/ship.md", ".claude/skills/codex-review/SKILL.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md", "docs/reference/coding-guidelines.md", "docs/manual/AGENT_ONBOARDING.md", ".coderabbit.yaml"]) {
@@ -1069,7 +1076,8 @@ assert.equal(
   }
   assert.equal(plan(["src/a.ts"], ["docs/manual/CURRENT_STATE.md"]).mode, "disjoint", "carry: an ordinary manual page is not a rule file");
   assert.equal(plan(["src/a.ts"], ["package-lock.json"]).mode, "collision_check", "carry: a main lockfile change needs the check");
-  assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs.bak"]).mode, "disjoint", "carry: exact hot files match exactly");
+  assert.deepEqual(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs.bak"]).hotFiles, [], "carry: exact focus files match exactly");
+  assert.deepEqual(plan(["src/a.ts"], ["supabase/migrations/1_x.sql"]).hotFiles, ["supabase/migrations/1_x.sql"], "carry: database files are named as focus files");
 }
 
 // Which earlier proofs may be carried.
@@ -1172,9 +1180,10 @@ function collisionPromptSkipsWork(prompt) {
     git("commit", "-qam", "pr change");
     const reviewedHead = git("rev-parse", "HEAD");
     git("switch", "-q", "main");
-    writeFileSync(path.join(repo, "src", "b.ts"), "export const b = 1;\n");
+    mkdirSync(path.join(repo, "docs", "manual"), { recursive: true });
+    writeFileSync(path.join(repo, "docs", "manual", "notes.md"), "# Notes\n");
     git("add", ".");
-    git("commit", "-qm", "another PR landed");
+    git("commit", "-qm", "a docs-only PR landed");
     const newBase = git("rev-parse", "HEAD");
     git("update-ref", "refs/remotes/origin/main", newBase);
     git("switch", "-q", "feature");
@@ -1214,6 +1223,20 @@ function collisionPromptSkipsWork(prompt) {
     const stale = carry();
     assert.equal(stale.status, 1, "carry e2e: a stale source is refused");
     assert.match(stale.stderr, /older than 24 hours/, "carry e2e: says the source is too old");
+
+    // A code change landing on main, carried from the carried proof above, must
+    // route to the collision check (dry run: decision only, no model call).
+    git("switch", "-q", "main");
+    writeFileSync(path.join(repo, "src", "b.ts"), "export const b = 1;\n");
+    git("add", ".");
+    git("commit", "-qm", "a code PR landed");
+    git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+    git("switch", "-q", "feature");
+    git("merge", "-q", "--no-edit", "origin/main");
+    const codeVsCode = carry("--dry-run");
+    assert.equal(codeVsCode.status, 0, `carry e2e: code-vs-code dry run succeeds (${codeVsCode.stderr})`);
+    assert.match(codeVsCode.stdout, /collision check needed: both this PR and main's new commits changed code/, "carry e2e: code vs code needs the collision check");
+    assert.equal(existsSync(codexPushProofPath(repo, git("rev-parse", "HEAD"))), false, "carry e2e: the dry run writes nothing");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

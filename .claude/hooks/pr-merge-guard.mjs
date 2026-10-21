@@ -588,7 +588,7 @@ function gateRequest(request) {
     if (carried) {
       process.stderr.write(
         `SOL CARRY-FORWARD: the Sol review of head ${String(carried.from_head).slice(0, 12)} was carried to this head ` +
-        `after a conflict-free merge of main (${carried.mode === "disjoint" ? "no shared files" : "collision check clean"}; Mason, 2026-10-21).\n`,
+        `after a conflict-free merge of main (${carried.mode === "disjoint" ? "no shared files, one side documentation-only" : "collision check clean"}; Mason, 2026-10-21).\n`,
       );
     }
     advisoryQueue.push(request);

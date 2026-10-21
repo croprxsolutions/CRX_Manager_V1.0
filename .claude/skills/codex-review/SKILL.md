@@ -416,11 +416,12 @@ decision only) immediately before the merge. It mints a carried proof for the ne
   edit refuses);
 - the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
-- and EITHER the PR's files and main's new files do not overlap and neither side touches a hot path
-  (`CARRY_HOT_PATHS` in the script: `supabase/`, `.claude/hooks/`, `.codex/hooks/`, `.github/`,
-  the hook settings, the proof-writing scripts, `package.json` and its lockfile, and the agent rule files (`AGENTS.md`/`CLAUDE.md` in any folder, `.claude/commands/`, `.claude/skills/`, `.claude/agents/`, `.claude/workflows/`, `.agents/`, `docs/workflows/` and the rule reference pages)) while the other side changes anything beyond plain
-  documentation (no model call), OR a focused Sol collision check returns CLEAN. That check centres on
-  the interaction but counts any other blocker it sees.
+- and EITHER the PR's files and main's new files do not overlap and one side is plain documentation
+  (the `docs/reference/sol-exempt-paths.md` definition, which excludes every rule file) — no model
+  call — OR a focused Sol collision check returns CLEAN. Two code or configuration changes always
+  get the check, even in different files (Mason, 2026-10-21). The check centres on the interaction,
+  starting from the database, guard, CI, dependency and rule files (`CARRY_HOT_PATHS`), and counts
+  any other blocker it sees.
 
 Anything else refuses, and the full Step 3B review above is the answer. The carried proof states
 `codex_ran: false, carried_forward: true`, names the head and base it came from, and still expires

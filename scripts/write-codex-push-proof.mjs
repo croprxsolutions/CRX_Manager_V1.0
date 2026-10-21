@@ -1085,21 +1085,23 @@ export function captureReviewOutput(root, result, runInfo = {}) {
 //      today's origin/main, and its tree is byte-for-byte what a conflict-free
 //      `git merge-tree` of those two produces — so nothing was hand-edited.
 //   2. The files main gained since the review do not overlap the PR's files, and
-//      neither side touches a HOT folder while the other side changes anything
-//      that is not plain documentation → the proof carries with no model call.
-//   3. Otherwise a focused Sol collision check of just the interaction runs; only
-//      its clean verdict carries the proof.
+//      one of the two sides is plain documentation → the proof carries with no
+//      model call.
+//   3. Otherwise (including any two code changes) a focused Sol collision check
+//      runs; only its clean verdict carries the proof.
 //
 // The carried proof is written where a normal proof goes, says plainly that it
 // was carried (codex_ran:false, carried_forward:true), and is accepted by
 // proofValid() in codex-push-lib.mjs. Anything uncertain refuses, and the
 // operator falls back to the full review.
 export const CARRY_SOURCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-// Paths whose changes can break the other side without sharing a file: the
-// database, the guards and settings that gate landing, the proof writers, CI,
+// Paths the collision check is pointed at first (COLLISION_FOCUS.json) because
+// their changes can break the other side without sharing a file: the database,
+// the guards and settings that gate landing, the proof writers, CI,
 // dependencies, and the rule-defining guidance a Sol review judges a change
-// against (a new rule on main must be checked against a waiting PR; Codex
-// GitHub App P1, PR #1002). A folder ends in "/"; anything else is one exact file.
+// against (Codex GitHub App P1, PR #1002). None of them is plain documentation,
+// so a change to one never carries freely against code. A folder ends in "/";
+// anything else is one exact file.
 export const CARRY_HOT_PATHS = Object.freeze([
   "supabase/",
   ".claude/hooks/",
@@ -1174,18 +1176,24 @@ export function carrySourceProofProblem(data, { headSha, nowMs = Date.now() } = 
 }
 
 // Decide whether the earlier review carries freely or needs a collision check.
+// Free only when the two sides share no file AND one side is plain
+// documentation (the Sol-exempt definition, which excludes every rule file):
+// two code changes in different files can still break each other (a quote
+// screen and a shared money helper), so they always get the check (Sol HIGH on
+// PR #1002; Mason, 2026-10-21: "do your recommendation"). The hot paths no
+// longer decide the mode; they point the collision check at the riskiest files.
 // Paths compare case-insensitively: Windows checks them out over each other.
 export function planCarryForward({ prFiles = [], mainFiles = [] } = {}) {
   const prSet = new Map(prFiles.map((file) => [String(file).toLowerCase(), file]));
   const overlap = [...new Set(mainFiles.filter((file) => prSet.has(String(file).toLowerCase())))].sort();
   const prHot = prFiles.filter(isHotPath).sort();
   const mainHot = mainFiles.filter(isHotPath).sort();
-  const prOnlyDocs = prFiles.every((file) => solExemptPathProblem(file) === null);
-  const mainOnlyDocs = mainFiles.every((file) => solExemptPathProblem(file) === null);
+  const plainDoc = (file) => !isHotPath(file) && solExemptPathProblem(file) === null;
+  const prOnlyDocs = prFiles.every(plainDoc);
+  const mainOnlyDocs = mainFiles.every(plainDoc);
   const reasons = [];
   if (overlap.length > 0) reasons.push(`both sides changed ${overlap.length} file(s)`);
-  if (mainHot.length > 0 && !prOnlyDocs) reasons.push(`main's new commits changed ${mainHot.length} database/guard file(s)`);
-  if (prHot.length > 0 && !mainOnlyDocs) reasons.push(`this PR changes ${prHot.length} database/guard file(s) and main's new commits changed code`);
+  if (!prOnlyDocs && !mainOnlyDocs) reasons.push("both this PR and main's new commits changed code or configuration");
   return {
     mode: reasons.length > 0 ? "collision_check" : "disjoint",
     overlap,

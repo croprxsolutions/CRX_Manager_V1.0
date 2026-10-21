@@ -63,11 +63,11 @@
 > re-review. `node scripts/write-codex-push-proof.mjs --carry-forward` mints a carried proof
 > (`codex_ran: false`, `carried_forward: true`, `carry.mode` `disjoint` or `collision_check`, `carry.from_head` /
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
-> hours old) and today's origin/main: with no model call when the PR's files and main's new files do not overlap and
-> neither side touches a hot path (`CARRY_HOT_PATHS`: `supabase/`, `.claude/hooks/`, `.codex/hooks/`,
-> `.github/`, the hook settings, the proof-writing scripts, `package.json` and its lockfile, and the agent rule files (`AGENTS.md`/`CLAUDE.md` in any folder, `.claude/commands/`, `.claude/skills/`, `.claude/agents/`, `.claude/workflows/`, `.agents/`, `docs/workflows/` and the rule reference pages); a chain of carries
-> expires 24 hours after its original full review) against non-documentation changes on the other
-> side, otherwise only after a focused Sol collision check returns CLEAN. `proofValid()` in `codex-push-lib.mjs`
+> hours old, as is the original full review behind a chain of carries) and today's origin/main: with no model call
+> only when the PR's files and main's new files do not overlap and one side is plain documentation (the Sol-exempt
+> definition, which excludes every rule file); otherwise, including any two code changes in different files, only
+> after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
+> rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 30-minute terms as a full proof, so both merge gates, the
 > push gate and the migration landing gate honour it; `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows
 > one. The minter is the same protected wrapper, so `review-proof-guard.mjs` still blocks hand-written proofs.

@@ -996,6 +996,25 @@ export default function OrderDetail() {
     setInvoiceWarnOpen(false);
     await runCriticalAction({
       action: async () => {
+        // The billing path must follow the order's real field split. A failed or stale
+        // allocation read leaves `allocations` empty or out of date, and an allocated order
+        // sent down the single-invoice path bills the order's customer for every field
+        // owner's share (create_invoice_from_order does not check allocations itself).
+        if (allocLoadFailed) {
+          throw new Error('The field split details failed to load. Refresh the page before creating the invoice.');
+        }
+        const allocCheck = await supabase
+          .from('order_item_field_allocations')
+          .select('id, order_items!inner(order_id)', { count: 'exact' })
+          .eq('order_items.order_id', id)
+          .order('id')
+          .range(0, 0);
+        if (allocCheck.error) {
+          throw new Error(`The order's field split could not be checked: ${allocCheck.error.message}`);
+        }
+        if (typeof allocCheck.count !== 'number' || (allocCheck.count > 0) !== hasAllocations) {
+          throw new Error("The order's field split changed since this page loaded. Refresh the page before creating the invoice.");
+        }
         // Field/acre split: when the order's lines have field allocations, generate one draft
         // invoice per field-owner (billed by acres) instead of a single order-level invoice. The
         // RPC itself falls back to a single invoice when there are no allocations, but we branch

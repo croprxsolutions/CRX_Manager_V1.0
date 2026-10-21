@@ -23,12 +23,11 @@
   and three removed. `allowlist-match.test.mjs`: exception count 22 → 21, plus checks that both new
   exceptions are present and the three removed ones stay gone. No database change.
 - **Proof.**
-  - Live sweep, read-only, 2026-10-20 (Central): 28 of 29 predicates adjudicated PASS against this
-    allowlist (`actor-forgery`: 21 rows, 21 allowlisted, 0 violations). That run used `--only`, so it is
-    diagnostic, not full-gate evidence.
-  - **Not run:** `quote-versions-rpc-owned`. It was declined at the tool permission prompt twice, and
-    Mason chose on 2026-10-20 to ship without it. This change does not touch that predicate or its
-    allowlist entries, but the full 29-predicate `--adjudicate` gate has not been shown passing.
+  - Full live sweep, read-only, 2026-10-21 (Central), run fresh after migration `20261020210000` went
+    live: all 29 predicates captured and `--adjudicate` (no `--only`) returned `complete: true`, every
+    predicate PASS (`actor-forgery`: 21 rows, 21 allowlisted, 0 violations; `quote-versions-rpc-owned`:
+    0 rows). One Supabase connector declines the quote-versions query without showing a prompt, so it
+    ran byte-exact through the second read-only Supabase connector with Mason present.
   - Control: the same captured `actor-forgery` packet against `main`'s allowlist leaves exactly
     `save_field_app_invoice` and `save_job`.
   - `node --test scripts/db-invariant-sweeps/*.test.mjs`: 6 of 6 files pass.

@@ -133,7 +133,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const unpostKeysRef = useRef<Record<string, string>>({});
   const { warning: creditWarning, check: checkCreditLimit, dismiss: dismissCreditWarning } = useCreditLimitCheck();
   const isNew = id === 'new';
-  const isMiscChargeLocked = isNew && searchParams.get('type') === 'misc_charge';
+  // A new invoice made on this page has no order behind it, and save_invoice refuses an orderless
+  // chemical sale, so every new chemical-route invoice is a misc charge (Goal 3; before this a
+  // bare /invoices/new opened as a Chemical Sale that could never be saved).
+  const isMiscChargeLocked = isNew && (routeArea !== 'field' || searchParams.get('type') === 'misc_charge');
 
   // Invoice header
   const [invoice, setInvoice] = useState<Partial<Invoice>>({

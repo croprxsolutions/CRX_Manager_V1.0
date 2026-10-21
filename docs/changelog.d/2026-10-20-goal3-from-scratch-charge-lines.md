@@ -12,7 +12,9 @@
   line from any other writer (today only finance charges) is typed "other" automatically, and the
   shape check then refuses anything that is not a single charge.
 - The New Invoice page shows **Add Charge** (type, description, amount) instead of Add Product on
-  such an invoice and explains why. Order-backed, field-application, blend-ticket and job invoices
+  such an invoice and explains why. A new invoice on that page now always opens as a locked Misc
+  Charge (a bare `/invoices/new` used to open as a Chemical Sale that `save_invoice` refuses
+  without an order, so it could never be saved; Codex connector P2 on PR #983). Order-backed, field-application, blend-ticket and job invoices
   and return credit memos are unchanged.
 - Proof: `scripts/smoke/prove-from-scratch-invoice-charge-lines-real-schema.mjs` builds the
   production schema baseline plus every migration in a throwaway database and checks every refusal

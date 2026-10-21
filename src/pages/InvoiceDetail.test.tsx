@@ -1442,6 +1442,20 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     nextIntentKey.value = 0;
   });
 
+  it('a bare New Invoice opens as a locked Misc Charge with Add Charge, never an unsaveable Chemical Sale', async () => {
+    render(
+      <MemoryRouter initialEntries={['/invoices/new']}>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetail routeArea="chemical" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const typeSelect = await screen.findByDisplayValue('Misc Charge');
+    expect(typeSelect).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add Charge' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add Product' })).toBeNull();
+  });
+
   it('offers Add Charge instead of Add Product, and saves a typed charge with no product or cost', async () => {
     setupInvoice({});
     mockIntentAwareRpc({ data: 'inv-scratch', error: null });

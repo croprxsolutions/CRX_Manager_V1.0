@@ -132,9 +132,11 @@ record(/Codex and Claude both proceed after a short plan without waiting for app
 record(
   /CodeRabbit is advisory/i.test(protectedDelivery)
     && /fix or refute every comment/i.test(protectedDelivery)
-    && /Never post `@coderabbitai review` to buy a re-review/i.test(protectedDelivery)
+    && /needs a clean CodeRabbit review of its current head plus a clean Sol/i.test(protectedDelivery)
+    && /post `@coderabbitai full review` once/i.test(protectedDelivery)
+    && /On any other PR[^.]*never post `@coderabbitai` commands/i.test(protectedDelivery)
     && /never ask Mason to comment, label, or click for CodeRabbit/i.test(protectedDelivery),
-  "CodeRabbit is advisory (Mason, 2026-10-19): agents handle its comments, never buy re-reviews, and never ask Mason to",
+  "CodeRabbit is advisory (Mason, 2026-10-19) except on money or Mason-named PRs, which need one clean full review of the current head (Mason, 2026-10-21); never ask Mason to",
 );
 record(
   /Post it to Mason, then proceed without waiting for his confirmation/i.test(shipWorkflow)

@@ -15,6 +15,35 @@
 > "edit to an already-applied migration" error check no longer blocks; the mandatory exact-SHA Sol
 > review of any migration change and the CI migration check remain.
 >
+> **Exception: money PRs and PRs Mason names need a clean CodeRabbit review (Mason, 2026-10-21).**
+> A PR qualifies when it changes how money, invoices, payments, inventory, or costs are
+> calculated, stored, or shown, or when Mason asks the session for a CodeRabbit review. Such a PR
+> merges only with a **clean CodeRabbit review of its current head** as well as the clean Sol
+> review. The agent requests that review itself; Mason never posts it by hand.
+>
+> 1. **When:** after the head is frozen and every required check is green, and only if CodeRabbit
+>    has not already reviewed that exact head (the automatic review on the ready switch counts).
+> 2. **What:** post exactly `@coderabbitai full review` once for that head
+>    (`gh pr comment <n> --body "@coderabbitai full review"`). Never `@coderabbitai review` or
+>    `@coderabbitai resume`.
+> 3. **Rate limit:** if CodeRabbit answers that it is rate-limited, wait the time it states, then
+>    check back. Post once more only if that head still has no review. If that second try is also
+>    refused, stop and report the PR stuck; never keep re-posting.
+> 4. **Clean** means the review's every comment (inline, review body, failed pre-merge check) is
+>    refuted with evidence and needed no code change, then replied to and resolved, or there were
+>    no comments.
+> 5. **Fixes move the head.** If CodeRabbit's comments lead to a code change, the new head needs a
+>    fresh Sol review (carry-forward covers only a merge of main) and one new full review, by the
+>    same steps. If that second review still asks for code changes, stop and hand over under the
+>    `AGENTS.md` stop rule.
+> 6. A merge of main alone into a head CodeRabbit already reviewed clean does not need a new
+>    CodeRabbit review; the Sol carry-forward rules apply as usual.
+>
+> Every other PR keeps the advisory rule above: no `@coderabbitai` commands, and no waiting for a
+> review that has not arrived. No hook or check blocks the request comment (checked 2026-10-21):
+> the merge gates read CodeRabbit threads, not commands, and the legacy `CodeRabbit candidate
+> lifecycle` job is not a required check.
+>
 > History: from 2026-09-26 to 2026-10-19 CodeRabbit reviewed every non-draft push, the ruleset
 > required one approving review of the latest push, the merge gates required CodeRabbit `APPROVED`
 > on the exact head, and agents posted `@coderabbitai review` once for a skipped or rate-limited
@@ -181,7 +210,8 @@ the exact-SHA Sol proof (not needed for a documentation-only change), apply
 approved the new head. Today CodeRabbit reviews each PR once, as advice only (see the banner
 above). Never post `@coderabbitai` commands by hand — including `@coderabbitai review` to buy a
 re-review (the 2026-09-27 single-retrigger exception ended 2026-10-19) — and never use
-`@coderabbitai resume`.
+`@coderabbitai resume`. The one exception is the single `@coderabbitai full review` request on a
+money or Mason-named PR described in the banner (Mason, 2026-10-21).
 
 The run API's `head_sha` can expose either the PR head or the execution base.
 It is separate from `GITHUB_SHA`; both candidate commits must match the run's

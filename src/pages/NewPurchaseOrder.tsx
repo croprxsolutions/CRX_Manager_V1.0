@@ -34,6 +34,9 @@ interface POItemDraft {
   quantity_ordered: number;
   unit_cost: number;
   unit_size: string;
+  /** True once unit_cost came from an admin's costed catalog or an admin's typing. A rep's line holds a
+   * placeholder 0 that must never be sent as an admin's cost if the session is promoted (Codex). */
+  costFromAdmin?: boolean;
 }
 
 let keyCounter = 0;
@@ -116,6 +119,14 @@ export default function NewPurchaseOrder() {
       return;
     }
     setProducts(prods);
+    if (isAdmin) {
+      // A promoted session: lines picked while cost was hidden take the costed catalog's cost now.
+      const byId = new Map(prods.map((p) => [p.id, p]));
+      setItems((prev) => prev.map((i) => {
+        const prod = i.product_id && !i.costFromAdmin ? byId.get(i.product_id) : undefined;
+        return prod ? { ...i, unit_cost: prod.current_cost || 0, costFromAdmin: true } : i;
+      }));
+    }
     const uniqueVendors = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
     setVendors(uniqueVendors.sort());
     setProductsLoading(false);
@@ -142,10 +153,10 @@ export default function NewPurchaseOrder() {
     if (!prod) return;
     preselectApplied.current = true;
     setItems((prev) => prev.map((i, idx) => (idx === 0
-      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '' }
+      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '', costFromAdmin: isAdmin }
       : i)));
     if (prod.vendor) setVendor((v) => v || prod.vendor || '');
-  }, [products, preselectProductId]);
+  }, [products, preselectProductId, isAdmin]);
 
   const addItem = () => {
     setItems((prev) => [
@@ -160,7 +171,9 @@ export default function NewPurchaseOrder() {
 
   const updateItem = (key: string, field: keyof POItemDraft, value: string | number) => {
     setItems((prev) =>
-      prev.map((i) => (i.key === key ? { ...i, [field]: value } : i))
+      prev.map((i) => (i.key === key
+        ? { ...i, [field]: value, ...(field === 'unit_cost' ? { costFromAdmin: isAdmin } : {}) }
+        : i))
     );
   };
 
@@ -173,6 +186,7 @@ export default function NewPurchaseOrder() {
               product_id: product.id,
               unit_cost: product.current_cost || 0,
               unit_size: product.unit_size || '',
+              costFromAdmin: isAdmin,
             }
           : i
       )
@@ -195,6 +209,12 @@ export default function NewPurchaseOrder() {
     const validItems = items.filter((i) => i.product_id && i.quantity_ordered > 0);
     if (validItems.length === 0) {
       toast('error', 'Add at least one item with a product and quantity');
+      return;
+    }
+
+    // A line still holding a pre-promotion placeholder waits for the costed catalog; never send its 0.
+    if (isAdmin && validItems.some((i) => !i.costFromAdmin)) {
+      toast('error', 'Unit costs are still loading. Check each unit cost, then save again.');
       return;
     }
 

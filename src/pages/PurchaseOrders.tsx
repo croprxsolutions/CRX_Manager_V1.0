@@ -233,7 +233,8 @@ export default function PurchaseOrders() {
 
   const filtered = pos.filter((p) => {
     if (statusFilter && p.status !== statusFilter) return false;
-    if (costReviewOnly && !costReviewPoIds.has(p.id)) return false;
+    // Admin-only: a role change mid-session hides the button, so the filter must stop applying too.
+    if (isAdmin && costReviewOnly && !costReviewPoIds.has(p.id)) return false;
     return true;
   });
 

@@ -18,5 +18,8 @@
   `.coderabbit.yaml` comments, `docs/reference/coderabbit-native-review.md` (full rules),
   `docs/reference/agent-guardrails.md`, `docs/reference/gotchas.md`,
   `docs/workflows/SAFE_DEVELOPMENT_RULES.md`, `docs/manual/DECISION_LOG.md`, and `docs/manual/KNOWN_ISSUES.md` (the deferred merge gate).
+- Review rounds (Luna x3, one advisory Sol) tightened the wording: one request per head (a code
+  fix needs a new one), drop `docs(` before marking ready, and the guidance check pins the scope,
+  the frozen-green timing, the stated wait, and the one-retry cap.
 - Checked: no hook, permission rule, or required check blocks an agent from posting the comment.
   The merge gates still deny any open or unreplied CodeRabbit thread.

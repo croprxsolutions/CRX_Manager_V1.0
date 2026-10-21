@@ -39,9 +39,12 @@
 > ready), `ignore_title_keywords: ["docs("]`. Agents open PRs as drafts, mark them ready once the head is frozen, fix or
 > refute every CodeRabbit comment that arrives before the merge in one push, do not wait for a review that has not
 > arrived, and never post `@coderabbitai review`. Exception (Mason, 2026-10-21): a PR that touches money, invoices,
-> payments, inventory, or costs, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its current
-> head plus a clean Sol, and the agent posts `@coderabbitai full review` once for its frozen, green head
-> (`docs/reference/coderabbit-native-review.md`). A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
+> payments, inventory, or costs in any way, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its
+> current head plus a clean Sol, and the agent posts `@coderabbitai full review` once for its frozen, green head (one
+> retry after a stated wait; a code fix moves the head and needs a new request; drop `docs(` from the title before
+> marking it ready). Written rule only: no merge gate checks it yet (`docs/manual/KNOWN_ISSUES.md`, 2026-10-21;
+> rules: `docs/reference/coderabbit-native-review.md`). The guidance check pins the trigger sentence in `AGENTS.md`
+> and the timing, wait and retry cap in that reference. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
 > blocker; accepted loss: its "edit to an already-applied migration" check no longer blocks (the mandatory Sol review
 > of any migration change and the CI migration check remain). Mentions of CodeRabbit APPROVED below are history.
 >

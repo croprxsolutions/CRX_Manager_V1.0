@@ -707,6 +707,19 @@ eq(prOwnChangesUnchanged(null, prFiles), false, "an unreadable compare is never 
   eq(read(headGh).status, "reviewed", "a review of the head passes");
   eq(calls, 1, "…with a single GitHub call");
 }
+// A PR with more than 100 files: the full list is read over REST (Luna round 6).
+{
+  const big = Array.from({ length: 150 }, (_, i) => `docs/page-${i}.md`);
+  const bigFacts = { ...facts({ files: big.slice(0, 100), filesTotal: 150, commits: [commit(HEAD)] }), baseRefOid: BASE40 };
+  const bigGh = (list) => (args) => (args[1] === "graphql"
+    ? JSON.stringify({ data: { repository: { pullRequest: structuredClone(bigFacts) } } })
+    : list.join("\n"));
+  eq(read(bigGh(big)).status, "not-required", "a 150-file docs PR is read in full and stays advisory");
+  eq(read(bigGh([...big.slice(0, 149), "src/lib/invoiceMath.ts"])).status, "missing",
+    "…but a money file on a later page still makes it qualify");
+  eq(read(bigGh(big.slice(0, 120))).status, "missing", "a full list whose count does not match stays incomplete (fail closed)");
+}
+
 // Budget: a call is not started unless it can finish before the deadline.
 {
   let threw = false;

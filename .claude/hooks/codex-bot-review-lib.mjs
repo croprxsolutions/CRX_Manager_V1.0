@@ -516,6 +516,12 @@ export function coderabbitCompareArgs(owner, name, base, sha) {
   return ["api", `repos/${owner}/${name}/compare/${base}...${sha}`,
     "--jq", "[.files[] | {filename, status, sha}]"];
 }
+// Every changed file's path, one per line, over REST (up to GitHub's 3000-file
+// limit for this endpoint).
+export function coderabbitFileListArgs(owner, name, number) {
+  return ["api", `repos/${owner}/${name}/pulls/${number}/files?per_page=100`, "--paginate", "--jq", ".[].filename"];
+}
+
 export function prOwnChangesUnchanged(atReview, atHead) {
   const index = (files) => {
     if (!Array.isArray(files) || files.length >= COMPARE_FILE_CAP) return null;
@@ -548,6 +554,15 @@ export function readCodeRabbitRequirement(runGh, { owner, name, number, deadline
     return runGh(args);
   };
   const pullRequest = JSON.parse(call(coderabbitRequirementArgs(owner, name, number)))?.data?.repository?.pullRequest;
+  // GraphQL returns at most 100 files. For a bigger PR, read the full list over
+  // REST (paginated) so a large non-money PR is not refused for a cut-short list
+  // (Luna round 6). If the count still does not match, it stays incomplete and
+  // the PR qualifies (fail closed).
+  const fileTotal = pullRequest?.files?.totalCount;
+  if (Number.isInteger(fileTotal) && Array.isArray(pullRequest?.files?.nodes) && fileTotal > pullRequest.files.nodes.length) {
+    const names = String(call(coderabbitFileListArgs(owner, name, number))).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (names.length === fileTotal) pullRequest.files.nodes = names.map((path) => ({ path }));
+  }
   const verdict = evaluateCodeRabbitRequirement(pullRequest);
   if (verdict.status !== "reviewed" || verdict.reviewedOid === verdict.headOid) return verdict;
   const base = String(pullRequest?.baseRefOid || "").trim();

@@ -13,7 +13,10 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
   approval window says which lines are inside a grower-share price instead of "free of charge".
 - The $0 approval is bound to the lines it showed. The screen sends back the approved lines
   (`p_approved_zero_lines`); if the $0 lines changed in between, nothing is invoiced and staff see
-  "The $0 lines on this ticket changed while the approval was open".
+  "The $0 lines on this ticket changed while the approval was open". The same refusal applies when
+  a $0 line got a real price in between and no line is $0 any more.
+- A retry key is now required (`IDEMPOTENCY_KEY_REQUIRED`), so a lost reply can always be replayed
+  instead of being refused as already billed. The screen always sends one.
 - The Blend Ticket screen explains these refusals, and a product with no cost entered
   (`COST_BASIS_REQUIRED`) or a cost that is not whole cents (`COST_BASIS_CENTS_REQUIRED`), in plain
   English, naming the product when it can.
@@ -21,10 +24,9 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
   approval, so a line edited mid-invoice fails closed.
 - Deploy order: the migration is applied right before the merge; until the new screen loads, a $0
   approval from the old screen is refused (it fails closed). 0 unbilled tickets were affected on
-  2026-10-21. Known and unchanged: a call with no retry key skips replay protection (the screen
-  always sends one).
+  2026-10-21.
 
 Live state when written: 0 grower-share overrides, 0 "included in grower share" lines ever, 0 blend
 lines without a product. Proof: `node scripts/smoke/prove-blend-invoice-approval-binding-real-schema.mjs`
-(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 7 mutations). Docs: migration-history row 959,
+(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 10 mutations). Docs: migration-history row 959,
 `docs/reference/rpc-functions.md`, `docs/manual/KNOWN_ISSUES.md`.

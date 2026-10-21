@@ -38,8 +38,11 @@
 --
 -- NOT CHANGED: every other line of the body (the $0 pre-check is rewritten for change 2: its outer
 -- quote-section test moved inside, unchanged in effect for $0 quoted lines); the line trigger; the
--- order path; the setter. Known and kept: a NULL p_idempotency_key still skips replay protection,
--- as in the live body (the only caller always sends one).
+-- order path; the setter.
+--   6. A retry key is now required (IDEMPOTENCY_KEY_REQUIRED, 22023): without one a lost reply could
+--      not be replayed. The only caller (the Blend Ticket screen) always sends one.
+--   7. An approval naming $0 lines when none is $0 any more (a price changed in between) is refused
+--      with BELOW_COST_APPROVAL_STALE instead of billing a price the window never showed.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -177,6 +180,12 @@ BEGIN
     ) THEN
       RAISE EXCEPTION 'SALESMAN_SCOPE_DENIED';
     END IF;
+  END IF;
+
+  -- 20261021050000: a retry key is required, so a lost reply can always be replayed instead of
+  -- refused as already billed (the screen always sends one).
+  IF NULLIF(btrim(COALESCE(p_idempotency_key, '')), '') IS NULL THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_invoice_from_blend_ticket requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
 
   IF p_idempotency_key IS NOT NULL THEN
@@ -525,6 +534,15 @@ BEGIN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || v_zero_line::text;
     END IF;
+  ELSIF jsonb_typeof(p_approved_zero_lines) = 'array' AND jsonb_array_length(p_approved_zero_lines) > 0 THEN
+    -- An approval for $0 lines arrived but none is $0 any more (a price changed in between):
+    -- bill nothing the window did not show; the screen asks again. No cost in this detail.
+    RAISE EXCEPTION USING ERRCODE = 'P0001',
+      MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || jsonb_build_object(
+        'operation', 'create_invoice_from_blend_ticket',
+        'entity_type', 'blend_ticket',
+        'entity_id', p_blend_ticket_id,
+        'zero_lines', '[]'::jsonb)::text;
   END IF;
 
   IF v_customer_count > 1 THEN
@@ -858,7 +876,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '0d0d4847e12acdc07e2b935cdf609791'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '383bfca3ef1f19dce2b353bcf881e931'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

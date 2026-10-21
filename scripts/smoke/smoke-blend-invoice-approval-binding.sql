@@ -269,6 +269,32 @@ BEGIN
      OR (SELECT payment_status FROM public.blend_tickets WHERE id = v_t12) IS DISTINCT FROM 'unbilled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused unmatched-line invoice left an invoice behind or billed the ticket';
   END IF;
+  --  b. (20261021050000) With every line matched (tier priced, no $0 line): a retry key is
+  --     required, and an approval naming $0 lines when none is $0 any more (a price changed after
+  --     the window) is refused instead of billing a price the window never showed.
+  UPDATE public.blend_ticket_products SET product_id = v_p_full WHERE blend_ticket_id = v_t12 AND product_id IS NULL;
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t12, v_admin, NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: a blend-ticket invoice was made with no retry key: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: wrong no-key refusal: %', v_err; END IF;
+  END;
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t12, v_admin, 'e2e-btp-invoice-12b-' || v_suffix, 'free sample',
+      jsonb_build_array(jsonb_build_object('line_id', v_line_t9_full, 'product_id', v_p_full)));
+    RAISE EXCEPTION 'SMOKE_FAIL: an approval for $0 lines billed a ticket that has none: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' OR v_err LIKE '%cost%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong no-zero-lines stale refusal: %', v_err;
+    END IF;
+  END;
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t12) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused no-key or stale invoice left an invoice behind';
+  END IF;
 
   -- 1. Order: a tier-2 customer, a product with no tier-2 price -> priced at tier 1, never $0.
   BEGIN

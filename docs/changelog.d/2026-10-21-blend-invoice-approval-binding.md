@@ -37,5 +37,5 @@ The three follow-ups reported when Goal 3 blend-ticket pricing shipped (PR #982)
 
 Live state when written: 0 grower-share overrides, 0 "included in grower share" lines ever, 0 blend
 lines without a product. Proof: `node scripts/smoke/prove-blend-invoice-approval-binding-real-schema.mjs`
-(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 18 mutations). Docs: migration-history row 960,
+(BLEND_INVOICE_APPROVAL_BINDING_PROOF_PASS, 18 mutations). Docs: migration-history row 961,
 `docs/reference/rpc-functions.md`, `docs/manual/KNOWN_ISSUES.md`.

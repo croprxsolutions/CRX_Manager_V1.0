@@ -1096,26 +1096,49 @@ export function captureReviewOutput(root, result, runInfo = {}) {
 // operator falls back to the full review.
 export const CARRY_SOURCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // Paths whose changes can break the other side without sharing a file: the
-// database, the guards and settings that gate landing, the proof writers and
-// CI. A folder ends in "/"; anything else is one exact file.
+// database, the guards and settings that gate landing, the proof writers, CI,
+// dependencies, and the rule-defining guidance a Sol review judges a change
+// against (a new rule on main must be checked against a waiting PR; Codex
+// GitHub App P1, PR #1002). A folder ends in "/"; anything else is one exact file.
 export const CARRY_HOT_PATHS = Object.freeze([
   "supabase/",
   ".claude/hooks/",
-  ".codex/hooks/",
+  ".codex/",
   ".github/",
+  ".husky/",
   ".claude/settings.json",
-  ".codex/hooks.json",
+  ".claude/commands/",
+  ".claude/skills/",
+  ".claude/agents/",
+  ".claude/workflows/",
+  ".agents/",
+  ".coderabbit.yaml",
+  "docs/workflows/",
+  "docs/manual/AGENT_ONBOARDING.md",
+  "docs/manual/OWNER_PLAYBOOK.md",
+  "docs/reference/agent-guardrails.md",
+  "docs/reference/codex-model-tuning.md",
+  "docs/reference/claude-model-tuning.md",
+  "docs/reference/sol-exempt-paths.md",
+  "docs/reference/coding-guidelines.md",
+  "docs/reference/gotchas.md",
   "scripts/write-codex-push-proof.mjs",
   "scripts/write-apply-proofs.mjs",
   "scripts/run-claude-review.mjs",
   "package.json",
   "package-lock.json",
 ]);
+// Agent instruction files are hot in ANY folder: both agents load a nested one.
+export const CARRY_HOT_NAMES = Object.freeze(["agents.md", "agents.override.md", "agent.md", "claude.md", "claude.local.md"]);
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 
 function isHotPath(file) {
   const lower = String(file).toLowerCase();
-  return CARRY_HOT_PATHS.some((entry) => (entry.endsWith("/") ? lower.startsWith(entry) : lower === entry));
+  if (CARRY_HOT_NAMES.includes(lower.slice(lower.lastIndexOf("/") + 1))) return true;
+  return CARRY_HOT_PATHS.some((entry) => {
+    const rule = entry.toLowerCase();
+    return rule.endsWith("/") ? lower.startsWith(rule) : lower === rule;
+  });
 }
 
 // null when `data` is a clean Sol proof (full or itself carried) for `headSha`

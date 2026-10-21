@@ -1064,6 +1064,10 @@ assert.equal(
   assert.equal(plan(["src/a.ts"], ["scripts/other-tool.mjs"]).mode, "disjoint", "carry: an ordinary script is not hot");
   assert.equal(plan(["src/a.ts"], ["package.json"]).mode, "collision_check", "carry: a main dependency change needs the check");
   assert.equal(plan(["src/a.ts"], [".github/actions/setup/action.yml"]).mode, "collision_check", "carry: a main local-action change needs the check");
+  for (const ruleFile of ["AGENTS.md", "CLAUDE.md", "src/lib/AGENTS.md", ".claude/commands/ship.md", ".claude/skills/codex-review/SKILL.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md", "docs/reference/coding-guidelines.md", "docs/manual/AGENT_ONBOARDING.md", ".coderabbit.yaml"]) {
+    assert.equal(plan(["src/a.ts"], [ruleFile]).mode, "collision_check", `carry: a main rule change in ${ruleFile} needs the check`);
+  }
+  assert.equal(plan(["src/a.ts"], ["docs/manual/CURRENT_STATE.md"]).mode, "disjoint", "carry: an ordinary manual page is not a rule file");
   assert.equal(plan(["src/a.ts"], ["package-lock.json"]).mode, "collision_check", "carry: a main lockfile change needs the check");
   assert.equal(plan(["src/a.ts"], ["scripts/write-codex-push-proof.mjs.bak"]).mode, "disjoint", "carry: exact hot files match exactly");
 }

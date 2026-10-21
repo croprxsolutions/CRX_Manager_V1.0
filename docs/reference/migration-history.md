@@ -4,6 +4,8 @@
 > `list_migrations` observation is at the top of this file, immediately below.
 > Do not scroll for it, and do not treat any older dated block as the latest.
 
+**Live capture — 2026-10-21 02:11 UTC (9:11 PM America/Chicago, 2026-10-20; read-only `execute_sql` on `supabase_migrations.schema_migrations`): unchanged since the 21:58 UTC capture below — 1038 rows / 1031 distinct names, `max(version)` `20261020193610`, effective ordering high-water `20261019230000` (row 956). Row 957's candidate `20261019235000` still sorts strictly above it; `idempotency_keys` holds zero receipts for `cancel_delivery`, `void_delivery` and `void_order`; and no draft invoice carries paid, prepay, write-off or credit cents.**
+
 **Live capture — 2026-10-20 21:58 UTC (4:58 PM America/Chicago; read-only `execute_sql` on `supabase_migrations.schema_migrations`): unchanged since the 19:37 UTC capture below — 1038 rows / 1031 distinct names, `max(version)` `20261020193610`, effective ordering high-water `20261019230000` (row 956). Row 957's candidate `20261019235000` still sorts strictly above it, and `idempotency_keys` holds zero receipts for `cancel_delivery`, `void_delivery` and `void_order`.**
 
 **Live capture — 2026-10-20 19:37 UTC (2:37 PM America/Chicago; read-only `execute_sql` on `supabase_migrations.schema_migrations`, after row 956 applied): 1038 rows / 1031 distinct names, `max(version)` `20261020193610`, from the row `20261019230000_cost_margin_admin_only_screens_step2` (row 956, applied through carrier PR #976 after #965 merged). Effective ordering high-water: `20261019230000`, the highest name timestamp of any row; row 957's candidate `20261019235000` sorts strictly above it. The earlier 2026-10-20 captures below predate that apply.**

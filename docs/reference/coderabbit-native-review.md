@@ -40,11 +40,14 @@
 >    gets no review, stop and report the PR stuck (to the coordinator, or
 >    `NEEDS MASON - ACTION REQUIRED`); never keep re-posting.
 > 5. **Clean** means every comment in that review (inline, review body, failed pre-merge check)
->    was refuted with evidence and needed no code change, then replied to and resolved, or there
->    were no comments. The final Sol review reads those replies.
-> 6. **Fixes move the head.** If CodeRabbit's comments lead to a code change, the new head needs a
+>    was refuted with evidence and needed no change, then replied to and resolved, or there were no
+>    comments. Each refutation reply cites its evidence (file and line, test, or document) so Mason
+>    or a later reviewer can check it; the Sol review sees only the code, not GitHub threads, so it
+>    does not check these replies.
+> 6. **Fixes move the head.** If CodeRabbit's comments lead to any new commit (code, documentation,
+>    or configuration; only a plain merge of main is exempt, item 7), the new head needs a
 >    fresh Sol review (carry-forward covers only a merge of main) and one new full review, by the
->    same steps. If that second review still asks for code changes, stop and hand over under the
+>    same steps. If that second review still asks for changes, stop and hand over under the
 >    `AGENTS.md` stop rule.
 > 7. **A merge of main alone** into a head CodeRabbit already reviewed clean does not need a new
 >    CodeRabbit review (Mason, 2026-10-21, accepting the recommendation): main takes dozens of

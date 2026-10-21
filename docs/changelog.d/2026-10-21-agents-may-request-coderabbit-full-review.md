@@ -6,7 +6,7 @@
   `@coderabbitai full review` comment on the frozen, green head; Mason no longer posts it by hand.
 - Limits: wait for an automatic review still in progress; one request per head, plus one retry
   after a stated rate-limit wait (30 minutes if CodeRabbit is silent), then the PR is reported
-  stuck. A qualifying PR drops `docs(` from its title so CodeRabbit does not skip it. A code fix prompted by CodeRabbit moves the head, so Sol re-runs and one new full
+  stuck. A qualifying PR drops `docs(` from its title so CodeRabbit does not skip it. Any fix commit prompted by CodeRabbit (code, documentation or configuration) moves the head, so Sol re-runs and one new full
   review is requested. A plain merge of main does not need a new CodeRabbit review.
 - Enforcement is written, not mechanical (Mason: keep it simple): no merge gate checks for the
   review; a coordinator session asks for `CR-CLEAN #<PR> head <sha>` before its GO. A hard

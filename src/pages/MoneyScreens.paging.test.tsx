@@ -57,6 +57,8 @@ import PrepayWorkspacePanel from '../components/prepay/PrepayWorkspacePanel';
 
 // Past the server cap, so one read cannot hold them all.
 const TOTAL = SERVER_ROW_CAP + 10;
+// Drawing over 1,000 rows can pass the 5-second default when the whole suite runs at once.
+vi.setConfig({ testTimeout: 30_000 });
 const pad = (i: number) => String(i).padStart(4, '0');
 const many = <T,>(make: (i: number) => T): T[] => Array.from({ length: TOTAL }, (_, i) => make(i));
 

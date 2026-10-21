@@ -153,10 +153,16 @@ export default function IntegrityCleanupPanel() {
           .or('quantity_available.lt.0,quantity_prebooked.lt.0,quantity_on_order.lt.0')
           .order('id')
           .range(from, to)),
-        supabase
+        // A filter cannot compare two columns: `.gt('quantity_received', 'quantity_ordered')`
+        // compared against the TEXT "quantity_ordered", so the server refused it every
+        // time (22P02) and this section always looked empty. Read every line received
+        // at all, page by page, and keep the over-received ones below.
+        fetchAllRows((from, to) => supabase
           .from('purchase_order_items')
-          .select('id, product_name, quantity_ordered, quantity_received, purchase_order:purchase_orders(po_number)')
-          .gt('quantity_received', 'quantity_ordered'),
+          .select('id, product_name, quantity_ordered, quantity_received, purchase_order:purchase_orders(po_number)', { count: 'exact' })
+          .gt('quantity_received', 0)
+          .order('id')
+          .range(from, to)),
         fetchAllRows((from, to) => supabase
           .from('deliveries')
           .select('id, delivery_number, order_id, completed_at, customer:customers(farm_name), items:delivery_items(id)', { count: 'exact' })
@@ -193,6 +199,7 @@ export default function IntegrityCleanupPanel() {
       setFailedSections([
         ['integrity alerts', alertsRes],
         ['negative inventory', negRes],
+        ['over-received POs', overRes],
         ['unbilled deliveries', unbilledRes],
         ['stock made at delivery', manufacturedRes],
       ].filter(([, res]) => !(res as { data: unknown }).data).map(([label]) => label as string));
@@ -259,7 +266,8 @@ export default function IntegrityCleanupPanel() {
           purchase_order?: { po_number: string } | { po_number: string }[] | null;
         }>;
         setOverReceived(
-          rows.map((r) => {
+          // Only the lines received past what was ordered (the comparison the query cannot make).
+          rows.filter((r) => Number(r.quantity_received) > Number(r.quantity_ordered)).map((r) => {
             const po = Array.isArray(r.purchase_order) ? r.purchase_order[0] : r.purchase_order;
             return {
               id: r.id,
@@ -271,6 +279,9 @@ export default function IntegrityCleanupPanel() {
             };
           }),
         );
+      } else {
+        if (overRes.error) Sentry.captureException(overRes.error);
+        setOverReceived([]);
       }
 
       if (manufacturedRes.data) {

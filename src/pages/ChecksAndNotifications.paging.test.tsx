@@ -56,15 +56,14 @@ vi.mock('../components/ui/DataTable', () => ({
 // The logbook's date controls: pick one fixed range as soon as the report mounts.
 vi.mock('../components/reports/ReportShell', async () => {
   const { useEffect } = await import('react');
-  return {
-    default: ({ onDateChange, extraControls, children }: {
-      onDateChange: (s: string, e: string) => void; extraControls?: React.ReactNode; children: React.ReactNode;
-    }) => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      useEffect(() => { onDateChange('2026-01-01', '2026-12-31'); }, []);
-      return <div>{extraControls}{children}</div>;
-    },
-  };
+  function ReportShellStub({ onDateChange, extraControls, children }: {
+    onDateChange: (s: string, e: string) => void; extraControls?: React.ReactNode; children: React.ReactNode;
+  }) {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { onDateChange('2026-01-01', '2026-12-31'); }, []);
+    return <div>{extraControls}{children}</div>;
+  }
+  return { default: ReportShellStub };
 });
 
 import IntegrityCleanupPanel from '../components/integrity/IntegrityCleanupPanel';
@@ -74,6 +73,8 @@ import Notifications from './Notifications';
 import NotificationsPanel from '../components/team/NotificationsPanel';
 
 const TOTAL = SERVER_ROW_CAP + 10;
+// Drawing over 1,000 rows can pass the 5-second default when the whole suite runs at once.
+vi.setConfig({ testTimeout: 30_000 });
 const pad = (i: number) => String(i).padStart(4, '0');
 const many = (make: (i: number) => Row): Row[] => Array.from({ length: TOTAL }, (_, i) => make(i));
 
@@ -107,6 +108,21 @@ describe('integrity cleanup past the 1,000-row server cap (H29, H30)', () => {
     await waitFor(() => expect(screen.getAllByText(`(${TOTAL} rows)`)).toHaveLength(3));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   }, 20000);
+
+  it('finds an over-received PO line past row 1,000 (the old column-to-text filter never matched)', async () => {
+    // Every line received in full except the last, received one over. The old query
+    // compared quantity_received with the TEXT "quantity_ordered": live it was refused
+    // every time, so the section always showed 0 rows.
+    H.tables.purchase_order_items = many((i) => ({
+      id: `poi${pad(i)}`, product_name: `Product ${pad(i)}`, quantity_ordered: 5,
+      quantity_received: i === TOTAL - 1 ? 6 : 5, purchase_order: { po_number: 'PO-1' },
+    }));
+    renderAt(<IntegrityCleanupPanel />);
+
+    const heading = await screen.findByText('Over-received PO items');
+    await waitFor(() => expect(heading.parentElement!).toHaveTextContent('(1 rows)'));
+    expect(screen.getByText(`Product ${pad(TOTAL - 1)}`)).toBeInTheDocument();
+  });
 });
 
 describe('compliance past the 1,000-row server cap', () => {

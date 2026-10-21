@@ -35,6 +35,8 @@ import FieldInvoicesListPanel from './FieldInvoicesListPanel';
 
 // Past the server cap, so a single read cannot hold them all.
 const TOTAL = SERVER_ROW_CAP + 10;
+// Drawing and posting over 1,000 invoices can pass the 5-second default when the whole suite runs at once.
+vi.setConfig({ testTimeout: 30_000 });
 
 function fieldInvoice(i: number, status: string) {
   const n = String(i).padStart(4, '0');

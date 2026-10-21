@@ -48,7 +48,8 @@
 > earlier commit followed only by merges whose PR-own changes (three-dot compare, per-file status, blob and rename source) are identical at both
 > commits; each gate reads that status BEFORE the review threads, so a review finishing mid-check cannot pair with a
 > stale thread list; the file list is always read in full over REST, and a renamed file's source path is classified too (a money file
-> renamed to a generic name still qualifies); an unreadable answer (including a GraphQL answer carrying errors, or a
+> renamed to a generic name still qualifies); in the Claude guard every requirement and thread-page call is capped at 5s and only started if it can finish
+> before the advisory deadline; an unreadable answer (including a GraphQL answer carrying errors, or a
 > file or label entry with no name), or a lookup that could outlive the
 > hook, refuses (rules: `docs/reference/coderabbit-native-review.md`). The guidance check pins the trigger sentence in `AGENTS.md`
 > and, in that reference, the timing, the in-progress wait, the `docs(` title step, the stated wait and the retry cap. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a

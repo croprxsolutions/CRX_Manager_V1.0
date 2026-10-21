@@ -728,6 +728,11 @@ ok(/let coderabbitReview = null;/.test(guardSource)
   && /if \(!coderabbitReview \|\| coderabbitReview\.status === "unreadable"\) \{\s*deny\(coderabbitRequirementUnreadableDenial\("PR MERGE GATE"/.test(guardSource)
   && /if \(coderabbitReview\.status === "missing"\) \{\s*deny\(coderabbitReviewMissingDenial\("PR MERGE GATE"/.test(guardSource),
   "the Claude merge guard refuses a money PR with no completed CodeRabbit review, and fails closed on an unreadable answer");
+// Codex App P1 on #1009 (budget): every thread-page call in the Claude guard is
+// capped and only started if it can finish before the advisory deadline.
+ok(/gh\(args, REQUIREMENT_CALL_TIMEOUT_MS\)\)\?\.data\?\.repository\?\.pullRequest/.test(guardSource)
+  && /\{ deadlineMs: deadlineMs - REQUIREMENT_CALL_TIMEOUT_MS \}/.test(guardSource),
+  "the Claude guard's thread walk uses the short call cap and stops while a capped call still fits the budget");
 // Codex App P1 on #1009: the completion status is read BEFORE the threads, in
 // every gate, so a review finishing mid-check cannot pair with a stale thread list.
 {

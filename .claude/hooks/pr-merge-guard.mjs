@@ -391,8 +391,12 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
         // Omit `after` entirely on the first page: -F after= would send the
         // empty string, which GraphQL treats as a cursor rather than as null.
         if (cursor) args.push("-F", `after=${cursor}`);
-        return JSON.parse(gh(args))?.data?.repository?.pullRequest;
-      }, { deadlineMs });
+        // Same short cap as the requirement read (Codex App P1 on #1009). A page
+        // is only STARTED if its capped call can finish before the advisory
+        // deadline: the walk throws once fewer than REQUIREMENT_CALL_TIMEOUT_MS
+        // remain, and that throw leaves the counts null, which denies below.
+        return JSON.parse(gh(args, REQUIREMENT_CALL_TIMEOUT_MS))?.data?.repository?.pullRequest;
+      }, { deadlineMs: deadlineMs - REQUIREMENT_CALL_TIMEOUT_MS });
       if (node.headRefOid) codexVerdict = evaluateCodexBotReview(node);
       coderabbitOpen = coderabbitThreadCount(node);
       // Both reads must describe the same head, or neither is trusted.

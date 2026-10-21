@@ -581,7 +581,8 @@ for (const [label, source] of [["Claude", guardSource], ["Codex", codexGuardSour
     `the ${label} guard's advisory budget (${budgetMs}ms) must stay at or under half its ${hookBudgetMs}ms hook timeout`,
   );
   ok(
-    /collectCodexThreads\([\s\S]{0,2000}?\{ deadlineMs(?:, now: clock)? \}\)/.test(source),
+    // The Claude guard passes a tighter deadline (one capped call earlier) since #1009.
+    /collectCodexThreads\([\s\S]{0,2000}?\{ deadlineMs(?:: deadlineMs - REQUIREMENT_CALL_TIMEOUT_MS)?(?:, now: clock)? \}\)/.test(source),
     `the ${label} guard actually PASSES the deadline to collectCodexThreads — declaring a budget it never applies is decoration`,
   );
 }

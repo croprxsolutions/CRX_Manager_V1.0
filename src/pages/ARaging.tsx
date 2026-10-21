@@ -11,7 +11,7 @@
  * credit-reduced figure. This is intentional — aging tracks what is owed, not net
  * position; credits are reflected against AR when applied via payment allocation.
  */
-import { useEffect, useState , useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { DollarSign, FileText, Printer, TrendingDown, TrendingUp, ArrowLeft, Zap, FileStack, Mail, Send } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -20,6 +20,7 @@ import DataTable, { type Column } from '../components/ui/DataTable';
 import { useToast } from '../components/ui/Toast';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
+import { fetchAllRows } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
@@ -32,7 +33,7 @@ import StatementPrintDialog from '../components/statements/StatementPrintDialog'
 import FinanceChargePreviewModal from '../components/invoices/FinanceChargePreviewModal';
 import { useAuth } from '../contexts/AuthContext';
 import { computeSeason } from '../utils/season';
-import { localToday, parseLocalDate, localDatePlusDays } from '../lib/dateUtils';
+import { localToday, parseLocalDate, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
 
@@ -49,6 +50,9 @@ export default function ARaging() {
   const [printingStatement, setPrintingStatement] = useState(false);
   const [printCustomerId, setPrintCustomerId] = useState<string | null>(null);
   const [printCustomerName, setPrintCustomerName] = useState('');
+  // The date of the screen Print Statement was opened from: the aging table's as-of date,
+  // or the Customer Statement tab's end date, so the PDF covers the day on screen.
+  const [printDefaultDate, setPrintDefaultDate] = useState('');
 
   // Batch statement selection
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
@@ -66,7 +70,13 @@ export default function ARaging() {
 
   // Aging
   const [agingData, setAgingData] = useState<ARAgingRow[]>([]);
-  const [asOfDate, setAsOfDate] = useState(localToday());
+  // The last aging load failed: the tab shows an error instead of zero totals.
+  const [agingFailed, setAgingFailed] = useState(false);
+  // Only the newest aging load may set state; an older date's load finishing late is ignored.
+  const agingLoadSeq = useRef(0);
+  // Chicago's date, the same day the Accounts Receivable summary strip asks for,
+  // so the strip and this table agree whatever the viewer's own clock says.
+  const [asOfDate, setAsOfDate] = useState(() => todayInBusinessTz());
 
   // Statement
   const [customers, setCustomers] = useState<{ id: string; farm_name: string }[]>([]);
@@ -95,17 +105,34 @@ export default function ARaging() {
   };
 
   const fetchAging = useCallback(async () => {
+    const seq = ++agingLoadSeq.current;
     setLoading(true);
-    const { data, error } = await supabase.rpc('get_ar_aging', {
-      p_as_of_date: asOfDate,
-    });
+    // Read every page: the server cuts a function's rows off at 1,000, which
+    // dropped the smallest balances from the list and the totals.
+    const { data, error } = await fetchAllRows<ARAgingRow>((from, to) => supabase
+      .rpc('get_ar_aging', { p_as_of_date: asOfDate }, { count: 'exact' })
+      // The function's own order (largest balance first), then the unique customer id.
+      .order('total_outstanding', { ascending: false })
+      .order('customer_id')
+      .range(from, to));
+    // A newer as-of date was picked while this one loaded.
+    if (seq !== agingLoadSeq.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'ar_aging' } });
       toast('error', 'Failed to load AR aging data');
+      // No rows and no totals: the previous date's or a partial list would look current.
+      setAgingData([]);
+      setSelectedCustomers(new Set());
+      setAgingFailed(true);
       setLoading(false);
       return;
     }
-    setAgingData(assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging'));
+    const rows = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging');
+    setAgingData(rows);
+    // Batch statements act on the selection: keep only customers on this date's list.
+    const onList = new Set(rows.map((r) => r.customer_id));
+    setSelectedCustomers((prev) => new Set([...prev].filter((id) => onList.has(id))));
+    setAgingFailed(false);
     setLoading(false);
   }, [asOfDate, toast]);
 
@@ -291,7 +318,7 @@ export default function ARaging() {
           title="Print Statement"
           onClick={(e) => {
             e.stopPropagation();
-            openStatementDialog(r.customer_id, r.farm_name);
+            openStatementDialog(r.customer_id, r.farm_name, asOfDate);
           }}
         >
           <Printer className="w-4 h-4" />
@@ -399,9 +426,10 @@ export default function ARaging() {
     fetchAging();
   };
 
-  const openStatementDialog = (custId: string, custName: string) => {
+  const openStatementDialog = (custId: string, custName: string, defaultDate: string) => {
     setPrintCustomerId(custId);
     setPrintCustomerName(custName);
+    setPrintDefaultDate(defaultDate);
     setShowStatementDialog(true);
   };
 
@@ -872,6 +900,8 @@ export default function ARaging() {
                 <Button
                   variant="secondary"
                   size="sm"
+                  // A failed or unfinished load must not export as if it were the whole list.
+                  disabled={agingFailed || loading}
                   onClick={() =>
                     exportToCSV(
                       agingData as unknown as Record<string, unknown>[],
@@ -894,6 +924,13 @@ export default function ARaging() {
             </div>
           </Card>
 
+          {/* A failed load shows no totals or table: zeros would read as "nothing owed". */}
+          {agingFailed ? (
+            <Card>
+              <p role="alert" className="text-center text-red-600 py-8 text-sm">AR aging could not be loaded. Press Refresh to try again.</p>
+            </Card>
+          ) : (
+          <>
           {/* Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <Card>
@@ -947,6 +984,8 @@ export default function ARaging() {
                 <span className="font-mono font-semibold">{fmt(agingTotals.total)}</span>
               </div>
             </Card>
+          )}
+          </>
           )}
         </>
       )}
@@ -1009,7 +1048,7 @@ export default function ARaging() {
                   icon={<Printer className="w-4 h-4" />}
                   onClick={() => {
                     const cust = customers.find((c) => c.id === selectedCustomer);
-                    openStatementDialog(selectedCustomer, cust?.farm_name || 'Customer');
+                    openStatementDialog(selectedCustomer, cust?.farm_name || 'Customer', stmtEnd);
                   }}
                   loading={printingStatement}
                 >
@@ -1142,18 +1181,23 @@ export default function ARaging() {
 
       {/* Statement Print Dialog */}
       <StatementPrintDialog
+        // The dialog reads defaultDate once, so start it afresh when that date changes.
+        key={`print-${printDefaultDate}`}
         open={showStatementDialog}
         onClose={() => setShowStatementDialog(false)}
         onGenerate={handlePrintStatement}
         loading={printingStatement}
+        defaultDate={printDefaultDate}
       />
 
       {/* Batch Statement Print Dialog */}
       <StatementPrintDialog
+        key={`batch-print-${asOfDate}`}
         open={showBatchStatementDialog}
         onClose={() => setShowBatchStatementDialog(false)}
         onGenerate={handleBatchStatements}
         loading={batchPrinting}
+        defaultDate={asOfDate}
       />
 
       {/* Finance Charge Preview Modal */}

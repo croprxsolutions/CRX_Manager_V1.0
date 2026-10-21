@@ -110,6 +110,37 @@ describe('Accounts Receivable in the evening, Central time', () => {
     expect(agingDates()).toEqual(['2026-10-20']);
   });
 
+  const oneCustomer = () => {
+    H.functions.get_ar_aging = [{
+      customer_id: 'c1', farm_name: 'Big Farm', current_amount: 10, days_30: 0, days_60: 0, days_90: 0,
+      over_90: 0, total_outstanding: 10, prepay_balance_cents: 0, open_credit_cents: 0,
+    }];
+  };
+  const printDialogDate = async () =>
+    ((await screen.findByText('Statement As-of Date')).parentElement!.querySelector('input[type="date"]') as HTMLInputElement).value;
+
+  it("Print Statement from an aging row starts on the table's date", async () => {
+    oneCustomer();
+    render(<MemoryRouter><ARaging /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByTitle('Print Statement'))[0]);
+    expect(await printDialogDate()).toBe('2026-10-20');
+  });
+
+  it("Print Statement from the Customer Statement tab starts on that tab's end date", async () => {
+    oneCustomer();
+    render(<MemoryRouter><ARaging /></MemoryRouter>);
+    // The customer's name opens their statement; its end date is the box on that tab.
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Big Farm' }))[0]);
+    const printButton = await screen.findByRole('button', { name: /Print Statement/ });
+    // Start and end boxes; the end date still follows the computer's clock (UTC here), so it
+    // differs from the table's Chicago date and a pop-up on the wrong date would show.
+    const dateBoxes = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/) as HTMLInputElement[];
+    expect(dateBoxes).toHaveLength(2);
+    expect(dateBoxes[1].value).toBe('2026-10-21');
+    fireEvent.click(printButton);
+    expect(await printDialogDate()).toBe('2026-10-21');
+  });
+
   it('after the As of Date is changed, Batch Print starts on the new date', async () => {
     H.functions.get_ar_aging = [{
       customer_id: 'c1', farm_name: 'Big Farm', current_amount: 10, days_30: 0, days_60: 0, days_90: 0,

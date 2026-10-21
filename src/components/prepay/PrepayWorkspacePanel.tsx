@@ -115,7 +115,7 @@ export default function PrepayWorkspacePanel() {
         .from('invoices')
         .select('id, invoice_number, total_amount_cents, balance_cents, due_date, created_at', { count: 'exact' })
         .eq('customer_id', selectedCustomerId)
-        // 'overdue' too: the 6am cron flips past-due posted invoices to 'overdue', and
+        // 'overdue' too: the daily cron (06:00 UTC) flips past-due posted invoices to 'overdue', and
         // apply_prepay_to_invoice accepts both (same fix as PaymentAllocation, U1 #41).
         .in('status', ['posted', 'overdue'])
         .gt('balance_cents', 0)

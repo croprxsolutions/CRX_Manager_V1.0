@@ -152,7 +152,7 @@ export default function PrepaymentManagerPanel() {
       .from('invoices')
       .select('id, customer_id, balance_cents', { count: 'exact' })
       .in('customer_id', idChunk)
-      // 'overdue' too: the 6am cron flips past-due posted invoices to 'overdue', and
+      // 'overdue' too: the daily cron (06:00 UTC) flips past-due posted invoices to 'overdue', and
       // they still owe money (same fix as PaymentAllocation, U1 #41).
       .in('status', ['posted', 'overdue'])
       .gt('balance_cents', 0)

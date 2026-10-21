@@ -23,7 +23,13 @@ try {
   // 23 after the 2026-10-20 reviewed get_gross_sales_report p_group_by exception (cost/margin wrapper, 20261019010000).
   // 22 after 20261019235000 (batch 3b): the cancel_delivery wrapper is no longer flagged by actor-forgery-fin-audit,
   //    so that exception was removed; its actor-forgery exception was re-reviewed and re-pinned to the wrapper + body.
-  equal(actorEntries.length, 22, '22 reviewed exceptions (cancel_delivery re-pinned after batch 3b); no stale transfer, complete_job or fin-audit cancel_delivery exemption');
+  // 21 after the 2026-10-21 review: +2 save_job / save_field_app_invoice (cost/margin step-2 wrappers, 20261019230000),
+  //    -3 create_application_record_from_blend_ticket / create_direct_order / create_rush_order, whose replay-binding
+  //    wrappers refuse a forged actor up front and are no longer flagged, so their stale exceptions were removed.
+  equal(actorEntries.length, 21, '21 reviewed exceptions (save_job and save_field_app_invoice added; three unflagged order/application exceptions removed)');
+  for (const retired of ['create_application_record_from_blend_ticket(', 'create_direct_order(', 'create_rush_order(']) {
+    check(!actorEntries.some((entry) => entry.violation_key.startsWith(retired)), `remove the retired ${retired}) exemption`);
+  }
   check(!actorEntries.some((entry) => entry.predicate === 'actor-forgery-fin-audit' && entry.violation_key.startsWith('cancel_delivery(')), 'remove the retired fin-audit cancel_delivery exemption');
   check(!actorEntries.some((entry) => entry.violation_key.startsWith('complete_job(')), 'remove the retired complete_job exemption');
   check(!actorEntries.some((entry) => entry.violation_key.startsWith('transfer_job_to_invoice(')), 'remove unused identity-only exemption');

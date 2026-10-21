@@ -130,7 +130,7 @@ profit to the rep who earns it; and a rep can still find a product's cost by tri
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
 
-## FIXED 2026-10-21 (migration `20261021150000`, pending apply) — split billing could not bill a field owner who is not the order's customer
+## FIX PENDING APPLY 2026-10-21 (migration `20261021150000`) — split billing could not bill a field owner who is not the order's customer
 
 `create_split_invoices_from_order` bills each field owner its share of a field-allocated order, but
 `guard_invoice_terminal_order` (since `20260721014858`) refused any order invoice whose customer
@@ -138,9 +138,22 @@ differs from the order's (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), split draft
 onto another customer's field rolled back. Live, read-only 2026-10-21: 0 field-allocated orders and 0
 split invoices, so nobody hit it. `20261021150000` lets a governed split invoice name such an owner,
 only inside the split call's creation claim for a customer the order's field split resolves to, and
-afterwards only under its `split_invoice_provenance` row. Found while building `20261021120000`
-(PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006 required this
-first. Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs`.
+afterwards only under its `split_invoice_provenance` row. This is the 2026-10-13 item "Splitting an
+order's bill to a landlord always fails" (Mason: "landlord yes"). Found again while building
+`20261021120000` (PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006
+required this first. Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs`.
+
+Left open, by design or for later (reviewers on the PR, 2026-10-21):
+- **Who a split may bill follows editable tables.** Any admin or sales rep may allocate an order line
+  to any field and edit a field's owner or billing defaults, so a split can bill any customer those
+  rows name. Claims and provenance stay unforgeable; the scope question (should an allocation be tied
+  to the order's customer or the field's owners?) is Mason's.
+- **A non-order owner cannot get an order-backed return credit (LOW).** The return-credit paths require
+  the return's customer to equal the order's (`RETURN_ORDER_CUSTOMER_MISMATCH`), so field owner B's
+  posted split invoice cannot be credited through them; they refuse rather than misattribute.
+- **A billing-default edit committed mid-split can refuse that split (LOW, availability).** The guard
+  re-reads the owners when each draft is written; a change committed by another session in between
+  rolls the split back. It never admits a customer the split did not choose.
 
 ## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
 
@@ -643,7 +656,7 @@ else on `main`. None blocks this branch cleanup; they are recorded here for foll
 The cleanup's second salvage pass compared every line each old branch added with `main`'s whole tree.
 These came out of it. Each says how it was checked.
 
-- **Splitting an order's bill to a landlord always fails (MED). Mason, 2026-10-13: it should work**
+- **FIX PENDING APPLY (`20261021150000`, see the 2026-10-21 entry near the top).** **Splitting an order's bill to a landlord always fails (MED). Mason, 2026-10-13: it should work**
   ("landlord yes"). Read from the live database 2026-10-13: the invoice trigger
   `trg_guard_invoice_terminal_order` (function `guard_invoice_terminal_order`) raises
   `INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID` whenever an invoice's customer is not its order's customer,

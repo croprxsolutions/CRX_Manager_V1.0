@@ -7,6 +7,7 @@
   for a customer the order's field split resolves to, and afterwards only under its private
   provenance row. Every other mismatch is still refused. Needed before PR #1006 (Sol, HIGH).
 - Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs` over the
-  container chain `smoke-split-invoice-cross-customer-lineage.sql` (a two-owner split created,
-  replayed and posted; five refusals; mutations), plus
+  container chain `smoke-split-invoice-cross-customer-lineage.sql` (a four-customer split created,
+  replayed, posted and voided; refusals at the exception's limits and of the unchanged rule; four
+  mutations), plus
   `src/__tests__/splitInvoiceLineageMigration.test.ts`.

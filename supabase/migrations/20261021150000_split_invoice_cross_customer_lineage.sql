@@ -8,7 +8,8 @@
 --   order's (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID, since 20260721014858), on INSERT and on every
 --   UPDATE. So a split onto another customer's field rolled back, and once
 --   20261021120000 (PR #1006) makes create_invoice_from_order refuse a split order, such an order
---   had no invoice path at all (Sol on #1006, 2026-10-21; KNOWN_ISSUES.md OPEN 2026-10-21).
+--   had no invoice path at all (Sol on #1006, 2026-10-21). KNOWN_ISSUES.md records it as
+--   "Splitting an order's bill to a landlord always fails" (Mason, 2026-10-13: it should work).
 --
 --   guard_invoice_terminal_order keeps the rule and admits exactly one exception, a governed split
 --   invoice (invoice_group_id set):
@@ -100,14 +101,18 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT_DEPENDENCY_DRIFT: a split-invoice function differs from its reviewed body';
   END IF;
+  -- Their triggers, by exact definition: the claim check on every INSERT, the identity lock on
+  -- every UPDATE and DELETE (a narrower binding would let a column escape it).
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger t
      WHERE t.tgname = 'require_split_invoice_creation_claim' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
+       AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER require_split_invoice_creation_claim BEFORE INSERT ON public.invoices FOR EACH ROW EXECUTE FUNCTION require_split_invoice_creation_claim()'
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_trigger t
      WHERE t.tgname = 'guard_split_invoice_provenance_identity' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
+       AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER guard_split_invoice_provenance_identity BEFORE DELETE OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_split_invoice_provenance_identity()'
   ) THEN
-    RAISE EXCEPTION 'PREFLIGHT_SPLIT_INVOICE_TRIGGER_DRIFT: the split creation-claim or provenance-identity trigger is missing or disabled';
+    RAISE EXCEPTION 'PREFLIGHT_SPLIT_INVOICE_TRIGGER_DRIFT: the split creation-claim or provenance-identity trigger differs from its reviewed form';
   END IF;
   -- No caller may manufacture a claim or a provenance row: RLS on, and no Data API role may write.
   IF EXISTS (
@@ -116,6 +121,8 @@ BEGIN
       CROSS JOIN unnest(ARRAY['anon', 'authenticated', 'service_role']) AS api_role
       CROSS JOIN unnest(ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) AS priv
      WHERE has_table_privilege(api_role, tbl, priv)
+        -- A column-level grant is invisible to has_table_privilege.
+        OR (priv IN ('INSERT', 'UPDATE') AND has_any_column_privilege(api_role, tbl, priv))
   ) OR EXISTS (
     SELECT 1 FROM pg_class c
      WHERE c.oid IN ('public.split_invoice_creation_claims'::regclass, 'public.split_invoice_provenance'::regclass)
@@ -179,11 +186,11 @@ BEGIN
     RAISE EXCEPTION 'ORDER_INVOICE_TERMINAL: cannot attach an invoice to missing order %', NEW.order_id;
   END IF;
   -- Governed split (20261021150000): a split invoice (invoice_group_id set) may name a field owner
-  -- other than the order's customer, and only that invoice. While create_split_invoices_from_order
-  -- creates or totals it: inside its claim for this transaction and order, for a customer this
-  -- order's field split bills (a field's billing-default customers, or the field's own customer
-  -- when it has none, as the split implementation resolves them). Afterwards: only as the invoice
-  -- its private provenance row names. An UPDATE may never change its customer or group here.
+  -- other than the customer of its order, and only that invoice. While the split RPC creates or
+  -- totals it: inside its claim for this transaction and order, for a customer the field split of
+  -- this order bills (the billing-default customers of a field, or the customer of the field when
+  -- it has none, as the split implementation resolves them). Afterwards: only as the invoice its
+  -- private provenance row names. Its customer and group never change through this exception.
   IF NEW.customer_id IS DISTINCT FROM v_order_customer_id AND NEW.invoice_group_id IS NOT NULL THEN
     IF TG_OP = 'INSERT' THEN
       v_split_identity_kept := true;
@@ -364,7 +371,7 @@ BEGIN
         AND NOT p.proisstrict AND p.prorettype = 'trigger'::regtype AND NOT p.proretset
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) = ''
-        AND md5(replace(p.prosrc, chr(13), '')) = 'da77621a5c216d2788935f0f97918fcc'
+        AND md5(replace(p.prosrc, chr(13), '')) = '3ce8e2202d902ed90ba3370dfc829e47'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['postgres']::text[]
@@ -382,6 +389,17 @@ BEGIN
        AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER trg_guard_invoice_terminal_order BEFORE INSERT OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_invoice_terminal_order()'
   ) THEN
     RAISE EXCEPTION 'POSTFLIGHT_INVOICE_LINEAGE_TRIGGER: trg_guard_invoice_terminal_order changed';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+     WHERE t.tgname = 'require_split_invoice_creation_claim' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
+       AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER require_split_invoice_creation_claim BEFORE INSERT ON public.invoices FOR EACH ROW EXECUTE FUNCTION require_split_invoice_creation_claim()'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+     WHERE t.tgname = 'guard_split_invoice_provenance_identity' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
+       AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER guard_split_invoice_provenance_identity BEFORE DELETE OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_split_invoice_provenance_identity()'
+  ) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_SPLIT_INVOICE_TRIGGER: the split creation-claim or provenance-identity trigger changed';
   END IF;
   -- Nothing else moved.
   IF EXISTS (

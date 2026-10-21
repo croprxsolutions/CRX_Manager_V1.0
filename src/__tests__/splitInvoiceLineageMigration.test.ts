@@ -70,6 +70,9 @@ describe('20261021150000 split invoice cross-customer lineage', () => {
     for (const block of [preflight, postflight]) {
       expect(block).toContain("IS NOT DISTINCT FROM ARRAY['postgres']::text[]");
       expect(block).toContain("pg_get_triggerdef(t.oid) = 'CREATE TRIGGER trg_guard_invoice_terminal_order BEFORE INSERT OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_invoice_terminal_order()'");
+      // The exception leans on these two firing on every INSERT, and every UPDATE and DELETE.
+      expect(block).toContain("pg_get_triggerdef(t.oid) = 'CREATE TRIGGER require_split_invoice_creation_claim BEFORE INSERT ON public.invoices FOR EACH ROW EXECUTE FUNCTION require_split_invoice_creation_claim()'");
+      expect(block).toContain("pg_get_triggerdef(t.oid) = 'CREATE TRIGGER guard_split_invoice_provenance_identity BEFORE DELETE OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_split_invoice_provenance_identity()'");
       for (const pin of [
         "('public.require_split_invoice_creation_claim()', 'e73daae16c5ff5432644060f2b34f925')",
         "('public.guard_split_invoice_provenance_identity()', '639875d6641556c78c25d633c67821f1')",

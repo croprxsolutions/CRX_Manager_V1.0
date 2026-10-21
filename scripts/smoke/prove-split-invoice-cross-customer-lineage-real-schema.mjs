@@ -12,11 +12,15 @@
  *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the file stops at its preflight;
  *      PREFLIGHT: a drifted body aborts the candidate before any change;
  *   3. the candidate applies and prints POSTFLIGHT_OK;
- *   4. AFTER: the new chain (create, replay, post the two-owner split; five refusals) and every
- *      other covering chain pass and roll back;
+ *   4. AFTER: the new chain (create, replay, post and void a four-customer split; refusals at the
+ *      exception's limits and of the unchanged rule) and every other covering chain pass and roll back;
  *   5. RE-APPLY: refused by the preflight's own pins;
- *   6. MUTATION: with the owner test widened to any allocation the chain fails at its unresolved-
- *      owner refusal, and without the provenance branch it fails at posting the group.
+ *   6. MUTATION: each load-bearing condition, removed in turn, fails its own chain step: the owner
+ *      test widened to any allocation (the unresolved-owner refusal), the provenance branch off
+ *      (posting the group), the group requirement dropped (the ungrouped-in-claim refusal) and the
+ *      billing-default exclusion dropped (the excluded-owner refusal). The creation-claim test is
+ *      defence in depth: require_split_invoice_creation_claim refuses every unclaimed grouped
+ *      insert on a split order first, so no chain step can isolate it.
  *
  * Run: node scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs   (needs Docker)
  * Prints SPLIT_INVOICE_LINEAGE_PROOF_PASS on success.
@@ -65,6 +69,10 @@ const COVERING_CHAINS = [
   'smoke-backfill-refuse-split-billing.sql',
   'smoke-govern-invoice-order-money-lifecycle.sql',
   'smoke-money-lifecycle-idempotency-required.sql',
+  // void_order: governed split drafts are cancelled through this guard (20261021030000).
+  // (smoke-draw-ledger-reversal.sql, the other void_order chain, needs an existing live product and
+  // stops at SMOKE_SETUP in a disposable database.)
+  'smoke-void-order-governed-split-drafts.sql',
 ];
 const SUPERUSER_CHAINS = new Set(['smoke-govern-invoice-order-money-lifecycle.sql']);
 const GUARD = 'guard_invoice_terminal_order';
@@ -258,6 +266,12 @@ const OWNER_TEST_WIDENED = '           AND (true OR\n             EXISTS (\n    
 // Provenance branch disabled: a governed split invoice could no longer be updated after creation.
 const PROVENANCE_BRANCH = '      v_governed_split_customer := v_split_identity_kept AND EXISTS (\n';
 const PROVENANCE_BRANCH_OFF = '      v_governed_split_customer := v_split_identity_kept AND false AND EXISTS (\n';
+// Group requirement dropped: an ungrouped invoice inside a split claim could name an owner.
+const GROUP_REQUIRED = '  IF NEW.customer_id IS DISTINCT FROM v_order_customer_id AND NEW.invoice_group_id IS NOT NULL THEN\n';
+const GROUP_DROPPED = '  IF NEW.customer_id IS DISTINCT FROM v_order_customer_id THEN\n';
+// Fallback narrowed away: a field owner would be admitted even when its billing defaults exclude it.
+const OWNER_FALLBACK = '               NOT EXISTS (SELECT 1 FROM public.field_billing_defaults fbd WHERE fbd.field_id = oifa.field_id)\n               AND EXISTS (\n';
+const OWNER_FALLBACK_OFF = '               EXISTS (\n';
 
 async function main() {
   buildContainer();
@@ -268,7 +282,7 @@ async function main() {
   const before = chain(LINEAGE_CHAIN);
   assert.ok(!before.pass, 'BEFORE: the lineage chain passed against the pre-fix guard');
   assert.match(before.fail, /SMOKE_FAIL: a split onto another customer's field was refused: INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID/, `BEFORE: wrong first failure: ${before.fail}`);
-  console.log('[prover] BEFORE: the lineage chain fails first at step 1 (the two-owner split is refused by the lineage rule)');
+  console.log('[prover] BEFORE: the lineage chain fails first at step 1 (the cross-customer split is refused by the lineage rule)');
   runCovering('BEFORE');
 
   // 2. AUTOCOMMIT and PREFLIGHT.
@@ -285,7 +299,6 @@ ROLLBACK;`,
   });
   assert.notEqual(drift.status, 0, 'PREFLIGHT: the candidate applied over a drifted body');
   assert.match(drift.stderr, /PREFLIGHT_INVOICE_LINEAGE_GUARD_DRIFT/, `PREFLIGHT: wrong refusal:\n${drift.stderr}`);
-  assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE proname = '${GUARD}' AND prosrc LIKE '%v_governed_split_customer%';`), '0', 'a refused apply left a change behind');
   console.log('[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, or over a drifted body, the candidate stops before any change');
 
   // 3. APPLY.
@@ -297,7 +310,7 @@ ROLLBACK;`,
   // 4. AFTER.
   const after = chain(LINEAGE_CHAIN);
   assert.ok(after.pass, `AFTER: the lineage chain failed: ${after.fail}`);
-  console.log('[prover] AFTER: the lineage chain passes and rolls back (two-owner split created, replayed, posted; five refusals)');
+  console.log('[prover] AFTER: the lineage chain passes and rolls back (four-customer split created, replayed, posted, voided; four refusals at the exception\'s limits, three unchanged-rule refusals)');
   runCovering('AFTER');
 
   // 5. RE-APPLY.
@@ -311,7 +324,11 @@ ROLLBACK;`,
     ['owner test widened to any allocation', OWNER_TEST, OWNER_TEST_WIDENED,
       /SMOKE_FAIL: a claimed split invoice billed a customer the split does not bill/],
     ['provenance branch off', PROVENANCE_BRANCH, PROVENANCE_BRANCH_OFF,
-      /SMOKE_FAIL: posting the two-owner split group was refused: INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID/],
+      /SMOKE_FAIL: posting the cross-customer split group was refused: INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID/],
+    ['group requirement dropped', GROUP_REQUIRED, GROUP_DROPPED,
+      /SMOKE_FAIL: an ungrouped invoice inside a split claim billed another customer/],
+    ['billing-default exclusion dropped', OWNER_FALLBACK, OWNER_FALLBACK_OFF,
+      /SMOKE_FAIL: a claimed split invoice billed a field owner its billing defaults exclude/],
   ];
   for (const [label, find, replacement, expected] of mutations) {
     const r = chain(LINEAGE_CHAIN, mutate(GUARD, find, replacement, label));

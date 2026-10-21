@@ -15,7 +15,7 @@ import { supabase, sanitizeError, assertRpcResult, describePostInvoiceBlock } fr
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
-import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
+import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
 import type { Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
@@ -77,6 +77,8 @@ interface LineItem {
   epa_registration: string | null;
   product_form: string | null;
 }
+
+const NEGATIVE_PRICE_MESSAGE = 'Enter a price of $0.00 or more. Use a credit memo to give money back.';
 
 const statusBadge = (status: InvoiceStatus) => {
   const map: Record<InvoiceStatus, { variant: 'default' | 'warning' | 'success' | 'error' | 'info'; label: string }> = {
@@ -2119,10 +2121,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                           type="number"
                           value={(item.unit_price_cents / 100).toFixed(2)}
                           onChange={(e) => {
-                            const cents = parseDollarsToCents(e.target.value);
+                            const cents = parseDollarsToCentsSigned(e.target.value);
                             // null = a third decimal digit. Refuse the keystroke; never store
                             // a $0 unit price that only the below-cost prompt would question.
                             if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
+                            // The unsigned parser flips "-100" to +$100, which would bill a credit
+                            // as a charge (Sol, PR #983). Refuse a negative price instead.
+                            if (cents < 0) { toast('error', NEGATIVE_PRICE_MESSAGE); return; }
                             updateItem(idx, 'unit_price_cents', cents);
                           }}
                           min={0}

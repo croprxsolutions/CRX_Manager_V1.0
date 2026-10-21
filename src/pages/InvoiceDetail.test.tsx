@@ -1484,6 +1484,21 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     });
   });
 
+  it('refuses a negative charge amount instead of billing it as a positive charge (Sol, PR #983)', async () => {
+    setupInvoice({});
+    renderInvoiceDetail('inv-scratch');
+    await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    const amount = within(row).getByRole('spinbutton') as HTMLInputElement;
+    fireEvent.change(amount, { target: { value: '-100.00' } });
+
+    expect(mockToast).toHaveBeenCalledWith('error', 'Enter a price of $0.00 or more. Use a credit memo to give money back.');
+    expect(amount.value).toBe('0.00');
+    expect(screen.queryByText('$100.00')).toBeNull();
+  });
+
   it('refuses to save a charge with no description, before calling the server', async () => {
     setupInvoice({});
     mockIntentAwareRpc({ data: 'inv-scratch', error: null });

@@ -10,7 +10,10 @@
 --   * a blend-ticket invoice never bills a product at $0 because it has no price;
 --   * when the job's quote lists the same product more than once at different prices, the blend
 --     invoice stops and lists the choices; staff pick one, and it bills as the quoted price;
---   * the same product twice at the same price is not ambiguous.
+--   * the same product twice at the same price is not ambiguous;
+--   * a product the quote lists at $0 bills at $0 (Mason, 2026-10-20) only with an admin's written
+--     below-cost reason, asked before any invoice row, and each such line is recorded in
+--     below_cost_approvals; a sales rep is refused without seeing the cost.
 --
 -- Runs as the table owner with request.jwt.claims set to an admin (and a sales rep for the
 -- own-name step), so every function sees the auth.uid() it sees on live. Every refused step must
@@ -40,6 +43,13 @@ DECLARE
   v_section_b uuid;
   v_job2 uuid;
   v_job3 uuid;
+  v_job4 uuid;
+  v_section_c uuid;
+  v_qi_b_t1_0 uuid;
+  v_qi_b_t1_600 uuid;
+  v_line_t9_full uuid;
+  v_line_t9_t1 uuid;
+  v_invoice uuid;
   v_other_customer uuid;
   v_other_quote uuid;
   v_other_section uuid;
@@ -134,19 +144,30 @@ BEGIN
   INSERT INTO public.jobs (job_number, customer_id, job_date, status, quote_id, quote_section_id, total_acres)
   VALUES ('E2E-BTP-J-' || v_suffix, v_customer, v_today, 'scheduled', v_quote, v_section, 10) RETURNING id INTO v_job;
 
-  -- A second section of the same quote listing the full product only at prices that are not
-  -- usable: $0, which is how an unpriced quote line looks (price_per_unit is NOT NULL DEFAULT 0).
-  -- (A fraction of a cent cannot be stored: quote_items_price_per_unit_cent_scale_chk.) Today's
-  -- below-cost quote guard refuses a new $0 line, so this recreates a legacy row: as the table owner
-  -- with the quote_items triggers off for this one statement (container only; rolled back).
+  -- A second section of the same quote listing the full product only at $0, and the tier-1-only
+  -- product at $0 and at 6.00. A $0 quote line bills $0 (Mason, 2026-10-20) behind the below-cost
+  -- admin approval. On live a new $0 quote line needs that approval when the quote is saved
+  -- (save_quote); this recreates the rows directly as the table owner with the quote_items
+  -- triggers off for this one statement (container only; rolled back).
   INSERT INTO public.quote_sections (quote_id, section_name, sort_order)
   VALUES (v_quote, '[E2E] BTP Section B', 1) RETURNING id INTO v_section_b;
   EXECUTE 'ALTER TABLE public.quote_items DISABLE TRIGGER USER';
   INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
   VALUES (v_quote, v_section_b, v_p_full, 0, 0, 20, 10, 2, 'gal/acre');
+  INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
+  VALUES (v_quote, v_section_b, v_p_t1only, 1, 0, 20, 10, 2, 'gal/acre') RETURNING id INTO v_qi_b_t1_0;
+  INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
+  VALUES (v_quote, v_section_b, v_p_t1only, 2, 6.00, 20, 10, 2, 'gal/acre') RETURNING id INTO v_qi_b_t1_600;
   EXECUTE 'ALTER TABLE public.quote_items ENABLE TRIGGER USER';
   INSERT INTO public.jobs (job_number, customer_id, job_date, status, quote_id, quote_section_id, total_acres)
   VALUES ('E2E-BTP-J3-' || v_suffix, v_customer, v_today, 'scheduled', v_quote, v_section_b, 10) RETURNING id INTO v_job3;
+  -- A third section that does not list the full product at all.
+  INSERT INTO public.quote_sections (quote_id, section_name, sort_order)
+  VALUES (v_quote, '[E2E] BTP Section C', 2) RETURNING id INTO v_section_c;
+  INSERT INTO public.quote_items (quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
+  VALUES (v_quote, v_section_c, v_p_t1only, 0, 6.00, 20, 10, 2, 'gal/acre');
+  INSERT INTO public.jobs (job_number, customer_id, job_date, status, quote_id, quote_section_id, total_acres)
+  VALUES ('E2E-BTP-J4-' || v_suffix, v_customer, v_today, 'scheduled', v_quote, v_section_c, 10) RETURNING id INTO v_job4;
 
   -- Another customer's quote, whose section a job of this customer has been pointed at.
   INSERT INTO public.customers (farm_name, assigned_tier)
@@ -204,7 +225,9 @@ BEGIN
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
   VALUES (v_t8, v_p_full, '[E2E] BTP t8 stale pick', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t8;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t9, v_p_full, '[E2E] BTP t9 unusable quote', 20, 'GL', 2, 'gal/ac', 1);
+  VALUES (v_t9, v_p_full, '[E2E] BTP t9 zero quote', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t9_full;
+  INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
+  VALUES (v_t9, v_p_t1only, '[E2E] BTP t9 zero or six', 20, 'GL', 2, 'gal/ac', 2) RETURNING id INTO v_line_t9_t1;
 
   -- 1. Order: a tier-2 customer, a product with no tier-2 price -> priced at tier 1, never $0.
   BEGIN
@@ -425,19 +448,19 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: changing a line''s product kept its old pick';
   END IF;
   --     A pick also goes stale when the ticket's job changes; billing itself refuses to honour it.
-  --     Put the product back, pick again, then move the ticket to the job whose quote has no usable
-  --     price for it: the line must bill its tier price, never the old pick.
+  --     Put the product back, pick again, then move the ticket to a job whose quote does not list
+  --     the product: the line must bill its tier price, never the old pick.
   UPDATE public.blend_ticket_products SET product_id = v_p_full WHERE id = v_line_t8;
   v_res := public.set_blend_ticket_product_quote_price(v_line_t8, v_qi_700, v_admin, 'e2e-btp-pick-t8b-' || v_suffix);
   IF (SELECT unit_price_cents FROM public.blend_ticket_products WHERE id = v_line_t8) IS DISTINCT FROM 700 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the second T8 pick was not stored: %', v_res;
   END IF;
-  UPDATE public.blend_tickets SET job_id = v_job3 WHERE id = v_t8;
+  UPDATE public.blend_tickets SET job_id = v_job4 WHERE id = v_t8;
   BEGIN
     v_res := public.create_invoice_from_blend_ticket(v_t8, v_admin, 'e2e-btp-invoice-8-' || v_suffix);
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
-    RAISE EXCEPTION 'SMOKE_FAIL: the ticket moved to a job with no usable quote price was refused: %', v_err;
+    RAISE EXCEPTION 'SMOKE_FAIL: the ticket moved to a job whose quote does not list the product was refused: %', v_err;
   END;
   SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_text
     FROM public.invoice_items ii
@@ -446,21 +469,106 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a stale pick billed % (%) after the job changed, expected the 900-cent tier-2 price', v_cents, v_text;
   END IF;
 
-  -- 14. A quote price that is not usable ($0, which is how an unpriced quote line looks) is
-  --     neither offered nor billed: the line bills its tier price.
-  --     (Before this change the $0 line won the quote lookup and the below-cost line guard then
-  --     refused the whole invoice.)
+  -- 14. A product the quote lists at $0 bills at $0 (Mason, 2026-10-20: "$0 of $0 but flag it in
+  --     system and alert before save"), only with an admin's written below-cost reason, and each
+  --     $0 line is recorded in below_cost_approvals. (Before this change the $0 line was refused
+  --     by the below-cost line guard, BELOW_COST_CONTEXT_REQUIRED, so no invoice could be made.)
+  --  a. $0 is a real quoted price: the quote listing the tier-1-only product at $0 and 6.00 asks.
   BEGIN
-    v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9-' || v_suffix);
+    v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9a-' || v_suffix, 'free sample');
+    RAISE EXCEPTION 'SMOKE_FAIL: a quote listing a product at $0 and 6.00 billed without asking: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT, v_err_detail = PG_EXCEPTION_DETAIL;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong $0-or-6.00 refusal: %', v_err;
+    END IF;
+  END;
+  v_detail := v_err_detail::jsonb;
+  IF jsonb_array_length(v_detail->'products') <> 1
+     OR (v_detail->'products'->0->>'blend_ticket_product_id')::uuid IS DISTINCT FROM v_line_t9_t1
+     OR (v_detail->'products'->0->'options') IS DISTINCT FROM jsonb_build_array(
+          jsonb_build_object('quote_item_id', v_qi_b_t1_0, 'price_cents', 0),
+          jsonb_build_object('quote_item_id', v_qi_b_t1_600, 'price_cents', 600)) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the $0 choice handed to the screen is wrong: %', v_err_detail;
+  END IF;
+  v_res := public.set_blend_ticket_product_quote_price(v_line_t9_t1, v_qi_b_t1_0, v_admin, 'e2e-btp-pick-t9-' || v_suffix);
+  IF (SELECT unit_price_cents FROM public.blend_ticket_products WHERE id = v_line_t9_t1) IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the $0 pick was not stored: %', v_res;
+  END IF;
+  --  b. An admin with no reason (or only spaces) is asked for one, before any invoice row.
+  FOR v_count IN 1..2 LOOP
+    BEGIN
+      v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9b' || v_count || '-' || v_suffix,
+        CASE WHEN v_count = 2 THEN '   ' END);
+      RAISE EXCEPTION 'SMOKE_FAIL: a $0 quoted line billed with no below-cost reason: %', v_res;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'BELOW_COST_REASON_REQUIRED:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong no-reason refusal: %', v_err;
+      END IF;
+    END;
+    v_detail := substr(v_err, length('BELOW_COST_REASON_REQUIRED:') + 1)::jsonb;
+    IF v_detail->>'operation' IS DISTINCT FROM 'create_invoice_from_blend_ticket'
+       OR v_detail->>'entity_type' IS DISTINCT FROM 'blend_ticket'
+       OR (v_detail->>'line_id')::uuid IS DISTINCT FROM v_line_t9_full
+       OR (v_detail->>'product_id')::uuid IS DISTINCT FROM v_p_full
+       OR (v_detail->>'unit_price_cents')::bigint IS DISTINCT FROM 0
+       OR (v_detail->>'locked_unit_cost_cents')::bigint IS DISTINCT FROM 500 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: the $0 approval request handed to the screen is wrong: %', v_err;
+    END IF;
+  END LOOP;
+  --  c. A sales rep cannot bill a $0 line, and the refusal never shows the rep the cost.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t9, v_rep, 'e2e-btp-invoice-9c-' || v_suffix, 'rep reason');
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep billed a $0 quoted line: %', v_res;
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
-    RAISE EXCEPTION 'SMOKE_FAIL: a line whose quote prices are unusable was refused: %', v_err;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    -- entity_type blend_ticket: refused by the up-front check, before any invoice number is drawn.
+    IF v_err NOT LIKE 'BELOW_COST_ADMIN_REQUIRED:%' OR v_err LIKE '%locked_unit_cost_cents%'
+       OR substr(v_err, length('BELOW_COST_ADMIN_REQUIRED:') + 1)::jsonb->>'entity_type' IS DISTINCT FROM 'blend_ticket' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong rep $0 refusal: %', v_err;
+    END IF;
   END;
-  SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_text
-    FROM public.invoice_items ii
-   WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = v_p_full;
-  IF v_cents IS DISTINCT FROM 900 OR v_text IS DISTINCT FROM 'tier' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a line whose quote prices are unusable billed % (%), expected the 900-cent tier-2 price', v_cents, v_text;
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t9)
+     OR EXISTS (SELECT 1 FROM public.below_cost_approvals WHERE operation = 'create_invoice_from_blend_ticket') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused $0 invoice left an invoice or an approval behind';
+  END IF;
+  --  d. An admin with a reason bills both lines at $0 as quoted; each is flagged in
+  --     below_cost_approvals with the reason.
+  v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9d-' || v_suffix, '  free sample  ');
+  v_invoice := (v_res->'invoice_ids'->>0)::uuid;
+  IF (SELECT count(*) FROM public.invoice_items ii
+       WHERE ii.invoice_id = v_invoice
+         AND ii.product_id IN (v_p_full, v_p_t1only)
+         AND ii.unit_price_cents = 0 AND ii.extended_cents = 0
+         AND ii.price_source = 'quoted' AND ii.quoted_price_cents = 0) <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the $0 quoted lines did not bill at $0 as quoted: %',
+      (SELECT jsonb_agg(to_jsonb(ii)) FROM public.invoice_items ii WHERE ii.invoice_id = v_invoice);
+  END IF;
+  IF (SELECT count(*) FROM public.below_cost_approvals a
+       JOIN public.invoice_items ii ON ii.id = a.line_id
+      WHERE a.operation = 'create_invoice_from_blend_ticket'
+        AND a.entity_type = 'invoice' AND a.entity_id = v_invoice
+        AND ii.invoice_id = v_invoice AND a.product_id = ii.product_id
+        AND a.actor_user_id = v_admin AND a.reason = 'free sample'
+        AND a.unit_price_cents = 0 AND a.locked_unit_cost_cents = 500) <> 2
+     OR (SELECT count(*) FROM public.below_cost_approvals WHERE operation = 'create_invoice_from_blend_ticket') <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the $0 lines were not flagged in below_cost_approvals: %',
+      (SELECT jsonb_agg(to_jsonb(a)) FROM public.below_cost_approvals a);
+  END IF;
+  --  e. The below-cost context ended with the $0 line: it is not left set for the rest of the call.
+  IF COALESCE(current_setting('app.crx_below_cost_operation', true), '') <> ''
+     OR COALESCE(current_setting('app.crx_below_cost_reason', true), '') <> '' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the below-cost context was left set after the invoice';
   END IF;
 
   -- 10. Own name: a sales rep cannot pick a price on another rep's ticket.

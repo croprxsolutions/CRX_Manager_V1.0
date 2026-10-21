@@ -2968,9 +2968,11 @@ makes the first one reachable more often by emitting several order lines per pro
    job's quote lists the product more than once at *different* prices, the invoice now stops before
    anything is written and the Blend Ticket screen asks staff to pick the quoted price; the pick is
    stored on the ticket line and bills as `quoted`, only while it still matches the current quote,
-   product and customer. Same-price duplicates bill as before. A $0 quote line (how an unpriced
-   quote line is stored) no longer becomes a $0 quoted line (which the below-cost guard refused,
-   blocking the invoice); the line bills its tier price.
+   product and customer. Same-price duplicates bill as before. A product the quote lists at $0
+   bills at $0 (Mason, 2026-10-20: "$0 of $0 but flag it in system and alert before save"): before
+   any invoice number, an admin must approve it with a written reason in the below-cost window, and
+   each $0 line is recorded in `below_cost_approvals`; a sales rep cannot bill it. (Before, the
+   below-cost guard refused the $0 line and blocked the invoice.)
    Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
    stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
    price; the line bills its tier price.

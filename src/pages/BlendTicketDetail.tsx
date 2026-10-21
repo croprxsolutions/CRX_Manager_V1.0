@@ -28,6 +28,8 @@ import { validateBlendMath, type BlendMathWarning } from '../lib/blendMathValida
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { localToday } from '../lib/dateUtils';
 import { useOCRThresholds } from '../hooks/useOCRThresholds';
+import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
+import { withBelowCostReason } from '../lib/belowCostApproval';
 import type { BlendTicket, BlendTicketProduct, BlendTicketImage, BlendTicketToOrderItem, Customer, Product, Order, OrderItem, Field, Job, UnitConversion } from '../types';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import UnitSelect from '../components/blendtickets/UnitSelect';
@@ -104,6 +106,7 @@ export function BlendTicketDetail() {
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const invoiceIdem = useIdempotencyKey('create_invoice_from_blend_ticket', profile?.id || '');
+  const { runWithBelowCostApproval } = useBelowCostApproval();
   // Goal 3 pricing: the quote lists a product twice at different prices, so staff pick one.
   const [quotePriceChoices, setQuotePriceChoices] = useState<BlendQuotePriceChoice[] | null>(null);
   const [savingQuotePrices, setSavingQuotePrices] = useState(false);
@@ -942,11 +945,16 @@ export function BlendTicketDetail() {
     await runCriticalAction({
       action: async () => {
         const key = invoiceIdem.getKey();
-        const { data, error } = await supabase.rpc('create_invoice_from_blend_ticket', {
-          p_blend_ticket_id: ticket.id,
-          p_created_by: profile.id,
-          p_idempotency_key: key,
-        });
+        // Goal 3 pricing: a product the quote lists at $0 bills at $0, but only after an admin
+        // approves it with a reason in the below-cost window (the database asks before any invoice
+        // number is used, and records each approval). A refusal saves nothing, so the approved
+        // retry reuses the same key.
+        const { data, error } = await runWithBelowCostApproval((reason) =>
+          supabase.rpc('create_invoice_from_blend_ticket', withBelowCostReason('create_invoice_from_blend_ticket', {
+            p_blend_ticket_id: ticket.id,
+            p_created_by: profile.id,
+            p_idempotency_key: key,
+          }, reason)));
         if (error) {
           // U6 #91a: the ticket's job already has a live invoice — billing the ticket
           // too would double-charge. Give a plain-English reason instead of the raw token.

@@ -114,6 +114,7 @@ vi.mock('../lib/blendMathValidator', () => ({ validateBlendMath: () => [] }));
 vi.mock('../lib/dateUtils', () => ({ localToday: () => '2026-04-29' }));
 
 import { BlendTicketDetail } from './BlendTicketDetail';
+import { BelowCostApprovalProvider } from '../contexts/BelowCostApprovalContext';
 
 function renderTicket(id = 'tk-1') {
   return render(
@@ -1026,6 +1027,56 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Pick the quoted price' })).not.toBeInTheDocument());
     expect(mockResetKeyFor).toHaveBeenCalledWith(`${LINE_ID}:${QI_750}`);
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('asks an admin to approve a $0 quoted line with a reason, then bills with that reason', async () => {
+    const detail = {
+      operation: 'create_invoice_from_blend_ticket', entity_type: 'blend_ticket', entity_id: 'tk-1',
+      line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L',
+      unit_price_cents: 0, locked_unit_cost_cents: 500,
+    };
+    mockFrom.mockReset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'blend_ticket_products') return buildChain({ data: [baseProduct], error: null });
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name !== 'create_invoice_from_blend_ticket') return Promise.resolve({ data: null, error: null });
+      return Promise.resolve(args.p_below_cost_reason
+        ? { data: { invoice_ids: ['inv-9'], invoice_group_id: null }, error: null }
+        : { data: null, error: { message: `BELOW_COST_REASON_REQUIRED:${JSON.stringify(detail)}` } });
+    });
+    render(
+      <BelowCostApprovalProvider>
+        <MemoryRouter initialEntries={['/blend-tickets/tk-1']}>
+          <Routes>
+            <Route path="/blend-tickets/:id" element={<BlendTicketDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </BelowCostApprovalProvider>,
+    );
+    const createInvoice = await screen.findByRole('button', { name: 'Create Invoice' });
+    await waitFor(() => expect(createInvoice).toBeEnabled());
+    fireEvent.click(createInvoice);
+    const confirm = await screen.findByRole('dialog');
+    fireEvent.click(within(confirm).getByRole('button', { name: /create invoice/i }));
+
+    const approval = await screen.findByRole('dialog', { name: 'Approve below-cost price' });
+    expect(within(approval).getByText(/billed free of charge/)).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    fireEvent.change(within(approval).getByLabelText(/Approval reason/), { target: { value: 'free sample' } });
+    fireEvent.click(within(approval).getByRole('button', { name: 'Approve and Retry' }));
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/inv-9'), { timeout: 5000 });
+    const calls = mockRpc.mock.calls.filter(([name]) => name === 'create_invoice_from_blend_ticket');
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toEqual({ p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key' });
+    expect(calls[1][1]).toEqual({
+      p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key',
+      p_below_cost_reason: 'free sample',
+    });
   });
 
   it('keeps the window and the retry key when the first pick fails', async () => {

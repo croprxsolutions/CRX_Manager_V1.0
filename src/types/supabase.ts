@@ -12710,6 +12710,7 @@ export type Database = {
       }
       create_invoice_from_blend_ticket: {
         Args: {
+          p_below_cost_reason?: string
           p_blend_ticket_id: string
           p_created_by: string
           p_idempotency_key?: string

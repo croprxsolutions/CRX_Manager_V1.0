@@ -180,7 +180,7 @@ function fidelity() {
     ['public._create_order_from_blend_ticket_replay_impl_20261015(uuid,text,date,text,uuid,text)', contract[1]],
     ...[...sql.matchAll(/\('(public\.[^']+\))', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2]]),
   ];
-  assert.equal(all.length, 9, 'the preflight pins nine bodies');
+  assert.equal(all.length, 10, 'the preflight pins ten bodies');
   for (const [sig, pin] of all) {
     assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('${sig}');`), pin, `${sig} replayed with a body that differs from the live pin`);
   }
@@ -282,6 +282,8 @@ ROLLBACK;`,
   assert.match(a.output, /POSTFLIGHT_OK/, `the postflight did not report OK:\n${a.output}`);
   assert.equal(scalar(`SELECT has_function_privilege('anon', 'public.${SETTER}(uuid,uuid,uuid,text)', 'EXECUTE')::text || ',' || has_function_privilege('authenticated', 'public._blend_tier_price_cents_20261020(integer,numeric,numeric,numeric)', 'EXECUTE')::text;`),
     'false,false', 'anon can run the setter, or authenticated can run the private helper');
+  assert.equal(scalar(`SELECT has_function_privilege('anon', 'public.${INVOICE}(uuid,uuid,text,text)', 'EXECUTE')::text || ',' || has_function_privilege('authenticated', 'public.${INVOICE}(uuid,uuid,text,text)', 'EXECUTE')::text || ',' || (to_regprocedure('public.${INVOICE}(uuid,uuid,text)') IS NULL)::text;`),
+    'false,true,true', 'the re-created invoice function has the wrong grants, or the old one survived');
   console.log('[prover] candidate applied; POSTFLIGHT_OK; anon cannot run the setter and only postgres runs the helper');
 
   // 4. AFTER.
@@ -300,7 +302,9 @@ ROLLBACK;`,
   const ORDER_PRECHECK = between(ORDER, '  -- Goal 3 pricing (20261020210000): an order line is never priced', '  -- CHANGED: Removed total_paid');
   const ORDER_LINE = between(ORDER, '        -- Goal 3 pricing: the tier price, else the tier-1 price', '        v_cost := COALESCE(v_db_product.current_cost, 0);');
   const INVOICE_CHOICE = between(INVOICE, '  -- (1) The job\'s quote lists a product more than once', '  -- (2) A product billed at its tier price');
-  const INVOICE_PRECHECK = between(INVOICE, '  -- (2) A product billed at its tier price', '  IF v_customer_count > 1 THEN');
+  const INVOICE_PRECHECK = between(INVOICE, '  -- (2) A product billed at its tier price', '  -- (3) A product the job');
+  const INVOICE_ZERO_PRECHECK = between(INVOICE, '  -- (3) A product the job', '  IF v_customer_count > 1 THEN');
+  const ZERO_ADMIN_TEST = between(INVOICE, '      IF NOT public.is_admin() THEN\n        -- Cost is admin-only', '      IF NULLIF(btrim(COALESCE(p_below_cost_reason');
   const INVOICE_LINE = between(INVOICE, '            -- Goal 3 pricing: the tier price, else the tier-1 price', '          ELSE\n            v_unit_price := 0;');
   const PICK_VALID_CALL = '        IF public._blend_quote_pick_valid_20261020(\n             v_quote_section_id, v_ticket.customer_id, v_btp.product_id, v_btp.unit_price_cents) THEN\n';
   const OLD_ORDER_LINE = '        v_price := CASE v_tier\n          WHEN 1 THEN COALESCE(v_db_product.tier1_price, 0)\n          WHEN 2 THEN COALESCE(v_db_product.tier2_price, 0)\n          WHEN 3 THEN COALESCE(v_db_product.tier3_price, 0)\n          ELSE COALESCE(v_db_product.tier1_price, 0)\n        END;\n';
@@ -320,11 +324,28 @@ ROLLBACK;`,
     // Billing honours any stored value again, as before: the stale pick bills the old price.
     ['invoice valid-pick test', INVOICE, [[PICK_VALID_CALL, '        IF v_btp.unit_price_cents IS NOT NULL THEN\n']],
       /SMOKE_FAIL: a stale pick billed 700 \(quoted\) after the job changed/],
-    // The quote lookup takes any priced line again: an unusable quote price wins over the tier.
-    ['invoice usable-quote-price filter', INVOICE,
-      [["             AND qi.product_id = v_btp.product_id\n             AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)\n           ORDER BY qi.id LIMIT 1;\n",
-        "             AND qi.product_id = v_btp.product_id\n           ORDER BY qi.id LIMIT 1;\n"]],
-      /SMOKE_FAIL: (a line whose quote prices are unusable (billed|was refused)|the ticket moved to a job with no usable quote price was refused)/],
+    // The quote lookup skips $0 lines again (the rule before Mason's 2026-10-20 answer): the $0
+    // quoted line bills its tier price instead of $0.
+    ['invoice $0 quote price counts', INVOICE,
+      [["             AND qi.product_id = v_btp.product_id\n             AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)\n           ORDER BY qi.id LIMIT 1;\n",
+        "             AND qi.product_id = v_btp.product_id\n             AND qi.price_per_unit > 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)\n           ORDER BY qi.id LIMIT 1;\n"]],
+      /SMOKE_FAIL: the \$0 quoted lines did not bill at \$0 as quoted/],
+    // Without the up-front check the line trigger still refuses, but only after an invoice number
+    // and rows exist, and the screen is handed the invoice line instead of the ticket line.
+    ['invoice $0 approval pre-check', INVOICE, [[INVOICE_ZERO_PRECHECK, '']],
+      /SMOKE_FAIL: the \$0 approval request handed to the screen is wrong/],
+    ['invoice $0 pre-check admin test', INVOICE, [[ZERO_ADMIN_TEST, '']],
+      /SMOKE_FAIL: (wrong rep \$0 refusal|a sales rep billed a \$0 quoted line)/],
+    // Without the below-cost context the $0 line is refused even with an admin's reason.
+    ['invoice $0 line below-cost context', INVOICE,
+      [["          PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);\n", '']],
+      /BELOW_COST_CONTEXT_REQUIRED/],
+    ['invoice $0 line context reset', INVOICE,
+      [["        IF v_zero_quoted THEN\n          PERFORM set_config('app.crx_below_cost_operation', '', true);\n          PERFORM set_config('app.crx_below_cost_reason', '', true);\n        END IF;\n", '']],
+      /SMOKE_FAIL: the below-cost context was left set after the invoice/],
+    ['setter accepts a $0 quote price', SETTER,
+      [['     OR NOT (v_quote_item.price_per_unit >= 0\n', '     OR NOT (v_quote_item.price_per_unit > 0\n']],
+      /BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE/],
     // The setter tests the product twice (its own line and the shared valid-pick rule); remove both.
     // The automatic lookup trusts any section the job names again: the other customer's quote
     // either asks for a pick (two prices) or bills its price.

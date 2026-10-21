@@ -48,6 +48,9 @@ export default function BelowCostApprovalModal({ open, detail, onCancel, onConfi
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
             <div>
               <p className="font-medium">{detail?.product_name || 'This product'} is priced below its locked cost.</p>
+              {price === 0 && (
+                <p className="mt-1">It is priced at $0, so it will be billed free of charge.</p>
+              )}
               {hasMoney && shortfall !== null && (
                 <p className="mt-1 tabular-nums">
                   Price {formatCents(price)} · Cost {formatCents(cost)} · Shortfall {formatCents(shortfall)} per unit

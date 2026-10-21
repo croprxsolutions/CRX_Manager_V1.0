@@ -26,9 +26,18 @@
 - A job pointed at another customer's quote, or a deleted quote, supplies no quoted price (the
   automatic lookup used to trust any section the job named); the line bills its tier price.
 - The same invoice refuses a tier-priced product with no usable price instead of billing $0, and
-  counts only usable quote prices (above zero, finite, whole cents). A $0 quote line (how an
-  unpriced quote line is stored) now bills the tier price; before, the invoice tried a $0 line,
-  which the below-cost line guard refused, so no invoice could be made.
+  counts only usable quote prices (zero or above, finite, whole cents).
+- **A product the quote lists at $0 bills at $0, flagged and approved first** (Mason, 2026-10-20:
+  "$0 of $0 but flag it in system and alert before save"). A $0 line is below cost, so it goes
+  through the existing below-cost wall: before any invoice number is drawn the invoice asks
+  (`BELOW_COST_REASON_REQUIRED`, or `BELOW_COST_ADMIN_REQUIRED` for a sales rep, whose message never
+  carries the cost), the screen opens the "Approve below-cost price" window ("priced at $0, so it
+  will be billed free of charge"), and the admin's reason travels in the new
+  `p_below_cost_reason` argument. The line trigger records each $0 line in `below_cost_approvals`
+  (operation `create_invoice_from_blend_ticket`, now allowed by its CHECK). A $0 option is also
+  offered in the pick window. Before, the $0 line was refused (`BELOW_COST_CONTEXT_REQUIRED`) and no
+  invoice could be made. `create_invoice_from_blend_ticket` is re-created with that one extra
+  trailing argument and the same grants.
 - Shared rule: private helper `_blend_tier_price_cents_20261020` (tier price, else tier 1, whole
   cents, never rounds; executable only by postgres).
 - Screen: each confirmed pick retires its retry key; a multi-pick that fails part-way reloads and
@@ -44,5 +53,5 @@ production schema baseline plus every post-baseline migration): the new chain
 its line was priced at $0), passes after it, and fails at the matching step with each guard removed.
 Screen tests: `src/pages/BlendTicketDetail.test.tsx`, `src/lib/blendTicketPricing.test.ts`.
 
-**Not changed.** The order wrapper and its replay binding, `save_blend_ticket`, every policy and
-grant. Automatic exact-line matching stays future work.
+**Not changed.** The order wrapper and its replay binding, `save_blend_ticket`, the below-cost line
+guard itself, every policy and every grant on an existing object. Automatic exact-line matching stays future work.

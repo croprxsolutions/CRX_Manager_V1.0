@@ -400,6 +400,7 @@ function runMatrix(label) {
       ['R7 charge line unknown type', { ...freight, charge_type: 'tax' }],
       ['R7 charge line zero amount', { ...freight, unit_price_cents: 0, extended_cents: 0 }],
       ['R7 charge line blank description', { ...freight, description: '   ' }],
+      ['R7 charge line tab/newline description', { ...freight, description: '\t\n' }],
     ]) add(scenario([{ key: k, as: U.ADMIN, call: save(misc, [line], `r7-${k.length}`) }]));
     // R9: an untyped product-less line from a writer other than save_invoice is typed 'other', so the
     // shape check refuses a quantity-times-price sale written that way.
@@ -524,6 +525,7 @@ const AFTER = [
   ['R7 charge line zero amount', SHAPE],
   ['R7 charge type on a product line (order invoice)', SHAPE],
   ['R7 charge line blank description', SHAPE],
+  ['R7 charge line tab/newline description', SHAPE],
   ['R8 product line on an overdue from-scratch invoice', REFUSED_PRODUCT],
   ['R9 owner inserts an untyped 10 x $50 line', SHAPE],
   ['R10 restore over an untyped line', REFUSED_TYPE],

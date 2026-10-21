@@ -138,7 +138,7 @@ ALTER TABLE public.invoice_items
       product_id IS NULL
       AND order_item_id IS NULL
       AND return_credit_source_item_id IS NULL
-      AND btrim(description) <> ''
+      AND description ~ '[^[:space:]]'  -- any real character; one-argument btrim strips spaces only, not tabs or newlines
       AND quantity = 1
       AND cost_cents = 0
       AND is_application_fee IS NOT TRUE

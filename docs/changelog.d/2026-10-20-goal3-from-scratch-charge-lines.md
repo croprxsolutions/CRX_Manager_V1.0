@@ -29,3 +29,5 @@
   high-water. Content unchanged.
 - A new charge line starts with no type (and no quantity box), and the page refuses to save until
   staff pick one, so a charge is never filed as freight by default (Codex connector P2 on PR #983).
+- A charge line's description must contain a real character: a description of only tabs or
+  newlines is refused, not just one of spaces (Codex connector P2 on PR #983).

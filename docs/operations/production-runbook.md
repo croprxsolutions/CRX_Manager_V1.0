@@ -265,9 +265,12 @@ Design (draft): `docs/plans/2026-10-19-goal6-backup-health-alert-design.md`. As 
 email, but a run that **never starts has no alert at all**: the missed-run watchdog is designed, not built.
 
 **Built 2026-10-21, not yet live** (same `CRX_Backups` [PR #1](https://github.com/masonwells1/CRX_Backups/pull/1)): the in-repository
-layer, `.github/workflows/backup-freshness.yml`. Daily at 20:00 UTC it fails (GitHub emails) when the newest database
+layer, `.github/workflows/backup-freshness.yml`. Daily at 20:00 UTC it fails when the newest database
 dump or the newest validated storage marker is older than the most recent Sunday 08:00 UTC, allowing 10 hours because
-GitHub has started the Sunday runs 4 to 6.5 hours late. It needs no secret. It is a second layer only: if GitHub Actions
+GitHub has started the Sunday runs 4 to 6.5 hours late. It needs no secret. A failed run is only a red mark in GitHub:
+it reaches Mason by email **only if** his GitHub notification settings send Actions failure emails for `CRX_Backups`
+(the design doc's caveat). That is not yet confirmed, so before this counts as an alert, confirm it once with a
+deliberately failed run (the break test) and record here that the email arrived; until then, keep the Monday check below. It is a second layer only: if GitHub Actions
 is switched off it does not run either, so the outside watchdog (design part B, needs a credential Mason approves) and
 the stronger dump checks (design part A) are still owed.
 

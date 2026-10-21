@@ -4130,8 +4130,9 @@ export interface BelowCostApprovalDetail {
   /** Every $0 line one approval covers (blend-ticket invoice, Goal 3); empty when not sent. */
   zero_line_product_names: string[];
   /**
-   * The same $0 lines as line and product ids. create_invoice_from_blend_ticket takes them back
-   * with the reason, so an approval covers exactly the lines it showed (20261021070000).
+   * The same $0 lines as line and product ids, kind and cost. create_invoice_from_blend_ticket
+   * takes them back with the reason, so an approval covers exactly the lines it showed
+   * (20261021070000).
    */
   zero_lines: BelowCostZeroLine[];
 }
@@ -4142,6 +4143,8 @@ export interface BelowCostZeroLine {
   product_name: string | null;
   /** 'quoted_zero', 'grower_share' or 'quoted_zero_and_grower_share'; null when not sent. */
   kind: string | null;
+  /** The line's cost per unit in cents (admins only; null when not sent). Sent back as shown. */
+  cost_cents: number | null;
 }
 
 export interface BelowCostApprovalError {

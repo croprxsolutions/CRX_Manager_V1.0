@@ -48,6 +48,10 @@
 --      check, so a quote edit cannot change a price between the check and the billing loop.
 --   9. An "included in grower share" chemical line records the chemical's cost (cost_cents) and
 --      adds it to the invoice's total_cost_cents; before, it recorded $0 cost, overstating margin.
+--  10. Each approved line is bound to its kind and cost as well as its line and product: an
+--      admin's detail lists each $0 line's cost_cents, the screen sends the lines back as shown,
+--      and a change in cost or in why a line is $0 is refused as stale. A non-admin's detail
+--      still carries no cost.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -523,12 +527,13 @@ BEGIN
       'product_name', v_zero_lines -> 0 -> 'product_name',
       'unit_price_cents', 0,
       'locked_unit_cost_cents', v_zero_lines -> 0 -> 'cost_cents',
-      'zero_lines', (SELECT jsonb_agg(e.value - 'cost_cents' ORDER BY e.ord)
-                       FROM jsonb_array_elements(v_zero_lines) WITH ORDINALITY AS e(value, ord)));
+      'zero_lines', v_zero_lines);
     IF NOT public.is_admin() THEN
       -- Cost is admin-only (Mason, 2026-10-15): a non-admin's detail never carries it.
       RAISE EXCEPTION USING ERRCODE = 'P0001',
-        MESSAGE = 'BELOW_COST_ADMIN_REQUIRED:' || (v_zero_line - 'locked_unit_cost_cents')::text;
+        MESSAGE = 'BELOW_COST_ADMIN_REQUIRED:' || jsonb_set(v_zero_line - 'locked_unit_cost_cents', '{zero_lines}',
+          (SELECT jsonb_agg(e.value - 'cost_cents' ORDER BY e.ord)
+             FROM jsonb_array_elements(v_zero_lines) WITH ORDINALITY AS e(value, ord)))::text;
     END IF;
     IF NULLIF(btrim(COALESCE(p_below_cost_reason, '')), '') IS NULL THEN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
@@ -538,9 +543,11 @@ BEGIN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || v_zero_line::text;
     END IF;
-    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id')
+    -- Each approved line is bound to what the window showed for it: line, product, why it is $0
+    -- (kind) and its cost; a change to any of them asks again.
+    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')
                FROM jsonb_array_elements(p_approved_zero_lines) AS e(value) ORDER BY 1)
-       IS DISTINCT FROM ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id')
+       IS DISTINCT FROM ARRAY(SELECT DISTINCT lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')
                FROM jsonb_array_elements(v_zero_lines) AS e(value) ORDER BY 1) THEN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || v_zero_line::text;
@@ -893,7 +900,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'a2b7ab6298ea00c27df05dc7b683088e'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'f9fd247bc2066f8bbde99727b3a97be8'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

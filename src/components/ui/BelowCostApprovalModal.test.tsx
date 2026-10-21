@@ -26,7 +26,7 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
     const dialog = renderWith({
       ...base,
       zero_line_product_names: ['Atrazine 4L'],
-      zero_lines: [{ line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share' }],
+      zero_lines: [{ line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share', cost_cents: 500 }],
     });
     expect(within(dialog).getByText(/included in a grower-share per-acre price/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/free of charge/)).not.toBeInTheDocument();
@@ -37,8 +37,8 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
       ...base,
       zero_line_product_names: ['Atrazine 4L', 'Roundup'],
       zero_lines: [
-        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'quoted_zero' },
-        { line_id: 'l2', product_id: 'p2', product_name: 'Roundup', kind: 'grower_share' },
+        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'quoted_zero', cost_cents: 500 },
+        { line_id: 'l2', product_id: 'p2', product_name: 'Roundup', kind: 'grower_share', cost_cents: 700 },
       ],
     });
     expect(within(dialog).getByText(/quoted at \$0, or included in a grower-share per-acre price/)).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
     const dialog = renderWith({
       ...base,
       zero_line_product_names: ['Atrazine 4L'],
-      zero_lines: [{ line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'quoted_zero' }],
+      zero_lines: [{ line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'quoted_zero', cost_cents: 500 }],
     });
     expect(within(dialog).getByText(/billed free of charge/)).toBeInTheDocument();
   });

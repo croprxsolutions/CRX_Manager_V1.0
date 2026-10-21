@@ -1035,8 +1035,8 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
       line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L',
       unit_price_cents: 0, locked_unit_cost_cents: 500,
       zero_lines: [
-        { line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L' },
-        { line_id: 'line-2', product_id: 'prod-2', product_name: 'Roundup PowerMax' },
+        { line_id: LINE_ID, product_id: 'prod-1', product_name: 'Atrazine 4L', kind: 'quoted_zero', cost_cents: 500 },
+        { line_id: 'line-2', product_id: 'prod-2', product_name: 'Roundup PowerMax', kind: 'quoted_zero', cost_cents: 700 },
       ],
     };
     mockFrom.mockReset();
@@ -1081,13 +1081,14 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     const calls = mockRpc.mock.calls.filter(([name]) => name === 'create_invoice_from_blend_ticket');
     expect(calls).toHaveLength(2);
     expect(calls[0][1]).toEqual({ p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key' });
-    // The approval names exactly the $0 lines the window showed (20261021070000).
+    // The approval names exactly the $0 lines the window showed, with why each is $0 and its
+    // cost (20261021070000).
     expect(calls[1][1]).toEqual({
       p_blend_ticket_id: 'tk-1', p_created_by: 'user-1', p_idempotency_key: 'test-idem-key',
       p_below_cost_reason: 'free sample',
       p_approved_zero_lines: [
-        { line_id: LINE_ID, product_id: 'prod-1' },
-        { line_id: 'line-2', product_id: 'prod-2' },
+        { line_id: LINE_ID, product_id: 'prod-1', kind: 'quoted_zero', cost_cents: 500 },
+        { line_id: 'line-2', product_id: 'prod-2', kind: 'quoted_zero', cost_cents: 700 },
       ],
     });
   });

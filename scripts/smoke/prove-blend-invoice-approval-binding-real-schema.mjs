@@ -295,7 +295,9 @@ ROLLBACK;`,
   const STALE_NONE = between(INVOICE, "  ELSIF p_approved_zero_lines IS NOT NULL OR", '  END IF;\n\n  IF v_customer_count > 1 THEN');
   const KEY_REQUIRED = between(INVOICE, '  -- 20261021070000: a retry key is required', '  IF p_idempotency_key IS NOT NULL THEN\n    v_existing');
   const STALE_TYPE = between(INVOICE, "    IF jsonb_typeof(p_approved_zero_lines) IS DISTINCT FROM 'array' THEN\n", "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')");
-  const KEY = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id')";
+  const KEY = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '') || ':' || COALESCE(e.value->>'cost_cents', '')";
+  const KEY_NO_COST = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'kind', '')";
+  const KEY_NO_KIND = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id') || ':' || COALESCE(e.value->>'cost_cents', '')";
   const mutations = [
     ['unmatched-line refusal', [[UNMATCHED, '']],
       /SMOKE_FAIL: a blend-ticket invoice billed a line with no product/],
@@ -316,6 +318,10 @@ ROLLBACK;`,
       /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(one\)/],
     ['approval bound to each line\'s product', [[`    IF ARRAY(SELECT DISTINCT ${KEY}\n`, "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')\n"], [`       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY}\n`, "       IS DISTINCT FROM ARRAY(SELECT DISTINCT lower(e.value->>'line_id')\n"]],
       /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(product\)/],
+    ['approval bound to each line\'s cost', [[`    IF ARRAY(SELECT DISTINCT ${KEY}\n`, `    IF ARRAY(SELECT DISTINCT ${KEY_NO_COST}\n`], [`       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY}\n`, `       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY_NO_COST}\n`]],
+      /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(cost\)/],
+    ['approval bound to each line\'s kind', [[`    IF ARRAY(SELECT DISTINCT ${KEY}\n`, `    IF ARRAY(SELECT DISTINCT ${KEY_NO_KIND}\n`], [`       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY}\n`, `       IS DISTINCT FROM ARRAY(SELECT DISTINCT ${KEY_NO_KIND}\n`]],
+      /SMOKE_FAIL: an approval that does not name exactly the shown \$0 lines billed \(kind\)/],
     ['retry key required', [[KEY_REQUIRED, '']],
       /SMOKE_FAIL: a blend-ticket invoice was made with no retry key/],
     ['approval with no $0 line left', [[STALE_NONE, '']],

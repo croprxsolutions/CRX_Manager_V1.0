@@ -66,6 +66,7 @@ function parseDetail(raw: string): BelowCostApprovalDetail | null {
                   product_id: productId,
                   product_name: nullableString(row.product_name),
                   kind: nullableString(row.kind),
+                  cost_cents: nullableInteger(row.cost_cents),
                 }]
               : [];
           })

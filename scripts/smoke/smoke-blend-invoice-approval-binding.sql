@@ -598,8 +598,8 @@ BEGIN
     END IF;
     -- Every $0 line is listed (Mason, 2026-10-20: "list every $0 line"), in ticket order.
     IF (v_detail->'zero_lines') IS DISTINCT FROM jsonb_build_array(
-         jsonb_build_object('line_id', v_line_t9_full, 'product_id', v_p_full, 'product_name', '[E2E] BTP Full ' || v_suffix, 'kind', 'quoted_zero'),
-         jsonb_build_object('line_id', v_line_t9_t1, 'product_id', v_p_t1only, 'product_name', '[E2E] BTP Tier1Only ' || v_suffix, 'kind', 'quoted_zero')) THEN
+         jsonb_build_object('line_id', v_line_t9_full, 'product_id', v_p_full, 'product_name', '[E2E] BTP Full ' || v_suffix, 'kind', 'quoted_zero', 'cost_cents', 500),
+         jsonb_build_object('line_id', v_line_t9_t1, 'product_id', v_p_t1only, 'product_name', '[E2E] BTP Tier1Only ' || v_suffix, 'kind', 'quoted_zero', 'cost_cents', 500)) THEN
       RAISE EXCEPTION 'SMOKE_FAIL: the approval request does not list every $0 line: %', v_detail->'zero_lines';
     END IF;
   END LOOP;
@@ -650,6 +650,26 @@ BEGIN
       IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
       IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
         RAISE EXCEPTION 'SMOKE_FAIL: wrong stale-approval refusal (product): %', v_err;
+      END IF;
+    END;
+    BEGIN
+      v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9scost-' || v_suffix, 'free sample', jsonb_build_array(jsonb_set(v_zero->0, '{cost_cents}', to_jsonb(499)), v_zero->1));
+      RAISE EXCEPTION 'SMOKE_FAIL: an approval that does not name exactly the shown $0 lines billed (cost): %', v_res;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong stale-approval refusal (cost): %', v_err;
+      END IF;
+    END;
+    BEGIN
+      v_res := public.create_invoice_from_blend_ticket(v_t9, v_admin, 'e2e-btp-invoice-9skind-' || v_suffix, 'free sample', jsonb_build_array(jsonb_set(v_zero->0, '{kind}', to_jsonb('grower_share'::text)), v_zero->1));
+      RAISE EXCEPTION 'SMOKE_FAIL: an approval that does not name exactly the shown $0 lines billed (kind): %', v_res;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: wrong stale-approval refusal (kind): %', v_err;
       END IF;
     END;
     BEGIN
@@ -758,7 +778,7 @@ BEGIN
   END;
   v_detail := substr(v_err, length('BELOW_COST_REASON_REQUIRED:') + 1)::jsonb;
   IF (v_detail->'zero_lines') IS DISTINCT FROM jsonb_build_array(
-       jsonb_build_object('line_id', v_line_t11, 'product_id', v_p_full, 'product_name', '[E2E] BTP Full ' || v_suffix, 'kind', 'grower_share'))
+       jsonb_build_object('line_id', v_line_t11, 'product_id', v_p_full, 'product_name', '[E2E] BTP Full ' || v_suffix, 'kind', 'grower_share', 'cost_cents', 500))
      OR v_detail->>'entity_type' IS DISTINCT FROM 'blend_ticket' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the grower-share approval does not list the included chemical: %', v_err;
   END IF;

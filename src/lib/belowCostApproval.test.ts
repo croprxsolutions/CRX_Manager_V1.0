@@ -45,19 +45,19 @@ describe('parseBelowCostApprovalError', () => {
       .toEqual(['Atrazine 4L', 'Roundup']);
   });
 
-  it('keeps the line and product id of each $0 line so the approval can name exactly those lines', () => {
+  it('keeps the line and product id, kind and cost of each $0 line so the approval can name exactly those lines', () => {
     const zero = {
       ...detail, operation: 'create_invoice_from_blend_ticket', unit_price_cents: 0,
       zero_lines: [
-        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share' },
+        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share', cost_cents: 500 },
         { line_id: 'l2' }, { product_id: 'p3' }, null,
-        { line_id: 'l4', product_id: 'p4' },
+        { line_id: 'l4', product_id: 'p4', cost_cents: 12.5 },
       ],
     };
     expect(parseBelowCostApprovalError({ message: `BELOW_COST_REASON_REQUIRED:${JSON.stringify(zero)}` })?.detail?.zero_lines)
       .toEqual([
-        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share' },
-        { line_id: 'l4', product_id: 'p4', product_name: null, kind: null },
+        { line_id: 'l1', product_id: 'p1', product_name: 'Atrazine 4L', kind: 'grower_share', cost_cents: 500 },
+        { line_id: 'l4', product_id: 'p4', product_name: null, kind: null, cost_cents: null },
       ]);
   });
 

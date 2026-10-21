@@ -948,16 +948,18 @@ export function BlendTicketDetail() {
         // Goal 3 pricing: a product the quote lists at $0 bills at $0, but only after an admin
         // approves it with a reason in the below-cost window (the database asks before any invoice
         // number is used, and records each approval). A refusal saves nothing, so the approved
-        // retry reuses the same key. The approval sends back the exact $0 lines the window showed;
-        // if they changed meanwhile the database refuses (BELOW_COST_APPROVAL_STALE) instead of
-        // billing lines the admin never saw.
+        // retry reuses the same key. The approval sends back the exact $0 lines the window showed
+        // (line, product, why it is $0 and its cost); if any changed meanwhile the database refuses
+        // (BELOW_COST_APPROVAL_STALE) instead of billing lines the admin never saw.
         const { data, error } = await runWithBelowCostApproval((reason, detail) =>
           supabase.rpc('create_invoice_from_blend_ticket', withBelowCostReason('create_invoice_from_blend_ticket', {
             p_blend_ticket_id: ticket.id,
             p_created_by: profile.id,
             p_idempotency_key: key,
             ...(reason ? {
-              p_approved_zero_lines: (detail?.zero_lines ?? []).map(({ line_id, product_id }) => ({ line_id, product_id })),
+              p_approved_zero_lines: (detail?.zero_lines ?? []).map(({ line_id, product_id, kind, cost_cents }) => ({
+                line_id, product_id, kind, cost_cents,
+              })),
             } : {}),
           }, reason)));
         if (error) {

@@ -292,6 +292,17 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong no-zero-lines stale refusal: %', v_err;
     END IF;
   END;
+  --     The same with a reason and no line list (a screen from before the line list).
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t12, v_admin, 'e2e-btp-invoice-12c-' || v_suffix, 'free sample');
+    RAISE EXCEPTION 'SMOKE_FAIL: a reason-only $0 approval billed a ticket that has none: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BELOW_COST_APPROVAL_STALE:%' OR v_err LIKE '%cost%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong reason-only stale refusal: %', v_err;
+    END IF;
+  END;
   IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_t12) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused no-key or stale invoice left an invoice behind';
   END IF;

@@ -291,8 +291,8 @@ ROLLBACK;`,
   const UNMATCHED = between(INVOICE, '  -- 20261021050000: every line must be a catalog product.', '  v_quote_section_id := NULL;\n  IF v_ticket.job_id IS NOT NULL THEN\n');
   const GROWER_TERM = "                 EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)\n                          WHERE (r.value->>'price_override_cents') IS NOT NULL\n                            AND (r.value->>'share_acres')::numeric > 0) AS in_grower_share\n";
   const KIND = "           'cost_cents', z.cost_cents,\n           'kind', CASE WHEN z.quoted_zero AND z.in_grower_share THEN 'quoted_zero_and_grower_share'\n                        WHEN z.quoted_zero THEN 'quoted_zero' ELSE 'grower_share' END)\n";
-  const STALE_SET = between(INVOICE, "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')", "  ELSIF jsonb_typeof(p_approved_zero_lines) = 'array'");
-  const STALE_NONE = between(INVOICE, "  ELSIF jsonb_typeof(p_approved_zero_lines) = 'array'", '  END IF;\n\n  IF v_customer_count > 1 THEN');
+  const STALE_SET = between(INVOICE, "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')", "  ELSIF p_approved_zero_lines IS NOT NULL OR");
+  const STALE_NONE = between(INVOICE, "  ELSIF p_approved_zero_lines IS NOT NULL OR", '  END IF;\n\n  IF v_customer_count > 1 THEN');
   const KEY_REQUIRED = between(INVOICE, '  -- 20261021050000: a retry key is required', '  IF p_idempotency_key IS NOT NULL THEN\n    v_existing');
   const STALE_TYPE = between(INVOICE, "    IF jsonb_typeof(p_approved_zero_lines) IS DISTINCT FROM 'array' THEN\n", "    IF ARRAY(SELECT DISTINCT lower(e.value->>'line_id')");
   const KEY = "lower(e.value->>'line_id') || ':' || lower(e.value->>'product_id')";
@@ -320,6 +320,8 @@ ROLLBACK;`,
       /SMOKE_FAIL: a blend-ticket invoice was made with no retry key/],
     ['approval with no $0 line left', [[STALE_NONE, '']],
       /SMOKE_FAIL: an approval for \$0 lines billed a ticket that has none/],
+    ['reason-only approval with no $0 line left', [["  ELSIF p_approved_zero_lines IS NOT NULL OR NULLIF(btrim(COALESCE(p_below_cost_reason, '')), '') IS NOT NULL THEN\n", '  ELSIF p_approved_zero_lines IS NOT NULL THEN\n']],
+      /SMOKE_FAIL: a reason-only \$0 approval billed a ticket that has none/],
     ['approval must be a list', [[STALE_TYPE, '']],
       /SMOKE_FAIL: wrong stale-approval refusal \(object\)/],
   ];

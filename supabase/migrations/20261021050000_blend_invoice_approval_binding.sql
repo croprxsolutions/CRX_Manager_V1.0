@@ -41,8 +41,9 @@
 -- order path; the setter.
 --   6. A retry key is now required (IDEMPOTENCY_KEY_REQUIRED, 22023): without one a lost reply could
 --      not be replayed. The only caller (the Blend Ticket screen) always sends one.
---   7. An approval naming $0 lines when none is $0 any more (a price changed in between) is refused
---      with BELOW_COST_APPROVAL_STALE instead of billing a price the window never showed.
+--   7. An approval (a reason, a line list or both) when no line is $0 any more (a price changed in
+--      between) is refused with BELOW_COST_APPROVAL_STALE instead of billing a price the window
+--      never showed.
 --
 -- ROLLBACK (if ever needed, as its own reviewed migration): drop the 5-argument function and
 -- re-create the 4-argument one from 20261020210000 with the same grants.
@@ -534,9 +535,10 @@ BEGIN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || v_zero_line::text;
     END IF;
-  ELSIF jsonb_typeof(p_approved_zero_lines) = 'array' AND jsonb_array_length(p_approved_zero_lines) > 0 THEN
-    -- An approval for $0 lines arrived but none is $0 any more (a price changed in between):
-    -- bill nothing the window did not show; the screen asks again. No cost in this detail.
+  ELSIF p_approved_zero_lines IS NOT NULL OR NULLIF(btrim(COALESCE(p_below_cost_reason, '')), '') IS NOT NULL THEN
+    -- An approval (a reason or a line list) arrived but no line is $0 any more (a price changed
+    -- in between): bill nothing the window did not show; the screen asks again. The reason is
+    -- only ever used for $0 lines, so nothing legitimate sends one here. No cost in this detail.
     RAISE EXCEPTION USING ERRCODE = 'P0001',
       MESSAGE = 'BELOW_COST_APPROVAL_STALE:' || jsonb_build_object(
         'operation', 'create_invoice_from_blend_ticket',
@@ -876,7 +878,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '383bfca3ef1f19dce2b353bcf881e931'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '316309fb43c4e7c7d15c40c355999873'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

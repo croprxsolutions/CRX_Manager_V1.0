@@ -248,7 +248,7 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 6. **Who reviews printed and emailed documents (9.2) and approves the money reports (10.2)**, and by when. Recommend the bookkeeper, by 2026-12-01.
 
 **Actions already decided, still waiting on Mason** (not new decisions):
-- **Upgrade Supabase to Pro and turn on point-in-time recovery** (decided 2026-10-13). Due this week: every recovery test waits on it.
+- **Upgrade Supabase to Pro and turn on point-in-time recovery** (decided 2026-10-13). Due this week, because the rewind-to-a-time drill (13.2) can't run without it. The first database-only restore of the existing weekly dump doesn't wait on it and can run now (`docs/plans/2026-10-18-goal-6-safety-net-findings.md`).
 - **Add the two storage-key secrets** that the file backup (13.3) waits on.
 - **Send Stripe the eligibility question** about restricted-use pesticide sales (section 14, and section 5.6 of the Goal 7 groundwork plan).
 - **Fallback for December 31 evening**: if the quote and order number fix (12.1) misses its December proof, staff stop entering quotes and orders in CRX after 6 pm that evening. It's a backup plan, not a substitute for the fix.

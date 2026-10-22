@@ -267,7 +267,7 @@ export default function FieldStop() {
   };
 
   const isPartial = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity);
-  // What complete_delivery checks before it completes (migration 20261022010000).
+  // What complete_delivery checks before it completes (migration 20261022050000).
   const completionEvidence: DeliveryCompletionEvidence = noOnePresent ? 'left_at_site' : usePaperTicket ? 'paper_ticket' : 'signature';
   const receiptEmail = delivery?.customer?.email || receiptRecipient?.email || null;
   // The proof the chosen path needs is in place (the server checks it again).

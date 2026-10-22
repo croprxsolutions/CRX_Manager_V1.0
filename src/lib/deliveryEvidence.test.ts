@@ -12,7 +12,7 @@ import { sanitizeError } from './errorSanitizer';
 import { supabase } from './db';
 
 // The captions and the signature path must match complete_delivery's evidence check
-// (migration 20261022010000) exactly, or every photo or signature completion is refused.
+// (migration 20261022050000) exactly, or every photo or signature completion is refused.
 describe('Goal 5 completion evidence', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 

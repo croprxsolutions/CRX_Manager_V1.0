@@ -1,6 +1,6 @@
 ## 2026-10-21 — Goal 5 follow-ups: the server requires completion evidence; drivers' receipts for hidden customers
 
-Migration `20261022010000_delivery_completion_evidence` (NOT YET APPLIED; ships with its PR, on Mason's
+Migration `20261022050000_delivery_completion_evidence` (NOT YET APPLIED; ships with its PR, on Mason's
 owner approval because it adds storage policies). Plan reviewed twice by Codex Sol (advisory) before the build.
 
 - **Completion needs saved proof.** Every completion now tells the server how the customer confirmed it:

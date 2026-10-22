@@ -1060,7 +1060,7 @@ export interface DispatchStockRow {
 
 export type DeliveryStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'voided';
 export type DeliveryPriority = 'low' | 'normal' | 'high' | 'urgent';
-// How the customer confirmed a completion (migration 20261022010000); checked by complete_delivery.
+// How the customer confirmed a completion (migration 20261022050000); checked by complete_delivery.
 // completion_evidence_ref holds the signature path (signature), the delivery_photos id (paper_ticket,
 // left_at_site), or the admin's written reason with whitespace collapsed (no_proof, admin only).
 export type DeliveryCompletionEvidence = 'signature' | 'paper_ticket' | 'left_at_site' | 'no_proof';

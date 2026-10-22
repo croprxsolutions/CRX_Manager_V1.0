@@ -28,7 +28,7 @@ const SITES: Array<[string, string]> = [
 
 // The reset runs on any binding refusal (the helper returns 'intent', 'actor' or 'receipt', else null),
 // first in a block that then reloads the record (CodeRabbit on PR #954). The delivery screens also
-// retire the key on SIGNATURE_IMAGE_MISSING in the same condition (Goal 5, 20261022010000).
+// retire the key on SIGNATURE_IMAGE_MISSING in the same condition (Goal 5, 20261022050000).
 const anyBindingReset = (hook: string) => new RegExp(
   `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)(?: \\|\\| isSignatureImageMissing\\((?:err|error)\\))?\\) \\{\\n\\s*${hook}\\.resetKey(?:For\\(completeScope\\))?\\(?\\)?;`,
   'g',

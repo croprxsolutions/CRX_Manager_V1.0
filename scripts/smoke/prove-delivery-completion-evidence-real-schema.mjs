@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261022010000 candidate (Goal 5 completion evidence): complete_delivery and
+ * Full-chain proof for the 20261022050000 candidate (Goal 5 completion evidence): complete_delivery and
  * start_and_complete_delivery take p_evidence (signature | paper_ticket | left_at_site), refuse with
  * nothing changed unless that proof is saved, and record it in deliveries.completion_evidence; a
  * trigger closes the direct-table route to 'completed'; get_delivery_receipt_recipient lets an
@@ -35,7 +35,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261022010000_delivery_completion_evidence.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261022050000_delivery_completion_evidence.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

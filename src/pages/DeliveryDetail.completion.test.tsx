@@ -1,6 +1,6 @@
 /**
  * DeliveryDetail.completion.test.tsx — Goal 5 completion paths on the REAL DeliveryDetail page
- * (migration 20261022010000). The server contract these tests lean on: an exact retry with the same
+ * (migration 20261022050000). The server contract these tests lean on: an exact retry with the same
  * key and identical args replays the saved result before any status or evidence check.
  *
  * Covered here:

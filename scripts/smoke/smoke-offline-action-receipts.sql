@@ -371,7 +371,7 @@ BEGIN
     json_build_object('sub', v_admin, 'role', 'authenticated')::text,
     true
   );
-  -- Since 20261022010000 (Goal 5) a completion must carry saved proof (a signature or ticket photo).
+  -- Since 20261022050000 (Goal 5) a completion must carry saved proof (a signature or ticket photo).
   -- An offline payload carries none, so the queued completion goes to office review with nothing
   -- committed; the office finishes it from the delivery page.
   v_result := public.process_offline_action(v_delivery_action, v_delivery_key);

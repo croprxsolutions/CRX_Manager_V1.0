@@ -1,5 +1,5 @@
 -- ============================================================================
--- SMOKE TEST (rolled back by design) for 20261022010000_delivery_completion_evidence.
+-- SMOKE TEST (rolled back by design) for 20261022050000_delivery_completion_evidence.
 --
 -- CONTAINER ONLY: run through scripts/smoke/prove-delivery-completion-evidence-real-schema.mjs,
 -- never against the live database. Completing a delivery on an order writes the order's automatic

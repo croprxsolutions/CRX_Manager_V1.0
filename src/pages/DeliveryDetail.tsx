@@ -279,7 +279,7 @@ export default function DeliveryDetail() {
   const isAssignedDriver = isDriver && profile?.id === delivery?.assigned_driver;
   const canConfirm = (isAdminOrRep || isAssignedDriver) && delivery?.status === 'scheduled';
   const receiptEmail = customer?.email || receiptRecipient?.email || null;
-  // What complete_delivery checks before it completes (migration 20261022010000).
+  // What complete_delivery checks before it completes (migration 20261022050000).
   // no_proof is offered only to an admin on the office layout (the server refuses anyone else).
   const completionEvidence: DeliveryCompletionEvidence = isAdmin && useNoProof ? 'no_proof' : usePaperTicket ? 'paper_ticket' : 'signature';
   // A delivery recorded without proof is signed with the fixed office text, never a customer's name.

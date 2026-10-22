@@ -136,7 +136,7 @@ profit to the rep who earns it; and a rep can still find a product's cost by tri
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
 
-## FIXED 2026-10-21 (migration `20261022010000`, NOT YET APPLIED; ships with its PR) — a driver's completion receipt can be skipped when the customer row is hidden from them
+## FIXED 2026-10-21 (migration `20261022050000`, NOT YET APPLIED; ships with its PR) — a driver's completion receipt can be skipped when the customer row is hidden from them
 
 The customer receipt email after a delivery is sent by the phone, and the delivery page and the field
 stop read the customer through the client. Under `customers_select`, an assigned driver may not see the
@@ -172,9 +172,9 @@ retry is not small, so it is written down here instead of built:
   and a new scheduled job (an Edge Function deployment, which needs Mason's approval), and its own
   review and live test. Owner: the next Goal 5 or Goal 6 change.
 
-## OPEN 2026-10-21 (LOW; follows from `20261022010000`) — completion-evidence leftovers
+## OPEN 2026-10-21 (LOW; follows from `20261022050000`) — completion-evidence leftovers
 
-`20261022010000` (Goal 5 follow-up 2) makes every completion carry server-checked proof:
+`20261022050000` (Goal 5 follow-up 2) makes every completion carry server-checked proof:
 `complete_delivery` and `start_and_complete_delivery` take `p_evidence` (`signature`, `paper_ticket` or
 `left_at_site`) and `p_evidence_ref`, and refuse, changing nothing, unless that exact proof is saved (the
 signature image this attempt uploaded, or the named, correctly captioned photo in the delivery's own

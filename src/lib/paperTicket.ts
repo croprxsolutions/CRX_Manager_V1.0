@@ -7,7 +7,7 @@
  * The ticket photo is an ordinary delivery photo carrying this caption, so it is
  * stored, protected and shown exactly like every other delivery photo.
  *
- * Since migration 20261022010000 the server enforces it: complete_delivery takes
+ * Since migration 20261022050000 the server enforces it: complete_delivery takes
  * p_evidence and refuses a paper_ticket completion without a ticket photo on the
  * delivery (and a signature completion without its saved image); see deliveryEvidence.ts.
  */

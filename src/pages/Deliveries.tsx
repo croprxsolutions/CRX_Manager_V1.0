@@ -166,7 +166,7 @@ export default function Deliveries() {
   const notifiedCompletionFor = useRef<Set<string>>(new Set());
   const [signedBy, setSignedBy] = useState('');
   const [deliveredOnDate, setDeliveredOnDate] = useState(businessToday());
-  // Goal 5 (migration 20261022010000): the server completes only with saved proof, either the
+  // Goal 5 (migration 20261022050000): the server completes only with saved proof, either the
   // on-screen signature or a photo of the signed paper ticket, or (admin only) a written reason
   // recorded without proof.
   const [completeEvidence, setCompleteEvidence] = useState<DeliveryCompletionEvidence>('signature');

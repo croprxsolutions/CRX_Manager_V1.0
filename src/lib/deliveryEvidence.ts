@@ -1,5 +1,5 @@
 /**
- * Goal 5 completion evidence (migration 20261022010000). Every delivery completion tells the
+ * Goal 5 completion evidence (migration 20261022050000). Every delivery completion tells the
  * server how the customer confirmed it (p_evidence) and exactly which artifact proves it
  * (p_evidence_ref), and the server refuses unless that artifact is saved:
  *   signature     the on-screen signature image, uploaded BEFORE the completion call to a path the

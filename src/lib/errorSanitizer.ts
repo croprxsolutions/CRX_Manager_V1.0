@@ -16,7 +16,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // A completion retried under a fresh key after an earlier attempt already completed the record.
   [/^Delivery must be in_progress to complete \(current status: completed\)/,
    'This delivery is already completed. Refresh the page to see it'],
-  // Goal 5 (migration 20261022010000): a completion needs its proof saved first. Nothing changed.
+  // Goal 5 (migration 20261022050000): a completion needs its proof saved first. Nothing changed.
   [/^COMPLETION_EVIDENCE_REQUIRED\b/,
    'This version of the app is out of date. Reload the app, then open the delivery to check whether it is already completed before completing it again'],
   // Every evidence refusal: THIS attempt changed nothing. An earlier attempt may still have completed

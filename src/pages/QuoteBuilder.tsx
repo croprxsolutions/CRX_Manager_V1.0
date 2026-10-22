@@ -1393,13 +1393,14 @@ export default function QuoteBuilder() {
           .map((row) => row.id));
         if (foreign.size > 0) {
           setSections((prev) => prev.map((sec) => (sec.field_id && foreign.has(sec.field_id) ? { ...sec, field_id: null } : sec)));
+          toast('warning', "The previous customer's field was removed from this quote. Check those lines' acres.");
         }
         if (rows.length < ids.length) {
           setFieldLoadError('A field on this quote no longer exists. Choose the section\'s field again before saving.');
         }
       });
     return () => { cancelled = true; };
-  }, [unresolvedFieldKey, customerIdRef]);
+  }, [unresolvedFieldKey, customerIdRef, toast]);
 
   // Repricing lines before products and unit conversions load would convert every unit at a
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
@@ -1425,9 +1426,15 @@ export default function QuoteBuilder() {
     recalcAllForTier(cust.assigned_tier);
     // A section's field must belong to the quote's customer: clear any that does not. A saved
     // field still loading by id is kept; the unresolved-field check blocks saving until it loads.
-    setSections((prev) => prev.map((sec) => (
-      sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id ? { ...sec, field_id: null } : sec
-    )));
+    // The lines keep their acres (they are the line's own values, as when a field is cleared by
+    // hand), so the user is told to check them (Luna, #1017).
+    const clearedSections = sections.filter((sec) => sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id);
+    if (clearedSections.length > 0) {
+      setSections((prev) => prev.map((sec) => (
+        sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id ? { ...sec, field_id: null } : sec
+      )));
+      toast('warning', `The previous customer's field was removed from ${clearedSections.map((sec) => sec.section_name || 'a section').join(', ')}. Check those lines' acres.`);
+    }
     return true;
   };
 

@@ -217,6 +217,35 @@ describe('InventoryPage Product identity writers', () => {
     expect(mocks.toast).not.toHaveBeenCalledWith('error', 'Failed to load products. Please try again.');
   });
 
+  it('blocks Add Inventory while a product reload is in flight (Luna, #1017)', async () => {
+    let release!: (result: { data: unknown; error: unknown; count: number | null }) => void;
+    let holdReads = false;
+    mocks.from.mockImplementation((table: string) => {
+      if (table !== 'products') return query([]);
+      if (!holdReads) return query(siblings);
+      const held = new Promise((resolve) => { release = resolve; });
+      const builder: Record<string, unknown> = {};
+      for (const method of ['select', 'eq', 'order', 'range']) builder[method] = vi.fn(() => builder);
+      builder.then = (resolve: (value: unknown) => void) => held.then(resolve);
+      return builder;
+    });
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /add inventory/i }));
+    let dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
+    expect(await within(dialog).findByRole('button', { name: /SKU-A/i })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /add.*inventory/i })).not.toBeInTheDocument());
+
+    // Reopening reloads the list; until it lands, the earlier list must not be used.
+    holdReads = true;
+    fireEvent.click(screen.getByRole('button', { name: /add inventory/i }));
+    dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
+    expect(within(dialog).getByRole('button', { name: /^add inventory$/i })).toBeDisabled();
+
+    release({ data: siblings, error: null, count: siblings.length });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /^add inventory$/i })).not.toBeDisabled());
+  });
+
   it('distinguishes siblings and sends exact UUID B to create_inventory_hold', async () => {
     render(<MemoryRouter><InventoryPage /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /create hold/i }));

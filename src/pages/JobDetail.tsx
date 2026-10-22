@@ -383,6 +383,9 @@ export default function JobDetail() {
   // did, editing and saving are closed: those lists pick the customer, size the
   // fields and price the chemicals, and an empty one must never pass for "none".
   const [lookupLoadFailures, setLookupLoadFailures] = useState<string[]>([]);
+  // True until the newest lookup load has finished: a job edited or saved before its
+  // customer, field and product lists arrive would use partial reference data (Luna, #1017).
+  const [lookupsLoading, setLookupsLoading] = useState(true);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [applicators, setApplicators] = useState<Profile[]>([]);
   // Staff-held license rows per profile (B5 license gates)
@@ -1659,6 +1662,7 @@ export default function JobDetail() {
   const loadLookups = useCallback(async () => {
     const loadId = ++lookupsLoadRef.current;
     const superseded = () => loadId !== lookupsLoadRef.current;
+    setLookupsLoading(true);
     setFieldsLookupReady(false);
     // Customers, fields and products are read page by page (Goal 4): these lists
     // name billed customers, size fields and price chemicals across the page, so
@@ -1709,6 +1713,7 @@ export default function JobDetail() {
     if (superseded()) return;
     setAllProducts(productRows);
     setLookupLoadFailures(failures);
+    setLookupsLoading(false);
     setVehicles((vehicleResult.data || []) as Vehicle[]);
     setApplicators((appResult.data || []) as Profile[]);
     setRecipes((recipeResult.data || []) as BlendRecipe[]);
@@ -2427,6 +2432,10 @@ export default function JobDetail() {
   // admin-override modal (admins only) so the save proceeds only with a LOGGED reason; a
   // non-admin is told to fix the rate (no silent corruption).
   const handleSave = async () => {
+    if (lookupsLoading) {
+      toast('error', 'Customers, fields and products are still loading. Try again in a moment.');
+      return;
+    }
     if (lookupLoadFailures.length > 0) {
       toast('error', `This job's ${lookupLoadFailures.join(', ')} could not be loaded. Retry before saving.`);
       return;
@@ -3749,7 +3758,7 @@ export default function JobDetail() {
   }
 
   // A failed customers/fields/products read closes editing until a retry succeeds.
-  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0;
+  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0 && !lookupsLoading;
   // U12: the assigned applicator (job-level applicator_id match — mirrors the
   // existing AppliedRecordsManager canEdit gate a few hundred lines down) can
   // see Start/Complete on THEIR OWN job even though isEditable is office-only.

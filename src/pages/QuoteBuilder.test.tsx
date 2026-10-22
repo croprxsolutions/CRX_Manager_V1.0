@@ -480,8 +480,10 @@ describe('QuoteBuilder', () => {
 
     expect(customerBox).toHaveValue('Far Field Farm');
     expect(screen.getByDisplayValue('Tier 3')).toBeInTheDocument();
-    // North Forty belongs to another customer, so the section no longer names it.
+    // North Forty belongs to another customer, so the section no longer names it, and the
+    // user is told to check that section's acres (Luna, #1017).
     await waitFor(() => expect(fieldBox).toHaveValue(''));
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining("Check those lines' acres"));
   });
 
   it('clears a saved section field of the original customer when it loads after another customer was picked', async () => {

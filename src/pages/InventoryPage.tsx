@@ -41,6 +41,7 @@ import { ProductSearchResultRow } from '../components/products/ProductSearchResu
 type PickerProduct = Product & ProductOptionPresentationModel;
 
 const PRODUCTS_FAILED_MESSAGE = 'Products could not be loaded. Close and reopen this window to try again.';
+const PRODUCTS_LOADING_MESSAGE = 'Products are still loading. Try again in a moment.';
 const HOLD_LISTS_FAILED_MESSAGE = 'Products or customers could not be loaded. Close and reopen this window to try again.';
 
 interface InventoryRow extends Inventory {
@@ -206,6 +207,8 @@ export default function InventoryPage() {
   const [products, setProducts] = useState<PickerProduct[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [productsFailed, setProductsFailed] = useState(false);
+  // True while the newest product read is in flight: the list on screen may be an older one.
+  const [productsLoading, setProductsLoading] = useState(false);
   const [customersFailed, setCustomersFailed] = useState(false);
   const [addProductId, setAddProductId] = useState('');
   const [addLocation, setAddLocation] = useState('Main Warehouse');
@@ -427,6 +430,7 @@ export default function InventoryPage() {
   const customersReadRef = useRef(0);
   const fetchProducts = useCallback(async () => {
     const readId = ++productsReadRef.current;
+    setProductsLoading(true);
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('products')
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
@@ -435,6 +439,7 @@ export default function InventoryPage() {
       .order('id')
       .range(from, to));
     if (readId !== productsReadRef.current) return;
+    setProductsLoading(false);
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });
       toast('error', 'Failed to load products. Please try again.');
@@ -616,6 +621,10 @@ export default function InventoryPage() {
         toast('error', HOLD_LISTS_FAILED_MESSAGE);
         return;
       }
+      if (productsLoading) {
+        toast('error', PRODUCTS_LOADING_MESSAGE);
+        return;
+      }
       if (!holdProductId) {
         toast('error', 'Please select a product');
         return;
@@ -745,6 +754,10 @@ export default function InventoryPage() {
   const handleAdd = async () => {
     if (productsFailed) {
       toast('error', PRODUCTS_FAILED_MESSAGE);
+      return;
+    }
+    if (productsLoading) {
+      toast('error', PRODUCTS_LOADING_MESSAGE);
       return;
     }
     if (!addProductId) {
@@ -1905,7 +1918,7 @@ export default function InventoryPage() {
                 createHoldIntent.isForeignIntentLocked
                 || createHoldIntent.isRetryExpired
                 // A new hold needs the complete lists; a locked retry re-sends its frozen request.
-                || (!createHoldIntent.isIntentLocked && (productsFailed || customersFailed))
+                || (!createHoldIntent.isIntentLocked && (productsFailed || customersFailed || productsLoading))
               }
             >
               {createHoldIntent.isIntentLocked ? 'Retry Exact Hold' : 'Create Hold'}
@@ -2008,7 +2021,7 @@ export default function InventoryPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button onClick={handleAdd} disabled={adding || productsFailed}>
+            <Button onClick={handleAdd} disabled={adding || productsFailed || productsLoading}>
               {adding ? 'Adding...' : 'Add Inventory'}
             </Button>
           </div>

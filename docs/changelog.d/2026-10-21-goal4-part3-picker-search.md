@@ -1,6 +1,6 @@
 ## 2026-10-21 - Pickers search the database or read every record (Goal 4, part 3, first PR)
 
-Record pickers no longer stop at 200, 500 or 1,000 rows. Frontend only, no migration.
+Customer, field and product pickers no longer stop at 500 or 1,000 rows; the order, job and purchase-order pickers listed under "Deferred" below still do until the second part-3 PR. Frontend only, no migration.
 
 **New shared search box.** `src/components/ui/RecordSearchPicker.tsx` searches the database as you type: one character or more, the first 20 matches, a "keep typing" note on a full page. Thin versions sit beside it: `CustomerSearchPicker` (farm name or account number), `FieldSearchPicker` (field name, optionally one customer's fields) and the existing `ProductSearchPicker` from #944, now built on the same box.
 - A failed search shows a red "… search failed" with a Retry button, never "no matches". A search with no reply in 15 seconds counts as failed.

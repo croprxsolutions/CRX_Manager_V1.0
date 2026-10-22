@@ -140,8 +140,10 @@ done, customer, invoice or record number, amount, and their initials.
   applied to invoices, and any prepay it had created (including prepay already applied to other
   invoices, which the void also takes back). The void screen shows only the payment's total, not
   the prepay it reverses. So write down the customer's balance on **AR Aging** and their **Prepay**
-  balance just **before** the void and again just **after**; the differences are the amounts for
-  the list;
+  balance just **before** the void and again just **after**. The AR difference is the void's
+  **whole** effect on Total Owed, including any prepay applications it reversed. Enter it once, as
+  the "payments voided" amount, and don't count those prepay reversals again in the equation's
+  prepay term. The Prepay difference goes in Step 5;
 - **anything else that changes what a customer owes, their prepay or their credit.** When in doubt,
   write it down.
 
@@ -358,8 +360,10 @@ each printed form next to its CRX screen, and add any field the form is missing.
 3. **Enter the paper records** through the normal CRX screens, oldest number first. CRX can search
    a paper number only for payments (the **Reference #** box, below). Invoices, returns, receiving
    and deliveries can't be searched by a paper number. So **for every operation, keep a form list**:
-   each form number in order, with the CRX record number (invoice, return, PO receipt, delivery or
-   payment) written next to it once it's entered. Before entering a form, check the form list; a
+   each form number in order, with the CRX record number (invoice, return, delivery or payment)
+   written next to it once it's entered. A goods receipt has no number of its own on screen, so for
+   receiving, type the paper form number into the receipt's **notes**: the purchase order's page
+   shows each receipt's notes. Write the PO number and receipt date on the form list. Before entering a form, check the form list; a
    form that already has a CRX number is never entered again. One person enters each operation's
    forms. Tick each form only after the entered record has been compared with the paper.
    - **Payments:** in **Record Payments**, type the check number and the paper number together in
@@ -453,8 +457,10 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
   item notes (the "rule for every form" in procedure 2). CRX will need all of these to create the order and its delivery afterwards;
   without them, CRX falls back to its own defaults, such as today's tier price. **Known gap:** a
   "price later" order can't be back-dated in CRX: it always gets the day it's entered. Keep the real
-  order date on the paper form and in the order's notes. Question 7 below asks whether that is
-  acceptable.
+  order date on the paper form and in the order's notes. A "price later" order also can't carry a
+  package size or item notes that differ from the product's usual ones; the delivery copies the
+  order's lines and can't change them. Put those details in the delivery's notes so the driver sees
+  them. Question 7 below asks whether that is acceptable.
 - The customer keeps a copy if the ticket has one. **Draft suggestion:** two-part (carbon) tickets.
 - If the product isn't on the printed schedule, write "NOT ON SCHEDULE" on the ticket, so the
   office knows to look for it in CRX afterwards.

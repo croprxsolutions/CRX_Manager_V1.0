@@ -81,6 +81,12 @@
   brake, delivery forms are entered first and each paper invoice form is matched to the draft the
   delivery created, never entered as a second invoice. The outage printout gets appointment times
   written in by hand, since only each delivery's own page shows them.
+- Fifteenth Codex GitHub App round (three findings, all confirmed). From this round on, Mason chose to
+  defer form and detail gaps to the December rehearsal and fix only what is wrong about the app;
+  these three were app facts or a counting error. A goods receipt shows no number of its own, so the
+  paper form number goes in the receipt's notes. A "price later" order can't carry a non-standard
+  package size or item notes, so they go in the delivery notes. A payment void's AR change is counted
+  once, not again in the prepay term.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

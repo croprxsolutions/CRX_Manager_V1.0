@@ -1599,6 +1599,24 @@ BEGIN
     RAISE EXCEPTION 'PRICING_INCOMPLETE: price the order before generating split invoices';
   END IF;
 
+  -- Split-payer return (20261021155000): freeze who owns each allocated field, and in what
+  -- percentages, for the rest of this transaction. Pass 1 reads the billing defaults field by field
+  -- in separate statements, so an edit committed between them could mix old and new percentages,
+  -- and the lineage guard checks only that each customer is still an owner (Codex App P1 on #1010).
+  -- Same order as save_field (the field row, then its defaults): the allocated fields' rows, then
+  -- the whole defaults table in SHARE mode (blocks every write to it until this split commits).
+  PERFORM 1
+     FROM fields f
+    WHERE f.id IN (
+      SELECT oifa.field_id
+        FROM order_item_field_allocations oifa
+        JOIN order_items oi ON oi.id = oifa.order_item_id
+       WHERE oi.order_id = p_order_id
+    )
+    ORDER BY f.id
+    FOR SHARE;
+  LOCK TABLE public.field_billing_defaults IN SHARE MODE;
+
   -- PASS 1: compute every (customer, line) cents + prorated qty into v_rows.
   FOR v_item IN
     SELECT * FROM order_items WHERE order_id = p_order_id ORDER BY sort_order NULLS LAST, id
@@ -1783,7 +1801,7 @@ BEGIN
         ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '0d5209ab7179f36d71f548b55a6cf77d', true),
         ('guard_invoice_terminal_order', 'public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', true),
         ('guard_mono_invoice_split_billing_post', 'public.guard_mono_invoice_split_billing_post()', 'b6fd2b19478801f6798c7b6e1fba737b', true),
-        ('_create_split_invoices_from_order_provenance_impl_20260719', 'public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', '9f112447e3694490b5538d042ab2f10f', true),
+        ('_create_split_invoices_from_order_provenance_impl_20260719', 'public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'ccde51261dd8c5270b6dbd24f28981bd', true),
         ('_return_customer_is_split_payer', 'public._return_customer_is_split_payer(uuid,uuid)', NULL, false),
         ('_return_customer_line_share', 'public._return_customer_line_share(uuid,uuid,uuid,uuid)', NULL, false)
       ) AS pin(name, sig, body_md5, secdef)

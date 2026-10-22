@@ -198,7 +198,12 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   can leave that return requested but no longer receivable (no money moves; staff reject or cancel it).
 - **A billing-default edit committed mid-split can refuse that split (LOW, availability).** The guard
   re-reads the owners when each draft is written; a change committed by another session in between
-  rolls the split back. It never admits a customer the split did not choose.
+  rolls the split back. It never admits a customer the split did not choose. CLOSED by
+  `20261021155000` (same PR; Codex App P1): the split reads each field's percentages in a separate
+  statement, so an edit that kept the same owners (50/50 to 70/30) could also have mixed old and new
+  percentages across lines and passed the guard. The split writer now locks the allocated fields'
+  rows (FOR SHARE) and then `field_billing_defaults` in SHARE mode before it reads them, so no
+  billing-default write can commit until the split does (the same order `save_field` writes them).
 
 ## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
 

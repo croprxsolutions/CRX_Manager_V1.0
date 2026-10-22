@@ -191,6 +191,18 @@ BEGIN
      OR (SELECT unit_price_cents FROM public.return_items WHERE return_id = v_return) IS DISTINCT FROM 1000::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: B''s return is not B''s 1 GL at 10.00';
   END IF;
+  -- The split in step 0 froze the billing defaults for the rest of its transaction (this one), so
+  -- no field edit could commit between its per-field reads: SHARE blocks every write until commit.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_locks l
+     WHERE l.locktype = 'relation'
+       AND l.relation = 'public.field_billing_defaults'::regclass
+       AND l.mode = 'ShareLock'
+       AND l.granted
+       AND l.pid = pg_backend_pid()
+  ) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the split did not hold the billing defaults in SHARE mode for its transaction';
+  END IF;
   -- The Returns screen's read-only lookups follow the same rule: with B's 1 GL open, B may return
   -- 1 GL more of line 1 and 0.5 GL of line 2, A 2 GL of line 1, D nothing; the order is among B's
   -- split-billed orders.

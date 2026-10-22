@@ -69,7 +69,7 @@ const FUNCTIONS = [
   { name: '_issue_return_credit_intent_impl_20260812', source: RETURNS_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.issue_return_credit(', pre: '1e9647da071aa1a53f3add5e38515da8', hunks: 5 },
   { name: 'guard_invoice_terminal_order', source: LINEAGE_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.guard_invoice_terminal_order()', pre: '3ce8e2202d902ed90ba3370dfc829e47', hunks: 2 },
   { name: 'guard_mono_invoice_split_billing_post', source: MONO_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.guard_mono_invoice_split_billing_post()', pre: 'e643f573e529a7117c10ff1e8b89fad0', hunks: 1 },
-  { name: '_create_split_invoices_from_order_provenance_impl_20260719', source: SPLIT_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public._create_split_invoices_from_order_provenance_impl_20260719(', pre: 'f671f1a3f5406cff52aedd8a5fb40b31', hunks: 1 },
+  { name: '_create_split_invoices_from_order_provenance_impl_20260719', source: SPLIT_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public._create_split_invoices_from_order_provenance_impl_20260719(', pre: 'f671f1a3f5406cff52aedd8a5fb40b31', hunks: 2 },
 ];
 
 describe('20261021155000 split-payer return credit', () => {
@@ -154,6 +154,11 @@ describe('20261021155000 split-payer return credit', () => {
     const split = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_split_invoices_from_order_provenance_impl_20260719(');
     expect(split).toContain("COALESCE(v_item.unit_size, 'ea'));");
     expect(split).not.toContain('v_item.cust_acres, v_item.unit_size);');
+    // The billing split is frozen before Pass 1 reads it field by field (Codex App P1): the
+    // allocated fields' rows first, then the defaults table, the same order save_field writes them.
+    const freeze = split.indexOf('LOCK TABLE public.field_billing_defaults IN SHARE MODE;');
+    expect(freeze).toBeGreaterThan(split.indexOf('    FOR SHARE;'));
+    expect(freeze).toBeLessThan(split.indexOf('-- PASS 1: compute every'));
     const create = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(');
     const unitCheck = create.indexOf("THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'");
     expect(unitCheck).toBeGreaterThan(create.indexOf('IF v_share.share_mode THEN'));

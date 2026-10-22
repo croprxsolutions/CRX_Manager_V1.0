@@ -328,11 +328,17 @@ number; write VOID across a spoiled form and keep it.
 |---|---|
 | Recording payments | number, date received, customer, amount, method (check, cash, ACH, card or other: Record Payments starts on "Check", so the method must be written down), check number or transfer reference, each invoice it pays and the amount for each, any remainder to be kept as prepay (Record Payments takes an amount per invoice and turns what's left into prepay), who received it |
 | Completing deliveries | number, customer, delivery number if known, products and quantities, date, signer's printed name and signature, driver. Photograph it. (The Goal 5 signed paper ticket.) |
-| Posting or creating invoices | number, customer, delivery or order it bills, lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. |
+| Posting or creating invoices | number, customer, delivery or order it bills, invoice date, payment terms or due date (a new invoice in CRX starts on today's date and the customer's usual terms), lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. |
 | Issuing credits or returns | number, customer, original invoice, products and quantities returned, **each item's condition and whether it goes back into stock** (the Returns screen records both, and they decide what is restocked), reason, amount, who approved it |
-| Receiving stock | number, supplier, PO number, products, quantities, package sizes, lot numbers, date, who received it |
+| Receiving stock | number, supplier, PO number, storage location, products, quantities, package sizes, lot numbers, each item's condition (good, damaged, short or wrong product), date, who received it. (CRX's receiving screen starts on "Main Warehouse" and "good".) |
 
 Keep each operation's forms together in one folder, in number order.
+
+**Rule for every form:** a paper form must ask for every field the matching CRX screen asks for,
+especially fields CRX fills in by itself (today's date, default terms, "Check", "Main Warehouse",
+"good"). Otherwise the record entered later quietly takes CRX's default instead of what really
+happened. The table above is a starting point. **Draft suggestion:** in the December rehearsal, lay
+each printed form next to its CRX screen, and add any field the form is missing.
 
 ### Steps to release it
 

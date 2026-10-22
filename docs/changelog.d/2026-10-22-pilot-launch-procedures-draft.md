@@ -50,6 +50,10 @@
   also covers unposting and voiding invoices and issuing credits (Returns shows only the requested
   date), plus a catch-all for any other balance change. A December 31 snapshot of the four A/R
   numbers is the starting point for the first daily check.
+- Seventh Codex GitHub App round (two findings, both confirmed). Brake invoice forms record the
+  invoice date and terms; receiving forms record the storage location and each item's condition. A
+  general rule now says each paper form copies every field of its CRX screen, especially fields CRX
+  fills in by default, and the December rehearsal checks each form against its screen.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

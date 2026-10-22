@@ -277,6 +277,14 @@ function main() {
     assert.equal(got, `${role}:true:open:set`, `ADMIN CREATE: role ${role} ended as ${got}`);
   }
   console.log('[prover] ADMIN CREATE: admin, sales_rep, driver and applicator each end with that role and name, active, login unblocked');
+  // After a lost create-user reply Settings finds the pending login by email (under profiles RLS)
+  // and tells the admin; activating it from the Edit dialog is the same admin_update_profile call.
+  const recovered = probe({ sessionUser: 'supabase_auth_admin', role: 'sales_rep',
+    after: asUser(ADMIN, `SELECT 'LOOKUP=' || id FROM public.profiles WHERE email = 'new-' || right('$NEW', 4) || '@example.invalid' AND NOT is_active AND full_name = 'Pending user ' || id::text;
+      SELECT public.admin_update_profile('$NEW', 'sales_rep', '[PROVER] Recovered', NULL, true, NULL, 'recover:$NEW');`) });
+  assert.match(lastOut, /LOOKUP=7a530000-/, `ADMIN CREATE: an admin could not find the pending login by email:\n${lastOut}`);
+  assert.equal(recovered, 'sales_rep:true:open:set', `ADMIN CREATE: recovering a pending login left ${recovered}`);
+  console.log('[prover] ADMIN CREATE: after a lost reply, an admin can find the pending login by email and activate it');
   const dup = probe({ sessionUser: 'supabase_auth_admin', role: 'sales_rep',
     after: asUser(ADMIN, `DO $dup$ BEGIN PERFORM public.admin_update_profile('$NEW', 'sales_rep', '[PROVER] Admin', NULL, true, NULL, 'dup:$NEW');
       EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'DUP_REFUSED %: %', SQLSTATE, SQLERRM; END $dup$;`) });

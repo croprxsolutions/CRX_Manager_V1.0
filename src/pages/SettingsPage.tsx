@@ -494,20 +494,37 @@ export default function SettingsPage() {
       );
 
       const data = await response.json();
-      if (!response.ok || data?.error) {
-        toast('error', data?.error || `Request failed (${response.status})`);
+      const newUserId: string | null = response.ok && !data?.error ? data.user.id : null;
+      if (!newUserId) {
+        let message = data?.error || `Request failed (${response.status})`;
+        if (/already (been )?registered|already exists/i.test(String(data?.error ?? ''))) {
+          // An earlier click whose reply was lost can leave this email's login created but never
+          // activated ('Pending user <id>', inactive, login banned). It is NOT adopted here: a
+          // self-signup could have taken the email first and would own the password, so an admin
+          // decides. Only say so, so the admin is not left with a bare "already registered".
+          const { data: pending } = await supabase
+            .from('profiles')
+            .select('id, full_name, is_active')
+            .eq('email', newEmail.trim().toLowerCase())
+            .maybeSingle();
+          if (pending && !pending.is_active && pending.full_name === `Pending user ${pending.id}`) {
+            message = `${newEmail} already has a blocked, not-yet-activated login (${pending.full_name}). If you just created it, open it in the list, set the name and role, mark it active, and set its password; if you did not, leave it blocked.`;
+          }
+        }
+        toast('error', message);
+        if (message !== data?.error) fetchUsers();
       } else {
         // handle_new_user (migration 20261022023000) creates every new login as an inactive,
         // login-blocked driver named 'Pending user <id>', whatever the signup metadata says, so the
         // chosen name and role are set and the user is activated here, by an admin. The key is
         // scoped to the new user so a lost reply for one user never replays onto the next.
-        const newUserId: string = data.user.id;
         let activationError: string | null = null;
         try {
           const { data: roleData, error: roleError } = await supabase.rpc('admin_update_profile', {
             target_user_id: newUserId,
             new_role: newRole,
             new_full_name: newName,
+            new_phone: newPhone || undefined,
             new_is_active: true,
             p_idempotency_key: newUserRoleIdem.getKeyFor(newUserId),
           });

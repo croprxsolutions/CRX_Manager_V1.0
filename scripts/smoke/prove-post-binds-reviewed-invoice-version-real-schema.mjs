@@ -451,6 +451,23 @@ function runAfter() {
       v := 'added';` },
     { key: 'G7 post after location added', as: U.ADMIN, stmt: postGroup('g7', U.ADMIN) },
   ], group()));
+  // A location naming both a standalone draft and the group (fal_requires_parent allows it, and
+  // admins and reps can write one directly) belongs to the group: it is in the group's version, and
+  // once the group is posted it is refused even though its invoice is still a draft (Codex, PR #1018).
+  add(scenario([
+    { key: 'G7d admin creates a standalone draft', as: U.ADMIN, stmt: KEEP_ID(save(U.ADMIN, 2500, 'g7ds')) },
+    { key: 'G7d admin reads the group', as: U.ADMIN, stmt: READ_MAP() },
+    { key: 'G7d dual-parent location added', as: 'owner', stmt: `
+      INSERT INTO public.fields (id, customer_id, field_name, total_acres) VALUES ('${id('9f2')}', '${CUST}', '[PROVER] Field D', 100), ('${id('9f3')}', '${CUST}', '[PROVER] Field E', 100);
+      INSERT INTO public.field_app_locations (invoice_id, invoice_group_id, field_id, applied_acres, sort_order) VALUES (${INV}, '${G}', '${id('9f2')}', 40, 0);
+      v := 'added';` },
+    { key: 'G7d post after dual-parent location added', as: U.ADMIN, stmt: postGroup('g7d', U.ADMIN) },
+    { key: 'G7d admin reloads and posts', as: U.ADMIN, stmt: `${READ_MAP('map2')} ${postGroup('g7d2', U.ADMIN, MAP('map2'))}` },
+    { key: 'G7d dual-parent location onto the posted group', as: 'owner', stmt: `
+      INSERT INTO public.field_app_locations (invoice_id, invoice_group_id, field_id, applied_acres, sort_order) VALUES (${INV}, '${G}', '${id('9f3')}', 40, 1);
+      v := 'added';` },
+    { key: 'G7d state', as: 'owner', call: `${GSTATE} || ' / ' || ${STATE()}` },
+  ], group()));
   add(scenario([
     { key: 'G5 group read as the owner (the rep cannot read it)', as: 'owner', stmt: READ_MAP() },
     { key: "G5 rep posts an admin group", as: U.REP, stmt: postGroup('g5', U.REP) },
@@ -567,6 +584,11 @@ const AFTER = [
   ['G2s state', /^ok\|PROVER-G-A:draft,PROVER-G-B:draft,PROVER-G-C:draft$/],
   ['G7 group-level location added', /^ok\|added$/],
   ['G7 post after location added', /^P0001\|INVOICE_CHANGED_SINCE_LOADED: invoice PROVER-G-A /],
+  ['G7d dual-parent location added', /^ok\|added$/],
+  ['G7d post after dual-parent location added', /^P0001\|INVOICE_CHANGED_SINCE_LOADED: invoice PROVER-G-A /],
+  ['G7d admin reloads and posts', /^ok\|\{.*"member_count": 2/],
+  ['G7d dual-parent location onto the posted group', /^23514\|INVOICE_POSTED_LOCKED: this split invoice group was posted/],
+  ['G7d state', /^ok\|PROVER-G-A:posted,PROVER-G-B:posted \/ draft:2500$/],
   ["G5 rep posts an admin group", /^P0001\|INVOICE_SCOPE_DENIED/],
   ['G5 rep posts with withheld placeholders', /^P0001\|INVOICE_SCOPE_DENIED/],
   ['G5 performed_by is not the caller', /^P0001\|ACTOR_MISMATCH/],

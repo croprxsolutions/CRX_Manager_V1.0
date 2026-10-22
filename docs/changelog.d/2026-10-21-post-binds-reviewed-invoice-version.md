@@ -53,5 +53,9 @@
   invoice's lines (`invoice_line_allocations.invoice_item_id`; `ila_target_check` allows it and
   admins and reps can insert one directly), not just those linked to the invoice or a split
   invoice (Codex Sol on PR #1018). Prover P5c.
+- A field location that names both an invoice and a split group (`fal_requires_parent` allows it;
+  no RPC writes one, but admins and reps can directly) now counts for the group in the version and
+  the post lock, and is refused once the group is posted even if its invoice is still a draft;
+  before, only its invoice was checked (Codex GitHub App P1 on PR #1018). Prover G7d.
 - Deploy order: until the new app is live, the old screens get "function not found" when posting;
   nothing posts unseen.

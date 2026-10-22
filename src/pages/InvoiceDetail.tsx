@@ -1188,7 +1188,14 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     // although post_invoice_group posts every sibling; it is a dismissible warning, not a gate.
     // `posting` is set before the check so the form stays locked from the confirm to the end.
     setPosting(true);
-    const creditOk = await checkCreditLimit({ customerId: saved.customerId!, newAmountCents: saved.totalCents });
+    let creditOk: boolean;
+    try {
+      creditOk = await checkCreditLimit({ customerId: saved.customerId!, newAmountCents: saved.totalCents });
+    } catch (err) {
+      // The check fails closed on its own; this only guarantees the form is never left locked.
+      setPosting(false);
+      throw err;
+    }
     if (!creditOk && !creditWarning?.dismissed) {
       setPosting(false);
       return;

@@ -149,16 +149,24 @@ Findings, most severe first:
    completed, cancelled or soft-deleted job, its fields, chemicals, shares, records and attachments indefinitely, while
    the dispatch route ends at cancellation or 7 days after completion. The applicator leg of `customers_select`
    (`job_date >= CURRENT_DATE - 7 days`) has no status or `deleted_at` test either, so a cancelled, deleted or
-   far-future job keeps its customer readable. Live today the one applicator has no whole-job assignments, so nothing is
-   exposed this way yet.
+   far-future job keeps its customer readable. The dispatch route has its own soft-delete hole: deleting a job from
+   the Jobs list (`src/pages/Jobs.tsx`) stamps only `jobs.deleted_at`, the trigger that closes dispatches
+   (`trg_close_job_location_dispatch_on_job_terminal`) fires only when the status becomes completed or cancelled, and
+   `_is_dispatched_to_me` never checks `deleted_at`, so a deleted job stays readable to its dispatched applicator or
+   crew. Live today nothing is exposed either way: the one applicator has no whole-job assignments, and no deleted job
+   has an open dispatch (read 2026-10-22).
 
 Already tracked elsewhere, not repeated: every active account reads every `customer_addresses` row (To-Do row 11.7),
 and job chemical cost is readable by the assigned applicator (the cost and margin entry below, row 11.3).
 
 **Fix plan (not built; each part is a migration, so each needs CodeRabbit and Sol, and narrowing permissions needs
 Mason's "I approve").** Part A first, since it closes every HIGH that a customer-portal account can reach:
-- **A. Gate the functions.** Add one helper, `_can_see_field(field_id)`: true for active office staff, or when the field
-  is on a job the caller may see (`_is_dispatched_to_me`, or the whole-job applicator under part C's window). Make
+- **A. Gate the functions.** Add one helper, `_can_see_field(field_id)`: true for active office staff; for the
+  whole-job applicator, any field on that job (under part C's window); and for a per-field or crew assignee, only the
+  field their own dispatch row points at (`job_location_dispatches.job_field_id` → `job_fields.field_id`), never the
+  job's other fields. It must not reuse `_is_dispatched_to_me(job_id)`, which is true for the whole job once any one
+  of its fields is dispatched to the caller. (That job-level test is why `job_fields_select_location_dispatchee`
+  today shows a split-job assignee the job's other field rows; 0 split assignments live.) Make
   `get_fields_geojson_by_ids` (Field View) and `get_field_geojson` (Job Detail) return only fields that pass it. Make
   `get_fields_with_geojson`, `get_field_polygons`, `get_field_dashboard`, `derive_customer_shares_from_fields`,
   `get_customer_farm_group`, both `get_field_billing_splits_for_*`, `get_customer_summary`,
@@ -179,7 +187,9 @@ Mason's "I approve").** Part A first, since it closes every HIGH that a customer
   row 11.3 cost-column work.
 - **C. End the whole-job route.** Add the dispatch route's window (open, or completed within 7 days; never cancelled or
   soft-deleted) to the whole-job applicator leg of `jobs_select`, the job child tables, `job-attachments` storage and
-  `customers_select`.
+  `customers_select`. Close the dispatch route's soft-delete hole too: add a `jobs.deleted_at IS NULL` test to
+  `_is_dispatched_to_me` (or a trigger that cancels open dispatches when `deleted_at` is set), since the dispatch
+  policies would otherwise keep a deleted job readable.
 - **Proof:** per-role impersonation before and after, in the disposable database and read-only on live after the apply:
   the applicator reads only their dispatched fields, a customer-portal account and a driver read 0 fields and get
   refusals from the office functions, office staff see no change; then a live click-through of Field View, Job Detail

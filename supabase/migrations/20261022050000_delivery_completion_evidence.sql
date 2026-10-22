@@ -103,8 +103,8 @@
 --   that policy lets staff read. The columns and constraints may stay. Either order of app and database
 --   rollback leaves a window where completions fail; do it outside delivery hours.
 --
--- ORDERING: stamp 20261022050000 and history row 972 assigned by the coordination session; it lands after
---   #1010, #1006, #1018, #1020 (20261022020000), 20261022025000, 20261022030000 and 20261022040000, none of
+-- ORDERING: stamp 20261022050000 and history row 973 assigned by the coordination session; it lands after
+--   #1010, #1006, #1020 (20261022020000), #1018, #1039, #1026 and the coordinator's queued cost changes, none of
 --   which touches these functions, the deliveries table or these policies. Re-read the live ledger
 --   (list_migrations, effective stamp row by row) before applying.
 --

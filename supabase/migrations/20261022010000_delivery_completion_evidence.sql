@@ -13,17 +13,27 @@
 --                   delivery_photos row the screen shows as saved, captioned 'Signed paper delivery
 --                   ticket', for this delivery, its file in delivery-photos/<delivery id>/;
 --     left_at_site  no one was present (the field stop's "No one present — left at site"): a photo
---                   captioned 'Left at site — drop location', the same way, and that signer text.
+--                   captioned 'Left at site — drop location', the same way, and that signer text
+--                   (the photo requirement confirmed by Mason 2026-10-21).
+--     no_proof      an ACTIVE ADMIN records the completion without proof (Mason 2026-10-21): a written
+--                   reason (10–500 characters once whitespace is collapsed) and the fixed signer text
+--                   'No proof — recorded by office' are required; the reason, the admin (id and a name
+--                   snapshot) and the server clock time are recorded and shown to staff.
 --   Until now complete_delivery and start_and_complete_delivery required none of this: the signature
 --   image was uploaded by the phone AFTER the completion (skipped if that failed), and nothing
 --   recorded that a paper ticket was used.
 --
 --   1. deliveries.completion_evidence (NULL on every existing row; CHECK signature | paper_ticket |
---      left_at_site) and deliveries.completion_evidence_ref (the signature path or the photo row id).
+--      left_at_site | no_proof), deliveries.completion_evidence_ref (the signature path, the photo row
+--      id, or the no-proof reason), and completion_no_proof_by / _by_name / _at, with two NULL-safe
+--      CHECKs: a no_proof row has all three, a valid reason and a status past in_progress; any other row
+--      has none of them.
 --   2. Trigger require_delivery_completion_evidence (BEFORE INSERT OR UPDATE ON deliveries): a row may
---      become 'completed', be inserted as 'completed', have either evidence column written, or (once
---      completed) have signed_by or signature_url changed, ONLY while the transaction-local marker
---      crx.delivery_completion_evidence names that row. Only complete_delivery sets it, after checking
+--      become 'completed', be inserted as 'completed', have any evidence or no-proof column written, or
+--      have signature_url changed (at any status), or (once completed, voided or carrying evidence)
+--      have signed_by changed, ONLY while the transaction-local marker
+--      crx.delivery_completion_evidence names that row; and once the evidence is recorded those columns
+--      never change again, marker or not, whatever the status. Only complete_delivery sets it, after checking
 --      the evidence, and clears it right after the completion. There is no app.admin_override
 --      exemption: the completion body sets that override with SET LOCAL and never clears it, so it
 --      would otherwise excuse every later statement in the same transaction. This also closes the
@@ -36,26 +46,34 @@
 --      trailing arguments, p_evidence text DEFAULT NULL and p_evidence_ref text DEFAULT NULL. Order:
 --      key required; AUTH_REQUIRED; ACTOR_MISMATCH; lock the delivery and run the body's authorization
 --      test (same message; now BEFORE the receipt lookup, as start_and_complete_delivery already does,
---      so a reassigned or deactivated actor gets no replay);
+--      so a reassigned or deactivated actor gets no replay; the caller's profile row is read FOR SHARE so
+--      a concurrent demotion waits for this completion to end);
 --        * p_evidence NULL = LEGACY REPLAY ONLY: the 20261019200000 fingerprint, unchanged, through
 --          check_idempotency_intent; a committed receipt replays through the body as before (an app
 --          from before this change, retrying a completion whose reply was lost); anything else is
 --          refused with COMPLETION_EVIDENCE_REQUIRED (22023). A NULL-evidence call never completes;
---        * otherwise the value and reference are validated, both join the fingerprint, an exact
---          retry replays, and a fresh call requires status in_progress (the body's message) BEFORE the
---          evidence checks (SIGNATURE_IMAGE_MISSING, PAPER_TICKET_PHOTO_MISSING,
---          LEFT_AT_SITE_PHOTO_MISSING, LEFT_AT_SITE_SIGNER_MISMATCH, 23514); then the marker is set, the
---          unchanged renamed body runs, completion_evidence/_ref (and signature_url) are recorded, the
---          marker is cleared and the receipt bound. A refusal anywhere rolls the whole call back.
+--        * otherwise the value and reference are validated (no_proof: NO_PROOF_ADMIN_ONLY,
+--          NO_PROOF_REASON_REQUIRED, NO_PROOF_SIGNER_MISMATCH), both join the fingerprint, an exact
+--          retry replays, and a fresh call requires status in_progress ("Delivery must be in_progress to
+--          complete (current status: ...)") BEFORE the evidence checks (SIGNATURE_IMAGE_MISSING,
+--          PAPER_TICKET_PHOTO_MISSING, LEFT_AT_SITE_PHOTO_MISSING, LEFT_AT_SITE_SIGNER_MISMATCH, 23514;
+--          a stored object must be non-empty; the accepted photo row is locked FOR UPDATE); then the
+--          marker is set, the unchanged renamed body runs, the evidence is recorded (signature_url is the
+--          checked path for a signature and NULL otherwise), the marker is cleared and the receipt bound.
+--          A refusal anywhere rolls the whole call back.
 --   4. start_and_complete_delivery (Deliveries list): DROPPED and re-created with the same two
 --      trailing arguments; the same legacy-replay rule for NULL evidence (its 20261019220000
 --      fingerprint, after its own authorization); the new fields join the fingerprint and pass to
 --      complete_delivery under '<key>:complete' (so the list's signature path hashes that string).
---   5. delivery-signatures storage: two NEW policies for the per-attempt pattern only — INSERT while
---      the delivery is scheduled or in_progress, SELECT for display — for the same people as the
---      existing policies (active admin, active sales rep, or the delivery's active assigned driver).
---      The four existing fixed-path policies (signatures/<id>.png) are UNCHANGED, and none of them
---      can match the new pattern, so nothing can update or delete an accepted image through the API.
+--   5. Storage: two NEW permissive delivery-signatures policies for the per-attempt pattern only —
+--      INSERT while the delivery is scheduled or in_progress, SELECT for display (any status) — for the
+--      same people as the existing policies (active admin, active sales rep, or the delivery's active
+--      assigned driver). Four NEW RESTRICTIVE policies (ANDed with every permissive policy, existing or
+--      future): no UPDATE or DELETE of a per-attempt signature object, and no UPDATE or DELETE of a
+--      delivery-photos object accepted as a completion's ticket or drop-location photo. The four existing
+--      fixed-path signature policies (signatures/<id>.png) are UNCHANGED.
+--   5b. Trigger protect_accepted_delivery_photo (BEFORE UPDATE OR DELETE ON delivery_photos): an accepted
+--      ticket or drop-location photo row can no longer be changed (any column) or deleted.
 --   6. get_delivery_receipt_recipient(p_delivery_id) (read-only, STABLE): the customer's name and
 --      receipt email, for an active admin or sales rep, or for the delivery's active assigned driver
 --      while it is scheduled or in progress (the screens read it before completing). One refusal
@@ -68,20 +86,27 @@
 --   (2026-10-19) carries no evidence, so it is refused and goes to Offline Work Review (needs_review,
 --   nothing committed) unless it is the exact retry of one that already committed.
 --
--- ACCESS: adds a storage INSERT and SELECT policy (same people, new path pattern) and one read RPC for
---   authenticated. Applies only on Mason's owner approval (scripts/owner-approve-migration.mjs).
+-- ACCESS: adds a storage INSERT and SELECT policy (same people, new path pattern), four restrictive
+--   storage policies (narrowing), one read RPC for authenticated (drivers may read an open delivery's
+--   receipt address), and an admin-only completion without proof. Applies only on Mason's owner approval
+--   (scripts/owner-approve-migration.mjs).
 --
 -- ROLLOUT: an app from before this change cannot complete a delivery once this is applied (it sends no
 --   evidence). Apply and deploy together, outside delivery hours; drivers reload the app.
 --
--- ROLLBACK (its own reviewed migration): DROP the two new storage policies, the trigger and its
---   function, get_delivery_receipt_recipient, and the two new wrappers; re-create the wrappers from
---   20261019200000 and 20261019220000 with their grants. The columns may stay. Roll the app back first.
+-- ROLLBACK (its own reviewed migration, ONE transaction): drop the deliveries trigger and its function
+--   FIRST (the old wrappers never set the marker), then the photo trigger and its function, the four
+--   restrictive policies and delivery_signatures_attempt_insert, get_delivery_receipt_recipient and
+--   _is_accepted_delivery_evidence_object, and the two new wrappers; re-create the wrappers from
+--   20261019200000 and 20261019220000 with their grants. KEEP delivery_signatures_attempt_select:
+--   signature_url of every completion made under this file points at a per-attempt path, which only
+--   that policy lets staff read. The columns and constraints may stay. Either order of app and database
+--   rollback leaves a window where completions fail; do it outside delivery hours.
 --
--- ORDERING: live effective high-water when written 2026-10-21: 20261021070000 (row 961). Numbered
---   above every open candidate (20261021120000 #1006, 20261021140000/141000 #980, 20261021150000
---   #1010), none of which touches these functions, the deliveries table or these policies. Re-read the
---   live ledger before applying.
+-- ORDERING: numbered above every live and open candidate known 2026-10-21 (20261021140000/141000 #980
+--   live; open 20261021120000 #1006, 20261021150000 #1010, 20261021200000 #1018), none of which
+--   touches these functions, the deliveries table or these policies. Re-read the live ledger
+--   (list_migrations, effective stamp row by row) before applying.
 --
 -- idempotency-body-check: exempt. Both wrappers read idempotency_keys through check_idempotency_intent
 --   with their own operation literal and write through save_idempotency (body) /
@@ -151,11 +176,27 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema = 'public' AND table_name = 'deliveries'
-                AND column_name IN ('completion_evidence', 'completion_evidence_ref'))
+                AND column_name IN ('completion_evidence', 'completion_evidence_ref', 'completion_no_proof_by',
+                                    'completion_no_proof_by_name', 'completion_no_proof_at'))
      OR to_regprocedure('public.get_delivery_receipt_recipient(uuid)') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.deliveries'::regclass
-                 AND tgname = 'require_delivery_completion_evidence') THEN
+     OR to_regprocedure('public._is_accepted_delivery_evidence_object(text,text)') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid IN ('public.deliveries'::regclass, 'public.delivery_photos'::regclass)
+                 AND tgname IN ('require_delivery_completion_evidence', 'protect_accepted_delivery_photo')) THEN
     RAISE EXCEPTION 'PREFLIGHT_DELIVERY_COMPLETION_EVIDENCE_ALREADY_APPLIED';
+  END IF;
+
+  -- No other function may already use the trigger's marker name.
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE prosrc LIKE '%crx.delivery_completion_evidence%') THEN
+    RAISE EXCEPTION 'PREFLIGHT_DELIVERY_COMPLETION_EVIDENCE_MARKER_IN_USE';
+  END IF;
+
+  -- The signature check reads storage.objects.owner_id and both checks read metadata; the
+  -- delivery-signatures bucket must still be private (attempt images are readable only by policy).
+  IF (SELECT count(*) FROM information_schema.columns
+       WHERE table_schema = 'storage' AND table_name = 'objects'
+         AND ((column_name = 'owner_id' AND data_type = 'text') OR (column_name = 'metadata' AND data_type = 'jsonb'))) <> 2
+     OR COALESCE((SELECT public FROM storage.buckets WHERE id = 'delivery-signatures'), false) THEN
+    RAISE EXCEPTION 'PREFLIGHT_DELIVERY_STORAGE_SHAPE: storage.objects.owner_id text and metadata jsonb, and a private delivery-signatures bucket, are required';
   END IF;
 
   -- Exactly the four known policies touch the delivery-signatures bucket, and they still allow writes
@@ -180,13 +221,35 @@ $preflight$;
 ALTER TABLE public.deliveries
   ADD COLUMN completion_evidence text
   CONSTRAINT deliveries_completion_evidence_check
-  CHECK (completion_evidence IN ('signature', 'paper_ticket', 'left_at_site'));
+  CHECK (completion_evidence IN ('signature', 'paper_ticket', 'left_at_site', 'no_proof'));
 ALTER TABLE public.deliveries ADD COLUMN completion_evidence_ref text;
+ALTER TABLE public.deliveries ADD COLUMN completion_no_proof_by uuid REFERENCES public.profiles(id);
+ALTER TABLE public.deliveries ADD COLUMN completion_no_proof_by_name text;
+ALTER TABLE public.deliveries ADD COLUMN completion_no_proof_at timestamptz;
+-- NULL-safe both ways (every existing row has all five NULL, so both hold and are validated).
+ALTER TABLE public.deliveries ADD CONSTRAINT deliveries_no_proof_record_check CHECK (
+  COALESCE(completion_evidence, '') <> 'no_proof'
+  OR (completion_no_proof_by IS NOT NULL AND completion_no_proof_at IS NOT NULL
+      AND completion_no_proof_by_name IS NOT NULL AND completion_evidence_ref IS NOT NULL
+      AND char_length(completion_evidence_ref) BETWEEN 10 AND 500
+      AND status IS NOT NULL AND status NOT IN ('scheduled', 'in_progress')));
+ALTER TABLE public.deliveries ADD CONSTRAINT deliveries_no_proof_fields_only_check CHECK (
+  COALESCE(completion_evidence, '') = 'no_proof'
+  OR (completion_no_proof_by IS NULL AND completion_no_proof_at IS NULL AND completion_no_proof_by_name IS NULL));
+-- The accepted-photo trigger and storage policy look deliveries up by the accepted reference.
+CREATE INDEX deliveries_completion_evidence_ref_idx ON public.deliveries (completion_evidence_ref)
+  WHERE completion_evidence_ref IS NOT NULL;
 
 COMMENT ON COLUMN public.deliveries.completion_evidence IS
-  'How the customer confirmed the completion, checked by complete_delivery before it ran: signature, paper_ticket or left_at_site. NULL on deliveries completed before 20261022010000.';
+  'How the completion was confirmed, checked by complete_delivery before it ran: signature, paper_ticket or left_at_site (customer proof), or no_proof (an admin recorded it without proof, with a written reason). NULL on deliveries completed before 20261022010000.';
 COMMENT ON COLUMN public.deliveries.completion_evidence_ref IS
-  'The artifact complete_delivery accepted: the signature object path (signatures/<id>/<hash>.png), or the delivery_photos id of the ticket or drop-location photo.';
+  'What complete_delivery accepted: the signature object path (signatures/<id>/<hash>.png), the delivery_photos id of the ticket or drop-location photo, or, when completion_evidence = no_proof, the admin''s written reason (NOT an artifact).';
+COMMENT ON COLUMN public.deliveries.completion_no_proof_by IS
+  'no_proof only: the admin who recorded the completion without proof (authoritative identity).';
+COMMENT ON COLUMN public.deliveries.completion_no_proof_by_name IS
+  'no_proof only: that admin''s name when it was recorded (display snapshot; the uuid is authoritative).';
+COMMENT ON COLUMN public.deliveries.completion_no_proof_at IS
+  'no_proof only: server clock time the no-proof completion was recorded (not the back-datable completed_at).';
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Only an evidence-checked completion may complete a delivery or write its proof.
@@ -196,26 +259,53 @@ RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $function$
+DECLARE
+  v_marked boolean;
 BEGIN
-  IF COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text THEN
-    RETURN NEW;
-  END IF;
-  IF NEW.status = 'completed'
-     AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'completed') THEN
-    RAISE EXCEPTION 'COMPLETION_EVIDENCE_REQUIRED: a delivery is completed only through complete_delivery with its evidence'
-      USING ERRCODE = '23514';
-  END IF;
+  v_marked := COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text;
   IF TG_OP = 'INSERT' THEN
-    IF NEW.completion_evidence IS NOT NULL OR NEW.completion_evidence_ref IS NOT NULL THEN
+    IF v_marked THEN
+      RETURN NEW;
+    END IF;
+    IF NEW.status = 'completed' THEN
+      RAISE EXCEPTION 'COMPLETION_EVIDENCE_REQUIRED: a delivery is completed only through complete_delivery with its evidence'
+        USING ERRCODE = '23514';
+    END IF;
+    IF NEW.completion_evidence IS NOT NULL OR NEW.completion_evidence_ref IS NOT NULL
+       OR NEW.completion_no_proof_by IS NOT NULL OR NEW.completion_no_proof_by_name IS NOT NULL
+       OR NEW.completion_no_proof_at IS NOT NULL THEN
       RAISE EXCEPTION 'COMPLETION_EVIDENCE_LOCKED: completion evidence is recorded only by complete_delivery'
         USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
   END IF;
+  -- Once recorded, the evidence never changes again: not under the marker, not after any status change.
+  IF OLD.completion_evidence IS NOT NULL
+     AND (NEW.completion_evidence IS DISTINCT FROM OLD.completion_evidence
+          OR NEW.completion_evidence_ref IS DISTINCT FROM OLD.completion_evidence_ref
+          OR NEW.completion_no_proof_by IS DISTINCT FROM OLD.completion_no_proof_by
+          OR NEW.completion_no_proof_by_name IS DISTINCT FROM OLD.completion_no_proof_by_name
+          OR NEW.completion_no_proof_at IS DISTINCT FROM OLD.completion_no_proof_at) THEN
+    RAISE EXCEPTION 'COMPLETION_EVIDENCE_LOCKED: recorded completion evidence cannot change'
+      USING ERRCODE = '23514';
+  END IF;
+  IF v_marked THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.status = 'completed' AND OLD.status IS DISTINCT FROM 'completed' THEN
+    RAISE EXCEPTION 'COMPLETION_EVIDENCE_REQUIRED: a delivery is completed only through complete_delivery with its evidence'
+      USING ERRCODE = '23514';
+  END IF;
   IF NEW.completion_evidence IS DISTINCT FROM OLD.completion_evidence
      OR NEW.completion_evidence_ref IS DISTINCT FROM OLD.completion_evidence_ref
-     OR (OLD.status = 'completed'
-         AND (NEW.signed_by IS DISTINCT FROM OLD.signed_by OR NEW.signature_url IS DISTINCT FROM OLD.signature_url)) THEN
+     OR NEW.completion_no_proof_by IS DISTINCT FROM OLD.completion_no_proof_by
+     OR NEW.completion_no_proof_by_name IS DISTINCT FROM OLD.completion_no_proof_by_name
+     OR NEW.completion_no_proof_at IS DISTINCT FROM OLD.completion_no_proof_at
+     -- The completion is the only writer of signature_url (the app never writes it), at any status, so a
+     -- path set ahead of a paper or no-proof completion cannot pose as the customer's signature.
+     OR NEW.signature_url IS DISTINCT FROM OLD.signature_url
+     OR ((OLD.status IN ('completed', 'voided') OR OLD.completion_evidence IS NOT NULL)
+         AND NEW.signed_by IS DISTINCT FROM OLD.signed_by) THEN
     RAISE EXCEPTION 'COMPLETION_EVIDENCE_LOCKED: completion evidence is recorded only by complete_delivery'
       USING ERRCODE = '23514';
   END IF;
@@ -263,6 +353,9 @@ DECLARE
   v_photo_id uuid;
   v_caption text;
   v_rows integer;
+  v_reason text;
+  v_recorder_name text;
+  v_photo public.delivery_photos%ROWTYPE;
 BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: complete_delivery requires p_idempotency_key' USING ERRCODE = '22023';
@@ -280,7 +373,8 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Delivery not found: %', p_delivery_id;
   END IF;
-  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
+  -- FOR SHARE: a concurrent demotion or deactivation waits until this completion ends.
+  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true FOR SHARE;
   IF v_actor_role IS NULL OR NOT (
     v_actor_role IN ('admin', 'sales_rep')
     OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver)
@@ -311,11 +405,28 @@ BEGIN
     RETURN public._complete_delivery_replay_impl_20261015(p_delivery_id, p_signed_by, p_performed_by, p_quantities, p_issue_type, p_issue_notes, p_idempotency_key, p_completed_at);
   END IF;
 
-  IF p_evidence NOT IN ('signature', 'paper_ticket', 'left_at_site') THEN
+  IF p_evidence NOT IN ('signature', 'paper_ticket', 'left_at_site', 'no_proof') THEN
     RAISE EXCEPTION 'COMPLETION_EVIDENCE_INVALID: %', p_evidence USING ERRCODE = '22023';
   END IF;
   IF p_evidence_ref IS NULL OR btrim(p_evidence_ref) = '' THEN
+    IF p_evidence = 'no_proof' THEN
+      RAISE EXCEPTION 'NO_PROOF_REASON_REQUIRED: write why this delivery is recorded without proof (10 to 500 characters)' USING ERRCODE = '22023';
+    END IF;
     RAISE EXCEPTION 'COMPLETION_EVIDENCE_INVALID: % needs its evidence reference', p_evidence USING ERRCODE = '22023';
+  END IF;
+  -- Recording without proof: an active admin only (before the receipt lookup, so a demoted admin cannot
+  -- replay either), a real written reason, and a signer text that never names a customer.
+  IF p_evidence = 'no_proof' THEN
+    IF v_actor_role IS DISTINCT FROM 'admin' THEN
+      RAISE EXCEPTION 'NO_PROOF_ADMIN_ONLY: only an admin can record a delivery without proof' USING ERRCODE = '42501';
+    END IF;
+    v_reason := btrim(regexp_replace(p_evidence_ref, '[[:space:]]+', ' ', 'g'));
+    IF char_length(v_reason) NOT BETWEEN 10 AND 500 THEN
+      RAISE EXCEPTION 'NO_PROOF_REASON_REQUIRED: write why this delivery is recorded without proof (10 to 500 characters)' USING ERRCODE = '22023';
+    END IF;
+    IF p_signed_by IS DISTINCT FROM 'No proof — recorded by office' THEN
+      RAISE EXCEPTION 'NO_PROOF_SIGNER_MISMATCH: a completion without proof is signed "No proof — recorded by office"' USING ERRCODE = '22023';
+    END IF;
   END IF;
 
   -- p_quantities is fingerprinted as sent (jsonb normalizes key order); p_completed_at as its epoch,
@@ -353,10 +464,12 @@ BEGIN
     IF p_evidence_ref IS DISTINCT FROM v_signature_path
        OR NOT EXISTS (SELECT 1 FROM storage.objects o
                        WHERE o.bucket_id = 'delivery-signatures' AND o.name = v_signature_path
-                         AND o.owner_id = v_actor::text) THEN
+                         AND o.owner_id = v_actor::text
+                         AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'
+                         AND (o.metadata ->> 'size')::bigint > 0) THEN
       RAISE EXCEPTION 'SIGNATURE_IMAGE_MISSING: no signature image saved for this attempt' USING ERRCODE = '23514';
     END IF;
-  ELSE
+  ELSIF p_evidence IN ('paper_ticket', 'left_at_site') THEN
     IF p_evidence = 'left_at_site' AND p_signed_by IS DISTINCT FROM 'No one present — left at site' THEN
       RAISE EXCEPTION 'LEFT_AT_SITE_SIGNER_MISMATCH: a left-at-site completion is signed "No one present — left at site"'
         USING ERRCODE = '23514';
@@ -368,16 +481,21 @@ BEGIN
     IF p_evidence_ref ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
       v_photo_id := p_evidence_ref::uuid;
     END IF;
-    -- The exact photo the screen showed: this delivery's, with the caption, its file in this
-    -- delivery's own folder and stored.
-    IF v_photo_id IS NULL OR NOT EXISTS (
-         SELECT 1 FROM public.delivery_photos dp
-           JOIN storage.objects o ON o.bucket_id = 'delivery-photos' AND o.name = dp.storage_path
-          WHERE dp.id = v_photo_id
-            AND dp.delivery_id = p_delivery_id
-            AND dp.caption = v_caption
-            AND split_part(dp.storage_path, '/', 1) = 'delivery-photos'
-            AND split_part(dp.storage_path, '/', 2) = p_delivery_id::text) THEN
+    -- The exact photo the screen showed, locked so a concurrent edit waits for this completion (and is
+    -- then refused by protect_accepted_delivery_photo): this delivery's, with the caption, its file in
+    -- this delivery's own folder, stored and non-empty.
+    IF v_photo_id IS NOT NULL THEN
+      SELECT * INTO v_photo FROM public.delivery_photos WHERE id = v_photo_id FOR UPDATE;
+    END IF;
+    IF v_photo.id IS NULL
+       OR v_photo.delivery_id IS DISTINCT FROM p_delivery_id
+       OR v_photo.caption IS DISTINCT FROM v_caption
+       OR split_part(v_photo.storage_path, '/', 1) <> 'delivery-photos'
+       OR split_part(v_photo.storage_path, '/', 2) <> p_delivery_id::text
+       OR NOT EXISTS (SELECT 1 FROM storage.objects o
+                       WHERE o.bucket_id = 'delivery-photos' AND o.name = v_photo.storage_path
+                         AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'
+                         AND (o.metadata ->> 'size')::bigint > 0) THEN
       IF p_evidence = 'paper_ticket' THEN
         RAISE EXCEPTION 'PAPER_TICKET_PHOTO_MISSING: no saved photo of the signed paper ticket for this delivery' USING ERRCODE = '23514';
       END IF;
@@ -387,12 +505,20 @@ BEGIN
 
   -- Lets require_delivery_completion_evidence accept this delivery's completion, and only until the
   -- evidence is recorded (a refusal rolls the setting back with everything else).
+  IF p_evidence = 'no_proof' THEN
+    SELECT COALESCE(NULLIF(btrim(full_name), ''), 'Admin ' || left(v_actor::text, 8)) INTO v_recorder_name
+      FROM public.profiles WHERE id = v_actor;
+  END IF;
   PERFORM set_config('crx.delivery_completion_evidence', p_delivery_id::text, true);
   v_result := public._complete_delivery_replay_impl_20261015(p_delivery_id, p_signed_by, p_performed_by, p_quantities, p_issue_type, p_issue_notes, p_idempotency_key, p_completed_at);
   UPDATE public.deliveries
      SET completion_evidence = p_evidence,
-         completion_evidence_ref = p_evidence_ref,
-         signature_url = CASE WHEN p_evidence = 'signature' THEN p_evidence_ref ELSE signature_url END
+         completion_evidence_ref = CASE WHEN p_evidence = 'no_proof' THEN v_reason ELSE p_evidence_ref END,
+         -- The checked path for a signature; never a leftover path for any other evidence.
+         signature_url = CASE WHEN p_evidence = 'signature' THEN p_evidence_ref END,
+         completion_no_proof_by = CASE WHEN p_evidence = 'no_proof' THEN v_actor END,
+         completion_no_proof_by_name = CASE WHEN p_evidence = 'no_proof' THEN v_recorder_name END,
+         completion_no_proof_at = CASE WHEN p_evidence = 'no_proof' THEN clock_timestamp() END
    WHERE id = p_delivery_id AND status = 'completed';
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   PERFORM set_config('crx.delivery_completion_evidence', '', true);
@@ -408,7 +534,7 @@ REVOKE ALL ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, t
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text) IS
-  'Completes a delivery with server-checked evidence (p_evidence + p_evidence_ref; 20261022010000). Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022010000.';
+  'Completes a delivery with server-checked evidence (p_evidence + p_evidence_ref; 20261022010000): signature, paper_ticket, left_at_site, or (active admin only, written reason as p_evidence_ref) no_proof. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022010000.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. start_and_complete_delivery (Deliveries list): the 20261019220000 body plus the evidence.
@@ -463,7 +589,7 @@ BEGIN
     RAISE EXCEPTION 'DELIVERED_ON_IN_FUTURE: the delivery date % is after today (%)', p_delivered_on, v_today
       USING ERRCODE = '22023';
   END IF;
-  IF p_evidence IS NOT NULL AND p_evidence NOT IN ('signature', 'paper_ticket', 'left_at_site') THEN
+  IF p_evidence IS NOT NULL AND p_evidence NOT IN ('signature', 'paper_ticket', 'left_at_site', 'no_proof') THEN
     RAISE EXCEPTION 'COMPLETION_EVIDENCE_INVALID: %', p_evidence USING ERRCODE = '22023';
   END IF;
   IF p_evidence IS NOT NULL AND (p_evidence_ref IS NULL OR btrim(p_evidence_ref) = '') THEN
@@ -481,12 +607,25 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Delivery not found: %', p_delivery_id;
   END IF;
-  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
+  -- FOR SHARE: a concurrent demotion or deactivation waits until this completion ends.
+  SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true FOR SHARE;
   IF v_actor_role IS NULL OR NOT (
     v_actor_role IN ('admin', 'sales_rep')
     OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver)
   ) THEN
     RAISE EXCEPTION 'Not authorized to complete this delivery';
+  END IF;
+  -- complete_delivery's no-proof rules, early, so nothing is started for a refused request.
+  IF p_evidence = 'no_proof' THEN
+    IF v_actor_role IS DISTINCT FROM 'admin' THEN
+      RAISE EXCEPTION 'NO_PROOF_ADMIN_ONLY: only an admin can record a delivery without proof' USING ERRCODE = '42501';
+    END IF;
+    IF char_length(btrim(regexp_replace(p_evidence_ref, '[[:space:]]+', ' ', 'g'))) NOT BETWEEN 10 AND 500 THEN
+      RAISE EXCEPTION 'NO_PROOF_REASON_REQUIRED: write why this delivery is recorded without proof (10 to 500 characters)' USING ERRCODE = '22023';
+    END IF;
+    IF p_signed_by IS DISTINCT FROM 'No proof — recorded by office' THEN
+      RAISE EXCEPTION 'NO_PROOF_SIGNER_MISMATCH: a completion without proof is signed "No proof — recorded by office"' USING ERRCODE = '22023';
+    END IF;
   END IF;
 
   IF p_evidence IS NULL THEN
@@ -590,7 +729,7 @@ WITH CHECK (
   AND EXISTS (
     SELECT 1
     FROM public.deliveries d
-    WHERE d.id::text = split_part(name, '/', 2)
+    WHERE d.id::text = split_part(objects.name, '/', 2)
       AND d.status IN ('scheduled', 'in_progress')
       AND (
         public.is_admin()
@@ -617,7 +756,7 @@ USING (
   AND EXISTS (
     SELECT 1
     FROM public.deliveries d
-    WHERE d.id::text = split_part(name, '/', 2)
+    WHERE d.id::text = split_part(objects.name, '/', 2)
       AND (
         public.is_admin()
         OR public.is_sales_rep()
@@ -633,6 +772,73 @@ USING (
       )
   )
 );
+
+-- Accepted proof can never be replaced or deleted. RESTRICTIVE policies are ANDed with every permissive
+-- policy on storage.objects (existing, dashboard-made or future), so none can reopen these paths.
+CREATE FUNCTION public._is_accepted_delivery_evidence_object(p_bucket_id text, p_name text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+  SELECT (p_bucket_id = 'delivery-signatures'
+          AND p_name ~ '^signatures/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{32}\.png$')
+      OR (p_bucket_id = 'delivery-photos'
+          AND EXISTS (SELECT 1
+                        FROM public.delivery_photos dp
+                        JOIN public.deliveries d ON d.completion_evidence_ref = dp.id::text
+                       WHERE dp.storage_path = p_name
+                         AND d.completion_evidence IN ('paper_ticket', 'left_at_site')));
+$function$;
+ALTER FUNCTION public._is_accepted_delivery_evidence_object(text, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) FROM PUBLIC, anon, service_role;
+GRANT EXECUTE ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) TO authenticated;
+COMMENT ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) IS
+  'Storage-policy helper (20261022010000): true for a per-attempt signature object or a delivery-photos object accepted as a completion''s ticket or drop-location photo. Definer so the answer does not depend on the caller''s row visibility.';
+
+CREATE POLICY "delivery_evidence_objects_no_update"
+ON storage.objects
+AS RESTRICTIVE
+FOR UPDATE TO authenticated
+USING (NOT public._is_accepted_delivery_evidence_object(bucket_id, name))
+WITH CHECK (NOT public._is_accepted_delivery_evidence_object(bucket_id, name));
+
+CREATE POLICY "delivery_evidence_objects_no_delete"
+ON storage.objects
+AS RESTRICTIVE
+FOR DELETE TO authenticated
+USING (NOT public._is_accepted_delivery_evidence_object(bucket_id, name));
+
+-- ---------------------------------------------------------------------------------------------
+-- 5b. An accepted ticket or drop-location photo row is frozen.
+-- ---------------------------------------------------------------------------------------------
+CREATE FUNCTION public._protect_accepted_delivery_photo()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.deliveries d
+              WHERE d.completion_evidence_ref = OLD.id::text
+                AND d.completion_evidence IN ('paper_ticket', 'left_at_site'))
+     AND (TG_OP = 'DELETE' OR NEW IS DISTINCT FROM OLD) THEN
+    RAISE EXCEPTION 'COMPLETION_EVIDENCE_LOCKED: this photo is the accepted proof of a completed delivery'
+      USING ERRCODE = '23514';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._protect_accepted_delivery_photo() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._protect_accepted_delivery_photo() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER protect_accepted_delivery_photo
+  BEFORE UPDATE OR DELETE ON public.delivery_photos
+  FOR EACH ROW EXECUTE FUNCTION public._protect_accepted_delivery_photo();
 
 -- ---------------------------------------------------------------------------------------------
 -- 6. The receipt recipient, for whoever may complete the delivery while it is open.
@@ -655,7 +861,7 @@ BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
   SELECT assigned_driver, customer_id, status INTO v_assigned_driver, v_customer_id, v_status
-    FROM public.deliveries WHERE id = p_delivery_id;
+    FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL;
   -- One message whether the delivery is missing or not the caller's.
   IF v_customer_id IS NULL OR v_actor_role IS NULL OR NOT (
     v_actor_role IN ('admin', 'sales_rep')
@@ -692,6 +898,8 @@ BEGIN
       ('start_and_complete_delivery', 'public.start_and_complete_delivery(uuid,text,date,uuid,jsonb,text,text,text,text,text)', ARRAY['authenticated', 'postgres']::text[], true),
       ('get_delivery_receipt_recipient', 'public.get_delivery_receipt_recipient(uuid)', ARRAY['authenticated', 'postgres']::text[], true),
       ('_require_delivery_completion_evidence', 'public._require_delivery_completion_evidence()', ARRAY['postgres']::text[], false),
+      ('_protect_accepted_delivery_photo', 'public._protect_accepted_delivery_photo()', ARRAY['postgres']::text[], true),
+      ('_is_accepted_delivery_evidence_object', 'public._is_accepted_delivery_evidence_object(text,text)', ARRAY['authenticated', 'postgres']::text[], true),
       -- The private completion chain stays callable by postgres alone: the wrapper is the only way in.
       ('_complete_delivery_replay_impl_20261015', 'public._complete_delivery_replay_impl_20261015(uuid,text,uuid,jsonb,text,text,text,timestamptz)', ARRAY['postgres']::text[], true),
       ('_complete_delivery_period_preflight_impl', 'public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', ARRAY['postgres']::text[], true),
@@ -724,6 +932,33 @@ BEGIN
                     AND tgfoid = 'public._require_delivery_completion_evidence()'::regprocedure) THEN
     RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_COMPLETION_EVIDENCE_TRIGGER';
   END IF;
+  -- BEFORE (2) + ROW (1) + DELETE (8) + UPDATE (16) = 27.
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                  WHERE tgrelid = 'public.delivery_photos'::regclass AND tgname = 'protect_accepted_delivery_photo'
+                    AND tgenabled = 'O' AND tgtype = 27
+                    AND tgfoid = 'public._protect_accepted_delivery_photo()'::regprocedure) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_PHOTO_TRIGGER';
+  END IF;
+  IF (SELECT provolatile FROM pg_proc WHERE oid = 'public.get_delivery_receipt_recipient(uuid)'::regprocedure) <> 's'
+     OR (SELECT provolatile FROM pg_proc WHERE oid = 'public._is_accepted_delivery_evidence_object(text,text)'::regprocedure) <> 's' THEN
+    RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_COMPLETION_EVIDENCE_VOLATILITY';
+  END IF;
+  -- Columns, types and the three validated constraints.
+  IF (SELECT string_agg(column_name || ':' || data_type, ',' ORDER BY column_name) FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'deliveries' AND column_name LIKE 'completion\_%')
+     IS DISTINCT FROM 'completion_evidence:text,completion_evidence_ref:text,completion_no_proof_at:timestamp with time zone,completion_no_proof_by:uuid,completion_no_proof_by_name:text'
+     OR (SELECT count(*) FROM pg_constraint
+          WHERE conrelid = 'public.deliveries'::regclass AND convalidated
+            AND conname IN ('deliveries_completion_evidence_check', 'deliveries_no_proof_record_check',
+                            'deliveries_no_proof_fields_only_check')) <> 3
+     OR position('no_proof' IN (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                                WHERE conrelid = 'public.deliveries'::regclass AND conname = 'deliveries_completion_evidence_check')) = 0
+     OR NOT EXISTS (SELECT 1 FROM pg_constraint
+                     WHERE conrelid = 'public.deliveries'::regclass AND contype = 'f'
+                       AND confrelid = 'public.profiles'::regclass
+                       AND conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'public.deliveries'::regclass AND attname = 'completion_no_proof_by')]::int2[]) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_COMPLETION_EVIDENCE_COLUMNS';
+  END IF;
   -- The four existing policies are byte-for-byte as found; exactly six policies touch the bucket.
   IF EXISTS (SELECT 1 FROM pg_temp.delivery_completion_evidence_policies f
               WHERE f.def_md5 IS DISTINCT FROM (
@@ -733,10 +968,11 @@ BEGIN
      OR (SELECT count(*) FROM pg_policies
           WHERE schemaname = 'storage' AND tablename = 'objects'
             AND coalesce(qual, '') || coalesce(with_check, '') LIKE '%delivery-signatures%') <> 6
-     OR (SELECT string_agg(policyname || ':' || cmd, ',' ORDER BY policyname) FROM pg_policies
+     OR (SELECT string_agg(policyname || ':' || cmd || ':' || permissive, ',' ORDER BY policyname) FROM pg_policies
           WHERE schemaname = 'storage' AND tablename = 'objects'
-            AND policyname IN ('delivery_signatures_attempt_insert', 'delivery_signatures_attempt_select'))
-        IS DISTINCT FROM 'delivery_signatures_attempt_insert:INSERT,delivery_signatures_attempt_select:SELECT' THEN
+            AND policyname IN ('delivery_signatures_attempt_insert', 'delivery_signatures_attempt_select',
+                               'delivery_evidence_objects_no_update', 'delivery_evidence_objects_no_delete'))
+        IS DISTINCT FROM 'delivery_evidence_objects_no_delete:DELETE:RESTRICTIVE,delivery_evidence_objects_no_update:UPDATE:RESTRICTIVE,delivery_signatures_attempt_insert:INSERT:PERMISSIVE,delivery_signatures_attempt_select:SELECT:PERMISSIVE' THEN
     RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_SIGNATURE_POLICY';
   END IF;
 END;

@@ -27,16 +27,18 @@ const SITES: Array<[string, string]> = [
 ];
 
 // The reset runs on any binding refusal (the helper returns 'intent', 'actor' or 'receipt', else null),
-// first in a block that then reloads the record (CodeRabbit on PR #954).
+// first in a block that then reloads the record (CodeRabbit on PR #954). The delivery screens also
+// retire the key on SIGNATURE_IMAGE_MISSING in the same condition (Goal 5, 20261022010000).
 const anyBindingReset = (hook: string) => new RegExp(
-  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)\\) \\{\\n\\s*${hook}\\.resetKey(?:For\\(completeScope\\))?\\(?\\)?;`,
+  `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)(?: \\|\\| isSignatureImageMissing\\((?:err|error)\\))?\\) \\{\\n\\s*${hook}\\.resetKey(?:For\\(completeScope\\))?\\(?\\)?;`,
   'g',
 );
-// Each screen's reload in that block (the next 1-4 lines).
+// Each screen's reload after that block. DeliveryDetail and FieldStop reconcile after EVERY failed
+// completion (not only a binding refusal): a status read, then a full reload once it is completed.
 const RELOADS: Record<string, RegExp> = {
   'src/pages/Deliveries.tsx': /bindingRejected = true;[\s\S]*?if \(outcome !== 'completed' && bindingRejected\) \{[\s\S]{0,500}?closeCompleteDialog\(\);\n\s*await fetchDeliveries\(\);/,
-  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*fetchDelivery\(\);/,
-  'src/pages/FieldStop.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*fetchStop\(\);/,
+  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]{0,600}?void reconcileAfterFailedCompletion\(deliveryId\);[\s\S]*?const reconcileAfterFailedCompletion = async[\s\S]{0,900}?await fetchDelivery\(\);/,
+  'src/pages/FieldStop.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]{0,600}?void reconcileAfterFailedCompletion\(id\);[\s\S]*?const reconcileAfterFailedCompletion = async[\s\S]{0,900}?await fetchStop\(\);/,
   'src/pages/FieldView.tsx': /completeIdem\.resetKey\(\);\n\s*\/\/[^\n]*\n\s*setCompleteFormOpenFor\(\(open\) => \(open === card\.job_id \? null : open\)\);\n\s*fetchCards\(\);/,
   'src/pages/JobDetail.tsx': /completeJobIdem\.resetKey\(\);\n\s*if \(stillOnThisJob\(\)\) \{\n\s*setShowCompleteModal\(false\);\n\s*fetchJob\(\);/,
 };

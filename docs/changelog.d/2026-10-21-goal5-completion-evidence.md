@@ -26,7 +26,18 @@ owner approval because it adds storage policies). Plan reviewed twice by Codex S
   required on the other path (it was optional on the office layout and absent from the list). A
   completed delivery shows how it was confirmed.
 - **Left at site needs a photo.** The field stop's "No one present" option now requires a photo of the
-  drop location (a default chosen during the build; Mason may change it).
+  drop location (confirmed by Mason on 2026-10-21).
+- **Admin-only "Record without proof" (Mason, 2026-10-21).** On the Deliveries list and the office
+  delivery page, an active admin can complete a delivery with no signature or photo by writing a reason
+  (10–500 characters). The server refuses anyone else, records the reason, the admin and the time, sets
+  the signer to "No proof — recorded by office", sends no customer receipt, and the delivery shows an
+  amber "Recorded without proof" card (and a "No proof" label in the list). Planned with two Codex Sol
+  advisory reviews.
+- **Accepted proof cannot be changed later.** The recorded evidence freezes once written. An accepted
+  ticket or drop-location photo row cannot be edited or deleted, and restrictive storage rules stop
+  anyone replacing or deleting an accepted signature or photo file. The server refuses empty files.
+- **Lost-reply retries.** If a completion went through but the phone never heard back, tapping Complete
+  again now asks the server, which replays the completion instead of the screen wrongly saying it failed.
 - **Driver receipts for hidden customers.** New read-only `get_delivery_receipt_recipient` gives an
   assigned driver the receipt email of a customer they cannot see (a stop scheduled before yesterday),
   while the delivery is open; the delivery page and the field stop use it (KNOWN_ISSUES, fixed entry).

@@ -28,7 +28,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { fetchReceiptRecipient, latestEvidencePhoto, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { fetchReceiptRecipient, fetchReceiptRecipientWithin, INVALID_SIGNATURE_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -51,6 +51,7 @@ interface StopPhoto {
   storage_path: string | null;
   image_url: string;
   caption: string | null;
+  uploaded_at?: string | null;
 }
 
 interface StopDelivery {
@@ -119,7 +120,7 @@ export default function FieldStop() {
     if (!id) return;
     const { data, error } = await supabase
       .from('delivery_photos')
-      .select('id, storage_path, image_url, caption')
+      .select('id, storage_path, image_url, caption, uploaded_at')
       .eq('delivery_id', id)
       .order('sort_order');
     if (activeStopIdRef.current !== id) return; // stale guard (H3)
@@ -347,14 +348,29 @@ export default function FieldStop() {
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) { toast('error', 'Enter the delivery date from the paper ticket (today or earlier)'); return; }
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
+    if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
     void handleComplete();
   };
 
+  // Claimed synchronously before the first await, so a second tap can never start a second attempt.
+  const submitClaimRef = useRef(false);
   const handleComplete = async () => {
+    if (submitClaimRef.current) return;
+    submitClaimRef.current = true;
+    try {
+      await runComplete();
+    } finally {
+      submitClaimRef.current = false;
+      setCompleting(false);
+    }
+  };
+
+  const runComplete = async () => {
     if (!delivery || !profile || !id) return;
     // Stale-route guard (H3): a fast stop-to-stop switch must never complete the
     // WRONG stop — the route id is fresh but component state could still lag.
     if (delivery.id !== id) { toast('error', 'This stop just changed — please retry'); return; }
+    if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
     setCompleting(true);
 
     const quantitiesJson = isPartial
@@ -393,19 +409,19 @@ export default function FieldStop() {
     const signaturePath = completionEvidence === 'signature' ? await signatureImagePathFor(id, idemKey) : undefined;
     const rpcParams = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
 
-    // The receipt address is read while the stop is still open (a driver may not see the customer).
-    const recipient = emailOnComplete && !delivery.customer?.email
-      ? (receiptRecipient ?? await fetchReceiptRecipient(id))
-      : null;
-
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
     // without a reachable server the stop stays exactly as it was.
     if (!(await hasSignal())) {
       toast('error', NO_SIGNAL_MESSAGE);
-      setCompleting(false);
       return;
     }
-    // The signal check can take a few seconds; re-check the stop did not change meanwhile.
+    // The receipt address is read while the stop is still open (a driver may not see the customer),
+    // after the signal check and for at most a few seconds, so it never holds up the completion.
+    const recipient = emailOnComplete && !delivery.customer?.email
+      ? (receiptRecipient ?? await fetchReceiptRecipientWithin(id))
+      : null;
+    // The checks above can take a few seconds; re-check the stop did not change meanwhile.
+    // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
       if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); return false; }
       if (completionInputsRef.current !== completionInputs) {
@@ -414,19 +430,18 @@ export default function FieldStop() {
       }
       return true;
     };
-    if (!stillSameAttempt()) { setCompleting(false); return; }
-    // The server completes only once this attempt's signature image is saved, so it goes up first;
-    // if it cannot be saved, nothing is sent.
+    if (!stillSameAttempt()) return;
+    // The server completes only once this attempt's signature image is saved, so it goes up first.
+    // A failed upload does not stop the call: after a lost reply the earlier attempt may already have
+    // completed the stop (storage then refuses the re-upload). The same key replays that completion,
+    // or the server refuses SIGNATURE_IMAGE_MISSING and nothing changes.
     if (signaturePath && signatureDataUrl) {
       try {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
-        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { extra: { context: 'Field Mode signature upload before completion failed' } });
-        toast('error', 'The signature could not be saved, so the delivery was NOT completed. Check your signal and tap Complete Delivery again.');
-        setCompleting(false);
-        return;
+        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
       }
-      if (!stillSameAttempt()) { setCompleting(false); return; }
+      if (!stillSameAttempt()) return;
     }
 
     try {
@@ -445,7 +460,9 @@ export default function FieldStop() {
       // The signature image went up before the call; the server recorded signature_url itself.
       const autoInvoice = result as { auto_invoice?: { invoice_number?: string } } | null;
       const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || null;
-      if (invoiceNum) setAutoInvoiceNumber(invoiceNum);
+      // Only the stop still on screen shows the Done step; the follow-ups below run regardless.
+      const stillOnStop = activeStopIdRef.current === id;
+      if (invoiceNum && stillOnStop) setAutoInvoiceNumber(invoiceNum);
       toast('success', invoiceNum
         ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice ${invoiceNum} created.`
         : `Delivery completed${isPartial ? ' (partial)' : ''}`);
@@ -489,24 +506,44 @@ export default function FieldStop() {
           ...(usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn) ? { deliveredOn: paperDeliveredOn } : {}),
         });
         if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
-      } else if (emailOnComplete && (completionEvidence !== 'signature' || (!delivery.customer && !recipient && !receiptRecipient))) {
+      } else if (emailOnComplete) {
+        // The receipt was wanted but no address could be read here (on any proof path).
         toast('warning', RECEIPT_NO_EMAIL_MESSAGE);
       }
 
-      setStep('done');
+      if (stillOnStop) setStep('done');
     } catch (error: unknown) {
       // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
       // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
       // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
-      // Reload so a completion an earlier attempt already committed shows instead of a stale form.
-      if (getIdempotencyBindingRejection(error)) {
+      // SIGNATURE_IMAGE_MISSING: this key's image is not saved and never will be under it, so the next
+      // tap is a fresh attempt (new key, new upload).
+      if (getIdempotencyBindingRejection(error) || isSignatureImageMissing(error)) {
         completeIdem.resetKeyFor(completeScope);
-        fetchStop();
       }
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
       toast('error', sanitizeError(error));
+      // After any refusal or unclear reply, reconcile with the server for THIS stop.
+      void reconcileAfterFailedCompletion(id);
     }
-    setCompleting(false);
+  };
+
+  // A completion an earlier attempt already committed must show as completed, not as a stale form.
+  // Only the status is read first: a full reload would reset the driver's edited quantities, which a
+  // retry would then send as full. Still open: refresh the photos (a refused photo may be gone).
+  const reconcileAfterFailedCompletion = async (stopId: string) => {
+    const { data, error } = await supabase.from('deliveries').select('status').eq('id', stopId).maybeSingle();
+    if (activeStopIdRef.current !== stopId) return;
+    if (error) {
+      Sentry.captureException(error, { level: 'warning', extra: { context: 'Field Mode status check after a failed completion' } });
+      return;
+    }
+    const status = (data as { status?: string } | null)?.status;
+    if (status && status !== 'scheduled' && status !== 'in_progress') {
+      await fetchStop(); // opens the completed delivery
+      return;
+    }
+    await fetchPhotos();
   };
 
   if (loading) {

@@ -194,6 +194,15 @@ folder); the path and reference are recorded in `deliveries.completion_evidence`
    to send evidence if they are reused. (The accounting-period, aggregate and offline-receipt chains were
    updated in this change and pass.)
 5. **Not yet tried on a real phone** (Goal 5's airplane-mode check is still owed).
+6. **Signature files from abandoned attempts stay stored.** Each completion attempt uploads its
+   signature to its own path before the server call, and no rule lets anyone delete those files (so an
+   accepted one can never be replaced). A refused or abandoned attempt leaves its file behind; a
+   service-role cleanup of files no delivery references is a possible follow-up.
+7. **Older signature rules unchanged.** The four policies for the old fixed path
+   (`signatures/<id>.png`) still let staff replace that image on deliveries completed before this change.
+   Narrowing them is an access change for a follow-up, on Mason's approval.
+8. **Photo proof is not tied to who took it.** Office staff may complete with a ticket photo a driver
+   saved, by design; the server checks the delivery, caption, folder and a non-empty file.
 
 ## FIXED 2026-10-19 (migration `20261019220000` applied live 2026-10-20 02:22 UTC (9:22 PM Central, 2026-10-19), PR #964) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
 

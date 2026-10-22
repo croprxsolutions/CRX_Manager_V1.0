@@ -19,6 +19,29 @@ export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
 export const LEFT_AT_SITE_PHOTO_CAPTION = 'Left at site — drop location';
 const EVIDENCE_PHOTO_CAPTIONS: ReadonlySet<string> = new Set([PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION]);
 
+// Admin-only "Record without proof" (no_proof): there is no customer signature or photo, so the
+// "Signed by" field never names a customer. complete_delivery requires exactly this text
+// (NO_PROOF_SIGNER_MISMATCH otherwise) and a written reason of 10 to 500 characters.
+export const NO_PROOF_SIGNER = 'No proof — recorded by office';
+export const NO_PROOF_REASON_MIN_CHARS = 10;
+export const NO_PROOF_REASON_MAX_CHARS = 500;
+
+// The reason as the server stores and measures it: btrim(regexp_replace(reason, '[[:space:]]+', ' ', 'g')).
+// Every run of spaces, tabs or line breaks becomes one space, then the ends are trimmed. The server
+// counts characters (code points), not UTF-16 units, so emoji count once here too.
+export function normalizeNoProofReason(reason: string): string {
+  return reason.replace(/[ \t\n\v\f\r]+/g, ' ').replace(/^ | $/g, '');
+}
+
+export function noProofReasonLength(reason: string): number {
+  return [...normalizeNoProofReason(reason)].length;
+}
+
+export function isValidNoProofReason(reason: string): boolean {
+  const length = noProofReasonLength(reason);
+  return length >= NO_PROOF_REASON_MIN_CHARS && length <= NO_PROOF_REASON_MAX_CHARS;
+}
+
 // A paper-ticket delivery is completed later, once back in signal, so the driver
 // records the day it really happened. That day becomes the delivery and invoice date.
 // The ticket date is required on the paper path and can never be in the future.

@@ -143,8 +143,8 @@ BEGIN
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;
 
   -- 20261022010000 (Goal 5): a completion names its saved proof; this chain uses a ticket photo.
-  INSERT INTO storage.objects (bucket_id, name, owner_id)
-  VALUES ('delivery-photos', 'delivery-photos/' || v_delivery || '/smoke-ticket.jpg', v_admin::text);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+  VALUES ('delivery-photos', 'delivery-photos/' || v_delivery || '/smoke-ticket.jpg', v_admin::text, '{"size": 1024}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_delivery, 'delivery-photos/' || v_delivery || '/smoke-ticket.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0)
   RETURNING id INTO v_ticket_photo;

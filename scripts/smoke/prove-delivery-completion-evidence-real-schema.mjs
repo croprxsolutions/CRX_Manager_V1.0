@@ -25,7 +25,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -158,7 +158,7 @@ function buildContainer() {
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
   psql(`CREATE SCHEMA IF NOT EXISTS storage;
     CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
-    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text);
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     -- As live (read 2026-10-21): postgres, which owns complete_delivery, may read storage.objects.
@@ -345,6 +345,90 @@ BEGIN
 END
 $replay$;`;
 
+// Committed fixtures for the two-session tests (after the candidate is applied): two in_progress
+// deliveries; the second has a saved, non-empty ticket photo.
+const CONC_SETUP = `
+DO $conc$
+DECLARE
+  v_admin uuid; v_customer uuid; v_product uuid; v_order uuid; v_oi uuid; v_id uuid; v_i int; v_photo uuid;
+BEGIN
+  SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at, id LIMIT 1;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  SELECT product_id INTO v_product FROM public._prover_legacy LIMIT 1;
+  SELECT customer_id INTO v_customer FROM public.deliveries WHERE id = (SELECT delivery_id FROM public._prover_legacy LIMIT 1);
+  INSERT INTO public.orders (order_number, customer_id, status, booking_draw) VALUES ('[PROVER] CONC', v_customer, 'confirmed', false) RETURNING id INTO v_order;
+  CREATE TABLE public._prover_conc (k text PRIMARY KEY, id uuid);
+  FOR v_i IN 1..2 LOOP
+    INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, cost_per_unit,
+      total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining)
+    VALUES (v_order, v_product, '[PROVER] conc ' || v_i, 10, 6, 2, 20, 8, 40, 0, 2) RETURNING id INTO v_oi;
+    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+    VALUES ('[PROVER] CONC-' || v_i, v_order, v_customer, CURRENT_DATE, 'scheduled', v_admin) RETURNING id INTO v_id;
+    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+    VALUES (v_id, v_oi, v_product, 2, 0, 'GL');
+    UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_id;
+    INSERT INTO public._prover_conc VALUES ('delivery' || v_i, v_id);
+  END LOOP;
+  SELECT id INTO v_id FROM public._prover_conc WHERE k = 'delivery2';
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+  VALUES ('delivery-photos', 'delivery-photos/' || v_id || '/conc.jpg', v_admin::text, '{"size": 1024}'::jsonb);
+  INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
+  VALUES (v_id, 'delivery-photos/' || v_id || '/conc.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0) RETURNING id INTO v_photo;
+  INSERT INTO public._prover_conc VALUES ('photo', v_photo);
+END
+$conc$;`;
+
+/**
+ * Session A runs `body` in a transaction it holds open for 4 s (ending with `finish`); 1.5 s in,
+ * session B runs `other`. Returns how long B waited and B's output.
+ */
+function race(prefix, body, finish, other) {
+  const a = spawn('docker', [...psqlArgs(), '-c', `BEGIN; ${prefix} ${body} SELECT pg_sleep(4); ${finish};`], { stdio: 'ignore' });
+  wait(1500);
+  const started = Date.now();
+  const b = docker([...psqlArgs()], { input: other, allowFailure: true });
+  const waited = Date.now() - started;
+  wait(Math.max(0, 4000 - waited));
+  for (let i = 0; i < 50 && a.exitCode === null; i += 1) wait(200);
+  return { waited, output: `${b.stdout}\n${b.stderr}` };
+}
+function concurrency() {
+  psql(CONC_SETUP);
+  const conc = (k) => scalar(`SELECT id FROM public._prover_conc WHERE k = '${k}';`);
+  const admin2 = scalar("SELECT id FROM public.profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at DESC, id LIMIT 1;");
+  const claims = (u) => `SELECT set_config('request.jwt.claims', json_build_object('sub', '${u}', 'role', 'authenticated')::text, true), set_config('request.jwt.claim.sub', '${u}', true);`;
+  const noProof = (key) => `SELECT public.complete_delivery('${conc('delivery1')}', 'No proof — recorded by office', '${admin2}', NULL, NULL, NULL, '${key}', NULL, 'no_proof', 'Concurrent demotion test reason');`;
+  const demote = `UPDATE public.profiles SET role = 'sales_rep' WHERE id = '${admin2}';`;
+  const restore = `UPDATE public.profiles SET role = 'admin' WHERE id = '${admin2}';`;
+  const unlocked = mutate(" WHERE id = v_actor AND is_active = true FOR SHARE;\n  IF v_actor_role IS NULL OR NOT (\n    v_actor_role IN ('admin', 'sales_rep')\n    OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver)\n  ) THEN\n    RAISE EXCEPTION 'Not authorized to complete this delivery';\n  END IF;\n\n  IF p_evidence IS NULL THEN\n    -- Legacy replay only: exactly the 20261019200000",
+    " WHERE id = v_actor AND is_active = true;\n  IF v_actor_role IS NULL OR NOT (\n    v_actor_role IN ('admin', 'sales_rep')\n    OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver)\n  ) THEN\n    RAISE EXCEPTION 'Not authorized to complete this delivery';\n  END IF;\n\n  IF p_evidence IS NULL THEN\n    -- Legacy replay only: exactly the 20261019200000", 'profile FOR SHARE');
+
+  // Mutation first (rolled back): without FOR SHARE the demotion does not wait.
+  let r = race(unlocked, claims(admin2) + noProof('prover-conc-np-mut'), 'ROLLBACK', demote);
+  psql(restore);
+  assert.ok(r.waited < 1000, `CONCURRENCY mutation: without FOR SHARE the demotion still waited ${r.waited} ms`);
+  r = race('', claims(admin2) + noProof('prover-conc-np'), 'COMMIT', demote);
+  assert.ok(r.waited >= 1500, `CONCURRENCY: a demotion did not wait for the admin's no-proof completion (${r.waited} ms)`);
+  assert.equal(scalar(`SELECT status || ':' || completion_evidence || ':' || completion_no_proof_by FROM public.deliveries WHERE id = '${conc('delivery1')}';`),
+    `completed:no_proof:${admin2}`, 'CONCURRENCY: the no-proof completion did not commit');
+  psql(restore);
+  console.log(`[prover] CONCURRENCY: a demotion waits for the admin's no-proof completion to commit (${r.waited} ms; without FOR SHARE it did not wait)`);
+
+  const admin1 = scalar("SELECT id FROM public.profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at, id LIMIT 1;");
+  const paper = (key) => `SELECT public.complete_delivery('${conc('delivery2')}', '[PROVER] Signer', '${admin1}', NULL, NULL, NULL, '${key}', NULL, 'paper_ticket', '${conc('photo')}');`;
+  const recaption = `UPDATE public.delivery_photos SET caption = 'Not a ticket' WHERE id = '${conc('photo')}';`;
+  const noRowLock = mutate("      SELECT * INTO v_photo FROM public.delivery_photos WHERE id = v_photo_id FOR UPDATE;",
+    "      SELECT * INTO v_photo FROM public.delivery_photos WHERE id = v_photo_id;", 'photo FOR UPDATE');
+  r = race(noRowLock, claims(admin1) + paper('prover-conc-photo-mut'), 'ROLLBACK', `BEGIN; ${recaption} ROLLBACK;`);
+  assert.ok(r.waited < 1000 && !/ERROR/.test(r.output), `CONCURRENCY mutation: without the photo row lock the re-caption still waited or failed (${r.waited} ms): ${r.output}`);
+  r = race('', claims(admin1) + paper('prover-conc-photo'), 'COMMIT', recaption);
+  assert.ok(r.waited >= 1500, `CONCURRENCY: a re-caption did not wait for the completion that accepted the photo (${r.waited} ms)`);
+  assert.match(r.output, /COMPLETION_EVIDENCE_LOCKED/, `CONCURRENCY: the re-caption after the completion was not refused: ${r.output}`);
+  assert.equal(scalar(`SELECT caption FROM public.delivery_photos WHERE id = '${conc('photo')}';`), 'Signed paper delivery ticket', 'CONCURRENCY: the accepted photo changed');
+  console.log(`[prover] CONCURRENCY: a re-caption of the accepted photo waits for the completion (${r.waited} ms), then is refused; without the row lock it did not wait`);
+}
+
 function main() {
   buildContainer();
   seed();
@@ -386,34 +470,60 @@ function main() {
   covering('AFTER', passedBefore);
 
   const mutations = [
-    ['signature uploader check', "                         AND o.owner_id = v_actor::text) THEN",
-      "                         ) THEN", /SMOKE_FAIL: a signature image uploaded by someone else was accepted/],
+    ['signature uploader check', "                         AND o.owner_id = v_actor::text\n", "",
+      /SMOKE_FAIL: a signature image uploaded by someone else was accepted/],
     ['signature path derived from the key', "      || left(encode(sha256(convert_to(p_idempotency_key, 'UTF8')), 'hex'), 32) || '.png';\n    IF p_evidence_ref IS DISTINCT FROM v_signature_path\n",
       "      || left(encode(sha256(convert_to(p_idempotency_key, 'UTF8')), 'hex'), 32) || '.png';\n    v_signature_path := p_evidence_ref;\n    IF p_evidence_ref IS DISTINCT FROM v_signature_path\n",
       /SMOKE_FAIL: a signature image of another attempt was accepted/],
-    ['photo delivery check', "            AND dp.delivery_id = p_delivery_id\n", "",
+    ['non-empty signature image', "                         AND o.owner_id = v_actor::text\n                         AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'\n                         AND (o.metadata ->> 'size')::bigint > 0) THEN",
+      "                         AND o.owner_id = v_actor::text) THEN", /SMOKE_FAIL: a\. an empty signature image was accepted/],
+    ['photo delivery check', "       OR v_photo.delivery_id IS DISTINCT FROM p_delivery_id\n", "",
       /SMOKE_FAIL: b\. another delivery's ticket photo was accepted/],
-    ['own-folder check', "            AND split_part(dp.storage_path, '/', 2) = p_delivery_id::text) THEN",
-      "            ) THEN", /SMOKE_FAIL: b\. a ticket photo from another delivery's folder was accepted/],
+    ['own-folder check', "       OR split_part(v_photo.storage_path, '/', 2) <> p_delivery_id::text\n", "",
+      /SMOKE_FAIL: b\. a ticket photo from another delivery's folder was accepted/],
+    ['non-empty photo', "                       WHERE o.bucket_id = 'delivery-photos' AND o.name = v_photo.storage_path\n                         AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'\n                         AND (o.metadata ->> 'size')::bigint > 0) THEN",
+      "                       WHERE o.bucket_id = 'delivery-photos' AND o.name = v_photo.storage_path) THEN", /SMOKE_FAIL: b\. an empty ticket photo was accepted/],
     ['left-at-site caption', "      ELSE 'Left at site — drop location'", "      ELSE 'Signed paper delivery ticket'",
       /SMOKE_FAIL: c\. left-at-site completion with a ticket photo was accepted/],
     ['left-at-site signer', "    IF p_evidence = 'left_at_site' AND p_signed_by IS DISTINCT FROM 'No one present — left at site' THEN",
       "    IF false THEN", /SMOKE_FAIL: c\. left-at-site completion with a named signer was accepted/],
     ['status before evidence', "  IF v_status IS DISTINCT FROM 'in_progress' THEN", "  IF false THEN",
       /SMOKE_FAIL: e\. expected the in_progress status refusal/],
-    ['direct-table trigger', "  IF COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text THEN",
-      "  IF true THEN", /SMOKE_FAIL: g\. a direct UPDATE completed a delivery/],
+    ['direct-table trigger', "  v_marked := COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text;",
+      "  v_marked := true;", /SMOKE_FAIL: g\. a direct UPDATE completed a delivery/],
     // The completion body leaves app.admin_override on for the rest of its transaction; trusting it
     // would let a later statement in the same transaction complete a delivery directly.
-    ['marker-only trigger (no admin-override exemption)', "  IF COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text THEN",
-      "  IF COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text OR public._is_admin_override() THEN",
+    ['marker-only trigger (no admin-override exemption)', "  v_marked := COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text;",
+      "  v_marked := COALESCE(current_setting('crx.delivery_completion_evidence', true), '') = NEW.id::text OR public._is_admin_override();",
       /SMOKE_FAIL: g\. a direct UPDATE completed a delivery/],
-    ['signer lock on completed rows', "     OR (OLD.status = 'completed'\n         AND (NEW.signed_by IS DISTINCT FROM OLD.signed_by OR NEW.signature_url IS DISTINCT FROM OLD.signature_url)) THEN",
-      " THEN", /SMOKE_FAIL: g\. a completed delivery's signature_url was rewritten directly/],
+    ['signature_url lock', "     OR NEW.signature_url IS DISTINCT FROM OLD.signature_url\n", "",
+      /SMOKE_FAIL: g\. a completed delivery's signature_url was rewritten directly/],
+    ['signed_by lock', "\n     OR ((OLD.status IN ('completed', 'voided') OR OLD.completion_evidence IS NOT NULL)\n         AND NEW.signed_by IS DISTINCT FROM OLD.signed_by) THEN",
+      " THEN", /SMOKE_FAIL: g\. a completed delivery's signed_by was rewritten directly/],
     ['receipt window for drivers', "AND v_status IN ('scheduled', 'in_progress'))", ")",
       /SMOKE_FAIL: h\. the driver read the receipt email of a completed delivery/],
     ['receipt reader authorization', "    OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver AND v_status IN ('scheduled', 'in_progress'))\n",
       "    OR (v_actor_role = 'driver' AND v_status IN ('scheduled', 'in_progress'))\n", /SMOKE_FAIL: h\. another driver read the receipt email/],
+    ['no-proof admin check', "      RAISE EXCEPTION 'NO_PROOF_ADMIN_ONLY: only an admin can record a delivery without proof' USING ERRCODE = '42501';\n    END IF;\n    v_reason :=",
+      "      NULL;\n    END IF;\n    v_reason :=", /SMOKE_FAIL: i\. a sales rep recorded a delivery without proof/],
+    ['no-proof reason length', "    IF char_length(v_reason) NOT BETWEEN 10 AND 500 THEN", "    IF false THEN",
+      // Without the wrapper's check the table CHECK still refuses the short reason (second layer).
+      /SMOKE_FAIL: i\. (?:a 9-character reason was accepted|short: expected NO_PROOF_REASON_REQUIRED, got new row [^\n]*deliveries_no_proof_record_check)/],
+    ['no-proof whitespace collapse', "    v_reason := btrim(regexp_replace(p_evidence_ref, '[[:space:]]+', ' ', 'g'));", "    v_reason := p_evidence_ref;",
+      /SMOKE_FAIL: i\. a whitespace-only reason was accepted/],
+    ['no-proof signer', "    IF char_length(v_reason) NOT BETWEEN 10 AND 500 THEN\n      RAISE EXCEPTION 'NO_PROOF_REASON_REQUIRED: write why this delivery is recorded without proof (10 to 500 characters)' USING ERRCODE = '22023';\n    END IF;\n    IF p_signed_by IS DISTINCT FROM 'No proof — recorded by office' THEN",
+      "    IF char_length(v_reason) NOT BETWEEN 10 AND 500 THEN\n      RAISE EXCEPTION 'NO_PROOF_REASON_REQUIRED: write why this delivery is recorded without proof (10 to 500 characters)' USING ERRCODE = '22023';\n    END IF;\n    IF false THEN",
+      /SMOKE_FAIL: i\. a no-proof completion naming a customer as signer was accepted/],
+    ['no-proof recorder', "         completion_no_proof_by = CASE WHEN p_evidence = 'no_proof' THEN v_actor END,",
+      "         completion_no_proof_by = CASE WHEN p_evidence = 'no_proof' THEN (SELECT id FROM public.profiles WHERE role = 'admin' AND id <> v_actor ORDER BY id LIMIT 1) END,",
+      /SMOKE_FAIL: i\. no-proof record wrong/],
+    ['freeze once recorded', "  IF OLD.completion_evidence IS NOT NULL\n     AND (NEW.completion_evidence IS DISTINCT FROM OLD.completion_evidence",
+      "  IF false\n     AND (NEW.completion_evidence IS DISTINCT FROM OLD.completion_evidence",
+      /SMOKE_FAIL: i\. a recorded no-proof reason was rewritten under the marker/],
+    ['accepted photo row protection', "     AND (TG_OP = 'DELETE' OR NEW IS DISTINCT FROM OLD) THEN", "     AND false THEN",
+      /SMOKE_FAIL: i\. an accepted ticket photo row was changed/],
+    ['storage helper', "      OR (p_bucket_id = 'delivery-photos'\n", "      OR (false\n",
+      /SMOKE_FAIL: i\. the storage helper marked the wrong objects/],
   ];
   for (const [label, find, replacement, expected] of mutations) {
     const r = chain(CHAIN, mutate(find, replacement, label));
@@ -421,6 +531,8 @@ function main() {
     assert.match(r.fail, expected, `MUTATION ${label}: wrong failure: ${r.fail}`);
     console.log(`[prover] MUTATION: without the ${label} the chain fails: ${r.fail}`);
   }
+
+  concurrency();
 
   console.log('DELIVERY_COMPLETION_EVIDENCE_PROOF_PASS');
 }

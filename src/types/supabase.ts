@@ -2602,6 +2602,9 @@ export type Database = {
           completed_at: string | null
           completion_evidence: string | null
           completion_evidence_ref: string | null
+          completion_no_proof_at: string | null
+          completion_no_proof_by: string | null
+          completion_no_proof_by_name: string | null
           created_at: string
           created_by: string
           customer_id: string
@@ -2636,6 +2639,9 @@ export type Database = {
           completed_at?: string | null
           completion_evidence?: string | null
           completion_evidence_ref?: string | null
+          completion_no_proof_at?: string | null
+          completion_no_proof_by?: string | null
+          completion_no_proof_by_name?: string | null
           created_at?: string
           created_by: string
           customer_id: string
@@ -2670,6 +2676,9 @@ export type Database = {
           completed_at?: string | null
           completion_evidence?: string | null
           completion_evidence_ref?: string | null
+          completion_no_proof_at?: string | null
+          completion_no_proof_by?: string | null
+          completion_no_proof_by_name?: string | null
           created_at?: string
           created_by?: string
           customer_id?: string

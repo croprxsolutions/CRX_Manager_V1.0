@@ -33,7 +33,7 @@ Words used below:
 Mason's priority is everything that happens **before delivery**: quoting, product pricing, cost tracking, inventory (so he knows what to order) and invoicing. Returns, field-application invoices and rep-only rules wait. Code work goes in this order:
 
 1. **Before delivery, first:**
-   - pricing and cost tracking: 0.1–0.6, then the sent-quote price lock 1.2 and quote line identity 1.3, which unblock each other;
+   - pricing and cost tracking: quote line identity 1.3, then the sent-quote price lock 1.2 (which depends on 1.3), then 0.1–0.6. The price sheet's safety work (0.1) can be built alongside, but per the pricing plan's rollout gate it isn't switched on for live price changes until 1.2 and the margin floors (0.2) are live. Otherwise a price-sheet change could re-price a quote the customer was already sent;
    - cost and margin admin-only: 11.3;
    - knowing what to order: 0.8–0.10;
    - quoting and orders: 1.1, 1.4;

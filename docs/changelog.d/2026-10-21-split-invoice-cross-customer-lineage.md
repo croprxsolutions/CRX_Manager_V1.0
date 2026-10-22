@@ -13,10 +13,10 @@
   `src/__tests__/splitInvoiceLineageMigration.test.ts`.
 - Split returns (same PR, `20261021155000_split_payer_return_credit.sql`, not applied yet; Mason:
   "Build split returns first"): a field owner billed through a split can return its billed share and
-  gets its own return credit; once another payer was billed for a line, each payer can return only
-  its own share; a return credit memo passes the split-order invoice guard only inside the credit's
-  claim (before this, no return on a split order could be credited). The Returns screen lists the
-  orders a customer was split-billed on and caps each line at what that customer may return. Proof:
+  gets its own return credit; on any split order each payer, the order's customer included, can
+  return only its own billed share; a return credit memo passes the split-order invoice guard only
+  inside the credit's claim (before this, no return on a split order could be credited). The Returns
+  screen lists the orders a customer was split-billed on and caps each line, through two read-only
+  server lookups (right for sales reps too). Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs` over
-  `smoke-split-payer-return-credit.sql`, plus `src/__tests__/splitPayerReturnMigration.test.ts` and
-  `src/lib/splitReturnShare.test.ts`.
+  `smoke-split-payer-return-credit.sql`, plus `src/__tests__/splitPayerReturnMigration.test.ts`.

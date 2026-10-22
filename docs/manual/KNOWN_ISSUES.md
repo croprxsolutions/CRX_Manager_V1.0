@@ -159,8 +159,10 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   ungrouped invoice on a split order, so no return on a split order could be credited, even the order
   customer's. Mason first accepted the gap, then chose "Build split returns first" (`DECISION_LOG.md`,
   2026-10-21). `20261021155000` lets a payer a posted governed split invoice bills return its own
-  billed share, priced from its own billed cents, capped for every payer once another payer was billed
-  for the line, and credited to that payer inside the credit's private claim. Proof:
+  billed share, priced from its own billed cents; on any order with split-billing evidence every payer,
+  the order's customer included, is capped at its own billed share; and the credit memo is created
+  inside the credit's private claim. The Returns screen reads each payer's allowance through two
+  read-only lookups, so it is right for sales reps too. Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Left open: a split payer's credit is
   not auto-applied (as for every return credit, staff apply it), and a split return's quantity check
   in `receive_return` runs without the per-line locks that `issue_return_credit` re-checks under, so a

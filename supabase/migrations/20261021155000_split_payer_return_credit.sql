@@ -13,16 +13,17 @@
 --   * create_return, receive_return, issue_return_credit (their private intent bodies, renamed in
 --     20260812130145): the returner may be the order's customer or a customer a posted governed
 --     split invoice of the order bills (_return_customer_is_split_payer).
---   * Share mode, per order line (_return_customer_line_share): when the returner is not the
---     order's customer, or another customer was billed for that line, the returner may return only
---     the quantity it was billed on that line (posted, overdue or paid; not a credit memo) minus its
---     other open returns, and its credit is that share of its own billed cents, spread so returning
---     its whole share credits exactly what it was billed. Otherwise the line keeps today's rule
---     (delivered quantity, order price) unchanged.
+--   * Share mode (_return_customer_line_share): when the returner is not the order's customer, or
+--     the order has split-billing evidence (needs_split_billing, a field allocation, or a governed
+--     split invoice), every payer, the order's customer included, may return only the quantity it
+--     was billed on that line (posted, overdue or paid; not a credit memo) minus its other open
+--     returns, and its credit is what is left of its own billed cents for that quantity, so
+--     returning its whole share credits exactly what it was billed. Otherwise the line keeps
+--     today's rule (delivered quantity, order price) unchanged.
 --   * issue_return_credit re-checks every line's share under the per-order-line advisory locks the
---     credit implementation takes (a source void or edit try-takes the same locks), and for a field
---     owner who is not the order's customer opens a private claim around the unchanged credit
---     implementation and refuses any credited unit without source lineage
+--     credit implementation takes (a source void or edit try-takes the same locks), opens a private
+--     claim around the unchanged credit implementation for every order-linked return, and on a
+--     share-mode return refuses any credited unit without source lineage
 --     (RETURN_SPLIT_CREDIT_UNBACKED).
 --   * guard_invoice_terminal_order admits that customer's credit memo only inside the claim, and
 --     afterwards (apply, unapply, void) only as the credit memo of a return for that order and
@@ -42,7 +43,10 @@
 --   postflight proves it.
 --
 -- NEW: public.return_credit_customer_claims (RLS deny-all, no Data API grant), the STABLE helpers
---   _return_customer_is_split_payer and _return_customer_line_share (EXECUTE for no Data API role).
+--   _return_customer_is_split_payer and _return_customer_line_share (EXECUTE for no Data API role),
+--   and two read-only lookups for the Returns screen, get_split_payer_return_orders and
+--   get_return_line_allowances (STABLE SECURITY DEFINER, admin or sales_rep, EXECUTE for
+--   authenticated), because a sales rep cannot read another customer's invoices.
 --
 -- ORDERING: strict. Apply after 20261021150000_split_invoice_cross_customer_lineage (the guard body
 --   replaced here is that migration's).
@@ -75,7 +79,8 @@ BEGIN
   IF to_regclass('public.return_credit_customer_claims') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'public'
-                   AND p.proname IN ('_return_customer_is_split_payer', '_return_customer_line_share')) THEN
+                   AND p.proname IN ('_return_customer_is_split_payer', '_return_customer_line_share',
+                                     'get_split_payer_return_orders', 'get_return_line_allowances')) THEN
     RAISE EXCEPTION 'PREFLIGHT_SPLIT_PAYER_RETURN_ALREADY_APPLIED: the claims table or a share helper already exists';
   END IF;
   -- The five functions this file replaces, pinned CR-insensitively to their current bodies, with
@@ -209,10 +214,13 @@ AS $function$
 $function$;
 
 -- One order line, one returning customer. share_mode: the returner is not the order's customer, or
--- another customer was billed for the line. billed_qty / billed_cents: what the returner was billed
--- for the line on this order's posted (or overdue or paid) invoices, not credit memos; for a customer
--- other than the order's, only its governed split invoices count. other_returned_*: the returner's
--- open returns of the line (not rejected, cancelled or deleted), except p_exclude_return_id.
+-- the order has split-billing evidence (needs_split_billing, a field allocation, or a governed split
+-- invoice in any status), so every payer, the order's customer included, returns only what it was
+-- billed. billed_qty / billed_cents: what the returner was billed for the line (same product and
+-- unit, as the credit's source lots match them) on this order's posted (or overdue or paid)
+-- invoices, not credit memos; for a customer other than the order's, only its governed split
+-- invoices count. other_returned_*: the returner's open returns of the line (not rejected,
+-- cancelled or deleted), except p_exclude_return_id.
 CREATE FUNCTION public._return_customer_line_share(
   p_order_id uuid, p_order_item_id uuid, p_customer_id uuid, p_exclude_return_id uuid
 )
@@ -228,12 +236,24 @@ STABLE
 SET search_path = public, pg_temp
 AS $function$
   WITH ord AS (
-    SELECT o.customer_id FROM public.orders o WHERE o.id = p_order_id
+    SELECT o.customer_id,
+           COALESCE(o.needs_split_billing, false)
+             OR EXISTS (
+               SELECT 1 FROM public.order_item_field_allocations oifa
+                 JOIN public.order_items alloc_oi ON alloc_oi.id = oifa.order_item_id
+                WHERE alloc_oi.order_id = o.id
+             )
+             OR EXISTS (SELECT 1 FROM public.split_invoice_provenance p WHERE p.order_id = o.id)
+             AS split_evidence
+      FROM public.orders o WHERE o.id = p_order_id
   ), billed AS (
     SELECT i.id AS invoice_id, i.customer_id, i.invoice_group_id, ii.quantity, ii.extended_cents
       FROM public.invoice_items ii
       JOIN public.invoices i ON i.id = ii.invoice_id
+      JOIN public.order_items oi ON oi.id = ii.order_item_id
      WHERE ii.order_item_id = p_order_item_id
+       AND ii.product_id = oi.product_id
+       AND ii.unit_size IS NOT DISTINCT FROM coalesce(oi.unit_size, 'ea')
        AND ii.quantity > 0
        AND i.order_id = p_order_id
        AND i.invoice_type <> 'credit_memo'
@@ -266,7 +286,7 @@ AS $function$
   )
   SELECT
     p_customer_id IS DISTINCT FROM (SELECT customer_id FROM ord)
-      OR EXISTS (SELECT 1 FROM billed b WHERE b.customer_id IS DISTINCT FROM p_customer_id),
+      OR COALESCE((SELECT split_evidence FROM ord), false),
     coalesce((SELECT sum(quantity) FROM own), 0),
     coalesce((SELECT sum(extended_cents) FROM own), 0)::bigint,
     coalesce((SELECT sum(quantity) FROM other_returns), 0),
@@ -275,6 +295,89 @@ $function$;
 
 REVOKE ALL ON FUNCTION public._return_customer_is_split_payer(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._return_customer_line_share(uuid, uuid, uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- Read-only lookups for the Returns screen, which create_return's staff (admin and sales_rep) use: a
+-- sales rep cannot read another customer's invoices, so the screen asks the server which orders a
+-- customer was split-billed on and how much of each delivered line that customer may still return,
+-- by the same rule create_return enforces. They read and return nothing else.
+CREATE FUNCTION public.get_split_payer_return_orders(p_customer_id uuid)
+RETURNS SETOF uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')
+  ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+  RETURN QUERY
+    SELECT DISTINCT p.order_id
+      FROM public.split_invoice_provenance p
+      JOIN public.orders o ON o.id = p.order_id
+     WHERE p.customer_id = p_customer_id
+       AND o.customer_id IS DISTINCT FROM p_customer_id
+       AND o.deleted_at IS NULL
+       AND public._return_customer_is_split_payer(p.order_id, p_customer_id);
+END;
+$function$;
+
+CREATE FUNCTION public.get_return_line_allowances(p_order_id uuid, p_customer_id uuid)
+RETURNS TABLE (order_item_id uuid, share_mode boolean, returnable_qty numeric)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+#variable_conflict use_column
+DECLARE
+  v_order_customer_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')
+  ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+  SELECT o.customer_id INTO v_order_customer_id
+    FROM public.orders o WHERE o.id = p_order_id AND o.deleted_at IS NULL;
+  IF NOT FOUND OR (
+    v_order_customer_id IS DISTINCT FROM p_customer_id
+    AND NOT public._return_customer_is_split_payer(p_order_id, p_customer_id)
+  ) THEN
+    RETURN;
+  END IF;
+  -- Delivered less every open return of the line; in share mode also the returner's own billed
+  -- share less its own open returns (create_return's two caps).
+  RETURN QUERY
+    SELECT oi.id,
+           s.share_mode,
+           greatest(0, CASE WHEN s.share_mode
+                            THEN least(d.left_qty, s.billed_qty - s.other_returned_qty)
+                            ELSE d.left_qty END)
+      FROM public.order_items oi
+      CROSS JOIN LATERAL (
+        SELECT coalesce(oi.quantity_delivered, 0) - coalesce((
+                 SELECT sum(ri.quantity)
+                   FROM public.return_items ri
+                   JOIN public.returns r ON r.id = ri.return_id
+                  WHERE ri.order_item_id = oi.id
+                    AND r.deleted_at IS NULL
+                    AND r.status NOT IN ('rejected', 'cancelled')
+               ), 0) AS left_qty
+      ) d
+      CROSS JOIN LATERAL public._return_customer_line_share(p_order_id, oi.id, p_customer_id, NULL) s
+     WHERE oi.order_id = p_order_id
+       AND coalesce(oi.quantity_delivered, 0) > 0
+     ORDER BY oi.id;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.get_split_payer_return_orders(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.get_return_line_allowances(uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_split_payer_return_orders(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_return_line_allowances(uuid, uuid) TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(p_return jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)
 RETURNS jsonb
@@ -399,9 +502,9 @@ BEGIN
       RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_DELIVERED';
     END IF;
 
-    -- Split-payer return (20261021155000): when another customer was billed for this line, or the
-    -- returner is not the order's customer, the returner may return only what it was billed, and
-    -- its credit is that share of its own billed cents, spread so its full share credits exactly.
+    -- Split-payer return (20261021155000): on a split order, or when the returner is not the
+    -- order's customer, the returner may return only what it was billed, and its credit is what is
+    -- left of its own billed cents for that quantity, so its full share credits exactly.
     SELECT * INTO v_share
       FROM public._return_customer_line_share(v_order_id, v_order_item.id, v_customer_id, v_return_id);
     IF v_share.share_mode THEN
@@ -409,8 +512,9 @@ BEGIN
       IF v_share.other_returned_qty + v_qty > v_share.billed_qty THEN
         RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE';
       END IF;
-      v_extended := round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint
-        - round(v_share.billed_cents * v_share.other_returned_qty / v_share.billed_qty)::bigint;
+      v_extended := greatest(0,
+        round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint
+        - v_share.other_returned_cents);
       IF v_share.other_returned_cents + v_extended > v_share.billed_cents THEN
         RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE';
       END IF;
@@ -527,13 +631,13 @@ BEGIN
           OR ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint
           OR (NOT s.share_mode
               AND ri.extended_cents IS DISTINCT FROM round(ri.quantity * oi.price_per_unit * 100)::bigint)
-          -- Split-payer return (20261021155000): within the returner's billed share, priced within
-          -- one cent of that share of its billed cents (create_return spreads the cents exactly).
+          -- Split-payer return (20261021155000): within the returner's billed share, in quantity and
+          -- in cents (create_return priced it from what was left of its billed cents).
           OR (s.share_mode AND (
             s.billed_qty <= 0
+            OR ri.extended_cents < 0
             OR s.other_returned_qty + ri.quantity > s.billed_qty
             OR s.other_returned_cents + ri.extended_cents > s.billed_cents
-            OR abs(ri.extended_cents * s.billed_qty - s.billed_cents * ri.quantity) >= s.billed_qty
           ))
         )
     ) OR (
@@ -730,13 +834,13 @@ BEGIN
           OR ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint
           OR (NOT s.share_mode
               AND ri.extended_cents IS DISTINCT FROM round(ri.quantity * oi.price_per_unit * 100)::bigint)
-          -- Split-payer return (20261021155000): within the returner's billed share, priced within
-          -- one cent of that share of its billed cents (create_return spreads the cents exactly).
+          -- Split-payer return (20261021155000): within the returner's billed share, in quantity and
+          -- in cents (create_return priced it from what was left of its billed cents).
           OR (s.share_mode AND (
             s.billed_qty <= 0
+            OR ri.extended_cents < 0
             OR s.other_returned_qty + ri.quantity > s.billed_qty
             OR s.other_returned_cents + ri.extended_cents > s.billed_cents
-            OR abs(ri.extended_cents * s.billed_qty - s.billed_cents * ri.quantity) >= s.billed_qty
           ))
         )
     ) OR (
@@ -1229,9 +1333,9 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', '5a7ba76c3145dedd2aead6c1457cfd1b', true),
-        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', 'a048ddb8a7300ff81b8f31f972f3ab3c', true),
-        ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '59b2c7a1d01ba7ec2833accec40260b4', true),
+        ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'fbaf12afb72c4d51a4711be30ead58e6', true),
+        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '02724d045d1e0c1df96ecf3a42d3d130', true),
+        ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', 'ff18e43e9566f498f6b9ab070a2586dc', true),
         ('guard_invoice_terminal_order', 'public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', true),
         ('guard_mono_invoice_split_billing_post', 'public.guard_mono_invoice_split_billing_post()', 'b6fd2b19478801f6798c7b6e1fba737b', true),
         ('_return_customer_is_split_payer', 'public._return_customer_is_split_payer(uuid,uuid)', NULL, false),
@@ -1279,8 +1383,38 @@ BEGIN
     SELECT 1 FROM pg_trigger t
      WHERE t.tgname = 'guard_mono_invoice_split_billing_post' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
        AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER guard_mono_invoice_split_billing_post BEFORE INSERT OR UPDATE OF status, order_id, invoice_group_id ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_mono_invoice_split_billing_post()'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+     WHERE t.tgname = 'require_split_invoice_creation_claim' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
+       AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER require_split_invoice_creation_claim BEFORE INSERT ON public.invoices FOR EACH ROW EXECUTE FUNCTION require_split_invoice_creation_claim()'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+     WHERE t.tgname = 'guard_split_invoice_provenance_identity' AND t.tgrelid = 'public.invoices'::regclass AND t.tgenabled = 'O'
+       AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER guard_split_invoice_provenance_identity BEFORE DELETE OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION guard_split_invoice_provenance_identity()'
   ) THEN
     RAISE EXCEPTION 'POSTFLIGHT_SPLIT_PAYER_RETURN_TRIGGER: an invoice guard trigger changed';
+  END IF;
+  -- The two read-only lookups: one overload each, STABLE, SECURITY DEFINER, fixed search_path,
+  -- EXECUTE for authenticated and service_role (and the owner), never anon.
+  IF EXISTS (
+    SELECT 1
+      FROM (VALUES
+        ('get_split_payer_return_orders', 'public.get_split_payer_return_orders(uuid)'),
+        ('get_return_line_allowances', 'public.get_return_line_allowances(uuid,uuid)')
+      ) AS pin(name, sig)
+      LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
+     WHERE p.oid IS NULL
+        OR (SELECT count(*) FROM pg_proc q JOIN pg_namespace n ON n.oid = q.pronamespace
+             WHERE n.nspname = 'public' AND q.proname = pin.name) <> 1
+        OR p.proowner <> 'postgres'::regrole
+        OR NOT p.prosecdef
+        OR p.provolatile <> 's'
+        OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+        OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                   FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+           IS DISTINCT FROM ARRAY['authenticated', 'postgres', 'service_role']::text[]
+  ) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_SPLIT_PAYER_RETURN_LOOKUP_CONTRACT: a return lookup''s security mode, search_path or grants are not the reviewed ones';
   END IF;
   IF EXISTS (
     SELECT 1
@@ -1291,12 +1425,16 @@ BEGIN
         ('public._issue_return_credit_impl(uuid,uuid,text)', 'a1e3183c3b962501b810e64333313a7c'),
         ('public._issue_return_credit_header_only_impl_20260825(uuid,uuid,text)', '4b32da9a350ca22e9dece371b1985493'),
         ('public._receive_return_impl_20260714(uuid,uuid,text)', '731471d04684bb5897c57dffdd329272'),
-        ('public.apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f')
+        ('public.apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f'),
+        ('public.require_split_invoice_creation_claim()', 'e73daae16c5ff5432644060f2b34f925'),
+        ('public.guard_split_invoice_provenance_identity()', '639875d6641556c78c25d633c67821f1'),
+        ('public.create_split_invoices_from_order(uuid,uuid,text,text)', '0f1e36e8536fc56f08fcf6071ea76da8'),
+        ('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'f671f1a3f5406cff52aedd8a5fb40b31')
       ) AS pin(sig, body_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM pin.body_md5
   ) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_SPLIT_PAYER_RETURN_DEPENDENCY_DRIFT: a return function other than the replaced ones changed';
+    RAISE EXCEPTION 'POSTFLIGHT_SPLIT_PAYER_RETURN_DEPENDENCY_DRIFT: a return or split function other than the replaced ones changed';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK: a governed split payer may return its billed share and receive its own return credit';
 END

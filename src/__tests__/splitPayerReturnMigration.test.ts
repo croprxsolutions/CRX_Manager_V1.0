@@ -38,20 +38,20 @@ function changedHunks(before: string, after: string): string[][] {
   }
   const hunks: string[][] = [];
   // Unchanged lines since the last change; null before the first change.
-  let unchanged: string[] | null = null;
+  const state: { unchanged: string[] | null } = { unchanged: null };
   const change = (line: string) => {
-    if (unchanged !== null && unchanged.length <= 2) {
-      hunks[hunks.length - 1].push(...unchanged.map((u) => ` ${u}`), line);
+    if (state.unchanged !== null && state.unchanged.length <= 2) {
+      hunks[hunks.length - 1].push(...state.unchanged.map((u) => ` ${u}`), line);
     } else {
       hunks.push([line]);
     }
-    unchanged = [];
+    state.unchanged = [];
   };
   let i = 0;
   let j = 0;
   while (i < a.length || j < b.length) {
     if (i < a.length && j < b.length && a[i] === b[j]) {
-      unchanged?.push(a[i]);
+      state.unchanged?.push(a[i]);
       i += 1; j += 1;
     } else if (j < b.length && (i === a.length || lcs[i][j + 1] >= lcs[i + 1][j])) {
       change(`+${b[j]}`); j += 1;
@@ -107,7 +107,19 @@ describe('20261021155000 split-payer return credit', () => {
     expect(MIGRATION).toContain('REVOKE ALL ON TABLE public.return_credit_customer_claims FROM PUBLIC, anon, authenticated, service_role;');
     expect(MIGRATION).toContain('REVOKE ALL ON FUNCTION public._return_customer_is_split_payer(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;');
     expect(MIGRATION).toContain('REVOKE ALL ON FUNCTION public._return_customer_line_share(uuid, uuid, uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;');
-    expect(MIGRATION).not.toMatch(/\bGRANT\b/);
+    // The only grants are the two read-only lookups for the Returns screen, never to anon.
+    expect(MIGRATION.match(/^GRANT .*$/gm)).toEqual([
+      'GRANT EXECUTE ON FUNCTION public.get_split_payer_return_orders(uuid) TO authenticated, service_role;',
+      'GRANT EXECUTE ON FUNCTION public.get_return_line_allowances(uuid, uuid) TO authenticated, service_role;',
+    ]);
+    for (const lookup of ['get_split_payer_return_orders', 'get_return_line_allowances']) {
+      const at = MIGRATION.indexOf(`CREATE FUNCTION public.${lookup}(`);
+      const fn = MIGRATION.slice(at, MIGRATION.indexOf('$function$;', at));
+      expect(fn).toContain('STABLE');
+      expect(fn).toContain('SECURITY DEFINER');
+      expect(fn).toContain("role IN ('admin', 'sales_rep')");
+      expect(fn).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/);
+    }
     // Both helpers are plain STABLE functions with a fixed search_path; neither is SECURITY DEFINER.
     for (const helper of ['_return_customer_is_split_payer', '_return_customer_line_share']) {
       const at = MIGRATION.indexOf(`CREATE FUNCTION public.${helper}(`);
@@ -120,7 +132,8 @@ describe('20261021155000 split-payer return credit', () => {
 
   it('prices a split share in exact numeric cents, with no floating point', () => {
     expect(MIGRATION).not.toMatch(/::(float|double precision|real)\b/i);
-    expect(MIGRATION).toContain('v_extended := round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint');
+    // What is left of the payer's billed cents for the cumulative quantity, never below zero.
+    expect(MIGRATION).toContain('round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint\n        - v_share.other_returned_cents);');
   });
 
   it('is registered as a container-only chain with its prover', () => {

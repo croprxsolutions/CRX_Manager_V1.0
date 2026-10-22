@@ -16,7 +16,11 @@
 --      A's order, -10.00, its one line backed by B's split invoice line, the claim gone;
 --   4. the memo is applied to B's split invoice (the guard admits the memo's UPDATE as the credit of
 --      B's return);
---   5. B's two partial returns of line 2 credit exactly what B was billed for it, not a cent more;
+--   (1 also checks the Returns screen's read-only lookups: B may then return 1 GL / 0.5 GL more, A
+--    2 GL, D nothing;)
+--   5. B's whole share of line 2 credits exactly what B was billed for it, not a cent more;
+--   5b. on a second split order whose invoices are still drafts, A cannot return anything
+--      (RETURN_SPLIT_SHARE_NOT_BILLED);
 --   6. the guard still refuses a credit memo for B on A's order with no claim, and a memo for D
 --      inside a claim for B (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID).
 --
@@ -46,6 +50,9 @@ DECLARE
   v_return2 uuid;
   v_return3 uuid;
   v_memo uuid;
+  v_order2 uuid;
+  v_line3 uuid;
+  v_delivery2 uuid;
   v_res jsonb;
   v_err text;
 BEGIN
@@ -167,6 +174,16 @@ BEGIN
      OR (SELECT extended_cents FROM public.return_items WHERE return_id = v_return) IS DISTINCT FROM 1000::bigint
      OR (SELECT unit_price_cents FROM public.return_items WHERE return_id = v_return) IS DISTINCT FROM 1000::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: B''s return is not B''s 1 GL at 10.00';
+  END IF;
+  -- The Returns screen's read-only lookups follow the same rule: with B's 1 GL open, B may return
+  -- 1 GL more of line 1 and 0.5 GL of line 2, A 2 GL of line 1, D nothing; the order is among B's
+  -- split-billed orders.
+  IF NOT (v_order IN (SELECT public.get_split_payer_return_orders(v_b)))
+     OR (SELECT returnable_qty FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line1) IS DISTINCT FROM 1::numeric
+     OR (SELECT returnable_qty FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line2) IS DISTINCT FROM 0.5::numeric
+     OR (SELECT returnable_qty FROM public.get_return_line_allowances(v_order, v_a) WHERE order_item_id = v_line1) IS DISTINCT FROM 2::numeric
+     OR EXISTS (SELECT 1 FROM public.get_return_line_allowances(v_order, v_d)) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the return lookups do not show B 1 GL / 0.5 GL, A 2 GL, and nothing for D';
   END IF;
 
   -- 2a. B cannot return more than its open billed share (2 GL billed, 1 GL already open).
@@ -309,6 +326,48 @@ BEGIN
                  WHERE r.id IN (v_return2, v_return3) AND i.customer_id IS DISTINCT FROM v_b) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: B''s line-2 credits are not exactly B''s billed % cents, all to B', v_b_line2_cents;
   END IF;
+
+  -- 5b. On a second split order whose per-owner invoices are still drafts, the order's own customer
+  --     cannot return anything: nothing is billed to A yet, and the split will bill part to B.
+  INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
+  VALUES ('E2E-SPLIT-RETURN-2-' || v_suffix, v_a, v_today, 'confirmed', false, NULL)
+  RETURNING id INTO v_order2;
+  INSERT INTO public.order_items (
+    order_id, product_id, product_name, price_per_unit, cost_per_unit, unit_size,
+    total_units_needed, total_price, profit, net_margin,
+    quantity_delivered, quantity_remaining, sort_order
+  ) VALUES (
+    v_order2, v_product, '[E2E] split return draft line', 10, 5, 'GL', 2, 20, 10, 50, 0, 2, 1
+  ) RETURNING id INTO v_line3;
+  INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
+  VALUES (v_line3, v_field, 100);
+  INSERT INTO public.deliveries (delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+  VALUES ('E2E-SPLIT-RETURN-D2-' || v_suffix, v_order2, v_a, v_today, 'scheduled', v_admin)
+  RETURNING id INTO v_delivery2;
+  INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+  VALUES (v_delivery2, v_line3, v_product, 2, 2, 'GL');
+  UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery2;
+  PERFORM public.complete_delivery(
+    v_delivery2, '[E2E] Split Return Receiver', v_admin,
+    NULL, NULL, NULL, 'e2e-split-return-complete-2-' || v_suffix, now()
+  );
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE order_id = v_order2 AND status IN ('posted', 'overdue', 'paid')) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: the second split order already has a posted invoice';
+  END IF;
+  BEGIN
+    PERFORM public.create_return(
+      jsonb_build_object('customer_id', v_a, 'order_id', v_order2, 'reason', 'defective'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line3, 'quantity', 1)),
+      'e2e-split-return-create-a-draft-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: the order customer returned goods its unposted split had not billed';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('RETURN_SPLIT_SHARE_NOT_BILLED' IN v_err) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: the draft-split return failed for the wrong reason: %', v_err;
+    END IF;
+  END;
 
   -- 6a. The guard: a credit memo for B on A's order, outside any claim.
   BEGIN

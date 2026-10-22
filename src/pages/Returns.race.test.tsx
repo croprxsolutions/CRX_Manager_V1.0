@@ -1,13 +1,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockFrom, mockRpc, mockToast, mockSentryCaptureException, intentKeys, nextIntentKey } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockSentryCaptureException, intentKeys, nextIntentKey, returnLookups } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
   mockSentryCaptureException: vi.fn(),
   intentKeys: new Map<string, string>(),
   nextIntentKey: { value: 0 },
+  // The Returns screen's read-only lookups (20261021155000), answered apart from mockRpc so each
+  // test's mutation mock stays about mutations.
+  returnLookups: {
+    allowances: [] as Array<{ order_item_id: string; returnable_qty: number; share_mode: boolean }>,
+    splitOrders: [] as string[],
+  },
 }));
 
 function buildChain(result: { data: unknown; error: unknown }): Record<string, unknown> {
@@ -43,7 +49,14 @@ function buildDeferredChain(): { chain: Record<string, unknown>; resolve: (resul
 }
 
 vi.mock('../lib/db', async () => ({
-  supabase: { from: mockFrom, rpc: mockRpc },
+  supabase: {
+    from: mockFrom,
+    rpc: (name: string, args?: unknown) => {
+      if (name === 'get_return_line_allowances') return Promise.resolve({ data: returnLookups.allowances, error: null });
+      if (name === 'get_split_payer_return_orders') return Promise.resolve({ data: returnLookups.splitOrders, error: null });
+      return mockRpc(name, args);
+    },
+  },
   checkMutationResult: vi.fn(),
   assertRpcResult: vi.fn((value) => value),
   // The REAL sanitizeError, never a stub. The previous stub was typed
@@ -112,6 +125,8 @@ describe('Returns loading and retry behavior', () => {
     intentKeys.clear();
     nextIntentKey.value = 0;
     mockRpc.mockResolvedValue({ data: null, error: null });
+    returnLookups.allowances = [];
+    returnLookups.splitOrders = [];
   });
 
   function setupCreateReturnData() {
@@ -127,7 +142,11 @@ describe('Returns loading and retry behavior', () => {
       if (table === 'returns') return buildChain({ data: [], error: null });
       return buildChain({ data: [], error: null });
     });
-    return { setReturnableQuantity: (value: number) => { returnableQuantity = value; } };
+    const allow = (value: number) => {
+      returnLookups.allowances = [{ order_item_id: 'order-item-1', returnable_qty: value, share_mode: false }];
+    };
+    allow(returnableQuantity);
+    return { setReturnableQuantity: (value: number) => { returnableQuantity = value; allow(value); } };
   }
 
   async function fillCreateReturn() {

@@ -25,7 +25,8 @@
 --   3. PREFLIGHT PINS. _blend_tier_price_cents_20261020 (called by the body, never pinned before),
 --      _blend_quote_pick_valid_20261020 (only checked to exist before) and safe_cents_qty (which
 --      change 1 relies on) are pinned by body md5 and signature, with the line trigger and share
---      helper pinned as before; the line trigger must also be attached to invoice_items and enabled.
+--      helper pinned as before; the line trigger must also be attached to invoice_items exactly as live
+--      defines it (BEFORE INSERT OR UPDATE, definition md5) and enabled.
 --   4. DEAD CHECK. "IF p_idempotency_key IS NOT NULL" around the replay lookup and around the
 --      receipt save could never be false once the key became required (IDEMPOTENCY_KEY_REQUIRED,
 --      20261021070000). Both tests are removed; the lookup and the receipt run exactly as before.
@@ -78,13 +79,15 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_BLEND_INVOICE_BINDING_LOWS_DEPENDENCY_DRIFT';
   END IF;
   -- The pinned line trigger only guards (and records each $0 approval) while it is attached to
-  -- invoice_items and enabled: exactly one such trigger, firing on origin (enabled 'O').
+  -- invoice_items as live defines it (BEFORE INSERT OR UPDATE OF the money columns, FOR EACH ROW;
+  -- pg_get_triggerdef md5 read live 2026-10-22) and enabled (origin 'O' or always 'A').
   IF (SELECT count(*) FROM pg_trigger t
        WHERE t.tgrelid = 'public.invoice_items'::regclass
          AND NOT t.tgisinternal
          AND t.tgfoid = to_regprocedure('public._enforce_below_cost_line()')
          AND t.tgname = 'zz_crx_below_cost_invoice_items'
-         AND t.tgenabled = 'O') <> 1 THEN
+         AND md5(pg_get_triggerdef(t.oid)) = '88f221e66893045f6883073fdd75cc1f'
+         AND t.tgenabled IN ('O', 'A')) <> 1 THEN
     RAISE EXCEPTION 'PREFLIGHT_BLEND_INVOICE_BINDING_LOWS_TRIGGER_DRIFT: the below-cost line trigger is not attached to invoice_items and enabled';
   END IF;
 END

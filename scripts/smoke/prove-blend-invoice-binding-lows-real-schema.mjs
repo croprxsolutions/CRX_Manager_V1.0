@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -235,8 +236,56 @@ function drift(sig) {
 
 const INVOICE = 'create_invoice_from_blend_ticket';
 const INVOICE_SIG = `public.${INVOICE}(uuid,uuid,text,text,jsonb)`;
+const PREVIOUS = path.join(MIGRATIONS, '20261021070000_blend_invoice_approval_binding.sql');
+
+// NOTHING ELSE CHANGED: rebuild the expected body from the 20261021070000 body (its live md5 is
+// the candidate's own preflight pin) with only the four intended edits, each matched exactly once,
+// and require the candidate body to equal it byte for byte.
+function expectedBody() {
+  const sql = lf(PREVIOUS);
+  const start = sql.indexOf(`CREATE FUNCTION public.${INVOICE}(`);
+  const a = sql.indexOf('AS $function$', start) + 'AS $function$'.length;
+  let body = sql.slice(a, sql.indexOf('$function$;', a));
+  assert.equal(pins()[0][1], createHash('md5').update(body).digest('hex'), 'the 20261021070000 body is not the body the candidate pins');
+  const once = (find, replacement) => {
+    assert.equal(body.split(find).length - 1, 1, `expected-body edit not found exactly once: ${find.slice(0, 80)}`);
+    body = body.replace(find, () => replacement);
+  };
+  // Change 4: drop each "IF p_idempotency_key IS NOT NULL THEN ... END IF;" wrapper, two spaces
+  // less indent inside, one comment line(s) above.
+  const unwrap = (from, to, comment) => {
+    const i = body.indexOf(from);
+    const j = body.indexOf(to, i) + to.length;
+    assert.ok(i >= 0 && j > i && body.indexOf(from, i + 1) < 0, `expected-body block not unique: ${from.slice(0, 60)}`);
+    const lines = body.slice(i, j).split('\n').slice(1, -2).map((l) => (l === '' ? l : l.replace(/^ {2}/, '')));
+    body = body.slice(0, i) + comment + lines.join('\n') + '\n' + body.slice(j);
+  };
+  unwrap('  IF p_idempotency_key IS NOT NULL THEN\n    v_existing := public.check_idempotency(\n', '      RETURN v_existing;\n    END IF;\n  END IF;\n',
+    '  -- 20261022020000: the key is required just above, so the replay lookup always runs (the\n'
+    + '  -- "IF p_idempotency_key IS NOT NULL" test that wrapped it could never be false).\n');
+  unwrap('  IF p_idempotency_key IS NOT NULL THEN\n    PERFORM public.save_idempotency(\n', '      v_result\n    );\n  END IF;\n',
+    '  -- 20261022020000: the key is required, so the receipt is always saved (no dead NULL test).\n');
+  // Change 1.
+  once('      IF v_chem_qty_a > 0 THEN\n', '      -- 20261022020000: a line stores its quantity rounded to 4 places. Price it, cost it and\n'
+    + '      -- add it to the invoice totals from that same stored quantity (as save_invoice does when\n'
+    + '      -- a line is saved again), so quantity x price is the line amount and the totals match the\n'
+    + '      -- lines. Before, the amount and cost used the unrounded quantity and could differ by cents.\n'
+    + '      v_chem_qty_a_conv := ROUND(v_chem_qty_a_conv, 4);\n      v_chem_qty_b_conv := ROUND(v_chem_qty_b_conv, 4);\n\n'
+    + '      IF v_chem_qty_a > 0 THEN\n');
+  // Change 2.
+  once("        IF v_zero_quoted THEN\n          PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);\n",
+    '        IF v_zero_quoted THEN\n'
+    + '          -- 20261022020000: an approved $0 line records the catalog cost (locked above) that the\n'
+    + "          -- approval window showed and below_cost_approvals records, not the ticket line's\n"
+    + '          -- editable cost copy, as the included-in-grower-share line already does.\n'
+    + '          v_unit_cost := ROUND(COALESCE(v_btp.product_cost, 0) * 100)::bigint;\n'
+    + "          PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);\n");
+  return body;
+}
 
 function main() {
+  assert.equal(candidateBody(INVOICE).body, expectedBody(), 'the candidate body is not the 20261021070000 body plus exactly the four intended edits');
+  console.log('[prover] BODY: the candidate body is the 20261021070000 body plus exactly the four intended edits (byte for byte)');
   buildContainer();
   fidelity();
   seed();
@@ -269,8 +318,21 @@ function main() {
   const off = docker([...psqlArgs()], { input: 'BEGIN;\nALTER TABLE public.invoice_items DISABLE TRIGGER zz_crx_below_cost_invoice_items;\n\\i /tmp/candidate.sql\nROLLBACK;', allowFailure: true });
   assert.notEqual(off.status, 0, 'PREFLIGHT: the candidate applied with the below-cost line trigger disabled');
   assert.match(off.stderr, /PREFLIGHT_BLEND_INVOICE_BINDING_LOWS_TRIGGER_DRIFT/, `PREFLIGHT: wrong refusal for a disabled line trigger:\n${off.stderr}`);
+  // The same trigger name and function re-created to fire on UPDATE only (inserts would skip the
+  // below-cost wall): the candidate refuses too.
+  const updOnly = docker([...psqlArgs()], {
+    input: 'BEGIN;\nDROP TRIGGER zz_crx_below_cost_invoice_items ON public.invoice_items;\n'
+      + 'CREATE TRIGGER zz_crx_below_cost_invoice_items BEFORE UPDATE ON public.invoice_items FOR EACH ROW EXECUTE FUNCTION public._enforce_below_cost_line();\n'
+      + '\\i /tmp/candidate.sql\nROLLBACK;',
+    allowFailure: true,
+  });
+  assert.notEqual(updOnly.status, 0, 'PREFLIGHT: the candidate applied with the line trigger firing on UPDATE only');
+  assert.match(updOnly.stderr, /PREFLIGHT_BLEND_INVOICE_BINDING_LOWS_TRIGGER_DRIFT/, `PREFLIGHT: wrong refusal for an UPDATE-only line trigger:\n${updOnly.stderr}`);
+  // Enabled ALWAYS still counts as enabled.
+  const always = docker([...psqlArgs()], { input: 'BEGIN;\nALTER TABLE public.invoice_items ENABLE ALWAYS TRIGGER zz_crx_below_cost_invoice_items;\n\\i /tmp/candidate.sql\nROLLBACK;', allowFailure: true });
+  assert.equal(always.status, 0, `PREFLIGHT: the candidate refused a line trigger enabled ALWAYS:\n${always.stderr}`);
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${INVOICE_SIG}'::regprocedure;`), liveMd5, 'PREFLIGHT: a refused apply changed the function');
-  console.log(`[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, over any of ${drifted.length} drifted bodies (the invoice function, the line trigger, the share, quote-pick, tier-price and cents helpers), or with the line trigger disabled, the candidate stops before any change`);
+  console.log(`[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, over any of ${drifted.length} drifted bodies (the invoice function, the line trigger, the share, quote-pick, tier-price and cents helpers), or with the line trigger disabled or firing on UPDATE only, the candidate stops before any change (a trigger enabled ALWAYS is accepted)`);
 
   // 3. APPLY.
   const a = apply('candidate.sql');

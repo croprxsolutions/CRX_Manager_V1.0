@@ -23,6 +23,7 @@
   an earlier return of the same line was cancelled is refused at receipt and credit
   (`RETURN_SPLIT_SHARE_REPRICED`: cancel and recreate it). Split invoices bill an order line with no
   unit as `ea`, the unit its return carries, so such a line can be returned and credited. A split
-  return and its credit memo show the payer's billed rate as the unit price, not the order price. Proof:
+  return and its credit memo show the payer's billed rate as the unit price, not the order price, and
+  only an admin or a rep who may read that payer's split invoices can create one. Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs` over
   `smoke-split-payer-return-credit.sql`, plus `src/__tests__/splitPayerReturnMigration.test.ts`.

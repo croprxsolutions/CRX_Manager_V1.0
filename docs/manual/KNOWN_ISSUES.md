@@ -174,7 +174,13 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   return of the same line leaves a later one's price stale; `receive_return` and `issue_return_credit`
   then refuse it (`RETURN_SPLIT_SHARE_REPRICED`: staff cancel and recreate the return) instead of
   crediting a stale price, and the Returns screen shows what is left of the share in quantity and cents
-  rather than a per-unit average (Codex App on PR #1010). An order line with no unit (`order_items.unit_size`
+  rather than a per-unit average (Codex App on PR #1010). A split return stores a price derived from
+  the payer's own invoices, so `create_return` lets a non-admin create one only when `invoices_select`
+  lets them read every active invoice billing that payer on the order (`RETURN_SPLIT_INVOICE_NOT_VISIBLE`;
+  Codex App P1 on PR #1010). Left open (LOW): once created, the return's lines are readable under
+  `return_items_select` (live 2026-10-22: admin, any sales rep, or the requester), so another rep can see
+  that price; this matches Mason's 2026-10-13 direction that reps may read every invoice (not yet
+  shipped), and narrowing it would be a permissions change. An order line with no unit (`order_items.unit_size`
   is nullable; live, read-only 2026-10-22: 4 of 289 lines, all from March to May 2026, one invoiced, none
   split) cannot get a return credit on ANY order: its invoice lines carry no unit, the return line is
   `ea`, and `_issue_return_credit_impl` has refused that pair since `20260827041100`

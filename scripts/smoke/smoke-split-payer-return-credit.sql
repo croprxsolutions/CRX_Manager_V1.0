@@ -221,6 +221,21 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.get_return_line_allowances(v_order, v_a)) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a sales rep who cannot read the split invoices saw their billing through the return lookups';
   END IF;
+  -- Nor can that rep create B's return, which would store a price derived from B's hidden invoice.
+  BEGIN
+    PERFORM public.create_return(
+      jsonb_build_object('customer_id', v_b, 'order_id', v_order, 'reason', 'defective'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line1, 'quantity', 0.5)),
+      'e2e-split-return-create-rep-hidden-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep who cannot read B''s split invoice created B''s return';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('RETURN_SPLIT_INVOICE_NOT_VISIBLE' IN v_err) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: the hidden-invoice return failed for the wrong reason: %', v_err;
+    END IF;
+  END;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 

@@ -274,8 +274,9 @@ const GUARD_FN = 'guard_invoice_terminal_order';
 // [label, function, hunk, replacement, the chain failure it must cause]
 const MUTATIONS = [
   ['share cap off in create_return', CREATE,
-    '    IF v_share.share_mode THEN\n', '    IF false AND v_share.share_mode THEN\n',
-    /SMOKE_FAIL: B returned more than its billed share/],
+    '      IF v_share.other_returned_qty + v_qty > v_share.billed_qty THEN\n', '      IF false THEN\n',
+    // The cents cap still refuses it, under the wrong code: the quantity cap names the refusal.
+    /SMOKE_FAIL: B's over-share return failed for the wrong reason: RETURN_CREDIT_EXCEEDS_BILLED_SHARE/],
   ['split-payer test admits any customer in create_return', CREATE,
     '    AND NOT public._return_customer_is_split_payer(v_order_id, v_customer_id)\n',
     '    AND false\n',
@@ -331,6 +332,9 @@ const MUTATIONS = [
   ['split invoice writer copies an empty unit', '_create_split_invoices_from_order_provenance_impl_20260719',
     "        COALESCE(v_item.unit_size, 'ea'));\n", '        v_item.unit_size);\n',
     /SMOKE_FAIL: B's return of the no-unit split line could not be created, received and credited: RETURN_CREDIT_UNIT_MISMATCH/],
+  ['create_return ignores invoice visibility', CREATE,
+    '      IF NOT public.is_admin() AND EXISTS (\n', '      IF false AND EXISTS (\n',
+    /SMOKE_FAIL: a sales rep who cannot read B's split invoice created B's return/],
   ['split return priced at the order unit price in create_return', CREATE,
     '      v_unit_price := round(v_share.billed_cents / v_share.billed_qty)::bigint;\n',
     '      v_unit_price := round(v_order_item.price_per_unit * 100)::bigint;\n',

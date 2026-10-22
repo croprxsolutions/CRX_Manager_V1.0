@@ -163,6 +163,9 @@ describe('20261021155000 split-payer return credit', () => {
 
   it('stores the split payer\'s billed rate as the return unit price, and re-checks it (Codex App P2 on #1010)', () => {
     const create = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(');
+    // Only a caller who may read every active invoice billing the returner may store it (Codex App P1).
+    expect(create).toContain("THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'");
+    expect(create.indexOf('RETURN_SPLIT_INVOICE_NOT_VISIBLE')).toBeLessThan(create.indexOf('v_unit_price := round(v_share.billed_cents'));
     expect(create).toContain('v_unit_price := round(v_share.billed_cents / v_share.billed_qty)::bigint;');
     expect(create).toContain('v_unit_price,  -- Split-payer return (20261021155000): priced above');
     for (const fn of ['_receive_return_intent_impl_20260812', '_issue_return_credit_intent_impl_20260812']) {

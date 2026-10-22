@@ -556,6 +556,10 @@ export default function QuoteBuilder() {
   // refused as QUOTE_ITEM_AMBIGUOUS_COST. A ref, not section state: installing the
   // ids a save returns must not mark the just-saved quote dirty.
   const savedLineIdsRef = useRef(new Map<string, { id: string; productId: string }>());
+  // Lines switched to another product since the last save was sent. A switched
+  // line stops being its saved line, even if it is later switched back, so the
+  // reply of a save that was in flight must not hand it an id again.
+  const switchedLineKeysRef = useRef(new Set<string>());
   // Serial number for quote loads. App.tsx routes every /quotes/:id to this one
   // element with no `key`, so navigating between two saved quotes re-runs the id
   // effect WITHOUT remounting. A load whose serial is no longer current has been
@@ -1778,12 +1782,14 @@ export default function QuoteBuilder() {
     };
 
     // A saved id is sent only while the line still holds the product it was saved
-    // with: a line switched to another product is a new line at today's cost.
+    // with. A line switched to another product is no longer named as its old line;
+    // the server prices it like any unnamed line.
     const savedLineIdFor = (item: LocalItem): string | null => {
       const saved = savedLineIdsRef.current.get(item._key);
       return saved && saved.productId === item.product_id ? saved.id : null;
     };
     const sentLineProducts = new Map<string, string>();
+    switchedLineKeysRef.current.clear();
 
     // Build sections JSON for the atomic RPC
     const sectionsPayload = sections.map((sec) => ({
@@ -1989,15 +1995,16 @@ export default function QuoteBuilder() {
       // above the assert as it did on main.
       if (editingSessionChanged()) return null;
       // save_quote rewrites every line; install the id each one now has so the
-      // next save can name it. Keyed by the product sent, so a line switched to
-      // another product while this save was in flight is still sent as new. A
-      // reply without the map (a receipt cached before it existed) keeps the ids
-      // already held, which still name this quote's lines.
-      if (result.item_ids && typeof result.item_ids === 'object') {
+      // next save can name it. A line switched to another product while this save
+      // was in flight gets none, so it is still sent unnamed. A reply without the
+      // map (a receipt cached before it existed) keeps the ids already held, which
+      // still name this quote's lines.
+      if (result.item_ids && typeof result.item_ids === 'object' && !Array.isArray(result.item_ids)) {
         const savedLineIds = new Map<string, { id: string; productId: string }>();
         for (const [clientKey, itemId] of Object.entries(result.item_ids)) {
           const productId = sentLineProducts.get(clientKey);
-          if (productId && typeof itemId === 'string') savedLineIds.set(clientKey, { id: itemId, productId });
+          if (!productId || typeof itemId !== 'string' || switchedLineKeysRef.current.has(clientKey)) continue;
+          savedLineIds.set(clientKey, { id: itemId, productId });
         }
         savedLineIdsRef.current = savedLineIds;
       }
@@ -4739,7 +4746,16 @@ export default function QuoteBuilder() {
                   key={p.id}
                   product={p}
                   onClick={() => {
-                    if (productSearchOpen) assignProduct(productSearchOpen.sectionKey, productSearchOpen.itemKey, p);
+                    if (!productSearchOpen) return;
+                    const { sectionKey, itemKey } = productSearchOpen;
+                    const currentProductId = sections
+                      .find((sec) => sec._key === sectionKey)?.items
+                      .find((item) => item._key === itemKey)?.product_id;
+                    if (currentProductId && currentProductId !== p.id) {
+                      savedLineIdsRef.current.delete(itemKey);
+                      switchedLineKeysRef.current.add(itemKey);
+                    }
+                    assignProduct(sectionKey, itemKey, p);
                   }}
                   trailing={<><p className="font-mono text-sm text-nav-dark">{fmt(getTierPrice(p, tier))}</p><p className="text-xs text-gray-400">T{tier} price</p>{perAcre != null && <p className="text-xs font-mono text-crx-green" title={`Approx. $/acre at tier ${tier}, applied at this product's standard rate`}>{fmt(perAcre)}/ac</p>}</>}
                 />

@@ -966,6 +966,35 @@ describe('QuoteBuilder', () => {
     expect(sentLines(1).map((line) => line.id)).toEqual(['saved-1-0', 'saved-1-1']);
   });
 
+  it('stops naming a line as its saved line once it is switched to another product, even if switched back', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const alpha = { ...fixture.product, product_name: 'Alpha Chem' };
+    const beta = { ...fixture.product, id: 'product-2', product_name: 'Beta Chem' };
+    const first = { ...fixture.item, product: alpha };
+    const second = { ...fixture.item, id: 'item-2', sort_order: 1, product: alpha };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? fixture.quote : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [first, second] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [alpha, beta] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: fixture.quote.id, row_version: 8, item_ids: {} }, error: null }
+      : { data: null, error: null }));
+
+    renderQuoteBuilder(fixture.quote.id);
+    const pick = async (lineIndex: number, productName: string) => {
+      fireEvent.click((await screen.findAllByRole('button', { name: /Alpha Chem|Beta Chem/ }))[lineIndex]);
+      const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
+      const dialog = picker.closest('[role="dialog"]') as HTMLElement;
+      fireEvent.click(within(dialog).getByText(productName));
+      await waitFor(() => expect(screen.queryByPlaceholderText('Search by name, SKU, category, or vendor...')).not.toBeInTheDocument());
+    };
+    await pick(0, 'Beta Chem');
+    await pick(0, 'Alpha Chem');
+    fireEvent.click(screen.getByText('Save Draft'));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    const lines = (mockRpc.mock.calls.find(([name]) => name === 'save_quote')![1] as {
+      p_sections: Array<{ items: Array<{ id: string | null; product_id: string }> }>;
+    }).p_sections.flatMap((s) => s.items);
+    expect(lines.map((line) => [line.id, line.product_id])).toEqual([[null, 'product-1'], ['item-2', 'product-1']]);
+  });
+
   it('shows Reload/review for a stale draft save after another tab sent the quote', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     mockFrom.mockImplementation((table: string) => buildChain({

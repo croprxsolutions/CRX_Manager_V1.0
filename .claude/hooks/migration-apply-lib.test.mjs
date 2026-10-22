@@ -1732,6 +1732,19 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(gate({ sessionId: skipSession }).coderabbitSkippedBy === undefined, "a reviewed PR is not marked as skipped");
     cancelCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession });
     refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review", "a cancelled waiver no longer counts");
+    // Codex App P2 on #1035: the hook records at the checkout root, so the gate
+    // must look there too, not only in the apply's (possibly nested) cwd.
+    const rootDir = mkdtempSync(path.join(os.tmpdir(), "crx-skip-root-"));
+    try {
+      mkdirSync(path.join(rootDir, ".claude"), { recursive: true });
+      recordCodeRabbitSkip({ dirs: [path.join(rootDir, ".claude", "session-state")], sessionId: skipSession, pullRequest: 900, said: "skip coderabbit #900" });
+      ok(gate({ crStatuses: [], sessionId: skipSession, git: { "rev-parse --show-toplevel": `${rootDir}\n` } }).ok === true,
+        "a waiver recorded at the checkout root (git's top level) is found");
+      refused(gate({ crStatuses: [], sessionId: skipSession, git: { "rev-parse --show-toplevel": new Error("not a repo") } }),
+        "needs a clean CodeRabbit review", "a failed root lookup only leaves that folder out");
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   }
   refused(gate({ crError: new Error("HTTP 502") }), "fail closed", "an unreadable requirement answer refuses the apply");
   refused(gate({ crHead: "d".repeat(40) }), "could not be read for this exact head",

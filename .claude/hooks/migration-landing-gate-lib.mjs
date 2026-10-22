@@ -191,7 +191,13 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let skip = null;
   if (coderabbitReview.status === "missing") {
     // Only a waiver naming THIS pull request counts (Mason, 2026-10-22: per PR).
-    try { skip = findCodeRabbitSkip({ dirs: skipStateDirs([dir]), sessionId, pullRequest: pr.number, now }); } catch { skip = null; }
+    // Look where the prompt hook records it: the checkout root and the session's
+    // project folder, not only the apply's cwd, which may be a subfolder (Codex
+    // App P2 on #1035). A failed root lookup just leaves those folders out.
+    let root = "";
+    try { root = String(git(["rev-parse", "--show-toplevel"])).trim(); } catch (error) { if (OUT(error)) throw error; }
+    const where = skipStateDirs([dir, root, process.env.CLAUDE_PROJECT_DIR]);
+    try { skip = findCodeRabbitSkip({ dirs: where, sessionId, pullRequest: pr.number, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {
     return refuse(`${number} needs a clean CodeRabbit review of its current head before its migration applies, because ${coderabbitReview.why}. Post "@coderabbitai full review" once (docs/reference/coderabbit-native-review.md), answer its threads, then re-run.`);

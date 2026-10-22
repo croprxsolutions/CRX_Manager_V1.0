@@ -49,5 +49,9 @@
   version field is withheld from them, so the screens send the placeholder `withheld` for a row
   loaded with no version and the server, which checks the own-name rule first, gives the reason.
   Anyone allowed to post the invoice gets "changed, reload". Prover P9 and G5.
+- The version and the post lock also cover a payment allocation linked only to one of the
+  invoice's lines (`invoice_line_allocations.invoice_item_id`; `ila_target_check` allows it and
+  admins and reps can insert one directly), not just those linked to the invoice or a split
+  invoice (Codex Sol on PR #1018). Prover P5c.
 - Deploy order: until the new app is live, the old screens get "function not found" when posting;
   nothing posts unseen.

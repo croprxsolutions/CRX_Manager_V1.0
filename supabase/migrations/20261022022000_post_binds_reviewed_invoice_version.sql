@@ -126,9 +126,12 @@ AS $fn$
        FROM public.invoice_line_shares ls
        JOIN public.invoice_items ii ON ii.id = ls.invoice_item_id
       WHERE ii.invoice_id = p_invoice_id),
+    -- An allocation may point at the invoice, a split invoice, or only at one of its lines
+    -- (ila_target_check allows invoice_item_id alone), so all three are covered.
     (SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a.id), '[]'::jsonb)
        FROM public.invoice_line_allocations a
-      WHERE a.invoice_id = p_invoice_id OR a.split_invoice_id = p_invoice_id),
+      WHERE a.invoice_id = p_invoice_id OR a.split_invoice_id = p_invoice_id
+         OR a.invoice_item_id IN (SELECT ii.id FROM public.invoice_items ii WHERE ii.invoice_id = p_invoice_id)),
     -- A split field invoice's locations are keyed by its group with invoice_id NULL.
     (SELECT COALESCE(jsonb_agg(to_jsonb(l) ORDER BY l.id), '[]'::jsonb)
        FROM public.field_app_locations l
@@ -199,6 +202,7 @@ BEGIN
    ORDER BY ls.id FOR UPDATE OF ls;
   PERFORM 1 FROM public.invoice_line_allocations a
    WHERE a.invoice_id = ANY (p_invoice_ids) OR a.split_invoice_id = ANY (p_invoice_ids)
+      OR a.invoice_item_id IN (SELECT ii.id FROM public.invoice_items ii WHERE ii.invoice_id = ANY (p_invoice_ids))
    ORDER BY a.id FOR UPDATE;
   PERFORM 1 FROM public.field_app_locations l
    WHERE l.invoice_id = ANY (p_invoice_ids)

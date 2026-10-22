@@ -345,6 +345,16 @@ function runAfter() {
     { key: 'P5b admin posts', as: U.ADMIN, stmt: post('p5bp') },
   ]));
 
+  // An allocation linked only to one of the invoice's lines (ila_target_check allows that) is
+  // part of the version too (Sol, PR #1018).
+  add(scenario([
+    { key: 'P5c admin creates', as: U.ADMIN, stmt: KEEP_ID(save(U.ADMIN, 2500, 'p5cs')) },
+    { key: 'P5c admin reads version', as: U.ADMIN, stmt: READ_VERSION() },
+    { key: 'P5c line-only allocation added', as: 'owner', stmt: `INSERT INTO public.allocation_sets (id, entity_type, entity_id) VALUES ('${id('5c0')}', 'invoice', ${INV}); INSERT INTO public.invoice_line_allocations (allocation_set_id, invoice_item_id, bill_to_customer_id, split_percentage, amount_cents) SELECT '${id('5c0')}', ii.id, '${CUST}', 100, 2500 FROM public.invoice_items ii WHERE ii.invoice_id = ${INV} ORDER BY ii.id LIMIT 1; v := (SELECT count(*) FROM public.invoice_line_allocations WHERE allocation_set_id = '${id('5c0')}' AND invoice_id IS NULL AND split_invoice_id IS NULL)::text;` },
+    { key: 'P5c admin posts', as: U.ADMIN, stmt: post('p5cp') },
+    { key: 'P5c state', as: 'owner', call: STATE() },
+  ]));
+
   add(scenario([
     { key: 'P6 admin creates', as: U.ADMIN, stmt: KEEP_ID(save(U.ADMIN, 2500, 'p6s')) },
     { key: 'P6 admin reads version', as: U.ADMIN, stmt: READ_VERSION() },
@@ -513,6 +523,9 @@ const AFTER = [
   ['P5 admin posts', CHANGED],
   ['P5b share added', /^ok\|changed$/],
   ['P5b admin posts', CHANGED],
+  ['P5c line-only allocation added', /^ok\|1$/],
+  ['P5c admin posts', CHANGED],
+  ['P5c state', /^ok\|draft:2500$/],
   ['P6 first post', /^ok\|posted$/],
   ['P6 retry, same key and version', /^ok\|posted$/],
   ['P6 posted once', /^ok\|1$/],

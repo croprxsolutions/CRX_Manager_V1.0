@@ -35,3 +35,7 @@ line's cost is invalid, because it sums every line.
 explicit `0`, or a cleared box still to fill) with the catalog cost; only an untouched OCR line without a
 cost takes the catalog cost, as before. A negative cost now says "Unit cost cannot be negative." instead
 of the decimal-places message.
+
+**Codex GitHub App fixes.** A typed cost is saved from its exact text, so the largest amount the box
+accepts (`90071992547409.91`) saves `9007199254740991` cents instead of one cent less through a binary
+float; the table footer's PO Total now shows a dash like the header while any cost is invalid.

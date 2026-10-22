@@ -19,7 +19,7 @@ import {
   purchaseOrderUnitCostCents,
   isWholeCentPurchaseOrderCost,
 } from '../../lib/purchaseOrderMoney';
-import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE } from '../../lib/parseCents';
+import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import {
   buildBulkPOIntentKey,
@@ -89,7 +89,7 @@ function buildParsedPOIntentKey(po: ParsedPO): string | null {
     items: po.items.map((item) => ({
       productId: item.matched_product?.id ?? null,
       quantityOrdered: item.quantity_ordered,
-      unitCostCents: purchaseOrderUnitCostCents(item.unit_cost),
+      unitCostCents: unitCostCentsOf(item),
       unitSize: item.unit_size,
       notes: item.notes,
     })),
@@ -116,6 +116,17 @@ function unitCostError(item: ParsedPOItem): string | null {
 
 function hasWholeCentUnitCost(item: ParsedPOItem): boolean {
   return unitCostError(item) === null;
+}
+
+// The cents a line saves. A typed cost comes from its exact text: parseFloat of a large amount
+// such as 90071992547409.91 loses the last cent. unitCostError has already refused any text that
+// is not a plain amount with at most two decimals and an exact cents value.
+function unitCostCentsOf(item: ParsedPOItem): number {
+  if (item.unit_cost_text !== undefined) {
+    const typedCents = parseDollarsToCents(item.unit_cost_text.trim());
+    if (typedCents !== null) return typedCents;
+  }
+  return purchaseOrderUnitCostCents(item.unit_cost);
 }
 
 // Only a matched, positive-quantity line is saved, so only its cost can block the PO.
@@ -495,7 +506,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
             notes: item.notes || null,
           };
           if (!isAdmin) return line;
-          const unitCostCents = purchaseOrderUnitCostCents(item.unit_cost);
+          const unitCostCents = unitCostCentsOf(item);
           return {
             ...line,
             // savedLinesHaveWholeCentCosts refused any cost past two decimals
@@ -997,7 +1008,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                     PO Total
                                   </td>
                                   <td className="px-3 py-2 font-mono text-sm font-semibold text-nav-dark">
-                                    {fmt(poTotal)}
+                                    {poTotalValid ? fmt(poTotal) : '—'}
                                   </td>
                                   <td />
                                 </tr>

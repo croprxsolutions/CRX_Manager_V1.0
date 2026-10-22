@@ -400,8 +400,12 @@ describe('BulkPOImport', () => {
     expect(costInput).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByText(/no more than two decimal places/i)).toBeInTheDocument();
     expect(mocks.rpc).not.toHaveBeenCalledWith('save_purchase_order', expect.anything());
+    // The footer total dashes too: an invalid cost is never shown as a rounded aggregate.
+    expect(screen.getByText('PO Total').closest('tr')).toHaveTextContent('—');
+    expect(screen.getByText('PO Total').closest('tr')).not.toHaveTextContent('$');
 
     fireEvent.change(costInput, { target: { value: '3.33' } });
+    expect(screen.getByText('PO Total').closest('tr')).toHaveTextContent('$6.66');
     fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
@@ -522,6 +526,25 @@ describe('BulkPOImport', () => {
       expect.objectContaining({
         p_items: [expect.objectContaining({ unit_cost: 0, unit_cost_cents: 0 })],
       }),
+    ));
+  });
+
+  it('saves the exact cents of the largest typed cost, not a shortened float', async () => {
+    render(<BulkPOImport {...defaultProps} />);
+    fireEvent.change(document.querySelector('#po-pdf-upload')!, {
+      target: { files: [new File(['one'], 'INV-LARGEST.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    await screen.findByRole('button', { name: /import 1 po/i });
+
+    // parseFloat('90071992547409.91') is 90071992547409.9: deriving cents from it would save one
+    // cent less than typed. The saved cents come from the typed text.
+    fireEvent.change(screen.getByRole('spinbutton', { name: /unit cost for/i }), { target: { value: '90071992547409.91' } });
+    fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
+      'save_purchase_order',
+      expect.objectContaining({ p_items: [expect.objectContaining({ unit_cost_cents: 9007199254740991 })] }),
     ));
   });
 

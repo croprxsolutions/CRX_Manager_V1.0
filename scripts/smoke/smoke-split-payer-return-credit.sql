@@ -24,6 +24,8 @@
 --   5. B's whole share of line 2 credits exactly what B was billed for it, not a cent more;
 --   5b. on a second split order whose invoices are still drafts, A cannot return anything
 --      (RETURN_SPLIT_SHARE_NOT_BILLED);
+--   5c. on a third split order whose line has no unit (its split invoices carry none), B's return is
+--      refused up front with the credit's own RETURN_CREDIT_UNIT_MISMATCH, not "not billed";
 --   6. the guard still refuses a credit memo for B on A's order with no claim, and a memo for D
 --      inside a claim for B (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID).
 --
@@ -61,6 +63,10 @@ DECLARE
   v_order2 uuid;
   v_line3 uuid;
   v_delivery2 uuid;
+  v_order3 uuid;
+  v_line4 uuid;
+  v_delivery3 uuid;
+  v_group3 uuid;
   v_res jsonb;
   v_err text;
 BEGIN
@@ -470,6 +476,60 @@ BEGIN
     IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF position('RETURN_SPLIT_SHARE_NOT_BILLED' IN v_err) = 0 THEN
       RAISE EXCEPTION 'SMOKE_FAIL: the draft-split return failed for the wrong reason: %', v_err;
+    END IF;
+  END;
+
+  -- 5c. A split line with no unit: the split invoices copy the empty unit, so no posted sale line
+  --     can back a credit for it (_issue_return_credit_impl refuses every such return with
+  --     RETURN_CREDIT_UNIT_MISMATCH), and create_return says so up front, before any restock,
+  --     instead of calling the billed payer "not billed".
+  INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
+  VALUES ('E2E-SPLIT-RETURN-3-' || v_suffix, v_a, v_today, 'confirmed', false, NULL)
+  RETURNING id INTO v_order3;
+  INSERT INTO public.order_items (
+    order_id, product_id, product_name, price_per_unit, cost_per_unit, unit_size,
+    total_units_needed, total_price, profit, net_margin,
+    quantity_delivered, quantity_remaining, sort_order
+  ) VALUES (
+    v_order3, v_product, '[E2E] split return no-unit line', 10, 5, NULL, 2, 20, 10, 50, 0, 2, 1
+  ) RETURNING id INTO v_line4;
+  INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
+  VALUES (v_line4, v_field, 100);
+  INSERT INTO public.deliveries (delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+  VALUES ('E2E-SPLIT-RETURN-D3-' || v_suffix, v_order3, v_a, v_today, 'scheduled', v_admin)
+  RETURNING id INTO v_delivery3;
+  INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+  VALUES (v_delivery3, v_line4, v_product, 2, 2, 'GL');
+  UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery3;
+  PERFORM public.complete_delivery(
+    v_delivery3, '[E2E] Split Return Receiver', v_admin,
+    NULL, NULL, NULL, 'e2e-split-return-complete-3-' || v_suffix, now()
+  );
+  IF NOT EXISTS (SELECT 1 FROM public.invoices WHERE order_id = v_order3 AND invoice_group_id IS NOT NULL) THEN
+    PERFORM public.create_split_invoices_from_order(v_order3, NULL, 'chemical_sale', 'e2e-split-return-split-3-' || v_suffix);
+  END IF;
+  SELECT invoice_group_id INTO v_group3
+    FROM public.invoices WHERE order_id = v_order3 AND invoice_group_id IS NOT NULL LIMIT 1;
+  PERFORM public.post_invoice_group(v_group3, v_admin, 'e2e-split-return-post-3-' || v_suffix);
+  IF NOT EXISTS (
+    SELECT 1 FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+     WHERE i.invoice_group_id = v_group3 AND i.customer_id = v_b AND i.status = 'posted'
+       AND ii.order_item_id = v_line4 AND ii.quantity > 0 AND ii.unit_size IS NULL
+  ) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: the no-unit split line was not billed to B with no unit';
+  END IF;
+  BEGIN
+    PERFORM public.create_return(
+      jsonb_build_object('customer_id', v_b, 'order_id', v_order3, 'reason', 'defective'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line4, 'quantity', 1)),
+      'e2e-split-return-create-b-no-unit-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: a return of a no-unit split line was created, which no credit can back';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('RETURN_CREDIT_UNIT_MISMATCH' IN v_err) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: the no-unit split return failed for the wrong reason: %', v_err;
     END IF;
   END;
 

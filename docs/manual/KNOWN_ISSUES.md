@@ -174,7 +174,14 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   return of the same line leaves a later one's price stale; `receive_return` and `issue_return_credit`
   then refuse it (`RETURN_SPLIT_SHARE_REPRICED`: staff cancel and recreate the return) instead of
   crediting a stale price, and the Returns screen shows what is left of the share in quantity and cents
-  rather than a per-unit average (Codex App on PR #1010). Left open, by design (Luna on PR #1010):
+  rather than a per-unit average (Codex App on PR #1010). An order line with no unit (`order_items.unit_size`
+  is nullable; live, read-only 2026-10-22: 4 of 289 lines, all from March to May 2026, one invoiced, none
+  split) cannot get a return credit on ANY order: its invoice lines carry no unit, the return line is
+  `ea`, and `_issue_return_credit_impl` has refused that pair since `20260827041100`
+  (`RETURN_CREDIT_UNIT_MISMATCH`, "broken lineage"). On a split order `create_return` now refuses it up
+  front with that same code (Sol on PR #1010) instead of as "not billed"; the system-wide fix (give
+  those lines a unit, or match a missing unit as `ea` throughout the return-credit lineage) is a
+  separate change. Left open, by design (Luna on PR #1010):
   a split payer's credit is not auto-applied (as for every return credit, staff apply it); a return is
   not tied to one invoice line, so when a payer was billed for the same order line on two invoices at
   different prices it is credited at its average billed price (the caps still keep the total at or

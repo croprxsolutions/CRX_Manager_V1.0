@@ -148,6 +148,14 @@ describe('20261021155000 split-payer return credit', () => {
     }
   });
 
+  it('refuses a split return of a line with no unit up front, with the credit\'s own code (Sol on #1010)', () => {
+    const create = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(');
+    const unitCheck = create.indexOf("THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'");
+    expect(unitCheck).toBeGreaterThan(create.indexOf('IF v_share.share_mode THEN'));
+    expect(unitCheck).toBeLessThan(create.indexOf("RAISE EXCEPTION 'RETURN_SPLIT_SHARE_NOT_BILLED'"));
+    expect(create).toContain("AND ii.unit_size IS DISTINCT FROM coalesce(v_order_item.unit_size, 'ea')");
+  });
+
   it('quotes what is left of a split share, not a per-unit average (Codex App P2 on #1010)', () => {
     const at = MIGRATION.indexOf('CREATE FUNCTION public.get_return_line_allowances(');
     const fn = MIGRATION.slice(at, MIGRATION.indexOf('$function$;', at));

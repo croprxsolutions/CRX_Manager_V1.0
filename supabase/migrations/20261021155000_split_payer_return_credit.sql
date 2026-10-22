@@ -568,6 +568,22 @@ BEGIN
     SELECT * INTO v_share
       FROM public._return_customer_line_share(v_order_id, v_order_item.id, v_customer_id, v_return_id);
     IF v_share.share_mode THEN
+      -- A posted sale line of this order line whose unit differs from the return's (an order line
+      -- with no unit is returned as 'ea', and its invoice lines carry no unit) can never back the
+      -- credit: _issue_return_credit_impl refuses every such return with this same code. Refuse it
+      -- here, before anything is restocked, rather than as "not billed".
+      IF EXISTS (
+        SELECT 1
+          FROM public.invoice_items ii
+          JOIN public.invoices i ON i.id = ii.invoice_id
+         WHERE ii.order_item_id = v_order_item.id
+           AND ii.product_id = v_order_item.product_id
+           AND ii.quantity > 0
+           AND i.invoice_type <> 'credit_memo'
+           AND i.status IN ('posted', 'overdue', 'paid')
+           AND i.deleted_at IS NULL
+           AND ii.unit_size IS DISTINCT FROM coalesce(v_order_item.unit_size, 'ea')
+      ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
       IF v_share.billed_qty <= 0 THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_NOT_BILLED'; END IF;
       IF v_share.other_returned_qty + v_qty > v_share.billed_qty THEN
         RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE';
@@ -1449,7 +1465,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'fbaf12afb72c4d51a4711be30ead58e6', true),
+        ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'bc6e71e4ae476742d6911cc5bbf4a4ee', true),
         ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '84d6c0f74e1a980e18af8ba2d4249b5a', true),
         ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '361c1b71d03c5d59a8f097a8463799a6', true),
         ('guard_invoice_terminal_order', 'public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', true),

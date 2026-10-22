@@ -325,7 +325,7 @@ END;
 $function$;
 
 CREATE FUNCTION public.get_return_line_allowances(p_order_id uuid, p_customer_id uuid)
-RETURNS TABLE (order_item_id uuid, share_mode boolean, returnable_qty numeric)
+RETURNS TABLE (order_item_id uuid, share_mode boolean, returnable_qty numeric, unit_credit_cents bigint)
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
@@ -349,13 +349,17 @@ BEGIN
     RETURN;
   END IF;
   -- Delivered less every open return of the line; in share mode also the returner's own billed
-  -- share less its own open returns (create_return's two caps).
+  -- share less its own open returns (create_return's two caps). In share mode the credit follows
+  -- the returner's own billed cents, not the order price: unit_credit_cents is that average per
+  -- unit, rounded to the cent, for the screen to show (create_return prices the exact cents).
   RETURN QUERY
     SELECT oi.id,
            s.share_mode,
            greatest(0, CASE WHEN s.share_mode
                             THEN least(d.left_qty, s.billed_qty - s.other_returned_qty)
-                            ELSE d.left_qty END)
+                            ELSE d.left_qty END),
+           CASE WHEN s.share_mode AND s.billed_qty > 0
+                THEN round(s.billed_cents / s.billed_qty)::bigint END
       FROM public.order_items oi
       CROSS JOIN LATERAL (
         SELECT coalesce(oi.quantity_delivered, 0) - coalesce((

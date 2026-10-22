@@ -185,6 +185,12 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.get_return_line_allowances(v_order, v_d)) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the return lookups do not show B 1 GL / 0.5 GL, A 2 GL, and nothing for D';
   END IF;
+  -- The screen shows each payer's credit per unit from its own billed cents, not the order price:
+  -- B 10.00 on line 1 (20.00 for 2 GL), and 10.00 or 10.02 on line 2 (5.00 or 5.01 for 0.5 GL).
+  IF (SELECT unit_credit_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line1) IS DISTINCT FROM 1000::bigint
+     OR (SELECT unit_credit_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line2) IS DISTINCT FROM (v_b_line2_cents * 2)::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the return lookup does not show B''s credit per unit from B''s own billed cents';
+  END IF;
 
   -- 2a. B cannot return more than its open billed share (2 GL billed, 1 GL already open).
   BEGIN

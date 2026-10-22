@@ -487,6 +487,43 @@ describe('BulkPOImport', () => {
     ));
   });
 
+  it('keeps an explicit typed 0 when the admin then picks the product (no catalog cost fallback)', async () => {
+    mocks.processDocumentWithOCR.mockResolvedValue({
+      success: true,
+      raw_text: 'parsed',
+      document_type: 'purchase_order',
+      parsed_data: {
+        vendor_name: 'Vendor A',
+        invoice_number: 'INV-PICK',
+        invoice_date: '2026-07-16',
+        items: [{ product_name: 'Unknown Product', quantity: 2, unit_cost: 5, unit_size: 'GAL' }],
+      },
+      confidence: 1,
+      processing_time_ms: 1,
+    });
+
+    render(<BulkPOImport {...defaultProps} />);
+    fireEvent.change(document.querySelector('#po-pdf-upload')!, {
+      target: { files: [new File(['one'], 'INV-PICK.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    await screen.findByRole('button', { name: /import 0 pos/i });
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /unit cost for/i }), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: /select product/i }));
+
+    fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'atrazine' } });
+    fireEvent.click((await screen.findAllByRole('button', { name: /atrazine 4l/i })).at(-1)!);
+    fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
+      'save_purchase_order',
+      expect.objectContaining({
+        p_items: [expect.objectContaining({ unit_cost: 0, unit_cost_cents: 0 })],
+      }),
+    ));
+  });
+
   it('refuses a typed cost too precise for a number instead of shortening it', async () => {
     render(<BulkPOImport {...defaultProps} />);
     fireEvent.change(document.querySelector('#po-pdf-upload')!, {

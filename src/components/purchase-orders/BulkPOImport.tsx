@@ -99,6 +99,7 @@ function buildParsedPOIntentKey(po: ParsedPO): string | null {
 // Purchase cost must be exact whole cents. OCR can read $10.006 off a vendor
 // document; that is refused for the admin to fix, never rounded (Mason's rule).
 const UNIT_COST_REQUIRED_MESSAGE = 'Enter a unit cost (type 0 for no cost).';
+const UNIT_COST_NEGATIVE_MESSAGE = 'Unit cost cannot be negative.';
 
 // Why this line's cost cannot be saved, or null when it can. A cleared box is
 // missing, not $0: clearing a refused OCR cost must not import it at zero.
@@ -106,8 +107,10 @@ function unitCostError(item: ParsedPOItem): string | null {
   if (item.unit_cost_text !== undefined) {
     const typed = item.unit_cost_text.trim();
     if (!typed) return UNIT_COST_REQUIRED_MESSAGE;
+    if (typed.startsWith('-')) return UNIT_COST_NEGATIVE_MESSAGE;
     if (!isWholeCentDollarInput(typed)) return MONEY_PRECISION_MESSAGE;
   }
+  if (item.unit_cost < 0) return UNIT_COST_NEGATIVE_MESSAGE;
   return isWholeCentPurchaseOrderCost(item.unit_cost) ? null : MONEY_PRECISION_MESSAGE;
 }
 
@@ -376,9 +379,11 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
         ...items[itemIdx],
         matched_product: product,
         match_confidence: 1,
-        unit_cost: items[itemIdx].unit_cost || product.current_cost || 0,
-        // The catalog fallback replaces whatever was typed, so the typed text no longer applies.
-        unit_cost_text: items[itemIdx].unit_cost ? items[itemIdx].unit_cost_text : undefined,
+        // A cost the admin typed (an explicit 0, or a cleared box still to fill) is never replaced by
+        // the catalog cost; only an untouched OCR line without a cost takes it.
+        unit_cost: items[itemIdx].unit_cost_text !== undefined
+          ? items[itemIdx].unit_cost
+          : items[itemIdx].unit_cost || product.current_cost || 0,
         unit_size: items[itemIdx].unit_size || product.unit_size || '',
       };
       copy[poIdx] = { ...copy[poIdx], items };

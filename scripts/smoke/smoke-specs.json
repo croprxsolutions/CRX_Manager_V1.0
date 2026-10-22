@@ -1127,7 +1127,10 @@
         "guard_invoice_terminal_order",
         "complete_delivery",
         "create_split_invoices_from_order",
-        "post_invoice_group"
+        "post_invoice_group",
+        "guard_mono_invoice_split_billing_post",
+        "get_split_payer_return_orders",
+        "get_return_line_allowances"
       ],
       "area": [
         "billing",

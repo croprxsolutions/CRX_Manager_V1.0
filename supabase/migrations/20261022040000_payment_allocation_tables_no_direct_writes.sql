@@ -105,13 +105,15 @@ BEGIN
     RAISE EXCEPTION 'ALLOCATION_WRITE_LOCK_PREFLIGHT: these functions may write or lock the allocation tables and are not SECURITY DEFINER owned by postgres with search_path = public, pg_temp, so they would break: %', v_bad;
   END IF;
 
-  -- The functions that write the three tables, by the write statements themselves.
-  SELECT string_agg(p.proname, ',' ORDER BY p.proname)
+  -- The functions, in any schema, that write the three tables, by the write statements themselves.
+  SELECT string_agg(format('%s.%s', n.nspname, p.proname), ',' ORDER BY n.nspname, p.proname)
     INTO v_writers
     FROM pg_proc p
-   WHERE p.pronamespace = 'public'::regnamespace
-     AND p.prosrc ~* '(insert\s+into|update|delete\s+from)\s+(public\.)?(allocation_sets|invoice_line_allocations|order_line_allocations)\M';
-  IF v_writers IS DISTINCT FROM '_update_order_items_impl,_void_invoice_split_provenance_impl_20260719,_void_payment_replay_impl_20261015,allocate_payment' THEN
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+     AND (coalesce(p.prosrc, '') || coalesce(p.prosqlbody::text, ''))
+         ~* '(insert\s+into|update(\s+only)?|delete\s+from(\s+only)?|merge\s+into|truncate(\s+table)?(\s+only)?)\s+(public\.)?"?(allocation_sets|invoice_line_allocations|order_line_allocations)\M';
+  IF v_writers IS DISTINCT FROM 'public._update_order_items_impl,public._void_invoice_split_provenance_impl_20260719,public._void_payment_replay_impl_20261015,public.allocate_payment' THEN
     RAISE EXCEPTION 'ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four this migration was reviewed for (re-check them first): %', v_writers;
   END IF;
 END

@@ -184,19 +184,26 @@ function fidelity() {
   for (const t of TABLES) {
     assert.equal(scalar(`SELECT string_agg(a, ',' ORDER BY a) FROM unnest((SELECT relacl FROM pg_class WHERE oid = 'public.${t}'::regclass)::text[]) a;`), LIVE_ACL,
       `${t} replayed with an ACL that is not live's`);
-    assert.equal(scalar(`SELECT string_agg(polname || ':' || polcmd::text, ',' ORDER BY polname) FROM pg_policy WHERE polrelid = 'public.${t}'::regclass;`), LIVE_POLICIES[t],
-      `${t} replayed with policies that are not live's`);
+    assert.equal(scalar(`SELECT string_agg(format('%s:%s:%s:%s:%s:%s', polname, polcmd::text, polpermissive, polroles::regrole[]::text,
+        coalesce(pg_get_expr(polqual, polrelid), ''), coalesce(pg_get_expr(polwithcheck, polrelid), '')), ';' ORDER BY polname)
+        FROM pg_policy WHERE polrelid = 'public.${t}'::regclass;`), LIVE_POLICIES[t],
+      `${t} replayed with policies that are not live's (name, command, permissive, roles, USING, WITH CHECK)`);
+    assert.equal(scalar(`SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.${t}'::regclass AND attacl IS NOT NULL;`), '0',
+      `${t} replayed with a column ACL (live has none)`);
   }
   console.log(`[prover] FIDELITY: all ${LIVE_PINS.length} pinned bodies, the three ACLs and the policies match live (2026-10-22)`);
 }
 const TABLES = ['allocation_sets', 'invoice_line_allocations', 'order_line_allocations'];
 // Live relacl of each of the three tables (sorted), read 2026-10-22.
 const LIVE_ACL = 'anon=rm/postgres,authenticated=arwdDxtm/postgres,metabase_ro=r/postgres,postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres';
+// Live policies, read 2026-10-22: name:command:permissive:roles:USING:WITH CHECK ({-} = PUBLIC).
 const LIVE_POLICIES = {
-  allocation_sets: 'allocation_sets_admin_delete:d,allocation_sets_insert:a,allocation_sets_select:r,allocation_sets_update:w',
-  invoice_line_allocations: 'invoice_line_alloc_insert:a,invoice_line_alloc_select:r',
-  order_line_allocations: 'order_line_alloc_insert:a,order_line_alloc_select:r',
+  allocation_sets: 'allocation_sets_admin_delete:d:t:{authenticated}:is_admin():;allocation_sets_insert:a:t:{-}::(is_admin() OR is_sales_rep());'
+    + 'allocation_sets_select:r:t:{-}:(is_admin() OR is_sales_rep()):;allocation_sets_update:w:t:{-}:is_admin():',
+  invoice_line_allocations: 'invoice_line_alloc_insert:a:t:{-}::(is_admin() OR is_sales_rep());invoice_line_alloc_select:r:t:{-}:(is_admin() OR is_sales_rep()):',
+  order_line_allocations: 'order_line_alloc_insert:a:t:{-}::(is_admin() OR is_sales_rep());order_line_alloc_select:r:t:{-}:(is_admin() OR is_sales_rep()):',
 };
+const SELECT_POLICY = (t) => LIVE_POLICIES[t].split(';').find((p) => p.split(':')[1] === 'r');
 
 // ------------------------------------------------------------------------------------------------
 // Fixtures (committed once; every probe rolls back).
@@ -324,6 +331,9 @@ const VOID = { fixture: FIX_ILA, stmt: `PERFORM public.void_invoice('${INV_VOID}
 const EDIT_ORDER = (uid) => ({ stmt: `r := public.update_order_items('${ORDER}', '[{"id":"${ITEM_KEEP}","product_id":"${PROD}","product_name":"[PROVER] Chem","unit_size":"GL","price_per_unit":10,"total_units_needed":2,"cost_per_unit":6}]'::jsonb, '${uid}', 'prover-uoi-${uid.slice(-2)}');
   v := (r->>'status') || ':' || (SELECT count(*) FROM public.order_items WHERE order_id = '${ORDER}') || ':' || (SELECT count(*) FROM public.order_line_allocations);` });
 
+const FORGED_PAY = { stmt: `r := public.allocate_payment('${CUST}', 30000, 'check', 'PROVER-REF', NULL, CURRENT_DATE, 'prover',
+    jsonb_build_array(jsonb_build_object('invoice_id', '${INV_PAY}', 'amount_cents', 30000)), '${U.ADMIN}', 'prover-pay-forged');
+  v := (r->>'total_allocated_cents') || ':' || (SELECT created_by::text FROM public.allocation_sets WHERE id = (r->>'allocation_set_id')::uuid);` };
 const RLS = (t) => new RegExp(`^42501\\|new row violates row-level security policy for table "${t}"$`);
 const NO_TABLE = (t) => new RegExp(`^42501\\|permission denied for table ${t}$`);
 const OK = (n) => new RegExp(`^ok\\|${n}$`);
@@ -362,6 +372,10 @@ const CASES = [
   ['admin: void_payment', U.ADMIN, UNPAY(U.ADMIN), OK('false:0'), 'same'],
   ['admin: void_invoice', U.ADMIN, VOID, OK('voided:0:0'), 'same'],
   ['admin: update_order_items drops an allocated line', U.ADMIN, EDIT_ORDER(U.ADMIN), OK('updated:1:0'), 'same'],
+  ['rep: update_order_items drops an allocated line', U.REP, EDIT_ORDER(U.REP), OK('updated:1:0'), 'same'],
+  // The functions' own actor gates are not changed here; a rep naming the admin as actor gets the
+  // same answer before and after.
+  ['rep naming the admin: allocate_payment', U.REP, FORGED_PAY, /^P0001\|p_performed_by does not match authenticated user$/, 'same'],
 ];
 
 function runMatrix(phase) {
@@ -392,8 +406,10 @@ function postflightPicture() {
   for (const t of TABLES) {
     assert.equal(scalar(`SELECT string_agg(a, ',' ORDER BY a) FROM unnest((SELECT relacl FROM pg_class WHERE oid = 'public.${t}'::regclass)::text[]) a;`),
       'anon=r/postgres,authenticated=r/postgres,metabase_ro=r/postgres,postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres', `${t}: unexpected ACL after the candidate`);
-    assert.equal(scalar(`SELECT string_agg(polname || ':' || polcmd::text || ':' || pg_get_expr(polqual, polrelid), ',' ORDER BY polname) FROM pg_policy WHERE polrelid = 'public.${t}'::regclass;`),
-      `${LIVE_POLICIES[t].split(',').find((p) => p.endsWith(':r'))}:(is_admin() OR is_sales_rep())`, `${t}: policies after the candidate are not just the unchanged SELECT policy`);
+    assert.equal(scalar(`SELECT string_agg(format('%s:%s:%s:%s:%s:%s', polname, polcmd::text, polpermissive, polroles::regrole[]::text,
+        coalesce(pg_get_expr(polqual, polrelid), ''), coalesce(pg_get_expr(polwithcheck, polrelid), '')), ';' ORDER BY polname)
+        FROM pg_policy WHERE polrelid = 'public.${t}'::regclass;`),
+      SELECT_POLICY(t), `${t}: policies after the candidate are not just the unchanged live SELECT policy`);
     assert.equal(scalar(`SELECT count(*) FROM pg_attribute a WHERE a.attrelid = 'public.${t}'::regclass AND a.attacl IS NOT NULL;`), '0', `${t}: has a column ACL`);
   }
   console.log('[prover] POSTFLIGHT: anon and authenticated hold only SELECT; service_role and metabase_ro unchanged; only the SELECT policies remain');
@@ -421,6 +437,10 @@ function preflightRefuses() {
     [`CREATE FUNCTION public.prover_new_writer(p uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
        AS $$ UPDATE allocation_sets SET notes = 'x' WHERE id = p $$;`,
      /ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four .*prover_new_writer/],
+    // ...also one in another schema that writes with MERGE.
+    [`CREATE SCHEMA prover_y; CREATE FUNCTION prover_y.merger(p uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
+       AS $$ MERGE INTO public.allocation_sets s USING (SELECT p AS id) x ON s.id = x.id WHEN MATCHED THEN UPDATE SET notes = 'x' $$;`,
+     /ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four .*prover_y\.merger/],
     ['ALTER TABLE public.invoice_line_allocations DISABLE ROW LEVEL SECURITY;',
      /ALLOCATION_WRITE_LOCK_PREFLIGHT: invoice_line_allocations must have row security on/],
     // Role attributes need the platform superuser; the change still rolls back with the probe.
@@ -431,6 +451,28 @@ function preflightRefuses() {
     assert.match(d.stderr, refusal, `wrong refusal for ${setup}:\n${d.stderr}`);
   }
   console.log('[prover] PREFLIGHT: an invoker writer, an invoker row-locker in another schema, a definer writer without search_path, forced RLS, an unreviewed writer and RLS off each abort the candidate');
+}
+
+// A column-level write grant held BEFORE the candidate (live has none) is cleared by the table-level
+// REVOKE, as PostgreSQL's REVOKE does, rather than surviving or aborting the apply.
+function columnGrantCleared() {
+  stageText('cand.sql', lf(CANDIDATE));
+  const d = docker([...psqlArgs(), '-A', '-t'], {
+    input: `BEGIN;
+GRANT INSERT (amount_cents), UPDATE (amount_cents) ON public.invoice_line_allocations TO authenticated;
+GRANT UPDATE (notes) ON public.allocation_sets TO authenticated;
+SELECT 'PRE|' || has_any_column_privilege('authenticated', 'public.invoice_line_allocations', 'INSERT')::text;
+\\i /tmp/cand.sql
+SELECT 'POST|' || (has_any_column_privilege('authenticated', 'public.invoice_line_allocations', 'INSERT')
+  OR has_any_column_privilege('authenticated', 'public.invoice_line_allocations', 'UPDATE')
+  OR has_any_column_privilege('authenticated', 'public.allocation_sets', 'UPDATE'))::text;
+ROLLBACK;`,
+    allowFailure: true,
+  });
+  assert.equal(d.status, 0, `the candidate did not apply over pre-existing column grants:\n${d.stderr}`);
+  assert.match(d.stdout, /PRE\|true/, 'the column grant was not in place before the candidate');
+  assert.match(d.stdout, /POST\|false/, `a column write grant survived the candidate:\n${d.stdout}`);
+  console.log('[prover] COLUMN GRANTS: column-level write grants held before the candidate are cleared by it');
 }
 
 function verifyRefuses() {
@@ -454,6 +496,7 @@ function main() {
   const before = runMatrix('before');
   check('before', before);
   preflightRefuses();
+  columnGrantCleared();
 
   stageText('candidate.sql', lf(CANDIDATE));
   // Applied the way the apply script does: one transaction, so a failed verify rolls everything back.

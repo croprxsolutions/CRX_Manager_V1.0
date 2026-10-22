@@ -165,8 +165,13 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   read-only lookups, so it is right for sales reps too. Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Both `receive_return` and `issue_return_credit`
   check a split return's share while holding the per-line locks a source void or edit try-takes, so a
-  void cannot slip between the check and the restock or credit. Left open: a split payer's credit is
-  not auto-applied (as for every return credit, staff apply it).
+  void cannot slip between the check and the restock or credit. Left open, by design (Luna on PR #1010):
+  a split payer's credit is not auto-applied (as for every return credit, staff apply it); a return is
+  not tied to one invoice line, so when a payer was billed for the same order line on two invoices at
+  different prices it is credited at its average billed price (the caps still keep the total at or
+  under what it was billed, and its whole share credits exactly that); and `create_return` checks the
+  split share without the per-line locks, so a split invoice voided while a return is being created
+  can leave that return requested but no longer receivable (no money moves; staff reject or cancel it).
 - **A billing-default edit committed mid-split can refuse that split (LOW, availability).** The guard
   re-reads the owners when each draft is written; a change committed by another session in between
   rolls the split back. It never admits a customer the split did not choose.

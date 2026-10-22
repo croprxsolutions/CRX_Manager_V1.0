@@ -19,7 +19,8 @@ section 6, common incidents), and the app's screens as they are on `main` today 
 - **Pilot:** the first 30 days of CRX-only billing, starting 2027-01-01.
 - **Posting** an invoice locks it as a real bill the customer owes.
 - **Tie-out:** checking that two numbers that should agree really do, and writing down why when they don't.
-- **Business day:** a day the office is open. The check covers the previous business day.
+- **Business day:** a day the office is open. (The daily check is different: it covers every
+  calendar day, weekends included; see procedure 1.)
 
 ## Contents
 
@@ -333,7 +334,7 @@ number; write VOID across a spoiled form and keep it.
 |---|---|
 | Recording payments | number, date received, customer, amount, method (check, cash, ACH, card or other: Record Payments starts on "Check", so the method must be written down), check number or transfer reference, each invoice it pays and the amount for each, any remainder to be kept as prepay (Record Payments takes an amount per invoice and turns what's left into prepay), who received it |
 | Completing deliveries | number, customer, delivery number if known, products and quantities, date, signer's printed name and signature, driver. Photograph it. (The Goal 5 signed paper ticket.) |
-| Posting or creating invoices | number, customer, delivery or order it bills, invoice date, payment terms or due date (a new invoice in CRX starts on today's date and the customer's usual terms), lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. |
+| Posting or creating invoices | number, customer, delivery or order it bills, invoice date, payment terms or due date (a new invoice in CRX starts on today's date and the customer's usual terms), lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. No paper invoice is written then: list each waiting draft's CRX invoice number on the form list, and on release post those same drafts. Never create a new invoice for them. |
 | Issuing credits or returns | number, customer, original invoice, products and quantities returned, **each item's condition and whether it goes back into stock** (the Returns screen records both, and they decide what is restocked), reason, amount, who approved it |
 | Receiving stock | number, supplier, PO number, storage location, products, quantities, package sizes, lot numbers, each item's condition (good, damaged, short or wrong product), date, who received it. (CRX's receiving screen starts on "Main Warehouse" and "good".) |
 
@@ -420,8 +421,8 @@ phone or one computer.
   every scheduled or in-progress delivery in the list, with each customer's contact, address and
   products (**Download PDF** prints only a one-line-per-delivery list). Check the printout's count
   against the next day's count on the seven-day strip at the top of the page, which ignores filters.
-  The strip also counts deliveries already completed or voided, which the Load Sheet leaves out, so
-  subtract any of those for that day before comparing.
+  The strip also counts deliveries for that day already completed, which the Load Sheet leaves out,
+  so subtract those before comparing. (Cancelled and voided deliveries aren't in either count.)
   File it in the kit. This is the "last printed delivery schedule" the runbook relies on.
 - **Each truck:** blank numbered delivery tickets. These are the same signed paper tickets Goal 5
   uses when there's no signal at a customer.

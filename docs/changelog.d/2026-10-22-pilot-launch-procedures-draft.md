@@ -68,6 +68,11 @@
 - Eleventh Codex GitHub App round (two findings, both confirmed). The outage ticket list also maps
   order forms to CRX order numbers, and the Load Sheet count check allows for completed or voided
   deliveries the seven-day strip includes.
+- Twelfth Codex GitHub App round (three findings, all confirmed). Only completed deliveries are
+  subtracted from the strip count: voided ones are never loaded once the status filter is cleared,
+  which corrects the previous round's wording. The "business day" definition no longer contradicts
+  the every-calendar-day check. A posting-only brake lists the waiting drafts' invoice numbers and
+  posts those same drafts on release, never new invoices.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

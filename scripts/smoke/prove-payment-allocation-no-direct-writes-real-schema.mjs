@@ -458,7 +458,8 @@ function preflightRefuses() {
 }
 
 // A column-level write grant held BEFORE the candidate (live has none) is cleared by the table-level
-// REVOKE, as PostgreSQL's REVOKE does, rather than surviving or aborting the apply.
+// REVOKE, as PostgreSQL's REVOKE does ("the corresponding column privileges (if any) are automatically
+// revoked on each column of the table, as well"), rather than surviving or aborting the apply.
 function columnGrantCleared() {
   stageText('cand.sql', lf(CANDIDATE));
   const d = docker([...psqlArgs(), '-A', '-t'], {

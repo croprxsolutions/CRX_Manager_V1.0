@@ -119,6 +119,11 @@ BEGIN
 END
 $preflight$;
 
+-- A table-level REVOKE also clears column-level grants of the same privilege. PostgreSQL's REVOKE
+-- reference: "When revoking privileges on a table, the corresponding column privileges (if any) are
+-- automatically revoked on each column of the table, as well." Live holds no column grants on these
+-- tables; the verify block below fails closed if any INSERT, UPDATE or REFERENCES column grant survives,
+-- and the prover's columnGrantCleared case pre-grants column INSERT/UPDATE and watches this REVOKE clear them.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN
   ON TABLE public.allocation_sets, public.invoice_line_allocations, public.order_line_allocations
   FROM PUBLIC, anon, authenticated;

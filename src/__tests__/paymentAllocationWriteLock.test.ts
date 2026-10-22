@@ -10,7 +10,7 @@ const root = process.cwd();
 const MIGRATIONS = path.join(root, 'supabase/migrations');
 const LOCK = '20261022040000_payment_allocation_tables_no_direct_writes.sql';
 const TABLES = ['allocation_sets', 'invoice_line_allocations', 'order_line_allocations'];
-const TABLE = `(?:public\\.)?"?(?:${TABLES.join('|')})"?`;
+const TABLE = `(?:"?public"?\\.)?"?(?:${TABLES.join('|')})"?`;
 
 const strip = (sql: string) => sql.replace(/\r\n/g, '\n').replace(/--[^\n]*/g, '');
 const lock = strip(readFileSync(path.join(MIGRATIONS, LOCK), 'utf8'));
@@ -63,6 +63,7 @@ describe('payment allocation tables: no direct browser writes (20261022040000)',
       'GRANT UPDATE (notes) ON public.allocation_sets TO authenticated;',
       'GRANT SELECT, DELETE ON public.order_line_allocations TO PUBLIC;',
       'GRANT INSERT ON ALL TABLES IN SCHEMA public TO authenticated;',
+      'GRANT INSERT ON "public"."allocation_sets" TO authenticated;',
     ]) expect(GRANT_WRITE.test(sql), sql).toBe(true);
     for (const sql of [
       'GRANT SELECT ON public.allocation_sets TO authenticated;',
@@ -73,6 +74,7 @@ describe('payment allocation tables: no direct browser writes (20261022040000)',
     ]) expect(GRANT_WRITE.test(sql), sql).toBe(false);
     expect(writePolicies('CREATE POLICY x ON public.order_line_allocations FOR INSERT WITH CHECK (true);')).toHaveLength(1);
     expect(writePolicies('CREATE POLICY y ON allocation_sets USING (true);')).toHaveLength(1);
+    expect(writePolicies('CREATE POLICY q ON "public"."invoice_line_allocations" FOR UPDATE USING (true);')).toHaveLength(1);
     expect(writePolicies('CREATE POLICY z ON public.allocation_sets FOR SELECT USING (true);')).toHaveLength(0);
     expect(writePolicies('CREATE POLICY w ON public.payments FOR INSERT WITH CHECK (true);')).toHaveLength(0);
   });

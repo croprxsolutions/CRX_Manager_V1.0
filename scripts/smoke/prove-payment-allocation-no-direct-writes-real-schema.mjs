@@ -441,6 +441,10 @@ function preflightRefuses() {
     [`CREATE SCHEMA prover_y; CREATE FUNCTION prover_y.merger(p uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
        AS $$ MERGE INTO public.allocation_sets s USING (SELECT p AS id) x ON s.id = x.id WHEN MATCHED THEN UPDATE SET notes = 'x' $$;`,
      /ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four .*prover_y\.merger/],
+    // ...and one that quotes the schema and table names.
+    [`CREATE FUNCTION public.prover_quoted_writer(p uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
+       AS $$ DELETE FROM "public"."allocation_sets" WHERE id = p $$;`,
+     /ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four .*prover_quoted_writer/],
     ['ALTER TABLE public.invoice_line_allocations DISABLE ROW LEVEL SECURITY;',
      /ALLOCATION_WRITE_LOCK_PREFLIGHT: invoice_line_allocations must have row security on/],
     // Role attributes need the platform superuser; the change still rolls back with the probe.

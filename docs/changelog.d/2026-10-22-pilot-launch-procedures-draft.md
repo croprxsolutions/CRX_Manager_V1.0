@@ -19,6 +19,10 @@
   against the code and fixed. Two were partly refuted: a check's `[ERROR: …]` marker does exist
   (`src/lib/reconciliation.ts`), and Mason's ownership of inventory and compliance is a recorded
   decision.
+- Codex GitHub App review fix: **Payment History** neither shows nor searches a payment's Notes
+  (`src/pages/PaymentHistory.tsx`), so the drafts no longer rely on Notes. The paper number goes in
+  Record Payments' **Reference #** box next to the check number (it shows and searches that box), and
+  the real received date stays on the paper form.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

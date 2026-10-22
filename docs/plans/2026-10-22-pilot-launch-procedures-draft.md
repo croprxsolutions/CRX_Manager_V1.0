@@ -124,11 +124,14 @@ On **A/R Workspace**, open the **Payment History** tab and list yesterday's paym
 - **Known gap (To-Do 6.7, MUST, open):** **Record Payments** has no "date received" box. CRX stamps
   each payment with the server's date, which runs on UTC (six hours ahead of Central in winter). A
   payment entered after 6 PM Central lands on the **next** day, and on December 31 or January 31 in
-  the wrong month. A payment received one day and entered later shows the entry date. Writing the
-  real date in **Notes** helps a person reading it, but it **doesn't change the recorded date**.
-  Until 6.7 is fixed: **Draft suggestion:** enter payments before 6 PM Central, and when matching
-  yesterday's payments, also look at payments dated today that were entered last evening. 6.7 should
-  be fixed before the pilot.
+  the wrong month. A payment received one day and entered later shows the entry date. A date typed
+  into **Notes** doesn't help: it doesn't change the recorded date, and **Payment History** neither
+  shows nor searches Notes. It shows and searches the **Reference #** box (the "Check #" column)
+  instead.
+  Until 6.7 is fixed: **Draft suggestion:** enter payments before 6 PM Central. When matching
+  yesterday's payments, also look at payments dated today that were entered last evening. For any
+  payment entered on a later day, keep its real received date on the paper payment log, not in CRX.
+  6.7 should be fixed before the pilot.
 
 ### Step 5. Credits and prepay
 
@@ -284,14 +287,16 @@ Keep each operation's forms together in one folder, in number order.
 2. **Draft suggestion:** [OWNER: Mason to name] watches the first paper record go in and checks the
    result, before the rest are entered. Testing the fix on a real customer record any other way needs
    Mason's OK first.
-3. **Enter the paper records** through the normal CRX screens, oldest number first. Put the
-   paper number in the record's notes or reference box. Before entering one, check that customer's
-   records for that number, so nothing goes in twice. Tick each form only after the entered record
-   has been compared with the paper.
-   - **Payments:** **Record Payments** stamps a payment with the server's date, not the day it was
-     received (see the known gap in procedure 1, Step 4). Write the received date in **Notes**; it
-     doesn't change the recorded date. The bookkeeper decides how that affects deposit matching and
-     QuickBooks (question below).
+3. **Enter the paper records** through the normal CRX screens, oldest number first. Put the paper
+   number on the record where it can be found again (for payments, the **Reference #** box; see
+   below). Before entering one, search that customer's records for that number, so nothing goes in
+   twice. Tick each form only after the entered record has been compared with the paper.
+   - **Payments:** in **Record Payments**, type the check number and the paper number together in
+     the **Reference #** box (for example `4471 B1-PAY-007`). That box is what **Payment History**
+     shows and searches; Notes are neither shown nor searched there. CRX stamps the payment with the
+     server's date, not the day it was received (see the known gap in procedure 1, Step 4). The real
+     received date stays on the paper form. The bookkeeper decides how that affects deposit matching
+     and QuickBooks (question below).
    - **Deliveries:** the assigned driver completes each delivery from their own delivery screen. They
      tick **Customer signed a paper ticket (no signal at the site)**, add the photo of the signed
      ticket, type the signer's printed name from the ticket in the **Signed By** box, and enter
@@ -316,8 +321,8 @@ Keep each operation's forms together in one folder, in number order.
    deliveries)? Today there isn't one; it would be a new build.
 5. Pre-printed numbered books, or blank forms numbered by hand from a log?
 6. Payments entered after the fact carry the entry date (and after 6 PM Central, the next day's).
-   Is a note with the real date enough for the bookkeeper, or does Record Payments need a "date
-   received" box before the pilot, alongside the To-Do 6.7 fix?
+   Is keeping the real date on the paper form enough for the bookkeeper, or does Record Payments
+   need a "date received" box before the pilot, alongside the To-Do 6.7 fix?
 7. How long are the paper forms kept, and where?
 
 ---
@@ -383,8 +388,9 @@ the one record until CRX is back.
 
 1. **Launch support confirms CRX is working** (it loads and saves) before anyone enters paper.
 2. **Enter oldest first**, using the normal screens. Before entering a record, check for its paper
-   number so nothing goes in twice; put the paper number in the record's notes or reference box.
-   Tick it on the paper only after the entered record has been compared with the paper.
+   number so nothing goes in twice, and put the paper number on the record where it can be found
+   again (for payments, the **Reference #** box). Tick it on the paper only after the entered
+   record has been compared with the paper.
    - **Dispatch changes:** update the deliveries in CRX to match the changes written on the schedule.
    - **Deliveries:** for a "NOT ON SCHEDULE" ticket, first search CRX for that customer's open
      orders and deliveries. A delivery missing from the printout may still exist in CRX. Use it if it
@@ -392,9 +398,11 @@ the one record until CRX is back.
      completes each one from their own delivery screen. They tick **Customer signed a paper ticket
      (no signal at the site)**, add the ticket photo, type the signer's name in **Signed By**, and
      enter **Delivered on (date on the ticket)**.
-   - **Payments:** enter each log line in **Record Payments**, with the check number in the
-     reference box and the date received in **Notes**. The note doesn't change the recorded date;
-     see the known gap in procedure 1, Step 4.
+   - **Payments:** enter each log line in **Record Payments**, with the check number and the log
+     line number together in the **Reference #** box (for example `4471 OUT-012`). That box is what
+     **Payment History** shows and searches. The real received date stays on the paper log: CRX
+     records the server's date (see the known gap in procedure 1, Step 4), and Payment History
+     doesn't show Notes.
 3. **Reconcile:** every ticket and log line is entered exactly once. Then run the daily check
    (procedure 1). If the outage needed a database restore, the runbook's after-restore checklist
    (section 4.7) also applies before anything resumes syncing.

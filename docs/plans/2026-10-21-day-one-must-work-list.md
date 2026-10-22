@@ -3,7 +3,7 @@
 **Owner:** Mason Wells approves. **Drafted:** 2026-10-21 by Claude, as asked in `docs/plans/2026-10-13-direction-and-goals.md` section 2 ("must work on day one" list, checkpoint 2026-10-31).
 **Reviewed:** an advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21. It made 57 findings. Claude checked each against the goals doc and the code. Most were applied; the few that weren't are listed at the end, with the reason.
 **Status:** DRAFT, revised with Mason's changes of 2026-10-22. Everything before delivery comes first: quoting, product pricing, cost tracking, inventory (knowing what to order) and invoicing. Field-app, job and blend-ticket invoices are built last. Returns, including "sitting at farm" tracking, can wait. Jobs can have two applicators. Rep-only rules wait because there are no regular reps yet. It still needs Mason's approval. Nothing here authorizes building anything. Each item is built through its own goal and pull request.
-**Evidence date:** every "today" status was checked against `main` at `d720cf681`, the open PR list and the open-issue list on 2026-10-22 (first checked at `e0b5d4234` on 2026-10-21, then refreshed after the Codex GitHub review on this PR). Statuses go stale quickly; re-check before relying on one. "Open PR" means written and in review, not live.
+**Evidence date:** every "today" status was checked against `main` at `13f83434d`, the open PR list and the open-issue list on 2026-10-22. It was first checked at `e0b5d4234` on 2026-10-21, then refreshed at `d720cf681` and again at `13f83434d` (after PR #1010 went live). Statuses go stale quickly; re-check before relying on one. "Open PR" means written and in review, not live.
 
 ---
 

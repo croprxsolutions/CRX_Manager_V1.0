@@ -68,6 +68,16 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
   END IF;
 
+  -- ORDERING (Codex App P1 on #1039): this stamp sits right after #1018's 20261022022000, which
+  -- is not in this branch. Applying first would move the live high-water past it and strand it,
+  -- so refuse until its ledger row exists (by name: the apply-time version differs).
+  IF NOT EXISTS (
+    SELECT 1 FROM supabase_migrations.schema_migrations
+     WHERE name IN ('20261022022000_post_binds_reviewed_invoice_version', 'post_binds_reviewed_invoice_version')
+  ) THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: apply 20261022022000_post_binds_reviewed_invoice_version (#1018) first';
+  END IF;
+
   IF (SELECT count(*) FROM pg_proc WHERE proname = 'handle_new_user' AND pronamespace = 'public'::regnamespace) <> 1 THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: public.handle_new_user must have exactly one overload';
   END IF;

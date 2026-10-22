@@ -10,15 +10,18 @@
  *   0. FIDELITY: the replayed handle_new_user body is the live one the preflight pins;
  *   1. BEFORE: a signup whose metadata says role 'admin' gets an ACTIVE ADMIN profile (the gap);
  *   2. AUTOCOMMIT: run statement by statement the file stops at its preflight, nothing changed;
- *   3. the candidate applies and prints POSTFLIGHT_OK; owner, ACL and trigger unchanged;
- *   4. AFTER: that signup, and one with no role, get an inactive, login-banned driver named by its
- *      email; the new user cannot
+ *   3. ORDERING: refused while #1018's 20261022022000 is not in the ledger; then the candidate
+ *      applies and prints POSTFLIGHT_OK; owner, ACL and trigger unchanged;
+ *   4. AFTER: that signup, and one with no role, get an inactive, login-banned driver named
+ *      'Pending user <id>' (also when its email equals another profile's name); the new user cannot
  *      activate or promote itself; a direct postgres insert still honours its metadata role;
  *   5. ADMIN CREATE: the create-user path (Auth-service insert with the chosen role in metadata)
- *      followed by the Settings page's admin_update_profile call ends with the chosen role, active,
- *      for each of the four roles the Edge Function accepts;
+ *      followed by the Settings page's admin_update_profile call ends with the chosen role and name,
+ *      active and unbanned, for each of the four roles the Edge Function accepts; an admin can find
+ *      a pending login by email; a duplicate name is refused and leaves it inactive and banned;
  *   6. RE-APPLY: refused by the preflight;
- *   7. MUTATION: trusting supabase_auth_admin, or testing current_user, lets the signup be admin.
+ *   7. MUTATION: trusting supabase_auth_admin, or testing current_user, lets the signup be admin;
+ *      the email as the placeholder name aborts a signup whose email is another profile's name.
  *
  * Run: node scripts/smoke/prove-handle-new-user-ignores-signup-role-real-schema.mjs   (needs Docker)
  * Prints HANDLE_NEW_USER_SIGNUP_ROLE_PROOF_PASS on success.
@@ -245,6 +248,14 @@ function main() {
   const acl = scalar(`SELECT proacl::text || ' ' || pg_get_userbyid(proowner) ${FN}`);
   const trgSql = "SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname = 'on_auth_user_created';";
   const trg = scalar(trgSql);
+  // ORDERING: #1018's 20261022022000 is not in this tree; until its ledger row exists the
+  // candidate refuses, so it can never strand that migration below the live high-water.
+  const early = apply('candidate.sql');
+  assert.notEqual(early.status, 0, 'the candidate applied before #1018 was in the ledger');
+  assert.match(early.output, /apply 20261022022000_post_binds_reviewed_invoice_version \(#1018\) first/, `refused for the wrong reason:\n${early.output}`);
+  assert.equal(scalar(`SELECT md5(prosrc) ${FN}`), before, 'the refused apply changed the function');
+  console.log('[prover] ORDERING: refused while #1018 (20261022022000) is not in the ledger');
+  ledger('20261022022000_post_binds_reviewed_invoice_version');
   const a = apply('candidate.sql');
   assert.equal(a.status, 0, `the candidate failed to apply:\n${a.output}`);
   assert.match(a.output, /POSTFLIGHT_OK/, `no POSTFLIGHT_OK:\n${a.output}`);

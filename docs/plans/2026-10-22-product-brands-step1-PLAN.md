@@ -14,8 +14,10 @@ documents keep the reasoning. Where this plan differs from them, section 9 says 
 
 **Code facts** were read from `main` on 2026-10-22, with file and line, and an independent read-only review
 checked every citation and the design against the code the same day (35 findings, all applied below).
-The Codex GitHub App's reviews of PR #1037 added seven more, also applied. Re-check each fact before
-building; delivery code changes often. Further build-level detail belongs to the build PRs' own reviews,
+The Codex GitHub App's reviews of PR #1037 added eleven more, also applied. Re-check each fact before
+building; delivery code changes often. Review comments on PR #1037 after its last commit are answered on
+the PR and carried to PR B, which must read that PR's resolved threads before it starts. Further
+build-level detail belongs to the build PRs' own reviews,
 not to this plan.
 
 **Words used below.** A *migration* is a reviewed change to the database. A *database function* is a
@@ -245,7 +247,9 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
      overwrites brand rows on a completed delivery. It marks the old rows superseded (`superseded_at`,
      `superseded_by`, reason) and adds new ones. Screens and new paperwork read the current rows. A reprint
      of an issued invoice reads the rows that were current when it was posted, so its brand names still
-     match its stored EPA number. Before completion, `set_delivery_brands` may still replace rows outright,
+     match its stored EPA number. If such an invoice is later unposted and posted again, posting re-copies
+     each line's EPA number from the brand rows current at that moment, so the new issue and its reprint
+     agree; the proof runs correction → unpost → repost. Before completion, `set_delivery_brands` may still replace rows outright,
      since nothing has been issued yet. In the same step, it rebuilds **all** of that invoice's RUP records
      at once. A register record can combine several lines (item 7) and carries no line identity, so voiding
      only "the corrected line's" record would lose a sibling line's quantity and cents. Instead, every active
@@ -266,7 +270,9 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
      (`20261013220000_reps_work_any_customer.sql:863-876`). With brands, two lines can also share a product
      and a delivered EPA number. So the function first adds up every line's per-brand quantity and cents by
      (invoice, product, EPA number, unit price), then writes one record per group. The duplicate check and
-     its active-record index use that same group. Grouping by unit price keeps each record's unit price exact
+     its active-record index use that same group, with a blank EPA number counting as equal to another
+     blank (`NULLS NOT DISTINCT`, or an equivalent normalized key), so a repeated run can't add a second
+     record for a product with no EPA number; the duplicate-generation proof includes that case. Grouping by unit price keeps each record's unit price exact
      in whole cents. This applies to every line, branded or not, so it also closes today's duplicate-line
      gap; that is a deliberate behavior change, and the proof covers it. The unpost, void and re-post
      handling (PARKED-006, `:108-116`) is re-proved with the new grouping;

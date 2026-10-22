@@ -3,7 +3,7 @@
 --
 -- WHAT: an inactive account can no longer reach four SECURITY DEFINER functions at its stored role.
 --   Each read the caller's role with `SELECT role ... FROM profiles WHERE id = <caller>` and never
---   checked `is_active`, so a deactivated user (or a new, not-yet-activated one, 20261022060000)
+--   checked `is_active`, so a deactivated user (or a new, not-yet-activated one, 20261022023000)
 --   whose token has not expired yet kept that role here:
 --     get_team_board_deliveries     inactive admin/sales rep saw every delivery on the team board;
 --     get_yesterday_delivery_recap  same, for yesterday's recap;
@@ -38,7 +38,9 @@
 --   return types, owner (postgres), ACLs, search_path, comments; no rows change. CREATE OR REPLACE
 --   keeps each OID.
 --
--- ORDERING: lands after row 973 (20261022060000). Re-read the live ledger first.
+-- ORDERING: lands last of the queue assigned 2026-10-22, after row 973 (PR #1024); the signup-role fix
+--   it follows up is 20261022023000_handle_new_user_ignores_signup_role.sql (row 969). Re-read the
+--   live ledger first.
 
 SET LOCAL lock_timeout = '5s';
 

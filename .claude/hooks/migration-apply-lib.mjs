@@ -1131,6 +1131,7 @@ export function evaluateMigrationApply({
     try {
       landing = (landingGate || evaluateLandingGate)({
         checkoutDir: hookCwd, migName, queryHash: currentHash, now, listWorktrees, deadlineMs: landingDeadlineMs,
+        sessionId: ownerSessionId,
       });
     } catch (error) {
       landing = { ok: false, reason: `MIGRATION LANDING GATE: the check itself failed (${error?.message || error}); fail closed.` };

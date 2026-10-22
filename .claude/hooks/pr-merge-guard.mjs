@@ -70,6 +70,8 @@ import {
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
+import { coderabbitSkipNotice, findCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
+import { ownerRequestDirs } from "./owner-approval-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -269,6 +271,19 @@ if (requests.some((request) => request?.admin)) {
   );
 }
 
+// Mason's live "skip coderabbit" waiver for the session running this merge, or
+// null. Any failure reads as no waiver, so the review is still required.
+function coderabbitSkipFor(hookPayload) {
+  try {
+    return findCodeRabbitSkip({
+      dirs: ownerRequestDirs([hookPayload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
+      sessionId: hookPayload?.session_id,
+    });
+  } catch {
+    return null;
+  }
+}
+
 // ── resolve the PR (fail closed) ─────────────────────────────────────────────
 const projectDir = path.resolve(
   payload?.cwd || payload?.tool_input?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd(),
@@ -424,7 +439,11 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
     deny(coderabbitRequirementUnreadableDenial("PR MERGE GATE", request.selector));
   }
   if (coderabbitReview.status === "missing") {
-    deny(coderabbitReviewMissingDenial("PR MERGE GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
+    // Mason's "skip coderabbit" in THIS session waives only the missing review
+    // (coderabbit-skip-lib.mjs, 2026-10-22); the thread rules above still applied.
+    const skip = coderabbitSkipFor(payload);
+    if (!skip) deny(coderabbitReviewMissingDenial("PR MERGE GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
+    process.stderr.write(coderabbitSkipNotice("PR MERGE GATE", request.selector, skip));
   }
 
   // The one blocking case: it flagged THIS commit and nobody answered. Not

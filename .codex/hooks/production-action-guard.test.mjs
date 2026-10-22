@@ -459,6 +459,23 @@ try {
     false, "a money PR CodeRabbit completed a review of merges");
   assert.equal(moneyMerge(() => { throw new Error("gh down"); }).blocked, true,
     "a failed requirement read refuses (fail closed)");
+  // Mason's "skip coderabbit" (2026-10-22): main() binds the waiver to the
+  // hook's session; here it is injected directly.
+  {
+    const waiver = { sessionId: "codex-session-01", said: "skip coderabbit", recordedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+    const skippedMerge = (answer, findCodeRabbitSkip) => evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+      nowMs: Date.now(), runGh: withRequirement(answer), findCodeRabbitSkip,
+    });
+    assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), () => waiver).blocked,
+      false, "a money PR with no CodeRabbit review merges when Mason skipped CodeRabbit in this session");
+    assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), () => null).blocked,
+      true, "no waiver in this session: still refused");
+    assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), () => { throw new Error("disk"); }).blocked,
+      true, "a waiver lookup that throws reads as no waiver");
+    assert.equal(skippedMerge(() => { throw new Error("gh down"); }, () => waiver).blocked,
+      true, "the waiver does not excuse an unreadable requirement read");
+  }
   assert.equal(moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"], statuses: crDone(), head: "e".repeat(40) })).blocked,
     true, "a requirement answer for a different head than the thread answer is not trusted");
   // Sol HIGH, round 3: the same merge-ready PR without the head pin is refused —

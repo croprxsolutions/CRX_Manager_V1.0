@@ -65,6 +65,8 @@ import {
   readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
+import { coderabbitSkipNotice, findCodeRabbitSkip } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
+import { ownerRequestDirs } from "../../.claude/hooks/owner-approval-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -1334,7 +1336,7 @@ const CODEX_CALL_TIMEOUT_MS = 5_000;
 // SEC-001): the caller computes it once and passes the same value to each
 // deferred lookup, so N chained merges spend one budget between them rather
 // than N budgets in series.
-function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), deadlineMs = clock() + CODEX_ADVISORY_BUDGET_MS }) {
+function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), deadlineMs = clock() + CODEX_ADVISORY_BUDGET_MS, findSkip = () => null }) {
   let codexVerdict = null;
   let coderabbitOpen = null; // null = not read completely → fail closed below
   let coderabbitReview = null; // null = not read → fail closed below
@@ -1388,7 +1390,14 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
     return denied(coderabbitRequirementUnreadableDenial("CODEX PRODUCTION GATE", request.selector));
   }
   if (coderabbitReview.status === "missing") {
-    return denied(coderabbitReviewMissingDenial("CODEX PRODUCTION GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
+    // Mason's "skip coderabbit" in THIS session waives only the missing review —
+    // mirror of pr-merge-guard.mjs (coderabbit-skip-lib.mjs, 2026-10-22).
+    let skip = null;
+    try { skip = findSkip(); } catch { skip = null; }
+    if (!skip) {
+      return denied(coderabbitReviewMissingDenial("CODEX PRODUCTION GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
+    }
+    process.stderr.write(coderabbitSkipNotice("CODEX PRODUCTION GATE", request.selector, skip));
   }
   if (codexVerdict?.status === "findings-at-head") {
     return denied(codexBotFindingsDenial("CODEX PRODUCTION GATE", request.selector, codexVerdict.unresolvedAtHead));
@@ -1443,6 +1452,9 @@ export function evaluateProductionAction({
   // Internal: > 0 when this call inspects a command found INSIDE another
   // command (see expandNestedCommands). Not part of the hook's input.
   nestingDepth = 0,
+  // Mason's live "skip coderabbit" waiver for this session, or null. main()
+  // binds it to the hook's session id; a direct caller gets no waiver.
+  findCodeRabbitSkip: findSkip = () => null,
 } = {}) {
   const name = String(toolName);
   const baseRepoDir = path.resolve(repoDir);
@@ -1561,7 +1573,7 @@ export function evaluateProductionAction({
       // before the hook is killed is refused, which leaves the count unread and
       // denies, instead of a killed hook that says nothing and so allows.
       const advisory = codexAppAdvisory({ request: result.advisoryRequest, repoDir: actionRepoDir, runGh: gateRunGh, clock,
-        deadlineMs: Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs) });
+        deadlineMs: Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs), findSkip });
       if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
       if (advisory) return advisory;
     }
@@ -1974,7 +1986,7 @@ export function evaluateProductionAction({
   // On the HARD-gate budget since #973: see the connector route above.
   const advisoryDeadlineMs = Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs);
   for (const request of [...nestedAdvisories, ...deferredAdvisories]) {
-    const advisory = codexAppAdvisory({ request, repoDir: actionRepoDir, runGh: gateRunGh, clock, deadlineMs: advisoryDeadlineMs });
+    const advisory = codexAppAdvisory({ request, repoDir: actionRepoDir, runGh: gateRunGh, clock, deadlineMs: advisoryDeadlineMs, findSkip });
     if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
     if (advisory) return advisory;
   }
@@ -2021,6 +2033,10 @@ async function main() {
     eventCwd: payload.cwd ?? "",
     repoDir: process.env.CODEX_PROJECT_DIR || process.cwd(),
     hardGateDeadlineMs: hookDeadlineMs(CODEX_HOOK_TIMEOUT_MS, CODEX_HOOK_RESERVE_MS),
+    findCodeRabbitSkip: () => findCodeRabbitSkip({
+      dirs: ownerRequestDirs([payload.cwd, process.env.CODEX_PROJECT_DIR, process.cwd()]),
+      sessionId: payload.session_id ?? payload.sessionId,
+    }),
   });
   // Codex treats allow payloads as noisy/failed hook output. Silence means allow.
   if (!result.blocked) return;

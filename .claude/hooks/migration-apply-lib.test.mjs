@@ -23,6 +23,7 @@ import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
 import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
+import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import {
   OWNER_APPROVAL_MAX_AGE_MS,
@@ -1600,8 +1601,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
-    crStatuses = crDone, crError = null, crHead = HEAD_SHA } = {}) => evaluateLandingGate({
-    checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "",
+    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined } = {}) => evaluateLandingGate({
+    checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
       if (key in git) { if (git[key] instanceof Error) throw git[key]; return git[key]; }
@@ -1698,6 +1699,26 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "a rate-limited CodeRabbit status is not a review");
   refused(gate({ crStatuses: [{ ...crDone[0], creator: { login: "masonwells1" } }] }), "needs a clean CodeRabbit review",
     "a completed status posted by anyone but CodeRabbit does not count");
+  // Mason's "skip coderabbit" (2026-10-22) waives the missing review for the
+  // session he said it in, and nothing else.
+  {
+    const stateDirs = [path.join(gateDir, ".claude", "session-state")];
+    const skipSession = "skip-session-0001";
+    ok(recordCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession, said: "skip coderabbit" }) !== null, "the waiver is recorded");
+    const skipped = gate({ crStatuses: [], sessionId: skipSession });
+    ok(skipped.ok === true && skipped.coderabbitSkippedBy?.sessionId === skipSession,
+      `a migration PR with no CodeRabbit review applies in the session where Mason said skip coderabbit (${skipped.reason || ""})`);
+    refused(gate({ crStatuses: [], sessionId: "other-session-0002" }), "needs a clean CodeRabbit review",
+      "the waiver does not carry to another session");
+    refused(gate({ crStatuses: [] }), "needs a clean CodeRabbit review", "an apply with no session id gets no waiver");
+    refused(gate({ crStatuses: [], sessionId: skipSession, threads: [crThread(false)] }), "unresolved CodeRabbit comment thread",
+      "the waiver does not excuse an unanswered CodeRabbit thread");
+    refused(gate({ crError: new Error("HTTP 502"), sessionId: skipSession }), "fail closed",
+      "the waiver does not excuse an unreadable requirement answer");
+    ok(gate({ sessionId: skipSession }).coderabbitSkippedBy === undefined, "a reviewed PR is not marked as skipped");
+    cancelCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession });
+    refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review", "a cancelled waiver no longer counts");
+  }
   refused(gate({ crError: new Error("HTTP 502") }), "fail closed", "an unreadable requirement answer refuses the apply");
   refused(gate({ crHead: "d".repeat(40) }), "could not be read for this exact head",
     "a requirement answer for a different head refuses the apply");

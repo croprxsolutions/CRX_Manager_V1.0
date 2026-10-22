@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
-  findCodeRabbitSkip, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
+  findCodeRabbitSkip, mayExist, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -127,6 +127,17 @@ try {
     writeFileSync(waiverFile, "unreadable for now");
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused }), { removed: 0, stillLive: true },
       "an unreadable, undeletable waiver file is reported still live");
+    // Codex App P2 on #1035: a folder that cannot be checked counts as still holding it.
+    const denied = (code) => () => { const e = new Error(code); e.code = code; throw e; };
+    eq(mayExist("x", denied("EACCES")), true, "a permission error counts as still there");
+    eq(mayExist("x", denied("EPERM")), true, "so does EPERM");
+    eq(mayExist("x", denied("EIO")), true, "and any other error");
+    eq(mayExist("x", denied("ENOENT")), false, "only a missing file counts as gone");
+    eq(mayExist("x", denied("ENOTDIR")), false, "or a missing folder");
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused, exists: (f) => mayExist(f, denied("EACCES")) }).stillLive,
+      true, "a withdraw that cannot check a folder reports the waiver still live");
+    rmSync(waiverFile, { force: true });
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }).stillLive, false, "a provably absent file does not count");
     recordCodeRabbitSkip({ dirs, sessionId: session, said: "skip coderabbit" });
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }), { removed: 1, stillLive: false }, "a normal withdraw removes it");
     eq(live(), null, "no waiver is left behind");

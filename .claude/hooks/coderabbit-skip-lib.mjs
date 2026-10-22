@@ -31,7 +31,7 @@
 // Node built-ins only: the Codex production gate imports this at startup, and
 // it is on that gate's protected-harness list (Codex App P1 on #1035), so it
 // must not pull in unprotected modules.
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export const CODERABBIT_SKIP_PURPOSE = "crx-coderabbit-skip-v1";
@@ -118,7 +118,15 @@ export function cancelCodeRabbitSkip({ dirs, sessionId, remove = (file) => rmSyn
  * because a copy that could not be deleted keeps the gates accepting it
  * (Luna round 2). Returns { removed, stillLive }.
  */
-export function withdrawCodeRabbitSkip({ dirs, sessionId, remove, exists = existsSync }) {
+// True unless the file is provably absent: existsSync also says false when a
+// permission error hides the file, which would report a live waiver as gone
+// (Codex App P2 on #1035). Only ENOENT/ENOTDIR count as absent.
+export function mayExist(file, stat = lstatSync) {
+  try { stat(file); return true; }
+  catch (error) { return !(error?.code === "ENOENT" || error?.code === "ENOTDIR"); }
+}
+
+export function withdrawCodeRabbitSkip({ dirs, sessionId, remove, exists = (file) => mayExist(file) }) {
   const removed = cancelCodeRabbitSkip({ dirs, sessionId, ...(remove ? { remove } : {}) });
   // Any file left counts as live, readable or not: one unreadable now could be
   // read by a gate later (Luna round 3).

@@ -187,12 +187,21 @@ export function withdrawCodeRabbitSkip({ dirs, sessionId, remove, list = readdir
  * another PR, another session, or anything malformed or expired is no waiver
  * (the gate then requires the review).
  */
-export function findCodeRabbitSkip({ dirs, sessionId, pullRequest, now = Date.now() }) {
+// A real waiver is a few hundred bytes. Anything larger, or not a plain file, is
+// never read: a huge file could outlast the gate's time budget, and a hook that
+// is killed emits nothing, which allows (Luna round 5).
+export const CODERABBIT_SKIP_MAX_BYTES = 4096;
+
+export function findCodeRabbitSkip({ dirs, sessionId, pullRequest, now = Date.now(), stat = lstatSync }) {
   if (!usableSkipSessionId(sessionId) || !usablePr(pullRequest)) return null;
   for (const dir of dirs || []) {
+    const file = path.join(dir, coderabbitSkipFileName(sessionId, pullRequest));
     let data;
-    try { data = JSON.parse(readFileSync(path.join(dir, coderabbitSkipFileName(sessionId, pullRequest)), "utf8")); }
-    catch { continue; }
+    try {
+      const info = stat(file);
+      if (!info.isFile() || info.size > CODERABBIT_SKIP_MAX_BYTES) continue;
+      data = JSON.parse(readFileSync(file, "utf8").slice(0, CODERABBIT_SKIP_MAX_BYTES));
+    } catch { continue; }
     if (data?.purpose !== CODERABBIT_SKIP_PURPOSE || data?.sessionId !== sessionId || data?.pullRequest !== pullRequest) continue;
     const recorded = Date.parse(data?.recordedAt);
     const expires = Date.parse(data?.expiresAt);

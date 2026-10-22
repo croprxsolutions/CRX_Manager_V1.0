@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
+  CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_MAX_BYTES, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
   findCodeRabbitSkip, mayExist, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
@@ -101,6 +101,16 @@ try {
   eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a session-wide v1 waiver is refused");
   write({});
   ok(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), "the exact 24-hour waiver the hook writes is accepted");
+  // Luna round 5: an oversized file is never read, so it cannot outlast the gate.
+  writeFileSync(file, JSON.stringify({ ...recorded, said: "x".repeat(CODERABBIT_SKIP_MAX_BYTES) }));
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a waiver file over the size limit is refused unread");
+  let readAttempted = false;
+  const huge = () => ({ isFile: () => true, size: 50 * 1024 * 1024 });
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now, stat: (f) => { readAttempted = true; return huge(f); } }), null,
+    "a 50 MB file is refused on its size alone");
+  ok(readAttempted, "the size check ran");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now, stat: () => ({ isFile: () => false, size: 10 }) }), null,
+    "something that is not a plain file is refused");
   writeFileSync(file, "not json");
   eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "an unreadable file is no waiver");
 

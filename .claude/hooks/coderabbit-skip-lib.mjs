@@ -38,6 +38,7 @@
 // Node built-ins only: the Codex production gate imports this at startup, and
 // it is on that gate's protected-harness list (Codex App P1 on #1035), so it
 // must not pull in unprotected modules.
+import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -85,13 +86,27 @@ export function coderabbitSkipCommand(reply) {
   return null;
 }
 
+// git's shared folder for a checkout (`<main checkout>/.git` for every worktree
+// of the repository), or "" when the folder is not in a git checkout.
+export function gitCommonDir(folder) {
+  try {
+    return String(execFileSync("git", ["-C", String(folder), "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+    })).trim();
+  } catch {
+    return "";
+  }
+}
+
 /**
- * The .claude/session-state folders of this session's checkout(s), one per
- * distinct real folder (Windows paths compared case-insensitively). The same
- * rule as owner-approval-lib's ownerRequestDirs, kept here so the hook and every
- * gate resolve identical folders without importing that module.
+ * Where waivers live: the MAIN checkout's .claude/session-state, found through
+ * git's shared folder, so every worktree of the repository records, finds and
+ * cancels in ONE place. A waiver kept per checkout survived a `use coderabbit`
+ * sent from a different checkout (final Sol review, #1035). The review proof
+ * guard keeps file tools out of every .claude/session-state folder. A folder
+ * that is not in a normal git checkout contributes nothing (no waiver).
  */
-export function skipStateDirs(sessionFolders) {
+export function skipStateDirs(sessionFolders, commonDir = gitCommonDir) {
   const canonical = (s) => {
     const r = path.resolve(s);
     try { return realpathSync.native(r); } catch { return r; }
@@ -99,8 +114,10 @@ export function skipStateDirs(sessionFolders) {
   const key = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
   const roots = new Map();
   for (const s of (sessionFolders || []).filter(Boolean)) {
-    const c = canonical(String(s));
-    if (!roots.has(key(c))) roots.set(key(c), c);
+    const common = String(commonDir(String(s)) || "").trim();
+    if (!common || path.basename(common).toLowerCase() !== ".git") continue;
+    const main = canonical(path.dirname(common));
+    if (!roots.has(key(main))) roots.set(key(main), main);
   }
   return [...roots.values()].map((r) => path.join(r, ".claude", "session-state"));
 }

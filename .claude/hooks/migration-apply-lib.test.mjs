@@ -1619,6 +1619,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       if (key === "rev-parse --abbrev-ref HEAD") return "claude/feature\n";
       if (key.startsWith("show HEAD:")) return SQL;
       if (key.startsWith("status --porcelain")) return "";
+      // git's shared folder: this fixture is its own main checkout.
+      if (key === "rev-parse --path-format=absolute --git-common-dir") return `${path.join(gateDir, ".git")}\n`;
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
@@ -1732,18 +1734,22 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(gate({ sessionId: skipSession }).coderabbitSkippedBy === undefined, "a reviewed PR is not marked as skipped");
     cancelCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession });
     refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review", "a cancelled waiver no longer counts");
-    // Codex App P2 on #1035: the hook records at the checkout root, so the gate
-    // must look there too, not only in the apply's (possibly nested) cwd.
-    const rootDir = mkdtempSync(path.join(os.tmpdir(), "crx-skip-root-"));
+    // Codex App P2 and the final Sol review on #1035: waivers live in the MAIN
+    // checkout's state folder (found through git's shared folder), so an apply
+    // from a subfolder or another worktree finds the same one.
+    const mainDir = mkdtempSync(path.join(os.tmpdir(), "crx-skip-main-"));
+    const COMMON = "rev-parse --path-format=absolute --git-common-dir";
     try {
-      mkdirSync(path.join(rootDir, ".claude"), { recursive: true });
-      recordCodeRabbitSkip({ dirs: [path.join(rootDir, ".claude", "session-state")], sessionId: skipSession, pullRequest: 900, said: "skip coderabbit #900" });
-      ok(gate({ crStatuses: [], sessionId: skipSession, git: { "rev-parse --show-toplevel": `${rootDir}\n` } }).ok === true,
-        "a waiver recorded at the checkout root (git's top level) is found");
-      refused(gate({ crStatuses: [], sessionId: skipSession, git: { "rev-parse --show-toplevel": new Error("not a repo") } }),
-        "needs a clean CodeRabbit review", "a failed root lookup only leaves that folder out");
+      mkdirSync(path.join(mainDir, ".claude"), { recursive: true });
+      recordCodeRabbitSkip({ dirs: [path.join(mainDir, ".claude", "session-state")], sessionId: skipSession, pullRequest: 900, said: "skip coderabbit #900" });
+      ok(gate({ crStatuses: [], sessionId: skipSession, git: { [COMMON]: `${path.join(mainDir, ".git")}\n` } }).ok === true,
+        "a waiver in the main checkout's state folder is found from a worktree");
+      refused(gate({ crStatuses: [], sessionId: skipSession, git: { [COMMON]: new Error("not a repo") } }),
+        "needs a clean CodeRabbit review", "a failed shared-folder lookup finds no waiver");
+      refused(gate({ crStatuses: [], sessionId: skipSession, git: { [COMMON]: `${path.join(mainDir, "bare.git")}\n` } }),
+        "needs a clean CodeRabbit review", "a shared folder that is not <checkout>/.git finds no waiver");
     } finally {
-      rmSync(rootDir, { recursive: true, force: true });
+      rmSync(mainDir, { recursive: true, force: true });
     }
   }
   refused(gate({ crError: new Error("HTTP 502") }), "fail closed", "an unreadable requirement answer refuses the apply");

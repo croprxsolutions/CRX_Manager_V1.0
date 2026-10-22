@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_MAX_BYTES, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
-  findCodeRabbitSkip, isSkipRepository, mayExist, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
+  findCodeRabbitSkip, isSkipRepository, mayExist, recordCodeRabbitSkip, skipStateDirs, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -66,9 +66,25 @@ eq(isSkipRepository(undefined, undefined), false, "an unknown repository gets no
 // ── record, find, cancel ────────────────────────────────────────────────────
 const temp = mkdtempSync(path.join(os.tmpdir(), "crx-cr-skip-"));
 try {
+  // A real git checkout with a second worktree: waivers live in the MAIN
+  // checkout's state folder whichever worktree records or cancels them.
   const checkout = path.join(temp, "checkout");
+  const worktree = path.join(temp, "worktree");
   mkdirSync(path.join(checkout, ".claude"), { recursive: true });
-  const dirs = [path.join(checkout, ".claude", "session-state")];
+  const git = (...args) => {
+    const r = spawnSync("git", ["-C", checkout, "-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+  };
+  git("init", "-q");
+  git("commit", "-q", "--allow-empty", "-m", "fixture");
+  git("worktree", "add", "-q", "--detach", worktree);
+  const dirs = skipStateDirs([checkout]);
+  eq(dirs.length, 1, "a checkout resolves to one state folder");
+  eq(skipStateDirs([worktree]), dirs, "a worktree resolves to the MAIN checkout's state folder");
+  eq(skipStateDirs([checkout, worktree, path.join(checkout, ".claude")]), dirs, "folders of one repository share one folder");
+  eq(skipStateDirs([path.join(temp, "not-a-repo")]), [], "a folder outside git resolves to none");
+  eq(skipStateDirs([checkout], () => path.join(temp, "bare.git")), [], "a shared folder that is not <checkout>/.git resolves to none");
+  eq(skipStateDirs([checkout], () => ""), [], "a failed lookup resolves to none");
   const session = "session-abc-12345";
   const PR = 1018;
   const now = Date.parse("2026-10-22T15:00:00Z");
@@ -132,12 +148,12 @@ try {
 
   // ── the real prompt hook, as Claude Code runs it ──────────────────────────
   const hook = path.join(HERE, "coderabbit-skip-prompt.mjs");
-  const run = (prompt, sessionId = session, key = "session_id") => {
+  const run = (prompt, sessionId = session, key = "session_id", from = checkout) => {
     const r = spawnSync(process.execPath, [hook], {
-      input: JSON.stringify({ prompt, [key]: sessionId, cwd: checkout, hook_event_name: "UserPromptSubmit" }),
+      input: JSON.stringify({ prompt, [key]: sessionId, cwd: from, hook_event_name: "UserPromptSubmit" }),
       encoding: "utf8",
-      cwd: checkout,
-      env: { ...process.env, CLAUDE_PROJECT_DIR: checkout },
+      cwd: from,
+      env: { ...process.env, CLAUDE_PROJECT_DIR: from },
     });
     eq(r.status, 0, `the hook exits cleanly for ${JSON.stringify(prompt.slice(0, 30))}`);
     return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : "";
@@ -162,6 +178,12 @@ try {
   ok(/CODERABBIT SKIP CANCELLED/.test(run("use coderabbit again")), "use coderabbit cancels them all");
   eq(files(), [], "and every waiver is gone");
   eq(run("use coderabbit"), "", "cancelling with nothing to cancel: silent");
+  // Final Sol review on #1035: a waiver recorded in one worktree is cancelled from another.
+  ok(/CODERABBIT SKIP RECORDED/.test(run("skip coderabbit #1018", session, "session_id", worktree)), "a waiver recorded from the worktree");
+  ok(live(), "lands in the main checkout's state folder");
+  ok(/CODERABBIT SKIP CANCELLED/.test(run("use coderabbit", session, "session_id", checkout)), "is cancelled from the main checkout");
+  eq(findCodeRabbitSkip({ dirs: skipStateDirs([worktree]), sessionId: session, pullRequest: PR }), null,
+    "and a gate in the worktree no longer finds it");
   ok(/CODERABBIT SKIP RECORDED/.test(run("<system-reminder>Linked sessions now: none</system-reminder>\nskip coderabbit #1018")),
     "the app's reminder block in front of his words is not part of them");
   cancelCodeRabbitSkip({ dirs, sessionId: session });

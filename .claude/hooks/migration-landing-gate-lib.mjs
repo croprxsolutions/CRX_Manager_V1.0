@@ -191,12 +191,13 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let skip = null;
   if (coderabbitReview.status === "missing") {
     // Only a waiver naming THIS pull request counts (Mason, 2026-10-22: per PR).
-    // Look where the prompt hook records it: the checkout root and the session's
-    // project folder, not only the apply's cwd, which may be a subfolder (Codex
-    // App P2 on #1035). A failed root lookup just leaves those folders out.
-    let root = "";
-    try { root = String(git(["rev-parse", "--show-toplevel"])).trim(); } catch (error) { if (OUT(error)) throw error; }
-    const where = skipStateDirs([dir, root, process.env.CLAUDE_PROJECT_DIR]);
+    // Waivers live in the main checkout's state folder, found through git's
+    // shared folder, wherever the apply runs from (a subfolder or another
+    // worktree: Codex App P2 and the final Sol review on #1035). This gate asks
+    // its own deadline-bound git; a failed lookup finds no waiver.
+    let common = "";
+    try { common = String(git(["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim(); } catch (error) { if (OUT(error)) throw error; }
+    const where = skipStateDirs([dir], () => common);
     try { skip = findCodeRabbitSkip({ dirs: where, sessionId, pullRequest: pr.number, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {

@@ -112,8 +112,9 @@
 > a PR number (`skip coderabbit #1018`, `skip coderabbit on PR 1018`; a short list such as
 > `#1018 #1020` names each, up to five; any case, "code rabbit" works too), the
 > `coderabbit-skip-prompt.mjs` message hook records one waiver per named PR, for that session only,
-> valid for 24 hours (`.claude/session-state/coderabbit-skip-<session>-pr<N>.json`, written by
-> `coderabbit-skip-lib.mjs`). `skip coderabbit` with no PR number records nothing; the agent asks
+> valid for 24 hours (`coderabbit-skip-<session>-pr<N>.json`, written by `coderabbit-skip-lib.mjs`
+> into the MAIN checkout's `.claude/session-state`, found through git's shared folder, so every
+> worktree records, finds and cancels the same file; a folder outside a git checkout holds none). `skip coderabbit` with no PR number records nothing; the agent asks
 > which PR. Both merge gates and the migration landing gate accept a waiver only for the PR it names
 > (the number GitHub returns for the PR being merged or applied, and only a PR in
 > `masonwells1/CRX_Manager_V1.0`: a merge in any other repository gets no waiver), and only when that

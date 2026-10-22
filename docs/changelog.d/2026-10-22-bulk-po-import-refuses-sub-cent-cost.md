@@ -30,3 +30,8 @@ deploy.
 cost).") instead of silently becoming $0.00, so clearing a refused OCR cost can no longer import the
 line at zero; an explicit `0` still imports. The PO total in the review header shows a dash whenever any
 line's cost is invalid, because it sums every line.
+
+**Luna round 3 fixes.** Picking the product for a line no longer replaces a cost the admin typed (an
+explicit `0`, or a cleared box still to fill) with the catalog cost; only an untouched OCR line without a
+cost takes the catalog cost, as before. A negative cost now says "Unit cost cannot be negative." instead
+of the decimal-places message.

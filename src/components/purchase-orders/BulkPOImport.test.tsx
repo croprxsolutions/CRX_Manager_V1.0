@@ -513,7 +513,8 @@ describe('BulkPOImport', () => {
     fireEvent.click(screen.getByRole('button', { name: /select product/i }));
 
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: 'atrazine' } });
-    fireEvent.click((await screen.findAllByRole('button', { name: /atrazine 4l/i })).at(-1)!);
+    const pickerRows = await screen.findAllByRole('button', { name: /atrazine 4l/i });
+    fireEvent.click(pickerRows[pickerRows.length - 1]);
     fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(

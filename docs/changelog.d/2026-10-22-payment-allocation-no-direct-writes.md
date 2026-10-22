@@ -5,7 +5,7 @@
   reconciliation and Payment History would read as real payments, and where an admin could edit or
   delete a payment record without reversing it. Live check 2026-10-22: no sign it was ever used.
 - New migration `20261022040000_payment_allocation_tables_no_direct_writes.sql` (migration-history
-  row 969) removes every direct write right from signed-in and signed-out users and drops the five
+  row 970) removes every direct write right from signed-in and signed-out users and drops the five
   write rules. Reading payment history is unchanged, and recording, reversing, voiding and order
   edits keep working because they run through the database functions.
 - Proof: `node scripts/smoke/prove-payment-allocation-no-direct-writes-real-schema.mjs` (passes on a

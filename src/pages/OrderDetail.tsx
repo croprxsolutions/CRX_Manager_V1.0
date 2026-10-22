@@ -2257,7 +2257,7 @@ export default function OrderDetail() {
           />
 
           <div className="max-h-96 overflow-y-auto space-y-2">
-            {filteredProducts.map((product) => {
+            {!productsLoading && filteredProducts.map((product) => {
               const tierNum = customer?.assigned_tier || 1;
               // Cascade: tier3 → tier2 → tier1 fallback
               const t1 = product.tier1_price || 0;

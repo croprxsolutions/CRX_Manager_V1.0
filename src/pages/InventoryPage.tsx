@@ -768,6 +768,12 @@ export default function InventoryPage() {
       toast('error', 'Please select a product');
       return;
     }
+    // A product picked while the list reloaded must still be in the list that arrived (Luna, #1017).
+    if (!products.some((p) => p.id === addProductId)) {
+      setAddProductId('');
+      toast('error', 'That product is no longer active. Please select a product again.');
+      return;
+    }
     const qty = parseFloat(addQty) || 0;
     if (qty <= 0) {
       toast('error', 'Quantity must be greater than 0');

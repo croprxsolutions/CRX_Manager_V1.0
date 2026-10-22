@@ -3,7 +3,7 @@
 **Owner:** Mason Wells approves. **Drafted:** 2026-10-21 by Claude, as asked in `docs/plans/2026-10-13-direction-and-goals.md` section 2 ("must work on day one" list, checkpoint 2026-10-31).
 **Reviewed:** an advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21. It made 57 findings. Claude checked each against the goals doc and the code. Most were applied; the few that weren't are listed at the end, with the reason.
 **Status:** DRAFT, waiting on Mason. Nothing here authorizes building anything. Each item is built through its own goal and pull request.
-**Evidence date:** every "today" status was checked against `main` at `e0b5d4234`, the open PR list and the open-issue list on 2026-10-21. Statuses go stale quickly; re-check before relying on one.
+**Evidence date:** every "today" status was checked against `main` at `d720cf681`, the open PR list and the open-issue list on 2026-10-22 (first checked at `e0b5d4234` on 2026-10-21, then refreshed after the Codex GitHub review on this PR). Statuses go stale quickly; re-check before relying on one. "Open PR" means written and in review, not live.
 
 ---
 
@@ -32,9 +32,9 @@ Words used below:
 | | Count |
 |---|---|
 | MUST, built and live (still needs its December proof) | 19 |
-| MUST, code not built or only partly built | 28 |
-| MUST, a business process, drill, review or Mason action (not code) | 25 |
-| SHOULD | 6 |
+| MUST, code not built or only partly built | 30 |
+| MUST, a business process, drill, review or Mason action (not code) | 26 |
+| SHOULD | 3 |
 | CAN-WAIT | 4, plus the parked items in section 17 |
 
 Rows that only point to another row ("See 4.4") aren't counted twice. A row split between two ranks (for example 8.3) counts under its MUST part.
@@ -43,7 +43,7 @@ Rows that only point to another row ("See 4.4") aren't counted twice. A row spli
 1. **Billing correctness (Goal 3) is about half built.** Split billing, voids on posted invoices, quote price locks, return credits on split orders and "post uses what was saved" are open or in progress.
 2. **We can't yet recover from losing the database (Goal 6).** The weekly off-site copy runs, but it has never been restored, photos aren't backed up, and the Supabase plan can't rewind to a chosen time. Today a bad day could cost about a week of work.
 3. **No staging system yet.** Nearly every proof below, plus the December rehearsal and staff training, needs one.
-4. **The QuickBooks and Stripe connections haven't started.** If they aren't proven by 2026-12-15, January runs on manual procedures that aren't written yet.
+4. **The QuickBooks and Stripe connections haven't started, and Stripe may not accept a restricted-use pesticide seller at all.** If they aren't proven by 2026-12-15, January runs on manual procedures that aren't written yet.
 
 ---
 
@@ -62,9 +62,9 @@ Rows that only point to another row ("See 4.4") aren't counted twice. A row spli
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
 | 2.1 | Completing a delivery from the delivery page, the field stop or the Deliveries list. With no signal the app refuses and changes nothing; back online it completes once | **Built, not proven on a real phone.** Refusal and paper-ticket fallback live (PR #955); the Deliveries list does it in one step (PR #964, migration `20261019220000`). The airplane-mode test on a supported phone hasn't been done (Goal 5, "Still open" item 4). | Goal 5 | MUST |
-| 2.2 | Paper ticket when there's no signal: the driver gets it signed, then completes in the app with a photo of it | **Built in the app**, which requires the photo once the paper-ticket box is ticked. The database doesn't require the photo or record that a paper ticket was used (Goal 5, "Still open" item 2). | Goal 5 follow-up | MUST: the real-phone test. SHOULD: the database check |
+| 2.2 | Paper ticket when there's no signal: the driver gets it signed, then completes in the app with a photo of it | **Built in the app**, which requires the photo once the paper-ticket box is ticked. The database doesn't require the photo or record that a paper ticket was used (Goal 5, "Still open" item 2). Open PR #1024 makes the server check completion proof. | Goal 5 follow-up | MUST: the real-phone test. SHOULD: the database check |
 | 2.3 | **Completions and money actions are retry-safe** | **Partly built.** Four batches live (last applied 2026-10-21). **69 database functions still open** (`KNOWN_ISSUES.md`, "about 75 live functions replay a saved result matched on the retry key alone"). The driver-retry gap in goals doc section 3 is part of this. | Goal 3 ("Retries are safe") | MUST |
-| 2.4 | Customer gets a delivery receipt email | **Built, with gaps.** The phone sends it, and doesn't retry if signal drops right after. A driver who can't see an older stop's customer sends no receipt, and on the normal signature path isn't told (`KNOWN_ISSUES.md`, "a driver's completion receipt can be skipped", MED). The office can resend. Receipts carry no photos (Mason, 2026-10-14). | Goal 5 follow-up | SHOULD (the office resend covers it, see 9.3) |
+| 2.4 | Customer gets a delivery receipt email | **Built, with gaps.** The phone sends it, and doesn't retry if signal drops right after. A driver who can't see an older stop's customer sends no receipt, and on the normal signature path isn't told (`KNOWN_ISSUES.md`, "a driver's completion receipt can be skipped", MED). The office can resend. Receipts carry no photos (Mason, 2026-10-14). Open PR #1024 also covers driver receipts. | Goal 5 follow-up | SHOULD (the office resend covers it, see 9.3) |
 | 2.5 | A counter sale through quick delivery in a few taps, including amounts under 1 unit | **Not built** (goals doc, Goal 3: today 9–12 actions across 3 screens). Counter sales still work, just slowly. | Goal 3 | SHOULD |
 | 2.6 | A stock shortage warns but never blocks a delivery | **Built.** Mason's permanent decision (2026-10-15, 6b). | Done | MUST |
 
@@ -72,7 +72,7 @@ Rows that only point to another row ("See 4.4") aren't counted twice. A row spli
 
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
-| 3.1 | **Post bills exactly what was saved and reviewed**, on every route: single, group, batch and list posting. Credit and restricted-use (RUP) checks use the same saved version | **Open.** Today Post sends the *old* saved amounts and drops the on-screen edits (`KNOWN_ISSUES.md`, "the regular invoice editor posts the old saved amounts", 2026-10-09). **In progress** in a parallel session. | Goal 3 | MUST |
+| 3.1 | **Post bills exactly what was saved and reviewed**, on every route: single, group, batch and list posting. Credit and restricted-use (RUP) checks use the same saved version | **Open.** Today Post sends the *old* saved amounts and drops the on-screen edits (`KNOWN_ISSUES.md`, "the regular invoice editor posts the old saved amounts", 2026-10-09). **Fix written:** open PR #1018 (migration `20261021200000`). | Goal 3 | MUST |
 | 3.2 | Product lines are billed only for delivered goods, across all of an order's invoices together (split siblings, added lines, returns, credits, restored invoices, two saves at once). Billing before delivery is removed | **Partly built.** A delivery's invoice is capped at what was delivered (migration `20261010120000`, PR #889). Order-level "Create Invoice" and up-front splits can still bill the ordered amount before delivery (goals doc, Goal 3 "Quantity caps"). No shipped fix found. | Goal 3 | MUST |
 | 3.3 | Invoices made from scratch carry only charge lines (freight, application fee, service, other) | **Built.** Live 2026-10-21 (PR #983, migration `20261021050000`). | Done; prove on staging | MUST |
 | 3.4 | A product added on the invoice screen uses the customer's price tier | **Built** (PR #908, 2026-10-14). The goals doc asks for one check on a saved invoice and its PDF. | Goal 3 (one check) | MUST |
@@ -101,7 +101,7 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 | 5.2 | Blend tickets never price a product at $0 for a missing tier price. Staff pick when a quote lists one product twice. A $0 line needs an admin reason | **Built.** Live 2026-10-21 (PR #982, migration `20261020210000`; PR #995, migration `20261021070000`). | Done; prove on staging | MUST |
 | 5.3 | A job or blend-ticket invoice can't bill more than was applied, counting every invoice for that job or ticket, including two saves at once | **Not built** (goals doc, Goal 3 "Caps and orderless invoices"). | Goal 3 | MUST |
 | 5.4 | Correcting a posted field-app invoice with a credit: admin-only, with a reason, partial amounts allowed. All credits on one invoice together can't exceed what's still creditable, and two at once are handled safely | **Not built.** No credit path exists for a field invoice today; credits come only from returns, which need an order. | Goal 3 | MUST |
-| 5.5 | The fix that stopped reps making field-app invoices through the order screens is fully signed off | **Fix live since 2026-10-07; two sign-off checks wait on Mason** (`KNOWN_ISSUES.md`, "CRX-LIFE-001"). Item 1 needs Mason to approve one read-only query at a prompt. Item 2 is a live run of two existing checks. | Mason + agent, minutes each | MUST |
+| 5.5 | The fix that stopped reps making field-app invoices through the order screens is fully signed off | **Fix live since 2026-10-07; two sign-off checks still owed** (`KNOWN_ISSUES.md`, "CRX-LIFE-001"). Item 1's query used to be refused at a confirmation prompt; PR #1013 (merged 2026-10-21) removed that cause, so an agent can now re-run it. Item 2 is a live run of two existing checks. | Agent, minutes each | MUST |
 | 5.6 | Blend ticket linked to an order with several price tiers for one product | **Open, no money effect today.** The quantity it records is read by nothing (`KNOWN_ISSUES.md`, "blend-ticket linkage picks ONE order line per product"). It's a separate issue from the duplicate-line pricing in 5.2. | Later | CAN-WAIT |
 
 ## 6. Payments, prepay and credits
@@ -113,7 +113,7 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 | 6.3 | Credits from returns applied to invoices, with reversal | **Built** (credit-memo apply live; `CURRENT_STATE.md` feature map). | Done; prove on staging | MUST |
 | 6.4 | **A refund paid outside CRX is recorded in CRX**, so the customer's credit can't be spent twice | **Not built** (goals doc, Goal 3 "Voids and cancellations"). | Goal 3 | MUST |
 | 6.5 | Balances and aging use Chicago's date and include every customer, for admins | **Built.** PRs #991, #996 and #998 (2026-10-21). Rep-visible full balances are still open (see 3.6). | Done | MUST |
-| 6.6 | A customer's full payment history past 200 entries | **Open** (goals doc, Goal 4 list). It matters only if old history moves into CRX at cut-over (16.4). | Goal 4 | SHOULD; MUST if 16.4 moves old payment history |
+| 6.6 | A customer's full payment history past 200 entries | **Open** (goals doc, Goal 4 list). Goal 4's done test includes a 200+ payment history, and Goal 4 is a launch gate. | Goal 4 | MUST |
 
 ## 7. Returns
 
@@ -148,8 +148,8 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 |---|---|---|---|---|
 | 10.1 | Lists, reports, integrity checks and lookups read every record | **Mostly built.** Goal 4 parts 1, 2a and 2b live (PRs #959, #981, #988, #993). Still open: the dashboard action counts that stop at 10 (H36, part 4), the payment-history limit (6.6), and the old-limit data tests in Goal 4's "Done when". | Goal 4 | MUST |
 | 10.2 | **The bookkeeper approves what each money report means** (which statuses count, the date basis, returns, credits, prepay, write-offs, costs), checked to the exact cent against independently prepared answers | **Not done** (goals doc, Goal 4 "Done when"). | Goal 4 | MUST |
-| 10.3 | Pickers become search boxes; list pages page on the server | **Open** (Goal 4 parts 3 and 4; part 3 is in progress in a parallel session). | Goal 4 | SHOULD |
-| 10.4 | Workload test at twice the busiest day | **Not run** (Goal 4). Needs staging. If it slips, Mason accepts the measured gap in writing. | Goal 4 | SHOULD |
+| 10.3 | Pickers become search boxes; list pages page on the server | **Open.** Part 3 (pickers) is written: open PR #1017. Part 4 (server-side paging) isn't started. Both are in Goal 4's done test, which the goals doc makes a launch gate (due 2026-12-15). | Goal 4 | MUST |
+| 10.4 | Workload test at twice the busiest day, with response-time targets agreed first | **Not run** (Goal 4). Needs staging. | Goal 4 | MUST |
 
 ## 11. Security and roles
 
@@ -159,7 +159,7 @@ Four staff roles must each get through a normal day: **admin** (everything), **s
 |---|---|---|---|---|
 | 11.1 | Only admins pull the restricted-use (RUP) sales register | **Built** (PR #927, migration `20261014220000`). | Done | MUST |
 | 11.2 | Photos need an active staff sign-in every time; old and copied links fail; deactivated staff are refused | **Built** (PRs #929 and #947; buckets private since 2026-10-16). Goal 1's full per-bucket, per-role and deactivation checks still have to pass on staging. | Goal 1 | MUST |
-| 11.3 | **Cost and margin are admin-only everywhere** | **2 of 3 steps live** (PR #957; PR #965 with migration `20261019230000`). Step 3, locking the cost columns on the tables, is open (`KNOWN_ISSUES.md`, HIGH, 2026-10-18). Purchase-order cost is in open PR #980. | Goal 1 | MUST |
+| 11.3 | **Cost and margin are admin-only everywhere** | **Mostly live.** Steps 1 and 2 (PR #957; PR #965 with migration `20261019230000`), and purchase-order cost admin-only with locked columns (PR #980, migrations `20261021140000` and `20261021141000`, live 2026-10-22). Still open: step 3, locking cost columns on the other tables, such as product `current_cost` (`KNOWN_ISSUES.md`, HIGH, 2026-10-18). | Goal 1 | MUST |
 | 11.4 | An applicator sees only the fields for their assigned jobs, by every route (job, location dispatch, crew), and loses access when the assignment ends | **Not proven.** It's a Goal 1 rule with no shipped check found. | Goal 1 | MUST |
 | 11.5 | A rep can't write RUP register rows for an invoice that was never posted | **Open** (`KNOWN_ISSUES.md`, MED, 2026-10-14). It would put false sales in a regulated record. | Goal 1 follow-up | MUST |
 
@@ -181,22 +181,22 @@ Mason's target: an outage can last overnight, CRX is back by the next business m
 |---|---|---|---|---|
 | 13.1 | **Supabase Pro with point-in-time recovery** (rewinding the database to a chosen minute) | **Not done.** The plan is Free (live check 2026-10-18, `docs/plans/2026-10-18-goal-6-safety-net-findings.md`). Already decided 2026-10-13; it needs Mason's billing click. | Goal 6 (Mason's action) | MUST |
 | 13.2 | **A full restore drill**, timed and logged: database, permissions, logins and every file bucket restored into an isolated copy, with photos opening against their records; plus one rewind-to-a-time on a throwaway copy, with recovery time and lost work measured against Mason's target | **Not done.** The weekly off-site copy has run every Sunday since 2026-09-06 (last 2026-10-18) but has never been restored. The steps are a draft (`docs/plans/2026-10-19-goal6-restore-procedure-draft.md`). A parallel session is working on Goal 6. | Goal 6 | MUST |
-| 13.3 | Photos, signatures and uploads backed up (all nine storage buckets) | **Not done.** The database copy doesn't include the files. | Goal 6 | MUST |
+| 13.3 | Photos, signatures and uploads backed up (all nine storage buckets) | **Built, not running.** A weekly file backup for every bucket was written on 2026-10-21 (`CRX_Backups` PR #1; `docs/operations/production-runbook.md`, storage row). It waits on Mason adding two storage keys as secrets, and on that PR merging. Until its first run succeeds, the files have no backup. | Goal 6 | MUST |
 | 13.4 | **After a restore, nothing happens twice**: payments, QuickBooks entries and emails already sent are reconciled before anything restarts | **Process not written** (goals doc, Goal 6 "Done when"). | Goal 6 | MUST |
 | 13.5 | Two named people can run the recovery; the backup passphrase isn't held by Mason alone | **Not done.** Only Mason holds the passphrase. | Goal 6 (Mason names them) | MUST |
-| 13.6 | A failed backup alerts a named person and a backup, who know what to do | **Designed, not built** (`docs/plans/2026-10-19-goal6-backup-health-alert-design.md`). A silent failure would quietly break the "minutes, not days" target. | Goal 6 | MUST |
+| 13.6 | A failed backup alerts a named person and a backup, who know what to do | **Partly built, not live.** A daily freshness check that fails when a backup is too old was written on 2026-10-21 (`CRX_Backups` PR #1; runbook section 4.11). It only reaches Mason if GitHub emails him about failed runs, which isn't confirmed yet. The outside watchdog, which still works if GitHub Actions stops, isn't built. Until then, someone checks the backup dates every Monday. A silent failure would quietly break the "minutes, not days" target. | Goal 6 | MUST |
 | 13.7 | **Staging**: a separate copy of CRX with its own accounts, test payment keys and captured email, which can't reach real systems. The money and inventory browser tests run per role on it, and a failure blocks the change | **Not built.** Almost every proof in this list, the December rehearsal and staff training depend on it. | Goal 6 | MUST |
 
 ## 14. QuickBooks and Stripe
 
-Both integrations stay in the plan (Goal 7). Nothing exists in the code yet: searching `src/` and `supabase/functions/` on 2026-10-21 found no QuickBooks or Stripe code. The manual fallbacks below are a **time-limited contingency**, used only if Mason chooses one at the 2026-12-15 checkpoint. Each has an owner and an end date for returning to the integration.
+Both integrations stay in the plan (Goal 7). Nothing exists in the code yet: searching `src/` and `supabase/functions/` on 2026-10-21 found no QuickBooks or Stripe code. A research plan landed on 2026-10-21 (`docs/plans/2026-10-21-goal7-quickbooks-stripe-groundwork.md`, PR #1016). It recommends testing the paid Conductor connector for QuickBooks first. It also found that **Stripe's prohibited-business list may exclude restricted-use pesticide sellers**, so Stripe has to confirm in writing before anything is built, and another processor may be needed. The manual fallbacks below are a **time-limited contingency**, used only if Mason chooses one at the 2026-12-15 checkpoint. Each has an owner and an end date for returning to the integration.
 
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
 | 14.1 | **The accountant approves the accounting map**: how invoices, payments and allocations, credits, prepay, refunds, write-offs, discounts, fees, inventory costs, vendor bills and commissions reach the books, with the chart-of-accounts mapping and closed-period rules. Needed for the sync *and* for hand entry | **Not started.** | Goal 7 | MUST |
-| 14.2 | **QuickBooks Desktop sync**: the accountant confirms our Desktop version stays supported; a connection is proven on a copy of our company file by 2026-11-15; there's an operating plan (which PC, schedule, bookkeeper, alert on a failed sync); a reconciled test month by 2026-12-15 | **Not started.** A parallel Goal 7 session has begun. | Goal 7 | MUST, or 14.3 approved as the contingency |
+| 14.2 | **QuickBooks Desktop sync**: the accountant confirms our Desktop version stays supported; a connection is proven on a copy of our company file by 2026-11-15; there's an operating plan (which PC, schedule, bookkeeper, alert on a failed sync); a reconciled test month by 2026-12-15 | **Planned, not started.** The connector choice and test steps are in the Goal 7 groundwork plan. | Goal 7 | MUST, or 14.3 approved as the contingency |
 | 14.3 | **QuickBooks contingency**: a transaction-level CRX report and written steps for entering invoices, payments with their allocations, credits, prepay and corrections by hand. Each one is marked when entered, so nothing goes in twice, and each customer is tied out daily, signed by the bookkeeper. Rehearsed on staging, with the daily workload measured | **Process and report not written.** | Phase D prep | MUST if chosen |
-| 14.4 | **Online card and ACH payments through Stripe**, with an invoice marked paid only on a verified Stripe settlement | **Not started.** Stripe sign-up and approval for an ag-chemical business takes time. | Goal 7 | CAN-WAIT if 14.5 is approved |
+| 14.4 | **Online card and ACH payments through Stripe**, with an invoice marked paid only on a verified Stripe settlement | **Not started.** Stripe may not accept us (see above); its written answer comes first. | Goal 7 | CAN-WAIT if 14.5 is approved |
 | 14.5 | **Payment contingency**: written steps for checks and bank transfers. When a payment counts as received, who records it in CRX and QuickBooks, unapplied money, returned or bounced payments, and matching each day's deposit | **Process not written.** Recording payments by hand already works in CRX (6.1). | Phase D prep | MUST |
 
 ## 15. Business readiness (Mason's own tasks, no code)
@@ -249,7 +249,8 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 
 **Actions already decided, still waiting on Mason** (not new decisions):
 - **Upgrade Supabase to Pro and turn on point-in-time recovery** (decided 2026-10-13). Due this week: every recovery test waits on it.
-- **Approve the one read-only query** that finishes the CRX-LIFE-001 sign-off (5.5) the next time an agent asks.
+- **Add the two storage-key secrets** that the file backup (13.3) waits on.
+- **Send Stripe the eligibility question** about restricted-use pesticide sales (section 14, and section 5.6 of the Goal 7 groundwork plan).
 - **Fallback for December 31 evening**: if the quote and order number fix (12.1) misses its December proof, staff stop entering quotes and orders in CRX after 6 pm that evening. It's a backup plan, not a substitute for the fix.
 
 ---
@@ -260,7 +261,8 @@ Checked against the goals doc and the code on 2026-10-21.
 - **"No money effect" on multi-tier blend linkage (Sol finding 46, which Sol rated low-confidence).** Kept. `KNOWN_ISSUES.md` shows the recorded quantity is read by nothing, and it's a different issue from the duplicate-line pricing that PR #982 fixed.
 - **Copying every goal's full acceptance list into each row (Sol findings 19–23, 30–34, 38).** Applied as one rule instead ("What 'done' means for each row"), with the key money words added where a row was misleading (frozen money basis in 4.3, cumulative credit cap in 5.4, every void status in 3.5). Repeating the goals doc in full would make this list too long to approve.
 - **The paper-ticket database check as a MUST (Sol finding 16).** Only the real-phone test is ranked MUST. The app already requires the photo on that path, which meets the goals doc's done test. A database-level check is extra protection, so it's SHOULD.
-- **Workload test as MUST (Sol finding 41).** Kept as SHOULD, on the condition that Mason accepts any measured gap in writing.
+
+Sol finding 41 (the workload test and the rest of Goal 4 as MUST) was first kept as SHOULD. It was applied after the Codex GitHub review on this PR made the same point: Goal 4's done test is a launch gate (rows 6.6, 10.3 and 10.4 are now MUST).
 
 ## Sources
 
@@ -269,5 +271,6 @@ Checked against the goals doc and the code on 2026-10-21.
 - `docs/manual/KNOWN_ISSUES.md`, the OPEN entries named in each row.
 - `docs/plans/2026-10-18-goal-6-safety-net-findings.md` and the two 2026-10-19 Goal 6 drafts.
 - `src/utils/season.ts` (the season boundary is October 1).
-- `git log` on `origin/main` through `e0b5d4234` and the open PR list, both read 2026-10-21.
+- `docs/plans/2026-10-21-goal7-quickbooks-stripe-groundwork.md` and `docs/operations/production-runbook.md` (storage backup and backup alerting rows).
+- `git log` on `origin/main` through `d720cf681` and the open PR list, both read 2026-10-22.
 - Advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21 (57 findings).

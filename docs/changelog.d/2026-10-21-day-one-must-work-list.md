@@ -10,4 +10,7 @@
 - Revised after an advisory Codex `gpt-6-sol` (high) review of the first draft (57 findings, each checked
   against the goals doc and the code). A source check also corrected the year-boundary section: the season
   changes on October 1 (`src/utils/season.ts`), so only quote and order numbering is a January 1 risk.
+- Statuses refreshed against `main` at `d720cf681` (2026-10-22) after the Codex GitHub review: PO cost live (#980),
+  file backup and freshness check built but not live, the Goal 7 groundwork (Stripe eligibility risk), and the Goal 4
+  done-test items (pickers, paging, workload test, 200+ payment history) raised to MUST.
 - Draft for Mason's approval by the 2026-10-31 checkpoint. Documentation only; no code or database change.

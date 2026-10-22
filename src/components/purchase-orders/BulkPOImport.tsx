@@ -98,9 +98,21 @@ function buildParsedPOIntentKey(po: ParsedPO): string | null {
 
 // Purchase cost must be exact whole cents. OCR can read $10.006 off a vendor
 // document; that is refused for the admin to fix, never rounded (Mason's rule).
+const UNIT_COST_REQUIRED_MESSAGE = 'Enter a unit cost (type 0 for no cost).';
+
+// Why this line's cost cannot be saved, or null when it can. A cleared box is
+// missing, not $0: clearing a refused OCR cost must not import it at zero.
+function unitCostError(item: ParsedPOItem): string | null {
+  if (item.unit_cost_text !== undefined) {
+    const typed = item.unit_cost_text.trim();
+    if (!typed) return UNIT_COST_REQUIRED_MESSAGE;
+    if (!isWholeCentDollarInput(typed)) return MONEY_PRECISION_MESSAGE;
+  }
+  return isWholeCentPurchaseOrderCost(item.unit_cost) ? null : MONEY_PRECISION_MESSAGE;
+}
+
 function hasWholeCentUnitCost(item: ParsedPOItem): boolean {
-  const typed = item.unit_cost_text?.trim();
-  return isWholeCentPurchaseOrderCost(item.unit_cost) && (!typed || isWholeCentDollarInput(typed));
+  return unitCostError(item) === null;
 }
 
 // Only a matched, positive-quantity line is saved, so only its cost can block the PO.
@@ -432,7 +444,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
         }
         // Only an admin sends cost; a rep's import never carries the OCR cost.
         if (isAdmin && !savedLinesHaveWholeCentCosts(po)) {
-          toast('error', `${po.source_file}: fix the unit cost. ${MONEY_PRECISION_MESSAGE}`);
+          const reason = unitCostError(po.items.find(costBlocksImport)!);
+          toast('error', `${po.source_file}: fix the unit cost. ${reason}`);
           failedCount++;
           continue;
         }
@@ -705,7 +718,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
             {/* Parsed POs accordion */}
             <div className="space-y-3 max-h-[500px] overflow-y-auto">
               {parsedPOs.map((po, poIdx) => {
-                const poTotalValid = savedLinesHaveWholeCentCosts(po);
+                // The total sums every line, so any invalid cost makes it meaningless.
+                const poTotalValid = po.items.every(hasWholeCentUnitCost);
                 const poTotal = purchaseOrderCentsToDollars(po.items.reduce(
                   (sum, item) => sum + purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
                   0,
@@ -936,7 +950,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                       />
                                       {costBlocksImport(item) && (
                                         <p id={`po-${poIdx}-item-${itemIdx}-cost-error`} className="mt-1 text-xs text-red-600">
-                                          {MONEY_PRECISION_MESSAGE}
+                                          {unitCostError(item)}
                                         </p>
                                       )}
                                     </td>

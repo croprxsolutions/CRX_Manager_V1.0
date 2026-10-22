@@ -25,3 +25,8 @@ rounded figure while a cost is invalid. **Known gap, not fixed here:** the `proc
 Function turns OCR text into a number with `parseFloat`, so a cost with more than about 15 significant
 digits is shortened on the server before the browser sees it; closing that needs an Edge Function
 deploy.
+
+**Luna round 2 fixes.** A cleared cost box is now treated as missing ("Enter a unit cost (type 0 for no
+cost).") instead of silently becoming $0.00, so clearing a refused OCR cost can no longer import the
+line at zero; an explicit `0` still imports. The PO total in the review header shows a dash whenever any
+line's cost is invalid, because it sums every line.

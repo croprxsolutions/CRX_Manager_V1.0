@@ -448,6 +448,45 @@ describe('BulkPOImport', () => {
     }
   });
 
+  it('treats a cleared cost box as missing, not $0, until the admin types a cost', async () => {
+    mocks.processDocumentWithOCR.mockResolvedValue({
+      success: true,
+      raw_text: 'parsed',
+      document_type: 'purchase_order',
+      parsed_data: {
+        vendor_name: 'Vendor A',
+        invoice_number: 'INV-CLEARED',
+        invoice_date: '2026-07-16',
+        items: [{ product_name: product.product_name, quantity: 2, unit_cost: 3.334, unit_size: 'GAL' }],
+      },
+      confidence: 1,
+      processing_time_ms: 1,
+    });
+
+    render(<BulkPOImport {...defaultProps} />);
+    fireEvent.change(document.querySelector('#po-pdf-upload')!, {
+      target: { files: [new File(['one'], 'INV-CLEARED.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    await screen.findByRole('button', { name: /import 0 pos/i });
+
+    const costInput = screen.getByRole('spinbutton', { name: /unit cost for/i });
+    fireEvent.change(costInput, { target: { value: '' } });
+
+    expect(await screen.findByRole('button', { name: /import 0 pos/i })).toBeDisabled();
+    expect(costInput).toHaveAccessibleDescription(/enter a unit cost/i);
+
+    // An explicit 0 is the admin's choice and imports.
+    fireEvent.change(costInput, { target: { value: '0' } });
+    fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
+      'save_purchase_order',
+      expect.objectContaining({
+        p_items: [expect.objectContaining({ unit_cost: 0, unit_cost_cents: 0 })],
+      }),
+    ));
+  });
+
   it('refuses a typed cost too precise for a number instead of shortening it', async () => {
     render(<BulkPOImport {...defaultProps} />);
     fireEvent.change(document.querySelector('#po-pdf-upload')!, {

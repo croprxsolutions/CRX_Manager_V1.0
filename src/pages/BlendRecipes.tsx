@@ -72,6 +72,8 @@ export default function BlendRecipes() {
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [productsFailed, setProductsFailed] = useState(false);
+  // Save checks each item's unit against its product's form, so it waits for the catalog (Luna, #1017).
+  const [productsLoading, setProductsLoading] = useState(true);
   // Item units are a PICKER, not free text, so a recipe can no longer carry a unit the
   // pricing/conversion path cannot resolve. unitLoad is tracked separately from the array
   // because an empty array means three different things (in flight / fetch failed / table
@@ -153,10 +155,12 @@ export default function BlendRecipes() {
       toast('error', 'Failed to load products: ' + error.message);
       setProducts([]);
       setProductsFailed(true);
+      setProductsLoading(false);
       return;
     }
     setProducts((data || []) as unknown as Product[]);
     setProductsFailed(false);
+    setProductsLoading(false);
   }, [toast]);
 
   const fetchUnitConversions = useCallback(async () => {
@@ -238,6 +242,10 @@ export default function BlendRecipes() {
   const handleSave = async () => {
     if (productsFailed) {
       toast('error', PRODUCTS_FAILED_MESSAGE);
+      return;
+    }
+    if (productsLoading) {
+      toast('error', 'Products are still loading. Try again in a moment.');
       return;
     }
     if (!form.name.trim()) {
@@ -688,7 +696,7 @@ export default function BlendRecipes() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium text-gray-700">Products</label>
-              <Button size="sm" variant="secondary" onClick={addItem} disabled={productsFailed}>
+              <Button size="sm" variant="secondary" onClick={addItem} disabled={productsFailed || productsLoading}>
                 <Plus className="w-3 h-3" /> Add Product
               </Button>
             </div>
@@ -773,7 +781,7 @@ export default function BlendRecipes() {
 
           <div className="flex justify-end gap-2 pt-2 border-t">
             <Button variant="secondary" onClick={() => setShowEditor(false)}>Cancel</Button>
-            <Button onClick={handleSave} loading={saving} disabled={productsFailed}>
+            <Button onClick={handleSave} loading={saving} disabled={productsFailed || productsLoading}>
               {editId ? 'Save Changes' : 'Create Recipe'}
             </Button>
           </div>

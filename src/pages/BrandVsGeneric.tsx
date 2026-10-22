@@ -190,6 +190,11 @@ export default function BrandVsGeneric() {
       setFormError('Products and mappings could not be loaded. Reload the page to try again.');
       return;
     }
+    // A refresh in flight may not include a mapping just saved (Luna, #1017).
+    if (loading) {
+      setFormError('Products and mappings are still loading. Try again in a moment.');
+      return;
+    }
     const branded = brandedName.trim();
     if (!branded) {
       setFormError('Choose a branded product.');
@@ -497,7 +502,7 @@ export default function BrandVsGeneric() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardHeader title="Manage" accent="Mappings" />
             {isAdmin && (
-              <Button icon={<Plus className="w-4 h-4" />} onClick={openAdd} disabled={loadFailed}>
+              <Button icon={<Plus className="w-4 h-4" />} onClick={openAdd} disabled={loadFailed || loading}>
                 Add Mapping
               </Button>
             )}

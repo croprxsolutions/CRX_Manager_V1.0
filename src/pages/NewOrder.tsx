@@ -102,6 +102,9 @@ export default function NewOrder() {
   // Set when the product list (or an admin's product costs) failed to load: the list is empty and
   // adding lines and saving are blocked, so nothing is priced from a missing or partial list.
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
+  // True while the newest catalog read is in flight: a role-change reload replaces the list, and
+  // an older one on screen must not be priced from meanwhile (Luna, #1017).
+  const [productsLoading, setProductsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -228,6 +231,7 @@ export default function NewOrder() {
   const customersPreloadedRef = useRef(false);
   const fetchData = useCallback(async () => {
     const seq = ++loadSeqRef.current;
+    setProductsLoading(true);
     // Only the customers the form opens with are read here, once: the restored draft's and the
     // link's. A reload after a role change keeps the customers already known.
     const preloadCustomers = !customersPreloadedRef.current;
@@ -305,6 +309,7 @@ export default function NewOrder() {
     }
     setProducts(productRows);
     setProductsLoadFailed(productListFailed);
+    setProductsLoading(false);
     setLoading(false);
   }, [toast, isAdmin, draft, customerIdParam]);
 
@@ -517,6 +522,10 @@ export default function NewOrder() {
       toast('error', 'Products failed to load. Refresh the page before adding products.');
       return;
     }
+    if (productsLoading) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return;
+    }
     // No pricing for a customer whose row could not be loaded (it would fall back to tier 1).
     if (customerLoadError && !selectedCustomer) {
       toast('error', customerLoadError);
@@ -562,6 +571,10 @@ export default function NewOrder() {
     }
     if (productsLoadFailed) {
       toast('error', 'Products failed to load. Refresh the page before saving this order.');
+      return;
+    }
+    if (productsLoading) {
+      toast('error', 'Products are still loading. Try again in a moment.');
       return;
     }
 

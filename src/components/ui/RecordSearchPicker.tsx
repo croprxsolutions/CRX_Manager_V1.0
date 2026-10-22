@@ -238,7 +238,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
           value={query}
           disabled={disabled}
           onChange={(e) => { setQuery(e.target.value); setIsOpen(true); setHighlightedIndex(0); }}
-          onFocus={() => setIsOpen(true)}
+          onFocus={(e) => { setIsOpen(true); e.currentTarget.select(); }}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? `Search ${noun}...`}

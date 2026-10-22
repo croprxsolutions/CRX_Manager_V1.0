@@ -107,8 +107,12 @@ and report it to launch support if the strip still doesn't appear.
 Then explain the change from yesterday. **Draft suggestion** (the bookkeeper sets the final rule):
 
 > yesterday's Total Owed + invoices posted yesterday − payment amounts applied to invoices yesterday
-> − credits and prepay applied yesterday ± corrections (for example a reversed credit) = today's Total
-> Owed
+> − credits and prepay applied yesterday − write-offs applied yesterday + write-offs reversed yesterday
+> ± other corrections (for example a reversed credit) = today's Total Owed
+
+Write-offs change an invoice's balance, but CRX shows them only on each invoice's own page; there's
+no list of yesterday's write-offs. **Draft suggestion:** whoever applies or reverses a write-off adds
+it to the posting list (Step 3's known gap below), with the invoice number and amount.
 
 Payment money that wasn't applied to an invoice doesn't lower Total Owed, so it's tracked separately
 (Step 4). If it doesn't add up, the gap gets a Difference Log row.
@@ -216,7 +220,8 @@ chosen.
 **Pilot Daily Check sheet columns (draft):** date · run by · time · Integrity discrepancies ·
 Cleanup counts (alerts / negative stock / over-received / deliveries without invoices / phantom
 rows) · Total Owed · Unused Prepay · Credit Memos · Net Position · invoices posted (count and
-total) · payments recorded (count and total) · credits issued (count and total) · deposit total ·
+total) · payments recorded (count and total) · credits issued (count and total) · write-offs
+applied and reversed (total) · deposit total ·
 QuickBooks status · paper records not yet entered · all clear? · Difference
 Log rows opened · reviewed by.
 
@@ -300,10 +305,10 @@ number; write VOID across a spoiled form and keep it.
 
 | Paused operation | What each paper record must show |
 |---|---|
-| Recording payments | number, date received, customer, amount, check number or transfer reference, invoices it pays (and amounts), who received it |
+| Recording payments | number, date received, customer, amount, method (check, cash, ACH, card or other: Record Payments starts on "Check", so the method must be written down), check number or transfer reference, invoices it pays (and amounts), who received it |
 | Completing deliveries | number, customer, delivery number if known, products and quantities, date, signer's printed name and signature, driver. Photograph it. (The Goal 5 signed paper ticket.) |
 | Posting or creating invoices | number, customer, delivery or order it bills, lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. |
-| Issuing credits or returns | number, customer, original invoice, products and quantities returned, reason, amount, who approved it |
+| Issuing credits or returns | number, customer, original invoice, products and quantities returned, **each item's condition and whether it goes back into stock** (the Returns screen records both, and they decide what is restocked), reason, amount, who approved it |
 | Receiving stock | number, supplier, PO number, products, quantities, package sizes, lot numbers, date, who received it |
 
 Keep each operation's forms together in one folder, in number order.

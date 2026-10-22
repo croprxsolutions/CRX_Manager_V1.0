@@ -35,6 +35,10 @@
   a question asks Mason about a posting-date filter). The sheet records counts and totals for the
   QuickBooks comparison. Pausing invoice creation also pauses delivery completion, which creates
   invoices automatically.
+- Fourth Codex GitHub App round (three findings, all confirmed and fixed). The A/R equation and the
+  sheet include write-offs, which CRX shows only per invoice, so they go on the posting list. Brake
+  payment forms record the method (Record Payments starts on "Check"). Return forms record each
+  item's condition and whether it is restocked.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

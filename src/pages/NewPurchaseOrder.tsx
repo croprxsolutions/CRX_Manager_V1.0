@@ -25,6 +25,7 @@ import { Sentry } from '../lib/sentry';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import { fetchAllRows } from '../lib/pagedRead';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -97,11 +98,14 @@ export default function NewPurchaseOrder() {
   const productLoadSeqRef = useRef(0);
   const fetchProducts = useCallback(async () => {
     const seq = ++productLoadSeqRef.current;
-    const { data, error } = await supabase
+    // Goal 4: the catalog is read whole, page by page; one request would stop silently at the row cap.
+    const { data, error } = await fetchAllRows((from, to) => supabase
       .from('products')
-      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
       .eq('is_active', true)
-      .order('product_name');
+      .order('product_name')
+      .order('id')
+      .range(from, to));
     let prods: PickerProduct[] = [];
     let loadError: unknown = error;
     if (!error) {
@@ -115,6 +119,8 @@ export default function NewPurchaseOrder() {
     if (loadError) {
       Sentry.captureException(loadError, { tags: { source: 'fetch', action: 'load_purchase_order_products' } });
       toast('error', 'Failed to load Products. Retry before creating this purchase order.');
+      // Never a short or earlier list.
+      setProducts([]);
       setProductsLoading(false);
       return;
     }

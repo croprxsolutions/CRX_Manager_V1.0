@@ -21,7 +21,7 @@ const product = {
 function buildProductsQuery() {
   const result = Promise.resolve({ data: [product], error: null });
   const chain: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'order']) {
+  for (const method of ['select', 'eq', 'order', 'range']) {
     chain[method] = vi.fn(() => chain);
   }
   chain.then = result.then.bind(result);

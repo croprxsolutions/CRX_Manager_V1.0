@@ -185,16 +185,27 @@ export default function CycleCounts() {
   }, [toast]);
 
   const fetchWarehouses = useCallback(async () => {
-    // Pull unique locations from inventory + warehouses table
+    // Pull unique locations from inventory + warehouses table. Inventory is read whole, page by
+    // page (Goal 4, N6): one request stops at the row cap and could miss a location.
     const [invRes, whRes] = await Promise.all([
-      supabase.from('inventory').select('location'),
+      fetchAllRows<{ id: string; location: string | null }>((from, to) => supabase
+        .from('inventory')
+        .select('id, location', { count: 'exact' })
+        .order('id')
+        .range(from, to)),
       supabase.from('warehouses').select('name').eq('is_active', true),
     ]);
-    const invLocs = [...new Set((invRes.data || []).map((r: { location: string | null }) => r.location).filter(Boolean) as string[])];
+    if (invRes.error || whRes.error) {
+      Sentry.captureException(invRes.error ?? whRes.error, { tags: { source: 'fetch', action: 'load_cycle_count_locations' } });
+      toast('error', 'Failed to load locations. Refresh before starting a count.');
+      setWarehouses([]);
+      return;
+    }
+    const invLocs = [...new Set((invRes.data || []).map((r) => r.location).filter(Boolean) as string[])];
     const whLocs = (whRes.data || []).map((r: { name: string }) => r.name);
     const all = [...new Set([...invLocs, ...whLocs])].sort();
     setWarehouses(all);
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     fetchCounts();

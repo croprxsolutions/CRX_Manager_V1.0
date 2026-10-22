@@ -79,6 +79,8 @@ export default function CycleCounts() {
   // New count modal
   const [showNew, setShowNew] = useState(false);
   const [newWarehouse, setNewWarehouse] = useState('Main Warehouse');
+  // A count must not start from a location list that failed to load.
+  const [locationsLoadFailed, setLocationsLoadFailed] = useState(false);
   const [newNotes, setNewNotes] = useState('');
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
@@ -199,8 +201,10 @@ export default function CycleCounts() {
       Sentry.captureException(invRes.error ?? whRes.error, { tags: { source: 'fetch', action: 'load_cycle_count_locations' } });
       toast('error', 'Failed to load locations. Refresh before starting a count.');
       setWarehouses([]);
+      setLocationsLoadFailed(true);
       return;
     }
+    setLocationsLoadFailed(false);
     const invLocs = [...new Set((invRes.data || []).map((r) => r.location).filter(Boolean) as string[])];
     const whLocs = (whRes.data || []).map((r: { name: string }) => r.name);
     const all = [...new Set([...invLocs, ...whLocs])].sort();
@@ -1075,6 +1079,9 @@ export default function CycleCounts() {
                 <option key={w} value={w}>{w}</option>
               ))}
             </select>
+            {locationsLoadFailed && (
+              <p role="alert" className="mt-1 text-sm text-red-600">Locations could not be loaded. Refresh the page to try again.</p>
+            )}
           </div>
           <Input
             label="Notes (Optional)"
@@ -1087,7 +1094,7 @@ export default function CycleCounts() {
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowNew(false)}>Cancel</Button>
-            <Button onClick={handleCreate} loading={creating}>
+            <Button onClick={handleCreate} loading={creating} disabled={locationsLoadFailed}>
               Start Count
             </Button>
           </div>

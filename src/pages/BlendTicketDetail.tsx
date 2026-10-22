@@ -1413,6 +1413,7 @@ export function BlendTicketDetail() {
                   if (customerId !== formData.customer_id && selectedJobId) {
                     setSelectedJobId('');
                     setJobLabel('');
+                    toast('info', 'The linked job belonged to the previous customer, so it was unlinked.');
                   }
                   setFormData({ ...formData, customer_id: customerId });
                   setCustomerLabel(customer?.farm_name ?? '');

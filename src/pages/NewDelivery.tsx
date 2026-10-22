@@ -77,6 +77,8 @@ export default function NewDelivery() {
   // selectedOrderId, so a failed, stale or ineligible read blocks the save.
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderProblem, setOrderProblem] = useState<string | null>(null);
+  // Only a failed read can be retried; an ineligible order stays blocked.
+  const [orderLoadFailed, setOrderLoadFailed] = useState(false);
   const orderLoadSeqRef = useRef(0);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -142,6 +144,12 @@ export default function NewDelivery() {
     setLoadingDetails(true);
     setSelectedOrder(null);
     setOrderProblem(null);
+    setOrderLoadFailed(false);
+    setOrderItems([]);
+    setCustomer(null);
+    setAddresses([]);
+    setSelectedAddressId('');
+    setDeliveryItems([]);
     const { data: orderRow, error: orderErr } = await supabase
       .from('orders')
       .select(`${ORDER_COLUMNS}, customer:customers(farm_name)`)
@@ -152,7 +160,8 @@ export default function NewDelivery() {
 
     if (orderErr) {
       toast('error', 'Failed to load order: ' + orderErr.message);
-      setOrderProblem('The order could not be loaded. Choose it again to retry.');
+      setOrderProblem('The order could not be loaded.');
+      setOrderLoadFailed(true);
       setLoadingDetails(false);
       return;
     }
@@ -247,6 +256,7 @@ export default function NewDelivery() {
       orderLoadSeqRef.current += 1;
       setSelectedOrder(null);
       setOrderProblem(null);
+      setOrderLoadFailed(false);
       setLoadingDetails(false);
       setOrderItems([]);
       setCustomer(null);
@@ -499,7 +509,18 @@ export default function NewDelivery() {
               ariaLabel="Order"
             />
             {orderProblem && (
-              <p role="alert" className="mt-1 text-sm text-red-600">{orderProblem}</p>
+              <p role="alert" className="mt-1 text-sm text-red-600">
+                {orderProblem}
+                {orderLoadFailed && (
+                  <button
+                    type="button"
+                    onClick={() => fetchOrderDetails(selectedOrderId)}
+                    className="ml-2 font-medium text-red-700 underline hover:text-red-800"
+                  >
+                    Retry
+                  </button>
+                )}
+              </p>
             )}
           </div>
 

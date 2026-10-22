@@ -5,6 +5,7 @@ import { numberOrCustomerNameTerms } from '../../lib/customerNameSearch';
 import { orderSearchLabel } from '../../lib/recordLabels';
 import type { OrderStatus } from '../../types';
 
+// A fixed column list: orders is a cost table, so screens never read a caller-built one.
 export const ORDER_SEARCH_SELECT = 'id, order_number, customer_id, status, order_date, customer:customers(farm_name)';
 
 export interface OrderSearchResult {
@@ -27,8 +28,6 @@ interface OrderSearchPickerProps<T extends OrderSearchResult = OrderSearchResult
   statuses: readonly OrderStatus[];
   /** Only this customer's orders, when given. */
   customerId?: string | null;
-  /** Columns to read; include ORDER_SEARCH_SELECT's columns when a caller needs more. */
-  select?: string;
   excludeIds?: readonly string[];
   placeholder?: string;
   ariaLabel?: string;
@@ -52,7 +51,6 @@ export default function OrderSearchPicker<T extends OrderSearchResult = OrderSea
   onSelect,
   statuses,
   customerId,
-  select = ORDER_SEARCH_SELECT,
   excludeIds,
   placeholder = 'Search by order # or customer...',
   ariaLabel = 'Search orders',
@@ -66,11 +64,11 @@ export default function OrderSearchPicker<T extends OrderSearchResult = OrderSea
       selectedLabel={selectedLabel}
       onSelect={onSelect}
       search={async (pattern, limit) => {
-        const { terms, error } = await numberOrCustomerNameTerms('order_number', pattern);
+        const { terms, error } = await numberOrCustomerNameTerms('order_number', pattern, customerId);
         if (error || !terms) return { data: null, error };
         let query = supabase
           .from('orders')
-          .select(select)
+          .select(ORDER_SEARCH_SELECT)
           .or(terms)
           .in('status', [...statuses])
           .is('deleted_at', null);
@@ -78,7 +76,7 @@ export default function OrderSearchPicker<T extends OrderSearchResult = OrderSea
         if (excludeIds?.length) query = query.not('id', 'in', excludedIdList(excludeIds));
         return query.order('order_date', { ascending: false }).order('id').limit(limit);
       }}
-      searchKey={[statuses.join(','), customerId ?? '', select, excludeIds?.join(',') ?? ''].join('|')}
+      searchKey={[statuses.join(','), customerId ?? '', excludeIds?.join(',') ?? ''].join('|')}
       getLabel={orderSearchLabel}
       renderDetails={orderDetails}
       noun="orders"

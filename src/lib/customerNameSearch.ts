@@ -14,11 +14,15 @@ export const CUSTOMER_NAME_MATCH_LIMIT = 50;
 export async function numberOrCustomerNameTerms(
   numberColumn: string,
   pattern: string,
+  /** The page's own customer, when the search is limited to one: only that name is matched. */
+  customerId?: string | null,
 ): Promise<{ terms: string | null; error: unknown }> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('customers')
     .select('id')
-    .or(`farm_name.ilike.${pattern}`)
+    .or(`farm_name.ilike.${pattern}`);
+  if (customerId) query = query.eq('id', customerId);
+  const { data, error } = await query
     .order('farm_name')
     .order('id')
     .limit(CUSTOMER_NAME_MATCH_LIMIT);

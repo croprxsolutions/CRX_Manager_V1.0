@@ -91,7 +91,8 @@ A list read stops at 1,000 rows (the PostgREST cap), so never fill a picker from
   - The page keeps the chosen id and its label. It does not look the record up in a loaded list.
   - Pass `select` with any extra columns the page needs from the pick, e.g. `assigned_tier` for pricing.
   - A saved record's label comes from the record's own join or a by-id read. A failed or missing by-id read
-    blocks pricing and saving; it never falls back to a default.
+    blocks pricing and saving; it never falls back to a default. A read used only for a label (the saved id
+    is sent unchanged) may show a "could not be loaded" label instead.
   - Records not to offer go in `excludeIds`, which filters in the database.
   - Keep the old list's active rule: `activeOnly={false}` where inactive customers were offered.
   - When a field picker's `customerId` changes, clear a chosen field that belongs to another customer.

@@ -3,6 +3,7 @@ import RecordSearchPicker from '../ui/RecordSearchPicker';
 import { excludedIdList } from '../../lib/recordSearch';
 import { PURCHASE_ORDER_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import { purchaseOrderSearchLabel } from '../../lib/recordLabels';
+import { formatUSD } from '../../lib/money';
 import type { POStatus, PurchaseOrder } from '../../types';
 
 interface PurchaseOrderSearchPickerProps {
@@ -29,7 +30,7 @@ function purchaseOrderDetails(po: PurchaseOrder) {
   const parts = [
     po.status.replace('_', ' '),
     po.submitted_date ?? '',
-    po.total_cost != null ? `$${po.total_cost.toFixed(2)}` : '',
+    po.total_cost != null ? formatUSD(po.total_cost) : '',
   ].filter(Boolean);
   return <div className="text-xs text-secondary">{parts.join(' · ')}</div>;
 }

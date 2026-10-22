@@ -129,7 +129,7 @@ describe('PurchaseOrderSearchPicker', () => {
     const onSelect = vi.fn();
     render(<PurchaseOrderSearchPicker value="" selectedLabel="" onSelect={onSelect} statuses={['submitted', 'partially_received', 'fully_received']} isAdmin ariaLabel="PO" />);
     type('PO', 'PO-0250');
-    fireEvent.click(await screen.findByRole('option', { name: /SEED-PO-0250 — Seed Vendor.*\$1234\.50/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /SEED-PO-0250 — Seed Vendor.*\$1,234\.50/ }));
     expect(calls.purchase_orders).toEqual(expect.arrayContaining([
       ['or', 'po_number.ilike."%PO-0250%",vendor.ilike."%PO-0250%"'],
       ['in', 'status', ['submitted', 'partially_received', 'fully_received']],

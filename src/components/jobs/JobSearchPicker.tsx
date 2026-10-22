@@ -5,6 +5,7 @@ import { numberOrCustomerNameTerms } from '../../lib/customerNameSearch';
 import { jobSearchLabel } from '../../lib/recordLabels';
 import type { JobStatus } from '../../types';
 
+// A fixed column list: jobs is a cost table, so screens never read a caller-built one.
 export const JOB_SEARCH_SELECT = 'id, job_number, job_date, status, customer_id, customer:customers(farm_name)';
 
 export interface JobSearchResult {
@@ -27,8 +28,6 @@ interface JobSearchPickerProps<T extends JobSearchResult = JobSearchResult> {
   statuses?: readonly JobStatus[];
   /** Only this customer's jobs, when given. The caller must clear a chosen job when this changes. */
   customerId?: string | null;
-  /** Columns to read; include JOB_SEARCH_SELECT's columns when a caller needs more. */
-  select?: string;
   excludeIds?: readonly string[];
   placeholder?: string;
   ariaLabel?: string;
@@ -52,7 +51,6 @@ export default function JobSearchPicker<T extends JobSearchResult = JobSearchRes
   onSelect,
   statuses,
   customerId,
-  select = JOB_SEARCH_SELECT,
   excludeIds,
   placeholder = 'Search by job # or customer...',
   ariaLabel = 'Search jobs',
@@ -67,19 +65,20 @@ export default function JobSearchPicker<T extends JobSearchResult = JobSearchRes
       selectedLabel={selectedLabel}
       onSelect={onSelect}
       search={async (pattern, limit) => {
-        const { terms, error } = await numberOrCustomerNameTerms('job_number', pattern);
+        const { terms, error } = await numberOrCustomerNameTerms('job_number', pattern, customerId);
         if (error || !terms) return { data: null, error };
         let query = supabase
           .from('jobs')
-          .select(select)
+          .select(JOB_SEARCH_SELECT)
           .or(terms)
           .is('deleted_at', null);
-        if (statuses?.length) query = query.in('status', [...statuses]);
+        // An empty list offers nothing, never every status.
+        if (statuses) query = query.in('status', [...statuses]);
         if (customerId) query = query.eq('customer_id', customerId);
         if (excludeIds?.length) query = query.not('id', 'in', excludedIdList(excludeIds));
         return query.order('job_date', { ascending: false }).order('id').limit(limit);
       }}
-      searchKey={[statuses?.join(',') ?? '', customerId ?? '', select, excludeIds?.join(',') ?? ''].join('|')}
+      searchKey={[statuses ? `in:${statuses.join(',')}` : 'any', customerId ?? '', excludeIds?.join(',') ?? ''].join('|')}
       getLabel={jobSearchLabel}
       renderDetails={jobDetails}
       noun="jobs"

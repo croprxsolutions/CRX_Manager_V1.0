@@ -21,7 +21,7 @@ import { SPLIT_BILLING_SETTING_KEY, parseSplitBillingEnabled } from '../lib/spli
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import FieldSearchPicker, { type FieldSearchResult } from '../components/fields/FieldSearchPicker';
-import JobSearchPicker, { JOB_SEARCH_SELECT, type JobSearchResult } from '../components/jobs/JobSearchPicker';
+import JobSearchPicker, { type JobSearchResult } from '../components/jobs/JobSearchPicker';
 import { jobSearchLabel } from '../lib/recordLabels';
 import UnitSelect from '../components/blendtickets/UnitSelect';
 import { blockedUnitSaveMessage, isKnownUnit, type UnitLoadState } from '../lib/units';
@@ -92,6 +92,9 @@ interface ServiceOption {
   id: string;
   name: string;
 }
+
+// The saved source job's label columns (jobs is a cost table: a fixed, cost-free list).
+const SOURCE_JOB_LABEL_SELECT = 'id, job_number, job_date, status, customer:customers(farm_name)';
 
 interface ResultInvoice {
   id: string;
@@ -830,7 +833,7 @@ export default function FieldAppSplitInvoiceEditor() {
           // Only the label: the saved job id is kept and sent as it is, whatever this read returns.
           const { data: job, error: jobError } = await supabase
             .from('jobs')
-            .select(JOB_SEARCH_SELECT)
+            .select(SOURCE_JOB_LABEL_SELECT)
             .eq('id', row.source_job_id)
             .maybeSingle();
           if (cancelled) return;

@@ -401,7 +401,7 @@ one-line reason. This is still the advisory path — it mints no proof.
 **Only after Step 3A is clean, for EVERY change headed for `main`** (Mason's autonomous-landing
 rule, 2026-09-26 — both merge gates now refuse any merge into `main` without this proof, risky diff
 or not). Run it LAST: after the head is frozen and checks are green (and after any CodeRabbit
-fix push, if its one advisory review arrived), immediately before the migration apply (if any) and
+fix push, if a requested review arrived), immediately before the migration apply (if any) and
 the merge. The proof binds to that HEAD and to GitHub's real base and expires after 30 minutes, so a
 later commit or a moved base voids it.
 
@@ -561,20 +561,25 @@ Notes:
 
 `/codex-review` NEVER pushes, merges, or deploys — it is a read gate. When the verdict is
 clean, hand back to the landing flow in `.claude/commands/ship.md` (summarized in `AGENTS.md`): **push a branch → open a draft PR → finish checks →
-freeze the candidate commit → mark ready (one advisory CodeRabbit review; fix or refute what arrives) → Step 3B Sol proof LAST (unless the
+freeze the candidate commit → mark ready (CodeRabbit reviews only on request, since 2026-10-21; fix or refute what arrives) → Step 3B Sol proof LAST (unless the
 documentation-only exemption in Step 3B applies) →
 apply the non-destructive migration, if any → merge with `--match-head-commit <reviewed-head-sha>`**.
 Direct pushes to `main` are impossible (the `protect-main` ruleset, 2026-07-14), so there is no "push to main" step.
 
-**CodeRabbit (advisory since 2026-10-19, Mason: "cut coderabbit volume"):** CodeRabbit reviews
-each PR ONCE, when it is opened non-draft or marked ready, never on later pushes; it only comments
-(never APPROVED or CHANGES_REQUESTED), and it skips PRs whose title contains `docs(`. GitHub's
+**CodeRabbit (advisory since 2026-10-19, Mason: "cut coderabbit volume"):** since 2026-10-21
+CodeRabbit makes no automatic reviews (Mason: "Yes turn off auto review"; before that it reviewed
+each PR once, when opened non-draft or marked ready); it reviews only when an agent requests it,
+and it only comments (never APPROVED or CHANGES_REQUESTED). GitHub's
 `protect-main` ruleset no longer requires an approving review (required checks stay). Open the PR
 as a draft, bring the branch current and green, freeze the release-candidate commit, then mark it
 ready. If CodeRabbit's review arrives before the merge, fix or refute with evidence every comment,
 in one push on the SAME PR — no replacement PR. Do not wait for it if it has not reviewed by the
 time checks are green and Sol is clean, never post `@coderabbitai review` to buy a re-review, and
-never use `@coderabbitai resume`. A failed CodeRabbit pre-merge "error" check is a finding to fix
+never use `@coderabbitai resume`. Exception (Mason, 2026-10-21): a PR that touches money, invoices,
+payments, inventory, or costs, or one Mason asks to have reviewed, needs a clean CodeRabbit review
+of its current head plus a clean Sol; the agent posts `@coderabbitai full review` once for its
+frozen, green head if CodeRabbit has not reviewed it, and any fix commit it prompts needs a new Sol
+and one new full review (rules: `docs/reference/coderabbit-native-review.md`). A failed CodeRabbit pre-merge "error" check is a finding to fix
 or refute, not a blocker. (`docs/reference/coderabbit-native-review.md` has the history.) Both agent
 merge gates enforce the rule: the newest run of every reported check green with `mergeStateStatus`
 CLEAN, the head containing GitHub's real base, and the Step 3B Sol proof bound to that head and

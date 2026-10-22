@@ -65,6 +65,9 @@
 - Tenth Codex GitHub App round (two findings, both confirmed). After a database restore, the
   runbook's restore and reconciliation steps (4.6–4.7) now come before any paper is entered, matching
   the runbook. The office outage kit includes numbered order forms.
+- Eleventh Codex GitHub App round (two findings, both confirmed). The outage ticket list also maps
+  order forms to CRX order numbers, and the Load Sheet count check allows for completed or voided
+  deliveries the seven-day strip includes.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

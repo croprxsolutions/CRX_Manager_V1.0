@@ -420,6 +420,8 @@ phone or one computer.
   every scheduled or in-progress delivery in the list, with each customer's contact, address and
   products (**Download PDF** prints only a one-line-per-delivery list). Check the printout's count
   against the next day's count on the seven-day strip at the top of the page, which ignores filters.
+  The strip also counts deliveries already completed or voided, which the Load Sheet leaves out, so
+  subtract any of those for that day before comparing.
   File it in the kit. This is the "last printed delivery schedule" the runbook relies on.
 - **Each truck:** blank numbered delivery tickets. These are the same signed paper tickets Goal 5
   uses when there's no signal at a customer.
@@ -448,10 +450,10 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
 - The customer keeps a copy if the ticket has one. **Draft suggestion:** two-part (carbon) tickets.
 - If the product isn't on the printed schedule, write "NOT ON SCHEDULE" on the ticket, so the
   office knows to look for it in CRX afterwards.
-- The office keeps one **outage ticket list**: every ticket number in order, with the customer. Once
-  a ticket is in CRX, the CRX delivery number is written next to it. CRX can't search for a paper
-  ticket number (Deliveries searches only delivery number, customer, driver and farm group), so this
-  list is the only guard against entering a ticket twice.
+- The office keeps one **outage ticket list**: every delivery ticket and order form number in order,
+  with the customer. Once a form is in CRX, the CRX delivery or order number is written next to it.
+  CRX can't search for a paper number (Deliveries and Orders search only their own numbers,
+  customer and a few other fields), so this list is the only guard against entering a form twice.
 
 **Payments**
 - Write every check, cash payment and transfer on the numbered payment log: line number, customer,

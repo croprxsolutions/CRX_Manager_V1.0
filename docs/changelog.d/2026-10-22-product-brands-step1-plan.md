@@ -13,7 +13,7 @@ applied. The most important: the completion check must run inside the completion
 delivered amounts are written, not on the status change, which happens first. The RUP register's duplicate
 check would also have dropped a split's second brand.
 
-**Also.** To-Do row 2.8 added, with its rank proposed as MUST (decision 13 for Mason). There is a new
+**Also.** To-Do row 2.8 added. Mason ranked it SHOULD for now (decision 13, 2026-10-22), declining the recommended MUST. There is a new
 decision-log entry for Mason's 2026-10-22 calls: one cost on the generic, the loader picks and it's
 required, delivery capture before receiving. UPDATE banners on the August master record and build plan say
 WP-3 is replaced.

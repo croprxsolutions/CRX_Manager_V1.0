@@ -104,7 +104,11 @@ This section is mainly for the developer. In plain terms: CRX keeps a to-do list
    - If CRX can't tell whether it landed, the row goes to **needs review** with a named owner. It is never sent again automatically.
 5. **Links at the right level.** CRX stores QuickBooks' ID, and its revision, for every record it writes, and for **each payment-to-invoice and credit-to-invoice application**. When a replacement record is made, the link history shows which record replaced which.
 6. **Half-finished work resumes, it doesn't replay.** Each step is confirmed on its own. If the invoice landed but the payment failed, only the payment is retried.
-7. **Edits made in QuickBooks are noticed.** A regular check of recently changed QuickBooks records (Conductor's `updatedAfter` filter) compares them with CRX. Any difference goes to a person, and CRX never overwrites it.
+7. **Edits and deletions made in QuickBooks are noticed, and every night both sides are checked in full.**
+   - A regular check of recently changed QuickBooks records (Conductor's `updatedAfter` filter) compares them with CRX.
+   - Conductor's deleted-transactions feed shows records deleted by hand. It only reaches back 90 days, so it is read at least daily ([docs](https://docs.conductor.is/api-ref/qbd/deleted-transactions/list)).
+   - Each night a full comparison runs both ways: transaction counts, invoice numbers, each customer's open balance, payment and credit applications, and the mapped accounts. That way a missing outbox item, or a linked record that quietly disappeared, is caught.
+   - Any difference goes to a person, and CRX never overwrites it.
 8. **After a restore of either side, stop.** Writes pause. Both sides are compared using the stored company-file identity and the last confirmed point. Links are rebuilt only from records verified in QuickBooks before syncing resumes. This matches Goal 6's "reconcile before syncing resumes" rule.
 9. **Never auto-apply a payment.** Every payment names its invoices and amounts.
 10. **Corrections keep the history.** Each kind of correction gets its own written procedure: invoice cancellation, payment reversal, credit reversal, ACH return, refund. In a closed month, the correction is a new entry dated in the open month and linked to the original. The original is never voided or edited. QuickBooks' closing date is set to match CRX's closed months.
@@ -246,7 +250,7 @@ Also needed:
 
 | Payment | Event | What CRX does |
 |---|---|---|
-| Card | `checkout.session.completed` with `payment_status = paid`. CRX re-reads the Session from Stripe. | **Settled.** Records the payment through the normal payment function (`allocate_payment`), using the Stripe payment's ID as the duplicate key. |
+| Card | `checkout.session.completed` with `payment_status = paid`. CRX re-reads the Session from Stripe. | **Settled.** Records the payment through a **new server-only database function** that writes the same payment ledger as `allocate_payment`, using the Stripe payment's ID as the duplicate key. It is needed because `allocate_payment` refuses any caller that isn't a signed-in admin or sales rep (`20260713060300_harden_allocate_payment_idempotency.sql`), and the webhook has no staff login. The new function is granted only to the server's own role, never to signed-in users, and it keeps the same PostgreSQL money rules. |
 | ACH started | `checkout.session.completed` with `payment_status = unpaid` (payment processing) | Invoice shows **"payment pending"**. **Balance unchanged.** No QuickBooks entry. |
 | ACH succeeded | `checkout.session.async_payment_succeeded`, usually about 4 business days later ([ACH docs](https://docs.stripe.com/payments/ach-direct-debit)) | **Settled.** Same as card. |
 | ACH failed | `checkout.session.async_payment_failed` | Pending cleared. Nothing recorded. Invoice stays open. |
@@ -264,7 +268,7 @@ Source for the pattern: [Stripe fulfillment](https://docs.stripe.com/checkout/fu
 - **A daily check compares Stripe with CRX**, in case an event never arrives. It covers everything that moves money: payments, refunds, disputes, payouts, and the balance transactions behind them. A missed refund or dispute event would otherwise leave an invoice showing paid while Stripe has already taken the money back.
 
 **Overpayment, wrong amount or a paid invoice:** Goal 7's acceptance test requires an overpayment to become prepay, so it does.
-- Any amount collected beyond what is still owed is recorded through CRX's existing overpayment path (`allocate_payment` → a `prepay_credits` row with `source_type='overpayment'`). This includes a payment on an invoice that was already paid or voided.
+- Any amount collected beyond what is still owed is recorded through the same overpayment rule `allocate_payment` uses, applied by the new server-only Stripe function above (→ a `prepay_credits` row with `source_type='overpayment'`). This includes a payment on an invoice that was already paid or voided.
 - That prepay is also flagged as an **exception for staff** (Sol finding), so nobody is surprised by credit they didn't ask for.
 - If the customer wants the money back instead, staff refund it from that prepay through the refund flow (4.2), following the accountant's written rule.
 - An end-to-end test covers each case: overpaying, paying an already-paid invoice, and paying a voided invoice. The prepay balance must change exactly once, and the flag must appear.

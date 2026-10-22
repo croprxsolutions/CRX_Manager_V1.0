@@ -556,8 +556,11 @@ test('the automatic-review pin fails on every form that could change a setting u
     'a second plain auto_review block': [afterKeyword, '$1\n  auto_review:\n    enabled: true'],
     'a merge key': [afterEnabled, '$1\n    <<: {enabled: true}'],
     'a flow mapping': [/^( {2}auto_review:)$/m, '$1 {enabled: true}'],
-    'a tagged value': [afterEnabled, '    enabled: !!str true'],
-    'an anchored value': [afterEnabled, '    enabled: &on true'],
+    // Value unchanged: these prove the construct itself is refused, whatever it carries.
+    'a tagged value (value unchanged)': [afterEnabled, '    enabled: !!str false'],
+    'an anchored value (value unchanged)': [afterEnabled, '    enabled: &off false'],
+    'a tagged value that switches reviews on': [afterEnabled, '    enabled: !!str true'],
+    'an anchored value that switches reviews on': [afterEnabled, '    enabled: &on true'],
     'a quoted false': [afterEnabled, '    enabled: "false"'],
     'a deeper-indented override': [afterEnabled, '$1\n      enabled: true'],
     'a tab-indented override': [afterEnabled, '$1\n\tenabled: true'],
@@ -579,6 +582,14 @@ test('the automatic-review pin fails on every form that could change a setting u
     const mutated = config.replace(pattern, replacement);
     assert.notEqual(mutated, config, `${label}: the mutation applied`);
     assert.throws(() => assertAutomaticReviewPinned(mutated), assert.AssertionError, label);
+    if (label.endsWith('(value unchanged)')) {
+      // The effective value is still false, so only the strict reader can refuse it.
+      assert.throws(
+        () => assertAutomaticReviewPinned(mutated),
+        /not a value this strict reader accepts/,
+        `${label}: refused for the construct, not the value`,
+      );
+    }
   }
 });
 

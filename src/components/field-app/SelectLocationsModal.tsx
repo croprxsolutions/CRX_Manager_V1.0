@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useLatestRef } from '../../hooks/useLatestRef';
 import { X, MapPin, Search } from 'lucide-react';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
@@ -39,6 +40,8 @@ export default function SelectLocationsModal({
   const [searchText, setSearchText] = useState('');
   const [cropFilter, setCropFilter] = useState('');
   const loadSeqRef = useRef(0);
+  // The caller passes a fresh array on every render; read it only when the modal opens.
+  const initialSelectedIdsRef = useLatestRef(initialSelectedIds);
 
   const fetchFields = useCallback(async () => {
     const seq = ++loadSeqRef.current;
@@ -86,9 +89,9 @@ export default function SelectLocationsModal({
   useEffect(() => {
     if (isOpen) {
       fetchFields();
-      setSelectedIds(new Set(initialSelectedIds));
+      setSelectedIds(new Set(initialSelectedIdsRef.current));
     }
-  }, [isOpen, fetchFields, initialSelectedIds]);
+  }, [isOpen, fetchFields, initialSelectedIdsRef]);
 
   const cropTypes = useMemo(() => {
     const set = new Set(fields.map((f) => f.crop_type).filter(Boolean) as string[]);

@@ -479,6 +479,8 @@ export default function QuoteBuilder() {
   // Set when the product list (or an admin's product costs) failed to load: the list is empty and
   // adding lines and saving are blocked, so nothing is priced from a missing or partial list.
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
+  // Until the product list and unit conversions land, every unit would convert at a factor of 1.
+  const [referenceDataReady, setReferenceDataReady] = useState(false);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   // Fields this page knows by id: each section's saved field (read by id) plus each field picked.
   const [fields, setFields] = useState<Record<string, FieldOption>>({});
@@ -819,6 +821,7 @@ export default function QuoteBuilder() {
   const referenceSeqRef = useRef(0);
   const fetchReferenceData = useCallback(async () => {
     const seq = ++referenceSeqRef.current;
+    setReferenceDataReady(false);
     // Customers and fields are searched by their pickers; the product list is read whole because
     // pricing, the product picker's local search and the admin cost overlay all use it.
     const [prodRes, convRes] = await Promise.all([
@@ -860,6 +863,7 @@ export default function QuoteBuilder() {
     setProducts(productRows);
     setProductsLoadFailed(productListFailed);
     setUnitConversions((convRes.data || []) as UnitConversion[]);
+    setReferenceDataReady(!productListFailed);
   }, [toast, isAdmin]);
 
   const generateQuoteNumber = async () => {
@@ -1558,6 +1562,11 @@ export default function QuoteBuilder() {
     itemKey: string,
     updates: Partial<LocalItem>
   ) => {
+    // A line priced before unit conversions load would convert at a factor of 1.
+    if (!referenceDataReady) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return;
+    }
     setSections((prev) =>
       prev.map((sec) => {
         if (sec._key !== sectionKey) return sec;
@@ -1686,6 +1695,10 @@ export default function QuoteBuilder() {
       toast('error', 'Products failed to load. Refresh the page before adding products.');
       return '';
     }
+    if (!referenceDataReady) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return '';
+    }
     const newItem = makeEmptyItem();
     setSections((prev) =>
       prev.map((sec) => {
@@ -1769,6 +1782,10 @@ export default function QuoteBuilder() {
     }
     if (productsLoadFailed) {
       toast('error', 'Products failed to load. Refresh the page before saving this quote.');
+      return null;
+    }
+    if (!referenceDataReady) {
+      toast('error', 'Products are still loading. Try again in a moment.');
       return null;
     }
     if (!profile) return null;

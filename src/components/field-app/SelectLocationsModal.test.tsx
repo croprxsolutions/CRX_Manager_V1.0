@@ -6,19 +6,27 @@ const toast = vi.fn();
 let fieldReply: { data: unknown[] | null; error: { message: string } | null; count?: number | null } = {
   data: [], error: null, count: 0,
 };
+// When set, the fake server holds these rows and answers each .range(from, to) with that
+// slice (at most 1,000 rows, like the real server's cap) plus the full count.
+let fieldRows: unknown[] | null = null;
 const rangeCalls: Array<[number, number]> = [];
 const tables: string[] = [];
 
 function chain() {
   const builder: Record<string, unknown> = {};
   const self = () => builder;
+  let slice: [number, number] | null = null;
   for (const m of ['select', 'eq', 'order', 'or', 'not', 'limit']) builder[m] = vi.fn(self);
   builder.range = vi.fn((from: number, to: number) => {
     rangeCalls.push([from, to]);
+    slice = [from, to];
     return builder;
   });
   builder.then = vi.fn((resolve: (v: unknown) => void) => {
-    Promise.resolve(fieldReply).then(resolve);
+    const reply = fieldRows && slice
+      ? { data: fieldRows.slice(slice[0], Math.min(slice[1], slice[0] + 999) + 1), error: null, count: fieldRows.length }
+      : fieldReply;
+    Promise.resolve(reply).then(resolve);
     return builder;
   });
   return builder;
@@ -54,16 +62,25 @@ describe('SelectLocationsModal field list', () => {
     toast.mockReset();
     rangeCalls.length = 0;
     tables.length = 0;
+    fieldRows = null;
   });
 
   it('reads every field page by page and loads no customer list', async () => {
-    fieldReply = { data: [field], error: null, count: 1 };
+    // 1,005 fields: one capped read would stop at 1,000 and miss the last five.
+    fieldRows = Array.from({ length: 1005 }, (_, i) => ({
+      ...field,
+      id: `field-${i + 1}`,
+      field_name: `Field #${String(i + 1).padStart(4, '0')}`,
+    }));
     // A stable list: the modal reloads whenever initialSelectedIds is a new array.
     const initialSelectedIds: string[] = [];
     render(<SelectLocationsModal isOpen onClose={vi.fn()} onSelect={vi.fn()} initialSelectedIds={initialSelectedIds} />);
 
-    expect(await screen.findByText('North 40')).toBeInTheDocument();
+    // Field #1,003 lives only on the second page.
+    expect(await screen.findByText('Field #1003', {}, { timeout: 10_000 })).toBeInTheDocument();
+    expect(screen.getByText('Field #0001')).toBeInTheDocument();
     expect(rangeCalls[0]).toEqual([0, 999]);
+    expect(rangeCalls.some(([from]) => from > 0)).toBe(true);
     expect(tables).not.toContain('customers');
     expect(screen.getByRole('combobox', { name: 'Filter by customer' })).toHaveAttribute('placeholder', 'All Customers');
   });

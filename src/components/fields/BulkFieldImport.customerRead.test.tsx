@@ -14,18 +14,26 @@ const assignmentProps = vi.fn();
 let customerReply: { data: unknown[] | null; error: { message: string } | null; count?: number | null } = {
   data: [], error: null, count: 0,
 };
+// When set, the fake server holds these customers and answers each .range(from, to) with
+// that slice (at most 1,000 rows, like the real server's cap) plus the full count.
+let customerRows: unknown[] | null = null;
 const rangeCalls: Array<[number, number]> = [];
 
 function customerChain() {
   const builder: Record<string, unknown> = {};
   const self = () => builder;
+  let slice: [number, number] | null = null;
   for (const m of ['select', 'eq', 'order', 'limit', 'is', 'in', 'neq']) builder[m] = vi.fn(self);
   builder.range = vi.fn((from: number, to: number) => {
     rangeCalls.push([from, to]);
+    slice = [from, to];
     return builder;
   });
   builder.then = vi.fn((resolve: (v: unknown) => void) => {
-    Promise.resolve(customerReply).then(resolve);
+    const reply = customerRows && slice
+      ? { data: customerRows.slice(slice[0], Math.min(slice[1], slice[0] + 999) + 1), error: null, count: customerRows.length }
+      : customerReply;
+    Promise.resolve(reply).then(resolve);
     return builder;
   });
   return builder;
@@ -99,17 +107,25 @@ describe('BulkFieldImport customer list read', () => {
     toast.mockReset();
     assignmentProps.mockReset();
     rangeCalls.length = 0;
+    customerRows = null;
   });
 
   it('reads customers page by page and offers them at step 4', async () => {
-    customerReply = { data: [{ id: 'cust-1', farm_name: 'Smith Farm' }], error: null, count: 1 };
+    // 1,005 customers: one capped read would stop at 1,000 and miss the last five.
+    const all = Array.from({ length: 1005 }, (_, i) => ({
+      id: `cust-${i + 1}`,
+      farm_name: `Farm #${String(i + 1).padStart(4, '0')}`,
+    }));
+    customerRows = all;
     render(<BulkFieldImport open onClose={vi.fn()} onSuccess={vi.fn()} />);
     await goToCustomerStep();
 
     expect(rangeCalls[0]).toEqual([0, 999]);
-    expect(assignmentProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ customers: [{ id: 'cust-1', farm_name: 'Smith Farm' }] }),
-    );
+    expect(rangeCalls.some(([from]) => from > 0)).toBe(true);
+    const offered = (assignmentProps.mock.lastCall?.[0] as { customers: Array<{ id: string }> }).customers;
+    expect(offered).toHaveLength(1005);
+    // Customer #1,003 lives only on the second page.
+    expect(offered).toContainEqual({ id: 'cust-1003', farm_name: 'Farm #1003' });
   });
 
   it('a failed read after a successful one leaves no stale list and blocks step 4', async () => {

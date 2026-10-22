@@ -130,6 +130,25 @@ describe('CustomerSearchPicker', () => {
     fireEvent.click(await screen.findByRole('option', { name: /Seed Farm 0002/ }));
     expect(input).toHaveValue('Seed Farm 0001');
   });
+
+  it('tabbing through a box whose saved label is still empty keeps the selection', () => {
+    // The saved customer's name has not loaded yet (or failed to), so the label is empty.
+    const onSelect = vi.fn();
+    render(<CustomerSearchPicker value="c-1" selectedLabel="" onSelect={onSelect} ariaLabel="Customer" />);
+    const input = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('emptying the typed text and leaving the box still clears the selection', () => {
+    const onSelect = vi.fn();
+    render(<CustomerSearchPicker value="c-1" selectedLabel="Seed Farm 0001" onSelect={onSelect} ariaLabel="Customer" />);
+    const input = screen.getByRole('combobox', { name: 'Customer' });
+    type(input, '');
+    fireEvent.blur(input);
+    expect(onSelect).toHaveBeenCalledWith(null);
+  });
 });
 
 describe('FieldSearchPicker', () => {

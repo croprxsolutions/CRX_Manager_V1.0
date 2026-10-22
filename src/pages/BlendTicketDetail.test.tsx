@@ -219,6 +219,23 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
   });
 
+  it('the missing-customer warning stays after the customer box is cleared', async () => {
+    // The ticket names a customer, but that customer's row did not come back with it.
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: { ...baseTicket, customer_id: 'cust-1', customer: null }, error: null });
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    renderTicket();
+    expect(await screen.findByText(/saved customer could not be loaded/)).toBeInTheDocument();
+
+    // Clearing the box does not choose a customer, so the warning and the save block stay.
+    fireEvent.click(screen.getByRole('button', { name: /^Clear customer/i }));
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('');
+    expect(screen.getByText(/saved customer could not be loaded/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+  });
+
   it('a failed catalog re-read after a successful one clears the catalog and blocks products and saving', async () => {
     const catalogProduct = { id: 'p-cat', product_name: 'Catalog Gamma', is_active: true, product_form: 'liquid' };
     let catalogFails = false;

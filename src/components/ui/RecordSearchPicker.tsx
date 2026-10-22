@@ -180,7 +180,9 @@ export default function RecordSearchPicker<T extends { id: string }>({
   };
 
   const handleBlur = () => {
-    if (!query.trim()) {
+    // Only text the user emptied clears the choice; a label still loading (or that failed
+    // to load) is empty too, and tabbing through it must not drop the saved record.
+    if (query !== selectedLabel && !query.trim()) {
       clear();
       return;
     }

@@ -170,7 +170,8 @@ export function BlendTicketDetail() {
   // The saved customer's row did not come back with the ticket (deleted or hidden),
   // so its name is unknown. Nothing is saved or billed against it until a customer is chosen.
   const customerRowMissing = Boolean(
-    ticket?.customer_id && !ticket.customer && formData.customer_id === ticket.customer_id,
+    ticket?.customer_id && !ticket.customer
+    && (formData.customer_id === ticket.customer_id || formData.customer_id === ''),
   );
 
   const orderActionBlockReason = !ticket

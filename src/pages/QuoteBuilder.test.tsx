@@ -575,6 +575,56 @@ describe('QuoteBuilder', () => {
     expect(screen.getByRole('button', { name: 'Add one' })).toBeInTheDocument();
   });
 
+  it('no line can be added or priced, and nothing saved, until the products and unit conversions finish loading', async () => {
+    // The product read is held open until the test releases it; until then every unit
+    // would convert at a factor of 1, so the page must refuse to add, price or save.
+    let releaseProducts!: (result: { data: unknown; error: unknown }) => void;
+    const productsRead = new Promise<{ data: unknown; error: unknown }>((resolve) => { releaseProducts = resolve; });
+    const heldChain = () => {
+      const self: Record<string, unknown> = {};
+      for (const m of ['select', 'eq', 'neq', 'or', 'not', 'order', 'limit', 'range', 'in', 'is']) self[m] = () => self;
+      self.then = (...args: Parameters<Promise<unknown>['then']>) => productsRead.then(...args);
+      self.catch = (...args: Parameters<Promise<unknown>['catch']>) => productsRead.catch(...args);
+      self.finally = (...args: Parameters<Promise<unknown>['finally']>) => productsRead.finally(...args);
+      return self;
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'products') return heldChain();
+      return buildChain({
+        data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
+        error: null,
+      });
+    });
+    renderQuoteBuilder();
+
+    const customerBox = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customerBox, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    expect(customerBox).toHaveValue('Far Field Farm');
+
+    // Adding a line is refused while the products load.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
+    expect(screen.getByRole('button', { name: 'Add one' })).toBeInTheDocument();
+
+    // Saving is refused too, before any save reaches the server.
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.'));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+
+    // Once the products land, adding a line works.
+    await act(async () => {
+      releaseProducts({ data: [{ id: 'product-1', product_name: 'Alpha Herbicide', is_active: true }], error: null });
+      await productsRead;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Add one' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add one' })).not.toBeInTheDocument());
+    expect(mockToast).not.toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
+  });
+
   it('renders the Quote Builder heading for a new quote', async () => {
     renderQuoteBuilder();
     await waitFor(() => {

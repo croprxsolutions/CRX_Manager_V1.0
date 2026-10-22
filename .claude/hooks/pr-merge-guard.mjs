@@ -70,8 +70,7 @@ import {
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
-import { coderabbitSkipNotice, findCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
-import { ownerRequestDirs } from "./owner-approval-lib.mjs";
+import { coderabbitSkipNotice, findCodeRabbitSkip, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -276,7 +275,7 @@ if (requests.some((request) => request?.admin)) {
 function coderabbitSkipFor(hookPayload) {
   try {
     return findCodeRabbitSkip({
-      dirs: ownerRequestDirs([hookPayload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
+      dirs: skipStateDirs([hookPayload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
       sessionId: hookPayload?.session_id,
     });
   } catch {

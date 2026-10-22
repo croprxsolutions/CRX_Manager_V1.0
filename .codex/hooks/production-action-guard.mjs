@@ -65,8 +65,7 @@ import {
   readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
-import { coderabbitSkipNotice, findCodeRabbitSkip } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { ownerRequestDirs } from "../../.claude/hooks/owner-approval-lib.mjs";
+import { coderabbitSkipNotice, findCodeRabbitSkip, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -114,7 +113,9 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // ALLOW, so that would bypass every production-action restriction, not merely
 // the Codex App review check this PR added. `sol-exempt-lib` joined 2026-10-07 for
 // the same reason: imported at startup, and it decides whether a merge needs Sol.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+// `coderabbit-skip-lib` joined 2026-10-22 likewise: imported at startup, and it
+// decides whether Mason waived a money PR's CodeRabbit review (Codex App P1, #1035).
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|coderabbit-skip-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -129,6 +130,7 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   ".claude/hooks/review-proof-guard.mjs",
   ".claude/hooks/live-testdata-lib.mjs",
   ".claude/hooks/sol-exempt-lib.mjs",
+  ".claude/hooks/coderabbit-skip-lib.mjs",
   ".codex/hooks/production-action-guard.mjs",
   ".codex/hooks/codex-hook-adapter.mjs",
   "scripts/run-claude-review.mjs",
@@ -2034,7 +2036,7 @@ async function main() {
     repoDir: process.env.CODEX_PROJECT_DIR || process.cwd(),
     hardGateDeadlineMs: hookDeadlineMs(CODEX_HOOK_TIMEOUT_MS, CODEX_HOOK_RESERVE_MS),
     findCodeRabbitSkip: () => findCodeRabbitSkip({
-      dirs: ownerRequestDirs([payload.cwd, process.env.CODEX_PROJECT_DIR, process.cwd()]),
+      dirs: skipStateDirs([payload.cwd, process.env.CODEX_PROJECT_DIR, process.cwd()]),
       sessionId: payload.session_id ?? payload.sessionId,
     }),
   });

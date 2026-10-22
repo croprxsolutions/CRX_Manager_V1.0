@@ -39,8 +39,7 @@ import {
   readCodeRabbitRequirement,
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
-import { findCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
-import { ownerRequestDirs } from "./owner-approval-lib.mjs";
+import { findCodeRabbitSkip, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 
@@ -191,7 +190,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   // (2026-10-22); the thread check below still runs.
   let skip = null;
   if (coderabbitReview.status === "missing") {
-    try { skip = findCodeRabbitSkip({ dirs: ownerRequestDirs([dir]), sessionId, now }); } catch { skip = null; }
+    try { skip = findCodeRabbitSkip({ dirs: skipStateDirs([dir]), sessionId, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {
     return refuse(`${number} needs a clean CodeRabbit review of its current head before its migration applies, because ${coderabbitReview.why}. Post "@coderabbitai full review" once (docs/reference/coderabbit-native-review.md), answer its threads, then re-run.`);

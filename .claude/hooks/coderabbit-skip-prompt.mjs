@@ -9,8 +9,8 @@
 // part of the message (owner-approval-lib.mjs, replyWithoutReminders).
 
 import { readFileSync } from "node:fs";
-import { ownerRequestDirs, replyWithoutReminders } from "./owner-approval-lib.mjs";
-import { coderabbitSkipCommand, recordCodeRabbitSkip, withdrawCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
+import { replyWithoutReminders } from "./owner-approval-lib.mjs";
+import { coderabbitSkipCommand, recordCodeRabbitSkip, skipStateDirs, withdrawCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 
 function emit(extra) {
   if (extra) {
@@ -35,7 +35,7 @@ let failure = "";
 // The same id the gates read: Codex may send it camelCased (Luna round 2).
 const sessionId = payload?.session_id ?? payload?.sessionId;
 try {
-  const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+  const dirs = skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
   if (command === "skip") recorded = recordCodeRabbitSkip({ dirs, sessionId, said: reply });
   else ({ removed, stillLive } = withdrawCodeRabbitSkip({ dirs, sessionId }));
 } catch (error) {

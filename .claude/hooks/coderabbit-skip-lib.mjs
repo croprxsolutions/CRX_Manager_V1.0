@@ -28,7 +28,10 @@
 // Mason's PC with his permissions. The file lives in .claude/session-state,
 // which the review proof guard keeps file tools out of.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// Node built-ins only: the Codex production gate imports this at startup, and
+// it is on that gate's protected-harness list (Codex App P1 on #1035), so it
+// must not pull in unprotected modules.
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export const CODERABBIT_SKIP_PURPOSE = "crx-coderabbit-skip-v1";
@@ -44,6 +47,26 @@ export function coderabbitSkipCommand(reply) {
   if (SKIP_RE.test(text)) return "skip";
   if (CANCEL_RE.test(text)) return "cancel";
   return null;
+}
+
+/**
+ * The .claude/session-state folders of this session's checkout(s), one per
+ * distinct real folder (Windows paths compared case-insensitively). The same
+ * rule as owner-approval-lib's ownerRequestDirs, kept here so the hook and every
+ * gate resolve identical folders without importing that module.
+ */
+export function skipStateDirs(sessionFolders) {
+  const canonical = (s) => {
+    const r = path.resolve(s);
+    try { return realpathSync.native(r); } catch { return r; }
+  };
+  const key = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const roots = new Map();
+  for (const s of (sessionFolders || []).filter(Boolean)) {
+    const c = canonical(String(s));
+    if (!roots.has(key(c))) roots.set(key(c), c);
+  }
+  return [...roots.values()].map((r) => path.join(r, ".claude", "session-state"));
 }
 
 export const coderabbitSkipFileName = (sessionId) => `coderabbit-skip-${sessionId}.json`;

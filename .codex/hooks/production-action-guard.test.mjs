@@ -479,7 +479,7 @@ try {
     // to its own session, so pin main()'s wiring to the payload's session id.
     const guardSource = readFileSync(new URL("./production-action-guard.mjs", import.meta.url), "utf8");
     assert.match(guardSource,
-      /findCodeRabbitSkip: \(\) => findCodeRabbitSkip\(\{\s*dirs: ownerRequestDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\]\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,/,
+      /findCodeRabbitSkip: \(\) => findCodeRabbitSkip\(\{\s*dirs: skipStateDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\]\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,/,
       "main() binds the waiver lookup to the hook payload's own session id");
     assert.equal((guardSource.match(/findSkip \}\)/g) || []).length, 2, "both advisory call sites pass the lookup through");
   }
@@ -1110,7 +1110,26 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 16, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 17, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  // coderabbit-skip-lib decides whether Mason waived a money PR's CodeRabbit review
+  // and is imported at startup (Codex App P1 on #1035): Codex may not edit it.
+  for (const file of [".claude/hooks/coderabbit-skip-lib.mjs", ".claude\\hooks\\coderabbit-skip-lib.mjs", ".claude/hooks/../hooks/coderabbit-skip-lib.mjs"]) {
+    assert.equal(evaluateProductionAction({ toolName: "Write", toolInput: { file_path: file } }).blocked, true,
+      `Codex may not write the CodeRabbit-skip module: ${file}`);
+    assert.equal(evaluateProductionAction({ toolName: "apply_patch", toolInput: `*** Begin Patch\n*** Update File: ${file}\n@@\n-a\n+b\n*** End Patch` }).blocked, true,
+      `nor patch it: ${file}`);
+  }
+  assert.equal(evaluateProductionAction({ toolName: "PowerShell", toolInput: { command: "Set-Content .claude/hooks/coderabbit-skip-lib.mjs -Value ''" } }).blocked, true,
+    "nor overwrite the CodeRabbit-skip module from the shell");
+  // Every module the guard imports at startup must be protected (or a Node built-in).
+  {
+    const imports = [...readFileSync(new URL("./production-action-guard.mjs", import.meta.url), "utf8")
+      .matchAll(/^import [^;]*? from "\.\.\/\.\.\/(\.claude\/hooks\/[^"]+)";/gm)].map((m) => m[1]);
+    for (const file of imports) {
+      assert.ok(PROTECTED_HARNESS_FILES.includes(file), `startup import ${file} is on the protected harness list`);
+    }
+    assert.ok(imports.includes(".claude/hooks/coderabbit-skip-lib.mjs"), "the import scan sees the skip module");
+  }
   // sol-exempt-lib decides whether a merge needs Sol and is imported at startup
   // (Mason's documentation-only exemption, 2026-10-07): Codex may not edit it.
   for (const file of [".claude/hooks/sol-exempt-lib.mjs", ".claude\\hooks\\sol-exempt-lib.mjs", ".claude/hooks/../hooks/sol-exempt-lib.mjs"]) {

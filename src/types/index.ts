@@ -1060,6 +1060,21 @@ export interface DispatchStockRow {
 
 export type DeliveryStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'voided';
 export type DeliveryPriority = 'low' | 'normal' | 'high' | 'urgent';
+// How the customer confirmed a completion (migration 20261022010000); checked by complete_delivery.
+export type DeliveryCompletionEvidence = 'signature' | 'paper_ticket' | 'left_at_site';
+/** A saved ticket or drop-location photo sent as completion evidence (its id is p_evidence_ref). */
+export interface DeliveryEvidencePhoto {
+  id: string;
+  storage_path: string;
+  image_url: string;
+  caption: string | null;
+}
+/** A delivery's receipt address, read through get_delivery_receipt_recipient. */
+export interface ReceiptRecipient {
+  email: string | null;
+  contactName: string | null;
+  farmName: string | null;
+}
 export type DeliveryIssueType = 'none' | 'customer_not_home' | 'gate_locked' | 'road_blocked' | 'wrong_address' | 'refused' | 'weather' | 'other';
 
 export interface Delivery {
@@ -1077,6 +1092,8 @@ export interface Delivery {
   delivery_window_start: string | null;
   delivery_window_end: string | null;
   completed_at: string | null;
+  completion_evidence?: DeliveryCompletionEvidence | null;
+  completion_evidence_ref?: string | null;
   signature_url: string | null;
   signed_by: string | null;
   receipt_pdf_url: string | null;

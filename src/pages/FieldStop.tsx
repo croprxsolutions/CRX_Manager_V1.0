@@ -27,7 +27,9 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
-import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
+import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
+import { fetchReceiptRecipient, latestEvidencePhoto, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
@@ -80,6 +82,7 @@ export default function FieldStop() {
   const sentCompletedAt = useRef(new Map<string, string | undefined>());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const paperTicketInputRef = useRef<HTMLInputElement>(null);
+  const leftAtSiteInputRef = useRef<HTMLInputElement>(null);
   // Latest stop id the route is showing — older in-flight fetches bail (H3 stale guard).
   const activeStopIdRef = useRef<string | undefined>(undefined);
 
@@ -96,15 +99,20 @@ export default function FieldStop() {
   const [step, setStep] = useState<Step>('arrive');
   const [signedBy, setSignedBy] = useState('');
   const [noOnePresent, setNoOnePresent] = useState(false);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   // Goal 5 paper fallback: a photo of the signed paper ticket replaces the on-screen signature.
   const [usePaperTicket, setUsePaperTicket] = useState(false);
   const [paperDeliveredOn, setPaperDeliveredOn] = useState(todayInBusinessTz());
   // Stop-to-stop navigation reuses this page; never carry paper mode onto the next stop.
   // Also drop the previous stop's photos, so a failed load for this stop shows none
   // (fails closed) instead of letting the last stop's ticket photo pass the check.
-  useEffect(() => { setUsePaperTicket(false); setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]); }, [id]);
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setUsePaperTicket(false); setNoOnePresent(false); setSignedBy(''); setSignatureDataUrl(null);
+    setPaperDeliveredOn(todayInBusinessTz()); setPhotos([]);
+  }, [id]);
   const [emailOnComplete, setEmailOnComplete] = useState(true);
+  // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
+  const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
 
   const fetchPhotos = useCallback(async () => {
@@ -147,6 +155,11 @@ export default function FieldStop() {
 
     const del = data as unknown as StopDelivery;
     setDelivery(del);
+    setReceiptRecipient(null);
+    // Only an open stop sends a receipt on completion.
+    if (!del.customer?.email && (del.status === 'scheduled' || del.status === 'in_progress')) {
+      void fetchReceiptRecipient(del.id).then((recipient) => { if (!isStale()) setReceiptRecipient(recipient); });
+    }
     if (del.status === 'scheduled') setStep('arrive');
     else if (del.status === 'in_progress') setStep('verify');
     else {
@@ -248,8 +261,17 @@ export default function FieldStop() {
   };
 
   const isPartial = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity);
+  // What complete_delivery checks before it completes (migration 20261022010000).
+  const completionEvidence: DeliveryCompletionEvidence = noOnePresent ? 'left_at_site' : usePaperTicket ? 'paper_ticket' : 'signature';
+  const receiptEmail = delivery?.customer?.email || receiptRecipient?.email || null;
+  // The proof the chosen path needs is in place (the server checks it again).
+  const evidenceReady = completionEvidence === 'left_at_site'
+    ? hasLeftAtSitePhoto(photos)
+    : completionEvidence === 'paper_ticket'
+      ? hasPaperTicketPhoto(photos) && isValidPaperDeliveredOn(paperDeliveredOn)
+      : !!signatureDataUrl;
   // What the driver can still edit while the signal check runs; compared after the check.
-  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
+  const completionInputs = JSON.stringify([signedBy, deliveryQtys, usePaperTicket, noOnePresent, paperDeliveredOn, signatureDataUrl, emailOnComplete]);
   const completionInputsRef = useLatestRef(completionInputs);
   const hasAnyQty = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) > 0);
 
@@ -263,6 +285,10 @@ export default function FieldStop() {
     }
     if (caption === PAPER_TICKET_PHOTO_CAPTION && countPaperTicketPhotos(photos) + files.length > MAX_PAPER_TICKET_PHOTOS) {
       toast('error', 'Maximum 2 ticket photos per delivery');
+      return;
+    }
+    if (caption === LEFT_AT_SITE_PHOTO_CAPTION && countLeftAtSitePhotos(photos) + files.length > MAX_LEFT_AT_SITE_PHOTOS) {
+      toast('error', 'Maximum 2 drop-location photos per delivery');
       return;
     }
     setUploadingPhoto(true);
@@ -310,6 +336,7 @@ export default function FieldStop() {
     setUploadingPhoto(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (paperTicketInputRef.current) paperTicketInputRef.current.value = '';
+    if (leftAtSiteInputRef.current) leftAtSiteInputRef.current.value = '';
   };
 
   // ── Complete (mirrors DeliveryDetail.handleComplete) ────────────────────
@@ -318,6 +345,8 @@ export default function FieldStop() {
     if (!hasAnyQty) { toast('error', 'At least one item must have a quantity above zero'); return; }
     if (usePaperTicket && !hasPaperTicketPhoto(photos)) { toast('error', 'Take a photo of the signed paper ticket before completing'); return; }
     if (usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn)) { toast('error', 'Enter the delivery date from the paper ticket (today or earlier)'); return; }
+    if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
+    if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     void handleComplete();
   };
 
@@ -331,12 +360,18 @@ export default function FieldStop() {
     const quantitiesJson = isPartial
       ? Object.fromEntries(items.map((it) => [it.id, deliveryQtys[it.id] ?? it.quantity]))
       : null;
+    const evidencePhoto = completionEvidence === 'paper_ticket'
+      ? latestEvidencePhoto(photos, PAPER_TICKET_PHOTO_CAPTION)
+      : completionEvidence === 'left_at_site' ? latestEvidencePhoto(photos, LEFT_AT_SITE_PHOTO_CAPTION) : undefined;
     const intentParams = {
       p_delivery_id: id,
       p_signed_by: signedBy,
       p_performed_by: profile.id,
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
       ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
+      p_evidence: completionEvidence,
+      // The exact photo the screen shows as saved (the signature's reference comes from the key).
+      ...(evidencePhoto ? { p_evidence_ref: evidencePhoto.id } : {}),
     };
     // check_idempotency replays by key and operation only: bind the key to this exact
     // payload (stop, signer, quantities, ticket date) so an edited retry, or another
@@ -350,8 +385,18 @@ export default function FieldStop() {
       ...intentParams,
       p_completed_at: undefined,
       delivered_on: usePaperTicket ? paperDeliveredOn : null,
+      // A re-drawn signature is a new attempt: new key, new signature file.
+      signature_digest: completionEvidence === 'signature' && signatureDataUrl ? await signatureDigest(signatureDataUrl) : null,
     })}`;
-    const rpcParams = { ...intentParams, p_idempotency_key: completeIdem.getKeyFor(completeScope) };
+    const idemKey = completeIdem.getKeyFor(completeScope);
+    // The server accepts only the image at the path it derives from this key; a retry of the key reuses it.
+    const signaturePath = completionEvidence === 'signature' ? await signatureImagePathFor(id, idemKey) : undefined;
+    const rpcParams = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
+
+    // The receipt address is read while the stop is still open (a driver may not see the customer).
+    const recipient = emailOnComplete && !delivery.customer?.email
+      ? (receiptRecipient ?? await fetchReceiptRecipient(id))
+      : null;
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
     // without a reachable server the stop stays exactly as it was.
@@ -361,8 +406,28 @@ export default function FieldStop() {
       return;
     }
     // The signal check can take a few seconds; re-check the stop did not change meanwhile.
-    if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); setCompleting(false); return; }
-    if (completionInputsRef.current !== completionInputs) { toast('error', 'Details changed while checking for signal. Nothing was saved; check them and tap Complete Delivery again.'); setCompleting(false); return; }
+    const stillSameAttempt = () => {
+      if (activeStopIdRef.current !== id) { toast('error', 'This stop just changed — please retry'); return false; }
+      if (completionInputsRef.current !== completionInputs) {
+        toast('error', 'Details changed while checking for signal. The delivery was not completed; check them and tap Complete Delivery again.');
+        return false;
+      }
+      return true;
+    };
+    if (!stillSameAttempt()) { setCompleting(false); return; }
+    // The server completes only once this attempt's signature image is saved, so it goes up first;
+    // if it cannot be saved, nothing is sent.
+    if (signaturePath && signatureDataUrl) {
+      try {
+        await uploadSignatureImage(signaturePath, signatureDataUrl);
+      } catch (sigErr) {
+        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { extra: { context: 'Field Mode signature upload before completion failed' } });
+        toast('error', 'The signature could not be saved, so the delivery was NOT completed. Check your signal and tap Complete Delivery again.');
+        setCompleting(false);
+        return;
+      }
+      if (!stillSameAttempt()) { setCompleting(false); return; }
+    }
 
     try {
       // Work out the completion time now, after the signal and route checks: if midnight passed
@@ -377,36 +442,7 @@ export default function FieldStop() {
       assertRpcResult(result, 'complete_delivery');
       completeIdem.resetKeyFor(completeScope);
 
-      // Signature image upload (PII — stored as a path, signed URL on demand).
-      if (signatureDataUrl && !usePaperTicket) {
-        try {
-          const base64Data = signatureDataUrl.split(',')[1];
-          const byteCharacters = atob(base64Data);
-          const byteArray = new Uint8Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) byteArray[i] = byteCharacters.charCodeAt(i);
-          const blob = new Blob([byteArray], { type: 'image/png' });
-          const filePath = `signatures/${id}.png`;
-          const { error: uploadError } = await supabase.storage
-            .from('delivery-signatures')
-            .upload(filePath, blob, { upsert: true, contentType: 'image/png' });
-          if (!uploadError) {
-            const sigResult = await supabase.from('deliveries').update({ signature_url: filePath }).eq('id', id).select();
-            checkMutationResult(sigResult, 'Update delivery signature');
-          } else {
-            // Supabase Storage reports failures via the RETURNED error (not a throw),
-            // so surface it explicitly — otherwise the signature image is silently
-            // lost after the delivery has already committed.
-            Sentry.captureException(new Error(`Signature upload failed: ${uploadError.message}`), { extra: { context: 'Field Mode signature upload returned error' } });
-            toast('error', 'Signature image could not be saved — the delivery is recorded; re-capture the signature if needed');
-          }
-        } catch (sigErr) {
-          Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { extra: { context: 'Field Mode signature upload failed' } });
-          // The delivery already committed; keep going (don't strand the receipt)
-          // but surface the failed image capture so it isn't silently lost.
-          toast('error', 'Signature image could not be saved — the delivery is recorded; re-capture the signature if needed');
-        }
-      }
-
+      // The signature image went up before the call; the server recorded signature_url itself.
       const autoInvoice = result as { auto_invoice?: { invoice_number?: string } } | null;
       const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || null;
       if (invoiceNum) setAutoInvoiceNumber(invoiceNum);
@@ -416,7 +452,7 @@ export default function FieldStop() {
 
       logActivity({
         event: 'delivery_completed',
-        description: `Delivery ${delivery.delivery_number} completed${isPartial ? ' (partial)' : ''}${usePaperTicket ? ' (signed paper ticket photo)' : ''}${invoiceNum ? ` — draft invoice ${invoiceNum}` : ''} via Field Mode`,
+        description: `Delivery ${delivery.delivery_number} completed${isPartial ? ' (partial)' : ''}${completionEvidence === 'paper_ticket' ? ' (signed paper ticket photo)' : completionEvidence === 'left_at_site' ? ' (no one present; drop-location photo)' : ' (on-screen signature)'}${invoiceNum ? ` — draft invoice ${invoiceNum}` : ''} via Field Mode`,
         performedBy: profile.id,
         entityType: 'delivery',
         entityId: delivery.id,
@@ -432,17 +468,18 @@ export default function FieldStop() {
         }
       }
 
-      await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
+      await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || recipient?.farmName || receiptRecipient?.farmName || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
 
       // Same opt-in as an on-screen signature. The customer keeps the signed paper ticket; a
       // guaranteed email needs a server-side receipt queue (open in the Goal 5 plan).
-      if (emailOnComplete && delivery.customer?.email) {
+      const sendTo = delivery.customer?.email || recipient?.email || receiptRecipient?.email || null;
+      if (emailOnComplete && sendTo) {
         const emailItems = items
           .map((it) => ({ name: it.product?.product_name || 'Product', qty: isPartial ? (deliveryQtys[it.id] ?? it.quantity) : it.quantity }))
           .filter((r) => r.qty > 0);
         const receiptSent = await sendDeliveryCompletionEmail({
-          customerEmail: delivery.customer.email,
-          contactName: delivery.customer.contact_name,
+          customerEmail: sendTo,
+          contactName: delivery.customer?.contact_name ?? recipient?.contactName ?? receiptRecipient?.contactName ?? null,
           deliveryNumber: delivery.delivery_number || '',
           deliveryId: delivery.id,
           customerId: delivery.customer_id,
@@ -452,7 +489,7 @@ export default function FieldStop() {
           ...(usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn) ? { deliveredOn: paperDeliveredOn } : {}),
         });
         if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
-      } else if (usePaperTicket && emailOnComplete) {
+      } else if (emailOnComplete && (completionEvidence !== 'signature' || (!delivery.customer && !recipient && !receiptRecipient))) {
         toast('warning', RECEIPT_NO_EMAIL_MESSAGE);
       }
 
@@ -656,13 +693,27 @@ export default function FieldStop() {
               <SignatureCanvas key={noOnePresent ? 'signature-skipped' : 'signature-capture'} onSignatureChange={setSignatureDataUrl} label="Customer signs with their finger" height={160} disabled={noOnePresent} />
             </div>
           )}
-          {noOnePresent && <p className="text-xs text-gray-500 mt-2">Signature skipped because no one was present.</p>}
-          <button type="button" disabled={!signedBy.trim() || (usePaperTicket && (!hasPaperTicketPhoto(photos) || !isValidPaperDeliveredOn(paperDeliveredOn)))} onClick={() => setStep('review')} className="w-full mt-4 flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
+          {noOnePresent && (
+            <div className="border border-gray-200 rounded-lg p-3 space-y-2 mt-3">
+              <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
+              {hasLeftAtSitePhoto(photos) ? (
+                <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the drop location saved</p>
+              ) : (
+                <p className="text-sm text-amber-700">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
+              )}
+              <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
+                <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
+              </button>
+            </div>
+          )}
+          <button type="button" disabled={!signedBy.trim() || !evidenceReady} onClick={() => setStep('review')} className="w-full mt-4 flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
             <PenLine className="w-5 h-5" /> Continue to Review
           </button>
           {!signedBy.trim() && <p className="text-xs text-amber-700 mt-2 text-center">Enter who signed or choose no one present to continue.</p>}
           {signedBy.trim() && usePaperTicket && !hasPaperTicketPhoto(photos) && <p className="text-xs text-amber-700 mt-2 text-center">Take the photo of the signed ticket to continue.</p>}
           {signedBy.trim() && usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn) && <p className="text-xs text-amber-700 mt-2 text-center">Enter the delivery date from the paper ticket (today or earlier) to continue.</p>}
+          {signedBy.trim() && completionEvidence === 'signature' && !signatureDataUrl && <p className="text-xs text-amber-700 mt-2 text-center">Have the customer sign above to continue.</p>}
+          {noOnePresent && !hasLeftAtSitePhoto(photos) && <p className="text-xs text-amber-700 mt-2 text-center">Take the drop-location photo to continue.</p>}
         </div>
       )}
 
@@ -692,7 +743,7 @@ export default function FieldStop() {
             <div className="flex justify-between"><dt className="text-gray-500">Photos</dt><dd className="font-medium">{photos.length}</dd></div>
           </dl>
 
-          {delivery.customer?.email && (
+          {receiptEmail && (
             <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
               <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className="w-4 h-4" />
               Email a receipt to the customer

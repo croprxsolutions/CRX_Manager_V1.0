@@ -7,13 +7,17 @@
  * The ticket photo is an ordinary delivery photo carrying this caption, so it is
  * stored, protected and shown exactly like every other delivery photo.
  *
- * The photo requirement is enforced by the app only, at parity with the on-screen
- * signature: complete_delivery requires no completion evidence on either path. A
- * server-enforced link is open in the Goal 5 plan (it needs a complete_delivery change).
+ * Since migration 20261022010000 the server enforces it: complete_delivery takes
+ * p_evidence and refuses a paper_ticket completion without a ticket photo on the
+ * delivery (and a signature completion without its saved image); see deliveryEvidence.ts.
  */
 import { todayInBusinessTz } from './dateUtils';
 
 export const PAPER_TICKET_PHOTO_CAPTION = 'Signed paper delivery ticket';
+// The field stop's "No one present — left at site" path needs a photo of the drop location
+// instead (left_at_site). Both captions must match complete_delivery's evidence check exactly.
+export const LEFT_AT_SITE_PHOTO_CAPTION = 'Left at site — drop location';
+const EVIDENCE_PHOTO_CAPTIONS: ReadonlySet<string> = new Set([PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION]);
 
 // A paper-ticket delivery is completed later, once back in signal, so the driver
 // records the day it really happened. That day becomes the delivery and invoice date.
@@ -60,12 +64,12 @@ export function completedAtForKey(
   return sent.get(key);
 }
 
-// Ticket photos do not count toward the 10-photo limit, so a delivery that already has
-// 10 ordinary photos can still be completed on the paper-ticket path.
+// Ticket and drop-location photos do not count toward the 10-photo limit, so a delivery that
+// already has 10 ordinary photos can still be completed on either photo path.
 export const MAX_ORDINARY_DELIVERY_PHOTOS = 10;
 
 export function countOrdinaryPhotos(photos: ReadonlyArray<{ caption?: string | null }>): number {
-  return photos.filter((photo) => photo.caption !== PAPER_TICKET_PHOTO_CAPTION).length;
+  return photos.filter((photo) => !photo.caption || !EVIDENCE_PHOTO_CAPTIONS.has(photo.caption)).length;
 }
 
 // Ticket photos are bounded on their own: a front and a back is enough.
@@ -77,4 +81,15 @@ export function countPaperTicketPhotos(photos: ReadonlyArray<{ caption?: string 
 
 export function hasPaperTicketPhoto(photos: ReadonlyArray<{ caption?: string | null }>): boolean {
   return photos.some((photo) => photo.caption === PAPER_TICKET_PHOTO_CAPTION);
+}
+
+// A drop-location photo is bounded the same way as a ticket photo.
+export const MAX_LEFT_AT_SITE_PHOTOS = 2;
+
+export function countLeftAtSitePhotos(photos: ReadonlyArray<{ caption?: string | null }>): number {
+  return photos.filter((photo) => photo.caption === LEFT_AT_SITE_PHOTO_CAPTION).length;
+}
+
+export function hasLeftAtSitePhoto(photos: ReadonlyArray<{ caption?: string | null }>): boolean {
+  return photos.some((photo) => photo.caption === LEFT_AT_SITE_PHOTO_CAPTION);
 }

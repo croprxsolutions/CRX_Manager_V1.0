@@ -199,6 +199,15 @@ export default function NewDelivery() {
       Sentry.captureException(itemsRes.error, { tags: { source: 'fetch', action: 'load_order_items' } });
       toast('error', 'Failed to load order items.');
     }
+    // Without its items and customer (RUP and inventory checks, driver notice) the order cannot be delivered.
+    if (custRes.error || itemsRes.error || !custRes.data) {
+      setOrderProblem(custRes.error || itemsRes.error
+        ? 'The order details could not be loaded.'
+        : 'The order\'s customer could not be loaded.');
+      setOrderLoadFailed(true);
+      setLoadingDetails(false);
+      return;
+    }
 
     const cust = custRes.data as Customer | null;
     setCustomer(cust);

@@ -36,6 +36,8 @@ explicit `0`, or a cleared box still to fill) with the catalog cost; only an unt
 cost takes the catalog cost, as before. A negative cost now says "Unit cost cannot be negative." instead
 of the decimal-places message.
 
-**Codex GitHub App fixes.** A typed cost is saved from its exact text, so the largest amount the box
-accepts (`90071992547409.91`) saves `9007199254740991` cents instead of one cent less through a binary
-float; the table footer's PO Total now shows a dash like the header while any cost is invalid.
+**Codex GitHub App fixes.** A typed cost is saved and totalled from its exact text, never through a
+binary float. `save_purchase_order` receives dollars beside cents and refuses a pair that disagree, so a
+typed amount whose dollar number cannot carry its exact cents (from about $90 billion up, such as
+`90071992547409.91`) is refused on the line ("This unit cost is too large to save exactly.") instead of
+failing at save. The table footer's PO Total now shows a dash like the header while any cost is invalid.

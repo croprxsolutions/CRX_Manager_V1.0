@@ -100,6 +100,7 @@ function buildParsedPOIntentKey(po: ParsedPO): string | null {
 // document; that is refused for the admin to fix, never rounded (Mason's rule).
 const UNIT_COST_REQUIRED_MESSAGE = 'Enter a unit cost (type 0 for no cost).';
 const UNIT_COST_NEGATIVE_MESSAGE = 'Unit cost cannot be negative.';
+const UNIT_COST_TOO_LARGE_MESSAGE = 'This unit cost is too large to save exactly.';
 
 // Why this line's cost cannot be saved, or null when it can. A cleared box is
 // missing, not $0: clearing a refused OCR cost must not import it at zero.
@@ -109,6 +110,14 @@ function unitCostError(item: ParsedPOItem): string | null {
     if (!typed) return UNIT_COST_REQUIRED_MESSAGE;
     if (typed.startsWith('-')) return UNIT_COST_NEGATIVE_MESSAGE;
     if (!isWholeCentDollarInput(typed)) return MONEY_PRECISION_MESSAGE;
+    // save_purchase_order receives dollars beside cents and refuses a pair that disagree
+    // (PO_UNIT_COST_CENTS_MISMATCH), so an amount whose dollar number cannot carry its exact
+    // cents (from about $90 billion up, e.g. 90071992547409.91) is refused here, not at save.
+    const typedCents = parseDollarsToCents(typed);
+    if (typedCents === null
+      || purchaseOrderUnitCostCents(purchaseOrderCentsToDollars(typedCents)) !== typedCents) {
+      return UNIT_COST_TOO_LARGE_MESSAGE;
+    }
   }
   if (item.unit_cost < 0) return UNIT_COST_NEGATIVE_MESSAGE;
   return isWholeCentPurchaseOrderCost(item.unit_cost) ? null : MONEY_PRECISION_MESSAGE;
@@ -118,9 +127,9 @@ function hasWholeCentUnitCost(item: ParsedPOItem): boolean {
   return unitCostError(item) === null;
 }
 
-// The cents a line saves. A typed cost comes from its exact text: parseFloat of a large amount
-// such as 90071992547409.91 loses the last cent. unitCostError has already refused any text that
-// is not a plain amount with at most two decimals and an exact cents value.
+// The cents a line saves and totals. A typed cost comes from its exact text, never from a
+// binary float; unitCostError has already refused any text that is not a plain amount with at
+// most two decimals whose cents its dollar number carries exactly.
 function unitCostCentsOf(item: ParsedPOItem): number {
   if (item.unit_cost_text !== undefined) {
     const typedCents = parseDollarsToCents(item.unit_cost_text.trim());
@@ -737,7 +746,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                 // The total sums every line, so any invalid cost makes it meaningless.
                 const poTotalValid = po.items.every(hasWholeCentUnitCost);
                 const poTotal = purchaseOrderCentsToDollars(po.items.reduce(
-                  (sum, item) => sum + purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
+                  (sum, item) => sum + purchaseOrderLineTotalCents(item.quantity_ordered, purchaseOrderCentsToDollars(unitCostCentsOf(item))),
                   0,
                 ));
                 const hasErrors = po.parse_errors.length > 0;
@@ -984,7 +993,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                     <td className="px-3 py-2 font-mono text-sm text-nav-dark">
                                       {hasWholeCentUnitCost(item)
                                         ? fmt(purchaseOrderCentsToDollars(
-                                          purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
+                                          purchaseOrderLineTotalCents(item.quantity_ordered, purchaseOrderCentsToDollars(unitCostCentsOf(item))),
                                         ))
                                         : '—'}
                                     </td>

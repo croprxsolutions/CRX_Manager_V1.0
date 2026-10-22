@@ -267,7 +267,10 @@ folder); the path and reference are recorded in `deliveries.completion_evidence`
 6. **Signature files from abandoned attempts stay stored.** Each completion attempt uploads its
    signature to its own path before the server call, and no rule lets anyone delete those files (so an
    accepted one can never be replaced). A refused or abandoned attempt leaves its file behind; a
-   service-role cleanup of files no delivery references is a possible follow-up.
+   service-role cleanup of files no delivery references is a possible follow-up. By design, not a
+   defect (Luna round 3 LOW, refuted 2026-10-22): letting app users delete a not-yet-accepted attempt
+   file would reopen the replace-or-delete window this rule closes, the files are small (live
+   2026-10-22: smallest signature 2,356 bytes), and nothing reads an unreferenced attempt file.
 7. **Older signature rules unchanged.** The four policies for the old fixed path
    (`signatures/<id>.png`) still let staff replace that image on deliveries completed before this change.
    Narrowing them is an access change for a follow-up, on Mason's approval.
@@ -278,9 +281,15 @@ folder); the path and reference are recorded in `deliveries.completion_evidence`
    trusts the upload's recorded type and size; a deliberately crafted file of the right type and size
    would pass. The screens only ever upload a real drawn signature or camera photo.
 10. **A file deleted in the same instant as its completion.** The completion locks the accepted photo
-   row, but not the stored file; an admin or rep deleting that exact file while the completion is still
+   row, but not the stored file; an admin deleting that exact file while the completion is still
    running could leave the record pointing at nothing. Once the completion commits, the restrictive
-   storage rules refuse any later delete or replace.
+   storage rules refuse any later delete or replace. Not reachable through the app (Luna round 3 MED,
+   refuted 2026-10-22): the only storage rule that allows deleting a `delivery-photos` file is
+   `delivery_photos_delete`, admins only (live read 2026-10-22; no update rule exists), and no screen,
+   library or Edge Function deletes a delivery-photo file (`src/` and `supabase/functions/` have no
+   `.remove(` on that bucket). Reaching it takes an admin's own hand-written storage call timed inside
+   the completion's commit; the dashboard and service-role tools bypass storage rules entirely, so a
+   lock would not cover them either.
 
 ## FIXED 2026-10-19 (migration `20261019220000` applied live 2026-10-20 02:22 UTC (9:22 PM Central, 2026-10-19), PR #964) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
 

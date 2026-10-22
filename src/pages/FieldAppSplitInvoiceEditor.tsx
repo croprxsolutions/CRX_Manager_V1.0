@@ -619,6 +619,9 @@ export default function FieldAppSplitInvoiceEditor() {
     // `stale()` checkpoint below instead of overwriting a newer set's result card.
     activeLoadSetIdRef.current = setId;
     const stale = () => activeLoadSetIdRef.current !== setId;
+    // Post stays unauthorized while this readback runs: the versions are kept local and published
+    // only once the invoices, items and shares they cover have all been read and shown.
+    postVersionsRef.current = [];
     // 1) Child invoices for this billing set (authoritative totals + send disposition).
     const { data: invRows, error: invErr } = await supabaseUntyped
       .from('invoices')
@@ -645,7 +648,7 @@ export default function FieldAppSplitInvoiceEditor() {
       send_disposition: ((r.send_disposition as string) === 'suppressed_zero_total' ? 'suppressed_zero_total' : 'normal') as ResultInvoice['send_disposition'],
       status: (r.status as string) || 'draft',
     }));
-    postVersionsRef.current = ((invRows as Array<{ id: string; invoice_group_id: string | null; invoice_post_version?: string | null }> | null) ?? [])
+    const loadedVersions = ((invRows as Array<{ id: string; invoice_group_id: string | null; invoice_post_version?: string | null }> | null) ?? [])
       .map((r) => ({ id: r.id, invoice_group_id: r.invoice_group_id, invoice_post_version: r.invoice_post_version ?? null }));
     setResultInvoices(invoices);
     // "Posted" means every child is in a COMMITTED status — NOT merely "not draft" (Codex round-3
@@ -664,7 +667,7 @@ export default function FieldAppSplitInvoiceEditor() {
     }
 
     const invoiceIds = invoices.map((i) => i.id);
-    if (invoiceIds.length === 0) { if (stale()) return false; setResultShares([]); return true; }
+    if (invoiceIds.length === 0) { if (stale()) return false; setResultShares([]); postVersionsRef.current = loadedVersions; return true; }
 
     // 2) Invoice items (invoice_id + description) for those invoices.
     const { data: itemRows, error: itemErr } = await supabaseUntyped
@@ -680,7 +683,7 @@ export default function FieldAppSplitInvoiceEditor() {
     if (stale()) return false;
     // 3) Per-line shares, joined to their item for invoice_id + description.
     const itemIds = Array.from(itemMap.keys());
-    if (itemIds.length === 0) { setResultShares([]); return true; }
+    if (itemIds.length === 0) { setResultShares([]); postVersionsRef.current = loadedVersions; return true; }
     const { data: shareRows, error: shareErr } = await supabaseUntyped
       .from('invoice_line_shares')
       .select('invoice_item_id, customer_id, unit_price_cents, amount_cents')
@@ -698,6 +701,7 @@ export default function FieldAppSplitInvoiceEditor() {
     });
     if (stale()) return false;
     setResultShares(shares);
+    postVersionsRef.current = loadedVersions;
     return true;
   }, [customerNames]);
 

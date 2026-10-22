@@ -1117,6 +1117,27 @@ describe('FieldApplicationInvoice — existing GROUP member invoice', () => {
     });
   });
 
+  it('keeps Post unauthorized when the sibling read fails', async () => {
+    setupGroup(['draft', 'draft']);
+    const base = mockFrom.getMockImplementation()!;
+    const failing = makeFromMock({ invoices: { data: null, error: { message: 'sibling read failed' } } });
+    // Only the sibling list (the read that joins the customer name) fails; the invoice row loads.
+    mockFrom.mockImplementation((table: string) => {
+      const chain = base(table);
+      if (table !== 'invoices') return chain;
+      const select = chain.select;
+      chain.select = vi.fn((cols: string) => (cols.includes('customer:customers') ? failing('invoices') : select(cols)));
+      return chain;
+    });
+    await renderPage();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Some invoice details did not load. Reload the page before posting.'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Post Group/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Post Group$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('could not read the invoice version')));
+    expect(mockRpc.mock.calls.map((c) => c[0])).not.toContain('post_invoice_group');
+  });
+
   it('locks edit (no Save / Post / Delete buttons) when any sibling is posted', async () => {
     setupGroup(['draft', 'posted']);
     await renderPage();

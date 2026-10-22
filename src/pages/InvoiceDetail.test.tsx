@@ -1689,6 +1689,22 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     expect(unsavedGuardCalls[unsavedGuardCalls.length - 1]).toBe(false);
   });
 
+  it('locks the form while Post runs, so nothing typed then is lost to the reload after it', async () => {
+    let finish: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'post_invoice') return { throwOnError: () => new Promise((resolve) => { finish = resolve; }) };
+      return Promise.resolve({ data: null, error: null });
+    });
+    await openLoaded();
+    expect(screen.getByPlaceholderText('Customer PO #')).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Post Invoice' }));
+    await waitFor(() => expect(screen.getByPlaceholderText('Customer PO #')).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    finish({ data: null, error: null });
+    await waitFor(() => expect(screen.getByPlaceholderText('Customer PO #')).toBeEnabled());
+  });
+
   it('reloads the invoice when the server says it changed since this screen loaded it', async () => {
     mockRpc.mockImplementation((name: string) => {
       if (name === 'post_invoice') {

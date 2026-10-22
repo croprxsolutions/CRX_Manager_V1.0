@@ -138,6 +138,9 @@ export default function OrderDetail() {
   const [products, setProducts] = useState<Product[]>([]);
   // A failed catalog read empties the list and blocks adding products (never a short list).
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
+  // True while a catalog read is in flight: the add-product picker offers nothing until it lands,
+  // so no product is ever picked from an older list (Luna, #1017).
+  const [productsLoading, setProductsLoading] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<string, { available: number; prebooked: number; onOrder: number }>>({});
@@ -382,6 +385,7 @@ export default function OrderDetail() {
   const productsLoadRef = useRef(0);
   const fetchProducts = useCallback(async () => {
     const loadId = ++productsLoadRef.current;
+    setProductsLoading(true);
     // The whole active catalog, page by page: the add-product modal filters, tier-prices and
     // cost-overlays this list locally, and one read stops at the server's row cap.
     const productsRes = await fetchAllRows((from, to) => supabase
@@ -417,6 +421,7 @@ export default function OrderDetail() {
     }
     if (loadId !== productsLoadRef.current) return;
     setProducts(productRows);
+    setProductsLoading(false);
 
     if (positionError) {
       setInventoryByProduct({});
@@ -2314,7 +2319,9 @@ export default function OrderDetail() {
             })}
           </div>
 
-          {productsLoadFailed ? (
+          {productsLoading ? (
+            <div role="status" className="text-center py-8 text-secondary">Loading products...</div>
+          ) : productsLoadFailed ? (
             <div role="alert" className="text-center py-8 text-red-600">
               Products could not be loaded. Leave edit mode and edit again to retry.
             </div>

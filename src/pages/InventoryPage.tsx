@@ -210,6 +210,8 @@ export default function InventoryPage() {
   // True while the newest product read is in flight: the list on screen may be an older one.
   const [productsLoading, setProductsLoading] = useState(false);
   const [customersFailed, setCustomersFailed] = useState(false);
+  // True while the newest customer read is in flight; a new hold waits for it (Luna, #1017).
+  const [customersLoading, setCustomersLoading] = useState(false);
   const [addProductId, setAddProductId] = useState('');
   const [addLocation, setAddLocation] = useState('Main Warehouse');
   const [addQty, setAddQty] = useState('');
@@ -453,6 +455,7 @@ export default function InventoryPage() {
 
   const fetchCustomers = useCallback(async () => {
     const readId = ++customersReadRef.current;
+    setCustomersLoading(true);
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('customers')
       .select('id, farm_name', { count: 'exact' })
@@ -461,6 +464,7 @@ export default function InventoryPage() {
       .order('id')
       .range(from, to));
     if (readId !== customersReadRef.current) return;
+    setCustomersLoading(false);
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });
       toast('warning', 'Customer names could not be loaded. Any saved customer on this hold is unchanged.');
@@ -621,8 +625,8 @@ export default function InventoryPage() {
         toast('error', HOLD_LISTS_FAILED_MESSAGE);
         return;
       }
-      if (productsLoading) {
-        toast('error', PRODUCTS_LOADING_MESSAGE);
+      if (productsLoading || customersLoading) {
+        toast('error', 'Products and customers are still loading. Try again in a moment.');
         return;
       }
       if (!holdProductId) {
@@ -1918,7 +1922,7 @@ export default function InventoryPage() {
                 createHoldIntent.isForeignIntentLocked
                 || createHoldIntent.isRetryExpired
                 // A new hold needs the complete lists; a locked retry re-sends its frozen request.
-                || (!createHoldIntent.isIntentLocked && (productsFailed || customersFailed || productsLoading))
+                || (!createHoldIntent.isIntentLocked && (productsFailed || customersFailed || productsLoading || customersLoading))
               }
             >
               {createHoldIntent.isIntentLocked ? 'Retry Exact Hold' : 'Create Hold'}

@@ -30,7 +30,7 @@ Read-only investigation. Nothing was changed in the database, storage, secrets, 
 | "Done when" bullet | Status today | Gap |
 |---|---|---|
 | Live check confirms Pro with PITR on | **Not met.** Plan is free. | Mason's billing click, then an agent re-checks live. |
-| Restore drill restores database, permissions, user access and each protected bucket into an isolated copy; photos open and match records | **Not met.** No drill ever run; no file backup exists. | Build the file backup, then run the drill. |
+| Restore drill restores database, permissions, user access and each protected bucket into an isolated copy; photos open and match records | **Not met.** No drill ever run. The weekly file backup is live since 2026-10-22 (runbook 4.1). | Run the drill. |
 | One rewind-to-a-time recovery practiced on a throwaway copy | **Not met.** Impossible before Pro + PITR. | After Pro. |
 | Reconcile payments, QuickBooks entries and emails before sync resumes after a restore | **Not met.** No written procedure. | Write the checklist. Needs the Goal 7 integrations to be fully specified, so draft now and complete later. |
 | Recovery meets Mason's target (back by next business morning, minutes of loss) | **Not met.** Today: about 7 days of loss at best, more after a missed run, untested restore time. | Pro + PITR, plus a timed drill. |

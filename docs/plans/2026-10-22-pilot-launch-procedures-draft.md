@@ -109,7 +109,14 @@ Then explain the change from yesterday. **Draft suggestion** (the bookkeeper set
 > yesterday's Total Owed + invoices posted yesterday − payment amounts applied to invoices yesterday
 > + applied amounts of payments voided yesterday − credits and prepay applied yesterday + credits and
 > prepay applications reversed yesterday − write-offs applied yesterday + write-offs reversed yesterday
-> = today's Total Owed
+> − invoices unposted or voided yesterday (net of any prepay or credit the void gave back) ± any other
+> change on the Daily Money Activity List = today's Total Owed
+
+**The first day needs a starting point.** CRX keeps no end-of-day balances. So on December 31,
+after the last Chem Man bill and before any January 1 activity, [OWNER: Mason to name] writes down
+the four A/R numbers (Total Owed, Unused Prepay, Credit Memos, Net Position) as the sheet's opening
+row. The January 1 check starts from those numbers. They should match the signed opening balances
+(To-Do 15.1).
 
 Payment money that wasn't applied to an invoice doesn't lower Total Owed, so it's tracked separately
 (Step 4). If it doesn't add up, the gap gets a Difference Log row.
@@ -123,11 +130,14 @@ numbers can't be read off a screen the next morning.
 **Draft suggestion: the Daily Money Activity List.** Until CRX can list these by date (question 9
 below), whoever does one of the following writes it on a shared list the same day: date, what was
 done, customer, invoice or record number, amount, and their initials.
-- posting an invoice;
+- posting, unposting or voiding an invoice (for a void, also any prepay or credit it gave back);
 - applying or reversing a write-off;
-- applying a credit memo to an invoice, or reversing that;
+- issuing a credit (a credited return), applying a credit memo to an invoice, or reversing that
+  (the Returns screen shows the date a return was requested, not the day it was credited);
 - applying, editing or reversing prepay;
-- voiding a payment (with its original date and the amount it had applied to invoices).
+- voiding a payment (with its original date and the amount it had applied to invoices);
+- **anything else that changes what a customer owes, their prepay or their credit.** When in doubt,
+  write it down.
 
 Step 3's equation and Steps 5 and 8 use that list. If the list is incomplete, the day won't add up,
 so it has to be part of each person's routine from January 1.

@@ -46,6 +46,10 @@
   dated report to replace the list. Every brake operation keeps a **form list** mapping paper numbers
   to CRX record numbers, because only payments can be searched by a paper number. Payment forms and
   the outage log record the amount for each invoice and any prepay remainder.
+- Sixth Codex GitHub App round (three findings, all confirmed). The Daily Money Activity List now
+  also covers unposting and voiding invoices and issuing credits (Returns shows only the requested
+  date), plus a catch-all for any other balance change. A December 31 snapshot of the four A/R
+  numbers is the starting point for the first daily check.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

@@ -38,9 +38,13 @@ up, and catch any difference while it is one day old.
 **Who:** [OWNER: Mason to name] runs it. Backup: [OWNER: Mason to name]. Reviewed by Mason and the
 bookkeeper ([OWNER: Mason to name the bookkeeper]).
 
-**When:** **Draft suggestion:** every business morning by 10 AM Central, for 30 days from
-2027-01-02 (the first check covers January 1). Roughly 30–45 minutes once practiced; the December
-rehearsal should time it.
+**When:** Phase D requires every one of the first 30 days to be reconciled, so the sheet has one row
+per calendar day, January 1 through January 30, including weekends and holidays. **Draft
+suggestion:** run it each morning the office is open, by 10 AM Central, for the day before. After a
+closed day, the next morning's check covers each closed day on its own row. The first check is the
+morning of January 2 (a Saturday), so someone has to run it that day, or it waits for Monday,
+January 4, and covers January 1–3 separately (question 5 below). Roughly 30–45 minutes once
+practiced; the December rehearsal should time it.
 
 **Needs:** an admin login. The Data Integrity, A/R Workspace and Prepay screens are admin-only.
 
@@ -56,17 +60,23 @@ Commission Splits, Quote-Hold Parity, Delivery-Invoice Quantity Parity, Pre-book
 Return-Credit Linkage and Customer AR Consistency.
 
 - Write down the time at the top ("Run at …") and the discrepancy count next to it.
-- Every check should say **PASS**. A check that says "N issues" lists each record with what it
+- Every check should say **PASS**. A check that says "N issues" lists the records with what it
   expected, what it found and the difference. Money is shown **in cents** (12345 means $123.45).
-- If a check's description ends in **[ERROR: …]**, that check didn't run. Treat it as **not clear**,
-  press **Re-run**, and log it if it fails again.
+  **The screen shows at most 50 records per check** ("Showing first 50 of …"). Write down the full
+  issue count, not just the rows you can see. If a check has more than 50, report it to launch
+  support (procedure 4), who can pull the full list.
+- If a check's description ends in **[ERROR: …]**, that check didn't run. If the page says **Failed
+  to load report**, none of them ran. Either way, treat it as **not clear**, press **Re-run** (or
+  reload the page), and log it if it fails again.
 - Compare with yesterday's sheet. A problem that was already on yesterday's sheet and is already in
   the Difference Log doesn't need a new row; anything new does.
 
 **Known before the pilot:** some flags existed before launch (for example, products that flag until
 the stock count is done; see `docs/manual/KNOWN_ISSUES.md`). The opening-balance and stock-count work
-(To-Do 15.1 and 15.2) should clear them before January 1. Any that remain are written on the
-first day's sheet as the starting list.
+(To-Do 15.1 and 15.2) has to clear them before January 1. Phase D says no unresolved money, stock or
+compliance defect is accepted just to hit the date. So each flag is either fixed or shown not to be a
+defect, with Mason's sign-off, before the pilot starts. The first day's sheet records that the list
+started clear, or names each signed-off exception.
 
 ### Step 2. Check the Cleanup tab
 
@@ -75,24 +85,32 @@ On the same page, open the **Cleanup** tab and write down the count for each sec
 - **Data-integrity alerts:** found by an automatic sweep that runs every night (06:45 UTC, which
   is 12:45 AM Central in winter). It looks for new negative stock, negative invoice balances, stock
   holds stuck on closed quotes and over-drawn bookings. It changes nothing; it only warns. Every new
-  alert gets a Difference Log row. Only press **Mark resolved** after the cause is found and fixed.
+  alert gets a Difference Log row. As the screen says: investigate the record, fix it if needed, then
+  press **Mark resolved**, and write what you found in the log.
 - **Negative inventory**, **Over-received PO items**, **Completed deliveries without invoices** and
-  **Phantom inventory rows:** any number higher than yesterday's is new and gets a Difference Log row.
-  "Completed deliveries without invoices" matters most during the pilot: a delivery that left with no
-  bill is lost money.
+  **Phantom inventory rows:** compare the rows themselves with yesterday's (product and location, PO
+  number, delivery number), not only the counts. One row can be fixed while a new one appears, and
+  the count stays the same. Every new row gets a Difference Log row.
+- **Completed deliveries without invoices** is a list of old, historical exceptions. It leaves out
+  deliveries recorded as billed outside CRX, so it can't prove that yesterday's deliveries were
+  billed. Step 6 checks yesterday's deliveries directly.
 - If a red box says "These sections could not be loaded", the check isn't clear. Press **Refresh**.
 
 ### Step 3. Balances
 
 Open **A/R Workspace**. The strip at the top shows four numbers: **Total Owed**, **Unused Prepay**,
-**Credit Memos** and **Net Position**. Write all four on the sheet.
+**Credit Memos** and **Net Position**. Write all four on the sheet. If the strip doesn't appear at all,
+one of its reads failed. That isn't the same as zero: the balance check isn't clear. Reload the page,
+and report it to launch support if the strip still doesn't appear.
 
 Then explain the change from yesterday. **Draft suggestion** (the bookkeeper sets the final rule):
 
-> yesterday's Total Owed + invoices posted yesterday − payments recorded yesterday − credits and
-> prepay applied yesterday = today's Total Owed
+> yesterday's Total Owed + invoices posted yesterday − payment amounts applied to invoices yesterday
+> − credits and prepay applied yesterday ± corrections (for example a reversed credit) = today's Total
+> Owed
 
-If it doesn't add up, the gap gets a Difference Log row. The **AR Aging** tab on the same page shows
+Payment money that wasn't applied to an invoice doesn't lower Total Owed, so it's tracked separately
+(Step 4). If it doesn't add up, the gap gets a Difference Log row. The **AR Aging** tab on the same page shows
 each customer's balance when one needs a closer look.
 
 ### Step 4. Payments
@@ -103,17 +121,23 @@ On **A/R Workspace**, open the **Payment History** tab and list yesterday's paym
   the deposit slip, the bank's record of transfers, and any paper payment log.
 - Each payment went to the right customer and the right invoices. Money that wasn't applied to an
   invoice is written down with who will apply it.
-- **Note:** **Record Payments** has no "date received" box. CRX dates each payment the day it is
-  entered. A payment received one day and entered the next shows on the entry day; write the real
-  date in the payment's **Notes**.
+- **Known gap (To-Do 6.7, MUST, open):** **Record Payments** has no "date received" box. CRX stamps
+  each payment with the server's date, which runs on UTC (six hours ahead of Central in winter). A
+  payment entered after 6 PM Central lands on the **next** day, and on December 31 or January 31 in
+  the wrong month. A payment received one day and entered later shows the entry date. Writing the
+  real date in **Notes** helps a person reading it, but it **doesn't change the recorded date**.
+  Until 6.7 is fixed: **Draft suggestion:** enter payments before 6 PM Central, and when matching
+  yesterday's payments, also look at payments dated today that were entered last evening. 6.7 should
+  be fixed before the pilot.
 
 ### Step 5. Credits and prepay
 
 - **Credits:** each return credited yesterday has its credit memo (the Integrity Report's
   Return-Credit Linkage check covers this). The **Credit Memos** total from Step 3 changed only by
-  credits issued or applied yesterday.
-- **Prepay:** **Unused Prepay** from Step 3 changed only by prepay received or applied yesterday. For
-  a customer whose prepay changed, open **Prepay** (Manager tab) and check their balance.
+  credits issued, applied or reversed yesterday, or another approved correction.
+- **Prepay:** **Unused Prepay** from Step 3 changed only by prepay received, applied or edited
+  yesterday, or another approved correction. For a customer whose prepay changed, open **Prepay**
+  (Manager tab) and check their balance.
 - **Not built yet:** there's no automatic check that each customer's prepay balance equals the sum
   of their prepay credits (To-Do 6.8). Until it exists, this step is a manual spot check.
 
@@ -123,8 +147,10 @@ On **A/R Workspace**, open the **Payment History** tab and list yesterday's paym
 - No new **Negative inventory** rows (Step 2). A shortage only warns and never blocks a delivery
   (Mason, 2026-10-15, permanent), so a new negative row usually means a delivery went out against
   stock CRX didn't show. Find out why.
-- Each delivery completed yesterday has a draft invoice ("Completed deliveries without invoices"
-  is zero or unchanged).
+- Each delivery completed yesterday was billed. The Integrity Report's **Delivery-Invoice Quantity
+  Parity** check passes (delivered quantity matches invoiced quantity for each order and product).
+  Then, on **Deliveries**, list yesterday's completed deliveries, and confirm each customer's draft or
+  posted invoice for it on **Invoices — Chemical** (completing a delivery creates a draft invoice).
 - Any count difference found in **Cycle Counts** gets a Difference Log row.
 
 ### Step 7. Work waiting for review
@@ -142,9 +168,11 @@ decision 3):
 
 - **If the QuickBooks Desktop sync is live (To-Do 14.2):** yesterday's sync finished with no failed
   or unresolved entries. Its counts and totals of invoices, payments and credits match Steps 3–5.
-- **If QuickBooks is entered by hand (To-Do 14.3):** every CRX invoice, payment, credit and prepay
-  entry from yesterday is marked as entered in QuickBooks, and nothing was entered twice. Each
-  customer's balance in QuickBooks matches CRX. The bookkeeper signs the day.
+- **If QuickBooks is entered by hand (To-Do 14.3):** this branch can't be used until 14.3 is written
+  and rehearsed. 14.3 requires a transaction-level CRX report, and written steps for entering
+  invoices, payments **with their allocations**, credits, prepay and corrections by hand. Each one is
+  marked when entered, so nothing goes in twice, and each customer is tied out daily, signed by the
+  bookkeeper. This step then checks that every one of yesterday's entries was made, once.
 
 Neither the sync nor the hand-entry report exists yet. This step gets written properly once one is
 chosen.
@@ -179,9 +207,12 @@ app fix) · date fixed · checked by.
 3. Is 10 AM Central the right deadline?
 4. Where should the sheet and the log live: a shared spreadsheet, paper in a binder, or somewhere
    else?
-5. Should the check run on Saturdays when deliveries happen, or does Monday's check cover the weekend?
+5. Does someone run the check on Saturdays and holidays (starting Saturday, January 2), or does the
+   next open morning cover each closed day on its own row?
 6. Should the missing prepay check (To-Do 6.8) be built before January 1? It's ranked SHOULD
    today. Without it, Step 5 is a manual spot check.
+7. The payment-date fix (To-Do 6.7) is ranked MUST but not built. Until it is, is "enter payments
+   before 6 PM Central" an acceptable rule for the office?
 
 ---
 
@@ -249,19 +280,22 @@ Keep each operation's forms together in one folder, in number order.
 
 ### Steps to release it
 
-1. The fix is live and tested.
-2. [OWNER: Mason to name] confirms the fix works on a real record before anyone enters paper.
+1. The fix is live, and it was tested on staging (the test copy of CRX) before it shipped.
+2. **Draft suggestion:** [OWNER: Mason to name] watches the first paper record go in and checks the
+   result, before the rest are entered. Testing the fix on a real customer record any other way needs
+   Mason's OK first.
 3. **Enter the paper records** through the normal CRX screens, oldest number first. Put the
    paper number in the record's notes or reference box. Before entering one, check that customer's
    records for that number, so nothing goes in twice. Tick each form only after the entered record
    has been compared with the paper.
-   - **Payments:** **Record Payments** dates a payment the day it is entered, not the day it was
-     received. Write the received date in **Notes**. The bookkeeper decides how that affects deposit
-     matching and QuickBooks (question below).
-   - **Deliveries:** the assigned driver completes each delivery from their own delivery screen, ticks
-     **Customer signed a paper ticket (no signal at the site)**, adds the photo of the signed ticket,
-     and enters **Delivered on (date on the ticket)**. The app never captures a signature after the
-     fact.
+   - **Payments:** **Record Payments** stamps a payment with the server's date, not the day it was
+     received (see the known gap in procedure 1, Step 4). Write the received date in **Notes**; it
+     doesn't change the recorded date. The bookkeeper decides how that affects deposit matching and
+     QuickBooks (question below).
+   - **Deliveries:** the assigned driver completes each delivery from their own delivery screen. They
+     tick **Customer signed a paper ticket (no signal at the site)**, add the photo of the signed
+     ticket, type the signer's printed name from the ticket in the **Signed By** box, and enter
+     **Delivered on (date on the ticket)**. The app never captures a signature after the fact.
 4. **Correct the wrong records** listed when the brake was pulled, each through the normal screens
    (a posted invoice is corrected with a credit, never cancelled by a void).
 5. **Reconcile:** count the paper forms against the entered records (every number entered once,
@@ -281,8 +315,9 @@ Keep each operation's forms together in one folder, in number order.
 4. Do you want a real on/off switch in the app for the riskiest operations (payments, posting,
    deliveries)? Today there isn't one; it would be a new build.
 5. Pre-printed numbered books, or blank forms numbered by hand from a log?
-6. Payments entered after the fact are dated the entry day. Is a note with the real date enough for
-   the bookkeeper, or does Record Payments need a "date received" box before the pilot?
+6. Payments entered after the fact carry the entry date (and after 6 PM Central, the next day's).
+   Is a note with the real date enough for the bookkeeper, or does Record Payments need a "date
+   received" box before the pilot, alongside the To-Do 6.7 fix?
 7. How long are the paper forms kept, and where?
 
 ---
@@ -307,10 +342,11 @@ phone or one computer.
 - **Office:** printed blank delivery tickets and payment log sheets (numbered), a pen, this page, and
   the phone list of drivers, the office and launch support.
 - **Every evening before a delivery day:** print the next day's deliveries. On **Deliveries**, pick
-  the next day's date and press **Load Sheet**. It prints the scheduled deliveries with each
-  customer's contact, address and products (**Download PDF** prints only a one-line-per-delivery
-  list). File the printout in the kit. This is the "last printed delivery schedule" the runbook
-  relies on.
+  the next day's date, make sure **no deliveries are ticked** (the button reads **Load Sheet**, not
+  **Load Sheet (3)**), and press it. With nothing ticked it prints every scheduled or in-progress
+  delivery in the list, with each customer's contact, address and products (**Download PDF** prints
+  only a one-line-per-delivery list). Check that the printout has as many deliveries as the screen.
+  File it in the kit. This is the "last printed delivery schedule" the runbook relies on.
 - **Each truck:** blank numbered delivery tickets. These are the same signed paper tickets Goal 5
   uses when there's no signal at a customer.
 
@@ -329,12 +365,16 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
   date, the signer's printed name and signature. Then they photograph it.
 - The customer keeps a copy if the ticket has one. **Draft suggestion:** two-part (carbon) tickets.
 - If the product isn't on the printed schedule, write "NOT ON SCHEDULE" on the ticket, so the
-  office creates the delivery in CRX afterwards.
+  office knows to look for it in CRX afterwards.
 
 **Payments**
 - Write every check, cash payment and transfer on the numbered payment log: line number, customer,
   invoice numbers it pays, amount, date received, method and check number, who took it.
-- Keep the checks with the log until they're entered in CRX. Deposit them as usual.
+- **Draft suggestion:** photograph or copy each check and keep the copy with its log line. Then the
+  check can be deposited as usual. Write the deposit date on each log line, so the log matches the
+  deposit slip. The log and the copies, not the checks, are what get entered afterwards.
+- A check that bounces, or a transfer that's returned, follows the payment steps in To-Do 14.5. Those
+  steps aren't written yet.
 
 **Don't** start a second record anywhere else (a spreadsheet, Chem Man, a notes app). The paper is
 the one record until CRX is back.
@@ -346,12 +386,15 @@ the one record until CRX is back.
    number so nothing goes in twice; put the paper number in the record's notes or reference box.
    Tick it on the paper only after the entered record has been compared with the paper.
    - **Dispatch changes:** update the deliveries in CRX to match the changes written on the schedule.
-   - **Deliveries:** the office creates any delivery that wasn't scheduled ("NOT ON SCHEDULE").
-     Then the assigned driver completes each one from their own delivery screen with **Customer
-     signed a paper ticket (no signal at the site)**, the ticket photo, and **Delivered on (date on
-     the ticket)**.
+   - **Deliveries:** for a "NOT ON SCHEDULE" ticket, first search CRX for that customer's open
+     orders and deliveries. A delivery missing from the printout may still exist in CRX. Use it if it
+     does; create a new delivery only once you've confirmed there isn't one. Then the assigned driver
+     completes each one from their own delivery screen. They tick **Customer signed a paper ticket
+     (no signal at the site)**, add the ticket photo, type the signer's name in **Signed By**, and
+     enter **Delivered on (date on the ticket)**.
    - **Payments:** enter each log line in **Record Payments**, with the check number in the
-     reference box and the date received in **Notes** (the app dates it the entry day).
+     reference box and the date received in **Notes**. The note doesn't change the recorded date;
+     see the known gap in procedure 1, Step 4.
 3. **Reconcile:** every ticket and log line is entered exactly once. Then run the daily check
    (procedure 1). If the outage needed a database restore, the runbook's after-restore checklist
    (section 4.7) also applies before anything resumes syncing.
@@ -393,7 +436,8 @@ fix through the normal reviewed path.
 
 **Draft suggestion:** one place for everything, so nothing is lost:
 
-- **Urgent** (can't deliver, can't take a payment, CRX is down, money or stock looks wrong):
+- **Urgent** (can't deliver, can't take a payment, CRX is down, money or stock looks wrong, or an RUP
+  sale or application record looks wrong):
   **call or text** [OWNER: Mason to name] at [phone number].
 - **Not urgent:** post on the in-app **Team Board**. **Draft suggestion:** also keep a shared
   issue log.
@@ -407,14 +451,14 @@ The response times are **draft suggestions** for Mason to set.
 | Problem | Staff do this first | Who answers | Answer within | Pull the brake? |
 |---|---|---|---|---|
 | **CRX is down** (won't load or save for several people) | Switch to the outage paper fallback (procedure 3). Call. | First contact, then the senior developer. Runbook section 6.1. | 15 minutes | No: it's an outage (procedure 3). |
-| **App error on one screen** (an error message, a blank screen) | Screenshot it, try once more, then report. Don't keep retrying a save. | First contact. The technical error is also logged automatically. | 1 business hour | Only if it stops a money or stock job and there's no workaround. |
+| **App error on one screen** (an error message, a blank screen) | Screenshot it, try once more, then report. Don't keep retrying a save. Always report it, even if you think it was logged. | First contact, who also checks the error tracker (Sentry, runbook section 6.1). | 1 business hour | Only if it stops a money or stock job and there's no workaround. |
 | **No signal at a customer** | Use the signed paper ticket (Goal 5) and complete the delivery when back in signal. | Nobody needs to answer: it's the normal process. | n/a | No |
 | **Email didn't go out** (invoice, receipt) | The app tells the driver when a receipt didn't send; the office resends it. Report it if resending fails. | First contact. Runbook section 6.2. | Same business day | No |
 | **Stuck bill** (an invoice won't post, a delivery has no draft invoice, a bill shows the wrong amount) | Don't post it again, and don't change it by hand. Report the invoice number. | First contact, with the bookkeeper. | 2 business hours | Yes, if the same wrong price or amount keeps happening on new bills. |
-| **Payment problem** (a payment applied to the wrong invoice, a balance that looks wrong) | Stop and report the payment and invoice numbers. | First contact, with the bookkeeper. | 2 business hours | Yes, if more than one payment is affected. |
+| **Payment problem** (a payment applied to the wrong invoice, a balance that looks wrong) | Stop and report the payment and invoice numbers. | First contact, with the bookkeeper. | 2 business hours | Yes, as soon as it looks like the next payment will go wrong too (procedure 2, "When to pull it"). |
 | **QuickBooks sync failure** or a hand-entry gap | Report it. Don't re-enter or re-send anything in QuickBooks. | The bookkeeper, then first contact. | Same business day | Only if the books can't be kept straight by hand. |
-| **Stock difference** (a count doesn't match, new negative stock) | Recount once, then report the product, location and both numbers. | [OWNER: Mason to name] (Mason owns inventory). | Same business day | Yes, if deliveries or receiving keep moving the wrong stock. |
-| **Compliance problem** (an RUP sale or application record looks wrong) | Stop that sale or record and report it. | Mason (Mason owns compliance). | 1 business hour | Yes, if the app keeps making the wrong regulated record. |
+| **Stock difference** (a count doesn't match, new negative stock) | Recount once, then report the product, location and both numbers. | [OWNER: Mason to name]. Mason owns inventory (goals doc, decision 6h). | Same business day | Yes, if deliveries or receiving keep moving the wrong stock. |
+| **Compliance problem** (an RUP sale or application record looks wrong) | Stop that sale or record and call or text (urgent). | [OWNER: Mason to name]. Mason owns compliance (goals doc, decision 6h). | 1 business hour | Yes, if the app keeps making the wrong regulated record. |
 | **Difference found by the daily check** | Logged in the Pilot Difference Log (procedure 1). | Daily check owner, with first contact. | Same business day | Yes, if it comes from an app defect that keeps making wrong money, stock or compliance records. |
 
 ### When to pull the emergency brake

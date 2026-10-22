@@ -591,7 +591,10 @@ export default function QuoteBuilder() {
   useLayoutEffect(() => {
     routeQuoteIdRef.current = id ?? null;
   }, [id]);
-  const blocker = useUnsavedChanges(isDirty);
+  // Set right before a navigate() that follows a committed save, so the router's
+  // stale "dirty" check cannot show a false Unsaved Changes prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
 
   // Status-based guards
   const currentStatus = status || 'draft';
@@ -2076,7 +2079,10 @@ export default function QuoteBuilder() {
         setActivePlannedHolds([]);
       }
 
-      if (!isEditing) navigate(`/quotes/${result}`, { replace: true });
+      if (!isEditing) {
+        skipUnsavedPromptRef.current = true;
+        navigate(`/quotes/${result}`, { replace: true });
+      }
     }
     setSaving(false);
   };
@@ -2967,6 +2973,7 @@ export default function QuoteBuilder() {
       sendOrderConfirmedEmail(result.order_id!);
       setIsDirty(false);
       setShowDrawModal(false);
+      skipUnsavedPromptRef.current = true;
       navigate(`/orders/${result.order_id}`);
     } catch (error: unknown) {
       if (isBelowCostApprovalHandledError(error)) {
@@ -3234,6 +3241,7 @@ export default function QuoteBuilder() {
 
       // Bug #31 fix: Clear dirty state before navigate to prevent unsaved changes dialog
       setIsDirty(false);
+      skipUnsavedPromptRef.current = true;
       navigate(`/orders/${result.order_id}`);
     } catch (error: unknown) {
       if (isBelowCostApprovalHandledError(error)) {
@@ -3287,6 +3295,7 @@ export default function QuoteBuilder() {
         if (createdOrderId) {
           toast('success', 'The order was created — opening it');
           setIsDirty(false);
+          skipUnsavedPromptRef.current = true;
           navigate(`/orders/${createdOrderId}`);
         } else {
           toast('warning', 'The quote was accepted, but its order could not be found — check the Orders page');

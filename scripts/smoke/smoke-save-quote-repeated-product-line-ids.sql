@@ -14,8 +14,8 @@
 --   6. Mark Presented (create_quote_version 'presented')
 --   7. Convert: save as accepted, convert_quote_to_order; each order line carries
 --      its own quote line's cost (6, 6, 8)
---   8. control: a quote without a repeated product re-saves with or without ids
---      and keeps its cost, as before
+--   8. control: a quote without a repeated product, after its product is
+--      repriced, re-saves with or without ids and keeps its quote-time cost, as before
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -242,7 +242,20 @@ BEGIN
     v_admin, 'smk-sqrp-ctrl-1-' || v_suffix);
   v_ctrl_id := (v_res->>'quote_id')::uuid;
   v_version := (v_res->>'row_version')::bigint;
-  -- id-less re-save (old screen) still works
+  -- Reprice the control product so a re-save that re-stamped today's cost would show.
+  v_price_res := preview_product_pricing_changes(
+    'product_page', NULL,
+    jsonb_build_array(jsonb_build_object(
+      'product_id', v_product_b,
+      'row_version', (SELECT pricing_version FROM products WHERE id = v_product_b),
+      'pricing_mode', 'margin_driven', 'new_cost', '9.00',
+      'tier1_margin_percent', '20', 'tier2_margin_percent', '25', 'tier3_margin_percent', '30',
+      'change_reason', 'Rollback smoke repeated-product control reprice')),
+    v_admin, 'smk-sqrp-price-preview-3-' || v_suffix);
+  PERFORM apply_product_pricing_change_set(
+    (v_price_res->>'change_set_id')::uuid, v_price_res->>'request_fingerprint',
+    v_admin, 'smk-sqrp-price-apply-3-' || v_suffix);
+  -- id-less re-save (old screen) still works and keeps the quote-time cost
   v_res := save_quote(v_ctrl_id,
     jsonb_build_object('quote_number', '[SMOKE] QRPC-' || v_suffix, 'customer_id', v_customer_id,
       'status', 'draft', 'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_version),
@@ -250,7 +263,11 @@ BEGIN
       'items', jsonb_build_array(v_line || jsonb_build_object('total_units_needed', 15)))),
     v_admin, 'smk-sqrp-ctrl-2-' || v_suffix);
   v_version := (v_res->>'row_version')::bigint;
-  -- id-bearing re-save (new screen) works too
+  SELECT cost_at_quote_cents INTO v_ctrl_cost FROM quote_items WHERE quote_id = v_ctrl_id AND total_units_needed = 15;
+  IF v_ctrl_cost IS DISTINCT FROM 600 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (8) control quote cost changed on the id-less re-save: %', v_ctrl_cost;
+  END IF;
+  -- id-bearing re-save (new screen) works too and keeps it
   v_res := save_quote(v_ctrl_id,
     jsonb_build_object('quote_number', '[SMOKE] QRPC-' || v_suffix, 'customer_id', v_customer_id,
       'status', 'draft', 'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_version),
@@ -260,7 +277,7 @@ BEGIN
     v_admin, 'smk-sqrp-ctrl-3-' || v_suffix);
   SELECT cost_at_quote_cents INTO v_ctrl_cost FROM quote_items WHERE quote_id = v_ctrl_id AND total_units_needed = 16;
   IF v_ctrl_cost IS DISTINCT FROM 600 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (8) control quote cost changed: %', v_ctrl_cost;
+    RAISE EXCEPTION 'SMOKE_FAIL: (8) control quote cost changed on the id-bearing re-save: %', v_ctrl_cost;
   END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK quote lines %; order lines %; control cost %', v_costs, v_order_costs, v_ctrl_cost;

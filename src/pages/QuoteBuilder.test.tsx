@@ -931,6 +931,41 @@ describe('QuoteBuilder', () => {
     })));
   });
 
+  // save_quote refuses QUOTE_ITEM_AMBIGUOUS_COST when a saved quote holds two
+  // lines of one product and the save does not say which line is which.
+  it('names every saved line on each save so two lines of one product keep their own costs', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const secondLine = { ...item, id: 'item-2', sort_order: 1, total_units_needed: 5, total_price: 50, profit: 20 };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [item, secondLine] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [product] : [], error: null }));
+    let saves = 0;
+    mockRpc.mockImplementation((name: string, args: { p_sections?: Array<{ items: Array<{ client_key: string }> }> }) => {
+      if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      // Mint visibly new ids so the next save can only send them if the page installed this map.
+      const itemIds = Object.fromEntries((args.p_sections ?? []).flatMap((s) => s.items)
+        .map((line, index) => [line.client_key, `saved-${saves}-${index}`]));
+      return Promise.resolve({ data: { status: 'saved', quote_id: quote.id, row_version: 7 + saves, item_ids: itemIds }, error: null });
+    });
+    const sentLines = (call: number) => (mockRpc.mock.calls.filter(([name]) => name === 'save_quote')[call][1] as {
+      p_sections: Array<{ items: Array<{ id: string | null; client_key: string; product_id: string }> }>;
+    }).p_sections.flatMap((s) => s.items);
+
+    renderQuoteBuilder(quote.id);
+    const header = await screen.findByDisplayValue('Version test header');
+    fireEvent.change(header, { target: { value: 'First edit' } });
+    fireEvent.click(screen.getByText('Save Draft'));
+    await waitFor(() => expect(saves).toBe(1));
+    const first = sentLines(0);
+    expect(first.map((line) => line.id)).toEqual(['item-1', 'item-2']);
+    expect(first.every((line) => line.product_id === product.id && line.client_key)).toBe(true);
+    await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+
+    fireEvent.change(screen.getByDisplayValue('First edit'), { target: { value: 'Second edit' } });
+    fireEvent.click(screen.getByText('Save Draft'));
+    await waitFor(() => expect(saves).toBe(2));
+    expect(sentLines(1).map((line) => line.id)).toEqual(['saved-1-0', 'saved-1-1']);
+  });
+
   it('shows Reload/review for a stale draft save after another tab sent the quote', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     mockFrom.mockImplementation((table: string) => buildChain({

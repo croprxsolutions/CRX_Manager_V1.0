@@ -217,15 +217,32 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
    `invoice_items`, and the invoice cap triggers don't watch this column
    (`20261010120000_cap_delivery_invoice_at_delivered.sql`).
 6. **`correct_delivery_brands`** (PR B, admin only, reason required, logged): changes the brands on a
-   completed delivery. It refuses while any invoice line built from that delivery is posted (unpost first,
-   then post again so the RUP register is rebuilt), and it re-copies the invoice lines' EPA numbers.
+   completed delivery, whatever state its invoices are in. It never unposts an invoice: `unpost_invoice`
+   accepts only `posted` and `overdue` and refuses any invoice with money applied
+   (`20260625130000_unpost_invoice.sql:151-170`), so "unpost first" can't work for a paid or part-paid one.
+   What it changes depends on the invoice's status (`invoices.status`: draft, unposted, posted, paid,
+   overdue, voided, cancelled):
+   - `draft` or `unposted`: it re-copies the invoice lines' EPA numbers;
+   - `posted`, `overdue` or `paid`: the invoice stays exactly as issued (the customer's copy doesn't
+     silently change). In the same step, it voids that invoice's active RUP records for the corrected lines,
+     with the correction's reason (`voided_at`, `voided_by`, `void_reason`, the same voided-row handling the
+     register already uses, PARKED-006). It then writes corrected records by the rules in item 7. The
+     correction log names the invoice, so a reprint question can be answered;
+   - `voided` or `cancelled`: only the delivery is corrected; such an invoice has no active RUP records.
    **`review_typed_brand`** (admin only) adds a typed brand to the product's list (and links the delivery row
    to it, without changing its snapshot) or dismisses it.
 7. **RUP register** (PR B): `generate_rup_sales_records` writes one record per delivered brand, with that
    brand's EPA number and amount, when the posted line's order line has delivery brand rows. Rules:
-   - the duplicate check and its active-record index change from (invoice, product) to (invoice, product, EPA
-     number), so the second brand isn't skipped; the unpost, void and re-post handling (PARKED-006, `:108-116`)
-     is re-proved with the new key;
+   - **records are added up before they are written, not skipped.** Today the duplicate check keeps only the
+     first record per (invoice, product) and silently drops the rest. A known case is two lines of the same
+     product on one invoice, which a split-invoice screen refuses for exactly that reason
+     (`20261013220000_reps_work_any_customer.sql:863-876`). With brands, two lines can also share a product
+     and a delivered EPA number. So the function first adds up every line's per-brand quantity and cents by
+     (invoice, product, EPA number, unit price), then writes one record per group. The duplicate check and
+     its active-record index use that same group. Grouping by unit price keeps each record's unit price exact
+     in whole cents. This applies to every line, branded or not, so it also closes today's duplicate-line
+     gap; that is a deliberate behavior change, and the proof covers it. The unpost, void and re-post
+     handling (PARKED-006, `:108-116`) is re-proved with the new grouping;
    - quantities are the delivered brand amounts, because the register records what physically went to the
      customer. If the invoice line's quantity was changed so it no longer matches the delivered amounts, the
      records use the invoice line's quantity divided across brands in the delivered proportion, with any
@@ -273,7 +290,8 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
 | A driver at the farm can't finish because a brand is missing. | The picker is on the completion screen and an unlisted brand can be typed in; completion is refused only with a message naming the line. |
 | The database change goes live before the screens and every branded completion is refused. | The `delivery_brand_required` switch is off until the screens are live and proven. |
 | An older completion queued offline replays after the switch is on and is refused. | Only for a listed-brand line; the office picks the brand on the delivery page and completes. New completions already need a signal (`src/pages/FieldStop.tsx:356`). |
-| The RUP register drops a brand or its cents don't add up. | New duplicate key with the EPA number; exact-cents division with the remainder on the last brand; both proven (section 8). |
+| The RUP register drops a brand or a line, or its cents don't add up. | Lines are added up by invoice, product, EPA number and unit price before writing, instead of skipped; exact-cents division with the remainder on the last brand; both proven (section 8). |
+| A wrong brand is found after the invoice is paid, when it can no longer be unposted. | The admin correction never unposts. It voids and rewrites that invoice's RUP records with the reason, and leaves the issued invoice as it was. |
 | Writing invoice lines collides with the invoice-line locking work in flight on 2026-10-22 (branches `claude/cost-lock-on-postable-20261022` and `claude/invoice-version-by-id-20261022`). | Only a draft line's existing `epa_registration` is written, before posting. Re-check against whatever invoice locking is live when this is built, and land after it. |
 | Changing the completion, invoice-creation and RUP functions, which sit on money paths. | No amount changes, but PR B gets the money review rules: a CodeRabbit full review plus the final Sol review. |
 | A field-application, job or blend-ticket invoice for an RUP generic still records the generic's EPA number. | Known and stated (section 2, "Not in step 1"); noted by hand until those invoices are built. |
@@ -302,8 +320,11 @@ look-only check on live after landing.
 - Switch off: the same completions succeed and record whatever was picked.
 - An unlisted brand typed at delivery completes, shows on the review list, the draft invoice warns, and "Add
   to list" leaves the delivery's saved name and number unchanged.
-- Changing a brand's EPA number afterwards leaves the old delivery and invoice unchanged; the admin correction
-  changes it, with its reason logged, and is refused while the invoice is posted.
+- Changing a brand's EPA number afterwards leaves the old delivery and invoice unchanged. The admin correction
+  changes the delivery, with its reason logged, for an invoice in each status:
+  - draft: the invoice line's number changes;
+  - posted, overdue and paid: the invoice is untouched, the old RUP records are voided with the reason, and
+    corrected records are written.
 - A product with no brands delivers, invoices and prints as before, except that its own EPA number now
   appears on the statement.
 - A Roundup line refuses a Liberty brand; a driver not assigned to the delivery is refused; the same save
@@ -312,7 +333,8 @@ look-only check on live after landing.
   pick only.
 - Landlord split invoices and a whole-order invoice carry the delivered brands' numbers.
 - Posting an invoice for a split RUP line writes two RUP records with the right numbers, amounts and cents
-  that add up exactly; unposting, voiding and re-posting it behaves as before.
+  that add up exactly. Two lines of the same product and EPA number on one invoice produce one record with
+  both lines' quantity and cents. Unposting, voiding and re-posting behaves as before.
 - The new tables' grants and policies are checked directly (who can read, nobody can write), since an admin
   session can't reveal a missing grant (August C-25).
 

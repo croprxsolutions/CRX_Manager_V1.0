@@ -1,4 +1,4 @@
--- Written 2026-10-21; restamped 2026-10-22 from 20261021120000 to 20261022021000 and re-pinned to the live
+-- Written 2026-10-21; restamped 2026-10-22 from 20261021120000 (then 20261021160000) to 20261022021000 and re-pinned to the live
 -- bodies after PR #1010. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migration-history.md.
 --
@@ -21,11 +21,13 @@
 --   which the public wrapper already holds FOR UPDATE, so no allocation can commit between this
 --   test and the invoice insert. The other order (invoice first, allocation after) was already
 --   closed: that trigger refuses an allocation while an active invoice covers the order
---   (ORDER_ALLOCATION_INVOICE_CONFLICT). Cost of the line lock: a transaction that edits an order
---   line and then (through after_order_items_change) the order's totals, at the same moment as an
---   invoice call on that same order, can deadlock with it; PostgreSQL rolls one side back (40P01)
---   with nothing written and no key saved. create_split_invoices_from_order takes the same locks in
---   the same order.
+--   (ORDER_ALLOCATION_INVOICE_CONFLICT). Before the line lock it raises the billing core's own
+--   live-delivery refusal (same words, same condition), so it never waits on complete_delivery,
+--   which locks an order's lines before the order. Cost of the line lock: a transaction that edits
+--   an order line and then (through after_order_items_change) the order's totals, at the same
+--   moment as an invoice call on that same order, can deadlock with it; PostgreSQL rolls one side
+--   back (40P01) with nothing written and no key saved. create_split_invoices_from_order takes the
+--   same order-then-lines locks and the same exposure.
 --
 -- WHY: Sol (final reviewer) on PR #993, twice, 2026-10-21: the page-side guard is not enough;
 --   financial invariants belong in PostgreSQL (AGENTS.md, CRX Hard Rules).
@@ -208,6 +210,17 @@ BEGIN
   -- through create_split_invoices_from_order. After the replay lookup above, so an exact retry of
   -- an invoice created before the split still returns its id. The lines are locked first: a new
   -- allocation row KEY SHARE-locks its line, so none can commit between this test and the insert.
+  -- The billing core refuses any order with a live delivery; refuse it here first, with the core's
+  -- own words, so the line lock never waits on complete_delivery (lines first, then the order).
+  IF EXISTS (
+    SELECT 1 FROM public.deliveries d
+     WHERE d.order_id = p_order_id AND d.status NOT IN ('cancelled', 'voided')
+  ) THEN
+    RAISE EXCEPTION 'Cannot create an order-level invoice for order % — it has % active delivery(ies); invoices are created per delivery on completion. Cancel/void those deliveries first to bill the whole order manually.',
+      (SELECT o.order_number FROM public.orders o WHERE o.id = p_order_id),
+      (SELECT count(*) FROM public.deliveries d
+        WHERE d.order_id = p_order_id AND d.status NOT IN ('cancelled', 'voided'));
+  END IF;
   PERFORM 1
     FROM public.order_items oi
    WHERE oi.order_id = p_order_id
@@ -262,7 +275,7 @@ BEGIN
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) =
           'p_order_id uuid, p_salesman_id uuid DEFAULT NULL::uuid, p_invoice_type text DEFAULT ''chemical_sale''::text, p_idempotency_key text DEFAULT NULL::text'
-        AND md5(replace(p.prosrc, chr(13), '')) = 'cca669b824623970d7ac617658d87cc1'
+        AND md5(replace(p.prosrc, chr(13), '')) = 'c43e09ca4310594cabff83bed4b8cd20'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['postgres']::text[]

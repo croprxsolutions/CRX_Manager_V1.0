@@ -18,7 +18,8 @@
  *      the order to one customer, so the lock is what closes it;
  *   6. RE-APPLY: refused by the preflight's own pins;
  *   7. MUTATION: with the refusal removed the chain fails at step 1, and with the refusal moved
- *      before the replay lookup it fails at step 3 (the exact retry no longer replays).
+ *      before the replay lookup it fails at step 3 (the exact retry no longer replays), and with
+ *      the early live-delivery refusal removed it fails at step 6 (ORDER_HAS_FIELD_SPLIT instead).
  *
  * Run: node scripts/smoke/prove-order-invoice-refuses-field-split-real-schema.mjs   (needs Docker)
  * Prints ORDER_INVOICE_FIELD_SPLIT_PROOF_PASS on success.
@@ -411,6 +412,14 @@ ROLLBACK;`,
   assert.ok(!moved.pass, 'MUTATION before replay: the chain still passed with the refusal ahead of the replay lookup');
   assert.match(moved.fail, /SMOKE_FAIL: an exact retry of an invoice created before the split did not replay its id/, `MUTATION before replay: wrong failure: ${moved.fail}`);
   console.log(`[prover] MUTATION: with the refusal ahead of the replay lookup the chain fails: ${moved.fail}`);
+  // Without the early live-delivery refusal, step 6's order reaches the field-split test instead.
+  const deliveryStart = body.indexOf('  IF EXISTS (\n    SELECT 1 FROM public.deliveries d');
+  assert.ok(deliveryStart >= 0, 'mutation "delivery": the live-delivery refusal is not in the body');
+  const DELIVERY_REFUSAL = body.slice(deliveryStart, body.indexOf('  END IF;\n', deliveryStart) + '  END IF;\n'.length);
+  const noDelivery = chain(FIELD_SPLIT_CHAIN, mutate(IDEM, DELIVERY_REFUSAL, '', 'delivery'));
+  assert.ok(!noDelivery.pass, 'MUTATION delivery: the chain still passed without the live-delivery refusal');
+  assert.match(noDelivery.fail, /SMOKE_FAIL: wrong live-delivery refusal: ORDER_HAS_FIELD_SPLIT/, `MUTATION delivery: wrong failure: ${noDelivery.fail}`);
+  console.log(`[prover] MUTATION: without the live-delivery refusal the chain fails: ${noDelivery.fail}`);
 
   console.log('ORDER_INVOICE_FIELD_SPLIT_PROOF_PASS');
 }

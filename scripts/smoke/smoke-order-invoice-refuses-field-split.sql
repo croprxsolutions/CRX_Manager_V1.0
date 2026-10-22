@@ -14,7 +14,9 @@
 --      ORDER_HAS_FIELD_SPLIT;
 --   4. create_split_invoices_from_order still bills the allocated order as governed per-owner
 --      drafts (here one: the split step's field belongs to the ordering customer, see below);
---   5. a cancelled allocated order is still ORDER_INVOICE_TERMINAL (the terminal test runs first).
+--   5. a cancelled allocated order is still ORDER_INVOICE_TERMINAL (the terminal test runs first);
+--   6. an allocated order with a live delivery gets the billing core's own live-delivery refusal,
+--      word for word (it passes before the fix too, where the core raises it).
 --
 -- Fixtures: an [E2E]-marked product priced through the governed preview/apply path, an ordering
 -- customer and a separate field-owner customer whose field the allocated lines are split onto.
@@ -91,9 +93,8 @@ BEGIN
   INSERT INTO public.fields (customer_id, field_name, crop_type, total_acres)
   VALUES (v_owner, '[E2E] Field Split Field ' || v_suffix, 'corn', 100)
   RETURNING id INTO v_field;
-  -- The split step bills a field the ordering customer owns: guard_invoice_terminal_order refuses
-  -- any order invoice for another customer (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID), split drafts
-  -- included, which is a separate open problem (KNOWN_ISSUES.md).
+  -- The split step bills a field the ordering customer owns, to keep it to one draft; billing
+  -- another owner through a split (20261021150000) has its own chain.
   INSERT INTO public.fields (customer_id, field_name, crop_type, total_acres)
   VALUES (v_customer, '[E2E] Field Split Own Field ' || v_suffix, 'corn', 100)
   RETURNING id INTO v_own_field;
@@ -244,6 +245,36 @@ BEGIN
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
     IF v_err NOT LIKE 'ORDER_INVOICE_TERMINAL:%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong cancelled-order refusal: %', v_err;
+    END IF;
+  END;
+
+  -- 6. An order with a live delivery gets the billing core's own refusal, word for word, before the
+  --    field-split test and its line lock (so the call never waits on complete_delivery): here an
+  --    allocated order with a scheduled delivery, which the core refuses the same way.
+  INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
+  VALUES ('E2E-FIELD-SPLIT-6-' || v_suffix, v_customer, v_today, 'confirmed', false, NULL)
+  RETURNING id INTO v_order;
+  INSERT INTO public.order_items (
+    order_id, product_id, product_name, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, profit, net_margin,
+    quantity_delivered, quantity_remaining, sort_order
+  ) VALUES (
+    v_order, v_product, '[E2E] field split line 6', 10, 5,
+    2, 20, 10, 50, 0, 2, 1
+  ) RETURNING id INTO v_item;
+  INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
+  VALUES (v_item, v_field, 100);
+  INSERT INTO public.deliveries (delivery_number, order_id, customer_id, status, created_by)
+  VALUES ('E2E-FIELD-SPLIT-D6-' || v_suffix, v_order, v_customer, 'scheduled', v_admin);
+  BEGIN
+    PERFORM public.create_invoice_from_order(v_order, NULL, 'chemical_sale', 'e2e-field-split-delivery-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: an order with a live delivery invoiced';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err IS DISTINCT FROM 'Cannot create an order-level invoice for order E2E-FIELD-SPLIT-6-' || v_suffix
+         || ' — it has 1 active delivery(ies); invoices are created per delivery on completion. Cancel/void those deliveries first to bill the whole order manually.' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong live-delivery refusal: %', v_err;
     END IF;
   END;
 

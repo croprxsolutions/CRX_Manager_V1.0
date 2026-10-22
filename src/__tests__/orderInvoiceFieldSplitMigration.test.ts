@@ -44,13 +44,15 @@ describe('20261022021000 order invoice refuses a field split', () => {
   it('refuses after the replay lookup and the terminal-order test, and before the billing core and the saved key', () => {
     const replayReturn = at("RETURN NULLIF(v_existing->'response'->>'invoice_id', '')::uuid;");
     const terminal = at("RAISE EXCEPTION 'ORDER_INVOICE_TERMINAL:");
+    const delivery = at("RAISE EXCEPTION 'Cannot create an order-level invoice for order % — it has % active delivery(ies);");
     const lineLock = at('  PERFORM 1\n    FROM public.order_items oi\n   WHERE oi.order_id = p_order_id\n   ORDER BY oi.id\n   FOR UPDATE;');
     const test = at('FROM public.order_item_field_allocations oifa\n      JOIN public.order_items oi ON oi.id = oifa.order_item_id\n     WHERE oi.order_id = p_order_id');
     const refusal = at("RAISE EXCEPTION 'ORDER_HAS_FIELD_SPLIT: this order is split across fields; bill it per field owner through create_split_invoices_from_order'\n      USING ERRCODE = 'check_violation';");
     const core = at('v_invoice_id := public._create_invoice_from_order_impl_20260718(');
     const save = at('PERFORM public.save_idempotency(');
     expect(replayReturn).toBeLessThan(terminal);
-    expect(terminal).toBeLessThan(lineLock);
+    expect(terminal).toBeLessThan(delivery);
+    expect(delivery).toBeLessThan(lineLock);
     expect(lineLock).toBeLessThan(test);
     expect(test).toBeLessThan(refusal);
     expect(refusal).toBeLessThan(core);
@@ -64,6 +66,17 @@ describe('20261022021000 order invoice refuses a field split', () => {
     expect(preflight).toContain(`md5(replace(p.prosrc, chr(13), '')) = '${md5(original)}'`);
     expect(md5(original)).toBe('3d393fb8639dbcb2aa38574ca9679eee');
     expect(postflight).toContain(`md5(replace(p.prosrc, chr(13), '')) = '${md5(body)}'`);
+  });
+
+  it('raises the billing core\'s own live-delivery refusal before the line lock, word for word', () => {
+    // The core (pinned by the preflight) refuses any order with a delivery that is not cancelled or
+    // voided; raising it first keeps the line lock from waiting on complete_delivery.
+    const core = read('supabase/migrations/20260827041400_align_return_credit_order_invoice_gates.sql');
+    const words = "'Cannot create an order-level invoice for order % — it has % active delivery(ies); invoices are created per delivery on completion. Cancel/void those deliveries first to bill the whole order manually.'";
+    expect(core).toContain(`RAISE EXCEPTION ${words}, v_order.order_number, v_delivery_count;`);
+    expect(core).toContain("FROM deliveries\n   WHERE order_id = p_order_id\n     AND status NOT IN ('cancelled', 'voided');");
+    expect(body).toContain(`RAISE EXCEPTION ${words},`);
+    expect(body.match(/d\.order_id = p_order_id AND d\.status NOT IN \('cancelled', 'voided'\)/g)).toHaveLength(2);
   });
 
   it('keeps the layer private and pins what the placement relies on', () => {

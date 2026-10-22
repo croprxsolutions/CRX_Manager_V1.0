@@ -471,6 +471,7 @@ DECLARE
   v_order_customer_id uuid;
   v_share record;
   v_extended bigint;
+  v_unit_price bigint;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF NOT EXISTS (
@@ -601,8 +602,12 @@ BEGIN
       IF v_share.other_returned_cents + v_extended > v_share.billed_cents THEN
         RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE';
       END IF;
+      -- The unit price the return and its credit memo show is the returner's own billed rate, not
+      -- the order price (a split invoice may bill a share at another rate).
+      v_unit_price := round(v_share.billed_cents / v_share.billed_qty)::bigint;
     ELSE
       v_extended := round(v_qty * v_order_item.price_per_unit * 100)::bigint;
+      v_unit_price := round(v_order_item.price_per_unit * 100)::bigint;
     END IF;
 
     INSERT INTO public.return_items (
@@ -611,8 +616,8 @@ BEGIN
     ) VALUES (
       v_return_id, v_order_item.id, v_order_item.product_id, v_order_item.product_name,
       v_qty, coalesce(v_order_item.unit_size, 'ea'),
-      round(v_order_item.price_per_unit * 100)::bigint,
-      v_extended,  -- Split-payer return (20261021155000): priced above
+      v_unit_price,  -- Split-payer return (20261021155000): priced above
+      v_extended,
       coalesce(v_item->>'condition', 'unopened'),
       coalesce((v_item->>'restock')::boolean, false),
       coalesce((v_item->>'sort_order')::integer, v_count), v_item->>'notes'
@@ -723,9 +728,13 @@ BEGIN
          WHERE ri.return_id = p_return_id
            AND s.share_mode
            AND s.billed_qty > 0
-           AND ri.extended_cents IS DISTINCT FROM greatest(0,
-             round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
-             - s.other_returned_cents)
+           AND (
+             ri.extended_cents IS DISTINCT FROM greatest(0,
+               round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+               - s.other_returned_cents)
+             -- and the unit price shown is the returner's billed rate
+             OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint
+           )
       ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;
     END IF;
 
@@ -751,9 +760,9 @@ BEGIN
           OR ri.unit IS DISTINCT FROM coalesce(oi.unit_size, 'ea')
           OR ri.quantity <= 0
           OR ri.quantity > coalesce(oi.quantity_delivered, 0)
-          OR ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint
           OR (NOT s.share_mode
-              AND ri.extended_cents IS DISTINCT FROM round(ri.quantity * oi.price_per_unit * 100)::bigint)
+              AND (ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint
+                   OR ri.extended_cents IS DISTINCT FROM round(ri.quantity * oi.price_per_unit * 100)::bigint))
           -- Split-payer return (20261021155000): within the returner's billed share, in quantity and
           -- in cents (create_return priced it from what was left of its billed cents).
           OR (s.share_mode AND (
@@ -954,9 +963,9 @@ BEGIN
           OR ri.unit IS DISTINCT FROM coalesce(oi.unit_size, 'ea')
           OR ri.quantity <= 0
           OR ri.quantity > coalesce(oi.quantity_delivered, 0)
-          OR ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint
           OR (NOT s.share_mode
-              AND ri.extended_cents IS DISTINCT FROM round(ri.quantity * oi.price_per_unit * 100)::bigint)
+              AND (ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint
+                   OR ri.extended_cents IS DISTINCT FROM round(ri.quantity * oi.price_per_unit * 100)::bigint))
           -- Split-payer return (20261021155000): within the returner's billed share, in quantity and
           -- in cents (create_return priced it from what was left of its billed cents).
           OR (s.share_mode AND (
@@ -1037,9 +1046,13 @@ BEGIN
        WHERE ri.return_id = p_return_id
          AND s.share_mode
          AND s.billed_qty > 0
-         AND ri.extended_cents IS DISTINCT FROM greatest(0,
-           round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
-           - s.other_returned_cents)
+         AND (
+           ri.extended_cents IS DISTINCT FROM greatest(0,
+             round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+             - s.other_returned_cents)
+           -- and the unit price shown is the returner's billed rate
+           OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint
+         )
     ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;
     v_split_return := v_order_customer_id IS DISTINCT FROM v_customer_id OR EXISTS (
       SELECT 1
@@ -1752,9 +1765,9 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'bc6e71e4ae476742d6911cc5bbf4a4ee', true),
-        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '84d6c0f74e1a980e18af8ba2d4249b5a', true),
-        ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '361c1b71d03c5d59a8f097a8463799a6', true),
+        ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'e9f55eecb9008c2858ae359636e1a107', true),
+        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '67566a09967e74b1ee813354038955b0', true),
+        ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '0d5209ab7179f36d71f548b55a6cf77d', true),
         ('guard_invoice_terminal_order', 'public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', true),
         ('guard_mono_invoice_split_billing_post', 'public.guard_mono_invoice_split_billing_post()', 'b6fd2b19478801f6798c7b6e1fba737b', true),
         ('_create_split_invoices_from_order_provenance_impl_20260719', 'public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', '9f112447e3694490b5538d042ab2f10f', true),

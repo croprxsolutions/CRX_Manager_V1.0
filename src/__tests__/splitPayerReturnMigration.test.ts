@@ -161,6 +161,17 @@ describe('20261021155000 split-payer return credit', () => {
     expect(create).toContain("AND ii.unit_size IS DISTINCT FROM coalesce(v_order_item.unit_size, 'ea')");
   });
 
+  it('stores the split payer\'s billed rate as the return unit price, and re-checks it (Codex App P2 on #1010)', () => {
+    const create = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(');
+    expect(create).toContain('v_unit_price := round(v_share.billed_cents / v_share.billed_qty)::bigint;');
+    expect(create).toContain('v_unit_price,  -- Split-payer return (20261021155000): priced above');
+    for (const fn of ['_receive_return_intent_impl_20260812', '_issue_return_credit_intent_impl_20260812']) {
+      const fnBody = body(MIGRATION, `CREATE OR REPLACE FUNCTION public.${fn}(`);
+      expect(fnBody).toContain('OR ri.unit_price_cents IS DISTINCT FROM round(s.billed_cents / NULLIF(s.billed_qty, 0))::bigint');
+      expect(fnBody).toContain('AND (ri.unit_price_cents IS DISTINCT FROM round(oi.price_per_unit * 100)::bigint');
+    }
+  });
+
   it('quotes what is left of a split share, not a per-unit average (Codex App P2 on #1010)', () => {
     const at = MIGRATION.indexOf('CREATE FUNCTION public.get_return_line_allowances(');
     const fn = MIGRATION.slice(at, MIGRATION.indexOf('$function$;', at));

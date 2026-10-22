@@ -348,10 +348,20 @@ BEGIN
        OR (SELECT extended_cents FROM public.return_items WHERE return_id = v_second) IS DISTINCT FROM 250::bigint THEN
       RAISE EXCEPTION 'SMOKE_FAIL: P''s two 0.25 GL returns of line 2 are not 2.51 then 2.50';
     END IF;
+    -- Their unit price is P's billed rate (5.01 for 0.5 GL: 10.02), not the order's 10.01.
+    IF EXISTS (SELECT 1 FROM public.return_items WHERE return_id IN (v_first, v_second)
+                AND unit_price_cents IS DISTINCT FROM 1002::bigint) THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: P''s line-2 returns do not show P''s billed rate 10.02 as their unit price';
+    END IF;
     PERFORM public.approve_return(v_second, v_admin, 'e2e-split-return-approve-p2-' || v_round || '-' || v_suffix);
     IF v_round = 1 THEN
       -- (i) received while the first is open (2.50 is exact then), then the first is cancelled.
-      PERFORM public.receive_return(v_second, v_admin, 'e2e-split-return-receive-p2-' || v_suffix);
+      BEGIN
+        PERFORM public.receive_return(v_second, v_admin, 'e2e-split-return-receive-p2-' || v_suffix);
+      EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+        RAISE EXCEPTION 'SMOKE_FAIL: P''s second line-2 return could not be received: %', v_err;
+      END;
       PERFORM public.cancel_return(v_first, '[E2E] cancelled first', v_admin, 'e2e-split-return-cancel-p1-1-' || v_suffix);
       BEGIN
         PERFORM public.issue_return_credit(v_second, v_admin, 'e2e-split-return-credit-p2-' || v_suffix);
@@ -437,6 +447,14 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.returns r JOIN public.invoices i ON i.id = r.credit_invoice_id
                  WHERE r.id IN (v_return2, v_return3) AND i.customer_id IS DISTINCT FROM v_b) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: B''s line-2 credits are not exactly B''s billed % cents, all to B', v_b_line2_cents;
+  END IF;
+  -- The returns and their credit memo lines show B's billed rate (10.00 or 10.02), not 10.01.
+  IF EXISTS (SELECT 1 FROM public.return_items WHERE return_id IN (v_return2, v_return3)
+              AND unit_price_cents IS DISTINCT FROM (v_b_line2_cents * 2)::bigint)
+     OR EXISTS (SELECT 1 FROM public.returns r JOIN public.invoice_items ii ON ii.invoice_id = r.credit_invoice_id
+                 WHERE r.id IN (v_return2, v_return3) AND ii.quantity < 0
+                   AND ii.unit_price_cents IS DISTINCT FROM (v_b_line2_cents * 2)::bigint) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: B''s line-2 returns or credit lines do not show B''s billed rate as the unit price';
   END IF;
 
   -- 5b. On a second split order whose per-owner invoices are still drafts, the order's own customer

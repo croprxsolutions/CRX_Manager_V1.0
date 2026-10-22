@@ -108,15 +108,24 @@ export default function CropPrograms() {
       return;
     }
 
-    setLoadError(false);
     if (data?.setting_value) {
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(data.setting_value);
-        setPrograms(Array.isArray(parsed) ? parsed : []);
+        parsed = JSON.parse(data.setting_value);
       } catch {
-        setPrograms([]);
+        parsed = undefined;
       }
+      // Unreadable saved programs must not look like an empty list: a save would overwrite them.
+      if (!Array.isArray(parsed)) {
+        Sentry.captureException(new Error('crop_programs setting is not a JSON array'));
+        toast('error', 'Failed to load crop programs.');
+        setLoadError(true);
+        setLoading(false);
+        return;
+      }
+      setPrograms(parsed as CropProgram[]);
     }
+    setLoadError(false);
     setLoading(false);
   }, [toast]);
 

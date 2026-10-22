@@ -89,6 +89,90 @@ This file consolidates (does not replace) the source documents it points to. If 
 
 ---
 
+## OPEN 2026-10-22 (HIGH; To-Do List row 11.4) — applicators, drivers and customer-portal accounts can read every customer's fields, field maps and some customer money totals
+
+A read-only audit of row 11.4 ("an applicator sees only the fields for their assigned jobs, by every route, and loses
+access when the assignment ends") read the live policies, functions, grants, storage rules and views on 2026-10-22
+(17:30–17:50 UTC, 12:30–12:50 PM Central), then proved each HIGH by read-only impersonation inside a `BEGIN READ ONLY …
+ROLLBACK` transaction (counts only, no customer data printed). Live had 5 fields (2 with boundaries, 4 boundary parts),
+1 active applicator, 2 drivers and 2 active `entity_recipient` (customer-portal) accounts. The live applicator is
+dispatched to 2 of the 5 fields.
+
+**What is already right.** The job tables are scoped: `jobs`, `job_fields`, `job_chemicals`, `job_field_shares`,
+`job_applied_records` and their children, `job_attachments` and the `job-attachments` storage bucket admit only office
+staff, the job's whole-job applicator (`jobs.applicator_id`), or, through `_is_dispatched_to_me`, the applicator or
+active crew member of a current dispatch. That helper re-checks an active profile and an active crew, drops a cancelled
+dispatch at once and a completed one after 7 days. The job-level functions `get_job_fields_with_geojson`,
+`get_dispatch_board_jobs`, `get_dispatched_list` and `get_job_billed_customers` repeat the same gate. Reassigning a
+job moves `jobs.applicator_id`, so the old applicator loses it. No view in `public` exposes these tables.
+
+Findings, most severe first:
+
+1. **HIGH — seven field functions check nothing.** These `SECURITY DEFINER` functions (they run with the owner's rights,
+   so row security does not apply) are executable by every signed-in account and have no role or assignment check:
+   `get_fields_with_geojson` (pass no customer and it returns every field with its boundary, owner name, legal
+   description, FSA numbers and notes), `get_fields_geojson_by_ids`, `get_field_geojson`, `get_field_polygons`,
+   `get_field_dashboard` (adds each field's billing splits with `price_override_cents`, and every applicator's spray
+   records on that field), `derive_customer_shares_from_fields` (owner names, price tier, price overrides) and
+   `get_customer_farm_group` (any customer's farm group names). Smaller: `get_field_billing_splits_for_order` and
+   `_for_blend_ticket` (customer ids and split percentages). **Proven live:** the applicator, assigned 2 fields, got all 5
+   fields and both boundaries from `get_fields_with_geojson(null)` and a full `get_field_dashboard` for a field never
+   assigned to them; a customer-portal account, which row security shows 0 fields and 0 customers, got all 5 fields with
+   their owners' names and both boundaries. Because nothing checks `profiles.is_active`, a deactivated account can call
+   them too until its sign-in token expires (the inactive-user checks are a separate session's work).
+2. **HIGH — customer money totals through four more unchecked functions** (same pattern, found while tracing field
+   customers; outside row 11.4's wording but fixed in the same migration): `get_customer_summary` (any customer's
+   accounts-receivable balance), `check_customer_credit_limit` (credit limit and outstanding balance),
+   `get_dashboard_action_items` (company-wide overdue invoices with balances and farm names, overdue and unassigned
+   deliveries and jobs, low stock, expiring quotes) and `global_search` (customer names and contacts, and order, invoice
+   and delivery numbers with farm names). **Proven live:** both the applicator and a customer-portal account received
+   the 2 overdue invoices with their balances and an accounts-receivable balance for a customer they cannot see.
+   Noticed in the same sweep and not traced further: `get_notes_for_entity` returns team notes on any record with no
+   check.
+3. **HIGH — the `fields` table admits every applicator.** `fields_select` is `is_admin() OR is_sales_rep() OR
+   is_applicator()` (`20260214210000`), so an active applicator reads every customer's fields. `field_polygons` (boundary
+   parts) inherits it (`field_id IN (SELECT id FROM fields)`), and `field_crop_history`, `field_obstacles`,
+   `field_app_locations` and `field_app_location_shares` (which carries `amount_cents`; 0 rows live) use the same
+   `is_applicator()` test. **Proven live:** the applicator read 5 fields and 4 boundary parts through the Data API. This
+   was recorded as a LOW in the carried-over "Field-app access-scope lows" item; it is raised here because row 11.4 is a
+   MUST.
+4. **MED — two field tables admit any active account.** `field_billing_defaults.fbd_select` (each field's paying
+   customers, split percentages, `price_override_cents` and `pricing_note`) and `application_record_fields.arf_select`
+   (field and acres of every spray record) test only an active profile, so drivers and customer-portal accounts read them
+   too. **Live:** the applicator read all 6 billing-split rows.
+5. **MED — the whole-job route never ends.** The applicator leg of `jobs_select` and of every job child table tests only
+   `jobs.applicator_id = auth.uid()`: no status, date or `deleted_at` limit. A whole-job applicator keeps reading a
+   completed, cancelled or soft-deleted job, its fields, chemicals, shares, records and attachments indefinitely, while
+   the dispatch route ends at cancellation or 7 days after completion. The applicator leg of `customers_select`
+   (`job_date >= CURRENT_DATE - 7 days`) has no status or `deleted_at` test either, so a cancelled, deleted or
+   far-future job keeps its customer readable. Live today the one applicator has no whole-job assignments, so nothing is
+   exposed this way yet.
+
+Already tracked elsewhere, not repeated: every active account reads every `customer_addresses` row (To-Do row 11.7),
+and job chemical cost is readable by the assigned applicator (the cost and margin entry below, row 11.3).
+
+**Fix plan (not built; each part is a migration, so each needs CodeRabbit and Sol, and narrowing permissions needs
+Mason's "I approve").** Part A first, since it closes every HIGH that a customer-portal account can reach:
+- **A. Gate the functions.** Add one helper, `_can_see_field(field_id)`: true for active office staff, or when the field
+  is on a job the caller may see (`_is_dispatched_to_me`, or the whole-job applicator under part C's window). Make
+  `get_fields_geojson_by_ids` (Field View) and `get_field_geojson` (Job Detail) return only fields that pass it. Make
+  `get_fields_with_geojson`, `get_field_polygons`, `get_field_dashboard`, `derive_customer_shares_from_fields`,
+  `get_customer_farm_group`, both `get_field_billing_splits_for_*`, `get_customer_summary`,
+  `check_customer_credit_limit` and `get_dashboard_action_items` office-only (`require_admin_or_sales_rep()`); their
+  callers are office pages. Make `global_search` return nothing to a non-office account, because the command palette
+  sits in the shared layout (`src/components/layout/AppLayout.tsx`) for every role.
+- **B. Narrow the tables.** Change the applicator leg of `fields_select`, `field_crop_history_select`,
+  `field_obstacles_select` and `field_app_locations_select`/`_shares_select` to `is_applicator() AND
+  _can_see_field(...)` (`field_polygons` follows automatically). Make `fbd_select` and `arf_select` office-only after
+  checking that no applicator or driver screen reads them.
+- **C. End the whole-job route.** Add the dispatch route's window (open, or completed within 7 days; never cancelled or
+  soft-deleted) to the whole-job applicator leg of `jobs_select`, the job child tables, `job-attachments` storage and
+  `customers_select`.
+- **Proof:** per-role impersonation before and after, in the disposable database and read-only on live after the apply:
+  the applicator reads only their dispatched fields, a customer-portal account and a driver read 0 fields and get
+  refusals from the office functions, office staff see no change; then a live click-through of Field View, Job Detail
+  and the Dispatch Board as the applicator.
+
 ## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; step 2 LIVE 2026-10-20 as `20261019230000`; step 3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
 
 Mason decided on 2026-10-15 that cost and margin are admin-only, including on a rep's own quotes and invoices
@@ -1012,7 +1096,7 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   showed, so staff still see photos with the buckets private.
   (Source: `docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md` (removed in the 2026-09-26 docs cleanup; recover with `git show 4b6ff6293:docs/archive/2026-summer-closeout/audits/2026-06-15-foundation-ultra-review.md`).)
 - **Field-app access-scope lows (June 2026 parity ledger).** (1) `fields_select` (`20260214210000`) lets every
-  active applicator read all customers' fields, not only dispatched ones; (2) `job_chemicals_select_location_dispatchee`
+  active applicator read all customers' fields, not only dispatched ones (raised to HIGH 2026-10-22; see the entry "applicators, drivers and customer-portal accounts can read every customer's fields" near the top); (2) `job_chemicals_select_location_dispatchee`
   (`20260627120000`) lets dispatched applicators read `cost_per_unit_cents`; (3) `update_field_app_invoice_billing`
   gates admin OR sales_rep with no per-row ownership, so any rep can edit another rep's draft billing fields;
   (4) `buildInvoiceEmailPayload` (`src/lib/emailService.ts`) puts the invoice number/date into email HTML

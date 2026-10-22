@@ -3151,7 +3151,7 @@ makes the first one reachable more often by emitting several order lines per pro
    differ by cents; the per-unit line's amount and cost, and the "included in grower share" line's
    cost (its price stays $0), now use the stored quantity; a positive quantity that would store as 0
    (below 0.00005) is refused (`BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO`) instead of billed as a
-   0-quantity line. (2) An approved $0 quoted line recorded the ticket line's editable cost copy instead of
+   0-quantity line, before any invoice number is drawn. (2) An approved $0 quoted line recorded the ticket line's editable cost copy instead of
    the catalog cost the approval showed; it now records the catalog cost (margin reporting only).
    (3) The tier-price helper the invoice calls was not pinned by the migration's safety check; it is
    now, with the quote-pick and cents helpers. (4) A leftover "if a retry key was sent" test that could

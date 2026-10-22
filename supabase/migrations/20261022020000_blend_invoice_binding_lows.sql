@@ -16,7 +16,8 @@
 --      is saved again (ROUND(quantity x unit price)). A customer's amount can move by a few cents
 --      on a fractional quantity; whole-number and 4-place quantities bill exactly as before. A positive
 --      quantity that would round to 0 (below 0.00005) is now refused with
---      BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO instead of billing a 0-quantity line (Sol review).
+--      BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO instead of billing a 0-quantity line (Sol review),
+--      before any invoice number is drawn (Codex App review: a drawn number is never given back).
 --   2. $0 LINE COST. An approved $0 quoted line now records the product's catalog cost (the cost the
 --      approval window showed, locked FOR SHARE above, and the cost the line trigger writes to
 --      below_cost_approvals), as the included-in-grower-share line does since 20261021070000. Before,
@@ -153,6 +154,7 @@ DECLARE
   v_inv_unit_line       text;
   v_chem_qty_a_conv     numeric;
   v_chem_qty_b_conv     numeric;
+  v_zero_qty_line       record;
   v_bad_rate            text;
   v_bad_unit            text;
   -- Goal 3 pricing (20261020210000)
@@ -579,6 +581,41 @@ BEGIN
         'zero_lines', '[]'::jsonb)::text;
   END IF;
 
+  -- 20261022020000: each line stores its quantity rounded to 4 places (below). A positive
+  -- quantity below 0.00005 would store as 0 and bill a 0-quantity, $0 line while the ticket is
+  -- marked billed, so refuse it here, before any invoice number is drawn (a drawn number is never
+  -- given back) and the office corrects the rate or acres. The quantity is worked out as the
+  -- billing loop below does: per customer, rate x share acres, split by grower-share override,
+  -- converted to the pricing unit.
+  SELECT COALESCE(p.product_name, btp.product_name) AS product_name, btp.id
+    INTO v_zero_qty_line
+    FROM blend_ticket_products btp
+    LEFT JOIN products p ON p.id = btp.product_id
+   CROSS JOIN (SELECT DISTINCT (c.value->>'customer_id')::uuid AS customer_id
+                 FROM jsonb_array_elements(v_customers) AS c(value)) cust
+   CROSS JOIN LATERAL (
+     SELECT COALESCE(SUM(COALESCE(btp.rate_per_acre, 0) * (r.value->>'share_acres')::numeric)
+                       FILTER (WHERE (r.value->>'price_override_cents') IS NOT NULL), 0) AS qty_a,
+            COALESCE(SUM(COALESCE(btp.rate_per_acre, 0) * (r.value->>'share_acres')::numeric)
+                       FILTER (WHERE (r.value->>'price_override_cents') IS NULL), 0) AS qty_b
+       FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
+      WHERE (r.value->>'customer_id')::uuid = cust.customer_id) q
+   CROSS JOIN LATERAL (
+     SELECT normalize_rate_unit(COALESCE(NULLIF(btrim(btp.rate_per_acre_unit), ''), p.rate_unit)) AS rate_unit,
+            normalize_rate_unit(COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AS inv_unit) u
+   WHERE btp.blend_ticket_id = p_blend_ticket_id
+     AND ((q.qty_a > 0 AND ROUND(CASE WHEN btp.product_id IS NOT NULL
+                                THEN field_app_priced_quantity(q.qty_a, u.rate_unit, u.inv_unit, p.product_form)
+                                ELSE q.qty_a END, 4) <= 0)
+       OR (q.qty_b > 0 AND ROUND(CASE WHEN btp.product_id IS NOT NULL
+                                THEN field_app_priced_quantity(q.qty_b, u.rate_unit, u.inv_unit, p.product_form)
+                                ELSE q.qty_b END, 4) <= 0))
+   ORDER BY btp.sequence_order, btp.id
+   LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO: % (blend ticket line %) bills less than 0.0001 per line; correct the rate or acres', v_zero_qty_line.product_name, v_zero_qty_line.id USING ERRCODE = '22023';
+  END IF;
+
   IF v_customer_count > 1 THEN
     v_invoice_group_id := gen_random_uuid();
   ELSE
@@ -690,13 +727,6 @@ BEGIN
       -- lines. Before, the amount and cost used the unrounded quantity and could differ by cents.
       v_chem_qty_a_conv := ROUND(v_chem_qty_a_conv, 4);
       v_chem_qty_b_conv := ROUND(v_chem_qty_b_conv, 4);
-
-      -- 20261022020000: a positive quantity below 0.00005 would round to a 0 stored quantity and
-      -- bill a 0-quantity, $0 line while the ticket is marked billed; refuse it instead, so the
-      -- office corrects the rate or acres.
-      IF (v_chem_qty_a > 0 AND v_chem_qty_a_conv <= 0) OR (v_chem_qty_b > 0 AND v_chem_qty_b_conv <= 0) THEN
-        RAISE EXCEPTION 'BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO: % (blend ticket line %) bills less than 0.0001 per line; correct the rate or acres', COALESCE(v_btp.full_product_name, v_btp.product_name), v_btp.id USING ERRCODE = '22023';
-      END IF;
 
       IF v_chem_qty_a > 0 THEN
         -- 20261021070000: the included line is $0, below cost; it carries the admin's reason (asked
@@ -932,7 +962,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'e447de5176c4a961acb74517ff4a86ff'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'a6f5c6e72d6632313549313b34f406ad'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

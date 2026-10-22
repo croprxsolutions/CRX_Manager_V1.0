@@ -14,7 +14,8 @@
 --   4. with the dead key test gone, the replay lookup and the receipt still work: the same key
 --      returns the same invoices, and the key reused on another ticket is refused;
 --   5. a positive quantity that rounds to 0 at the stored 4 places is refused
---      (BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO), per-unit and grower share, leaving no invoice.
+--      (BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO), per-unit and grower share, leaving no invoice and
+--      drawing no invoice number (a drawn number is never given back).
 -- (The preflight pins are proven by the prover, not this chain.)
 --
 -- One product costs $900.00 (tier 2 $1,400.00); a line at 0.123456 gal/ac on 10 acres is
@@ -49,6 +50,7 @@ DECLARE
   v_err text;
   v_count int;
   v_row record;
+  v_seq bigint;
 BEGIN
   SELECT id INTO v_admin FROM public.profiles
    WHERE role = 'admin' AND is_active = true ORDER BY created_at, id LIMIT 1;
@@ -289,7 +291,9 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: the below-cost context was left set after the invoices';
   END IF;
 
-  -- 5. A quantity that rounds to 0 at 4 places is refused, not billed as a 0-quantity line.
+  -- 5. A quantity that rounds to 0 at 4 places is refused, not billed as a 0-quantity line, and
+  --    before an invoice number is drawn.
+  v_seq := pg_sequence_last_value('public.invoice_number_seq');
   BEGIN
     v_res := public.create_invoice_from_blend_ticket(v_t_tiny, v_admin, 'e2e-bil-invoice-5a-' || v_suffix);
     RAISE EXCEPTION 'SMOKE_FAIL: a quantity that rounds to 0 at 4 places was billed (per-unit): %',
@@ -327,6 +331,10 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id IN (v_t_tiny, v_t_tiny_share))
      OR (SELECT count(*) FROM public.blend_tickets WHERE id IN (v_t_tiny, v_t_tiny_share) AND payment_status = 'unbilled') <> 2 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused zero-quantity ticket left an invoice or was marked billed';
+  END IF;
+  IF pg_sequence_last_value('public.invoice_number_seq') IS DISTINCT FROM v_seq THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a zero-quantity refusal drew an invoice number: % then %',
+      v_seq, pg_sequence_last_value('public.invoice_number_seq');
   END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';

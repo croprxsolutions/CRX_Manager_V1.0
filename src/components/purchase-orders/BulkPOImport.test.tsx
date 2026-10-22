@@ -368,7 +368,7 @@ describe('BulkPOImport', () => {
     );
   });
 
-  it('normalizes an OCR fractional-cent unit cost before saving', async () => {
+  it('refuses an OCR unit cost with more than two decimals until the admin fixes it', async () => {
     mocks.processDocumentWithOCR.mockResolvedValue({
       success: true,
       raw_text: 'parsed',
@@ -393,6 +393,15 @@ describe('BulkPOImport', () => {
       target: { files: [new File(['one'], 'INV-FRACTIONAL.pdf', { type: 'application/pdf' })] },
     });
     fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+
+    // Refused, never rounded: the PO is not importable until the admin fixes the cost.
+    expect(await screen.findByRole('button', { name: /import 0 pos/i })).toBeDisabled();
+    const costInput = screen.getByRole('spinbutton', { name: /unit cost for/i });
+    expect(costInput).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText(/no more than two decimal places/i)).toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalledWith('save_purchase_order', expect.anything());
+
+    fireEvent.change(costInput, { target: { value: '3.33' } });
     fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
@@ -404,6 +413,32 @@ describe('BulkPOImport', () => {
         })],
       }),
     ));
+  });
+
+  it('a sales rep can still import a document whose OCR cost has more than two decimals (no cost is sent)', async () => {
+    mocks.role = 'sales_rep';
+    mocks.processDocumentWithOCR.mockResolvedValue({
+      success: true,
+      raw_text: 'parsed',
+      document_type: 'purchase_order',
+      parsed_data: {
+        vendor_name: 'Vendor A',
+        invoice_number: 'INV-REP-FRACTIONAL',
+        invoice_date: '2026-07-16',
+        items: [{ product_name: product.product_name, quantity: 2, unit_cost: 3.334, unit_size: 'GAL' }],
+      },
+      confidence: 1,
+      processing_time_ms: 1,
+    });
+
+    render(<BulkPOImport {...defaultProps} />);
+    fireEvent.change(document.querySelector('#po-pdf-upload')!, {
+      target: { files: [new File(['one'], 'INV-REP-FRACTIONAL.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_purchase_order', expect.anything()));
   });
 
   it('a sales rep import sends no cost and shows no cost columns (purchase cost is admin-only)', async () => {

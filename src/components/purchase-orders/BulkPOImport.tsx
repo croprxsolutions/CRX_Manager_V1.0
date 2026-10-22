@@ -18,6 +18,7 @@ import {
   purchaseOrderLineTotalCents,
   purchaseOrderUnitCostCents,
 } from '../../lib/purchaseOrderMoney';
+import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE } from '../../lib/parseCents';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import {
   buildBulkPOIntentKey,
@@ -89,6 +90,18 @@ function buildParsedPOIntentKey(po: ParsedPO): string | null {
       notes: item.notes,
     })),
   });
+}
+
+// Purchase cost must be exact whole cents. OCR can read $10.006 off a vendor
+// document; that is refused for the admin to fix, never rounded (Mason's rule).
+function hasWholeCentUnitCost(item: ParsedPOItem): boolean {
+  return isWholeCentDollarInput(String(item.unit_cost));
+}
+
+function savedLinesHaveWholeCentCosts(po: ParsedPO): boolean {
+  return po.items
+    .filter((item) => item.matched_product && item.quantity_ordered > 0)
+    .every(hasWholeCentUnitCost);
 }
 
 function fuzzyMatchProductWithScore(
@@ -407,6 +420,12 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
           failedCount++;
           continue;
         }
+        // Only an admin sends cost; a rep's import never carries the OCR cost.
+        if (isAdmin && !savedLinesHaveWholeCentCosts(po)) {
+          toast('error', `${po.source_file}: fix the unit cost. ${MONEY_PRECISION_MESSAGE}`);
+          failedCount++;
+          continue;
+        }
         const validItems = po.items.filter((i) => i.matched_product && i.quantity_ordered > 0);
         if (validItems.length === 0) {
           failedCount++;
@@ -451,9 +470,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
           const unitCostCents = purchaseOrderUnitCostCents(item.unit_cost);
           return {
             ...line,
-            // OCR may return extra decimal places. Send one canonical whole-cent
-            // value in both representations so the database never sees a raw,
-            // fractional-cent dollar amount that disagrees with our cents math.
+            // savedLinesHaveWholeCentCosts refused any cost past two decimals
+            // above, so this conversion is exact; both representations agree.
             unit_cost: purchaseOrderCentsToDollars(unitCostCents),
             unit_cost_cents: unitCostCents,
           };
@@ -580,7 +598,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
     const positiveItems = po.items.filter((item) => item.quantity_ordered > 0);
     return intentKey !== null
       && positiveItems.length > 0
-      && positiveItems.every((item) => item.matched_product);
+      && positiveItems.every((item) => item.matched_product)
+      && (!isAdmin || savedLinesHaveWholeCentCosts(po));
   }).length ?? 0;
 
   const filteredProducts = products.filter((p) => {
@@ -896,8 +915,15 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                         }
                                         min="0"
                                         step="0.01"
-                                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
+                                        aria-label={`Unit cost for ${item.matched_product?.product_name ?? item.extracted_name}`}
+                                        aria-invalid={!hasWholeCentUnitCost(item)}
+                                        className={`w-full px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green ${
+                                          hasWholeCentUnitCost(item) ? 'border-gray-200' : 'border-red-400'
+                                        }`}
                                       />
+                                      {!hasWholeCentUnitCost(item) && (
+                                        <p className="mt-1 text-xs text-red-600">{MONEY_PRECISION_MESSAGE}</p>
+                                      )}
                                     </td>
                                     )}
                                     <td className="px-3 py-2">

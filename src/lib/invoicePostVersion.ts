@@ -1,5 +1,5 @@
 /**
- * Posting binds the invoice version a screen loaded (Goal 3, migration 20261021200000).
+ * Posting binds the invoice version a screen loaded (Goal 3, migration 20261022022000).
  *
  * `invoice_post_version` (INVOICE_POST_VERSION_COLUMNS in costFields.ts) is a computed field on
  * `invoices`: select it in the SAME query as the

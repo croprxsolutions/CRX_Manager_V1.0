@@ -68,6 +68,14 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Return credits are briefly paused while an accounting update finishes. Retry in a moment'],
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
+  // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
+  // per field owner. The page offers that path once it sees the order's field allocations.
+  [/^ORDER_HAS_FIELD_SPLIT\b/,
+   "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
+  // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
+  // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
+  [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,
+   "Nothing was billed. An invoice made from an order can only be for that order's customer, and this one would bill someone else. Ask an admin to review the order's field split"],
   // void_order refuses rather than erase money already recorded on the order's draft invoice.
   [/^ORDER_VOID_DRAFT_HAS_APPLIED_MONEY\b/,
    'Nothing was changed. This order\'s draft invoice already has a payment, prepay, write-off or credit recorded. Reverse that first, then void the order'],
@@ -257,7 +265,7 @@ export function sanitizeError(error: unknown): string {
       ? 'Nothing was saved. This order is already billed delivery by delivery, so a whole-order invoice would bill those goods twice. Invoice each remaining delivery instead'
       : 'Nothing was saved. This order already has a whole-order invoice, so a delivery invoice would bill those goods twice';
   }
-  // Reviewed-version binding (20261021200000): the saved invoice changed after the screen loaded it.
+  // Reviewed-version binding (20261022022000): the saved invoice changed after the screen loaded it.
   // The server sentence names the invoice by number and says what to do, so it is kept.
   const changedSinceLoaded = message.match(/^INVOICE_CHANGED_SINCE_LOADED:\s*(.+)$/s);
   if (changedSinceLoaded) return `Nothing was posted. ${changedSinceLoaded[1].trim()}`;

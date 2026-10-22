@@ -165,7 +165,7 @@ export const RpcErrorCodes = {
   DELIVERY_NOT_COMPLETED: 'DELIVERY_NOT_COMPLETED',
   DELIVERY_MISSING: 'DELIVERY_MISSING',
   // post_invoice / post_invoice_group / batch_post_invoices reviewed-version binding (Goal 3,
-  // migration 20261021200000): the saved invoice changed after the screen loaded it, or the
+  // migration 20261022022000): the saved invoice changed after the screen loaded it, or the
   // screen sent no version.
   INVOICE_CHANGED_SINCE_LOADED: 'INVOICE_CHANGED_SINCE_LOADED',
   INVOICE_VERSION_REQUIRED: 'INVOICE_VERSION_REQUIRED',
@@ -199,6 +199,8 @@ export const RpcErrorCodes = {
   RETURN_CREDIT_VOID_RELEASE_FAILED: 'RETURN_CREDIT_VOID_RELEASE_FAILED',
   RETURN_CREDIT_UNAPPLY_RELEASE_FAILED: 'RETURN_CREDIT_UNAPPLY_RELEASE_FAILED',
   ORDER_INVOICE_TERMINAL: 'ORDER_INVOICE_TERMINAL',
+  // create_invoice_from_order — the order is split across fields; bill it per field owner
+  ORDER_HAS_FIELD_SPLIT: 'ORDER_HAS_FIELD_SPLIT',
   ORDER_LIFECYCLE_BUSY_RETRY: 'ORDER_LIFECYCLE_BUSY_RETRY',
   // price_order (sell-side roadmap #2 v2)
   INVALID_PRICE: 'INVALID_PRICE',

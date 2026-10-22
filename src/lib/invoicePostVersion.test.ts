@@ -68,14 +68,14 @@ describe('postInvoiceTarget', () => {
   });
 });
 
-describe('the posting version carries no cost (migration 20261021200000)', () => {
+describe('the posting version carries no cost (migration 20261022022000)', () => {
   // The version is a SHA-256 a rep can read, over rows whose other fields the rep can also read, so a
   // single cost value inside it could be guessed. Every cost column registered for a table the
   // hash reads must be left out of it, and the other tables it reads must have no cost columns.
   it('excludes every registered cost column of the tables it hashes', async () => {
     const { readFileSync } = await import('node:fs');
     const { COST_COLUMNS } = await import('./costFields');
-    const sql = readFileSync('supabase/migrations/20261021200000_post_binds_reviewed_invoice_version.sql', 'utf8');
+    const sql = readFileSync('supabase/migrations/20261022022000_post_binds_reviewed_invoice_version.sql', 'utf8');
     expect(sql).toContain("to_jsonb(i) - 'total_cost_cents'");
     expect(sql).toContain("to_jsonb(ii) - ARRAY['cost_cents', 'return_credit_cogs_cents']");
     expect([...COST_COLUMNS.invoices]).toEqual(['total_cost_cents']);

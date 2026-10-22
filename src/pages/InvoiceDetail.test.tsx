@@ -1621,7 +1621,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
 });
 
 /**
- * Goal 3 "Post uses what was saved and reviewed" (migration 20261021200000). Post is blocked while
+ * Goal 3 "Post uses what was saved and reviewed" (migration 20261022022000). Post is blocked while
  * the form has unsaved edits, sends the invoice_post_version this screen loaded, and a server
  * refusal because the invoice changed elsewhere reloads the invoice.
  */

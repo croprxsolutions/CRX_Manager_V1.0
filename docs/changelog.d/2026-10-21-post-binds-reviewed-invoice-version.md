@@ -2,7 +2,7 @@
 
 - Posting an invoice now posts exactly the version the screen showed. Before, a save from a second
   tab or by another person just before Post was posted unseen (KNOWN_ISSUES "OPEN 2026-10-09").
-- Migration `20261021200000_post_binds_reviewed_invoice_version` (not applied yet): a new computed
+- Migration `20261022022000_post_binds_reviewed_invoice_version` (not applied yet): a new computed
   field `invoice_post_version` (a fingerprint of the saved invoice, its lines, shares, allocations,
   field locations and the customer's payment terms, with every cost column left out) that screens
   read with the invoice row. `post_invoice`, `post_invoice_group` and `batch_post_invoices` now

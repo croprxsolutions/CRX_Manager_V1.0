@@ -285,7 +285,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // has no valid applicator license — posting is the legal point of sale.
   const [rupPostWarning, setRupPostWarning] = useState<string | null>(null);
 
-  // ── Post binds the saved, reviewed invoice (Goal 3, migration 20261021200000) ──────────────
+  // ── Post binds the saved, reviewed invoice (Goal 3, migration 20261022022000) ──────────────
   // post_invoice / post_invoice_group post what is SAVED, and refuse if the saved invoice (or a
   // split sibling, or the group's membership) changed since this screen loaded it. So everything
   // Post sends or checks comes from the last load, never from the form: the version, and the

@@ -204,7 +204,7 @@ BEGIN
   --     Its SECDEF body runs as owner postgres, so the internal
   --     generate_rup_sales_records call must still work post-revoke.
   -- --------------------------------------------------------------------
-  -- Read as owner: the version helper is not executable by authenticated (20261021200000).
+  -- Read as owner: the version helper is not executable by authenticated (20261022022000).
   v_version := public._invoice_post_version(v_invoice);
   BEGIN
     SET LOCAL ROLE authenticated;

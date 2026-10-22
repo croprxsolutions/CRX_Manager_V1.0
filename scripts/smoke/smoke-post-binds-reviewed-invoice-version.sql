@@ -1,4 +1,4 @@
--- Rollback-only live chain for 20261021200000 (Goal 3, "Post uses what was saved and reviewed").
+-- Rollback-only live chain for 20261022022000 (Goal 3, "Post uses what was saved and reviewed").
 -- It plants no rows. Every posting call below is refused before it writes anything; the
 -- full matrix (real posts, two users, a second tab, races, mutations) runs in the container
 -- prover scripts/smoke/prove-post-binds-reviewed-invoice-version-real-schema.mjs.
@@ -16,7 +16,7 @@ DECLARE
 BEGIN
   IF to_regprocedure('public.invoice_post_version(public.invoices)') IS NULL
      OR to_regprocedure('public.post_invoice(uuid,text,text)') IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_PREREQ: 20261021200000 is not applied on this database';
+    RAISE EXCEPTION 'SMOKE_PREREQ: 20261022022000 is not applied on this database';
   END IF;
 
   -- The old signatures, which take no version, are gone.

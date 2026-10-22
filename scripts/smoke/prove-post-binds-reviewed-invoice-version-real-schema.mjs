@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261021200000 candidate: Goal 3 "Post uses what was saved and reviewed"
+ * Full-chain proof for the 20261022022000 candidate: Goal 3 "Post uses what was saved and reviewed"
  * (docs/plans/2026-10-13-direction-and-goals.md, done-test "Posting"; docs/manual/KNOWN_ISSUES.md
  * "OPEN 2026-10-09"). post_invoice, post_invoice_group and batch_post_invoices take the version of the
  * invoice the screen loaded (the invoice_post_version computed field) and refuse, inside the posting
@@ -50,7 +50,7 @@ const VERBOSE = process.env.CRX_PROVER_VERBOSE === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261021200000_post_binds_reviewed_invoice_version.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261022022000_post_binds_reviewed_invoice_version.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

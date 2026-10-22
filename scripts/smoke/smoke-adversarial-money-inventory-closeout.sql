@@ -114,7 +114,7 @@ BEGIN
   END;
 
   BEGIN
-    -- Since 20261021200000 the own-name check runs before the version check, so any version works here.
+    -- Since 20261022022000 the own-name check runs before the version check, so any version works here.
     PERFORM public.post_invoice(
       v_other_invoice,
       'v1:smoke',

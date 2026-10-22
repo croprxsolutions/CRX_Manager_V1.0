@@ -10,7 +10,9 @@ notes:
   stored quantity, as `save_invoice` already does when a line is saved again. The "included in grower
   share" line stays $0 (its customer charge is the per-acre share line, from acres and the override
   price, unchanged); only its cost in the invoice total now uses the stored quantity. Whole-number and
-  4-place quantities bill exactly as before.
+  4-place quantities bill exactly as before. A positive quantity so small it would store as 0 (below
+  0.00005) is refused (`BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO`) instead of billing a 0-quantity line
+  (found by the Sol review).
 - **$0 line cost.** An approved $0 quoted line now records the catalog cost the approval window showed
   (and `below_cost_approvals` records), not the ticket line's editable cost copy; the grower-share line
   already did. Other lines keep their cost source. Margin reporting only (the price is $0 either way).

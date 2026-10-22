@@ -239,7 +239,7 @@ const INVOICE_SIG = `public.${INVOICE}(uuid,uuid,text,text,jsonb)`;
 const PREVIOUS = path.join(MIGRATIONS, '20261021070000_blend_invoice_approval_binding.sql');
 
 // NOTHING ELSE CHANGED: rebuild the expected body from the 20261021070000 body (its live md5 is
-// the candidate's own preflight pin) with only the four intended edits, each matched exactly once,
+// the candidate's own preflight pin) with only the intended edits (the four LOW fixes and the zero-quantity refusal), each matched exactly once,
 // and require the candidate body to equal it byte for byte.
 function expectedBody() {
   const sql = lf(PREVIOUS);
@@ -270,7 +270,9 @@ function expectedBody() {
     + '      -- add it to the invoice totals from that same stored quantity (as save_invoice does when\n'
     + '      -- a line is saved again), so quantity x price is the line amount and the totals match the\n'
     + '      -- lines. Before, the amount and cost used the unrounded quantity and could differ by cents.\n'
-    + '      v_chem_qty_a_conv := ROUND(v_chem_qty_a_conv, 4);\n      v_chem_qty_b_conv := ROUND(v_chem_qty_b_conv, 4);\n\n'
+    + '      v_chem_qty_a_conv := ROUND(v_chem_qty_a_conv, 4);\n      v_chem_qty_b_conv := ROUND(v_chem_qty_b_conv, 4);\n'
+    + "\n      -- 20261022020000: a positive quantity below 0.00005 would round to a 0 stored quantity and\n      -- bill a 0-quantity, $0 line while the ticket is marked billed; refuse it instead, so the\n      -- office corrects the rate or acres.\n      IF (v_chem_qty_a > 0 AND v_chem_qty_a_conv <= 0) OR (v_chem_qty_b > 0 AND v_chem_qty_b_conv <= 0) THEN\n        RAISE EXCEPTION 'BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO: % (blend ticket line %) bills less than 0.0001 per line; correct the rate or acres', COALESCE(v_btp.full_product_name, v_btp.product_name), v_btp.id USING ERRCODE = '22023';\n      END IF;\n"
+    + '\n'
     + '      IF v_chem_qty_a > 0 THEN\n');
   // Change 2.
   once("        IF v_zero_quoted THEN\n          PERFORM set_config('app.crx_below_cost_operation', 'create_invoice_from_blend_ticket', true);\n",
@@ -284,8 +286,8 @@ function expectedBody() {
 }
 
 function main() {
-  assert.equal(candidateBody(INVOICE).body, expectedBody(), 'the candidate body is not the 20261021070000 body plus exactly the four intended edits');
-  console.log('[prover] BODY: the candidate body is the 20261021070000 body plus exactly the four intended edits (byte for byte)');
+  assert.equal(candidateBody(INVOICE).body, expectedBody(), 'the candidate body is not the 20261021070000 body plus exactly the intended edits');
+  console.log('[prover] BODY: the candidate body is the 20261021070000 body plus exactly the intended edits (byte for byte)');
   buildContainer();
   fidelity();
   seed();
@@ -371,6 +373,8 @@ function main() {
       /SMOKE_FAIL: the per-unit line amount is not its stored quantity x price/],
     ['stored quantity (grower share)', [[ROUND_A, '']],
       /SMOKE_FAIL: the included chemical's cost in the invoice is not its stored quantity x cost \(111114\): 111110/],
+    ['zero-quantity refusal', [["      IF (v_chem_qty_a > 0 AND v_chem_qty_a_conv <= 0) OR (v_chem_qty_b > 0 AND v_chem_qty_b_conv <= 0) THEN\n", "      IF false THEN\n"]],
+      /SMOKE_FAIL: a quantity that rounds to 0 at 4 places was billed/],
     ['$0 line catalog cost', [[ZERO_COST, '          PERFORM set_config(']],
       /SMOKE_FAIL: the approved \$0 line records the ticket's cost copy, not the approved catalog cost/],
     ['replay lookup', [['  IF v_existing IS NOT NULL THEN\n    -- The receipt is keyed', '  IF false THEN\n    -- The receipt is keyed']],

@@ -14,7 +14,9 @@
 --      line (Mode A, the 20261021070000 finding) its share of the invoice cost; that line's price
 --      stays $0 and the per-acre share charge is unchanged. This is what save_invoice already does when a line
 --      is saved again (ROUND(quantity x unit price)). A customer's amount can move by a few cents
---      on a fractional quantity; whole-number and 4-place quantities bill exactly as before.
+--      on a fractional quantity; whole-number and 4-place quantities bill exactly as before. A positive
+--      quantity that would round to 0 (below 0.00005) is now refused with
+--      BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO instead of billing a 0-quantity line (Sol review).
 --   2. $0 LINE COST. An approved $0 quoted line now records the product's catalog cost (the cost the
 --      approval window showed, locked FOR SHARE above, and the cost the line trigger writes to
 --      below_cost_approvals), as the included-in-grower-share line does since 20261021070000. Before,
@@ -38,7 +40,7 @@
 -- DEPLOY ORDER: apply immediately before the merge (ship.md). No screen change: the arguments, the
 -- refusals and the approval contract are unchanged.
 --
--- NOT CHANGED: the arguments and defaults; every refusal and its detail; the $0 approval binding;
+-- NOT CHANGED: the arguments and defaults; every existing refusal and its detail; the $0 approval binding;
 -- the grower-share share line and application-fee line (acres, unrounded as before); the line
 -- trigger; the order path.
 --
@@ -689,6 +691,13 @@ BEGIN
       v_chem_qty_a_conv := ROUND(v_chem_qty_a_conv, 4);
       v_chem_qty_b_conv := ROUND(v_chem_qty_b_conv, 4);
 
+      -- 20261022020000: a positive quantity below 0.00005 would round to a 0 stored quantity and
+      -- bill a 0-quantity, $0 line while the ticket is marked billed; refuse it instead, so the
+      -- office corrects the rate or acres.
+      IF (v_chem_qty_a > 0 AND v_chem_qty_a_conv <= 0) OR (v_chem_qty_b > 0 AND v_chem_qty_b_conv <= 0) THEN
+        RAISE EXCEPTION 'BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO: % (blend ticket line %) bills less than 0.0001 per line; correct the rate or acres', COALESCE(v_btp.full_product_name, v_btp.product_name), v_btp.id USING ERRCODE = '22023';
+      END IF;
+
       IF v_chem_qty_a > 0 THEN
         -- 20261021070000: the included line is $0, below cost; it carries the admin's reason (asked
         -- for above) to the line trigger, which re-checks it and records the approval. Only this
@@ -923,7 +932,7 @@ BEGIN
   IF v_fn IS NULL
      OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'create_invoice_from_blend_ticket') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM '6f73489aead62a438afe0cc260d21894'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM 'e447de5176c4a961acb74517ff4a86ff'
      OR pg_get_function_arguments(v_fn) IS DISTINCT FROM 'p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb'
      OR (SELECT proowner FROM pg_proc WHERE oid = v_fn) <> 'postgres'::regrole
      OR (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM true

@@ -12,7 +12,9 @@
 --   3. an approved $0 quoted line records the catalog cost the approval showed, not the ticket
 --      line's editable cost copy; a priced quoted line on the same ticket keeps its copy;
 --   4. with the dead key test gone, the replay lookup and the receipt still work: the same key
---      returns the same invoices, and the key reused on another ticket is refused.
+--      returns the same invoices, and the key reused on another ticket is refused;
+--   5. a positive quantity that rounds to 0 at the stored 4 places is refused
+--      (BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO), per-unit and grower share, leaving no invoice.
 -- (The preflight pins are proven by the prover, not this chain.)
 --
 -- One product costs $900.00 (tier 2 $1,400.00); a line at 0.123456 gal/ac on 10 acres is
@@ -37,6 +39,8 @@ DECLARE
   v_t_unit uuid;
   v_t_share uuid;
   v_t_zero uuid;
+  v_t_tiny uuid;
+  v_t_tiny_share uuid;
   v_line_zero uuid;
   v_invoice uuid;
   v_res jsonb;
@@ -111,7 +115,7 @@ BEGIN
 
   -- Three approved, unbilled tickets: per-unit (plain field), grower share (share field), and $0
   -- quoted (plain field, on the job).
-  FOR v_count IN 1..3 LOOP
+  FOR v_count IN 1..5 LOOP
     INSERT INTO public.blend_tickets (
       ticket_number, uploaded_by, customer_id, status, review_status,
       payment_status, order_link_status, season, total_acres, source, job_id
@@ -121,16 +125,21 @@ BEGIN
       CASE WHEN v_count = 3 THEN v_job END
     ) RETURNING id INTO v_invoice;
     INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, actual_acres)
-    VALUES (v_invoice, CASE WHEN v_count = 2 THEN v_field_share ELSE v_field END, v_customer, 10);
+    VALUES (v_invoice, CASE WHEN v_count IN (2, 5) THEN v_field_share ELSE v_field END, v_customer, 10);
     CASE v_count
       WHEN 1 THEN v_t_unit := v_invoice;
       WHEN 2 THEN v_t_share := v_invoice;
-      ELSE v_t_zero := v_invoice;
+      WHEN 3 THEN v_t_zero := v_invoice;
+      WHEN 4 THEN v_t_tiny := v_invoice;
+      ELSE v_t_tiny_share := v_invoice;
     END CASE;
   END LOOP;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
   VALUES (v_t_unit, v_p_big, '[E2E] BIL per-unit', 1.23456, 'GL', 0.123456, 'gal/ac', 1),
-         (v_t_share, v_p_big, '[E2E] BIL in grower share', 1.23456, 'GL', 0.123456, 'gal/ac', 1);
+         (v_t_share, v_p_big, '[E2E] BIL in grower share', 1.23456, 'GL', 0.123456, 'gal/ac', 1),
+         -- 0.000004 gal/ac on 10 acres is 0.00004 gal, which stores as 0.0000.
+         (v_t_tiny, v_p_big, '[E2E] BIL tiny per-unit', 0.00004, 'GL', 0.000004, 'gal/ac', 1),
+         (v_t_tiny_share, v_p_big, '[E2E] BIL tiny in grower share', 0.00004, 'GL', 0.000004, 'gal/ac', 1);
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order, unit_cost_cents)
   VALUES (v_t_zero, v_p_big, '[E2E] BIL zero quoted', 20, 'GL', 2, 'gal/ac', 1, 100) RETURNING id INTO v_line_zero;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order, unit_cost_cents)
@@ -278,6 +287,46 @@ BEGIN
   IF COALESCE(current_setting('app.crx_below_cost_operation', true), '') <> ''
      OR COALESCE(current_setting('app.crx_below_cost_reason', true), '') <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the below-cost context was left set after the invoices';
+  END IF;
+
+  -- 5. A quantity that rounds to 0 at 4 places is refused, not billed as a 0-quantity line.
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t_tiny, v_admin, 'e2e-bil-invoice-5a-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: a quantity that rounds to 0 at 4 places was billed (per-unit): %',
+      (SELECT jsonb_agg(to_jsonb(ii)) FROM public.invoice_items ii WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong per-unit zero-quantity refusal: %', v_err;
+    END IF;
+  END;
+  -- The grower-share ticket asks for its $0 approval first; approved, it is still refused.
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t_tiny_share, v_admin, 'e2e-bil-invoice-5b-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: the tiny grower-share ticket billed with no approval: %', v_res;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BELOW_COST_REASON_REQUIRED:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong tiny grower-share approval request: %', v_err;
+    END IF;
+  END;
+  v_detail := substr(v_err, length('BELOW_COST_REASON_REQUIRED:') + 1)::jsonb;
+  BEGIN
+    v_res := public.create_invoice_from_blend_ticket(v_t_tiny_share, v_admin, 'e2e-bil-invoice-5c-' || v_suffix, 'package price', v_detail->'zero_lines');
+    RAISE EXCEPTION 'SMOKE_FAIL: a quantity that rounds to 0 at 4 places was billed (grower share): %',
+      (SELECT jsonb_agg(to_jsonb(ii)) FROM public.invoice_items ii WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong grower-share zero-quantity refusal: %', v_err;
+    END IF;
+  END;
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE blend_ticket_id IN (v_t_tiny, v_t_tiny_share))
+     OR (SELECT count(*) FROM public.blend_tickets WHERE id IN (v_t_tiny, v_t_tiny_share) AND payment_status = 'unbilled') <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused zero-quantity ticket left an invoice or was marked billed';
   END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';

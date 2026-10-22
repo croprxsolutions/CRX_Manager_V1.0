@@ -14,7 +14,9 @@ documents keep the reasoning. Where this plan differs from them, section 9 says 
 
 **Code facts** were read from `main` on 2026-10-22, with file and line, and an independent read-only review
 checked every citation and the design against the code the same day (35 findings, all applied below).
-Re-check each fact before building; delivery code changes often.
+The Codex GitHub App's reviews of PR #1037 added seven more, also applied. Re-check each fact before
+building; delivery code changes often. Further build-level detail belongs to the build PRs' own reviews,
+not to this plan.
 
 **Words used below.** A *migration* is a reviewed change to the database. A *database function* is a
 saved operation the app asks the database to run (for example "complete this delivery"); the rules inside
@@ -235,7 +237,12 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
    overdue, voided, cancelled):
    - `draft` or `unposted`: it re-copies the invoice lines' EPA numbers;
    - `posted`, `overdue` or `paid`: the invoice stays exactly as issued (the customer's copy doesn't
-     silently change). In the same step, it voids that invoice's active RUP records for the corrected lines,
+     silently change). To make that true for the brand names as well as the EPA number, a correction never
+     overwrites brand rows on a completed delivery. It marks the old rows superseded (`superseded_at`,
+     `superseded_by`, reason) and adds new ones. Screens and new paperwork read the current rows. A reprint
+     of an issued invoice reads the rows that were current when it was posted, so its brand names still
+     match its stored EPA number. Before completion, `set_delivery_brands` may still replace rows outright,
+     since nothing has been issued yet. In the same step, it voids that invoice's active RUP records for the corrected lines,
      with the correction's reason (`voided_at`, `voided_by`, `void_reason`, the same voided-row handling the
      register already uses, PARKED-006). It then writes corrected records by the rules in item 7. The
      correction log names the invoice, so a reprint question can be answered;
@@ -284,9 +291,15 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
 - **Deliveries list** (`src/pages/Deliveries.tsx:480-540`): the plain refusal message on Mark Delivered.
 - **Quick delivery** (`src/components/deliveries/QuickDeliveryModal.tsx`): no picker in step 1. A quick
   delivery is completed on its delivery page like any other, where the picker is.
-- **Delivery receipt PDF** (`src/lib/deliveryPdf.ts`) and **completion email**
-  (`src/lib/deliveryCompletionEmail.ts`, sent from `src/pages/FieldStop.tsx:443`): under each line, each
-  brand with its EPA number and amount.
+- **Delivery receipt PDF** (`src/lib/deliveryPdf.ts`) and **every completion email**: under each line, each
+  brand with its EPA number and amount. There are three email builders today:
+  - `src/lib/deliveryCompletionEmail.ts`, sent from `src/pages/FieldStop.tsx:443`;
+  - the delivery page's own completion email, built inline in `src/pages/DeliveryDetail.tsx`
+    (`sendEmail` at `:1259`);
+  - its resend button (`handleResendEmail`, `:1295`, sent at `:1348`).
+
+  PR B moves all three onto the one helper, so the brand lines can't be missed on any of them. The proof
+  covers both the first send and a resend.
 - **Invoice PDF** (`src/lib/invoicePdf.ts`): the EPA column already prints `invoice_items.epa_registration`
   first; the brand names print under the line. **Invoice editing** (`src/pages/InvoiceDetail.tsx`) today
   clears a line's EPA number when the line is added or changed (`:818`, `:855`); it is changed to keep the
@@ -337,7 +350,7 @@ look-only check on live after landing.
   changes the delivery, with its reason logged, for an invoice in each status:
   - draft: the invoice line's number changes;
   - posted, overdue and paid: the invoice is untouched, the old RUP records are voided with the reason, and
-    corrected records are written.
+    corrected records are written. Reprinting that invoice still shows the original brand names and number.
 - A product with no brands delivers, invoices and prints as before, except that its own EPA number now
   appears on the statement.
 - A Roundup line refuses a Liberty brand; a driver not assigned to the delivery is refused; the same save

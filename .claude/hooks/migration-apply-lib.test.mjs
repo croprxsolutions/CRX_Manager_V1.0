@@ -194,6 +194,13 @@ allows(evaluate(fixture()), "known-good UNARMED fixture (both reviewers + fresh 
   const spy = (args) => { seen.push(args.sessionId); return landingOk(args); };
   allows(evaluate(fixture(), { landingGate: spy, ownerSessionId: "apply-session-0001" }), "an apply with a session id still passes");
   ok(seen.length > 0 && seen.every((id) => id === "apply-session-0001"), "the landing gate receives the applying session's id");
+  // Codex App P2 on #1035: a waiver the landing gate used rides on the allow
+  // verdict, so the apply reports CodeRabbit SKIPPED, not clean.
+  const waived = { pullRequest: 900, said: "skip coderabbit #900", recordedAt: "2026-10-22T15:00:00.000Z", expiresAt: "2026-10-23T15:00:00.000Z" };
+  const withSkip = evaluate(fixture(), { landingGate: (args) => ({ ...landingOk(args), coderabbitSkippedBy: waived }) });
+  allows(withSkip, "an apply on a waived PR still passes");
+  ok(withSkip.coderabbitSkippedBy?.pullRequest === 900, "and its verdict says CodeRabbit was skipped for #900");
+  ok(evaluate(fixture()).coderabbitSkippedBy === undefined, "a reviewed PR's verdict carries no skip marker");
 }
 
 // ── CHECK 1: ordering preflight ─────────────────────────────────────────────

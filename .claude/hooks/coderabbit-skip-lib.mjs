@@ -271,6 +271,8 @@ export function coderabbitSkipNotice(prefix, selector, skip) {
     `${prefix}: CODERABBIT SKIPPED BY MASON — #${skip.pullRequest} has no CodeRabbit review of its head, but Mason waived ` +
     `that requirement for this PR in this session at ${skip.recordedAt} ("${skip.said}"; valid until ${skip.expiresAt}). ` +
     "The Sol review, required checks and CodeRabbit thread rules still applied. Record it on the PR: " +
-    `gh pr comment ${selector || skip.pullRequest} --body "CodeRabbit review skipped at Mason's request (said in the session that merged this PR)."\n`
+    // The repository is named so the note lands on THIS PR even when the merge
+    // ran from another checkout (Codex App P2 on #1035).
+    `gh pr comment ${skip.pullRequest} --repo ${CODERABBIT_SKIP_REPOSITORY} --body "CodeRabbit review skipped at Mason's request (said in the session that merged this PR)."\n`
   );
 }

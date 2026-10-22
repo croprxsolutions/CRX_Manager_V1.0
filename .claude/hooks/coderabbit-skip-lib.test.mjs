@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_MAX_BYTES, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
+  coderabbitSkipNotice,
   findCodeRabbitSkip, isSkipRepository, mayExist, recordCodeRabbitSkip, skipStateDirs, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
@@ -67,6 +68,11 @@ eq(parsed("use coderabbit"), { kind: "cancel" }, "use coderabbit cancels");
 eq(parsed("Require CodeRabbit again"), { kind: "cancel" }, "require coderabbit cancels");
 eq(parsed(""), null, "empty");
 eq(parsed(undefined), null, "missing");
+
+// The gate's note names the repository, so following it comments on THIS PR
+// even from another checkout (Codex App P2 on #1035).
+ok(coderabbitSkipNotice("PR MERGE GATE", "1018", { pullRequest: 1018, said: "skip coderabbit #1018", recordedAt: "t", expiresAt: "u" })
+  .includes("gh pr comment 1018 --repo masonwells1/CRX_Manager_V1.0 --body"), "the suggested PR comment names this repository");
 
 // ── which repository a waiver covers (Codex App P2 on #1035) ────────────────
 eq(isSkipRepository("masonwells1", "CRX_Manager_V1.0"), true, "this repository");

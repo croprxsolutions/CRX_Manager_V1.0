@@ -138,8 +138,10 @@ done, customer, invoice or record number, amount, and their initials.
 - applying, editing or reversing prepay;
 - voiding a payment, with its original date and everything the void undid: the amount it had
   applied to invoices, and any prepay it had created (including prepay already applied to other
-  invoices, which the void also takes back). Write down the totals the void screen reports, and
-  check the customer's balances on **AR Aging** and **Prepay** right after;
+  invoices, which the void also takes back). The void screen shows only the payment's total, not
+  the prepay it reverses. So write down the customer's balance on **AR Aging** and their **Prepay**
+  balance just **before** the void and again just **after**; the differences are the amounts for
+  the list;
 - **anything else that changes what a customer owes, their prepay or their credit.** When in doubt,
   write it down.
 
@@ -340,7 +342,8 @@ number; write VOID across a spoiled form and keep it.
 
 Keep each operation's forms together in one folder, in number order.
 
-**Rule for every form:** a paper form must ask for every field the matching CRX screen asks for,
+**Rule for every form** (this one, and the outage forms in procedure 3): a paper form must ask for
+every field the matching CRX screen asks for,
 especially fields CRX fills in by itself (today's date, default terms, "Check", "Main Warehouse",
 "good"). Otherwise the record entered later quietly takes CRX's default instead of what really
 happened. The table above is a starting point. **Draft suggestion:** in the December rehearsal, lay
@@ -443,7 +446,9 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
 - **An order taken by phone during the outage** goes on a numbered paper order form before it's
   delivered. It records the customer, order date, products and quantities, the agreed price for each
   (or "price later", if that was agreed), the delivery address, driver, delivery date and priority,
-  and who took it. CRX will need all of these to create the order and its delivery afterwards;
+  and who took it. Like every paper form, it also copies the rest of the fields the New Order and
+  New Delivery screens ask for, such as delivery time, delivery notes, package size, tote number and
+  item notes (the "rule for every form" in procedure 2). CRX will need all of these to create the order and its delivery afterwards;
   without them, CRX falls back to its own defaults, such as today's tier price. **Known gap:** a
   "price later" order can't be back-dated in CRX: it always gets the day it's entered. Keep the real
   order date on the paper form and in the order's notes. Question 7 below asks whether that is

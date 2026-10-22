@@ -160,7 +160,9 @@ ships or quarterly, whichever comes first.
   On 2026-10-22 (~16:05 UTC) it was regenerated from live introspection (all six queries) to
   `migrations_high_water` `20261022155943`, adding `20261021150000_split_invoice_cross_customer_lineage`,
   `20261021155000_split_payer_return_credit` (PR #1010, with its new `return_credit_customer_claims` table)
-  and `20261022020000_blend_invoice_binding_lows` (PR #1020, function body only).
+  and `20261022020000_blend_invoice_binding_lows` (PR #1020, function body only). At 16:52 UTC it was
+  regenerated again (all six queries) to `migrations_high_water` `20261022163441`, adding only
+  `20261022021000_order_invoice_refuses_field_split` (PR #1006, function bodies only).
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on
   2026-09-22 UTC, the Documents tab that calls it merged in PR #764 (2026-09-23 UTC, the evening
   of 2026-09-22 Chicago), and migration

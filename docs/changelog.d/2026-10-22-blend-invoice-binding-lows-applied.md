@@ -11,5 +11,9 @@ the reviewed body (md5 `a6f5c6e7…`) with unchanged security and grants.
 - `docs/manual/KNOWN_ISSUES.md` records the four LOW fixes (and the zero-quantity refusal) as live.
 - `.claude/schema-registry.json` regenerated from live introspection (high-water `20261022155943`;
   adds the #1010 and #1020 migration names and #1010's `return_credit_customer_claims` table).
+- After PR #1006 landed, row 967 (`20261022021000`, ledger `20261022163441`) is marked APPLIED too, and the
+  registry was regenerated again from live through it (high-water `20261022163441`, name list only).
+- `src/lib/rpcContracts.test.ts` drops the `guard_invoice_terminal_order` exemption: its migration
+  `20261021150000` is now in the applied snapshot, so the guard is no longer discovered.
 - Follow-up: the blend ticket screen has no plain-English message for the new
-  `BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO` refusal yet, so staff see the database text.
+  `BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO` refusal yet, so staff see the database text (PR #1034).

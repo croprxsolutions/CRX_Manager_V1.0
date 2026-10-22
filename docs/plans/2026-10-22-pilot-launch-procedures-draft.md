@@ -200,8 +200,9 @@ On **A/R Workspace**, open the **Payment History** tab and list yesterday's paym
   Then list the deliveries completed yesterday, and confirm each one's draft or posted invoice on
   **Invoices — Chemical** (completing a delivery creates a draft invoice). **The Deliveries screen's
   date filters and date column use the scheduled date, not the completion date.** A delivery finished
-  later than scheduled would be missed. **Draft suggestion:** on **Deliveries**, set Status to
-  Completed and the date to **All Dates**, then press **Export CSV**. The spreadsheet has a
+  later than scheduled would be missed. **Draft suggestion:** on **Deliveries**, make sure **no
+  deliveries are ticked** (with any ticked, Export CSV exports only those), set Status to Completed
+  and the date to **All Dates**, then press **Export CSV**. The spreadsheet has a
   **Completed** column; keep the rows completed yesterday. The December rehearsal should confirm that
   column shows the Central date. Question 8 below asks whether to add a completion-date filter.
 - Any count difference found in **Cycle Counts** gets a Difference Log row.
@@ -487,9 +488,10 @@ the one record until CRX is back.
 
 1. **Launch support confirms CRX is working** (it loads and saves) before anyone enters paper.
    **If the outage needed a database restore,** the runbook's restore steps (sections 4.6 and 4.7)
-   come first. CRX stays closed to staff until everything done after the restore point has been
-   reconciled: payments, deliveries, emails and QuickBooks entries. Only then does anyone enter the
-   paper, or entries can be doubled.
+   come first, and CRX stays closed to ordinary staff until they're finished. Entering the paper
+   payments and delivery tickets is **part of** that reconciliation (runbook 4.7). It's done by the
+   person running the recovery, using the steps below, while CRX is still closed to everyone else.
+   Only after section 4.7 is complete does CRX reopen and normal work resume.
 2. **Enter oldest first**, using the normal screens. Before entering a record, check for its paper
    number so nothing goes in twice. For payments, search **Payment History**, because the paper
    number goes in the **Reference #** box. For deliveries, check the outage ticket list, because CRX

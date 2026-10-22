@@ -87,6 +87,10 @@
   paper form number goes in the receipt's notes. A "price later" order can't carry a non-standard
   package size or item notes, so they go in the delivery notes. A payment void's AR change is counted
   once, not again in the prepay term.
+- Sixteenth Codex GitHub App round (two findings, both confirmed). After a restore, the paper is
+  entered by the person running the recovery as part of runbook 4.7, while CRX stays closed to
+  ordinary staff (the earlier wording contradicted the runbook). The completed-deliveries export
+  first clears ticked rows, since Export CSV exports only ticked rows when any are ticked.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

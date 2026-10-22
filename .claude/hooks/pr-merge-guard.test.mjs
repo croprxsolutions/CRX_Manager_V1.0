@@ -735,8 +735,8 @@ ok(/findCodeRabbitSkip\(\{[^}]*sessionId: hookPayload\?\.session_id \?\? hookPay
   "the merge guard reads the skip waiver for its own session and THIS PR, and treats a failed lookup as none");
 // Per PR (Mason, 2026-10-22): the number is GitHub's answer for the PR being
 // merged, taken only together with the trusted requirement answer.
-ok(/coderabbitReview = verdict;\s*reviewedPr = meta\.number;/.test(guardSource),
-  "the waiver is looked up for the PR number GitHub resolved, set with the trusted requirement answer");
+ok(/coderabbitReview = verdict;\s*(?:\/\/[^\n]*\n\s*)*reviewedPr = isSkipRepository\(slug\[1\], slug\[2\]\) \? meta\.number : null;/.test(guardSource),
+  "the waiver is looked up for the PR number GitHub resolved, only for a PR in this repository (Codex App P2 on #1035)");
 // Codex App P1 on #1009 (budget): every thread-page call in the Claude guard is
 // capped and only started if it can finish before the advisory deadline.
 ok(/gh\(args, REQUIREMENT_CALL_TIMEOUT_MS\)\)\?\.data\?\.repository\?\.pullRequest/.test(guardSource)

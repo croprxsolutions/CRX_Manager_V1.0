@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_MAX_BYTES, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
-  findCodeRabbitSkip, mayExist, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
+  findCodeRabbitSkip, isSkipRepository, mayExist, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +55,13 @@ eq(coderabbitSkipCommand("use coderabbit"), { kind: "cancel" }, "use coderabbit 
 eq(coderabbitSkipCommand("Require CodeRabbit again"), { kind: "cancel" }, "require coderabbit cancels");
 eq(coderabbitSkipCommand(""), null, "empty");
 eq(coderabbitSkipCommand(undefined), null, "missing");
+
+// ── which repository a waiver covers (Codex App P2 on #1035) ────────────────
+eq(isSkipRepository("masonwells1", "CRX_Manager_V1.0"), true, "this repository");
+eq(isSkipRepository("MasonWells1", "crx_manager_v1.0"), true, "GitHub names are case-insensitive");
+eq(isSkipRepository("other", "repo"), false, "any other repository gets no waiver");
+eq(isSkipRepository("masonwells1", "CRX_Manager_V1.0-fork"), false, "a look-alike name gets none");
+eq(isSkipRepository(undefined, undefined), false, "an unknown repository gets none");
 
 // ── record, find, cancel ────────────────────────────────────────────────────
 const temp = mkdtempSync(path.join(os.tmpdir(), "crx-cr-skip-"));

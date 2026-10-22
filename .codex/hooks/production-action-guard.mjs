@@ -65,7 +65,7 @@ import {
   readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
-import { coderabbitSkipNotice, findCodeRabbitSkip, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
+import { coderabbitSkipNotice, findCodeRabbitSkip, isSkipRepository, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -1376,7 +1376,8 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
       coderabbitOpen = coderabbitThreadCount(node);
       if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
         coderabbitReview = verdict;
-        reviewedPr = meta.number;
+        // A waiver covers this repository's PRs only (Codex App P2 on #1035).
+        reviewedPr = isSkipRepository(slug[1], slug[2]) ? meta.number : null;
       }
     }
   } catch {

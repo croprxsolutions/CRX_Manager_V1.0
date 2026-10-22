@@ -106,6 +106,14 @@ export function skipStateDirs(sessionFolders) {
 }
 
 const usablePr = (n) => Number.isInteger(n) && n > 0;
+
+// A waiver names a PR NUMBER, and numbers repeat across repositories, so it
+// only ever covers this repository's PRs. A merge gate passes the owner/name
+// GitHub returned for the PR; any other repository gets no waiver (Codex App
+// P2 on #1035: `gh pr merge -R other/repo 1018`).
+export const CODERABBIT_SKIP_REPOSITORY = "masonwells1/CRX_Manager_V1.0";
+export const isSkipRepository = (owner, name) =>
+  `${String(owner ?? "")}/${String(name ?? "")}`.toLowerCase() === CODERABBIT_SKIP_REPOSITORY.toLowerCase();
 export const coderabbitSkipFileName = (sessionId, pullRequest) => `coderabbit-skip-${sessionId}-pr${pullRequest}.json`;
 export const usableSkipSessionId = (sessionId) => SESSION_ID_RE.test(String(sessionId || ""));
 // Every waiver file this session could hold, whatever PR it names.

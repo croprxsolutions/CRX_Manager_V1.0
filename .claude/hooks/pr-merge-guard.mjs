@@ -70,7 +70,7 @@ import {
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
-import { coderabbitSkipNotice, findCodeRabbitSkip, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { coderabbitSkipNotice, findCodeRabbitSkip, isSkipRepository, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -420,7 +420,8 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
       // Both reads must describe the same head, or neither is trusted.
       if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
         coderabbitReview = verdict;
-        reviewedPr = meta.number;
+        // A waiver covers this repository's PRs only (Codex App P2 on #1035).
+        reviewedPr = isSkipRepository(slug[1], slug[2]) ? meta.number : null;
       }
     }
   } catch {

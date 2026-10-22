@@ -157,6 +157,15 @@ BEGIN
 
   -- 4. The replay lookup and the receipt still run with the dead test gone: the same key returns
   --    the same invoices and writes nothing; the same key on another ticket is refused.
+  -- Every row an invoice call writes, counted before the replay.
+  SELECT jsonb_build_object(
+           'invoices', (SELECT count(*) FROM public.invoices),
+           'items', (SELECT count(*) FROM public.invoice_items),
+           'shares', (SELECT count(*) FROM public.invoice_shares),
+           'audit', (SELECT count(*) FROM public.financial_audit_log),
+           'activity', (SELECT count(*) FROM public.activity_feed),
+           'approvals', (SELECT count(*) FROM public.below_cost_approvals))
+    INTO v_detail;
   BEGIN
     v_res2 := public.create_invoice_from_blend_ticket(v_t_unit, v_admin, 'e2e-bil-invoice-1-' || v_suffix);
   EXCEPTION WHEN OTHERS THEN
@@ -166,6 +175,15 @@ BEGIN
   IF v_res2 IS DISTINCT FROM v_res
      OR (SELECT count(*) FROM public.invoices WHERE blend_ticket_id = v_t_unit) <> 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the same key did not replay the same invoices: % then %', v_res, v_res2;
+  END IF;
+  IF v_detail IS DISTINCT FROM jsonb_build_object(
+           'invoices', (SELECT count(*) FROM public.invoices),
+           'items', (SELECT count(*) FROM public.invoice_items),
+           'shares', (SELECT count(*) FROM public.invoice_shares),
+           'audit', (SELECT count(*) FROM public.financial_audit_log),
+           'activity', (SELECT count(*) FROM public.activity_feed),
+           'approvals', (SELECT count(*) FROM public.below_cost_approvals)) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the replay wrote rows: before %', v_detail;
   END IF;
   BEGIN
     v_res2 := public.create_invoice_from_blend_ticket(v_t_share, v_admin, 'e2e-bil-invoice-1-' || v_suffix);

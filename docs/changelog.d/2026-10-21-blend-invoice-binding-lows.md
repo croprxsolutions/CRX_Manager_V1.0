@@ -15,7 +15,8 @@ notes:
   (and `below_cost_approvals` records), not the ticket line's editable cost copy; the grower-share line
   already did. Other lines keep their cost source. Margin reporting only (the price is $0 either way).
 - **Preflight pins.** The tier-price helper (called but never pinned), the quote-pick helper (only checked
-  to exist) and `safe_cents_qty` are now pinned by body md5, with the line trigger and share helper.
+  to exist) and `safe_cents_qty` are now pinned by body md5, with the line trigger and share helper;
+  the line trigger must also be attached to `invoice_items` and enabled.
 - **Dead check removed.** The `IF p_idempotency_key IS NOT NULL` tests around the replay lookup and the
   receipt could never be false once the key became required; removed, behaviour unchanged.
 - Proof: `scripts/smoke/prove-blend-invoice-binding-lows-real-schema.mjs` (Docker, real schema) with the

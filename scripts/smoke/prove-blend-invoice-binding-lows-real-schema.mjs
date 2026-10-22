@@ -265,8 +265,12 @@ function main() {
     assert.notEqual(r.status, 0, `PREFLIGHT: the candidate applied over a drifted ${sig}`);
     assert.match(r.stderr, expected, `PREFLIGHT: wrong refusal for a drifted ${sig}:\n${r.stderr}`);
   }
+  // The line trigger disabled (its body unchanged): the candidate refuses too.
+  const off = docker([...psqlArgs()], { input: 'BEGIN;\nALTER TABLE public.invoice_items DISABLE TRIGGER zz_crx_below_cost_invoice_items;\n\\i /tmp/candidate.sql\nROLLBACK;', allowFailure: true });
+  assert.notEqual(off.status, 0, 'PREFLIGHT: the candidate applied with the below-cost line trigger disabled');
+  assert.match(off.stderr, /PREFLIGHT_BLEND_INVOICE_BINDING_LOWS_TRIGGER_DRIFT/, `PREFLIGHT: wrong refusal for a disabled line trigger:\n${off.stderr}`);
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${INVOICE_SIG}'::regprocedure;`), liveMd5, 'PREFLIGHT: a refused apply changed the function');
-  console.log(`[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, or over any of ${drifted.length} drifted bodies (the invoice function, the line trigger, the share, quote-pick, tier-price and cents helpers), the candidate stops before any change`);
+  console.log(`[prover] AUTOCOMMIT + PREFLIGHT: outside one transaction, over any of ${drifted.length} drifted bodies (the invoice function, the line trigger, the share, quote-pick, tier-price and cents helpers), or with the line trigger disabled, the candidate stops before any change`);
 
   // 3. APPLY.
   const a = apply('candidate.sql');

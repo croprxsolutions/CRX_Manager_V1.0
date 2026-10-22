@@ -76,18 +76,28 @@ export function recordCodeRabbitSkip({ dirs, sessionId, said, now = Date.now() }
 }
 
 /** Remove this session's waiver everywhere. Returns how many files were removed. */
-export function cancelCodeRabbitSkip({ dirs, sessionId }) {
+export function cancelCodeRabbitSkip({ dirs, sessionId, remove = (file) => rmSync(file, { force: true }) }) {
   if (!usableSkipSessionId(sessionId)) return 0;
   let removed = 0;
   for (const dir of dirs || []) {
     const file = path.join(dir, coderabbitSkipFileName(sessionId));
     try {
       if (!existsSync(file)) continue;
-      rmSync(file, { force: true });
+      remove(file);
       removed++;
-    } catch { /* best effort */ }
+    } catch { /* withdrawCodeRabbitSkip re-checks what is left */ }
   }
   return removed;
+}
+
+/**
+ * Mason's `use coderabbit`: remove the waiver, then check none is still live,
+ * because a copy that could not be deleted keeps the gates accepting it
+ * (Luna round 2). Returns { removed, stillLive }.
+ */
+export function withdrawCodeRabbitSkip({ dirs, sessionId, now = Date.now(), remove }) {
+  const removed = cancelCodeRabbitSkip({ dirs, sessionId, ...(remove ? { remove } : {}) });
+  return { removed, stillLive: Boolean(findCodeRabbitSkip({ dirs, sessionId, now })) };
 }
 
 /**

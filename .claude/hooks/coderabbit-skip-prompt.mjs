@@ -10,7 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { ownerRequestDirs, replyWithoutReminders } from "./owner-approval-lib.mjs";
-import { cancelCodeRabbitSkip, coderabbitSkipCommand, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
+import { coderabbitSkipCommand, recordCodeRabbitSkip, withdrawCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 
 function emit(extra) {
   if (extra) {
@@ -30,16 +30,26 @@ if (!command) emit();
 // throws, and a catch here would turn a clean exit into a failure.
 let recorded = null;
 let removed = 0;
+let stillLive = false;
 let failure = "";
+// The same id the gates read: Codex may send it camelCased (Luna round 2).
+const sessionId = payload?.session_id ?? payload?.sessionId;
 try {
   const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
-  if (command === "skip") recorded = recordCodeRabbitSkip({ dirs, sessionId: payload?.session_id, said: reply });
-  else removed = cancelCodeRabbitSkip({ dirs, sessionId: payload?.session_id });
+  if (command === "skip") recorded = recordCodeRabbitSkip({ dirs, sessionId, said: reply });
+  else ({ removed, stillLive } = withdrawCodeRabbitSkip({ dirs, sessionId }));
 } catch (error) {
   failure = String(error?.message || error);
+  stillLive = command === "cancel";
 }
 
 if (command === "cancel") {
+  if (stillLive) {
+    emit([
+      `CODERABBIT SKIP NOT CANCELLED — Mason said "use coderabbit", but his waiver for this session could not be removed${failure ? ` (${failure})` : ""}, so the merge gates may still accept it.`,
+      "Tell him in one line, and request the CodeRabbit review on money PRs anyway: treat the waiver as withdrawn.",
+    ].join("\n"));
+  }
   emit(removed > 0
     ? "CODERABBIT SKIP CANCELLED — Mason said to use CodeRabbit again. Money PRs merged from this session need a completed CodeRabbit review of their head again."
     : "");
@@ -55,7 +65,7 @@ if (!recorded) {
 
 emit([
   `CODERABBIT SKIP RECORDED — Mason waived the CodeRabbit review requirement for money PRs merged from THIS session, until ${recorded.expiresAt}.`,
-  "Do not request a CodeRabbit review (@coderabbitai full review) for PRs you merge from this session while it lasts. The merge gates and the migration landing gate accept the waiver here only.",
+  "This is Mason's own instruction, recorded from his message: he does not want a CodeRabbit review (@coderabbitai full review) requested for PRs merged from this session while it lasts. The merge gates and the migration landing gate accept the waiver here only.",
   "Everything else still applies: the exact-SHA Sol review, every required check, and replying to and resolving any CodeRabbit thread already on the PR.",
   "When you merge a PR that had no CodeRabbit review under this waiver, post one comment on it first: " +
     "gh pr comment <n> --body \"CodeRabbit review skipped at Mason's request (said in the session that merged this PR).\"",

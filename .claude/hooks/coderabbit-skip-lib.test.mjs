@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
-  findCodeRabbitSkip, recordCodeRabbitSkip,
+  findCodeRabbitSkip, recordCodeRabbitSkip, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -108,6 +108,23 @@ try {
   eq(run("<system-reminder>a</system-reminder>\nnote</system-reminder>\nskip coderabbit"), "",
     "a reminder that is not cleanly whole is not stripped, so the words do not lead");
   eq(live(), null, "and nothing recorded");
+  // Codex may send the id camelCased; the gate reads either, so the hook must too (Luna round 2).
+  {
+    const r = spawnSync(process.execPath, [hook], {
+      input: JSON.stringify({ prompt: "skip coderabbit", sessionId: session, cwd: checkout }),
+      encoding: "utf8", cwd: checkout, env: { ...process.env, CLAUDE_PROJECT_DIR: checkout },
+    });
+    ok(/CODERABBIT SKIP RECORDED/.test(r.stdout) && live(), "a camelCase sessionId records the waiver for that session");
+  }
+  // A copy that cannot be deleted must never be reported as cancelled (Luna round 2).
+  {
+    const refused = () => { throw new Error("EPERM"); };
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused }), { removed: 0, stillLive: true },
+      "a waiver whose delete fails is reported still live");
+    ok(live(), "and it really is still there");
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }), { removed: 1, stillLive: false }, "a normal withdraw removes it");
+    eq(live(), null, "no waiver is left behind");
+  }
   ok(/CODERABBIT SKIP NOT RECORDED/.test(run("skip coderabbit", "")), "with no session id it says the waiver was not saved");
   ok(!existsSync(path.join(dirs[0], coderabbitSkipFileName(""))), "and writes nothing");
 } finally {

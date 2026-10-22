@@ -18,6 +18,9 @@
   inside the credit's claim (before this, no return on a split order could be credited). The Returns
   screen lists the orders a customer was split-billed on and caps each line, through two read-only
   server lookups, which show a sales rep a split order only when the rep may read every active invoice
-  billing that customer there (as `invoices_select` allows), and an admin always. Proof:
+  billing that customer there (as `invoices_select` allows), and an admin always; it shows what is left
+  of the customer's billed share in quantity and cents. A split return whose price went stale because
+  an earlier return of the same line was cancelled is refused at receipt and credit
+  (`RETURN_SPLIT_SHARE_REPRICED`: cancel and recreate it). Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs` over
   `smoke-split-payer-return-credit.sql`, plus `src/__tests__/splitPayerReturnMigration.test.ts`.

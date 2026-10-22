@@ -17,7 +17,10 @@
 --   4. the memo is applied to B's split invoice (the guard admits the memo's UPDATE as the credit of
 --      B's return);
 --   (1 also checks the Returns screen's read-only lookups: B may then return 1 GL / 0.5 GL more, A
---    2 GL, D nothing;)
+--    2 GL, D nothing, and they show what is left of B's billed share in quantity and cents;)
+--   4b. the payer billed the odd cent on line 2 returns it in two parts, priced 2.51 then 2.50 (the
+--      lookup quotes the 2.50 first); after the first is cancelled the second's price is stale, and
+--      issue_return_credit (i) and receive_return (ii) refuse it (RETURN_SPLIT_SHARE_REPRICED);
 --   5. B's whole share of line 2 credits exactly what B was billed for it, not a cent more;
 --   5b. on a second split order whose invoices are still drafts, A cannot return anything
 --      (RETURN_SPLIT_SHARE_NOT_BILLED);
@@ -50,6 +53,10 @@ DECLARE
   v_return uuid;
   v_return2 uuid;
   v_return3 uuid;
+  v_p uuid;
+  v_round int;
+  v_first uuid;
+  v_second uuid;
   v_memo uuid;
   v_order2 uuid;
   v_line3 uuid;
@@ -186,11 +193,13 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.get_return_line_allowances(v_order, v_d)) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the return lookups do not show B 1 GL / 0.5 GL, A 2 GL, and nothing for D';
   END IF;
-  -- The screen shows each payer's credit per unit from its own billed cents, not the order price:
-  -- B 10.00 on line 1 (20.00 for 2 GL), and 10.00 or 10.02 on line 2 (5.00 or 5.01 for 0.5 GL).
-  IF (SELECT unit_credit_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line1) IS DISTINCT FROM 1000::bigint
-     OR (SELECT unit_credit_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line2) IS DISTINCT FROM (v_b_line2_cents * 2)::bigint THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: the return lookup does not show B''s credit per unit from B''s own billed cents';
+  -- The screen shows what is left of each payer's own billed share, not the order price: B 1 GL /
+  -- 10.00 of line 1 (2 GL / 20.00 billed, 1 GL / 10.00 open), 0.5 GL / 5.00 or 5.01 of line 2.
+  IF (SELECT share_left_qty FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line1) IS DISTINCT FROM 1::numeric
+     OR (SELECT share_left_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line1) IS DISTINCT FROM 1000::bigint
+     OR (SELECT share_left_qty FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line2) IS DISTINCT FROM 0.5::numeric
+     OR (SELECT share_left_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line2) IS DISTINCT FROM v_b_line2_cents THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the return lookup does not show what is left of B''s own billed share';
   END IF;
   -- A sales rep who neither created B's split invoice nor is its salesperson cannot read it under
   -- invoices_select, so the lookups show that rep nothing about it.
@@ -290,6 +299,80 @@ BEGIN
      WHERE cma.credit_memo_id = v_memo AND cma.target_invoice_id = v_b_invoice AND cma.amount_cents = 1000
   ) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: no 10.00 application of B''s memo to B''s invoice was recorded';
+  END IF;
+
+  -- 4b. Line 2's payer P billed the odd 5.01 for 0.5 GL (A or B, by the split's penny rounding).
+  --     Two 0.25 GL returns telescope: 2.51, then 2.50, and the lookup quotes the second exactly
+  --     before it is made. Cancelling the first leaves the second's 2.50 stale (alone it would be
+  --     2.51), so crediting it (i) or receiving it (ii) refuses RETURN_SPLIT_SHARE_REPRICED. Each
+  --     return is cancelled again, so step 5 starts with nothing open on line 2.
+  v_p := CASE WHEN v_b_line2_cents = 501 THEN v_b ELSE v_a END;
+  IF (SELECT share_left_cents FROM public.get_return_line_allowances(v_order, v_p) WHERE order_item_id = v_line2) IS DISTINCT FROM 501::bigint THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: neither payer was billed 5.01 for line 2';
+  END IF;
+  FOR v_round IN 1..2 LOOP
+    BEGIN
+      v_res := public.create_return(
+        jsonb_build_object('customer_id', v_p, 'order_id', v_order, 'reason', 'defective'),
+        jsonb_build_array(jsonb_build_object('order_item_id', v_line2, 'quantity', 0.25, 'restock', true)),
+        'e2e-split-return-create-p1-' || v_round || '-' || v_suffix
+      );
+      v_first := (v_res->>'return_id')::uuid;
+      IF (SELECT extended_cents FROM public.return_items WHERE return_id = v_first) IS DISTINCT FROM 251::bigint THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: P''s first 0.25 GL return of line 2 is not 2.51';
+      END IF;
+      IF (SELECT share_left_qty FROM public.get_return_line_allowances(v_order, v_p) WHERE order_item_id = v_line2) IS DISTINCT FROM 0.25::numeric
+         OR (SELECT share_left_cents FROM public.get_return_line_allowances(v_order, v_p) WHERE order_item_id = v_line2) IS DISTINCT FROM 250::bigint THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: after a 2.51 return of 0.25 GL the lookup does not quote the 0.25 GL / 2.50 left of P''s line-2 share';
+      END IF;
+      v_res := public.create_return(
+        jsonb_build_object('customer_id', v_p, 'order_id', v_order, 'reason', 'defective'),
+        jsonb_build_array(jsonb_build_object('order_item_id', v_line2, 'quantity', 0.25, 'restock', true)),
+        'e2e-split-return-create-p2-' || v_round || '-' || v_suffix
+      );
+      v_second := (v_res->>'return_id')::uuid;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+      RAISE EXCEPTION 'SMOKE_FAIL: P''s two 0.25 GL returns of line 2 were refused: %', v_err;
+    END;
+    IF (SELECT extended_cents FROM public.return_items WHERE return_id = v_first) IS DISTINCT FROM 251::bigint
+       OR (SELECT extended_cents FROM public.return_items WHERE return_id = v_second) IS DISTINCT FROM 250::bigint THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: P''s two 0.25 GL returns of line 2 are not 2.51 then 2.50';
+    END IF;
+    PERFORM public.approve_return(v_second, v_admin, 'e2e-split-return-approve-p2-' || v_round || '-' || v_suffix);
+    IF v_round = 1 THEN
+      -- (i) received while the first is open (2.50 is exact then), then the first is cancelled.
+      PERFORM public.receive_return(v_second, v_admin, 'e2e-split-return-receive-p2-' || v_suffix);
+      PERFORM public.cancel_return(v_first, '[E2E] cancelled first', v_admin, 'e2e-split-return-cancel-p1-1-' || v_suffix);
+      BEGIN
+        PERFORM public.issue_return_credit(v_second, v_admin, 'e2e-split-return-credit-p2-' || v_suffix);
+        RAISE EXCEPTION 'SMOKE_FAIL: a stale split return price was credited after an earlier return was cancelled';
+      EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+        IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+        IF position('RETURN_SPLIT_SHARE_REPRICED' IN v_err) = 0 THEN
+          RAISE EXCEPTION 'SMOKE_FAIL: the stale credit failed for the wrong reason: %', v_err;
+        END IF;
+      END;
+    ELSE
+      -- (ii) the first is cancelled before the second is received.
+      PERFORM public.cancel_return(v_first, '[E2E] cancelled first', v_admin, 'e2e-split-return-cancel-p1-2-' || v_suffix);
+      BEGIN
+        PERFORM public.receive_return(v_second, v_admin, 'e2e-split-return-receive-p2-stale-' || v_suffix);
+        RAISE EXCEPTION 'SMOKE_FAIL: a stale split return price was received after an earlier return was cancelled';
+      EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+        IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+        IF position('RETURN_SPLIT_SHARE_REPRICED' IN v_err) = 0 THEN
+          RAISE EXCEPTION 'SMOKE_FAIL: the stale receipt failed for the wrong reason: %', v_err;
+        END IF;
+      END;
+    END IF;
+    PERFORM public.cancel_return(v_second, '[E2E] stale price', v_admin, 'e2e-split-return-cancel-p2-' || v_round || '-' || v_suffix);
+  END LOOP;
+  IF (SELECT share_left_cents FROM public.get_return_line_allowances(v_order, v_p) WHERE order_item_id = v_line2) IS DISTINCT FROM 501::bigint THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the cancelled returns still hold part of P''s line-2 share';
   END IF;
 
   -- 5. Returning B's whole line-2 share (0.5 GL of 1 GL at 10.01, billed 5.00 or 5.01 by the split's

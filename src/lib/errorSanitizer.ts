@@ -96,6 +96,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'This customer was not billed for this product on the split order, so they cannot return it. No changes were saved'],
   [/^RETURN_CREDIT_EXCEEDS_BILLED_SHARE\b/i,
    "This return would credit more than this customer was billed for the product on the split order. Check the customer's split invoice and earlier returns. No changes were saved"],
+  [/^RETURN_SPLIT_SHARE_REPRICED\b/i,
+   "An earlier return of this product was cancelled or rejected after this one was made, so this return's credit is out of date. Cancel this return and create it again to price it correctly. No changes were saved"],
   [/^RETURN_SPLIT_CREDIT_UNBACKED\b/i,
    "This return credit could not be matched to the customer's own split invoice line, so no credit was issued. Check that the split invoice is still posted"],
   [/^RETURN_ORDER_CUSTOMER_MISMATCH\b/i,

@@ -20,8 +20,12 @@
 --     returns, and its credit is what is left of its own billed cents for that quantity, so
 --     returning its whole share credits exactly what it was billed. Otherwise the line keeps
 --     today's rule (delivered quantity, order price) unchanged.
---   * issue_return_credit re-checks every line's share under the per-order-line advisory locks the
---     credit implementation takes (a source void or edit try-takes the same locks), opens a private
+--   * receive_return and issue_return_credit re-check, under the per-order-line advisory locks the
+--     credit implementation takes (a source void or edit try-takes the same locks), that each share
+--     line's stored credit is still exactly what create_return would price it at now; when an earlier
+--     return of the line was cancelled or rejected after it was created, it is not, and they refuse
+--     (RETURN_SPLIT_SHARE_REPRICED: cancel and recreate the return) instead of crediting a stale price.
+--   * issue_return_credit re-checks every line's share under the same locks, opens a private
 --     claim around the unchanged credit implementation for every order-linked return, and on a
 --     share-mode return refuses any credited unit without source lineage
 --     (RETURN_SPLIT_CREDIT_UNBACKED).
@@ -340,7 +344,7 @@ END;
 $function$;
 
 CREATE FUNCTION public.get_return_line_allowances(p_order_id uuid, p_customer_id uuid)
-RETURNS TABLE (order_item_id uuid, share_mode boolean, returnable_qty numeric, unit_credit_cents bigint)
+RETURNS TABLE (order_item_id uuid, share_mode boolean, returnable_qty numeric, share_left_qty numeric, share_left_cents bigint)
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
@@ -400,16 +404,18 @@ BEGIN
   END IF;
   -- Delivered less every open return of the line; in share mode also the returner's own billed
   -- share less its own open returns (create_return's two caps). In share mode the credit follows
-  -- the returner's own billed cents, not the order price: unit_credit_cents is that average per
-  -- unit, rounded to the cent, for the screen to show (create_return prices the exact cents).
+  -- the returner's own billed cents, not the order price, and create_return prices each return from
+  -- what is left of them: share_left_qty and share_left_cents are the returner's billed quantity and
+  -- cents less its open returns', so returning all of share_left_qty credits exactly
+  -- share_left_cents (the screen shows these, not a per-unit average a later return would not get).
   RETURN QUERY
     SELECT oi.id,
            s.share_mode,
            greatest(0, CASE WHEN s.share_mode
                             THEN least(d.left_qty, s.billed_qty - s.other_returned_qty)
                             ELSE d.left_qty END),
-           CASE WHEN s.share_mode AND s.billed_qty > 0
-                THEN round(s.billed_cents / s.billed_qty)::bigint END
+           CASE WHEN s.share_mode THEN greatest(0, s.billed_qty - s.other_returned_qty) END,
+           CASE WHEN s.share_mode THEN greatest(0, s.billed_cents - s.other_returned_cents)::bigint END
       FROM public.order_items oi
       CROSS JOIN LATERAL (
         SELECT coalesce(oi.quantity_delivered, 0) - coalesce((
@@ -682,6 +688,22 @@ BEGIN
       LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
       END LOOP;
+      -- Each share line's stored credit must still be exactly what create_return would price it at
+      -- now: an earlier return of the line cancelled or rejected after this one was created leaves it
+      -- stale, so refuse before restocking (cancel and recreate the return to reprice it).
+      IF EXISTS (
+        SELECT 1
+          FROM public.return_items ri
+          CROSS JOIN LATERAL public._return_customer_line_share(
+            v_order_id, ri.order_item_id, v_customer_id, p_return_id
+          ) s
+         WHERE ri.return_id = p_return_id
+           AND s.share_mode
+           AND s.billed_qty > 0
+           AND ri.extended_cents IS DISTINCT FROM greatest(0,
+             round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+             - s.other_returned_cents)
+      ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;
     END IF;
 
     -- Older linked rows were writable through table policies, so re-derive and
@@ -980,6 +1002,22 @@ BEGIN
            OR s.other_returned_cents + ri.extended_cents > s.billed_cents
          )
     ) THEN RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE'; END IF;
+    -- And each share line's stored credit is still exactly what create_return would price it at
+    -- now: an earlier return of the line cancelled or rejected after this one was created leaves it
+    -- stale, so refuse rather than credit a stale price (cancel and recreate the return).
+    IF EXISTS (
+      SELECT 1
+        FROM public.return_items ri
+        CROSS JOIN LATERAL public._return_customer_line_share(
+          v_order_id, ri.order_item_id, v_customer_id, p_return_id
+        ) s
+       WHERE ri.return_id = p_return_id
+         AND s.share_mode
+         AND s.billed_qty > 0
+         AND ri.extended_cents IS DISTINCT FROM greatest(0,
+           round(s.billed_cents * (s.other_returned_qty + ri.quantity) / NULLIF(s.billed_qty, 0))::bigint
+           - s.other_returned_cents)
+    ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;
     v_split_return := v_order_customer_id IS DISTINCT FROM v_customer_id OR EXISTS (
       SELECT 1
         FROM public.return_items ri
@@ -1412,8 +1450,8 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'fbaf12afb72c4d51a4711be30ead58e6', true),
-        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '51ec76dc82c7166030dc943cd2a14104', true),
-        ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', 'ff18e43e9566f498f6b9ab070a2586dc', true),
+        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '84d6c0f74e1a980e18af8ba2d4249b5a', true),
+        ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', '361c1b71d03c5d59a8f097a8463799a6', true),
         ('guard_invoice_terminal_order', 'public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', true),
         ('guard_mono_invoice_split_billing_post', 'public.guard_mono_invoice_split_billing_post()', 'b6fd2b19478801f6798c7b6e1fba737b', true),
         ('_return_customer_is_split_payer', 'public._return_customer_is_split_payer(uuid,uuid)', NULL, false),

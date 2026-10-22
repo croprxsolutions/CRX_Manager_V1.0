@@ -136,6 +136,26 @@ describe('20261021155000 split-payer return credit', () => {
     expect(MIGRATION).toContain('round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint\n        - v_share.other_returned_cents);');
   });
 
+  it('refuses a stored split price that no longer matches, at receipt and at credit (Codex App P2 on #1010)', () => {
+    // An earlier return cancelled after a later one was priced leaves the later price stale; the
+    // re-check reprices with create_return's own formula and refuses on any difference.
+    for (const fn of ['_receive_return_intent_impl_20260812', '_issue_return_credit_intent_impl_20260812']) {
+      const fnBody = body(MIGRATION, `CREATE OR REPLACE FUNCTION public.${fn}(`);
+      expect(fnBody).toContain("THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;");
+      expect(fnBody).toMatch(/ri\.extended_cents IS DISTINCT FROM greatest\(0,\s+round\(s\.billed_cents \* \(s\.other_returned_qty \+ ri\.quantity\) \/ NULLIF\(s\.billed_qty, 0\)\)::bigint\s+- s\.other_returned_cents\)/);
+      // Under the per-order-line credit locks.
+      expect(fnBody.indexOf('RETURN_SPLIT_SHARE_REPRICED')).toBeGreaterThan(fnBody.indexOf('pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361))'));
+    }
+  });
+
+  it('quotes what is left of a split share, not a per-unit average (Codex App P2 on #1010)', () => {
+    const at = MIGRATION.indexOf('CREATE FUNCTION public.get_return_line_allowances(');
+    const fn = MIGRATION.slice(at, MIGRATION.indexOf('$function$;', at));
+    expect(fn).toContain('RETURNS TABLE (order_item_id uuid, share_mode boolean, returnable_qty numeric, share_left_qty numeric, share_left_cents bigint)');
+    expect(fn).toContain('CASE WHEN s.share_mode THEN greatest(0, s.billed_cents - s.other_returned_cents)::bigint END');
+    expect(fn).not.toContain('unit_credit_cents');
+  });
+
   it('is registered as a container-only chain with its prover', () => {
     const specs = JSON.parse(read('scripts/smoke/smoke-specs.json')).specs as Record<string, {
       chain: string; container_only?: boolean; container_prover?: string; covers: string[];

@@ -82,8 +82,13 @@ interface ReturnableOrderItem {
   price_per_unit: number;
   quantity_delivered: number;
   quantity_returnable: number;
-  /** On a split order, the credit per unit from this customer's own invoice; null otherwise. */
-  unit_credit_cents: number | null;
+  /**
+   * On a split order, what is left of this customer's own billed share of the line (its billed
+   * quantity and cents less its open returns'); null otherwise. Returning all of share_left_qty
+   * credits exactly share_left_cents.
+   */
+  share_left_qty: number | null;
+  share_left_cents: number | null;
   unit_size: string | null;
   section_name: string | null;
   product?: ProductOptionPresentationModel | null;
@@ -297,7 +302,7 @@ export default function Returns() {
     // A slower response for the previously selected order must not overwrite the
     // product list for the order currently shown in the form.
     if (requestId !== orderItemsRequestRef.current) return;
-    let allowances: Array<{ order_item_id: string; returnable_qty: number; unit_credit_cents: number | null }> = [];
+    let allowances: Array<{ order_item_id: string; returnable_qty: number; share_left_qty: number | null; share_left_cents: number | null }> = [];
     try {
       if (itemsResult.error) throw itemsResult.error;
       if (allowancesResult.error) throw allowancesResult.error;
@@ -309,13 +314,14 @@ export default function Returns() {
       return;
     }
     const allowanceByLine = new Map(allowances.map((a) => [a.order_item_id, a]));
-    const returnableItems = ((itemsResult.data || []) as Omit<ReturnableOrderItem, 'quantity_returnable' | 'unit_credit_cents'>[])
+    const returnableItems = ((itemsResult.data || []) as Omit<ReturnableOrderItem, 'quantity_returnable' | 'share_left_qty' | 'share_left_cents'>[])
       .map((item) => {
         const allowance = allowanceByLine.get(item.id);
         return {
           ...item,
           quantity_returnable: allowance ? Number(allowance.returnable_qty) : 0,
-          unit_credit_cents: allowance?.unit_credit_cents ?? null,
+          share_left_qty: allowance?.share_left_qty != null ? Number(allowance.share_left_qty) : null,
+          share_left_cents: allowance?.share_left_cents ?? null,
         };
       })
       .filter((item) => item.quantity_returnable > 0);
@@ -1030,8 +1036,8 @@ export default function Returns() {
                       ))
                       .map((p) => (
                       <option key={p.id} value={p.id} disabled={normalizeReturnPolicy(p.product?.return_policy) === 'no_return'}>
-                        {productOptionLabel({ id: p.product_id, product_name: p.product_name, unit_size: p.unit_size, ...p.product })} — {p.section_name || 'No section'} — {p.unit_credit_cents != null
-                          ? `credit ${formatCents(p.unit_credit_cents)}/${p.unit_size || 'ea'} from this customer's split invoice`
+                        {productOptionLabel({ id: p.product_id, product_name: p.product_name, unit_size: p.unit_size, ...p.product })} — {p.section_name || 'No section'} — {p.share_left_cents != null && p.share_left_qty != null
+                          ? `${formatCents(p.share_left_cents)} left for ${p.share_left_qty} ${p.unit_size || 'ea'} on this customer's split invoice`
                           : `$${Number(p.price_per_unit).toFixed(2)}/${p.unit_size || 'ea'}`} (returnable {p.quantity_returnable} of {p.quantity_delivered})
                       </option>
                       ))}

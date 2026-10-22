@@ -169,7 +169,12 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   from the screen; an admin can. Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Both `receive_return` and `issue_return_credit`
   check a split return's share while holding the per-line locks a source void or edit try-takes, so a
-  void cannot slip between the check and the restock or credit. Left open, by design (Luna on PR #1010):
+  void cannot slip between the check and the restock or credit. Each split return is priced from what is
+  left of the payer's billed cents after its other open returns, so cancelling or rejecting an earlier
+  return of the same line leaves a later one's price stale; `receive_return` and `issue_return_credit`
+  then refuse it (`RETURN_SPLIT_SHARE_REPRICED`: staff cancel and recreate the return) instead of
+  crediting a stale price, and the Returns screen shows what is left of the share in quantity and cents
+  rather than a per-unit average (Codex App on PR #1010). Left open, by design (Luna on PR #1010):
   a split payer's credit is not auto-applied (as for every return credit, staff apply it); a return is
   not tied to one invoice line, so when a payer was billed for the same order line on two invoices at
   different prices it is credited at its average billed price (the caps still keep the total at or

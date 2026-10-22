@@ -13708,8 +13708,9 @@ export type Database = {
         Returns: {
           order_item_id: string
           returnable_qty: number
+          share_left_cents: number
+          share_left_qty: number
           share_mode: boolean
-          unit_credit_cents: number
         }[]
       }
       get_rup_sales_register: {

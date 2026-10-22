@@ -16,8 +16,9 @@
  *      PREFLIGHT: a drifted body aborts the candidate before any change;
  *   3. the candidate applies and prints POSTFLIGHT_OK;
  *   4. AFTER: the new chain (a landlord's return created, refused beyond its share, received,
- *      credited and applied; exact cents on an unevenly split line; the guard's refusals) and every
- *      other covering chain pass and roll back;
+ *      credited and applied; exact cents on an unevenly split line; the lookup quoting what is left
+ *      of a share; a price left stale by a cancelled earlier return refused at receipt and credit;
+ *      the guard's refusals) and every other covering chain pass and roll back;
  *   5. RE-APPLY: refused by the preflight;
  *   6. MUTATION: each load-bearing condition, removed in turn, fails its own chain step.
  *      Defence in depth that no single-session chain step can isolate: issue_return_credit's re-check
@@ -280,7 +281,8 @@ const MUTATIONS = [
   ['share pricing replaced by the order price in create_return', CREATE,
     '      v_extended := greatest(0,\n        round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint\n        - v_share.other_returned_cents);\n',
     '      v_extended := round(v_qty * v_order_item.price_per_unit * 100)::bigint;\n',
-    /SMOKE_FAIL: B's (partial return of line 2 was refused|partial returns of line 2 do not add up)/],
+    // Step 4b's first partial return is the earliest that the order price misprices (2.50, not 2.51).
+    /SMOKE_FAIL: P's first 0\.25 GL return of line 2 is not 2\.51/],
   ['split-billing evidence ignored', SHARE,
     '      OR COALESCE((SELECT split_evidence FROM ord), false),\n',
     '      OR false,\n',
@@ -320,6 +322,18 @@ const MUTATIONS = [
   ['guard claim not bound to the customer', GUARD_FN,
     '         AND claim.customer_id = NEW.customer_id\n', '',
     /SMOKE_FAIL: a claim for B admitted a credit memo for another customer/],
+  ['allowance lookup quotes the share pro rata instead of what is left', 'get_return_line_allowances',
+    '           CASE WHEN s.share_mode THEN greatest(0, s.billed_cents - s.other_returned_cents)::bigint END\n',
+    '           CASE WHEN s.share_mode AND s.billed_qty > 0 THEN round(s.billed_cents * (s.billed_qty - s.other_returned_qty) / s.billed_qty)::bigint END\n',
+    /SMOKE_FAIL: after a 2\.51 return of 0\.25 GL the lookup does not quote the 0\.25 GL \/ 2\.50 left/],
+  ['issue_return_credit exact re-price check off', ISSUE,
+    "    ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;\n",
+    "    ) AND false THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;\n",
+    /SMOKE_FAIL: a stale split return price was credited after an earlier return was cancelled/],
+  ['receive_return exact re-price check off', RECEIVE,
+    "      ) THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;\n",
+    "      ) AND false THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_REPRICED'; END IF;\n",
+    /SMOKE_FAIL: a stale split return price was received after an earlier return was cancelled/],
 ];
 
 async function main() {
@@ -360,7 +374,7 @@ ROLLBACK;`,
   // 4. AFTER.
   const after = chain(RETURN_CHAIN);
   assert.ok(after.pass, `AFTER: the return chain failed: ${after.fail}`);
-  console.log('[prover] AFTER: the return chain passes and rolls back (landlord return created, refused beyond its share, received, credited, applied; exact cents on the uneven line; guard refusals)');
+  console.log('[prover] AFTER: the return chain passes and rolls back (landlord return created, refused beyond its share, received, credited, applied; exact cents on the uneven line; what is left of a share quoted exactly; a stale price refused at receipt and credit; guard refusals)');
   runCovering('AFTER');
 
   // 5. RE-APPLY.

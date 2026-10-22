@@ -1,6 +1,6 @@
 ---
 name: deploy-check
-description: Pre-merge checklist for CRX Manager — verifies a branch is safe to land. Since `main` is protected (2026-07-14), landing means branch → draft PR → checks → mark ready (one advisory CodeRabbit review) → Sol → merge, and the merge is what deploys production via Vercel. Use before opening or merging a PR, or before applying migrations to Supabase.
+description: Pre-merge checklist for CRX Manager — verifies a branch is safe to land. Since `main` is protected (2026-07-14), landing means branch → draft PR → checks → mark ready (CodeRabbit reviews only on request) → Sol → merge, and the merge is what deploys production via Vercel. Use before opening or merging a PR, or before applying migrations to Supabase.
 ---
 
 # Pre-Deployment Check
@@ -172,6 +172,6 @@ If blocked: List every issue that needs fixing first.
 - NEVER push/merge if secrets are found in source code
 - NEVER merge with unapplied migrations pending without surfacing them (warn — Mason decides the ordering)
 - NEVER attempt to push directly to `main`; the ruleset blocks it and the attempt is a bug in the plan
-- NEVER mark the PR ready (which triggers CodeRabbit's single review) while implementation or Codex review is still changing the branch
+- NEVER mark the PR ready (which triggers the Codex GitHub App's review) while implementation or Codex review is still changing the branch
 - NEVER merge over a `CHANGES_REQUESTED` verdict; CodeRabbit approval is not required (advisory since 2026-10-19), but every CodeRabbit comment that arrived before the merge must be fixed or refuted with evidence
 - Edge Function deploys and direct Vercel CLI deploys always need Mason's explicit approval; only the reviewed merge path is covered by the autonomous-landing rule. Non-destructive live migrations apply under that rule once migration-apply-guard's full proof + Sol gate passes; destructive, data-overwriting or access-changing migrations apply only after Mason's own `I approve` chat reply for that exact file (`scripts/owner-approve-migration.mjs` builds the request; the apply gate enforces the recorded reply), through `scripts/apply-migration-file.mjs`

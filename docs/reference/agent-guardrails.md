@@ -35,8 +35,9 @@
 > pre-2026-10-19 CodeRabbit change request is dismissed by a Claude session (ship.md Step 8) (#973, because CodeRabbit never
 > re-reviews the fix. Mason sets the `protect-main` ruleset's required approving reviews to 0 himself (required status
 > checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
-> (CodeRabbit only comments), `auto_incremental_review: false` (one review per PR, when opened non-draft or marked
-> ready), `ignore_title_keywords: ["docs("]`. Agents open PRs as drafts, mark them ready once the head is frozen, fix or
+> (CodeRabbit only comments) and, since 2026-10-21, `auto_review.enabled: false` (Mason: "Yes turn off auto review"):
+> CodeRabbit reviews only when an agent requests it (before that, one review per PR, when opened non-draft or marked
+> ready, skipping `docs(` titles). Agents open PRs as drafts, mark them ready once the head is frozen, fix or
 > refute every CodeRabbit comment that arrives before the merge in one push, do not wait for a review that has not
 > arrived, and never post `@coderabbitai review`. Exception (Mason, 2026-10-21): a PR that touches money, invoices,
 > payments, inventory, or costs in any way, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its
@@ -498,7 +499,9 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    moves to `allow`; the merge gates are its hard stop, and item 7 keeps them closed when the local guard breaks.
    `scripts/agent-manifest-parity.mjs` reads only each manifest's `hooks` block, so these `ask` rules are not mistaken
    for hook wiring.
-2. **CodeRabbit reviews every non-draft PR automatically**, on open and on every push, never pausing
+2. *(Superseded: 2026-10-19 cut this to one review per PR, and since 2026-10-21 `auto_review.enabled: false` means
+   no automatic reviews at all; see `docs/reference/coderabbit-native-review.md`.)*
+   **CodeRabbit reviews every non-draft PR automatically**, on open and on every push, never pausing
    (`auto_review.enabled: true`, no label restriction, `auto_pause_after_reviewed_commits: 0`). Proven on PR #822:
    CodeRabbit reviewed it with no label or command. With no label filter the `ready-for-coderabbit` provider label no
    longer triggers a review (the workflow stays installed), so **for a head CodeRabbit skipped or was rate limited on,
@@ -529,7 +532,8 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    steps as a written bypass path, 2026-09-27).
 4. **Adversarial review:** unchanged from the autonomous-landing entry — Luna rounds and an exact-SHA Sol proof on
    every change (since 2026-10-07, except a documentation-only change; see the block at the top) — plus CodeRabbit
-   (since 2026-10-19 one advisory review per PR, skipping `docs(` titles) and the Codex GitHub App automatically.
+   (advisory since 2026-10-19; since 2026-10-21 no automatic reviews, only the requested full review on a money or
+   Mason-named PR) and the Codex GitHub App automatically.
 5. **Codex hooks re-trusted (Mason's machine).** Codex silently skips a repository hook whose definition changed since
    it was trusted; on 2026-09-26, 17 of 24 CRX Codex hooks were skipped — every Write/Edit content guard, the three MCP
    guards, `production-action-guard`, `review-proof-guard`, `hold-latch-guard` and both routers — while Codex ran with

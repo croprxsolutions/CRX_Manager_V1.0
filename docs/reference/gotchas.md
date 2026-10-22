@@ -317,8 +317,8 @@ gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews,comments
 
 Zero `reviews` plus a `coderabbitai` comment containing "Review failed" or "rate limited" means no
 CodeRabbit review was submitted. Say so rather than treating green as clean. Current rule (Mason,
-2026-10-19): CodeRabbit reviews each PR once, when marked ready or opened non-draft, and only
-comments; the merge gates and GitHub's `protect-main` ruleset no longer require its approval. If no
+2026-10-19, narrowed 2026-10-21): CodeRabbit makes no automatic reviews, reviews only when an
+agent requests one, and only comments; the merge gates and GitHub's `protect-main` ruleset no longer require its approval. If no
 review has arrived by the time checks are green and Sol is clean, merge without it — never post
 `@coderabbitai review` to buy one. Exception (Mason, 2026-10-21): a money or Mason-named PR needs a
 clean CodeRabbit review of its current head, and the agent posts `@coderabbitai full review` once

@@ -1,7 +1,7 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-22 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-22 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+`execute_sql`, 2026-10-22 16:02 UTC (11:02 AM Central): 1048 rows, `max(version)` `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020), and the pending candidate `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006) is not applied; at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
 at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
@@ -146,7 +146,7 @@ split invoices, so nobody hit it. `20261021150000` lets a governed split invoice
 only inside the split call's creation claim for a customer the order's field split resolves to, and
 afterward only under its `split_invoice_provenance` row. This is the 2026-10-13 item "Splitting an
 order's bill to a landlord always fails" (Mason: "landlord yes"). Found again while building
-`20261021120000` (PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006
+`20261022021000` (restamped from `20261021120000`; PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006
 required this first. Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs`.
 
 Left open, by design or for later (reviewers on the PR, 2026-10-21):
@@ -3135,14 +3135,27 @@ makes the first one reachable more often by emitting several order lines per pro
    Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
    stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
    price; the line bills its tier price.
-   **Follow-ups, 2026-10-21 (migration `20261021070000_blend_invoice_approval_binding`, not yet
-   applied when written; live state in `docs/reference/migration-history.md` row 961):** a ticket
+   **Follow-ups, 2026-10-21 (migration `20261021070000_blend_invoice_approval_binding`, applied
+   live 2026-10-21 20:41 UTC, ledger `20261021204100`, PR #995 merged as `a254cbfcf`; see
+   `docs/reference/migration-history.md` row 961):** a ticket
    line with no product is refused instead of billing $0; a grower-share override ticket's $0
    "included in grower share" chemical takes the same admin approval instead of blocking the
    invoice; and the approval names the exact $0 lines it was shown, so a re-pick in between is
    refused ("the $0 lines changed") instead of billing lines the admin never saw; an approval
    that arrives after every $0 line got a real price is refused the same way. A retry key is now
    required (`IDEMPOTENCY_KEY_REQUIRED`), so a lost reply can always be replayed.
+   **Four LOW leftovers of that migration (Sol round 5 and review notes), fixed by migration
+   `20261022020000_blend_invoice_binding_lows` (not applied when written; live state in
+   `docs/reference/migration-history.md` row 966):** (1) a line stored its quantity rounded to 4
+   places but its amount and its share of the invoice cost used the unrounded quantity, so they could
+   differ by cents; the per-unit line's amount and cost, and the "included in grower share" line's
+   cost (its price stays $0), now use the stored quantity; a positive quantity that would store as 0
+   (below 0.00005) is refused (`BLEND_INVOICE_QUANTITY_ROUNDS_TO_ZERO`) instead of billed as a
+   0-quantity line, before any invoice number is drawn. (2) An approved $0 quoted line recorded the ticket line's editable cost copy instead of
+   the catalog cost the approval showed; it now records the catalog cost (margin reporting only).
+   (3) The tier-price helper the invoice calls was not pinned by the migration's safety check; it is
+   now, with the quote-pick and cents helpers. (4) A leftover "if a retry key was sent" test that could
+   never be false is removed; behaviour is unchanged.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

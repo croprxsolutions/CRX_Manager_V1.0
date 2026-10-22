@@ -146,8 +146,10 @@ git checkout HEAD -- supabase/functions/<fn-name>/
 Until the file backup's first successful run is recorded in this table, a lost Storage bucket cannot
 be recovered. Say so plainly if it happens; do not promise a restore. After that, files restore from
 the newest `storage-backups/crx-storage-<UTC timestamp>.tar.gpg` (steps: `CRX_Backups/restore.md`,
-"Restoring Storage files"); a file uploaded after that copy is lost. The file copy runs about 30 minutes
-after the database dump, so a file deleted between the two can be missing from the pair; uploading the
+"Restoring Storage files"); a file uploaded after that copy is lost. The file copy and the database dump are
+scheduled separately (08:30 and 08:00 UTC Sundays), but GitHub delays each run independently, so they
+can be hours apart or run in either order. Pick the file archive by the capture time in its name and
+marker, closest to the chosen dump; a file added or deleted between the two can be missing from the pair; uploading the
 files back into a project has not been rehearsed yet (restore drill, 4.9).
 
 ### 4.2 Who runs recovery

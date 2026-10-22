@@ -98,13 +98,17 @@ ROLLBACK` transaction (counts only, no customer data printed). Live had 5 fields
 1 active applicator, 2 drivers and 2 active `entity_recipient` (customer-portal) accounts. The live applicator is
 dispatched to 2 of the 5 fields.
 
-**What is already right.** The job tables are scoped: `jobs`, `job_fields`, `job_chemicals`, `job_field_shares`,
-`job_applied_records` and their children, `job_attachments` and the `job-attachments` storage bucket admit only office
-staff, the job's whole-job applicator (`jobs.applicator_id`), or, through `_is_dispatched_to_me`, the applicator or
-active crew member of a current dispatch. That helper re-checks an active profile and an active crew, drops a cancelled
-dispatch at once and a completed one after 7 days. The job-level functions `get_job_fields_with_geojson`,
-`get_dispatch_board_jobs`, `get_dispatched_list` and `get_job_billed_customers` repeat the same gate. Reassigning a
-job moves `jobs.applicator_id`, so the old applicator loses it. No view in `public` exposes these tables.
+**What is already right.** No job table leaks to an unassigned applicator. `jobs`, `job_fields`, `job_chemicals`,
+`job_loader_worksheets` and `customers` admit office staff, the job's whole-job applicator (`jobs.applicator_id`), and,
+through `_is_dispatched_to_me`, the applicator or active crew member of a current dispatch. That helper re-checks an
+active profile and an active crew, drops a cancelled dispatch at once and a completed one after 7 days. The job-level
+functions `get_job_fields_with_geojson`, `get_dispatch_board_jobs`, `get_dispatched_list` and
+`get_job_billed_customers` repeat the same gate. Reassigning a job moves `jobs.applicator_id`, so the old applicator
+loses it. No view in `public` exposes these tables. **One gap the other way (missing access, not a leak):**
+`job_field_shares`, `job_applied_records` and its children, `job_attachments` and the `job-attachments` storage bucket
+admit only the whole-job applicator, not a per-field or crew assignee, so a dispatch-only applicator cannot read those
+records for the fields they were sent to. Part C below does not change that; widening them to `_is_dispatched_to_me`
+is a separate decision.
 
 Findings, most severe first:
 
@@ -158,20 +162,28 @@ Mason's "I approve").** Part A first, since it closes every HIGH that a customer
   `get_fields_geojson_by_ids` (Field View) and `get_field_geojson` (Job Detail) return only fields that pass it. Make
   `get_fields_with_geojson`, `get_field_polygons`, `get_field_dashboard`, `derive_customer_shares_from_fields`,
   `get_customer_farm_group`, both `get_field_billing_splits_for_*`, `get_customer_summary`,
-  `check_customer_credit_limit` and `get_dashboard_action_items` office-only (`require_admin_or_sales_rep()`); their
-  callers are office pages. Make `global_search` return nothing to a non-office account, because the command palette
-  sits in the shared layout (`src/components/layout/AppLayout.tsx`) for every role.
+  `check_customer_credit_limit` and `get_dashboard_action_items` office-only (`require_admin_or_sales_rep()`). Two of
+  their callers are open to every role, so part A also needs two small screen changes in the same PR: the Overview
+  page (`/dashboard`, open to every signed-in role in `src/App.tsx`) mounts `ActionQueue` unconditionally, which would
+  catch the refusal and show a false "All Clear", so show `ActionQueue` to office roles only; and the command palette
+  sits in the shared layout (`src/components/layout/AppLayout.tsx`), so make `global_search` return nothing to a
+  non-office account (or hide the palette for field roles).
 - **B. Narrow the tables.** Change the applicator leg of `fields_select`, `field_crop_history_select`,
   `field_obstacles_select` and `field_app_locations_select`/`_shares_select` to `is_applicator() AND
-  _can_see_field(...)` (`field_polygons` follows automatically). Make `fbd_select` and `arf_select` office-only after
-  checking that no applicator or driver screen reads them.
+  _can_see_field(...)` (`field_polygons` follows automatically). Do **not** make `fbd_select` and `arf_select`
+  office-only: applicator screens read both. Job Detail (`src/pages/JobDetail.tsx`, the grower-share banner) reads
+  `field_billing_defaults` and would mislabel a denied read, and the applicator sheet
+  (`src/lib/applicatorSheetPrintData.ts`) joins `application_record_fields` for a field's past applications. Scope
+  both to `_can_see_field(field_id)` instead. That still shows an assigned applicator the price override on their own
+  fields; hiding that column needs a column grant or a function that returns only "has an override", in the
+  row 11.3 cost-column work.
 - **C. End the whole-job route.** Add the dispatch route's window (open, or completed within 7 days; never cancelled or
   soft-deleted) to the whole-job applicator leg of `jobs_select`, the job child tables, `job-attachments` storage and
   `customers_select`.
 - **Proof:** per-role impersonation before and after, in the disposable database and read-only on live after the apply:
   the applicator reads only their dispatched fields, a customer-portal account and a driver read 0 fields and get
   refusals from the office functions, office staff see no change; then a live click-through of Field View, Job Detail
-  and the Dispatch Board as the applicator.
+  (including its customer shares), the applicator sheet, the Overview page and the Dispatch Board as the applicator.
 
 ## OPEN 2026-10-18 (HIGH; Goal 1 part 3, step 1 of 3 LIVE 2026-10-19; step 2 LIVE 2026-10-20 as `20261019230000`; step 3 open) — product cost and margin are still readable by sales reps, drivers and applicators through table columns
 

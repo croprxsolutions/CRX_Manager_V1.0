@@ -497,14 +497,14 @@ not a read, so PR #927's read lock does not cover it. Fix (its own PR): require 
 or revoke `authenticated` EXECUTE if no browser caller needs it (posting calls it as owner). A follow-up task was
 offered to Mason on 2026-10-14. Live register rows on 2026-10-14: 0.
 
-## OPEN 2026-10-13 (latent; rescued from closed PRs #397 and #350) — quote screen: re-saving a quote with two lines of one product is refused, and Convert to Order can leave an accepted quote with no order
+## OPEN 2026-10-13 (latent; rescued from closed PRs #397 and #350) — quote screen: Convert to Order can leave an accepted quote with no order (the repeated-product re-save refusal was FIXED 2026-10-22)
 
 **Rescued in the 2026-10-13 GitHub branch cleanup** (`docs/audits/2026-10-13-github-branch-cleanup-audit.md`).
 These findings were recorded only on the never-merged branches `codex/pr389-coderabbit-fixes` (PR #397,
 closed 2026-08-20) and `claude/pricing-audit-strategy-jym8rr` (PR #350), whose commits stay restorable
 from their PR pages. Each was re-checked against `main` on 2026-10-13 as stated below.
 
-**The quote re-save refusal (MED, latent).** The live `save_quote` (`20260812115236`, applied
+**The quote re-save refusal (MED, latent) — FIXED 2026-10-22 (frontend only, no migration).** QuoteBuilder now keeps each saved line's `quote_items` id (from the load, then from the `item_ids` map every save returns), sends it with a `client_key` on every line, and drops the id for good when a line is switched to another product (even if switched back). Still refused, by the server's design: deleting or switching away a saved line of a product while adding two or more new lines of that same product in one save (save once in between). Proof: `src/pages/QuoteBuilder.test.tsx` ("names every saved line...") and the rolled-back live chain `scripts/smoke/smoke-save-quote-repeated-product-line-ids.sql` (PASS on live 2026-10-22: save, edit with a new line, save, Mark Presented, Convert; lines kept 6.00/6.00/8.00 and the order carried the same). The original finding follows for history. The live `save_quote` (`20260812115236`, applied
 2026-08-12) keeps each existing line's recorded cost only when the browser says which saved line each
 row is. `src/pages/QuoteBuilder.tsx` on `main` sends no line `id` (checked 2026-10-13: the save payload
 built near line 1740 carries `product_id`, prices and quantities only). So when an EXISTING quote
@@ -2328,7 +2328,7 @@ assuming any screen is covered.
 `OrderDetail`, `DeliveryDetail`, `InvoiceDetail`, `FieldApplicationInvoice`, `Returns`,
 `PrepaymentManagerPanel`, `MonthEndClose`. Nine keys are also given a record scope via the hook's
 `intentScope` / `getKeyFor`, because detail pages do NOT remount on a route-id change (every
-`<x>/:id` route in `src/App.tsx` **except `jobs/:id`**, which is keyed by id via
+`<x>/:id` route in the router (`src/appPages.tsx`) **except `jobs/:id`**, which is keyed by id via
 `JobDetailRoute`, is rendered without a `key` prop) and a retained unscoped key would otherwise
 replay record A's receipt against record B. The `jobs/:id` exception costs the argument nothing:
 none of the nine record-scoped keys lives on `JobDetail`, and every page they do live on is still

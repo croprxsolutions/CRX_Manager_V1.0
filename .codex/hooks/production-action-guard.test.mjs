@@ -494,9 +494,10 @@ try {
     // to its own session, so pin main()'s wiring to the payload's session id.
     const guardSource = readFileSync(new URL("./production-action-guard.mjs", import.meta.url), "utf8");
     assert.match(guardSource,
-      /findCodeRabbitSkip: \(pullRequest\) => findCodeRabbitSkip\(\{\s*dirs: skipStateDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\]\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,\s*pullRequest,/,
-      "main() binds the waiver lookup to the hook payload's own session id and the PR being merged");
-    assert.match(guardSource, /try \{ skip = findSkip\(reviewedPr\); \}/, "the advisory asks for the waiver of the PR it read");
+      /findCodeRabbitSkip: \(pullRequest, budget\) => findCodeRabbitSkip\(\{\s*dirs: skipStateDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\], undefined, budget\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,\s*pullRequest,/,
+      "main() binds the waiver lookup to the hook payload's own session id, the PR being merged, and the caller's time budget");
+    assert.match(guardSource, /try \{ skip = findSkip\(reviewedPr, \{ deadlineMs, now: clock \}\); \}/,
+      "the advisory asks for the waiver of the PR it read, inside its own deadline (Codex App P2 on #1035)");
     assert.match(guardSource, /coderabbitReview = verdict;\s*(?:\/\/[^\n]*\n\s*)*reviewedPr = isSkipRepository\(slug\[1\], slug\[2\]\) \? meta\.number : null;/,
       "reviewedPr is GitHub's number for a PR in this repository, set only with the trusted requirement answer");
     assert.equal((guardSource.match(/findSkip \}\)/g) || []).length, 2, "both advisory call sites pass the lookup through");

@@ -273,10 +273,11 @@ if (requests.some((request) => request?.admin)) {
 // Mason's live "skip coderabbit" waiver for THIS pull request (the number GitHub
 // returned for the PR being merged) in the session running this merge, or null.
 // Any failure reads as no waiver, so the review is still required.
-function coderabbitSkipFor(hookPayload, pullRequest) {
+// Its git lookups stay inside the caller's `deadlineMs` (Codex App P2 on #1035).
+function coderabbitSkipFor(hookPayload, pullRequest, deadlineMs) {
   try {
     return findCodeRabbitSkip({
-      dirs: skipStateDirs([hookPayload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
+      dirs: skipStateDirs([hookPayload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()], undefined, { deadlineMs }),
       // Same id the prompt hook records under (Luna round 4).
       sessionId: hookPayload?.session_id ?? hookPayload?.sessionId,
       pullRequest,
@@ -447,7 +448,7 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
     // Mason's "skip coderabbit #<this PR>" in THIS session waives only the missing
     // review of this PR (coderabbit-skip-lib.mjs, 2026-10-22); the thread rules
     // above still applied.
-    const skip = coderabbitSkipFor(payload, reviewedPr);
+    const skip = coderabbitSkipFor(payload, reviewedPr, deadlineMs);
     if (!skip) deny(coderabbitReviewMissingDenial("PR MERGE GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
     process.stderr.write(coderabbitSkipNotice("PR MERGE GATE", request.selector, skip));
   }

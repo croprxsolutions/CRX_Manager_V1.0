@@ -726,11 +726,12 @@ ok(/if \(coderabbitOpen === null\) \{\s*deny\(coderabbitUnreadableDenial\("PR ME
 ok(/let coderabbitReview = null;/.test(guardSource)
   && /coderabbitReview = verdict;/.test(guardSource)
   && /if \(!coderabbitReview \|\| coderabbitReview\.status === "unreadable"\) \{\s*deny\(coderabbitRequirementUnreadableDenial\("PR MERGE GATE"/.test(guardSource)
-  && /if \(coderabbitReview\.status === "missing"\) \{[^}]*const skip = coderabbitSkipFor\(payload, reviewedPr\);\s*if \(!skip\) deny\(coderabbitReviewMissingDenial\("PR MERGE GATE"/.test(guardSource),
+  && /if \(coderabbitReview\.status === "missing"\) \{[^}]*const skip = coderabbitSkipFor\(payload, reviewedPr, deadlineMs\);\s*if \(!skip\) deny\(coderabbitReviewMissingDenial\("PR MERGE GATE"/.test(guardSource)
+  && /skipStateDirs\(\[hookPayload\?\.cwd, process\.env\.CLAUDE_PROJECT_DIR, process\.cwd\(\)\], undefined, \{ deadlineMs \}\)/.test(guardSource),
   "the Claude merge guard refuses a money PR with no completed CodeRabbit review unless Mason skipped it in this session, and fails closed on an unreadable answer");
 // Mason's "skip coderabbit" (2026-10-22) is read for THIS hook's session only,
 // and any failure in the lookup reads as no waiver.
-ok(/findCodeRabbitSkip\(\{[^}]*sessionId: hookPayload\?\.session_id \?\? hookPayload\?\.sessionId,\s*pullRequest,/.test(guardSource)
+ok(/findCodeRabbitSkip\(\{[^;]*?sessionId: hookPayload\?\.session_id \?\? hookPayload\?\.sessionId,\s*pullRequest,/.test(guardSource)
   && /catch \{\s*return null;\s*\}/.test(guardSource.slice(guardSource.indexOf("function coderabbitSkipFor"))),
   "the merge guard reads the skip waiver for its own session and THIS PR, and treats a failed lookup as none");
 // Per PR (Mason, 2026-10-22): the number is GitHub's answer for the PR being

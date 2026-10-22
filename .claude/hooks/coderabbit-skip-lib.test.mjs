@@ -85,6 +85,21 @@ try {
   eq(skipStateDirs([path.join(temp, "not-a-repo")]), [], "a folder outside git resolves to none");
   eq(skipStateDirs([checkout], () => path.join(temp, "bare.git")), [], "a shared folder that is not <checkout>/.git resolves to none");
   eq(skipStateDirs([checkout], () => ""), [], "a failed lookup resolves to none");
+  // Codex App P2 on #1035: git calls stay inside the caller's deadline.
+  {
+    const calls = [];
+    const spy = (folder, timeoutMs) => { calls.push(timeoutMs); return path.join(checkout, ".git"); };
+    eq(skipStateDirs([checkout, checkout, path.join(checkout, ".")], spy).length, 1, "the same folder three ways");
+    eq(calls.length, 1, "costs ONE git call");
+    calls.length = 0;
+    eq(skipStateDirs([checkout], spy, { deadlineMs: 1000, now: () => 900 }), [], "100 ms left: no git call is started");
+    eq(calls, [], "and none was");
+    skipStateDirs([checkout], spy, { deadlineMs: 2000, now: () => 1000 });
+    eq(calls, [900], "a call is capped to the time left (less a margin)");
+    calls.length = 0;
+    skipStateDirs([checkout], spy, { deadlineMs: 60_000, now: () => 0 });
+    eq(calls, [3000], "and never longer than 3 seconds");
+  }
   const session = "session-abc-12345";
   const PR = 1018;
   const now = Date.parse("2026-10-22T15:00:00Z");

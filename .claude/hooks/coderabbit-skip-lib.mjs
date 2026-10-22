@@ -88,10 +88,10 @@ export function coderabbitSkipCommand(reply) {
 
 // git's shared folder for a checkout (`<main checkout>/.git` for every worktree
 // of the repository), or "" when the folder is not in a git checkout.
-export function gitCommonDir(folder) {
+export function gitCommonDir(folder, timeoutMs = 3000) {
   try {
     return String(execFileSync("git", ["-C", String(folder), "rev-parse", "--path-format=absolute", "--git-common-dir"], {
-      encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "ignore"],
     })).trim();
   } catch {
     return "";
@@ -106,15 +106,34 @@ export function gitCommonDir(folder) {
  * guard keeps file tools out of every .claude/session-state folder. A folder
  * that is not in a normal git checkout contributes nothing (no waiver).
  */
-export function skipStateDirs(sessionFolders, commonDir = gitCommonDir) {
+// `deadlineMs` (a gate's own deadline): a git call is started only if it can
+// finish before it, and capped to the time left, because a hook killed for
+// running out of time emits nothing, which allows (Codex App P2 on #1035).
+// Out of time → the remaining folders are skipped, so no waiver is found.
+const GIT_CALL_MAX_MS = 3000;
+const GIT_CALL_MIN_MS = 300;
+
+export function skipStateDirs(sessionFolders, commonDir = gitCommonDir, { deadlineMs = null, now = Date.now } = {}) {
   const canonical = (s) => {
     const r = path.resolve(s);
     try { return realpathSync.native(r); } catch { return r; }
   };
   const key = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
-  const roots = new Map();
+  // One git call per distinct folder: the session's folders usually coincide.
+  const folders = new Map();
   for (const s of (sessionFolders || []).filter(Boolean)) {
-    const common = String(commonDir(String(s)) || "").trim();
+    const c = canonical(String(s));
+    if (!folders.has(key(c))) folders.set(key(c), c);
+  }
+  const roots = new Map();
+  for (const s of folders.values()) {
+    let timeoutMs = GIT_CALL_MAX_MS;
+    if (deadlineMs !== null) {
+      const left = deadlineMs - now();
+      if (left < GIT_CALL_MIN_MS + 100) break;
+      timeoutMs = Math.min(GIT_CALL_MAX_MS, left - 100);
+    }
+    const common = String(commonDir(s, timeoutMs) || "").trim();
     if (!common || path.basename(common).toLowerCase() !== ".git") continue;
     const main = canonical(path.dirname(common));
     if (!roots.has(key(main))) roots.set(key(main), main);

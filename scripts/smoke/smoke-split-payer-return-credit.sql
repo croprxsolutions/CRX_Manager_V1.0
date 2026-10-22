@@ -24,8 +24,8 @@
 --   5. B's whole share of line 2 credits exactly what B was billed for it, not a cent more;
 --   5b. on a second split order whose invoices are still drafts, A cannot return anything
 --      (RETURN_SPLIT_SHARE_NOT_BILLED);
---   5c. on a third split order whose line has no unit (its split invoices carry none), B's return is
---      refused up front with the credit's own RETURN_CREDIT_UNIT_MISMATCH, not "not billed";
+--   5c. on a third split order whose line has no unit, the split invoices bill it as 'ea', and B's
+--      return of it is created, received and credited (-10.00) from B's own line;
 --   6. the guard still refuses a credit memo for B on A's order with no claim, and a memo for D
 --      inside a claim for B (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID).
 --
@@ -67,6 +67,8 @@ DECLARE
   v_line4 uuid;
   v_delivery3 uuid;
   v_group3 uuid;
+  v_b_line4_item uuid;
+  v_return4 uuid;
   v_res jsonb;
   v_err text;
 BEGIN
@@ -479,10 +481,10 @@ BEGIN
     END IF;
   END;
 
-  -- 5c. A split line with no unit: the split invoices copy the empty unit, so no posted sale line
-  --     can back a credit for it (_issue_return_credit_impl refuses every such return with
-  --     RETURN_CREDIT_UNIT_MISMATCH), and create_return says so up front, before any restock,
-  --     instead of calling the billed payer "not billed".
+  -- 5c. A split line with no unit: the split invoices bill it as 'ea', the unit its return carries,
+  --     so the payer's return is created, received and credited from its own line (before
+  --     20261021155000 the invoices copied the empty unit, and the credit refuses a source line
+  --     whose unit differs: RETURN_CREDIT_UNIT_MISMATCH).
   INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
   VALUES ('E2E-SPLIT-RETURN-3-' || v_suffix, v_a, v_today, 'confirmed', false, NULL)
   RETURNING id INTO v_order3;
@@ -511,27 +513,39 @@ BEGIN
   SELECT invoice_group_id INTO v_group3
     FROM public.invoices WHERE order_id = v_order3 AND invoice_group_id IS NOT NULL LIMIT 1;
   PERFORM public.post_invoice_group(v_group3, v_admin, 'e2e-split-return-post-3-' || v_suffix);
-  IF NOT EXISTS (
-    SELECT 1 FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
-     WHERE i.invoice_group_id = v_group3 AND i.customer_id = v_b AND i.status = 'posted'
-       AND ii.order_item_id = v_line4 AND ii.quantity > 0 AND ii.unit_size IS NULL
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: the no-unit split line was not billed to B with no unit';
+  SELECT ii.id INTO v_b_line4_item
+    FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+   WHERE i.invoice_group_id = v_group3 AND i.customer_id = v_b AND i.status = 'posted'
+     AND ii.order_item_id = v_line4 AND ii.quantity = 1 AND ii.extended_cents = 1000;
+  IF v_b_line4_item IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: the no-unit split line was not billed to B (1 unit, 10.00)';
   END IF;
+  -- B returns it (damaged, not restocked), and it is received and credited from B's own line.
   BEGIN
-    PERFORM public.create_return(
+    v_res := public.create_return(
       jsonb_build_object('customer_id', v_b, 'order_id', v_order3, 'reason', 'defective'),
-      jsonb_build_array(jsonb_build_object('order_item_id', v_line4, 'quantity', 1)),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line4, 'quantity', 1,
+        'condition', 'damaged', 'restock', false)),
       'e2e-split-return-create-b-no-unit-' || v_suffix
     );
-    RAISE EXCEPTION 'SMOKE_FAIL: a return of a no-unit split line was created, which no credit can back';
+    v_return4 := (v_res->>'return_id')::uuid;
+    PERFORM public.approve_return(v_return4, v_admin, 'e2e-split-return-approve-b-no-unit-' || v_suffix);
+    PERFORM public.receive_return(v_return4, v_admin, 'e2e-split-return-receive-b-no-unit-' || v_suffix);
+    PERFORM public.issue_return_credit(v_return4, v_admin, 'e2e-split-return-credit-b-no-unit-' || v_suffix);
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
-    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF position('RETURN_CREDIT_UNIT_MISMATCH' IN v_err) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: the no-unit split return failed for the wrong reason: %', v_err;
-    END IF;
+    RAISE EXCEPTION 'SMOKE_FAIL: B''s return of the no-unit split line could not be created, received and credited: %', v_err;
   END;
+  IF (SELECT i.total_amount_cents FROM public.returns r JOIN public.invoices i ON i.id = r.credit_invoice_id
+       WHERE r.id = v_return4) IS DISTINCT FROM -1000::bigint
+     OR EXISTS (SELECT 1 FROM public.returns r JOIN public.invoice_items ii ON ii.invoice_id = r.credit_invoice_id
+                 WHERE r.id = v_return4 AND ii.quantity < 0
+                   AND ii.return_credit_source_item_id IS DISTINCT FROM v_b_line4_item) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: B''s no-unit credit is not -10.00 backed by B''s own line';
+  END IF;
+  IF (SELECT unit_size FROM public.invoice_items WHERE id = v_b_line4_item) IS DISTINCT FROM 'ea' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the split invoice did not bill the no-unit line as ea';
+  END IF;
 
   -- 6a. The guard: a credit memo for B on A's order, outside any claim.
   BEGIN

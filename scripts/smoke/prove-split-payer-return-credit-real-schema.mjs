@@ -22,8 +22,10 @@
  *   5. RE-APPLY: refused by the preflight;
  *   6. MUTATION: each load-bearing condition, removed in turn, fails its own chain step.
  *      Defence in depth that no single-session chain step can isolate: issue_return_credit's re-check
- *      under the per-line locks (it matters only when a source void races the credit) and its
- *      unbacked-credit refusal (the re-check already guarantees the returner's own lots cover it).
+ *      under the per-line locks (it matters only when a source void races the credit), its
+ *      unbacked-credit refusal (the re-check already guarantees the returner's own lots cover it), and
+ *      create_return's up-front unit check (reached only by a posted sale line whose unit differs from
+ *      the return's, which the fixed split writer no longer produces; the writer mutation shows it).
  *
  * Run: node scripts/smoke/prove-split-payer-return-credit-real-schema.mjs   (needs Docker)
  * Prints SPLIT_PAYER_RETURN_PROOF_PASS on success.
@@ -204,8 +206,8 @@ function fidelity() {
   const sql = lf(CANDIDATE).split('$preflight$')[1];
   const replaced = [...sql.matchAll(/\('[a-z_0-9]+', '(public\.[^']+\))', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2]]);
   const dependencies = [...sql.matchAll(/\('(public\.[^']+\))', '([0-9a-f]{32})'\)/g)].map((m) => [m[1], m[2]]);
-  assert.equal(replaced.length, 5, 'the preflight pins the five replaced bodies');
-  assert.equal(dependencies.length, 11, 'the preflight pins eleven dependency bodies');
+  assert.equal(replaced.length, 6, 'the preflight pins the six replaced bodies');
+  assert.equal(dependencies.length, 10, 'the preflight pins ten dependency bodies');
   for (const [sig, pin] of [...replaced, ...dependencies]) {
     assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('${sig}');`), pin, `${sig} replayed with a body that differs from the live pin`);
   }
@@ -322,10 +324,11 @@ const MUTATIONS = [
   ['guard claim not bound to the customer', GUARD_FN,
     '         AND claim.customer_id = NEW.customer_id\n', '',
     /SMOKE_FAIL: a claim for B admitted a credit memo for another customer/],
-  ['no-unit check off in create_return', CREATE,
-    "      ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;\n",
-    "      ) AND false THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;\n",
-    /SMOKE_FAIL: the no-unit split return failed for the wrong reason: RETURN_SPLIT_SHARE_NOT_BILLED/],
+  // The writer copies the empty unit again: create_return's up-front unit check refuses the return
+  // with the credit's own code (without that check it would fail as RETURN_SPLIT_SHARE_NOT_BILLED).
+  ['split invoice writer copies an empty unit', '_create_split_invoices_from_order_provenance_impl_20260719',
+    "        COALESCE(v_item.unit_size, 'ea'));\n", '        v_item.unit_size);\n',
+    /SMOKE_FAIL: B's return of the no-unit split line could not be created, received and credited: RETURN_CREDIT_UNIT_MISMATCH/],
   ['allowance lookup quotes the share pro rata instead of what is left', 'get_return_line_allowances',
     '           CASE WHEN s.share_mode THEN greatest(0, s.billed_cents - s.other_returned_cents)::bigint END\n',
     '           CASE WHEN s.share_mode AND s.billed_qty > 0 THEN round(s.billed_cents * (s.billed_qty - s.other_returned_qty) / s.billed_qty)::bigint END\n',

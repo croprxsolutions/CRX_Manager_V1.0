@@ -17,6 +17,7 @@ const MIGRATION = read('supabase/migrations/20261021155000_split_payer_return_cr
 const RETURNS_SOURCE = read('supabase/migrations/20260723193312_product_families_return_policy_foundation.sql');
 const LINEAGE_SOURCE = read('supabase/migrations/20261021150000_split_invoice_cross_customer_lineage.sql');
 const MONO_SOURCE = read('supabase/migrations/20260719044912_trust_only_post_revoke_split_provenance.sql');
+const SPLIT_SOURCE = read('supabase/migrations/20260827041400_align_return_credit_order_invoice_gates.sql');
 
 function body(sql: string, header: string): string {
   const at = sql.indexOf(header);
@@ -68,6 +69,7 @@ const FUNCTIONS = [
   { name: '_issue_return_credit_intent_impl_20260812', source: RETURNS_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.issue_return_credit(', pre: '1e9647da071aa1a53f3add5e38515da8', hunks: 5 },
   { name: 'guard_invoice_terminal_order', source: LINEAGE_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.guard_invoice_terminal_order()', pre: '3ce8e2202d902ed90ba3370dfc829e47', hunks: 2 },
   { name: 'guard_mono_invoice_split_billing_post', source: MONO_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.guard_mono_invoice_split_billing_post()', pre: 'e643f573e529a7117c10ff1e8b89fad0', hunks: 1 },
+  { name: '_create_split_invoices_from_order_provenance_impl_20260719', source: SPLIT_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public._create_split_invoices_from_order_provenance_impl_20260719(', pre: 'f671f1a3f5406cff52aedd8a5fb40b31', hunks: 1 },
 ];
 
 describe('20261021155000 split-payer return credit', () => {
@@ -148,7 +150,10 @@ describe('20261021155000 split-payer return credit', () => {
     }
   });
 
-  it('refuses a split return of a line with no unit up front, with the credit\'s own code (Sol on #1010)', () => {
+  it('bills a split line with no unit as ea, so its return can be credited, and refuses a unit mismatch up front (Sol on #1010)', () => {
+    const split = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_split_invoices_from_order_provenance_impl_20260719(');
+    expect(split).toContain("COALESCE(v_item.unit_size, 'ea'));");
+    expect(split).not.toContain('v_item.cust_acres, v_item.unit_size);');
     const create = body(MIGRATION, 'CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(');
     const unitCheck = create.indexOf("THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'");
     expect(unitCheck).toBeGreaterThan(create.indexOf('IF v_share.share_mode THEN'));

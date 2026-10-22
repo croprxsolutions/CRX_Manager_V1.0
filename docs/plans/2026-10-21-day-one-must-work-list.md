@@ -2,7 +2,7 @@
 
 **Owner:** Mason Wells approves. **Drafted:** 2026-10-21 by Claude, as asked in `docs/plans/2026-10-13-direction-and-goals.md` section 2 ("must work on day one" list, checkpoint 2026-10-31).
 **Reviewed:** an advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21. It made 57 findings. Claude checked each against the goals doc and the code. Most were applied; the few that weren't are listed at the end, with the reason.
-**Status:** DRAFT, waiting on Mason. Nothing here authorizes building anything. Each item is built through its own goal and pull request.
+**Status:** DRAFT, revised with Mason's changes of 2026-10-22: field-app, job and blend-ticket invoices are built last; returns must restock correctly and track goods sitting at the farm; jobs can have two applicators; rep-only rules wait because there are no regular reps yet. It still needs Mason's approval. Nothing here authorizes building anything. Each item is built through its own goal and pull request.
 **Evidence date:** every "today" status was checked against `main` at `d720cf681`, the open PR list and the open-issue list on 2026-10-22 (first checked at `e0b5d4234` on 2026-10-21, then refreshed after the Codex GitHub review on this PR). Statuses go stale quickly; re-check before relying on one. "Open PR" means written and in review, not live.
 
 ---
@@ -31,16 +31,16 @@ Words used below:
 
 | | Count |
 |---|---|
-| MUST, built and live (still needs its December proof) | 19 |
-| MUST, code not built or only partly built | 30 |
-| MUST, a business process, drill, review or Mason action (not code) | 26 |
-| SHOULD | 3 |
-| CAN-WAIT | 4, plus the parked items in section 17 |
+| MUST, built and live (still needs its December proof) | 18 |
+| MUST, code not built or only partly built | 24 |
+| MUST, a business process, drill, review or Mason action (not code) | 25 |
+| SHOULD | 4 |
+| CAN-WAIT | 13, plus the parked items in section 17 |
 
 Rows that only point to another row ("See 4.4") aren't counted twice. A row split between two ranks (for example 8.3) counts under its MUST part.
 
 **The four biggest risks for January 1:**
-1. **Billing correctness (Goal 3) is about half built.** Split billing, voids on posted invoices, quote price locks, return credits on split orders and "post uses what was saved" are open or in progress.
+1. **Billing correctness (Goal 3) is about half built.** Partly delivered split orders, voids on posted invoices, quote price locks, return pickup tracking and "post uses what was saved" are open or in progress. Billing a landlord and split-order returns went live on 2026-10-22.
 2. **We can't yet recover from losing the database (Goal 6).** The weekly off-site copy runs, but it has never been restored, photos aren't backed up, and the Supabase plan can't rewind to a chosen time. Today a bad day could cost about a week of work.
 3. **No staging system yet.** Nearly every proof below, plus the December rehearsal and staff training, needs one.
 4. **The QuickBooks and Stripe connections haven't started, and Stripe may not accept a restricted-use pesticide seller at all.** If they aren't proven by 2026-12-15, January runs on manual procedures that aren't written yet.
@@ -55,7 +55,7 @@ Rows that only point to another row ("See 4.4") aren't counted twice. A row spli
 | 1.2 | **A sent quote keeps the prices the customer saw.** A price change goes through a revision that must be re-sent; rewind to the last sent version; an admin approves a below-cost price at Convert | **Not built.** Accepting a sent quote re-prices it to today's tier price (confirmed live 2026-10-14; goals doc section 3, gap 2). | Goal 3, pricing plan slice 2 | MUST |
 | 1.3 | Convert to Order never leaves an accepted quote with no order; re-saving a quote with one product on two lines works | **Open, latent** (`KNOWN_ISSUES.md`, "quote screen: re-saving a quote with two lines of one product is refused", 2026-10-13). An accepted quote with no order can lose a sale without anyone noticing. | Goal 3 (same area as 1.2) | MUST |
 | 1.4 | Create an order; a rep records only their own name on orders and blend tickets | **Built.** Live since 2026-10-15 (PR #933, migration `20261015130000`). | Done; prove on staging | MUST |
-| 1.5 | **Only admins change commission splits** (customers, jobs, quotes, orders). New customers go on an admin to-do list. Copied and rolled-over quotes take the customer's current split. An admin editor recalculates *unpaid* commissions and can't race a payout | **Not built.** Today a customer's assigned rep can edit that customer's split, and any rep can edit a job's split (goals doc, Goal 2 "Still to do"). Due 2026-11-30. | Goal 2 follow-up | MUST |
+| 1.5 | **Only admins change commission splits** (customers, jobs, quotes, orders). New customers go on an admin to-do list. Copied and rolled-over quotes take the customer's current split. An admin editor recalculates *unpaid* commissions and can't race a payout | **Not built.** Today a customer's assigned rep can edit that customer's split, and any rep can edit a job's split (goals doc, Goal 2 "Still to do"). No regular reps yet (Mason, 2026-10-22), so only admins edit splits in practice. | Goal 2 follow-up | CAN-WAIT (MUST before the first regular rep gets an account) |
 
 ## 2. Delivering
 
@@ -77,8 +77,8 @@ Rows that only point to another row ("See 4.4") aren't counted twice. A row spli
 | 3.3 | Invoices made from scratch carry only charge lines (freight, application fee, service, other) | **Built.** Live 2026-10-21 (PR #983, migration `20261021050000`). | Done; prove on staging | MUST |
 | 3.4 | A product added on the invoice screen uses the customer's price tier | **Built** (PR #908, 2026-10-14). The goals doc asks for one check on a saved invoice and its PDF. | Goal 3 (one check) | MUST |
 | 3.5 | **Voiding or cancelling a delivery leaves nothing collectible for that delivery**: a draft or unposted invoice is cancelled; a posted one (unpaid, partly paid, paid or overdue) gets an automatic credit for exactly that delivery; the order's other deliveries stay collectible; repeats never restock or credit twice; only admins cancel a completed delivery | **Mostly not built.** A posted invoice stays fully collectible after its delivery is voided (`KNOWN_ISSUES.md`, "Voiding a delivery whose invoice is already posted leaves that invoice active"). A sales rep can cancel a completed delivery through the server. Built so far: voiding an order with split drafts (PR #987, migration `20261021030000`, live 2026-10-21), and cancel/void retry-safety (batch 3b). | Goal 3 ("Voids and cancellations") | MUST |
-| 3.6 | **Reps read every invoice.** Another rep's invoice is view, print and re-email only, with no edit, post, unpost, transfer or added lines. Invoices nobody owns are admin-only. Every balance a rep sees covers the whole customer (Customer Balance report, printed Customer Invoice Summary, payment-allocation screen) | **Not built.** Reps can still unpost or edit some other reps' invoices (goals doc, Goal 2 "Back doors to close"). Due 2026-11-30. | Goal 2 follow-up | MUST |
-| 3.7 | A rep invoices only under their own name on every path: splits, groups with mixed owners, list posting, unposting, consolidation, transfer. Admins can reassign | **Partly built.** Manual, order and blend-ticket invoices are live (PRs #907, #928, #933). Job invoices don't record a salesperson yet (goals doc, Goal 2). | Goal 2 follow-up | MUST |
+| 3.6 | **Reps read every invoice.** Another rep's invoice is view, print and re-email only, with no edit, post, unpost, transfer or added lines. Invoices nobody owns are admin-only. Every balance a rep sees covers the whole customer (Customer Balance report, printed Customer Invoice Summary, payment-allocation screen) | **Not built.** Reps can still unpost or edit some other reps' invoices (goals doc, Goal 2 "Back doors to close"). No regular reps yet (Mason, 2026-10-22). | Goal 2 follow-up | CAN-WAIT (MUST before the first regular rep gets an account) |
+| 3.7 | A rep invoices only under their own name on every path: splits, groups with mixed owners, list posting, unposting, consolidation, transfer. Admins can reassign | **Partly built.** Manual, order and blend-ticket invoices are live (PRs #907, #928, #933). Job invoices don't record a salesperson yet (goals doc, Goal 2). No regular reps yet (Mason, 2026-10-22). | Goal 2 follow-up | CAN-WAIT (MUST before the first regular rep gets an account) |
 | 3.8 | Invoice numbers take Chicago's year | **Built.** Live 2026-09-21 (migration `20260914100100`). | Done | MUST |
 
 ## 4. Split billing (one sale billed to more than one customer)
@@ -87,21 +87,23 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
-| 4.1 | Split an order or delivery between the grower and a landlord, partly delivered orders included. Co-owners pay the order's price. Every cent is accounted for, and the leftover cent goes to the order's own customer | **In progress.** Today splitting to a landlord fails and a partly delivered order can't be split (goals doc, Goal 3 "Split billing"). Open PRs: #1006 and #1010. | Goal 3 | MUST |
+| 4.1 | Split an order or delivery between the grower and a landlord, partly delivered orders included. Co-owners pay the order's price. Every cent is accounted for, and the leftover cent goes to the order's own customer | **Partly built.** Billing a landlord (a field owner who isn't the order's customer) is live since 2026-10-22 (PR #1010, migration `20261021150000`). A partly delivered order still can't be split (goals doc, Goal 3 "Split billing"). Open PR #1006 stops a single order invoice on an order split across fields. | Goal 3 | MUST |
 | 4.2 | The Order page's "Bill Split" card drives the bills | **Not built.** It saves percentages that no bill reads. | Goal 3 | MUST |
 | 4.3 | At the first delivery the split freezes the *money*: each line's billed total after discounts, its price, acres and owners. The last delivery bills exactly what's left. An order can be closed short and split on what was delivered | **Not built** (goals doc, Goal 3 build notes). | Goal 3 | MUST |
-| 4.4 | A return on a split order credits each payer for their own share, from their original invoice lines | **Not built.** A return has one customer today, and the database refuses quantity billed to another split customer. | Goal 3 | MUST |
+| 4.4 | A return on a split order credits each payer for their own share, from their original invoice lines | **Built.** Live since 2026-10-22 (PR #1010, migration `20261021155000_split_payer_return_credit`): each payer returns and is credited only for what its own invoices billed (`DECISION_LOG.md`, 2026-10-21 "Split returns are built before split billing to a landlord ships"). | Done; prove on staging | MUST |
 | 4.5 | Splitting one *field-application* invoice among customers | **Not built, on purpose.** Parked by Mason 2026-10-15. | Future work | CAN-WAIT |
 
 ## 5. Field-application, job and blend-ticket invoices
 
+**Mason, 2026-10-22:** "field application, job and blend ticket invoices are not musts, they are least important and are last thing to get built in the system." These invoices keep working as they do today; the remaining work on them is built last, after everything else on this list.
+
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
-| 5.1 | Create, post and print field-app, job and blend-ticket invoices with their chemical lines | **Built** (goals doc, Goal 3: these keep their chemical lines by design). | Done; prove on staging | MUST |
-| 5.2 | Blend tickets never price a product at $0 for a missing tier price. Staff pick when a quote lists one product twice. A $0 line needs an admin reason | **Built.** Live 2026-10-21 (PR #982, migration `20261020210000`; PR #995, migration `20261021070000`). | Done; prove on staging | MUST |
-| 5.3 | A job or blend-ticket invoice can't bill more than was applied, counting every invoice for that job or ticket, including two saves at once | **Not built** (goals doc, Goal 3 "Caps and orderless invoices"). | Goal 3 | MUST |
-| 5.4 | Correcting a posted field-app invoice with a credit: admin-only, with a reason, partial amounts allowed. All credits on one invoice together can't exceed what's still creditable, and two at once are handled safely | **Not built.** No credit path exists for a field invoice today; credits come only from returns, which need an order. | Goal 3 | MUST |
-| 5.5 | The fix that stopped reps making field-app invoices through the order screens is fully signed off | **Fix live since 2026-10-07; two sign-off checks still owed** (`KNOWN_ISSUES.md`, "CRX-LIFE-001"). Item 1's query used to be refused at a confirmation prompt; PR #1013 (merged 2026-10-21) removed that cause, so an agent can now re-run it. Item 2 is a live run of two existing checks. | Agent, minutes each | MUST |
+| 5.1 | Create, post and print field-app, job and blend-ticket invoices with their chemical lines | **Built** (goals doc, Goal 3: these keep their chemical lines by design). | Done | CAN-WAIT |
+| 5.2 | Blend tickets never price a product at $0 for a missing tier price. Staff pick when a quote lists one product twice. A $0 line needs an admin reason | **Built.** Live 2026-10-21 (PR #982, migration `20261020210000`; PR #995, migration `20261021070000`). | Done | CAN-WAIT |
+| 5.3 | A job or blend-ticket invoice can't bill more than was applied, counting every invoice for that job or ticket, including two saves at once | **Not built** (goals doc, Goal 3 "Caps and orderless invoices"). | Goal 3, built last | CAN-WAIT |
+| 5.4 | Correcting a posted field-app invoice with a credit: admin-only, with a reason, partial amounts allowed. All credits on one invoice together can't exceed what's still creditable, and two at once are handled safely | **Not built.** No credit path exists for a field invoice today; credits come only from returns, which need an order. | Goal 3, built last | CAN-WAIT |
+| 5.5 | The fix that stopped reps making field-app invoices through the order screens is fully signed off | **Fix live since 2026-10-07; two sign-off checks still owed** (`KNOWN_ISSUES.md`, "CRX-LIFE-001"). Item 1's query used to be refused at a confirmation prompt; PR #1013 (merged 2026-10-21) removed that cause, so an agent can now re-run it. Item 2 is a live run of two existing checks. | Agent, minutes each | CAN-WAIT |
 | 5.6 | Blend ticket linked to an order with several price tiers for one product | **Open, no money effect today.** The quantity it records is read by nothing (`KNOWN_ISSUES.md`, "blend-ticket linkage picks ONE order line per product"). It's a separate issue from the duplicate-line pricing in 5.2. | Later | CAN-WAIT |
 
 ## 6. Payments, prepay and credits
@@ -119,17 +121,18 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
-| 7.1 | Return goods on a CRX-billed order and get a credit | **Built** (`issue_return_credit`). | Done; prove on staging | MUST |
-| 7.2 | A return against one of the 53 spring deliveries billed in Chem Man can't create a CRX credit | **Not built.** Returns on those are allowed today (`KNOWN_ISSUES.md`, 2026-10-07 entry). The block needs returns to name their delivery. | Goal 3 | MUST |
-| 7.3 | Old-sale returns after 2026-12-31: staff know how to accept the goods, issue the credit in Chem Man or the books, and still open Chem Man history | **Process not written** (goals doc, L3; decision 2026-10-07). | Mason (L3) | MUST |
-| 7.4 | Split-order returns | See 4.4. | Goal 3 | MUST |
+| 7.1 | **A return fixes the money and the stock.** Return goods on a CRX-billed order and get a credit; goods put back on the shelf go back into inventory once, and damaged goods are credited without being restocked | **Built.** A return goes requested → approved → received → credited (`src/pages/Returns.tsx`). Stock comes back only at the "received" step, as a logged inventory movement into Main Warehouse, and each item says whether to restock it (`supabase/migrations/20260827041100_rebuild_return_credit_cogs_reversal.sql`, the receive function). Damaged items are credited with "restock" off; there's no separate damaged or write-off stock location. Cancelling a received return takes the stock back out. | Done; prove the money and the stock together on staging | MUST |
+| 7.2 | **Returns "sitting at farm":** a return is marked when the customer says the goods are coming back, and stays listed as sitting at the farm until it's picked up. Staff can see what still needs picking up, and what's picked up but not yet back in the warehouse (Mason, 2026-10-22) | **Not built.** Return statuses are only requested, approved, received, credited, rejected and cancelled (`.claude/schema-registry.json`). Nothing tracks pickup: an approved return is still at the farm by implication, and nothing shows "picked up, on the truck". | New, with Goal 3 returns work | MUST |
+| 7.3 | A return against one of the 53 spring deliveries billed in Chem Man can't create a CRX credit | **Not built.** Returns on those are allowed today (`KNOWN_ISSUES.md`, 2026-10-07 entry). The block needs returns to name their delivery. | Goal 3 | MUST |
+| 7.4 | Old-sale returns after 2026-12-31: staff know how to accept the goods, issue the credit in Chem Man or the books, and still open Chem Man history | **Process not written** (goals doc, L3; decision 2026-10-07). | Mason (L3) | MUST |
+| 7.5 | Split-order returns | See 4.4. | Done | MUST |
 
 ## 8. Commissions
 
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
 | 8.1 | Commissions calculated on orders and jobs, and payouts recorded | **Built** (job-level commissions live; commission cohort live 2026-09-21 to 09-28). | Done; prove on staging | MUST |
-| 8.2 | Admin-only splits | See 1.5. | Goal 2 follow-up | MUST |
+| 8.2 | Admin-only splits | See 1.5. | Goal 2 follow-up | CAN-WAIT |
 | 8.3 | **Commission already paid on a returned or credited sale comes off the next payout**, as a lasting negative adjustment in CRX that the payout and the commission reports both show. It carries forward if it's bigger than one payout, and stays visible as owed if the person has left | **Not built.** Today `create_commission_payment` pays pending rows at full amount and refuses negative lines (goals doc, Goal 3 build notes). Mason allowed the *calculation* to be manual at first, but it still has to be recorded in CRX. | Goal 3 | MUST: the recorded adjustment. SHOULD: automatic calculation |
 
 ## 9. Statements, printed documents and emails
@@ -155,13 +158,16 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 
 Four staff roles must each get through a normal day: **admin** (everything), **sales rep** (quotes, orders, invoices, payments), **driver** (deliveries, field stops) and **applicator** (assigned jobs and fields). Commission recipients are paid but don't sign in to work.
 
+**Mason, 2026-10-22:** "there are no regular reps yet so not very important on what reps can and cant do yet." Rules that only limit sales reps are CAN-WAIT, and become MUST before the first regular rep gets an account. Rules that also protect against drivers and applicators (cost and margin, photos, applicator fields) stay MUST.
+
 | # | What must work | Today (evidence) | Closed by | Rank |
 |---|---|---|---|---|
 | 11.1 | Only admins pull the restricted-use (RUP) sales register | **Built** (PR #927, migration `20261014220000`). | Done | MUST |
 | 11.2 | Photos need an active staff sign-in every time; old and copied links fail; deactivated staff are refused | **Built** (PRs #929 and #947; buckets private since 2026-10-16). Goal 1's full per-bucket, per-role and deactivation checks still have to pass on staging. | Goal 1 | MUST |
 | 11.3 | **Cost and margin are admin-only everywhere** | **Mostly live.** Steps 1 and 2 (PR #957; PR #965 with migration `20261019230000`), and purchase-order cost admin-only with locked columns (PR #980, migrations `20261021140000` and `20261021141000`, live 2026-10-22). Still open: step 3, locking cost columns on the other tables, such as product `current_cost` (`KNOWN_ISSUES.md`, HIGH, 2026-10-18). | Goal 1 | MUST |
 | 11.4 | An applicator sees only the fields for their assigned jobs, by every route (job, location dispatch, crew), and loses access when the assignment ends | **Not proven.** It's a Goal 1 rule with no shipped check found. | Goal 1 | MUST |
-| 11.5 | A rep can't write RUP register rows for an invoice that was never posted | **Open** (`KNOWN_ISSUES.md`, MED, 2026-10-14). It would put false sales in a regulated record. | Goal 1 follow-up | MUST |
+| 11.5 | A rep can't write RUP register rows for an invoice that was never posted | **Open** (`KNOWN_ISSUES.md`, MED, 2026-10-14). It would put false sales in a regulated record, but only a sales rep can do it. | Goal 1 follow-up | CAN-WAIT (MUST before the first regular rep gets an account) |
+| 11.6 | **Two applicators on one job** working together (Mason, 2026-10-22) | **Partly built.** A job has one main applicator (`jobs.applicator_id`). The Dispatch Board can give each field on a job a different applicator, or a crew (`job_location_dispatches`, `src/pages/DispatchBoard.tsx`), and a crew's members can be recorded on what was applied. Two named applicators on the *same* field isn't possible; the workaround is a crew with both of them. | New | SHOULD (the crew workaround covers January); MUST before spring application season |
 
 ## 12. The year boundary (December 31 to January 1)
 
@@ -227,6 +233,8 @@ These are Mason's checklists (goals doc, L1–L3), not agent gates. The full che
 
 | Item | Why it can wait |
 |---|---|
+| Remaining field-app, job and blend-ticket invoice work (section 5) | Mason, 2026-10-22: least important, built last. They keep working as they do today. |
+| Rules that only limit sales reps (1.5, 3.6, 3.7, 11.5) | Mason, 2026-10-22: no regular reps yet. They become MUST before the first regular rep gets an account. |
 | Field-application split billing (4.5) | Parked by Mason, 2026-10-15. |
 | Blend-ticket billing that picks the exact quoted line by itself | Parked by Mason; staff pick it today (5.2). |
 | Multi-tier blend linkage (5.6) | No money effect today. |
@@ -272,5 +280,6 @@ Sol finding 41 (the workload test and the rest of Goal 4 as MUST) was first kept
 - `docs/plans/2026-10-18-goal-6-safety-net-findings.md` and the two 2026-10-19 Goal 6 drafts.
 - `src/utils/season.ts` (the season boundary is October 1).
 - `docs/plans/2026-10-21-goal7-quickbooks-stripe-groundwork.md` and `docs/operations/production-runbook.md` (storage backup and backup alerting rows).
-- `git log` on `origin/main` through `d720cf681` and the open PR list, both read 2026-10-22.
+- `git log` on `origin/main` through `13f83434d` and the open PR list, both read 2026-10-22.
+- Mason's changes in chat, 2026-10-22, and a code check of returns (`src/pages/Returns.tsx`, the return receive function in `20260827041100`) and job assignment (`jobs.applicator_id`, `job_location_dispatches`, ground crews).
 - Advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21 (57 findings).

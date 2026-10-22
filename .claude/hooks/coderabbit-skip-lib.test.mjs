@@ -61,6 +61,12 @@ try {
   eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a waiver claiming more than 24 hours is refused");
   write({ recordedAt: new Date(now + 3_600_000).toISOString(), expiresAt: new Date(now + 7_200_000).toISOString() });
   eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a waiver dated in the future is refused");
+  write({ recordedAt: new Date(now + 1).toISOString(), expiresAt: new Date(now + 1 + CODERABBIT_SKIP_MAX_AGE_MS).toISOString() });
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "even one millisecond in the future (Luna round 1)");
+  write({ recordedAt: new Date(now).toISOString(), expiresAt: new Date(now + CODERABBIT_SKIP_MAX_AGE_MS + 1).toISOString() });
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "and one claiming a millisecond over 24 hours");
+  write({});
+  ok(findCodeRabbitSkip({ dirs, sessionId: session, now }), "the exact 24-hour waiver the hook writes is accepted");
   write({ sessionId: "another-session-99" });
   eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a file naming another session is refused");
   write({ purpose: "something-else" });

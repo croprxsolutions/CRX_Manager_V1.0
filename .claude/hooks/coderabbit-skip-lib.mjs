@@ -104,8 +104,9 @@ export function findCodeRabbitSkip({ dirs, sessionId, now = Date.now() }) {
     const recorded = Date.parse(data?.recordedAt);
     const expires = Date.parse(data?.expiresAt);
     if (!Number.isFinite(recorded) || !Number.isFinite(expires)) continue;
-    // A waiver dated in the future, or one claiming more than 24 hours, is not one he gave.
-    if (recorded > now + 60_000 || expires - recorded > CODERABBIT_SKIP_MAX_AGE_MS) continue;
+    // A waiver dated in the future, or one claiming more than 24 hours, is not one he gave
+    // (Luna round 1: no grace window, so it never outlives 24 hours from the gate's clock).
+    if (recorded > now || expires - recorded > CODERABBIT_SKIP_MAX_AGE_MS) continue;
     if (now >= expires) continue;
     return data;
   }

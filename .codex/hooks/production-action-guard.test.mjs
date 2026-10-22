@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -475,6 +475,13 @@ try {
       true, "a waiver lookup that throws reads as no waiver");
     assert.equal(skippedMerge(() => { throw new Error("gh down"); }, () => waiver).blocked,
       true, "the waiver does not excuse an unreadable requirement read");
+    // Luna round 1: the injected lookup above cannot show that the real hook binds it
+    // to its own session, so pin main()'s wiring to the payload's session id.
+    const guardSource = readFileSync(new URL("./production-action-guard.mjs", import.meta.url), "utf8");
+    assert.match(guardSource,
+      /findCodeRabbitSkip: \(\) => findCodeRabbitSkip\(\{\s*dirs: ownerRequestDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\]\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,/,
+      "main() binds the waiver lookup to the hook payload's own session id");
+    assert.equal((guardSource.match(/findSkip \}\)/g) || []).length, 2, "both advisory call sites pass the lookup through");
   }
   assert.equal(moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"], statuses: crDone(), head: "e".repeat(40) })).blocked,
     true, "a requirement answer for a different head than the thread answer is not trusted");

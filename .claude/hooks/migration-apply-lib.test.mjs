@@ -187,6 +187,15 @@ const evaluate = (root, over = {}) => evaluateMigrationApply({ landingGate: land
 // ── BASELINE: the fixture must ALLOW, or every deny below proves nothing ─────
 allows(evaluate(fixture()), "known-good UNARMED fixture (both reviewers + fresh Sol proof) is allowed — no per-migration ask since 2026-09-26");
 
+// Mason's "skip coderabbit" waiver counts only in the applying session, so the
+// apply must hand the landing gate THIS session's id (Luna round 1).
+{
+  const seen = [];
+  const spy = (args) => { seen.push(args.sessionId); return landingOk(args); };
+  allows(evaluate(fixture(), { landingGate: spy, ownerSessionId: "apply-session-0001" }), "an apply with a session id still passes");
+  ok(seen.length > 0 && seen.every((id) => id === "apply-session-0001"), "the landing gate receives the applying session's id");
+}
+
 // ── CHECK 1: ordering preflight ─────────────────────────────────────────────
 // Each case asserts the SPECIFIC message for its condition, not just the guard
 // banner. Mutation testing earned this: disabling the missing-snapshot check

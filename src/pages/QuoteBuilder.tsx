@@ -2810,6 +2810,10 @@ export default function QuoteBuilder() {
     toast('success', `Restored from V${selectedVersion?.version_number || '?'}`);
     setConfirmRestore(null);
     setSelectedVersion(null);
+    // The restore rewrote every line, so the held line ids no longer name them.
+    // The reload re-seeds them from the database; forgetting them first means a
+    // save that somehow ran before it could only be refused, never mismatch costs.
+    savedLineIdsRef.current = new Map();
     // Reload quote data
     window.location.reload();
   };

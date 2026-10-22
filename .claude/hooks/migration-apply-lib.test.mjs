@@ -1592,7 +1592,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString() };
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
-    number: 900, state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
+    number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
+    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: HEAD_SHA }, submittedAt: new Date().toISOString() }],
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
@@ -1732,6 +1733,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     refused(gate({ crError: new Error("HTTP 502"), sessionId: skipSession }), "fail closed",
       "the waiver does not excuse an unreadable requirement answer");
     ok(gate({ sessionId: skipSession }).coderabbitSkippedBy === undefined, "a reviewed PR is not marked as skipped");
+    // Codex App P2 on #1035: the same number in another repository gets no waiver.
+    refused(gate({ crStatuses: [], sessionId: skipSession, pr: { url: "https://github.com/other/repo/pull/900" } }),
+      "needs a clean CodeRabbit review", "a waiver for #900 here does not cover other/repo#900");
+    refused(gate({ crStatuses: [], sessionId: skipSession, pr: { url: undefined } }),
+      "needs a clean CodeRabbit review", "a PR whose repository cannot be read gets no waiver");
     cancelCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession });
     refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review", "a cancelled waiver no longer counts");
     // Codex App P2 and the final Sol review on #1035: waivers live in the MAIN

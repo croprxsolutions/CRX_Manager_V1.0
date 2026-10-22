@@ -39,7 +39,7 @@ import {
   readCodeRabbitRequirement,
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
-import { findCodeRabbitSkip, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { findCodeRabbitSkip, isSkipRepository, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 
@@ -156,7 +156,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let pr;
   try {
     pr = JSON.parse(gh(["pr", "view", branch, "--json",
-      "number,state,baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup"]));
+      "number,url,state,baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup"]));
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not find or read the open pull request for branch "${branch}" (${error?.message || error}).`);
@@ -198,7 +198,11 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     let common = "";
     try { common = String(git(["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim(); } catch (error) { if (OUT(error)) throw error; }
     const where = skipStateDirs([dir], () => common);
-    try { skip = findCodeRabbitSkip({ dirs: where, sessionId, pullRequest: pr.number, now }); } catch { skip = null; }
+    // A waiver covers this repository's PRs only: GH_REPO or a fork's remote can
+    // point gh at another repository whose PR numbers overlap (Codex App P2 on #1035).
+    const slug = String(pr?.url || "").match(/[/]([^/]+)[/]([^/]+)[/]pull[/]/);
+    const pullRequest = slug && isSkipRepository(slug[1], slug[2]) ? pr.number : null;
+    try { skip = findCodeRabbitSkip({ dirs: where, sessionId, pullRequest, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {
     return refuse(`${number} needs a clean CodeRabbit review of its current head before its migration applies, because ${coderabbitReview.why}. Post "@coderabbitai full review" once (docs/reference/coderabbit-native-review.md), answer its threads, then re-run.`);

@@ -116,10 +116,14 @@ describe('CustomerSearchPicker', () => {
     }
   });
 
-  it('asks for two characters instead of showing nothing', () => {
-    render(<CustomerSearchPicker value="" selectedLabel="" onSelect={vi.fn()} ariaLabel="Customer" />);
-    type(screen.getByRole('combobox', { name: 'Customer' }), 'S');
-    expect(screen.getByText('Type at least 2 characters to search')).toBeInTheDocument();
+  it('finds a record whose name is a single character', async () => {
+    mocks.limit.mockResolvedValue({ data: [{ id: 'c-a', farm_name: 'A' }], error: null });
+    const onSelect = vi.fn();
+    render(<CustomerSearchPicker value="" selectedLabel="" onSelect={onSelect} ariaLabel="Customer" />);
+    type(screen.getByRole('combobox', { name: 'Customer' }), 'A');
+    fireEvent.click(await screen.findByRole('option', { name: /^A$/ }));
+    expect(mocks.or).toHaveBeenCalledWith('farm_name.ilike."%A%",account_number.ilike."%A%"');
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'c-a' }));
   });
 
   it('keeps the previous label when the page refuses a pick', async () => {

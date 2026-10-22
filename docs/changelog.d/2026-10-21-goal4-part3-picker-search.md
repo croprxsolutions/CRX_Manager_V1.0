@@ -2,12 +2,12 @@
 
 Record pickers no longer stop at 200, 500 or 1,000 rows. Frontend only, no migration.
 
-**New shared search box.** `src/components/ui/RecordSearchPicker.tsx` searches the database as you type: two characters or more, the first 20 matches, a "keep typing" note on a full page. Thin versions sit beside it: `CustomerSearchPicker` (farm name or account number), `FieldSearchPicker` (field name, optionally one customer's fields) and the existing `ProductSearchPicker` from #944, now built on the same box.
+**New shared search box.** `src/components/ui/RecordSearchPicker.tsx` searches the database as you type: one character or more, the first 20 matches, a "keep typing" note on a full page. Thin versions sit beside it: `CustomerSearchPicker` (farm name or account number), `FieldSearchPicker` (field name, optionally one customer's fields) and the existing `ProductSearchPicker` from #944, now built on the same box.
 - A failed search shows a red "… search failed" with a Retry button, never "no matches". A search with no reply in 15 seconds counts as failed.
 - The search term is quoted for PostgREST (`src/lib/recordSearch.ts`), so commas, brackets, quotes, backslashes, `%` and `_` are searched literally (the old `.or()` comma trap). A typed `*` still acts as a wildcard, as PostgREST defines it.
 - Records a page must not offer (the customer itself as its own parent, customers already in a split, fields already added) are left out in the database query, before the 20-row limit.
 - Results belong to the conditions they were searched under. Changing customer or filter drops them and searches again.
-- A page may refuse a pick; the box then keeps the previous name. An empty or one-letter box says "Type at least 2 characters to search".
+- A page may refuse a pick; the box then keeps the previous name. An empty box says "Type to search"; one character is enough, so a record named "A" can be found.
 
 **Now database searches** (old limit in brackets):
 - Customer Detail parent customer (500).

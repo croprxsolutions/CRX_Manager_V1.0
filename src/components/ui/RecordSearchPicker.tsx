@@ -8,7 +8,9 @@ import { ilikeOrPattern } from '../../lib/recordSearch';
 export const RECORD_SEARCH_LIMIT = 20;
 // A search with no reply by then is shown as failed (with Retry) instead of "Searching..." forever.
 export const RECORD_SEARCH_TIMEOUT_MS = 15_000;
-const MIN_QUERY_LENGTH = 2;
+// One character is enough: a record named "A" must be reachable (Codex review, #1017).
+// A broad one-letter search still returns only the first 20, with the "keep typing" note.
+const MIN_QUERY_LENGTH = 1;
 
 export interface RecordSearchPickerProps<T extends { id: string }> {
   /** Selected record id, or '' for none. */
@@ -256,7 +258,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
       </div>
       {showHint && (
         <div role="status" aria-live="polite" className="absolute z-30 w-full min-w-[280px] mt-1 bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-sm text-secondary">
-          Type at least {MIN_QUERY_LENGTH} characters to search
+          Type to search
         </div>
       )}
       {showList && (

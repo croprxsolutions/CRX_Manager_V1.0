@@ -39,6 +39,7 @@ export default function Fields() {
   const [customerFilter, setCustomerFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [loadError, setLoadError] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -75,6 +76,7 @@ export default function Fields() {
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_fields' } });
       toast('error', 'Failed to load fields. Please try again.');
+      setLoadError(true);
       setLoading(false);
       return false;
     }
@@ -103,6 +105,7 @@ export default function Fields() {
       };
     });
     setFields(rows);
+    setLoadError(false);
     setLoading(false);
     return true;
   }, [toast]);
@@ -110,6 +113,11 @@ export default function Fields() {
   useEffect(() => {
     fetchFields();
   }, [fetchFields]);
+
+  const retryFields = () => {
+    setLoading(true);
+    void fetchFields();
+  };
 
   const filtered = fields.filter((f) => {
     if (cropFilter && f.crop_type !== cropFilter) return false;
@@ -457,7 +465,12 @@ export default function Fields() {
             <FieldMarkerLayer fields={filtered} onFieldClick={(fieldId) => navigate(`/fields/${fieldId}/dashboard`)} />
           </CRXMap>
 
-          {filtered.some((f) => f.centroid_geojson || f.boundary_geojson) ? (
+          {loadError ? (
+            <p role="alert" className="text-xs text-red-600 mt-2">
+              Fields could not be loaded, so the map is empty.{' '}
+              <button type="button" onClick={retryFields} className="font-medium underline">Try again</button>
+            </p>
+          ) : filtered.some((f) => f.centroid_geojson || f.boundary_geojson) ? (
             <p className="text-xs text-secondary mt-2">
               Showing {withBoundary} boundar{withBoundary === 1 ? 'y' : 'ies'} and {filtered.filter((f) => f.centroid_geojson && !f.boundary_geojson).length} marker(s) of {filtered.length} fields.
             </p>
@@ -485,6 +498,8 @@ export default function Fields() {
                 </Button>
               }
               loading={loading}
+              loadError={loadError}
+              onRetry={retryFields}
               filters={
                 <>
                   <select value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} aria-label="Filter by customer" className={filterSelect}>

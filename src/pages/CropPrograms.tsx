@@ -24,6 +24,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import HelpTip from '../components/ui/HelpTip';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import { computeSeason } from '../utils/season';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
 import type { ProductSearchResult, UnitConversion } from '../types';
@@ -63,6 +64,7 @@ export default function CropPrograms() {
   const { toast } = useToast();
   const [programs, setPrograms] = useState<CropProgram[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProgram, setEditingProgram] = useState<CropProgram | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -96,10 +98,12 @@ export default function CropPrograms() {
     if (error) {
       Sentry.captureException(error);
       toast('error', 'Failed to load crop programs.');
+      setLoadError(true);
       setLoading(false);
       return;
     }
 
+    setLoadError(false);
     if (data?.setting_value) {
       try {
         const parsed = JSON.parse(data.setting_value);
@@ -114,6 +118,11 @@ export default function CropPrograms() {
   useEffect(() => {
     fetchPrograms();
   }, [fetchPrograms]);
+
+  const retryPrograms = () => {
+    setLoading(true);
+    void fetchPrograms();
+  };
 
   const savePrograms = async (updated: CropProgram[]) => {
     const { data: existing } = await supabase
@@ -287,12 +296,19 @@ export default function CropPrograms() {
           <SplitHeading title="Crop" accent="Programs" />
           <HelpTip text="Reusable product templates for common crop programs (e.g. '2026 Corn Program'). When building a quote, use 'Apply Program' to auto-fill sections and items with pre-set products and rates." />
         </span>
-        <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
-          New Program
-        </Button>
+        {/* Saving rewrites the whole program list, so it must never start from a list that failed to load. */}
+        {!loadError && (
+          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
+            New Program
+          </Button>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
+      {loadError ? (
+        <Card>
+          <LoadFailedState onRetry={retryPrograms} />
+        </Card>
+      ) : filtered.length === 0 ? (
         <Card>
           <div className="text-center py-12">
             <Sprout className="w-12 h-12 text-gray-300 mx-auto mb-3" />

@@ -29,6 +29,7 @@ export default function Vehicles() {
   const { role } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [typeFilter, setTypeFilter] = useState<VehicleType | ''>('');
   const [statusFilter, setStatusFilter] = useState<VehicleStatus | ''>('');
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -47,10 +48,12 @@ export default function Vehicles() {
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_vehicles' } });
       toast('error', 'Failed to load vehicles');
+      setLoadError(true);
       setLoading(false);
       return;
     }
     setVehicles((data || []) as Vehicle[]);
+    setLoadError(false);
     setLoading(false);
   }, [toast]);
 
@@ -247,6 +250,8 @@ export default function Vehicles() {
             emptyTitle="No vehicles"
             emptyDescription="Add your first vehicle to get started."
             loading={loading}
+            loadError={loadError}
+            onRetry={() => void fetchVehicles()}
           />
         </div>
       </Card>

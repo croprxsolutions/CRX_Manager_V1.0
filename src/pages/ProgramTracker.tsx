@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckSquare, ChevronDown, ChevronRight } from 'lucide-react';
 import Card from '../components/ui/Card';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import Badge, { type BadgeVariant } from '../components/ui/Badge';
 import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
@@ -42,6 +43,7 @@ export default function ProgramTracker() {
   const { toast } = useToast();
   const [programs, setPrograms] = useState<ProgramRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [season, setSeason] = useState(currentSeason());
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [customerFilter, setCustomerFilter] = useState<string>('');
@@ -54,9 +56,12 @@ export default function ProgramTracker() {
       if (error) throw error;
       const result = assertRpcResult<ProgramRow[]>(data, 'get_program_completion');
       setPrograms(result);
+      setLoadError(false);
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
       toast('error', 'Failed to load program data');
+      setPrograms([]);
+      setLoadError(true);
     }
     setLoading(false);
   }, [season, toast]);
@@ -125,6 +130,8 @@ export default function ProgramTracker() {
         <div className="p-5">
           {loading ? (
             <div className="space-y-3">{[1,2,3].map((i) => <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />)}</div>
+          ) : loadError ? (
+            <LoadFailedState onRetry={() => void fetchPrograms()} />
           ) : filtered.length === 0 ? (
             <div className="text-center py-12">
               <CheckSquare className="w-12 h-12 text-gray-300 mx-auto mb-3" />

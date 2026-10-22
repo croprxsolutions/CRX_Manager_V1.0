@@ -78,6 +78,7 @@ export default function Products() {
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
   const [categories, setCategories] = useState<string[]>([]);
@@ -119,7 +120,9 @@ export default function Products() {
         .range(from, from + PAGE_SIZE - 1);
       if (error) {
         Sentry.captureException(error);
+        // A silent reload's caller keeps the rows on screen and explains the failure itself.
         if (reportError) toast('error', 'Failed to load products. Please try again.');
+        if (reportError && seq === loadSeqRef.current) setLoadError(true);
         setLoading(false);
         return false;
       }
@@ -134,11 +137,13 @@ export default function Products() {
     } catch (costError) {
       Sentry.captureException(costError);
       if (reportError) toast('error', 'Failed to load products. Please try again.');
+      if (reportError && seq === loadSeqRef.current) setLoadError(true);
       setLoading(false);
       return false;
     }
     if (seq !== loadSeqRef.current) return false;
     setProducts(prods);
+    setLoadError(false);
 
     const cats = [...new Set(prods.map((p) => p.category).filter(Boolean))] as string[];
     const vends = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
@@ -151,6 +156,11 @@ export default function Products() {
   useEffect(() => {
     void fetchProducts();
   }, [fetchProducts]);
+
+  const retryProducts = () => {
+    setLoading(true);
+    void fetchProducts();
+  };
 
   const filtered = products.filter((p) => {
     if (categoryFilter && p.category !== categoryFilter) return false;
@@ -885,6 +895,8 @@ export default function Products() {
               ) : undefined
             }
             loading={loading}
+            loadError={loadError}
+            onRetry={retryProducts}
             canEdit={isAdmin}
             onSave={handleBulkSave}
             headerActions={isAdmin ? (

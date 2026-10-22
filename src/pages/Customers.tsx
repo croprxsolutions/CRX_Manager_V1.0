@@ -68,6 +68,7 @@ export default function Customers() {
   const [assignableRepsError, setAssignableRepsError] = useState(false);
   const [repsLoadNonce, setRepsLoadNonce] = useState(0);
   const [truncated, setTruncated] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
@@ -84,7 +85,11 @@ export default function Customers() {
       .limit(CUSTOMER_FETCH_LIMIT);
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_customers' } });
-      if (options.reportError !== false) toast('error', 'Failed to load customers. Please try again.');
+      // A silent refresh's caller keeps the rows on screen and explains the failure itself.
+      if (options.reportError !== false) {
+        toast('error', 'Failed to load customers. Please try again.');
+        setLoadError(true);
+      }
       setLoading(false);
       return false;
     }
@@ -101,6 +106,7 @@ export default function Customers() {
         : count > CUSTOMER_FETCH_LIMIT,
     );
     setCustomers(rows);
+    setLoadError(false);
     setLoading(false);
     return true;
   }, [toast]);
@@ -108,6 +114,11 @@ export default function Customers() {
   useEffect(() => {
     fetchCustomers();
   }, [fetchCustomers]);
+
+  const retryCustomers = () => {
+    setLoading(true);
+    void fetchCustomers();
+  };
 
   // Assigned-rep names for the column + filter. A failure here only costs the
   // rep label (the id-based filter still works), so it never blocks the list.
@@ -607,6 +618,8 @@ export default function Customers() {
               </Button>
             }
             loading={loading}
+            loadError={loadError}
+            onRetry={retryCustomers}
             filters={
               <>
                 <select

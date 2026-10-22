@@ -9,7 +9,7 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import SplitHeading from '../components/ui/SplitHeading';
 import Skeleton from '../components/ui/Skeleton';
-import EmptyState from '../components/ui/EmptyState';
+import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/activityLogger';
@@ -213,6 +213,7 @@ export default function SettingsPage() {
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
   const [settingPassword, setSettingPassword] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+  const [usersLoadError, setUsersLoadError] = useState(false);
 
   const fetchSettings = async () => {
     const { data, error } = await supabase.from('app_settings').select('*');
@@ -257,8 +258,10 @@ export default function SettingsPage() {
       .order('full_name');
     if (error) {
       toast('error', 'Failed to load users');
+      setUsersLoadError(true);
       return;
     }
+    setUsersLoadError(false);
     setUsers((data || []) as Profile[]);
   };
 
@@ -707,7 +710,9 @@ export default function SettingsPage() {
           }
         />
         <div className="overflow-x-auto">
-          {users.length === 0 ? (
+          {usersLoadError ? (
+            <LoadFailedState title="Users could not be loaded" onRetry={() => void fetchUsers()} />
+          ) : users.length === 0 ? (
             <EmptyState
               icon={<Users className="w-6 h-6 text-gray-400" />}
               title="No users found"

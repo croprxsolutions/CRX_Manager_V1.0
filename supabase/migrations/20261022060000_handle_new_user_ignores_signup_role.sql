@@ -16,8 +16,12 @@
 --   sign-ins and refreshes; a token issued during the signup request itself (autoconfirm on)
 --   lives until it expires, so the inactive profile is the real boundary. An inactive profile passes none of is_admin / is_sales_rep /
 --   is_driver / is_applicator, and every RLS policy that reads profiles.role also reads is_active
---   (live read 2026-10-22); 'driver' is the narrowest role for the few SECURITY DEFINER functions
---   that read role without is_active (get_team_board_deliveries and four others). The Settings
+--   (live read 2026-10-22); 'driver' is the narrowest role for the five SECURITY DEFINER functions
+--   that read role without is_active (live bodies read 2026-10-22): get_team_board_deliveries and
+--   get_yesterday_delivery_recap give a non-admin, non-sales caller only deliveries assigned to
+--   them (none for a new user; the board's unassigned count is shown to any role, unchanged),
+--   mark_inventory_row_verified requires admin, and the two _replay_impl_20261015 bodies are not
+--   executable by authenticated. So the role grants a new login nothing those functions hide. The Settings
 --   page's Create User flow then sets the role and name the admin chose and activates the user
 --   through `admin_update_profile` (admin-only, idempotent), in the same click; activation clears
 --   the ban through the existing `_sync_auth_access_on_profile_active` trigger.

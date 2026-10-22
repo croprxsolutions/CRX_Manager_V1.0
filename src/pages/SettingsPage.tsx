@@ -525,7 +525,7 @@ export default function SettingsPage() {
         if (activationError) {
           toast('error', activationError.startsWith('Another user')
             ? activationError
-            : `The login ${newEmail} was created but is not active yet (${activationError}). Open it, set the name and role, and mark it active.`);
+            : `The login ${newEmail} was created but could not be confirmed active (${activationError}). Check it in the list; if it is not active, open it, set the name and role, and mark it active.`);
           if (profile) logActivity({ event: 'user_created', description: `User ${newEmail} created but not activated`, performedBy: profile.id });
           setUserModalOpen(false);
           fetchUsers();

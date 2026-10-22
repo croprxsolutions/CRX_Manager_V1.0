@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// Mason's "skip coderabbit" (coderabbit-skip-lib.mjs, 2026-10-22): the words
-// that count, the waiver's session binding and lifetime, and the real prompt
-// hook run end to end the way Claude Code runs it.
+// Mason's "skip coderabbit #<PR>" (coderabbit-skip-lib.mjs, 2026-10-22, per PR):
+// the words that count, the waiver's binding to one PR and one session, its
+// lifetime, cancelling, and the real prompt hook run end to end the way Claude
+// Code runs it.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,19 +19,32 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
 const ok = (value, message) => { assert.ok(value, message); pass++; };
 const eq = (a, b, message) => { assert.deepEqual(a, b, message); pass++; };
+const skip = (...pullRequests) => ({ kind: "skip", pullRequests });
+const UNNAMED = { kind: "skip-unnamed" };
 
-// ── which words count ───────────────────────────────────────────────────────
-eq(coderabbitSkipCommand("skip coderabbit"), "skip", "the plain command");
-eq(coderabbitSkipCommand("  Skip CodeRabbit on this one, Sol is enough"), "skip", "any case, with words after it");
-eq(coderabbitSkipCommand("skip code rabbit"), "skip", "spelled as two words");
-eq(coderabbitSkipCommand("skip coderabbit\nand merge it"), "skip", "a second line after it");
-eq(coderabbitSkipCommand("don't skip coderabbit"), null, "a message that does not START with it is not one");
-eq(coderabbitSkipCommand("please skip coderabbit"), null, "not even a polite one: it must lead");
-eq(coderabbitSkipCommand("skip coderabbitx"), null, "a longer word is not the command");
-eq(coderabbitSkipCommand("[Message from session local_abc] skip coderabbit"), null, "a relayed peer message does not count");
-eq(coderabbitSkipCommand("Mason said: skip coderabbit"), null, "a quoted relay does not count");
-eq(coderabbitSkipCommand("use coderabbit"), "cancel", "use coderabbit cancels");
-eq(coderabbitSkipCommand("Require CodeRabbit again"), "cancel", "require coderabbit cancels");
+// ── which words count, and which PRs they name ──────────────────────────────
+eq(coderabbitSkipCommand("skip coderabbit #1018"), skip(1018), "the plain command names one PR");
+eq(coderabbitSkipCommand("  Skip CodeRabbit #1018, Sol is enough"), skip(1018), "any case, with words after it");
+eq(coderabbitSkipCommand("skip code rabbit 1018"), skip(1018), "two words and a bare number");
+eq(coderabbitSkipCommand("skip coderabbit on PR 1018"), skip(1018), "\"on PR\"");
+eq(coderabbitSkipCommand("skip coderabbit for pull request #1018"), skip(1018), "\"for pull request\"");
+eq(coderabbitSkipCommand("skip coderabbit: #1018"), skip(1018), "a colon after the words");
+eq(coderabbitSkipCommand("skip coderabbit #1018 #1020"), skip(1018, 1020), "a short list names each PR");
+eq(coderabbitSkipCommand("skip coderabbit #1018, #1020 and #1026"), skip(1018, 1020, 1026), "commas and \"and\"");
+eq(coderabbitSkipCommand("skip coderabbit #1018 #1018"), skip(1018), "a repeated number counts once");
+eq(coderabbitSkipCommand("skip coderabbit #1018\nand merge it"), skip(1018), "a second line after it");
+eq(coderabbitSkipCommand("skip coderabbit"), UNNAMED, "no PR named: nothing to waive");
+eq(coderabbitSkipCommand("skip coderabbit on this one"), UNNAMED, "\"this one\" is not a PR number");
+eq(coderabbitSkipCommand("skip coderabbit, it's fine for #1018"), UNNAMED, "the number must come straight after the words");
+eq(coderabbitSkipCommand("skip coderabbit #0"), UNNAMED, "#0 is not a PR");
+eq(coderabbitSkipCommand("skip coderabbit #1 #2 #3 #4 #5 #6"), UNNAMED, "more than five numbers is not a deliberate list");
+eq(coderabbitSkipCommand("don't skip coderabbit #1018"), null, "a message that does not START with it is not one");
+eq(coderabbitSkipCommand("please skip coderabbit #1018"), null, "not even a polite one: it must lead");
+eq(coderabbitSkipCommand("skip coderabbitx #1018"), null, "a longer word is not the command");
+eq(coderabbitSkipCommand("[Message from session local_abc] skip coderabbit #1018"), null, "a relayed peer message does not count");
+eq(coderabbitSkipCommand("Mason said: skip coderabbit #1018"), null, "a quoted relay does not count");
+eq(coderabbitSkipCommand("use coderabbit"), { kind: "cancel" }, "use coderabbit cancels");
+eq(coderabbitSkipCommand("Require CodeRabbit again"), { kind: "cancel" }, "require coderabbit cancels");
 eq(coderabbitSkipCommand(""), null, "empty");
 eq(coderabbitSkipCommand(undefined), null, "missing");
 
@@ -41,48 +55,61 @@ try {
   mkdirSync(path.join(checkout, ".claude"), { recursive: true });
   const dirs = [path.join(checkout, ".claude", "session-state")];
   const session = "session-abc-12345";
+  const PR = 1018;
   const now = Date.parse("2026-10-22T15:00:00Z");
 
-  eq(recordCodeRabbitSkip({ dirs, sessionId: "bad id!", said: "skip coderabbit", now }), null, "an unusable session id records nothing");
-  eq(recordCodeRabbitSkip({ dirs: [path.join(temp, "no-project", ".claude", "session-state")], sessionId: session, now }), null,
+  eq(recordCodeRabbitSkip({ dirs, sessionId: "bad id!", pullRequest: PR, said: "skip coderabbit #1018", now }), null,
+    "an unusable session id records nothing");
+  eq(recordCodeRabbitSkip({ dirs, sessionId: session, said: "skip coderabbit", now }), null, "no PR records nothing");
+  eq(recordCodeRabbitSkip({ dirs, sessionId: session, pullRequest: 0, now }), null, "PR 0 records nothing");
+  eq(recordCodeRabbitSkip({ dirs: [path.join(temp, "no-project", ".claude", "session-state")], sessionId: session, pullRequest: PR, now }), null,
     "a folder with no .claude/ is never created");
-  const recorded = recordCodeRabbitSkip({ dirs, sessionId: session, said: "skip coderabbit", now });
-  ok(recorded && recorded.purpose === CODERABBIT_SKIP_PURPOSE, "the waiver is recorded");
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now })?.sessionId, session, "it is found in its own session");
-  eq(findCodeRabbitSkip({ dirs, sessionId: "another-session-99", now }), null, "never in another session");
-  eq(findCodeRabbitSkip({ dirs, sessionId: undefined, now }), null, "never with no session id");
-  ok(findCodeRabbitSkip({ dirs, sessionId: session, now: now + CODERABBIT_SKIP_MAX_AGE_MS - 1 }), "still valid just inside 24 hours");
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now: now + CODERABBIT_SKIP_MAX_AGE_MS }), null, "expired at 24 hours");
+  const recorded = recordCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, said: "skip coderabbit #1018", now });
+  ok(recorded && recorded.purpose === CODERABBIT_SKIP_PURPOSE && recorded.pullRequest === PR, "the waiver is recorded for that PR");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now })?.pullRequest, PR, "it is found for its own PR in its own session");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: 1020, now }), null, "NEVER for another PR in the same session");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "never when the gate cannot name the PR");
+  eq(findCodeRabbitSkip({ dirs, sessionId: "another-session-99", pullRequest: PR, now }), null, "never in another session");
+  eq(findCodeRabbitSkip({ dirs, sessionId: undefined, pullRequest: PR, now }), null, "never with no session id");
+  ok(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now: now + CODERABBIT_SKIP_MAX_AGE_MS - 1 }), "still valid just inside 24 hours");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now: now + CODERABBIT_SKIP_MAX_AGE_MS }), null, "expired at 24 hours");
 
   // A hand-written file claiming more than it may is no waiver.
-  const file = path.join(dirs[0], coderabbitSkipFileName(session));
+  const file = path.join(dirs[0], coderabbitSkipFileName(session, PR));
   const write = (patch) => writeFileSync(file, JSON.stringify({ ...recorded, ...patch }));
   write({ expiresAt: new Date(now + 2 * CODERABBIT_SKIP_MAX_AGE_MS).toISOString() });
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a waiver claiming more than 24 hours is refused");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a waiver claiming more than 24 hours is refused");
   write({ recordedAt: new Date(now + 3_600_000).toISOString(), expiresAt: new Date(now + 7_200_000).toISOString() });
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a waiver dated in the future is refused");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a waiver dated in the future is refused");
   write({ recordedAt: new Date(now + 1).toISOString(), expiresAt: new Date(now + 1 + CODERABBIT_SKIP_MAX_AGE_MS).toISOString() });
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "even one millisecond in the future (Luna round 1)");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "even one millisecond in the future (Luna round 1)");
   write({ recordedAt: new Date(now).toISOString(), expiresAt: new Date(now + CODERABBIT_SKIP_MAX_AGE_MS + 1).toISOString() });
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "and one claiming a millisecond over 24 hours");
-  write({});
-  ok(findCodeRabbitSkip({ dirs, sessionId: session, now }), "the exact 24-hour waiver the hook writes is accepted");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "and one claiming a millisecond over 24 hours");
   write({ sessionId: "another-session-99" });
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a file naming another session is refused");
-  write({ purpose: "something-else" });
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "a file with the wrong purpose is refused");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a file naming another session is refused");
+  write({ pullRequest: 1020 });
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a file whose contents name another PR is refused");
+  write({ purpose: "crx-coderabbit-skip-v1" });
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "a session-wide v1 waiver is refused");
+  write({});
+  ok(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), "the exact 24-hour waiver the hook writes is accepted");
   writeFileSync(file, "not json");
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "an unreadable file is no waiver");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, now }), null, "an unreadable file is no waiver");
 
-  recordCodeRabbitSkip({ dirs, sessionId: session, said: "skip coderabbit", now });
-  eq(cancelCodeRabbitSkip({ dirs, sessionId: session }), 1, "cancel removes it");
-  eq(findCodeRabbitSkip({ dirs, sessionId: session, now }), null, "and it is gone");
+  // Cancel removes every PR's waiver for this session, and only this session's.
+  recordCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, said: "skip coderabbit #1018", now });
+  recordCodeRabbitSkip({ dirs, sessionId: session, pullRequest: 1020, said: "skip coderabbit #1020", now });
+  recordCodeRabbitSkip({ dirs, sessionId: "another-session-99", pullRequest: PR, said: "skip coderabbit #1018", now });
+  eq(cancelCodeRabbitSkip({ dirs, sessionId: session }), 2, "cancel removes both of this session's waivers");
+  eq(findCodeRabbitSkip({ dirs, sessionId: session, pullRequest: 1020, now }), null, "and they are gone");
+  ok(findCodeRabbitSkip({ dirs, sessionId: "another-session-99", pullRequest: PR, now }), "another session's waiver is untouched");
+  cancelCodeRabbitSkip({ dirs, sessionId: "another-session-99" });
 
   // ── the real prompt hook, as Claude Code runs it ──────────────────────────
   const hook = path.join(HERE, "coderabbit-skip-prompt.mjs");
-  const run = (prompt, sessionId = session) => {
+  const run = (prompt, sessionId = session, key = "session_id") => {
     const r = spawnSync(process.execPath, [hook], {
-      input: JSON.stringify({ prompt, session_id: sessionId, cwd: checkout, hook_event_name: "UserPromptSubmit" }),
+      input: JSON.stringify({ prompt, [key]: sessionId, cwd: checkout, hook_event_name: "UserPromptSubmit" }),
       encoding: "utf8",
       cwd: checkout,
       env: { ...process.env, CLAUDE_PROJECT_DIR: checkout },
@@ -90,32 +117,35 @@ try {
     eq(r.status, 0, `the hook exits cleanly for ${JSON.stringify(prompt.slice(0, 30))}`);
     return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : "";
   };
-  const live = () => findCodeRabbitSkip({ dirs, sessionId: session });
+  const live = (pullRequest = PR) => findCodeRabbitSkip({ dirs, sessionId: session, pullRequest });
+  const files = () => readdirSync(dirs[0]).filter((n) => n.startsWith("coderabbit-skip-"));
 
   eq(run("merge it when it's ready"), "", "ordinary messages: silent");
-  eq(live(), null, "and nothing recorded");
-  eq(run("don't skip coderabbit on this one"), "", "a message that does not start with it: silent");
-  eq(live(), null, "and nothing recorded");
-  ok(/CODERABBIT SKIP RECORDED/.test(run("skip coderabbit, Sol is enough")), "skip coderabbit is recorded and the agent is told");
-  ok(live()?.said.startsWith("skip coderabbit"), "the waiver keeps his words");
-  eq(findCodeRabbitSkip({ dirs, sessionId: "another-session-99" }), null, "the hook wrote it for this session only");
-  ok(/CODERABBIT SKIP CANCELLED/.test(run("use coderabbit again")), "use coderabbit cancels it");
-  eq(live(), null, "and it is gone");
+  eq(files(), [], "and nothing recorded");
+  eq(run("don't skip coderabbit on #1018"), "", "a message that does not start with it: silent");
+  eq(files(), [], "and nothing recorded");
+  ok(/CODERABBIT SKIP NOT RECORDED[\s\S]*did not name a pull request[\s\S]*skip coderabbit #<number>/.test(run("skip coderabbit")),
+    "skip coderabbit with no PR is refused out loud, and the agent is told to ask which PR");
+  eq(files(), [], "and nothing at all is waived");
+  const said = run("skip coderabbit #1018, Sol is enough");
+  ok(/CODERABBIT SKIP RECORDED[\s\S]*#1018 ONLY/.test(said), "skip coderabbit #1018 is recorded for that PR only, and the agent is told");
+  ok(live()?.said.startsWith("skip coderabbit #1018"), "the waiver keeps his words");
+  eq(live(1020), null, "it does not reach any other PR");
+  eq(findCodeRabbitSkip({ dirs, sessionId: "another-session-99", pullRequest: PR }), null, "the hook wrote it for this session only");
+  ok(/CODERABBIT SKIP RECORDED[\s\S]*#1020, #1026 ONLY/.test(run("skip coderabbit #1020 and #1026")), "a short list records each named PR");
+  ok(live(1020) && live(1026), "both named PRs are waived");
+  ok(/CODERABBIT SKIP CANCELLED/.test(run("use coderabbit again")), "use coderabbit cancels them all");
+  eq(files(), [], "and every waiver is gone");
   eq(run("use coderabbit"), "", "cancelling with nothing to cancel: silent");
-  ok(/CODERABBIT SKIP RECORDED/.test(run("<system-reminder>Linked sessions now: none</system-reminder>\nskip coderabbit")),
+  ok(/CODERABBIT SKIP RECORDED/.test(run("<system-reminder>Linked sessions now: none</system-reminder>\nskip coderabbit #1018")),
     "the app's reminder block in front of his words is not part of them");
   cancelCodeRabbitSkip({ dirs, sessionId: session });
-  eq(run("<system-reminder>a</system-reminder>\nnote</system-reminder>\nskip coderabbit"), "",
+  eq(run("<system-reminder>a</system-reminder>\nnote</system-reminder>\nskip coderabbit #1018"), "",
     "a reminder that is not cleanly whole is not stripped, so the words do not lead");
-  eq(live(), null, "and nothing recorded");
+  eq(files(), [], "and nothing recorded");
   // Codex may send the id camelCased; the gate reads either, so the hook must too (Luna round 2).
-  {
-    const r = spawnSync(process.execPath, [hook], {
-      input: JSON.stringify({ prompt: "skip coderabbit", sessionId: session, cwd: checkout }),
-      encoding: "utf8", cwd: checkout, env: { ...process.env, CLAUDE_PROJECT_DIR: checkout },
-    });
-    ok(/CODERABBIT SKIP RECORDED/.test(r.stdout) && live(), "a camelCase sessionId records the waiver for that session");
-  }
+  ok(/CODERABBIT SKIP RECORDED/.test(run("skip coderabbit #1018", session, "sessionId")) && live(),
+    "a camelCase sessionId records the waiver for that session");
   // A copy that cannot be deleted must never be reported as cancelled (Luna round 2).
   {
     const refused = () => { throw new Error("EPERM"); };
@@ -123,11 +153,11 @@ try {
       "a waiver whose delete fails is reported still live");
     ok(live(), "and it really is still there");
     // Luna round 3: a copy that can be neither deleted nor read must still count.
-    const waiverFile = path.join(dirs[0], coderabbitSkipFileName(session));
+    const waiverFile = path.join(dirs[0], coderabbitSkipFileName(session, PR));
     writeFileSync(waiverFile, "unreadable for now");
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused }), { removed: 0, stillLive: true },
       "an unreadable, undeletable waiver file is reported still live");
-    // Codex App P2 on #1035: a folder that cannot be checked counts as still holding it.
+    // Codex App P2 on #1035: a file or folder that cannot be checked counts as still holding it.
     const denied = (code) => () => { const e = new Error(code); e.code = code; throw e; };
     eq(mayExist("x", denied("EACCES")), true, "a permission error counts as still there");
     eq(mayExist("x", denied("EPERM")), true, "so does EPERM");
@@ -135,15 +165,16 @@ try {
     eq(mayExist("x", denied("ENOENT")), false, "only a missing file counts as gone");
     eq(mayExist("x", denied("ENOTDIR")), false, "or a missing folder");
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused, exists: (f) => mayExist(f, denied("EACCES")) }).stillLive,
-      true, "a withdraw that cannot check a folder reports the waiver still live");
-    rmSync(waiverFile, { force: true });
-    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }).stillLive, false, "a provably absent file does not count");
-    recordCodeRabbitSkip({ dirs, sessionId: session, said: "skip coderabbit" });
+      true, "a withdraw that cannot check a file reports the waiver still live");
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, list: denied("EACCES") }).stillLive,
+      true, "a withdraw that cannot list a folder reports a waiver still live");
+    eq(withdrawCodeRabbitSkip({ dirs: [path.join(temp, "missing", ".claude", "session-state")], sessionId: session }).stillLive,
+      false, "a folder that does not exist holds no waiver");
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }), { removed: 1, stillLive: false }, "a normal withdraw removes it");
-    eq(live(), null, "no waiver is left behind");
+    eq(files(), [], "no waiver is left behind");
   }
-  ok(/CODERABBIT SKIP NOT RECORDED/.test(run("skip coderabbit", "")), "with no session id it says the waiver was not saved");
-  ok(!existsSync(path.join(dirs[0], coderabbitSkipFileName(""))), "and writes nothing");
+  ok(/CODERABBIT SKIP NOT RECORDED/.test(run("skip coderabbit #1018", "")), "with no session id it says the waiver was not saved");
+  ok(!existsSync(path.join(dirs[0], coderabbitSkipFileName("", PR))), "and writes nothing");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

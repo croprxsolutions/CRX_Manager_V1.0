@@ -190,7 +190,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   // (2026-10-22); the thread check below still runs.
   let skip = null;
   if (coderabbitReview.status === "missing") {
-    try { skip = findCodeRabbitSkip({ dirs: skipStateDirs([dir]), sessionId, now }); } catch { skip = null; }
+    // Only a waiver naming THIS pull request counts (Mason, 2026-10-22: per PR).
+    try { skip = findCodeRabbitSkip({ dirs: skipStateDirs([dir]), sessionId, pullRequest: pr.number, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {
     return refuse(`${number} needs a clean CodeRabbit review of its current head before its migration applies, because ${coderabbitReview.why}. Post "@coderabbitai full review" once (docs/reference/coderabbit-native-review.md), answer its threads, then re-run.`);

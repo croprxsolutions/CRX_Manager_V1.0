@@ -1713,10 +1713,15 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   {
     const stateDirs = [path.join(gateDir, ".claude", "session-state")];
     const skipSession = "skip-session-0001";
-    ok(recordCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession, said: "skip coderabbit" }) !== null, "the waiver is recorded");
+    ok(recordCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession, pullRequest: 901, said: "skip coderabbit #901" }) !== null,
+      "a waiver for ANOTHER PR is recorded");
+    refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review",
+      "a waiver naming another PR does not let this PR's migration apply (Mason, 2026-10-22: per PR)");
+    ok(recordCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession, pullRequest: 900, said: "skip coderabbit #900" }) !== null,
+      "the waiver for this PR is recorded");
     const skipped = gate({ crStatuses: [], sessionId: skipSession });
-    ok(skipped.ok === true && skipped.coderabbitSkippedBy?.sessionId === skipSession,
-      `a migration PR with no CodeRabbit review applies in the session where Mason said skip coderabbit (${skipped.reason || ""})`);
+    ok(skipped.ok === true && skipped.coderabbitSkippedBy?.pullRequest === 900,
+      `a migration PR with no CodeRabbit review applies when Mason said skip coderabbit #900 in this session (${skipped.reason || ""})`);
     refused(gate({ crStatuses: [], sessionId: "other-session-0002" }), "needs a clean CodeRabbit review",
       "the waiver does not carry to another session");
     refused(gate({ crStatuses: [] }), "needs a clean CodeRabbit review", "an apply with no session id gets no waiver");

@@ -462,13 +462,20 @@ try {
   // Mason's "skip coderabbit" (2026-10-22): main() binds the waiver to the
   // hook's session; here it is injected directly.
   {
-    const waiver = { sessionId: "codex-session-01", said: "skip coderabbit", recordedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+    // The harness's `gh pr view` answers number 1: the gate must use GitHub's
+    // resolved number, not text from the command.
+    const waiver = { sessionId: "codex-session-01", pullRequest: 1, said: "skip coderabbit #1", recordedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+    const asked = [];
+    const forPr = (n) => (pr) => { asked.push(pr); return pr === n ? waiver : null; };
     const skippedMerge = (answer, findCodeRabbitSkip) => evaluateProductionAction({
       toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
       nowMs: Date.now(), runGh: withRequirement(answer), findCodeRabbitSkip,
     });
-    assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), () => waiver).blocked,
-      false, "a money PR with no CodeRabbit review merges when Mason skipped CodeRabbit in this session");
+    assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), forPr(1)).blocked,
+      false, "a money PR with no CodeRabbit review merges when Mason skipped CodeRabbit for THIS PR in this session");
+    assert.deepEqual(asked, [1], "the gate asks for the waiver of the PR GitHub resolved");
+    assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), forPr(5)).blocked,
+      true, "a waiver for another PR (even the number typed in the command) does not let this one merge (Mason, 2026-10-22: per PR)");
     assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), () => null).blocked,
       true, "no waiver in this session: still refused");
     assert.equal(skippedMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }), () => { throw new Error("disk"); }).blocked,
@@ -479,8 +486,11 @@ try {
     // to its own session, so pin main()'s wiring to the payload's session id.
     const guardSource = readFileSync(new URL("./production-action-guard.mjs", import.meta.url), "utf8");
     assert.match(guardSource,
-      /findCodeRabbitSkip: \(\) => findCodeRabbitSkip\(\{\s*dirs: skipStateDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\]\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,/,
-      "main() binds the waiver lookup to the hook payload's own session id");
+      /findCodeRabbitSkip: \(pullRequest\) => findCodeRabbitSkip\(\{\s*dirs: skipStateDirs\(\[payload\.cwd, process\.env\.CODEX_PROJECT_DIR, process\.cwd\(\)\]\),\s*sessionId: payload\.session_id \?\? payload\.sessionId,\s*pullRequest,/,
+      "main() binds the waiver lookup to the hook payload's own session id and the PR being merged");
+    assert.match(guardSource, /try \{ skip = findSkip\(reviewedPr\); \}/, "the advisory asks for the waiver of the PR it read");
+    assert.match(guardSource, /coderabbitReview = verdict;\s*reviewedPr = meta\.number;/,
+      "reviewedPr is GitHub's number, set only with the trusted requirement answer");
     assert.equal((guardSource.match(/findSkip \}\)/g) || []).length, 2, "both advisory call sites pass the lookup through");
   }
   assert.equal(moneyMerge(requirementJson({ files: ["src/lib/invoiceMath.ts"], statuses: crDone(), head: "e".repeat(40) })).blocked,

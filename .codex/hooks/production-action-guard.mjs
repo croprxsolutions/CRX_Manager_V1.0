@@ -1342,6 +1342,7 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
   let codexVerdict = null;
   let coderabbitOpen = null; // null = not read completely → fail closed below
   let coderabbitReview = null; // null = not read → fail closed below
+  let reviewedPr = null; // the PR number GitHub answered for, which a skip waiver must name
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -1375,6 +1376,7 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
       coderabbitOpen = coderabbitThreadCount(node);
       if (verdict.headOid && verdict.headOid === String(node.headRefOid || "").trim().toLowerCase()) {
         coderabbitReview = verdict;
+        reviewedPr = meta.number;
       }
     }
   } catch {
@@ -1392,10 +1394,10 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
     return denied(coderabbitRequirementUnreadableDenial("CODEX PRODUCTION GATE", request.selector));
   }
   if (coderabbitReview.status === "missing") {
-    // Mason's "skip coderabbit" in THIS session waives only the missing review —
-    // mirror of pr-merge-guard.mjs (coderabbit-skip-lib.mjs, 2026-10-22).
+    // Mason's "skip coderabbit #<this PR>" in THIS session waives only the missing
+    // review of this PR — mirror of pr-merge-guard.mjs (coderabbit-skip-lib.mjs, 2026-10-22).
     let skip = null;
-    try { skip = findSkip(); } catch { skip = null; }
+    try { skip = findSkip(reviewedPr); } catch { skip = null; }
     if (!skip) {
       return denied(coderabbitReviewMissingDenial("CODEX PRODUCTION GATE", request.selector, coderabbitReview.why, coderabbitReview.headOid));
     }
@@ -1454,8 +1456,9 @@ export function evaluateProductionAction({
   // Internal: > 0 when this call inspects a command found INSIDE another
   // command (see expandNestedCommands). Not part of the hook's input.
   nestingDepth = 0,
-  // Mason's live "skip coderabbit" waiver for this session, or null. main()
-  // binds it to the hook's session id; a direct caller gets no waiver.
+  // (pullRequest) => Mason's live "skip coderabbit" waiver for that PR in this
+  // session, or null. main() binds it to the hook's session id; a direct caller
+  // gets no waiver.
   findCodeRabbitSkip: findSkip = () => null,
 } = {}) {
   const name = String(toolName);
@@ -2035,9 +2038,10 @@ async function main() {
     eventCwd: payload.cwd ?? "",
     repoDir: process.env.CODEX_PROJECT_DIR || process.cwd(),
     hardGateDeadlineMs: hookDeadlineMs(CODEX_HOOK_TIMEOUT_MS, CODEX_HOOK_RESERVE_MS),
-    findCodeRabbitSkip: () => findCodeRabbitSkip({
+    findCodeRabbitSkip: (pullRequest) => findCodeRabbitSkip({
       dirs: skipStateDirs([payload.cwd, process.env.CODEX_PROJECT_DIR, process.cwd()]),
       sessionId: payload.session_id ?? payload.sessionId,
+      pullRequest,
     }),
   });
   // Codex treats allow payloads as noisy/failed hook output. Silence means allow.

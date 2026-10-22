@@ -162,6 +162,9 @@ export default function RecordSearchPicker<T extends { id: string }>({
     requestRef.current += 1;
     editedRef.current = false;
     setResults([]);
+    // Forget the old search too, or retyping the same text shows its stale "no matches" or failure.
+    setSearchedFor('');
+    setSearchFailed(false);
     setIsOpen(false);
     if (onSelect(record) === false) {
       setQuery(selectedLabel);
@@ -174,6 +177,9 @@ export default function RecordSearchPicker<T extends { id: string }>({
     requestRef.current += 1;
     editedRef.current = false;
     setResults([]);
+    // Forget the old search too, or retyping the same text shows its stale "no matches" or failure.
+    setSearchedFor('');
+    setSearchFailed(false);
     setIsOpen(false);
     if (value && onSelect(null) === false) {
       setQuery(selectedLabel);

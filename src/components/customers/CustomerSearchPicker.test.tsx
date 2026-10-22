@@ -158,6 +158,19 @@ describe('CustomerSearchPicker', () => {
     expect(input).toHaveValue('Seed Farm 0001');
   });
 
+  it('retyping the same text after a pick never flashes the old "no matches" before the search runs (CodeRabbit, #1017)', async () => {
+    mocks.limit.mockResolvedValueOnce({ data: [{ id: 'c-1', farm_name: 'Seed Farm', account_number: 'A1' }], error: null });
+    render(<CustomerSearchPicker value="" selectedLabel="" onSelect={vi.fn()} ariaLabel="Customer" />);
+    const input = screen.getByRole('combobox', { name: 'Customer' });
+    type(input, 'Seed');
+    fireEvent.click(await screen.findByRole('option', { name: /Seed Farm/ }));
+    mocks.limit.mockReturnValueOnce(new Promise(() => {}));
+    type(input, 'Seed');
+    expect(screen.queryByText('No matching active customers')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText(/Searching/)).toBeInTheDocument();
+  });
+
   it('emptying the typed text and leaving the box still clears the selection', () => {
     const onSelect = vi.fn();
     render(<CustomerSearchPicker value="c-1" selectedLabel="Seed Farm 0001" onSelect={onSelect} ariaLabel="Customer" />);

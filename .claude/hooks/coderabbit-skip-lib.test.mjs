@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_MAX_BYTES, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
   coderabbitSkipNotice,
-  findCodeRabbitSkip, isSkipRepository, mayExist, recordCodeRabbitSkip, skipStateDirs, withdrawCodeRabbitSkip,
+  findCodeRabbitSkip, isSkipRepository, mayExist, recordCodeRabbitSkip, skipPullRequestFor, skipStateDirs, withdrawCodeRabbitSkip,
 } from "./coderabbit-skip-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +80,16 @@ eq(isSkipRepository("MasonWells1", "crx_manager_v1.0"), true, "GitHub names are 
 eq(isSkipRepository("other", "repo"), false, "any other repository gets no waiver");
 eq(isSkipRepository("masonwells1", "CRX_Manager_V1.0-fork"), false, "a look-alike name gets none");
 eq(isSkipRepository(undefined, undefined), false, "an unknown repository gets none");
+// Codex App P2 on #1035: the PR's own github.com address, host included.
+eq(skipPullRequestFor("https://github.com/masonwells1/CRX_Manager_V1.0/pull/1018", 1018), 1018, "github.com, this repository, same number");
+eq(skipPullRequestFor("https://GitHub.com/MasonWells1/crx_manager_v1.0/pull/1018/", 1018), 1018, "case and a trailing slash do not matter");
+eq(skipPullRequestFor("https://github.example.com/masonwells1/CRX_Manager_V1.0/pull/1018", 1018), null, "an enterprise host with the same name gets none");
+eq(skipPullRequestFor("http://github.com/masonwells1/CRX_Manager_V1.0/pull/1018", 1018), null, "plain http is not GitHub's answer");
+eq(skipPullRequestFor("https://github.com/other/repo/pull/1018", 1018), null, "another repository gets none");
+eq(skipPullRequestFor("https://github.com/masonwells1/CRX_Manager_V1.0/pull/1020", 1018), null, "a url for another number gets none");
+eq(skipPullRequestFor("https://github.com.evil.example/masonwells1/CRX_Manager_V1.0/pull/1018", 1018), null, "a look-alike host gets none");
+eq(skipPullRequestFor(undefined, 1018), null, "no url, no waiver");
+eq(skipPullRequestFor("https://github.com/masonwells1/CRX_Manager_V1.0/pull/1018", undefined), null, "no number, no waiver");
 
 // ── record, find, cancel ────────────────────────────────────────────────────
 const temp = mkdtempSync(path.join(os.tmpdir(), "crx-cr-skip-"));

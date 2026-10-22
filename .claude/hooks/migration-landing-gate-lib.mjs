@@ -39,7 +39,7 @@ import {
   readCodeRabbitRequirement,
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
-import { findCodeRabbitSkip, isSkipRepository, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 
@@ -200,8 +200,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     const where = skipStateDirs([dir], () => common);
     // A waiver covers this repository's PRs only: GH_REPO or a fork's remote can
     // point gh at another repository whose PR numbers overlap (Codex App P2 on #1035).
-    const slug = String(pr?.url || "").match(/[/]([^/]+)[/]([^/]+)[/]pull[/]/);
-    const pullRequest = slug && isSkipRepository(slug[1], slug[2]) ? pr.number : null;
+    const pullRequest = skipPullRequestFor(pr?.url, pr?.number);
     try { skip = findCodeRabbitSkip({ dirs: where, sessionId, pullRequest, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {

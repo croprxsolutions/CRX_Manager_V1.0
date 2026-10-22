@@ -153,6 +153,20 @@ const usablePr = (n) => Number.isInteger(n) && n > 0;
 export const CODERABBIT_SKIP_REPOSITORY = "masonwells1/CRX_Manager_V1.0";
 export const isSkipRepository = (owner, name) =>
   `${String(owner ?? "")}/${String(name ?? "")}`.toLowerCase() === CODERABBIT_SKIP_REPOSITORY.toLowerCase();
+
+/**
+ * The PR number a waiver may be looked up for, from GitHub's own answer for the
+ * PR being merged or applied: its `url` must be github.com's address for THIS
+ * repository and that same number, else null (no waiver). The host is checked
+ * too: GH_HOST can point gh at an enterprise server that also has a
+ * masonwells1/CRX_Manager_V1.0 (Codex App P2 on #1035).
+ */
+export function skipPullRequestFor(url, number) {
+  if (!usablePr(number)) return null;
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/i.exec(String(url ?? "").trim());
+  if (!m || !isSkipRepository(m[1], m[2]) || Number(m[3]) !== number) return null;
+  return number;
+}
 export const coderabbitSkipFileName = (sessionId, pullRequest) => `coderabbit-skip-${sessionId}-pr${pullRequest}.json`;
 export const usableSkipSessionId = (sessionId) => SESSION_ID_RE.test(String(sessionId || ""));
 // Every waiver file this session could hold, whatever PR it names.

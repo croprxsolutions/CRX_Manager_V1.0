@@ -498,7 +498,7 @@ try {
       "main() binds the waiver lookup to the hook payload's own session id, the PR being merged, and the caller's time budget");
     assert.match(guardSource, /try \{ skip = findSkip\(reviewedPr, \{ deadlineMs, now: clock \}\); \}/,
       "the advisory asks for the waiver of the PR it read, inside its own deadline (Codex App P2 on #1035)");
-    assert.match(guardSource, /coderabbitReview = verdict;\s*(?:\/\/[^\n]*\n\s*)*reviewedPr = isSkipRepository\(slug\[1\], slug\[2\]\) \? meta\.number : null;/,
+    assert.match(guardSource, /coderabbitReview = verdict;\s*(?:\/\/[^\n]*\n\s*)*reviewedPr = skipPullRequestFor\(meta\.url, meta\.number\);/,
       "reviewedPr is GitHub's number for a PR in this repository, set only with the trusted requirement answer");
     assert.equal((guardSource.match(/findSkip \}\)/g) || []).length, 2, "both advisory call sites pass the lookup through");
   }

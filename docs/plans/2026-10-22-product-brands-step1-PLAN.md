@@ -202,15 +202,26 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
      `.claude/commands/ship.md`) without refusing every completion of a branded product in between. It is
      switched on once the pickers are live and proven, and scheduled deliveries still open then simply get
      the picker.
-5. **EPA number onto invoice lines** (PR B). One step at completion, modeled on the tote-number copy that
-   already runs on every completion (`20261014210000…:606-628`), fills `invoice_items.epa_registration` on
-   the open draft lines for that delivery's order lines: the delivered brands' numbers (two joined, such as
+5. **EPA number onto invoice lines** (PR B).
+   **Which brands belong to an invoice line.** This rule is used here, by the RUP register (item 7) and by the
+   correction (item 6). One order line can be filled by several deliveries, each with its own brands, and
+   the completion flow bills each delivery on its own invoice with its own `invoices.delivery_id`
+   (`20261014210000…:717-722`, `:817-834`). So:
+   - **an invoice with a `delivery_id`** takes brands only from that delivery: the brand rows of that
+     delivery's line for the same order line (`delivery_items.delivery_id = invoices.delivery_id` and the
+     same `order_item_id`). It never picks up a sibling delivery's brands;
+   - **an invoice with no `delivery_id`** (a whole-order invoice or a landlord split invoice) adds up the
+     brand rows of every completed, not-voided delivery of that order line.
+
+   One step at completion, modeled on the tote-number copy that already runs on every completion
+   (`20261014210000…:606-628`), fills `invoice_items.epa_registration` on the open draft lines of that
+   delivery's own invoice: the delivered brands' numbers (two joined, such as
    `524-475; 34704-890`, for a split line), or the product's own number when the product has no brands. This
    covers the automatic invoice, a quick delivery's draft (whose lines exist before completion), and the
    partial-delivery trim. The unbilled recovery path, the landlord split creator
    (`_create_split_invoices_from_order_provenance_impl_20260719`, `20261021155000…:1739-1748`) and the
    whole-order invoice (`_create_invoice_from_order_impl_20260718`, `20260827041400…:167`) set the same value
-   when they insert lines, from every completed delivery of that order line. The split creator must do it at
+   when they insert lines, using the rule above. The split creator must do it at
    insert time, because split lines can't be changed afterwards outside an invoice save
    (`guard_split_invoice_provenance_items`, `20260719044912…:330-361`); each owner's share shows all the
    brands delivered on that line. **No invoice amount, quantity or cost changes**, no column is added to
@@ -232,7 +243,9 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
    **`review_typed_brand`** (admin only) adds a typed brand to the product's list (and links the delivery row
    to it, without changing its snapshot) or dismisses it.
 7. **RUP register** (PR B): `generate_rup_sales_records` writes one record per delivered brand, with that
-   brand's EPA number and amount, when the posted line's order line has delivery brand rows. Rules:
+   brand's EPA number and amount, when the posted line has brand rows under the rule in item 5. That rule
+   matters most here: a delivery invoice uses only its own delivery's brands, so two invoices for one order
+   line never both report the same brand amounts. Rules:
    - **records are added up before they are written, not skipped.** Today the duplicate check keeps only the
      first record per (invoice, product) and silently drops the rest. A known case is two lines of the same
      product on one invoice, which a split-invoice screen refuses for exactly that reason
@@ -249,7 +262,7 @@ to the open retry gap in To-Do 2.3; functions that run with elevated rights set
      remainder on the last brand, and the draft invoice shows a warning before posting;
    - the line's cents are divided the same way in exact whole cents, with the remainder on the last brand, so
      the records add up to the line's `extended_cents` exactly;
-   - lines whose order line has no brand rows behave exactly as today.
+   - lines with no brand rows under that rule behave exactly as today.
 8. **Editing a scheduled delivery** (PR B): the screen always sends the lines, even for a date or driver
    change (`src/pages/DeliveryDetail.tsx:688-696`), and `edit_delivery` deletes and re-creates every line
    (`20260611211058_idempotency_operation_scope_sweep.sql:1534`, `:1573-1586`). So `edit_delivery` is changed
@@ -332,6 +345,8 @@ look-only check on live after landing.
 - Changing only the date of a scheduled delivery keeps its picks; changing a line's quantity drops that line's
   pick only.
 - Landlord split invoices and a whole-order invoice carry the delivered brands' numbers.
+- One order line delivered in two trips with different brands, each trip billed on its own invoice: each
+  invoice line and its RUP records show only that trip's brands and amounts.
 - Posting an invoice for a split RUP line writes two RUP records with the right numbers, amounts and cents
   that add up exactly. Two lines of the same product and EPA number on one invoice produce one record with
   both lines' quantity and cents. Unposting, voiding and re-posting behaves as before.

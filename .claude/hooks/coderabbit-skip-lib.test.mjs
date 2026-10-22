@@ -122,6 +122,12 @@ try {
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused }), { removed: 0, stillLive: true },
       "a waiver whose delete fails is reported still live");
     ok(live(), "and it really is still there");
+    // Luna round 3: a copy that can be neither deleted nor read must still count.
+    const waiverFile = path.join(dirs[0], coderabbitSkipFileName(session));
+    writeFileSync(waiverFile, "unreadable for now");
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: session, remove: refused }), { removed: 0, stillLive: true },
+      "an unreadable, undeletable waiver file is reported still live");
+    recordCodeRabbitSkip({ dirs, sessionId: session, said: "skip coderabbit" });
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }), { removed: 1, stillLive: false }, "a normal withdraw removes it");
     eq(live(), null, "no waiver is left behind");
   }

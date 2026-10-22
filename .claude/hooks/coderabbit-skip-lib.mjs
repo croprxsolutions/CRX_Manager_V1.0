@@ -95,9 +95,13 @@ export function cancelCodeRabbitSkip({ dirs, sessionId, remove = (file) => rmSyn
  * because a copy that could not be deleted keeps the gates accepting it
  * (Luna round 2). Returns { removed, stillLive }.
  */
-export function withdrawCodeRabbitSkip({ dirs, sessionId, now = Date.now(), remove }) {
+export function withdrawCodeRabbitSkip({ dirs, sessionId, remove, exists = existsSync }) {
   const removed = cancelCodeRabbitSkip({ dirs, sessionId, ...(remove ? { remove } : {}) });
-  return { removed, stillLive: Boolean(findCodeRabbitSkip({ dirs, sessionId, now })) };
+  // Any file left counts as live, readable or not: one unreadable now could be
+  // read by a gate later (Luna round 3).
+  const stillLive = usableSkipSessionId(sessionId)
+    && (dirs || []).some((dir) => exists(path.join(dir, coderabbitSkipFileName(sessionId))));
+  return { removed, stillLive };
 }
 
 /**

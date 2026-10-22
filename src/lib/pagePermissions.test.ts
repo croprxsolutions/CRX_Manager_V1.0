@@ -235,6 +235,8 @@ describe('PAGE_PERMISSIONS coverage (PR-11 fail-closed)', () => {
     // only because src/pages/FieldApplicationInvoice.test.tsx pins their text there.
     const app = readFileSync(resolve(__dirname, '../App.tsx'), 'utf-8');
     const outsideTheApp = new Set(['/design-preview', 'login', 'forgot-password', 'reset-password', '*']);
+    // Routes are route objects only; JSX routes would escape the scan below.
+    expect(app, 'App.tsx must not declare JSX routes').not.toMatch(/<Routes?\b|\bpath=/);
     // Every `path:` anywhere in the file, in any quotes, on any line layout.
     const handWritten = [...app.matchAll(/\bpath:\s*(['"`])([^'"`]+)\1/g)]
       .map((m) => m[2])

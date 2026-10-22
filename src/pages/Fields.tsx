@@ -40,7 +40,7 @@ export default function Fields() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [loadError, setLoadError] = useState(false);
-  // Only the newest read may set or clear loadError, so a slow older read cannot hide a newer list.
+  // Only the newest read may change the list or its error state: a slow older read must not overwrite a newer one.
   const loadSeqRef = useRef(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -75,11 +75,12 @@ export default function Fields() {
     // fields_select RLS policy allows it) so the list shows the acres that actually
     // BILL — override ?? measured ?? legacy total — instead of the legacy total alone.
     const { data, error } = await supabase.rpc('get_fields_with_geojson');
+    if (seq !== loadSeqRef.current) return false;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_fields' } });
       toast('error', 'Failed to load fields. Please try again.');
-      if (seq === loadSeqRef.current) setLoadError(true);
+      setLoadError(true);
       setLoading(false);
       return false;
     }
@@ -87,6 +88,7 @@ export default function Fields() {
     // Pull the two-acre columns separately (kept sequential, not Promise.all, so the
     // assertRpcResult coverage check still pairs the rpc capture above with its assert).
     const acreRes = await supabase.from('fields').select('id, override_acres, measured_acres, acres_source');
+    if (seq !== loadSeqRef.current) return false;
     const acreMap = new Map<string, { override_acres: number | null; measured_acres: number | null; acres_source: Field['acres_source'] }>();
     if (!acreRes.error && acreRes.data) {
       for (const a of acreRes.data as Array<{ id: string; override_acres: number | null; measured_acres: number | null; acres_source: Field['acres_source'] }>) {
@@ -108,7 +110,7 @@ export default function Fields() {
       };
     });
     setFields(rows);
-    if (seq === loadSeqRef.current) setLoadError(false);
+    setLoadError(false);
     setLoading(false);
     return true;
   }, [toast]);
@@ -470,7 +472,7 @@ export default function Fields() {
 
           {loadError ? (
             <p role="alert" className="text-xs text-red-600 mt-2">
-              Fields could not be loaded, so the map is empty.{' '}
+              Fields could not be loaded, so the map may be empty or out of date.{' '}
               <button type="button" onClick={retryFields} className="font-medium underline">Try again</button>
             </p>
           ) : filtered.some((f) => f.centroid_geojson || f.boundary_geojson) ? (

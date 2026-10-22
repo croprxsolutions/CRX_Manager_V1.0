@@ -214,7 +214,7 @@ export default function SettingsPage() {
   const [settingPassword, setSettingPassword] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [usersLoadError, setUsersLoadError] = useState(false);
-  // Only the newest users read may set or clear usersLoadError (Try again can overlap a slower read).
+  // Only the newest users read may change the list or its error state (Try again can overlap a slower read).
   const usersLoadSeqRef = useRef(0);
 
   const fetchSettings = async () => {
@@ -259,12 +259,13 @@ export default function SettingsPage() {
       .select('*')
       .neq('role', 'entity_recipient')
       .order('full_name');
+    if (seq !== usersLoadSeqRef.current) return;
     if (error) {
       toast('error', 'Failed to load users');
-      if (seq === usersLoadSeqRef.current) setUsersLoadError(true);
+      setUsersLoadError(true);
       return;
     }
-    if (seq === usersLoadSeqRef.current) setUsersLoadError(false);
+    setUsersLoadError(false);
     setUsers((data || []) as Profile[]);
   };
 

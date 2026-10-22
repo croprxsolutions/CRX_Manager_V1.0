@@ -69,7 +69,7 @@ export default function Customers() {
   const [repsLoadNonce, setRepsLoadNonce] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  // Only the newest read may set or clear loadError, so a slow older read cannot hide a newer list.
+  // Only the newest read may change the list or its error state: a slow older read must not overwrite a newer one.
   const loadSeqRef = useRef(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
@@ -86,12 +86,13 @@ export default function Customers() {
       .select('*', { count: 'exact' })
       .order('farm_name')
       .limit(CUSTOMER_FETCH_LIMIT);
+    if (seq !== loadSeqRef.current) return false;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_customers' } });
       // A silent refresh's caller keeps the rows on screen and explains the failure itself.
       if (options.reportError !== false) {
         toast('error', 'Failed to load customers. Please try again.');
-        if (seq === loadSeqRef.current) setLoadError(true);
+        setLoadError(true);
       }
       setLoading(false);
       return false;
@@ -109,7 +110,7 @@ export default function Customers() {
         : count > CUSTOMER_FETCH_LIMIT,
     );
     setCustomers(rows);
-    if (seq === loadSeqRef.current) setLoadError(false);
+    setLoadError(false);
     setLoading(false);
     return true;
   }, [toast]);

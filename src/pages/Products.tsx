@@ -118,11 +118,12 @@ export default function Products() {
         .order('product_name')
         .order('id')
         .range(from, from + PAGE_SIZE - 1);
+      if (seq !== loadSeqRef.current) return false;
       if (error) {
         Sentry.captureException(error);
         // A silent reload's caller keeps the rows on screen and explains the failure itself.
         if (reportError) toast('error', 'Failed to load products. Please try again.');
-        if (reportError && seq === loadSeqRef.current) setLoadError(true);
+        if (reportError) setLoadError(true);
         setLoading(false);
         return false;
       }
@@ -136,8 +137,9 @@ export default function Products() {
       prods = await withAdminCosts('products', all, isAdmin);
     } catch (costError) {
       Sentry.captureException(costError);
+      if (seq !== loadSeqRef.current) return false;
       if (reportError) toast('error', 'Failed to load products. Please try again.');
-      if (reportError && seq === loadSeqRef.current) setLoadError(true);
+      if (reportError) setLoadError(true);
       setLoading(false);
       return false;
     }

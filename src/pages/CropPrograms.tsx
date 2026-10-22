@@ -8,7 +8,7 @@
  *
  * Stored in app_settings as JSON (no new table needed).
  */
-import { useEffect, useState , useCallback } from 'react';
+import { useEffect, useState , useCallback, useRef } from 'react';
 import { Plus, Copy, Pencil, Trash2, Sprout, Save, X, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -88,12 +88,17 @@ export default function CropPrograms() {
 
   const isAdmin = role === 'admin';
 
+  // Only the newest read may change the list or its error state: saving rewrites the whole
+  // list, so a slow older read must never replace a newer one.
+  const loadSeqRef = useRef(0);
   const fetchPrograms = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     const { data, error } = await supabase
       .from('app_settings')
       .select('*')
       .eq('setting_key', 'crop_programs')
       .maybeSingle();
+    if (seq !== loadSeqRef.current) return;
 
     if (error) {
       Sentry.captureException(error);

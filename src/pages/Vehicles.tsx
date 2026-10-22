@@ -30,7 +30,7 @@ export default function Vehicles() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  // Only the newest read may set or clear loadError, so a slow older read cannot hide a newer list.
+  // Only the newest read may change the list or its error state: a slow older read must not overwrite a newer one.
   const loadSeqRef = useRef(0);
   const [typeFilter, setTypeFilter] = useState<VehicleType | ''>('');
   const [statusFilter, setStatusFilter] = useState<VehicleStatus | ''>('');
@@ -47,16 +47,17 @@ export default function Vehicles() {
       .from('vehicles')
       .select('*')
       .order('vehicle_name');
+    if (seq !== loadSeqRef.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_vehicles' } });
       toast('error', 'Failed to load vehicles');
-      if (seq === loadSeqRef.current) setLoadError(true);
+      setLoadError(true);
       setLoading(false);
       return;
     }
     setVehicles((data || []) as Vehicle[]);
-    if (seq === loadSeqRef.current) setLoadError(false);
+    setLoadError(false);
     setLoading(false);
   }, [toast]);
 

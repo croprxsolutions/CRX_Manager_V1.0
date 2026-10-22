@@ -10,7 +10,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 ## 2026-10-22 — Day-one priorities: before-delivery work first; field invoices, returns and rep-only rules wait; two applicators per job
 
-**Decision (Mason, in chat, 2026-10-22, reviewing `docs/plans/2026-10-21-day-one-must-work-list.md`).**
+**Decision (Mason, in chat, 2026-10-22, reviewing the day-one list, now `docs/manual/TO_DO_LIST.md`).**
 1. "i need everything built that is quoting, invoice, inventory (so i know wha to order) cost tracking, product pricing etc all things that need done before delivery." That work is built first.
 2. "field application, job and blend ticket invoices are not musts, they are least important and are last thing to get built in the system." They keep working as they do today; their remaining work (job and blend-ticket caps, the field-invoice credit, the CRX-LIFE-001 sign-off) is built last.
 3. Returns must eventually fix the stock as well as the money, and stay listed as "sitting at farm" until picked up. Then: "returns are not important either it can wait especially the sitting at farm."

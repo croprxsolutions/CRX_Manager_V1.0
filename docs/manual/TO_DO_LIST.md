@@ -1,4 +1,10 @@
-# Day one: what must work on 2027-01-01 (APPROVED by Mason, 2026-10-22)
+# CRX Manager To-Do List
+
+**What this is:** the one list of work still to finish in the app, in the order Mason approved. It's built around the 2027-01-01 start of CRX-only billing ("day one"), but it stays the working to-do list after that. Approved by Mason, 2026-10-22.
+
+**How to keep it current:** when an item ships, update its "Today" cell with the PR and date. When Mason changes a priority, change the row's rank, quote him, and add a `docs/manual/DECISION_LOG.md` entry. Add new work as a new row in the right section. The older `TODO.md` at the repository root (last updated 2026-09-27) predates this list; for order and priority, this list wins.
+
+**Moved and renamed 2026-10-22** (Mason: "rename this ... like future to do list"). It was `docs/plans/2026-10-21-day-one-must-work-list.md`.
 
 **Owner:** Mason Wells approves. **Drafted:** 2026-10-21 by Claude, as asked in `docs/plans/2026-10-13-direction-and-goals.md` section 2 ("must work on day one" list, checkpoint 2026-10-31).
 **Reviewed:** an advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21. It made 57 findings. Claude checked each against the goals doc and the code. Most were applied; the few that weren't are listed at the end, with the reason.

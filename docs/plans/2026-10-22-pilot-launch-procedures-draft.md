@@ -411,8 +411,8 @@ phone or one computer.
 
 **Draft suggestion:** keep one outage kit in the office and one in each truck.
 
-- **Office:** printed blank delivery tickets and payment log sheets (numbered), a pen, this page, and
-  the phone list of drivers, the office and launch support.
+- **Office:** printed blank delivery tickets, payment log sheets and order forms (all numbered), a
+  pen, this page, and the phone list of drivers, the office and launch support.
 - **Every evening before a delivery day:** print the next day's deliveries. On **Deliveries**, pick
   the next day's date and **clear every other filter** (status, driver, customer, priority and the
   search box): the Load Sheet prints only what the filtered list shows. Make sure **no deliveries
@@ -470,6 +470,10 @@ the one record until CRX is back.
 ### After CRX is back
 
 1. **Launch support confirms CRX is working** (it loads and saves) before anyone enters paper.
+   **If the outage needed a database restore,** the runbook's restore steps (sections 4.6 and 4.7)
+   come first. CRX stays closed to staff until everything done after the restore point has been
+   reconciled: payments, deliveries, emails and QuickBooks entries. Only then does anyone enter the
+   paper, or entries can be doubled.
 2. **Enter oldest first**, using the normal screens. Before entering a record, check for its paper
    number so nothing goes in twice. For payments, search **Payment History**, because the paper
    number goes in the **Reference #** box. For deliveries, check the outage ticket list, because CRX
@@ -493,8 +497,7 @@ the one record until CRX is back.
      records the server's date (see the known gap in procedure 1, Step 4), and Payment History
      doesn't show Notes.
 3. **Reconcile:** every ticket and log line is entered exactly once. Then run the daily check
-   (procedure 1). If the outage needed a database restore, the runbook's after-restore checklist
-   (section 4.7) also applies before anything resumes syncing.
+   (procedure 1).
 4. **Log the outage** in the Pilot Difference Log: start and end times, how many tickets and payments
    were entered, who checked them, and any problems.
 

@@ -262,7 +262,9 @@ invisible and unwritable to `authenticated` until someone adds it to that list. 
 PostgREST `permission denied for column …` on a field that plainly exists — reads like an app bug,
 is actually a missing grant. **Any `ALTER TABLE … ADD COLUMN` on a column-carved table must ship a
 `GRANT` for the new column in the same migration.** Tables in this state today:
-`public.application_services` **and `public.products`**.
+`public.application_services` **and `public.products`**, and (since `20261021141000` went live on 2026-10-22, ledger `20261022002748`)
+**`public.purchase_orders` and `public.purchase_order_items`**, whose `SELECT`/`REFERENCES` grants for
+`authenticated` and `SELECT` for `anon` list every column except the purchase cost ones.
 
 **`public.products` (verified live 2026-08-18).** `authenticated` has **no** table-level
 `INSERT` or `UPDATE` — `has_table_privilege('authenticated','public.products','UPDATE')` is
@@ -318,7 +320,9 @@ CodeRabbit review was submitted. Say so rather than treating green as clean. Cur
 2026-10-19): CodeRabbit reviews each PR once, when marked ready or opened non-draft, and only
 comments; the merge gates and GitHub's `protect-main` ruleset no longer require its approval. If no
 review has arrived by the time checks are green and Sol is clean, merge without it — never post
-`@coderabbitai review` to buy one. (From 2026-09-26 to 2026-10-19 the merge gates required
+`@coderabbitai review` to buy one. Exception (Mason, 2026-10-21): a money or Mason-named PR needs a
+clean CodeRabbit review of its current head, and the agent posts `@coderabbitai full review` once
+for it (`docs/reference/coderabbit-native-review.md`). (From 2026-09-26 to 2026-10-19 the merge gates required
 CodeRabbit's APPROVED verdict on the exact head, the ruleset required one approving review, and
 agents posted `@coderabbitai review` once for a skipped or rate-limited head.) The
 `ready-for-coderabbit` label no longer triggers a review — the rest of this paragraph describes that

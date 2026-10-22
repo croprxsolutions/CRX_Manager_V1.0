@@ -468,7 +468,9 @@ BEGIN
                          AND o.owner_id = v_actor::text
                          AND o.metadata ->> 'mimetype' = 'image/png'
                          AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'
-                         AND (o.metadata ->> 'size')::bigint > 0) THEN
+                         -- A drawn signature is never this small (live 2026-10-22: smallest 2,356 bytes);
+                         -- the bytes themselves cannot be read here, so size and type are the check.
+                         AND (o.metadata ->> 'size')::bigint >= 500) THEN
       RAISE EXCEPTION 'SIGNATURE_IMAGE_MISSING: no signature image saved for this attempt' USING ERRCODE = '23514';
     END IF;
   ELSIF p_evidence IN ('paper_ticket', 'left_at_site') THEN
@@ -496,8 +498,9 @@ BEGIN
        OR split_part(v_photo.storage_path, '/', 2) <> p_delivery_id::text
        OR NOT EXISTS (SELECT 1 FROM storage.objects o
                        WHERE o.bucket_id = 'delivery-photos' AND o.name = v_photo.storage_path
+                         AND COALESCE(o.metadata ->> 'mimetype', '') LIKE 'image/%'
                          AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'
-                         AND (o.metadata ->> 'size')::bigint > 0) THEN
+                         AND (o.metadata ->> 'size')::bigint >= 1000) THEN
       IF p_evidence = 'paper_ticket' THEN
         RAISE EXCEPTION 'PAPER_TICKET_PHOTO_MISSING: no saved photo of the signed paper ticket for this delivery' USING ERRCODE = '23514';
       END IF;

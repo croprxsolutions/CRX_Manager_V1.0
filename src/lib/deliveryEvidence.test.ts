@@ -64,7 +64,9 @@ describe('Goal 5 completion evidence', () => {
     expect(isSignatureDataUrl('data:image/png;base64,')).toBe(false);
     expect(isSignatureDataUrl('data:image/jpeg;base64,iVBORw0KGgo=')).toBe(false);
     expect(isSignatureDataUrl('data:image/png;base64,iVBOR w0KGgo=')).toBe(false);
-    expect(isSignatureDataUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true);
+    // Just the 8-byte PNG header is not a drawn signature (the server wants at least 500 bytes).
+    expect(isSignatureDataUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(false);
+    expect(isSignatureDataUrl(`data:image/png;base64,iVBORw0KGgo${'A'.repeat(669)}`)).toBe(true);
     // Labelled PNG but not PNG bytes.
     expect(isSignatureDataUrl('data:image/png;base64,AAAAAAAAAAAA')).toBe(false);
   });

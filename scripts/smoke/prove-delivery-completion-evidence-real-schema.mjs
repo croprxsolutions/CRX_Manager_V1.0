@@ -372,7 +372,7 @@ BEGIN
   END LOOP;
   SELECT id INTO v_id FROM public._prover_conc WHERE k = 'delivery2';
   INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
-  VALUES ('delivery-photos', 'delivery-photos/' || v_id || '/conc.jpg', v_admin::text, '{"size": 1024}'::jsonb);
+  VALUES ('delivery-photos', 'delivery-photos/' || v_id || '/conc.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/jpeg"}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_id, 'delivery-photos/' || v_id || '/conc.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0) RETURNING id INTO v_photo;
   INSERT INTO public._prover_conc VALUES ('photo', v_photo);
@@ -475,14 +475,14 @@ function main() {
     ['signature path derived from the key', "      || left(encode(sha256(convert_to(p_idempotency_key, 'UTF8')), 'hex'), 32) || '.png';\n    IF p_evidence_ref IS DISTINCT FROM v_signature_path\n",
       "      || left(encode(sha256(convert_to(p_idempotency_key, 'UTF8')), 'hex'), 32) || '.png';\n    v_signature_path := p_evidence_ref;\n    IF p_evidence_ref IS DISTINCT FROM v_signature_path\n",
       /SMOKE_FAIL: a signature image of another attempt was accepted/],
-    ['non-empty signature image', "                         AND o.metadata ->> 'mimetype' = 'image/png'\n                         AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'\n                         AND (o.metadata ->> 'size')::bigint > 0) THEN",
-      "                         AND o.metadata ->> 'mimetype' = 'image/png') THEN", /SMOKE_FAIL: a\. an empty signature image was accepted/],
+    ['non-empty signature image', "                         AND (o.metadata ->> 'size')::bigint >= 500) THEN",
+      "                         AND true) THEN", /SMOKE_FAIL: a\. an empty signature image was accepted/],
     ['photo delivery check', "       OR v_photo.delivery_id IS DISTINCT FROM p_delivery_id\n", "",
       /SMOKE_FAIL: b\. another delivery's ticket photo was accepted/],
     ['own-folder check', "       OR split_part(v_photo.storage_path, '/', 2) <> p_delivery_id::text\n", "",
       /SMOKE_FAIL: b\. a ticket photo from another delivery's folder was accepted/],
-    ['non-empty photo', "                       WHERE o.bucket_id = 'delivery-photos' AND o.name = v_photo.storage_path\n                         AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'\n                         AND (o.metadata ->> 'size')::bigint > 0) THEN",
-      "                       WHERE o.bucket_id = 'delivery-photos' AND o.name = v_photo.storage_path) THEN", /SMOKE_FAIL: b\. an empty ticket photo was accepted/],
+    ['non-empty photo', "                         AND (o.metadata ->> 'size')::bigint >= 1000) THEN",
+      "                         AND true) THEN", /SMOKE_FAIL: b\. an empty ticket photo was accepted/],
     ['left-at-site caption', "      ELSE 'Left at site — drop location'", "      ELSE 'Signed paper delivery ticket'",
       /SMOKE_FAIL: c\. left-at-site completion with a ticket photo was accepted/],
     ['left-at-site signer', "    IF p_evidence = 'left_at_site' AND p_signed_by IS DISTINCT FROM 'No one present — left at site' THEN",
@@ -500,6 +500,8 @@ function main() {
       /SMOKE_FAIL: g\. a completed delivery's signature_url was rewritten directly/],
     ['signed_by lock', "\n     OR NEW.signed_by IS DISTINCT FROM OLD.signed_by THEN",
       "\n     THEN", /SMOKE_FAIL: g\. a completed delivery's signed_by was rewritten directly/],
+    ['photo image type', "                         AND COALESCE(o.metadata ->> 'mimetype', '') LIKE 'image/%'\n", "",
+      /SMOKE_FAIL: b\. a non-image ticket file was accepted/],
     ['PNG signature content type', "                         AND o.metadata ->> 'mimetype' = 'image/png'\n", "",
       /SMOKE_FAIL: a\. a non-PNG signature file was accepted/],
     ['receipt window for drivers', "AND v_status IN ('scheduled', 'in_progress'))", ")",

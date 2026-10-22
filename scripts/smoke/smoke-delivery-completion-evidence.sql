@@ -257,8 +257,20 @@ BEGIN
   IF (SELECT status FROM public.deliveries WHERE id = v_del[2]) <> 'in_progress' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: b. a refused paper completion changed the delivery';
   END IF;
+  -- A ticket file of this delivery that is not an image does not count.
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/notes.txt', v_driver::text, '{"size": 1024, "mimetype": "text/plain"}'::jsonb);
+  INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
+  VALUES (v_del[2], 'delivery-photos/' || v_del[2] || '/notes.txt', 'x', v_driver, 'Signed paper delivery ticket', 4)
+  RETURNING id INTO v_photo;
+  BEGIN
+    PERFORM public.complete_delivery(v_del[2], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_prefix || 'b-text', NULL, 'paper_ticket', v_photo::text);
+    RAISE EXCEPTION 'SMOKE_FAIL: b. a non-image ticket file was accepted';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err NOT LIKE 'PAPER_TICKET_PHOTO_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: b. text file: expected PAPER_TICKET_PHOTO_MISSING, got %', v_err; END IF;
+  END;
   -- An empty ticket photo of this delivery does not count.
-  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/empty.jpg', v_driver::text, '{"size": 0}'::jsonb);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/empty.jpg', v_driver::text, '{"size": 0, "mimetype": "image/jpeg"}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[2], 'delivery-photos/' || v_del[2] || '/empty.jpg', 'x', v_driver, 'Signed paper delivery ticket', 3)
   RETURNING id INTO v_photo;

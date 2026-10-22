@@ -42,7 +42,8 @@ export async function signatureDigest(signatureDataUrl: string): Promise<string>
 export function isSignatureDataUrl(signatureDataUrl: string | null | undefined): signatureDataUrl is string {
   if (!signatureDataUrl) return false;
   const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(signatureDataUrl);
-  if (!match || match[1].length % 4 !== 0 || match[1].length < 12) return false;
+  // At least ~500 bytes, as the server requires: a drawn signature is always larger than that.
+  if (!match || match[1].length % 4 !== 0 || match[1].length < MIN_SIGNATURE_BASE64_LENGTH) return false;
   // The bytes must start with the PNG file signature, not just carry a PNG label.
   return match[1].startsWith(PNG_SIGNATURE_BASE64);
 }
@@ -50,6 +51,8 @@ export function isSignatureDataUrl(signatureDataUrl: string | null | undefined):
 /** The 8-byte PNG file signature (89 50 4E 47 0D 0A 1A 0A) as the first 11 base64 characters; the 11th
  * also carries the top 2 bits of the IHDR chunk length, which are always 0. */
 const PNG_SIGNATURE_BASE64 = 'iVBORw0KGgo';
+/** 500 bytes as base64 (the server's minimum signature size). */
+const MIN_SIGNATURE_BASE64_LENGTH = 668;
 
 export const INVALID_SIGNATURE_MESSAGE =
   'The signature could not be read. Nothing was sent; clear the signature box and have the customer sign again.';

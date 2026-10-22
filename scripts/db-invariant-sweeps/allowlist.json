@@ -522,7 +522,7 @@
       "reviewed_contracts": {
         "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
         "public._complete_delivery_period_preflight_impl(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "9f7bf84ab636a8f7971cfa76b1244f95",
-        "public.complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)": "f1db8430e55bea5a264eea7d268bc943",
+        "public.complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)": "a4cac732dfb744b3edbb3b9c84dd142a",
         "public._complete_delivery_replay_impl_20261015(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "2d068d077de57dbbb22f338492d8389f"
       }
     },
@@ -536,7 +536,7 @@
         "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
         "public._complete_delivery_period_preflight_impl(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "9f7bf84ab636a8f7971cfa76b1244f95",
         "public._complete_delivery_replay_impl_20261015(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone)": "2d068d077de57dbbb22f338492d8389f",
-        "public.complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)": "f1db8430e55bea5a264eea7d268bc943",
+        "public.complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)": "a4cac732dfb744b3edbb3b9c84dd142a",
         "public.confirm_delivery(p_delivery_id uuid, p_performed_by uuid, p_idempotency_key text)": "95f3f6f891b5d0b59ef8102ff5848712",
         "public.start_and_complete_delivery(p_delivery_id uuid, p_signed_by text, p_delivered_on date, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_evidence text, p_evidence_ref text)": "88c36c104a6824e8bb7be95118dc5c76"
       }

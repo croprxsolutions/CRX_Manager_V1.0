@@ -203,7 +203,15 @@ folder); the path and reference are recorded in `deliveries.completion_evidence`
    (`signatures/<id>.png`) still let staff replace that image on deliveries completed before this change.
    Narrowing them is an access change for a follow-up, on Mason's approval.
 8. **Photo proof is not tied to who took it.** Office staff may complete with a ticket photo a driver
-   saved, by design; the server checks the delivery, caption, folder and a non-empty file.
+   saved, by design; the server checks the delivery, caption, folder, an image file type and a
+   minimum size (signatures: a PNG of at least 500 bytes; photos: at least 1,000 bytes).
+9. **File contents are not inspected.** The database cannot read a stored file's bytes, so the server
+   trusts the upload's recorded type and size; a deliberately crafted file of the right type and size
+   would pass. The screens only ever upload a real drawn signature or camera photo.
+10. **A file deleted in the same instant as its completion.** The completion locks the accepted photo
+   row, but not the stored file; an admin or rep deleting that exact file while the completion is still
+   running could leave the record pointing at nothing. Once the completion commits, the restrictive
+   storage rules refuse any later delete or replace.
 
 ## FIXED 2026-10-19 (migration `20261019220000` applied live 2026-10-20 02:22 UTC (9:22 PM Central, 2026-10-19), PR #964) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
 

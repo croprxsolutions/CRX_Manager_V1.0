@@ -278,8 +278,10 @@ deliberately failed run (the break test) and record here that the email arrived;
 is switched off it does not run either, so the outside watchdog (design part B, needs a credential Mason approves) and
 the stronger dump checks (design part A) are still owed.
 
-Until the outside watchdog exists, every Monday check the date of the newest file in `CRX_Backups/backups/`
-(and, once the file backup runs, `CRX_Backups/storage-backups/`). That confirms
+Until an outside watchdog covers each backup, every Monday check the date of the newest file in
+`CRX_Backups/backups/` and, once the file backup runs, `CRX_Backups/storage-backups/`. The designed watchdog
+covers the database dump only, so keep the `storage-backups/` check even after it is built, until a watchdog
+outside GitHub Actions also checks the storage marker. That confirms
 freshness only; it does **not** prove the dump is complete (a truncated dump over 10 KB passes today's
 workflow). So also, once a month, decrypt the newest dump and run a full restore into a throwaway
 database (4.6) to prove it works, and save the Monday row-count list described in the draft procedure (step 5).

@@ -84,12 +84,12 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 <div id="header">
   <h1>⬡ CRX Manager — Architecture Map</h1>
   <!-- __STATS_START__ -->
-  <span id="stat-line" style="color:var(--muted);font-size:.8rem">98 routes · 265 RPC calls · 5 issues · Updated Oct 20, 2026</span>
+  <span id="stat-line" style="color:var(--muted);font-size:.8rem">98 routes · 266 RPC calls · 6 issues · Updated Oct 21, 2026</span>
   <!-- __STATS_END__ -->
   <div id="tabs">
     <button class="tab active" onclick="showTab('graph')">Graph</button>
     <button class="tab" onclick="showTab('lifecycle')">Lifecycles</button>
-    <button class="tab" onclick="showTab('problems')">Problems <span id="prob-count" style="background:#ef4444;color:#fff;border-radius:10px;padding:0 6px;font-size:.7rem;margin-left:4px">5</span></button>
+    <button class="tab" onclick="showTab('problems')">Problems <span id="prob-count" style="background:#ef4444;color:#fff;border-radius:10px;padding:0 6px;font-size:.7rem;margin-left:4px">6</span></button>
   </div>
 </div>
 
@@ -448,6 +448,14 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
           <strong>Orphan page: /prepay-workspace</strong>
           <p>Route exists (component: LegacyTabRedirect) but nothing references it — no sidebar link, no navigate() call, no nav-config entry. Only reachable by typing the URL directly.</p>
           <span class="loc">src/App.tsx</span>
+        </div>
+      </div>
+      <div class="prob-section">
+        <h3>Auto-detected Dead RPCs (in docs, never called from src) (1 found)</h3>
+        <div class="prob-item warn">
+          <strong>Dead RPC: paper_ticket()</strong>
+          <p>Listed in docs/reference/rpc-functions.md but never called from any src/ file.</p>
+          <span class="loc">docs/reference/rpc-functions.md</span>
         </div>
       </div><!-- __AUTO_PROBLEMS_END__ -->
 

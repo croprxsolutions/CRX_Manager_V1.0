@@ -5,7 +5,7 @@ import {
   PAPER_TICKET_PHOTO_CAPTION,
 } from './paperTicket';
 import {
-  completionRefusalCode, fetchReceiptRecipientWithin, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto,
+  completionRefusalCode, fetchReceiptRecipientWithin, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto,
   mergePhotosById, signatureImagePathFor,
 } from './deliveryEvidence';
 import { sanitizeError } from './errorSanitizer';
@@ -96,6 +96,17 @@ describe('Goal 5 completion evidence', () => {
     expect(completionRefusalCode({ message: 'NO_PROOF_ADMIN_ONLY: x' })).toBe('NO_PROOF_ADMIN_ONLY');
   });
 
+  it('tells a lost connection apart from a storage refusal', () => {
+    expect(isNetworkFailure(new Error('The signature could not be saved: Failed to fetch'))).toBe(true);
+    expect(isNetworkFailure(new TypeError('NetworkError when attempting to fetch resource.'))).toBe(true);
+    expect(isNetworkFailure(new Error('The signature could not be saved: new row violates row-level security policy'))).toBe(false);
+  });
+
+  it('words refusals that can follow a lost reply without assuming nothing happened', () => {
+    expect(sanitizeError({ message: 'NO_PROOF_ADMIN_ONLY: x' })).toMatch(/may already be completed by an earlier attempt/);
+    expect(sanitizeError({ message: 'SIGNATURE_IMAGE_MISSING: x' })).toMatch(/then try again$/);
+  });
+
   it('gives up on the receipt lookup after the timeout instead of holding the completion', async () => {
     vi.useFakeTimers();
     const client = supabase as unknown as { rpc: (...args: unknown[]) => unknown };
@@ -117,6 +128,8 @@ describe('no-proof reason', () => {
     expect(normalizeNoProofReason('\t\t\t')).toBe('');
     expect(normalizeNoProofReason('\n\r\n')).toBe('');
     expect(normalizeNoProofReason('a \t\n\v\f\r b')).toBe('a b');
+    // [[:space:]] in the database's UTF-8 locale also matches Unicode spaces.
+    expect(normalizeNoProofReason(' called　 back\u0085')).toBe('called back');
   });
 
   it('accepts 10 to 500 characters after collapsing, counting characters not UTF-16 units', () => {

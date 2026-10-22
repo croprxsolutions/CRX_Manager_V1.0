@@ -27,10 +27,12 @@ export const NO_PROOF_REASON_MIN_CHARS = 10;
 export const NO_PROOF_REASON_MAX_CHARS = 500;
 
 // The reason as the server stores and measures it: btrim(regexp_replace(reason, '[[:space:]]+', ' ', 'g')).
-// Every run of spaces, tabs or line breaks becomes one space, then the ends are trimmed. The server
-// counts characters (code points), not UTF-16 units, so emoji count once here too.
+// Every run of whitespace becomes one space, then the ends are trimmed. In the database's UTF-8 locale
+// [[:space:]] also matches Unicode spaces (e.g. U+2003, U+3000), so every Unicode White_Space
+// character collapses here too. The server counts characters (code points), not UTF-16 units, so
+// emoji count once here too.
 export function normalizeNoProofReason(reason: string): string {
-  return reason.replace(/[ \t\n\v\f\r]+/g, ' ').replace(/^ | $/g, '');
+  return reason.replace(/\p{White_Space}+/gu, ' ').replace(/^ | $/g, '');
 }
 
 export function noProofReasonLength(reason: string): number {

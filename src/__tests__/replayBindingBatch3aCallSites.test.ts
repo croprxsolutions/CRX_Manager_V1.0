@@ -33,12 +33,13 @@ const anyBindingReset = (hook: string) => new RegExp(
   `if \\(getIdempotencyBindingRejection\\((?:err|error)\\)(?: \\|\\| isSignatureImageMissing\\((?:err|error)\\))?\\) \\{\\n\\s*${hook}\\.resetKey(?:For\\(completeScope\\))?\\(?\\)?;`,
   'g',
 );
-// Each screen's reload after that block. DeliveryDetail and FieldStop reconcile after EVERY failed
-// completion (not only a binding refusal): a status read, then a full reload once it is completed.
+// Each screen's reload after that block. The three delivery screens reconcile after EVERY failed
+// completion (not only a binding refusal) through reconcileFailedCompletion: a status read; completed
+// with the key still held, an identical replay; otherwise a full reload once it is no longer open.
 const RELOADS: Record<string, RegExp> = {
-  'src/pages/Deliveries.tsx': /bindingRejected = true;[\s\S]*?if \(outcome !== 'completed' && bindingRejected\) \{[\s\S]{0,500}?closeCompleteDialog\(\);\n\s*await fetchDeliveries\(\);/,
-  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]{0,600}?void reconcileAfterFailedCompletion\(deliveryId\);[\s\S]*?const reconcileAfterFailedCompletion = async[\s\S]{0,900}?await fetchDelivery\(\);/,
-  'src/pages/FieldStop.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]{0,600}?void reconcileAfterFailedCompletion\(id\);[\s\S]*?const reconcileAfterFailedCompletion = async[\s\S]{0,900}?await fetchStop\(\);/,
+  'src/pages/Deliveries.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]{0,1600}?const bindingRejected = !!getIdempotencyBindingRejection\(error\);[\s\S]{0,1600}?await reconcileFailedCompletion\(\{ deliveryId: target\.id, keyHeld, resend: sendCompletion[\s\S]{0,1600}?if \(bindingRejected \|\| reconciled\.kind === 'completed_not_replayed' \|\| reconciled\.kind === 'closed'\) \{[\s\S]{0,500}?closeCompleteDialog\(\);\n\s*await fetchDeliveries\(\);/,
+  'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]*?await reconcileFailedCompletion\(\{ deliveryId, keyHeld, resend: sendCompletion[\s\S]{0,2000}?if \(outcome\.kind === 'completed_not_replayed' \|\| outcome\.kind === 'closed'\) \{\n\s*await fetchDelivery\(\);/,
+  'src/pages/FieldStop.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]*?await reconcileFailedCompletion\(\{ deliveryId: id, keyHeld, resend: sendCompletion[\s\S]{0,2000}?if \(outcome\.kind === 'completed_not_replayed' \|\| outcome\.kind === 'closed'\) await fetchStop\(\);/,
   'src/pages/FieldView.tsx': /completeIdem\.resetKey\(\);\n\s*\/\/[^\n]*\n\s*setCompleteFormOpenFor\(\(open\) => \(open === card\.job_id \? null : open\)\);\n\s*fetchCards\(\);/,
   'src/pages/JobDetail.tsx': /completeJobIdem\.resetKey\(\);\n\s*if \(stillOnThisJob\(\)\) \{\n\s*setShowCompleteModal\(false\);\n\s*fetchJob\(\);/,
 };

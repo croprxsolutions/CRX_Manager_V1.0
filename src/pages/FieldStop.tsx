@@ -28,13 +28,13 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { fetchReceiptRecipient, fetchReceiptRecipientWithin, INVALID_SIGNATURE_MESSAGE, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, fetchReceiptRecipientWithin, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
-import { RECEIPT_NO_EMAIL_MESSAGE, RECEIPT_NOT_SENT_MESSAGE, sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
+import { RECEIPT_NO_EMAIL_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE, RECEIPT_NOT_SENT_MESSAGE, sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
@@ -116,14 +116,19 @@ export default function FieldStop() {
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
 
+  // Every photo-list read and local add takes a number; only the newest read may replace the list,
+  // so a slow older read can never drop a photo added (or keep one removed) after it started.
+  const photoSeqRef = useRef(0);
   const fetchPhotos = useCallback(async () => {
     if (!id) return;
+    const seq = ++photoSeqRef.current;
     const { data, error } = await supabase
       .from('delivery_photos')
       .select('id, storage_path, image_url, caption, uploaded_at')
       .eq('delivery_id', id)
       .order('sort_order');
     if (activeStopIdRef.current !== id) return; // stale guard (H3)
+    if (seq !== photoSeqRef.current) return; // a newer read or local add superseded this one
     if (error) {
       // Keep what is on screen. Clearing it would hide a paper-ticket photo that is
       // already saved and block completion until the stop is reopened.
@@ -323,7 +328,10 @@ export default function FieldStop() {
         checkMutationResult(photoResult, 'Insert delivery photo');
         // Show the saved row now, so the list does not depend on the refresh read below.
         const inserted = (photoResult.data || []) as StopPhoto[];
-        if (activeStopIdRef.current === id) setPhotos((prev) => [...prev, ...inserted.filter((row) => !prev.some((p) => p.id === row.id))]);
+        if (activeStopIdRef.current === id) {
+          photoSeqRef.current++; // an older in-flight read must not replace the list without this photo
+          setPhotos((prev) => [...prev, ...inserted.filter((row) => !prev.some((p) => p.id === row.id))]);
+        }
         uploadCount++;
       } catch (err) {
         Sentry.captureException(err, { tags: { source: 'critical_action', action: 'upload_delivery_photo' } });
@@ -359,6 +367,9 @@ export default function FieldStop() {
     submitClaimRef.current = true;
     try {
       await runComplete();
+    } catch (error: unknown) {
+      // Only a follow-up after a confirmed completion can land here (the call itself is handled).
+      Sentry.captureException(error, { level: 'warning', extra: { context: 'Field Mode completion follow-up failed after the delivery completed' } });
     } finally {
       submitClaimRef.current = false;
       setCompleting(false);
@@ -435,28 +446,47 @@ export default function FieldStop() {
     // A failed upload does not stop the call: after a lost reply the earlier attempt may already have
     // completed the stop (storage then refuses the re-upload). The same key replays that completion,
     // or the server refuses SIGNATURE_IMAGE_MISSING and nothing changes.
+    let signatureUploadError: unknown = null;
     if (signaturePath && signatureDataUrl) {
       try {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
+        signatureUploadError = sigErr;
         Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
       }
       if (!stillSameAttempt()) return;
     }
 
-    try {
-      // Work out the completion time now, after the signal and route checks: if midnight passed
-      // during them, a ticket dated "today" is now a past date and must carry its own timestamp.
-      const { data: result, error } = await supabase.rpc('complete_delivery', {
+    // Sends this attempt exactly: the same inputs and key every time (a lost-reply replay included).
+    // Retires the key on a confirmed result, a binding refusal, or SIGNATURE_IMAGE_MISSING (this key's
+    // image is not saved and never will be under it, so the next tap is a fresh attempt).
+    const sendCompletion = async (): Promise<unknown> => {
+      // Work out the completion time on the first send, after the signal and route checks: if midnight
+      // passed during them, a ticket dated "today" is now a past date and must carry its own timestamp.
+      const { data, error: rpcError } = await supabase.rpc('complete_delivery', {
         ...rpcParams,
         // A retry of this key resends the first send's value (completedAtForKey).
         p_completed_at: completedAtForKey(sentCompletedAt.current, rpcParams.p_idempotency_key, () => (
           usePaperTicket ? paperDeliveredAt(paperDeliveredOn) : undefined)),
       });
-      if (error) throw error;
-      assertRpcResult(result, 'complete_delivery');
+      try {
+        if (rpcError) throw rpcError;
+        assertRpcResult(data, 'complete_delivery');
+      } catch (error: unknown) {
+        if (getIdempotencyBindingRejection(error) || isSignatureImageMissing(error)) {
+          completeIdem.resetKeyFor(completeScope);
+        }
+        throw error;
+      }
       completeIdem.resetKeyFor(completeScope);
+      return data;
+    };
+    // An error toast for a stop the driver has already left names it.
+    const forThisStop = (message: string) => (activeStopIdRef.current === id ? message : `Delivery ${delivery.delivery_number}: ${message}`);
 
+    // The success path: toasts, activity, notifications and the receipt. Also run after a lost reply
+    // whose identical replay returned the saved result.
+    const finishCompleted = async (result: unknown) => {
       // The signature image went up before the call; the server recorded signature_url itself.
       const autoInvoice = result as { auto_invoice?: { invoice_number?: string } } | null;
       const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || null;
@@ -507,43 +537,48 @@ export default function FieldStop() {
         });
         if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
       } else if (emailOnComplete) {
-        // The receipt was wanted but no address could be read here (on any proof path).
-        toast('warning', RECEIPT_NO_EMAIL_MESSAGE);
+        // The receipt was wanted but no address could be read here (on any proof path). A visible
+        // customer with no email has none on file; otherwise the office may still have one.
+        toast('warning', delivery.customer ? RECEIPT_NO_EMAIL_ON_FILE_MESSAGE : RECEIPT_NO_EMAIL_MESSAGE);
       }
 
       if (stillOnStop) setStep('done');
+    };
+
+    let result: unknown;
+    try {
+      result = await sendCompletion();
     } catch (error: unknown) {
       // Any replay-binding refusal (another request's or person's key, or a receipt that can never be
-      // used) retires the key; nothing ran for THIS request. Safe for a completion even if an earlier
-      // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
-      // SIGNATURE_IMAGE_MISSING: this key's image is not saved and never will be under it, so the next
-      // tap is a fresh attempt (new key, new upload).
-      if (getIdempotencyBindingRejection(error) || isSignatureImageMissing(error)) {
-        completeIdem.resetKeyFor(completeScope);
-      }
+      // used) or SIGNATURE_IMAGE_MISSING retired the key in sendCompletion; nothing ran for THIS
+      // request. Otherwise the key is still held: the reply may have been lost after a commit.
+      const keyHeld = !getIdempotencyBindingRejection(error) && !isSignatureImageMissing(error);
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'complete_delivery' } });
-      toast('error', sanitizeError(error));
-      // After any refusal or unclear reply, reconcile with the server for THIS stop.
-      void reconcileAfterFailedCompletion(id);
-    }
-  };
-
-  // A completion an earlier attempt already committed must show as completed, not as a stale form.
-  // Only the status is read first: a full reload would reset the driver's edited quantities, which a
-  // retry would then send as full. Still open: refresh the photos (a refused photo may be gone).
-  const reconcileAfterFailedCompletion = async (stopId: string) => {
-    const { data, error } = await supabase.from('deliveries').select('status').eq('id', stopId).maybeSingle();
-    if (activeStopIdRef.current !== stopId) return;
-    if (error) {
-      Sentry.captureException(error, { level: 'warning', extra: { context: 'Field Mode status check after a failed completion' } });
+      // Reconcile with the server for THIS stop. Completed with the key still held: resend the
+      // identical call, which replays the saved result, and run the normal success path.
+      const outcome = await reconcileFailedCompletion({ deliveryId: id, keyHeld, resend: sendCompletion, context: 'Field Mode' });
+      if (outcome.kind === 'replayed') {
+        await finishCompleted(outcome.result);
+        return;
+      }
+      if (outcome.kind === 'completed_not_replayed') {
+        toast('error', forThisStop(COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
+      } else {
+        toast('error', forThisStop(sanitizeError(error)));
+        // The upload had already failed for a reason other than the signal: say what it was.
+        if (isSignatureImageMissing(error) && signatureUploadError && !isNetworkFailure(signatureUploadError)) {
+          toast('error', forThisStop(sanitizeError(signatureUploadError)));
+        }
+      }
+      if (activeStopIdRef.current !== id) return;
+      // A completion that already committed must show as completed, not as a stale form. Only the
+      // status was read: a full reload would reset the driver's edited quantities, which a retry would
+      // then send as full. Still open: refresh the photos (a refused photo may be gone).
+      if (outcome.kind === 'completed_not_replayed' || outcome.kind === 'closed') await fetchStop(); // opens the completed delivery
+      else if (outcome.kind === 'open') await fetchPhotos();
       return;
     }
-    const status = (data as { status?: string } | null)?.status;
-    if (status && status !== 'scheduled' && status !== 'in_progress') {
-      await fetchStop(); // opens the completed delivery
-      return;
-    }
-    await fetchPhotos();
+    await finishCompleted(result);
   };
 
   if (loading) {

@@ -14,6 +14,7 @@
 import { supabase, assertRpcResult, checkMutationResult } from './db';
 import { compressImage } from './imageCompression';
 import { Sentry } from './sentry';
+import { normalizeNoProofReason } from './paperTicket';
 import type { DeliveryEvidencePhoto, ReceiptRecipient } from '../types';
 
 /**
@@ -185,4 +186,76 @@ export async function fetchReceiptRecipientWithin(deliveryId: string, timeoutMs 
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/** A failure that looks like no connection (the request may never have reached storage or the server). */
+export function isNetworkFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error
+    ? String((error as { message?: unknown }).message ?? '')
+    : String(error ?? '');
+  return /failed to fetch|networkerror|network request failed|load failed|timed? ?out|offline/i.test(message);
+}
+
+// Shown when the delivery turned out completed after a failed reply, but the identical replay of this
+// attempt also failed, so this screen could not run the receipt and follow-ups itself.
+export const COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE =
+  'This delivery is completed (an earlier attempt went through). No receipt was emailed from here; use Email Confirmation.';
+
+/**
+ * What a failed completion call left behind, read from the server:
+ *   replayed               the delivery is completed and the IDENTICAL call (same key, same inputs)
+ *                          returned the saved result: run the normal success path with `result`;
+ *   completed_not_replayed it is completed, but the identical replay failed too;
+ *   open                   still scheduled or in progress: nothing changed;
+ *   closed                 cancelled, voided or another final status, or completed while this key
+ *                          was retired (it can never replay);
+ *   unknown                the status could not be read.
+ */
+export type FailedCompletionOutcome =
+  | { kind: 'replayed'; result: unknown }
+  | { kind: 'completed_not_replayed' }
+  | { kind: 'open' }
+  | { kind: 'closed' }
+  | { kind: 'unknown' };
+
+/**
+ * After a completion call failed or its reply was lost, read the delivery's status. If it is completed
+ * and this attempt's key is still held (no binding refusal, no SIGNATURE_IMAGE_MISSING), the server may
+ * have committed THIS attempt: `resend` must send the identical call with the same key, and the server
+ * replays the saved result before any status or evidence check. Never resend with different inputs.
+ */
+export async function reconcileFailedCompletion(opts: {
+  deliveryId: string;
+  keyHeld: boolean;
+  resend: () => Promise<unknown>;
+  context: string;
+}): Promise<FailedCompletionOutcome> {
+  const { data, error } = await supabase.from('deliveries').select('status').eq('id', opts.deliveryId).maybeSingle();
+  if (error) {
+    Sentry.captureException(error, { level: 'warning', extra: { context: `${opts.context}: status check after a failed completion`, deliveryId: opts.deliveryId } });
+    return { kind: 'unknown' };
+  }
+  const status = (data as { status?: string } | null)?.status;
+  if (!status) return { kind: 'unknown' };
+  if (status === 'scheduled' || status === 'in_progress') return { kind: 'open' };
+  if (status !== 'completed') return { kind: 'closed' };
+  // A retired key can never replay: show the delivery as it is now (the refusal already said why).
+  if (!opts.keyHeld) return { kind: 'closed' };
+  try {
+    return { kind: 'replayed', result: await opts.resend() };
+  } catch (replayError) {
+    Sentry.captureException(replayError, { level: 'warning', extra: { context: `${opts.context}: identical replay after a lost reply failed`, deliveryId: opts.deliveryId } });
+    return { kind: 'completed_not_replayed' };
+  }
+}
+
+/**
+ * The no-proof reason as the server stored it (completion_evidence_ref), for the activity log. Falls
+ * back to the typed reason normalized the server's way when it cannot be read.
+ */
+export async function storedNoProofReason(deliveryId: string, typedReason: string): Promise<string> {
+  const { data, error } = await supabase.from('deliveries').select('completion_evidence_ref').eq('id', deliveryId).maybeSingle();
+  if (error) Sentry.captureException(error, { level: 'warning', extra: { context: 'Read the stored no-proof reason for the activity log', deliveryId } });
+  const stored = (data as { completion_evidence_ref?: string | null } | null)?.completion_evidence_ref;
+  return stored && stored.trim() ? stored : normalizeNoProofReason(typedReason);
 }

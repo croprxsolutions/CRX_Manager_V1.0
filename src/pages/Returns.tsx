@@ -278,17 +278,20 @@ export default function Returns() {
     const requestId = ++orderItemsRequestRef.current;
     if (!preserveDraftItems) setNewItems([]);
     if (!orderId) { setOrderItems([]); return; }
-    const itemsRequest = supabase
+    // A query builder runs only when awaited or then()-ed: start the line read now so it runs
+    // alongside the allowance read below.
+    const itemsPromise = supabase
       .from('order_items')
       .select('id, product_id, product_name, price_per_unit, quantity_delivered, unit_size, section_name, product:products(id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, product_family:product_families(name))')
       .eq('order_id', orderId)
       .gt('quantity_delivered', 0)
-      .order('sort_order');
+      .order('sort_order')
+      .then((result) => result);
     // How much of each delivered line this customer may still return, by create_return's own
     // rule: on a split order each payer only its billed share (20261021155000). Read on the
-    // server, because a sales rep cannot read the other payers' invoices. Both reads run at once.
+    // server, because a sales rep cannot read the other payers' invoices.
     const allowancesResult = await supabase.rpc('get_return_line_allowances', { p_order_id: orderId, p_customer_id: customerId });
-    const itemsResult = await itemsRequest;
+    const itemsResult = await itemsPromise;
     // A slower response for the previously selected order must not overwrite the
     // product list for the order currently shown in the form.
     if (requestId !== orderItemsRequestRef.current) return;

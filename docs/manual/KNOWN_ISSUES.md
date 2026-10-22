@@ -163,10 +163,10 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   the order's customer included, is capped at its own billed share; and the credit memo is created
   inside the credit's private claim. The Returns screen reads each payer's allowance through two
   read-only lookups, so it is right for sales reps too. Proof:
-  `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Left open: a split payer's credit is
-  not auto-applied (as for every return credit, staff apply it), and a split return's quantity check
-  in `receive_return` runs without the per-line locks that `issue_return_credit` re-checks under, so a
-  source void racing a receive can leave a received return that the credit step then refuses.
+  `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Both `receive_return` and `issue_return_credit`
+  check a split return's share while holding the per-line locks a source void or edit try-takes, so a
+  void cannot slip between the check and the restock or credit. Left open: a split payer's credit is
+  not auto-applied (as for every return credit, staff apply it).
 - **A billing-default edit committed mid-split can refuse that split (LOW, availability).** The guard
   re-reads the owners when each draft is written; a change committed by another session in between
   rolls the split back. It never admits a customer the split did not choose.

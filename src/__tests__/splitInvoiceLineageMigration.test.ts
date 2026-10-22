@@ -5,8 +5,8 @@
  * other order invoice for another customer is still INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID.
  *
  * Static contract over the file; the behaviour proof is
- * scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs (container: a two-owner
- * split created, replayed and posted, five refusals, two mutations).
+ * scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs (container: a four-customer
+ * split created, replayed, posted and voided, seven refusals, four mutations).
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';

@@ -571,6 +571,8 @@ DECLARE
   v_is_legacy_unlinked boolean := false;
   -- Phase 3 addition: this wrapper takes the sorted multi-product lock set.
   v_product_ids uuid[];
+  -- Split-payer return (20261021155000): see the per-line locks below.
+  v_lock_order_item_id uuid;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_received_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
@@ -604,6 +606,28 @@ BEGIN
     IF v_order_customer_id IS DISTINCT FROM v_customer_id
        AND NOT public._return_customer_is_split_payer(v_order_id, v_customer_id) THEN
       RAISE EXCEPTION 'RETURN_ORDER_CUSTOMER_MISMATCH';
+    END IF;
+
+    -- Split-payer return (20261021155000): on a split return, hold the per-order-line locks the
+    -- credit takes before checking the share, so a source invoice cannot be voided or edited (that
+    -- path try-takes them and fails fast) between this check and the restock; a change committed
+    -- first is seen by the check below.
+    IF v_order_customer_id IS DISTINCT FROM v_customer_id OR EXISTS (
+      SELECT 1
+        FROM public.return_items ri
+        CROSS JOIN LATERAL public._return_customer_line_share(
+          v_order_id, ri.order_item_id, v_customer_id, p_return_id
+        ) s
+       WHERE ri.return_id = p_return_id AND s.share_mode
+    ) THEN
+      FOR v_lock_order_item_id IN
+        SELECT DISTINCT ri.order_item_id
+          FROM public.return_items ri
+         WHERE ri.return_id = p_return_id AND ri.order_item_id IS NOT NULL
+         ORDER BY ri.order_item_id
+      LOOP
+        PERFORM pg_advisory_xact_lock(hashtextextended(v_lock_order_item_id::text, 361));
+      END LOOP;
     END IF;
 
     -- Older linked rows were writable through table policies, so re-derive and
@@ -1334,7 +1358,7 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('_create_return_intent_impl_20260812', 'public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'fbaf12afb72c4d51a4711be30ead58e6', true),
-        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '02724d045d1e0c1df96ecf3a42d3d130', true),
+        ('_receive_return_intent_impl_20260812', 'public._receive_return_intent_impl_20260812(uuid,uuid,text)', '51ec76dc82c7166030dc943cd2a14104', true),
         ('_issue_return_credit_intent_impl_20260812', 'public._issue_return_credit_intent_impl_20260812(uuid,uuid,text)', 'ff18e43e9566f498f6b9ab070a2586dc', true),
         ('guard_invoice_terminal_order', 'public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', true),
         ('guard_mono_invoice_split_billing_post', 'public.guard_mono_invoice_split_billing_post()', 'b6fd2b19478801f6798c7b6e1fba737b', true),

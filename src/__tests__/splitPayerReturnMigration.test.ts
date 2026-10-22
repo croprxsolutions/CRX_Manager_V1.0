@@ -64,7 +64,7 @@ function changedHunks(before: string, after: string): string[][] {
 
 const FUNCTIONS = [
   { name: '_create_return_intent_impl_20260812', source: RETURNS_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.create_return(', pre: '80b3f9fd43c3ab3e56eae2935c525dcd', hunks: 4 },
-  { name: '_receive_return_intent_impl_20260812', source: RETURNS_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.receive_return(', pre: 'c43084461f30b9305bd0bb19f6605d89', hunks: 3 },
+  { name: '_receive_return_intent_impl_20260812', source: RETURNS_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.receive_return(', pre: 'c43084461f30b9305bd0bb19f6605d89', hunks: 5 },
   { name: '_issue_return_credit_intent_impl_20260812', source: RETURNS_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.issue_return_credit(', pre: '1e9647da071aa1a53f3add5e38515da8', hunks: 5 },
   { name: 'guard_invoice_terminal_order', source: LINEAGE_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.guard_invoice_terminal_order()', pre: '3ce8e2202d902ed90ba3370dfc829e47', hunks: 2 },
   { name: 'guard_mono_invoice_split_billing_post', source: MONO_SOURCE, sourceHeader: 'CREATE OR REPLACE FUNCTION public.guard_mono_invoice_split_billing_post()', pre: 'e643f573e529a7117c10ff1e8b89fad0', hunks: 1 },

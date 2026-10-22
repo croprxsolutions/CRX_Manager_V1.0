@@ -77,6 +77,10 @@
   void's payment total, so staff record the customer's AR and prepay balances before and after each
   void. The "copy every screen field" rule now covers the outage forms too, including delivery time,
   notes, package size, tote number and item notes.
+- Fourteenth Codex GitHub App round (two findings, both confirmed). On release of an invoice-creation
+  brake, delivery forms are entered first and each paper invoice form is matched to the draft the
+  delivery created, never entered as a second invoice. The outage printout gets appointment times
+  written in by hand, since only each delivery's own page shows them.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

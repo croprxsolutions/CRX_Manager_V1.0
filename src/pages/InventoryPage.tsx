@@ -422,7 +422,11 @@ export default function InventoryPage() {
   // its frozen product/customer from them, so each list is read in full, page
   // by page (one read stops silently at the server's 1,000-row cap). A failed
   // read clears the list and blocks new adds/holds rather than offering a short one.
+  // Each list keeps only its newest read: an older one finishing late never overwrites it.
+  const productsReadRef = useRef(0);
+  const customersReadRef = useRef(0);
   const fetchProducts = useCallback(async () => {
+    const readId = ++productsReadRef.current;
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('products')
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
@@ -430,6 +434,7 @@ export default function InventoryPage() {
       .order('product_name')
       .order('id')
       .range(from, to));
+    if (readId !== productsReadRef.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });
       toast('error', 'Failed to load products. Please try again.');
@@ -442,6 +447,7 @@ export default function InventoryPage() {
   }, [toast]);
 
   const fetchCustomers = useCallback(async () => {
+    const readId = ++customersReadRef.current;
     const { data, error } = await fetchAllRows((from, to) => supabase
       .from('customers')
       .select('id, farm_name', { count: 'exact' })
@@ -449,6 +455,7 @@ export default function InventoryPage() {
       .order('farm_name')
       .order('id')
       .range(from, to));
+    if (readId !== customersReadRef.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });
       toast('warning', 'Customer names could not be loaded. Any saved customer on this hold is unchanged.');

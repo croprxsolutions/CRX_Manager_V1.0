@@ -1396,10 +1396,18 @@ export default function QuoteBuilder() {
     return () => { cancelled = true; };
   }, [unresolvedFieldKey, customerIdRef]);
 
-  const handleCustomerChange = (cust: QuoteCustomer | null) => {
+  // Repricing lines before products and unit conversions load would convert every unit at a
+  // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
+  const repriceBlocked = !referenceDataReady && sections.some((sec) => sec.items.length > 0);
+
+  const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
       setCustomerId('');
-      return;
+      return true;
+    }
+    if (repriceBlocked) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return false;
     }
     setCustomerId(cust.id);
     setCustomerRow(cust);
@@ -1415,6 +1423,7 @@ export default function QuoteBuilder() {
     setSections((prev) => prev.map((sec) => (
       sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id ? { ...sec, field_id: null } : sec
     )));
+    return true;
   };
 
   const getConversionFactor = useCallback(
@@ -1551,7 +1560,9 @@ export default function QuoteBuilder() {
         }
         // Lines may already exist (the link read is separate from the product read), so the link
         // customer is applied exactly like a pick: reprice for its tier and clear foreign fields.
-        handleCustomerChangeRef.current(cust);
+        if (!handleCustomerChangeRef.current(cust)) {
+          setCustomerLoadError('The customer from the link was not applied while products were loading. Choose the customer before saving this quote.');
+        }
       });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4225,6 +4236,10 @@ export default function QuoteBuilder() {
             <select
               value={tier}
               onChange={(e) => {
+                if (repriceBlocked) {
+                  toast('error', 'Products are still loading. Try again in a moment.');
+                  return;
+                }
                 const t = parseInt(e.target.value);
                 setTier(t);
                 recalcAllForTier(t);

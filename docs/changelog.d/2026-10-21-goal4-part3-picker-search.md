@@ -41,6 +41,11 @@ A failed complete read clears the list (never a short or previous list), says so
 
 Not in this PR, because other sessions own those files: the Invoice Detail customer picker (M29) and the purchase-order screens. The blend-ticket scanner (M51) needs an Edge Function deploy.
 
+**Late replies (CodeRabbit review 3).** A late reply never overwrites newer data:
+- Customer Invoice Summary ignores a report for a customer no longer chosen, and an older report for the same customer.
+- Inventory keeps only the newest product and customer list reads.
+- Quote Builder refuses a customer or tier change while saved lines exist and products are still loading, since repricing then would convert units at a factor of 1. With no lines, a pick or a `?customer_id=` link still works.
+
 **Known limits, for part 4:**
 - Complete paged reads still grow with the table. They are correct at any size, but slow at very large sizes.
 - More than 20 records with identical names and no account number or SKU to tell them apart cannot all be reached.

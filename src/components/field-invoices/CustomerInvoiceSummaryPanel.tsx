@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Printer, Layers } from 'lucide-react';
 import Card from '../ui/Card';
@@ -71,10 +71,15 @@ export default function CustomerInvoiceSummaryPanel() {
   const [rows, setRows] = useState<SummaryInvoiceRow[] | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [printing, setPrinting] = useState(false);
+  // Bumped on every customer change and every load, so only the newest load for the
+  // current customer may fill the table: a late reply never shows another customer's invoices.
+  const summaryRequestRef = useRef(0);
 
   const handleSelectCustomer = (customer: CustomerOption | null) => {
+    summaryRequestRef.current += 1;
     setSelectedCustomer(customer);
     setRows(null);
+    setLoadingSummary(false);
     // Default the Terms input to the customer's payment terms when they're picked
     // (the user can override; still report-only). Only seeds an empty Terms box so
     // we never clobber what the user typed.
@@ -84,6 +89,7 @@ export default function CustomerInvoiceSummaryPanel() {
   };
 
   const loadSummary = useCallback(async (customerId: string) => {
+    const requestId = ++summaryRequestRef.current;
     setLoadingSummary(true);
     const { data, error } = await supabase
       .from('invoices')
@@ -93,6 +99,7 @@ export default function CustomerInvoiceSummaryPanel() {
       .in('status', ['draft', 'unposted'])
       .is('deleted_at', null)
       .order('invoice_date', { ascending: true });
+    if (requestId !== summaryRequestRef.current) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch_summary', page: 'customer-invoice-summary' } });

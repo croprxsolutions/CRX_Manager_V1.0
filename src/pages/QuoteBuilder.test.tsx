@@ -625,6 +625,69 @@ describe('QuoteBuilder', () => {
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
   });
 
+  it('refuses a customer or tier change while saved lines exist and products are still loading, then allows it', async () => {
+    // Repricing a saved line before unit conversions load would convert at a factor of 1.
+    let releaseProducts!: (result: { data: unknown; error: unknown }) => void;
+    const productsRead = new Promise<{ data: unknown; error: unknown }>((resolve) => { releaseProducts = resolve; });
+    const heldChain = () => {
+      const self: Record<string, unknown> = {};
+      for (const m of ['select', 'eq', 'neq', 'or', 'not', 'order', 'limit', 'range', 'in', 'is']) self[m] = () => self;
+      self.then = (...args: Parameters<Promise<unknown>['then']>) => productsRead.then(...args);
+      self.catch = (...args: Parameters<Promise<unknown>['catch']>) => productsRead.catch(...args);
+      self.finally = (...args: Parameters<Promise<unknown>['finally']>) => productsRead.finally(...args);
+      return self;
+    };
+    const product = { id: 'product-1', product_name: 'Alpha Herbicide', is_active: true, tier1_price: 10, tier2_price: 9, tier3_price: 8 };
+    const quote = {
+      id: 'quote-77', quote_number: 'Q-2026-0077', customer_id: null, tier: 1, valid_days: 30,
+      header_notes: null, footer_notes: null, status: 'draft', is_planned: false, commission_split: null,
+      created_at: RECENT_QUOTE_CREATED_AT,
+    };
+    const section = {
+      id: 'section-1', quote_id: quote.id, section_name: 'Products', sort_order: 1, section_notes: null,
+      section_header_notes: null, needed_by_date: null, field_id: null,
+    };
+    const item = {
+      id: 'item-1', quote_id: quote.id, section_id: section.id, product_id: product.id, sort_order: 1, product,
+      calc_mode: 'units_direct', total_units_needed: 1, price_per_unit: 10, price_override: null, suggested_rate: null,
+      actual_rate: null, rate_unit: null, oz_per_acre: null, price_per_acre: null, acres: null, unit_size: null,
+      total_price: 10, notes: null, price_unit: null,
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'products') return heldChain();
+      const data = table === 'quotes' ? quote
+        : table === 'quote_sections' ? [section]
+          : table === 'quote_items' ? [item]
+            : table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }]
+              : [];
+      return buildChain({ data, error: null });
+    });
+    renderQuoteBuilder(quote.id);
+
+    const customerBox = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.focus(customerBox);
+    fireEvent.change(customerBox, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
+    expect(customerBox).toHaveValue('');
+    const tierSelect = screen.getByDisplayValue('Tier 1');
+    fireEvent.change(tierSelect, { target: { value: '2' } });
+    expect(tierSelect).toHaveValue('1');
+
+    await act(async () => {
+      releaseProducts({ data: [product], error: null });
+      await productsRead;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    mockToast.mockClear();
+    fireEvent.focus(customerBox);
+    fireEvent.change(customerBox, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    expect(customerBox).toHaveValue('Far Field Farm');
+    expect(screen.getByDisplayValue('Tier 3')).toBeInTheDocument();
+    expect(mockToast).not.toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
+  });
+
   it('renders the Quote Builder heading for a new quote', async () => {
     renderQuoteBuilder();
     await waitFor(() => {

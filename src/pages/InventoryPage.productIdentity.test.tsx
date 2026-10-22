@@ -186,6 +186,37 @@ describe('InventoryPage Product identity writers', () => {
     expect(mocks.rpc).not.toHaveBeenCalledWith('manual_inventory_add', expect.anything());
   });
 
+  it('an older product read that fails late never replaces a newer good list (CodeRabbit, #1017)', async () => {
+    // Every products read waits for the test, so the replies can arrive out of order.
+    const releases: Array<(result: { data: unknown; error: unknown; count: number | null }) => void> = [];
+    mocks.from.mockImplementation((table: string) => {
+      if (table !== 'products') return query([]);
+      const held = new Promise((resolve) => { releases.push(resolve); });
+      const builder: Record<string, unknown> = {};
+      for (const method of ['select', 'eq', 'order', 'range']) builder[method] = vi.fn(() => builder);
+      builder.then = (resolve: (value: unknown) => void) => held.then(resolve);
+      return builder;
+    });
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /add inventory/i }));
+    let dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /add.*inventory/i })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /add inventory/i }));
+    dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
+    expect(releases).toHaveLength(2);
+
+    // The newer read succeeds first, then the older one fails.
+    releases[1]({ data: siblings, error: null, count: siblings.length });
+    expect(await within(dialog).findByRole('button', { name: /SKU-A.*Family: Family A/i })).toBeInTheDocument();
+    releases[0]({ data: null, error: { message: 'connection reset' }, count: null });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(within(dialog).getByRole('button', { name: /SKU-B.*Family: Family B/i })).toBeInTheDocument();
+    expect(within(dialog).queryByText('Products could not be loaded')).toBeNull();
+    expect(mocks.toast).not.toHaveBeenCalledWith('error', 'Failed to load products. Please try again.');
+  });
+
   it('distinguishes siblings and sends exact UUID B to create_inventory_hold', async () => {
     render(<MemoryRouter><InventoryPage /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /create hold/i }));

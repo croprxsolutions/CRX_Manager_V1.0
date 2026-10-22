@@ -1,5 +1,5 @@
 /**
- * Migration 20261021120000: create_invoice_from_order refuses an order split across fields
+ * Migration 20261021160000: create_invoice_from_order refuses an order split across fields
  * (ORDER_HAS_FIELD_SPLIT), inside its idempotency layer and AFTER the replay lookup, so an exact
  * retry of an invoice created before the split still returns its id. The order's lines are locked
  * before the test, so no allocation can commit between the test and the invoice insert.
@@ -16,7 +16,7 @@ import { sanitizeError } from '../lib/errorSanitizer';
 const read = (file: string) => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 const md5 = (text: string) => createHash('md5').update(text).digest('hex');
 
-const MIGRATION = 'supabase/migrations/20261021120000_order_invoice_refuses_field_split.sql';
+const MIGRATION = 'supabase/migrations/20261021160000_order_invoice_refuses_field_split.sql';
 const sql = read(MIGRATION);
 const header = sql.slice(
   sql.indexOf('CREATE OR REPLACE FUNCTION public._create_invoice_from_order_idem_impl_20260721('),
@@ -33,7 +33,7 @@ const at = (needle: string) => {
   return i;
 };
 
-describe('20261021120000 order invoice refuses a field split', () => {
+describe('20261021160000 order invoice refuses a field split', () => {
   it('replaces exactly one function, keeping its signature, definer mode and search_path, with no grant change', () => {
     expect(sql.match(/CREATE OR REPLACE FUNCTION/g)).toHaveLength(1);
     expect(header).toContain('p_order_id uuid,\n  p_salesman_id uuid DEFAULT NULL,\n  p_invoice_type text DEFAULT \'chemical_sale\',\n  p_idempotency_key text DEFAULT NULL\n)');
@@ -58,7 +58,7 @@ describe('20261021120000 order invoice refuses a field split', () => {
   });
 
   it('is the live body plus only the field-split hunk, matching the preflight and postflight pins', () => {
-    const hunkStart = at('  -- Field split (20261021120000)');
+    const hunkStart = at('  -- Field split (20261021160000)');
     const hunkEnd = at('  v_invoice_id := public._create_invoice_from_order_impl_20260718(');
     const original = body.slice(0, hunkStart) + body.slice(hunkEnd);
     expect(preflight).toContain(`md5(replace(p.prosrc, chr(13), '')) = '${md5(original)}'`);
@@ -73,7 +73,7 @@ describe('20261021120000 order invoice refuses a field split', () => {
         "('public.create_invoice_from_order(uuid,uuid,text,text)', 'c97b2be8bee9dd8baaaab92bc24b92e7')",
         "('public._create_invoice_from_order_impl_20260718(uuid,uuid,text,text)', '454e04c4e199549a4f5be9975e397e17')",
         "('public.create_split_invoices_from_order(uuid,uuid,text,text)', '0f1e36e8536fc56f08fcf6071ea76da8')",
-        "('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'f671f1a3f5406cff52aedd8a5fb40b31')",
+        "('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'ccde51261dd8c5270b6dbd24f28981bd')",
       ]) expect(block).toContain(sig);
     }
     // The race argument's three supports: the allocation foreign key, the allocation trigger

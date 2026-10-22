@@ -35,6 +35,15 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'You can only change or post invoices under your own name'],
   [/^CUSTOMER_HAS_OPEN_INVOICES\b/i,
    'This customer has posted or overdue invoices. Resolve them before deactivating the customer'],
+  // Purchase-order cost corrections (20261021140000, Mason 2026-10-20).
+  [/^PO_COST_REASON_REQUIRED\b/i,
+   'Say why the cost of a received line is changing'],
+  [/^PO_COST_REASON_TOO_LONG\b/i,
+   'Keep the reason to 500 characters'],
+  [/^PO_CANCELLED\b/i,
+   'This purchase order is cancelled, so its cost cannot change'],
+  [/^PO_COST_BELOW_BILLED\b/i,
+   'This would put the purchase order more than 5% below its vendor bills. Void or adjust the bill first'],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,
@@ -59,12 +68,12 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Return credits are briefly paused while an accounting update finishes. Retry in a moment'],
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
-  // create_invoice_from_order refuses an order split across fields (20261021120000): it is billed
+  // create_invoice_from_order refuses an order split across fields (20261021160000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
-  // (this also stops a field split onto another customer's field, KNOWN_ISSUES.md 2026-10-21).
+  // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,
    "Nothing was billed. An invoice made from an order can only be for that order's customer, and this one would bill someone else. Ask an admin to review the order's field split"],
   // void_order refuses rather than erase money already recorded on the order's draft invoice.
@@ -88,6 +97,21 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An existing return credit is missing its protected cost source. Void or unapply it and contact support before retrying'],
   [/^RETURN_CREDIT_REVERSAL_EXCEEDS_RECOGNIZED\b/i,
    'This return would reverse more product cost than the related sales invoices recorded. No changes were saved; review the source invoices and earlier return credits'],
+  // Split-billed orders (20261021155000): each payer returns only what its own invoices billed.
+  [/^RETURN_QUANTITY_EXCEEDS_BILLED_SHARE\b/i,
+   'This order was split between payers. This customer can return only the quantity billed to them, less their other open returns. No changes were saved'],
+  [/^RETURN_SPLIT_SHARE_NOT_BILLED\b/i,
+   'This customer was not billed for this product on the split order, so they cannot return it. No changes were saved'],
+  [/^RETURN_CREDIT_EXCEEDS_BILLED_SHARE\b/i,
+   "This return would credit more than this customer was billed for the product on the split order. Check the customer's split invoice and earlier returns. No changes were saved"],
+  [/^RETURN_SPLIT_INVOICE_NOT_VISIBLE\b/i,
+   "This order was split between payers, and you cannot view this customer's split invoice, so you cannot start their return. Ask an admin to create it. No changes were saved"],
+  [/^RETURN_SPLIT_SHARE_REPRICED\b/i,
+   "An earlier return of this product was cancelled or rejected after this one was made, so this return's credit is out of date. Cancel this return and create it again to price it correctly. No changes were saved"],
+  [/^RETURN_SPLIT_CREDIT_UNBACKED\b/i,
+   "This return credit could not be matched to the customer's own split invoice line, so no credit was issued. Check that the split invoice is still posted"],
+  [/^RETURN_ORDER_CUSTOMER_MISMATCH\b/i,
+   'This customer was not billed on that order. Pick the order\'s customer, or a payer billed on the order\'s posted split invoice'],
   [/invoice_items_return_credit_source_item_fk/i,
    'This source invoice line is retained as return-credit accounting history and cannot be deleted or re-saved. Keep the source invoice unchanged, or permanently delete the already-voided credit memo before editing it'],
   [/duplicate key value violates unique constraint "[^"]+"/i,

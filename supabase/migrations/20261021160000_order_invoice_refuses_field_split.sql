@@ -1,4 +1,5 @@
--- Written 2026-10-21. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
+-- Written 2026-10-21; restamped 2026-10-22 from 20261021120000 to 20261021160000 and re-pinned to the live
+-- bodies after PR #1010. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migration-history.md.
 --
 -- WHAT: create_invoice_from_order refuses an order whose lines are split across fields.
@@ -91,7 +92,7 @@ BEGIN
         ('public.create_invoice_from_order(uuid,uuid,text,text)', 'c97b2be8bee9dd8baaaab92bc24b92e7'),
         ('public._create_invoice_from_order_impl_20260718(uuid,uuid,text,text)', '454e04c4e199549a4f5be9975e397e17'),
         ('public.create_split_invoices_from_order(uuid,uuid,text,text)', '0f1e36e8536fc56f08fcf6071ea76da8'),
-        ('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'f671f1a3f5406cff52aedd8a5fb40b31')
+        ('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'ccde51261dd8c5270b6dbd24f28981bd')
       ) AS pin(sig, body_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM pin.body_md5
@@ -203,7 +204,7 @@ BEGIN
     RAISE EXCEPTION 'ORDER_INVOICE_TERMINAL: cannot create an invoice for a cancelled, voided, or deleted order';
   END IF;
 
-  -- Field split (20261021120000): an order split across fields is billed per field owner, only
+  -- Field split (20261021160000): an order split across fields is billed per field owner, only
   -- through create_split_invoices_from_order. After the replay lookup above, so an exact retry of
   -- an invoice created before the split still returns its id. The lines are locked first: a new
   -- allocation row KEY SHARE-locks its line, so none can commit between this test and the insert.
@@ -261,7 +262,7 @@ BEGIN
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) =
           'p_order_id uuid, p_salesman_id uuid DEFAULT NULL::uuid, p_invoice_type text DEFAULT ''chemical_sale''::text, p_idempotency_key text DEFAULT NULL::text'
-        AND md5(replace(p.prosrc, chr(13), '')) = '46b91bcd1c41b5428a6ac3f0fcf817b7'
+        AND md5(replace(p.prosrc, chr(13), '')) = 'be6f66979b8a19c933b7294fe5cb3105'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['postgres']::text[]
@@ -278,7 +279,7 @@ BEGIN
         ('public.create_invoice_from_order(uuid,uuid,text,text)', 'c97b2be8bee9dd8baaaab92bc24b92e7'),
         ('public._create_invoice_from_order_impl_20260718(uuid,uuid,text,text)', '454e04c4e199549a4f5be9975e397e17'),
         ('public.create_split_invoices_from_order(uuid,uuid,text,text)', '0f1e36e8536fc56f08fcf6071ea76da8'),
-        ('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'f671f1a3f5406cff52aedd8a5fb40b31')
+        ('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)', 'ccde51261dd8c5270b6dbd24f28981bd')
       ) AS pin(sig, body_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM pin.body_md5

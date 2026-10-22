@@ -1,8 +1,8 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-21 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-21 19:15 UTC (2:15 PM Central): 1041 rows / 1034 names, `max(version)` `20261021191058` = `20261021030000_void_order_governed_split_draft_claims` (PR #987); the pending candidate `20261021120000_order_invoice_refuses_field_split` is not applied. At 05:13 UTC (12:13 AM Central): unchanged since the 04:01 UTC read, 1040 rows / 1033 names,
-`max(version)` `20261021040052`, and still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
+**Last verified: 2026-10-22 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-22 12:39 UTC (7:39 AM Central): unchanged, and the pending candidate `20261021160000_order_invoice_refuses_field_split` (row 966, PR #1006) is not applied; at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
 20:55 UTC read are that `20261019220000` (ledger `20261020022222`, PR #964), `20261019230000` (ledger `20261020193610`,
@@ -116,34 +116,94 @@ purchase-order screens now lists the non-cost columns it reads (`src/lib/costFie
 admins add cost through `get_admin_cost_fields`, quote history comes through `get_quote_versions`, the three saves derive a
 non-admin's cost, and chemical history and Quick Receive no longer show purchase cost to reps. **Purchase orders are NOT part of
 step 2 (Mason, 2026-10-20, option 1 "for now"):** the purchase order screens and `save_purchase_order` are unchanged, so reps still
-see and enter purchase cost there. Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
+see and enter purchase cost there until PR #980 landed (below; live 2026-10-22). Until step 3, the columns themselves are still readable through the Data API. Step 3: the column
 lock, applied only after step 2's screens are live, then live per-role refusal checks; it must also revoke INSERT/UPDATE of the
 cost columns, because reps can still write `job_chemicals` and `invoice_items` rows directly. Step 3 must leave the columns the purchase order screens read (product `current_cost`, purchase order and line cost) unlocked
 until the purchase order project lands (`costFields.test.ts` names those four screens as its only exemption). **TOP-PRIORITY
 FOLLOW-UP / OPEN COST QUESTION (Mason, 2026-10-20, "dig deeper in future"): purchase orders as their own project.** Three Sol rounds
 on PR #965 showed any cost a rep's purchase order line is given (the catalog cost, or $0) can be wrong and then locked at receipt
 (the supplier-cost-basis snapshot trigger, and the writer's received-line rule), with no governed way to correct it. The project
-needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps. Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
+needs a governed way to correct, or at least track, a received line's cost, then can hide purchase cost from reps.
+**Closed by PR #980 (Mason, 2026-10-20, Option B; merged 2026-10-22 00:28 UTC as `8399309dc`; migrations `20261021140000`
+(ledger `20261021224056`) and `20261021141000` (ledger `20261022002748`) both LIVE, applied before the merge on Mason's `I approve`):** the four purchase-order screens show and send unit cost only to admins; `save_purchase_order`
+ignores a non-admin's cost, gives a rep's new line the catalog cost and flags it (`cost_needs_review`, the admin "Costs to confirm"
+filter); `set_purchase_order_item_costs` is the governed, admin-only correction (received lines included, a reason required once
+a line has been received), and every cost change is kept in the admin-only, append-only `purchase_order_item_cost_changes`;
+`20261021141000` then locks the purchase-order cost columns from every API role (live read 2026-10-22 00:27 UTC: `authenticated` and
+`anon` can no longer read `purchase_order_items.unit_cost` or `purchase_orders.total_cost`). Still open: step 3's lock on the other
+tables (product `current_cost` and the rest stay readable through the Data API). Quick Receive still marks the cheaper open PO line NO-RETURN for reps (they saw it, and the prices, before step 2), so it tells a rep which line cost less but never by how much; kept because receiving needs it. Residuals for Mason to decide later (no fix planned yet): a commission amount and rate together still imply
 profit to the rep who earns it; and a rep can still find a product's cost by trial and error, because a price below cost is
 refused and one at or above cost saves (about 20 attempts on a draft quote narrow it to the cent; refused attempts are not
 logged or limited).
 
-## OPEN 2026-10-21 (MED; latent, no live order affected) — split billing cannot bill a field owner who is not the order's customer
+## FIXED 2026-10-22 (migration `20261021150000`, applied live as ledger `20261022114024`, PR #1010) — split billing could not bill a field owner who is not the order's customer
 
-`create_split_invoices_from_order` bills each field owner their share of a field-allocated order, but
-the invoice trigger `guard_invoice_terminal_order` (since `20260721014858`) refuses any invoice whose
-customer differs from its order's customer (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), split drafts
-included, so a split onto another customer's field rolls back with that error. A split onto the
-ordering customer's own fields works. Live, read-only 2026-10-21 17:10 UTC: 0 orders carry a field
-allocation and 0 split invoices exist, so nobody has hit it. Found while building
-`20261021120000_order_invoice_refuses_field_split` (its container chain bills a field the ordering
-customer owns for this reason). Once that migration is applied, `create_invoice_from_order` refuses
-such an order too (`ORDER_HAS_FIELD_SPLIT`), so an order split onto another customer's field cannot be
-invoiced from the order at all until this is fixed: refused on purpose, rather than billed entirely to
-the ordering customer as before (Luna on the PR, MED, accepted). **Fix:** let the lineage guard accept a governed split draft (one
-inside its `split_invoice_creation_claims` claim, for a customer the allocation resolves to), or move
-the customer test into the split implementation; prove a two-owner split end to end. Source:
-`guard_invoice_terminal_order()`, `_create_split_invoices_from_order_provenance_impl_20260719`.
+`create_split_invoices_from_order` bills each field owner its share of a field-allocated order, but
+`guard_invoice_terminal_order` (since `20260721014858`) refused any order invoice whose customer
+differs from the order's (`INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID`), split drafts included, so a split
+onto another customer's field rolled back. Live, read-only 2026-10-21: 0 field-allocated orders and 0
+split invoices, so nobody hit it. `20261021150000` lets a governed split invoice name such an owner,
+only inside the split call's creation claim for a customer the order's field split resolves to, and
+afterward only under its `split_invoice_provenance` row. This is the 2026-10-13 item "Splitting an
+order's bill to a landlord always fails" (Mason: "landlord yes"). Found again while building
+`20261021160000` (restamped from `20261021120000`; PR #1006, which makes `create_invoice_from_order` refuse split orders); Sol on #1006
+required this first. Proof: `scripts/smoke/prove-split-invoice-cross-customer-lineage-real-schema.mjs`.
+
+Left open, by design or for later (reviewers on the PR, 2026-10-21):
+- **Who a split may bill follows editable tables.** Any admin or sales rep may allocate an order line
+  to any field and edit a field's owner or billing defaults, so a split can bill any customer those
+  rows name. Claims and provenance stay unforgeable; the scope question (should an allocation be tied
+  to the order's customer or the field's owners?) is Mason's.
+- **FIXED 2026-10-22 (`20261021155000`, same PR, applied live as ledger `20261022115547`): a non-order owner could not get an order-backed
+  return credit.** The return paths required the return's customer to equal the order's
+  (`RETURN_ORDER_CUSTOMER_MISMATCH`), and `guard_mono_invoice_split_billing_post` refused every posted
+  ungrouped invoice on a split order, so no return on a split order could be credited, even the order
+  customer's. Mason first accepted the gap, then chose "Build split returns first" (`DECISION_LOG.md`,
+  2026-10-21). `20261021155000` lets a payer a posted governed split invoice bills return its own
+  billed share, priced from its own billed cents; on any order with split-billing evidence every payer,
+  the order's customer included, is capped at its own billed share; and the credit memo is created
+  inside the credit's private claim. The Returns screen reads each payer's allowance through two
+  read-only lookups. They follow `invoices_select`: a sales rep sees a split order's allowance only
+  for a payer invoice the rep created or is the salesperson on (an admin sees all), so until reps may
+  read every invoice (Mason, 2026-10-13, not yet shipped) such a rep cannot start that payer's return
+  from the screen; an admin can. Proof:
+  `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Both `receive_return` and `issue_return_credit`
+  check a split return's share while holding the per-line locks a source void or edit try-takes, so a
+  void cannot slip between the check and the restock or credit. Each split return is priced from what is
+  left of the payer's billed cents after its other open returns, so cancelling or rejecting an earlier
+  return of the same line leaves a later one's price stale; `receive_return` and `issue_return_credit`
+  then refuse it (`RETURN_SPLIT_SHARE_REPRICED`: staff cancel and recreate the return) instead of
+  crediting a stale price, and the Returns screen shows what is left of the share in quantity and cents
+  rather than a per-unit average (Codex App on PR #1010). A split return stores a price derived from
+  the payer's own invoices, so `create_return` lets a non-admin create one only when `invoices_select`
+  lets them read every active invoice billing that payer on the order (`RETURN_SPLIT_INVOICE_NOT_VISIBLE`;
+  Codex App P1 on PR #1010). Left open (LOW): once created, the return's lines are readable under
+  `return_items_select` (live 2026-10-22: admin, any sales rep, or the requester), so another rep can see
+  that price; this matches Mason's 2026-10-13 direction that reps may read every invoice (not yet
+  shipped), and narrowing it would be a permissions change. An order line with no unit (`order_items.unit_size`
+  is nullable; live, read-only 2026-10-22: 4 of 289 lines, all from March to May 2026, one invoiced, none
+  split) cannot get a return credit on ANY order: its invoice lines carry no unit, the return line is
+  `ea`, and `_issue_return_credit_impl` has refused that pair since `20260827041100`
+  (`RETURN_CREDIT_UNIT_MISMATCH`, "broken lineage"). `20261021155000` makes the split invoice writer
+  bill such a line as `ea`, so a split payer can be credited for it (Sol on PR #1010), and
+  `create_return` refuses a split line whose posted sale lines carry another unit up front, with that
+  same code, before anything is restocked. Still OPEN outside split billing: `create_invoice_from_order`
+  copies the empty unit, so a mono-billed line with no unit cannot be credited (give those lines a unit,
+  or bill them as `ea` there too). Left open, by design (Luna on PR #1010):
+  a split payer's credit is not auto-applied (as for every return credit, staff apply it); a return is
+  not tied to one invoice line, so when a payer was billed for the same order line on two invoices at
+  different prices it is credited at its average billed price (the caps still keep the total at or
+  under what it was billed, and its whole share credits exactly that); and `create_return` checks the
+  split share without the per-line locks, so a split invoice voided while a return is being created
+  can leave that return requested but no longer receivable (no money moves; staff reject or cancel it).
+- **A billing-default edit committed mid-split can refuse that split (LOW, availability).** The guard
+  re-reads the owners when each draft is written; a change committed by another session in between
+  rolls the split back. It never admits a customer the split did not choose. CLOSED by
+  `20261021155000` (same PR; Codex App P1): the split reads each field's percentages in a separate
+  statement, so an edit that kept the same owners (50/50 to 70/30) could also have mixed old and new
+  percentages across lines and passed the guard. The split writer now locks the allocated fields'
+  rows (FOR SHARE) and then `field_billing_defaults` in SHARE mode before it reads them, so no
+  billing-default write can commit until the split does (the same order `save_field` writes them).
 
 ## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
 
@@ -292,8 +352,8 @@ draft is zeroed only when it carries no paid, prepay, write-off or credit cents,
 operations; `idempotency_keys` holds zero receipts for the three operations; and a keyless live `void_order` call on a
 random uuid was refused with `IDEMPOTENCY_KEY_REQUIRED`.
 
-**Fix written, NOT applied: voiding an order with a governed SPLIT draft invoice still fails, now that batch 3b is live** (migration
-`20261021030000_void_order_governed_split_draft_claims`, PR #987; until it is applied the description after "Found by" is current). The fix
+**FIXED, applied live 2026-10-21 19:10:58 UTC (2:10 PM Central): voiding an order with a governed SPLIT draft invoice no longer fails** (migration
+`20261021030000_void_order_governed_split_draft_claims`, ledger `20261021191058`, PR #987 merged as `05fdc3e40`; live `void_order` md5 `960b7306`, `_void_order_impl_20260714` md5 `8ad84bdc`, one overload each, `void_order` EXECUTE for `authenticated` and not `anon`, read 2026-10-21; the description after "Found by" is the pre-fix history). The fix
 gives `void_order` the same lock, claim, provenance refresh and claim drop as `cancel_order`, reusing the
 `'cancel_order'` claim operation (the guard's exact-cancel shape is the one write the void makes; anyone tightening that
 shape in `guard_split_invoice_provenance_identity` must keep `void_order`'s draft cancel inside it). (Found by the Codex
@@ -304,8 +364,7 @@ same-transaction `split_invoice_mutation_claims` row. `cancel_order` writes one 
 `_cancel_order_provenance_wrapper_20260719` (lock, claim, refresh the provenance, drop the claim); `void_order` does
 not, so its zeroing UPDATE is refused with `SPLIT_INVOICE_PROVENANCE_IMMUTABLE` and the whole void rolls back
 cleanly. This is not a regression: before batch 3b, now live, every nonzero draft already failed. Live impact today is none:
-live has 0 `split_invoice_provenance` rows (read 2026-10-20). Fix: give `void_order` the same governed-invoice
-locking, claim and provenance refresh as `cancel_order`, in its own reviewed migration, before split billing is used.
+live had 0 `split_invoice_provenance` rows (read 2026-10-20 and again 2026-10-21 before the apply), so no real order was ever affected.
 
 **Bound by batch 2 (migration `20261016140000`, applied live 2026-10-19, ledger `20261019010324`).** The thirteen HIGH-stock functions it covers left the table below: `release_inventory_hold`, `retire_inventory_item`, `reconcile_negative_inventory`, `manual_inventory_add`, `create_order_from_blend_ticket`, `create_direct_order`, `create_rush_order`, `close_quote_as_applied`, `close_quote_as_short`, `create_application_record_from_blend_ticket`, `batch_cancel_deliveries`, `reverse_completed_cycle_count` and `create_planned_holds`. The live re-check is recorded in the batch-2 paragraph below the table.
 
@@ -646,7 +705,7 @@ else on `main`. None blocks this branch cleanup; they are recorded here for foll
 The cleanup's second salvage pass compared every line each old branch added with `main`'s whole tree.
 These came out of it. Each says how it was checked.
 
-- **Splitting an order's bill to a landlord always fails (MED). Mason, 2026-10-13: it should work**
+- **FIXED 2026-10-22 (`20261021150000`, applied live, PR #1010; see the entry near the top).** **Splitting an order's bill to a landlord always fails (MED). Mason, 2026-10-13: it should work**
   ("landlord yes"). Read from the live database 2026-10-13: the invoice trigger
   `trg_guard_invoice_terminal_order` (function `guard_invoice_terminal_order`) raises
   `INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID` whenever an invoice's customer is not its order's customer,
@@ -720,8 +779,9 @@ leave these open:
   invoice with no order or delivery behind it (the New Invoice page's two types)
   carries no product lines, only service or misc charges; field-application,
   blend-ticket and job invoices (`invoices.invoice_type = 'field_application'`) keep their chemical lines
-  (`DECISION_LOG.md`), and so do credit memos (return credits). Still open until Goal 3
-  of `docs/plans/2026-10-13-direction-and-goals.md` enforces it in the database.
+  (`DECISION_LOG.md`), and so do credit memos (return credits). **Closed 2026-10-21:** migration
+  `20261021050000` (PR #983, ledger `20261021200526`) enforces it in the database on every write path,
+  and the New Invoice page offers only typed charge lines (freight, application fee, service, other).
 - **The integrity checks page by offset, not by a snapshot.** Their reads (and the
   `delivery_external_billings` reader) now page past the PostgREST row cap, but a row deleted or
   inserted between two pages can shift the next page by one, so a single run can miss or repeat a
@@ -1020,6 +1080,28 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
       their customer, field and applicator pickers (`LogbookReport.tsx`);
     - Notifications: the page lists every notification, and the bell counts unread notifications in the
       database (it counted only the unread among the 20 it loads); a count that cannot be read shows "!".
+  - **Fixed 2026-10-21 (Goal 4, part 2b — lookups and per-record reads):** these also read every row, and
+    a failed read shows an error or stops the action instead of a short result:
+    - a customer's statement (`src/lib/customerStatement.ts`, used by AR Aging and Customer Detail; its
+      rows have no id, so each read is checked with the running balance and the server's last row);
+    - Customer Detail's recent-transactions card (now says "the latest 50 of N"), the interaction
+      history (was the newest 50, so its filters missed older ones) and the open prepay credits;
+    - an order's field allocations, field-billing defaults, pick-list stock and pick-list customer
+      addresses (`OrderDetail.tsx`), and the
+      quantities other deliveries already claim when a scheduled delivery is edited (`DeliveryDetail.tsx`);
+    - a product's inventory ledger, a new cycle count's stock and a count's lines;
+    - the Office Cockpit's lapsed crop-program holds with their quotes and products;
+    - the Jobs list's applicator and customer filters (their dispatch and share reads ignored errors), the
+      Dispatch Board and Field View map boundaries, the license check on a job, the return form's
+      "pick an order", and the credit-limit warning's open-invoice balance;
+    - document scanning (`src/lib/documentOCR.ts`): a PDF over 20 pages is refused with a plain message
+      ("split it into files of 20 pages or fewer"); it used to scan only the first 20 pages and drop the
+      rest without telling anyone.
+    - Open (deferred to part 4, server-side paging): the Jobs list's applicator and customer filters put
+      every matching job id into one `.or('id.in.(...)')` request. Around 1,000 matching jobs that request
+      address grows past about 37 KB and could be refused by the server or a proxy (a failed load then
+      shows "Failed to load jobs", never a short list). On 2026-10-21 there were 2 dispatches and 5 field
+      shares, so it cannot trigger yet.
   - Still capped (checked 2026-10-02 by searching `src/pages` for `.limit(` and `*_LIMIT`; the pages
     fixed above are removed):
     - 1000: Customers (shows a banner).
@@ -1035,8 +1117,8 @@ same sweep went to `TODO.md` §5. Re-verify against the live app before fixing.
   - The picker entries above are examples, not a complete inventory: other selectors also call `.limit(`, so
     search `src/` for `.limit(` before relying on this list.
   - Complete current inventory (2026-10-20, after part 1): `docs/audits/2026-10-20-goal4-row-limit-inventory-refresh.md`.
-    Part 2a above fixed its Field Invoices, AR/AP/prepay, integrity, compliance and Notifications items; part 2b
-    (the lookups and per-record reads, and the 20-page document-scan limit) is next.
+    Parts 2a and 2b above fixed its part 2 items; next is part 3 (pickers as search boxes), then part 4
+    (server-side paging, including H36's dashboard queue counts).
   - Jobs and Customers show a banner when capped.
   - Paging is by position, so records changing during a long load are handled four ways:
     - repeats are dropped by `id`, and each page re-reads a 50-row overlap;
@@ -2535,9 +2617,12 @@ three careful passes.
 
 - **For the novel-lexical and non-hooked tool-path gaps** (rows 5 and 6
   above): the exact-SHA `gpt-6-sol` proof on migration diffs is the control that always applies.
-  (**Since 2026-10-19 the CodeRabbit review is advisory and not guaranteed:** it reviews a PR once when
-  marked ready, skips `docs(` titles, and the merge does not wait for it, so "the CodeRabbit review" in
-  the rows below is a best-effort extra layer, not a guaranteed one.) The post-apply sweep predicates are a **partial, conditional** control here,
+  (**Since 2026-10-21 CodeRabbit makes no automatic reviews:** marking a PR ready no longer starts one.
+  Every `supabase/migrations/` change counts as a money PR for the merge gates, so the agent posts
+  `@coderabbitai full review` once on its frozen, green head, and the merge and migration landing gates
+  refuse it until CodeRabbit's "Review completed" status is on that head (rules:
+  `docs/reference/coderabbit-native-review.md`). CodeRabbit is still advisory, so "the CodeRabbit review"
+  in the rows below is a required extra layer, not a security control.) The post-apply sweep predicates are a **partial, conditional** control here,
   not a third guaranteed one, and the condition must be stated rather than implied. They consider such a
   routine at all only because it carries no `ACTOR_MISMATCH` token — but they then fire only on their own
   sinks: the actor parameter near COALESCE/`auth.uid()`/role text, or a `financial_audit_log` write in the
@@ -3050,6 +3135,14 @@ makes the first one reachable more often by emitting several order lines per pro
    Matching the exact quoted line automatically (and splitting a ticket quantity across tiers)
    stays open. A job pointed at another customer's (or a deleted) quote no longer supplies a quoted
    price; the line bills its tier price.
+   **Follow-ups, 2026-10-21 (migration `20261021070000_blend_invoice_approval_binding`, not yet
+   applied when written; live state in `docs/reference/migration-history.md` row 961):** a ticket
+   line with no product is refused instead of billing $0; a grower-share override ticket's $0
+   "included in grower share" chemical takes the same admin approval instead of blocking the
+   invoice; and the approval names the exact $0 lines it was shown, so a re-pick in between is
+   refused ("the $0 lines changed") instead of billing lines the admin never saw; an approval
+   that arrives after every $0 line got a real price is refused the same way. A retry key is now
+   required (`IDEMPOTENCY_KEY_REQUIRED`), so a lost reply can always be replayed.
 
 ## OPEN 2026-08-12 — `20260813060000`'s guarded-function set has a fragile membership rule
 

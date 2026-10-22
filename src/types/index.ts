@@ -1294,8 +1294,8 @@ export interface PurchaseOrder {
   status: POStatus;
   submitted_date: string | null;
   expected_delivery_date: string | null;
-  total_cost: number;
-  total_cost_cents: number;
+  total_cost?: number | null;
+  total_cost_cents?: number | null;
   notes: string | null;
   created_by: string;
   created_at: string;
@@ -1311,8 +1311,8 @@ export interface PurchaseOrderItem {
   product_id: string;
   product_name?: string;
   quantity_ordered: number;
-  unit_cost: number;
-  unit_cost_cents: number;
+  unit_cost?: number | null;
+  unit_cost_cents?: number | null;
   quantity_received: number;
   unit_size: string | null;
   notes: string | null;
@@ -1321,7 +1321,26 @@ export interface PurchaseOrderItem {
   inventory_units_per_supplier_unit_snapshot?: number | null;
   cost_provenance?: 'manual' | 'supplier_observation' | 'legacy' | null;
   cost_snapshot_at?: string | null;
+  /** A non-admin's line: its cost is the catalog cost until an admin confirms or changes it. */
+  cost_needs_review?: boolean;
   product?: Product;
+}
+
+/** One row of the admin-only, append-only purchase-order cost history (20261021140000). */
+export type PurchaseOrderCostChangeSource = 'entered' | 'edited' | 'catalog_default' | 'set_by_admin' | 'confirmed';
+
+export interface PurchaseOrderItemCostChange {
+  id: string;
+  purchase_order_id: string;
+  purchase_order_item_id: string;
+  product_id: string | null;
+  old_unit_cost_cents: number | null;
+  new_unit_cost_cents: number;
+  quantity_received_at_change: number;
+  source: PurchaseOrderCostChangeSource;
+  reason: string | null;
+  changed_by: string | null;
+  created_at: string;
 }
 
 // ── Receiving ─────────────────────────────────────────────────
@@ -1731,6 +1750,8 @@ export interface BlendRecipeItem {
 // Phase 2: Billing / Invoices
 
 export type InvoiceType = 'chemical_sale' | 'field_application' | 'misc_charge' | 'credit_memo';
+/** invoice_items.charge_type (CHECK invoice_items_charge_type_check, mig 20261021050000). */
+export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other';
 export type InvoiceStatus = 'draft' | 'unposted' | 'posted' | 'paid' | 'overdue' | 'voided' | 'cancelled';
 
 export interface Invoice {
@@ -1911,6 +1932,9 @@ export interface InvoiceItem {
   // applied live and the generated schema artifacts are refreshed.
   return_credit_cogs_cents?: number | null;
   return_credit_source_item_id?: string | null;
+  // Goal 3 charge line (mig 20261021050000): set only on a line with no product, quantity 1 and
+  // no cost. Every line of an invoice made from scratch carries one.
+  charge_type?: InvoiceChargeType | null;
   created_at: string;
   updated_at: string;
   product?: Product;
@@ -4129,6 +4153,24 @@ export interface BelowCostApprovalDetail {
   locked_unit_cost_cents: number | null;
   /** Every $0 line one approval covers (blend-ticket invoice, Goal 3); empty when not sent. */
   zero_line_product_names: string[];
+  /**
+   * The same $0 lines as line and product ids, kind and cost. create_invoice_from_blend_ticket
+   * takes them back with the reason, so an approval covers exactly the lines it showed
+   * (20261021070000).
+   */
+  zero_lines: BelowCostZeroLine[];
+}
+
+export interface BelowCostZeroLine {
+  line_id: string;
+  product_id: string;
+  product_name: string | null;
+  /** 'quoted_zero', 'grower_share' or 'quoted_zero_and_grower_share'; null when not sent. */
+  kind: string | null;
+  /** The line's cost per unit in cents (admins only; null when not sent). Sent back as shown. */
+  cost_cents: number | null;
+  /** Opaque fingerprint of the line's rate and the fields' acres and per-acre prices; sent back as shown. */
+  basis: string | null;
 }
 
 export interface BelowCostApprovalError {

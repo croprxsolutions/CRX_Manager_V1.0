@@ -1,4 +1,4 @@
--- Post-apply rollback-only chain for 20261021120000_order_invoice_refuses_field_split:
+-- Post-apply rollback-only chain for 20261021160000_order_invoice_refuses_field_split:
 -- create_invoice_from_order refuses an order whose lines are split across fields, after its
 -- replay lookup.
 --
@@ -133,7 +133,7 @@ BEGIN
   END LOOP;
 
   -- 1. An order split across fields is refused before anything is written. FAIL-FIRST: before
-  --    20261021120000 this call succeeds and bills the ordering customer for the owner's share.
+  --    20261021160000 this call succeeds and bills the ordering customer for the owner's share.
   SELECT string_agg(seqname || '=' || COALESCE(pg_sequence_last_value(to_regclass('public.' || seqname))::text, 'null'), ',' ORDER BY seqname)
     INTO v_seq_before
     FROM unnest(ARRAY['cs_invoice_number_seq', 'mc_invoice_number_seq', 'cm_invoice_number_seq', 'invoice_number_seq']) AS seqname

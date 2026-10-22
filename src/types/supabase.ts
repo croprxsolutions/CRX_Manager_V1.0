@@ -4310,6 +4310,7 @@ export type Database = {
         Row: {
           acres: number | null
           billing_line_id: string | null
+          charge_type: string | null
           cost_cents: number
           created_at: string
           description: string
@@ -4344,6 +4345,7 @@ export type Database = {
         Insert: {
           acres?: number | null
           billing_line_id?: string | null
+          charge_type?: string | null
           cost_cents?: number
           created_at?: string
           description?: string
@@ -4378,6 +4380,7 @@ export type Database = {
         Update: {
           acres?: number | null
           billing_line_id?: string | null
+          charge_type?: string | null
           cost_cents?: number
           created_at?: string
           description?: string
@@ -8216,8 +8219,51 @@ export type Database = {
           },
         ]
       }
+      purchase_order_item_cost_changes: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          id: string
+          new_unit_cost_cents: number
+          old_unit_cost_cents: number | null
+          product_id: string | null
+          purchase_order_id: string
+          purchase_order_item_id: string
+          quantity_received_at_change: number
+          reason: string | null
+          source: string
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          new_unit_cost_cents: number
+          old_unit_cost_cents?: number | null
+          product_id?: string | null
+          purchase_order_id: string
+          purchase_order_item_id: string
+          quantity_received_at_change?: number
+          reason?: string | null
+          source: string
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          new_unit_cost_cents?: number
+          old_unit_cost_cents?: number | null
+          product_id?: string | null
+          purchase_order_id?: string
+          purchase_order_item_id?: string
+          quantity_received_at_change?: number
+          reason?: string | null
+          source?: string
+        }
+        Relationships: []
+      }
       purchase_order_items: {
         Row: {
+          cost_needs_review: boolean
           cost_provenance: string | null
           cost_snapshot_at: string | null
           id: string
@@ -8236,6 +8282,7 @@ export type Database = {
           unit_size: string | null
         }
         Insert: {
+          cost_needs_review?: boolean
           cost_provenance?: string | null
           cost_snapshot_at?: string | null
           id?: string
@@ -8254,6 +8301,7 @@ export type Database = {
           unit_size?: string | null
         }
         Update: {
+          cost_needs_review?: boolean
           cost_provenance?: string | null
           cost_snapshot_at?: string | null
           id?: string
@@ -12710,6 +12758,7 @@ export type Database = {
       }
       create_invoice_from_blend_ticket: {
         Args: {
+          p_approved_zero_lines?: Json
           p_below_cost_reason?: string
           p_blend_ticket_id: string
           p_created_by: string
@@ -13654,6 +13703,16 @@ export type Database = {
           this_season_cents: number
         }[]
       }
+      get_return_line_allowances: {
+        Args: { p_customer_id: string; p_order_id: string }
+        Returns: {
+          order_item_id: string
+          returnable_qty: number
+          share_left_cents: number
+          share_left_qty: number
+          share_mode: boolean
+        }[]
+      }
       get_rup_sales_register: {
         Args: {
           p_compliance_status?: string
@@ -13749,6 +13808,10 @@ export type Database = {
           season_a_val: number
           season_b_val: number
         }[]
+      }
+      get_split_payer_return_orders: {
+        Args: { p_customer_id: string }
+        Returns: string[]
       }
       get_supplier_market_evidence: {
         Args: { p_product_ids?: string[] }
@@ -14833,6 +14896,16 @@ export type Database = {
           p_idempotency_key?: string
           p_override_acres: number
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      set_purchase_order_item_costs: {
+        Args: {
+          p_idempotency_key?: string
+          p_items: Json
+          p_performed_by?: string
+          p_po_id: string
+          p_reason?: string
         }
         Returns: Json
       }

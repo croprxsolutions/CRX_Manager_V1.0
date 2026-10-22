@@ -17,7 +17,10 @@ import {
   purchaseOrderCentsToDollars,
   purchaseOrderLineTotalCents,
   purchaseOrderUnitCostCents,
+  isWholeCentPurchaseOrderCost,
 } from '../../lib/purchaseOrderMoney';
+import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
+import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import {
   buildBulkPOIntentKey,
   buildBulkPOIdempotencyKey,
@@ -43,6 +46,9 @@ interface ParsedPOItem {
   match_confidence: number;
   quantity_ordered: number;
   unit_cost: number;
+  // What the admin typed, kept because a number can silently shorten an over-precise
+  // entry (10.0000000000000001 becomes 10); the text is what gets checked.
+  unit_cost_text?: string;
   unit_size: string;
   notes: string;
 }
@@ -83,11 +89,62 @@ function buildParsedPOIntentKey(po: ParsedPO): string | null {
     items: po.items.map((item) => ({
       productId: item.matched_product?.id ?? null,
       quantityOrdered: item.quantity_ordered,
-      unitCostCents: purchaseOrderUnitCostCents(item.unit_cost),
+      unitCostCents: unitCostCentsOf(item),
       unitSize: item.unit_size,
       notes: item.notes,
     })),
   });
+}
+
+// Purchase cost must be exact whole cents. OCR can read $10.006 off a vendor
+// document; that is refused for the admin to fix, never rounded (Mason's rule).
+const UNIT_COST_REQUIRED_MESSAGE = 'Enter a unit cost (type 0 for no cost).';
+const UNIT_COST_NEGATIVE_MESSAGE = 'Unit cost cannot be negative.';
+const UNIT_COST_TOO_LARGE_MESSAGE = 'This unit cost is too large to save exactly.';
+
+// Why this line's cost cannot be saved, or null when it can. A cleared box is
+// missing, not $0: clearing a refused OCR cost must not import it at zero.
+function unitCostError(item: ParsedPOItem): string | null {
+  if (item.unit_cost_text !== undefined) {
+    const typed = item.unit_cost_text.trim();
+    if (!typed) return UNIT_COST_REQUIRED_MESSAGE;
+    if (typed.startsWith('-')) return UNIT_COST_NEGATIVE_MESSAGE;
+    if (!isWholeCentDollarInput(typed)) return MONEY_PRECISION_MESSAGE;
+    // save_purchase_order receives dollars beside cents and refuses a pair that disagree
+    // (PO_UNIT_COST_CENTS_MISMATCH), so an amount whose dollar number cannot carry its exact
+    // cents (from about $90 billion up, e.g. 90071992547409.91) is refused here, not at save.
+    const typedCents = parseDollarsToCents(typed);
+    if (typedCents === null
+      || purchaseOrderUnitCostCents(purchaseOrderCentsToDollars(typedCents)) !== typedCents) {
+      return UNIT_COST_TOO_LARGE_MESSAGE;
+    }
+  }
+  if (item.unit_cost < 0) return UNIT_COST_NEGATIVE_MESSAGE;
+  return isWholeCentPurchaseOrderCost(item.unit_cost) ? null : MONEY_PRECISION_MESSAGE;
+}
+
+function hasWholeCentUnitCost(item: ParsedPOItem): boolean {
+  return unitCostError(item) === null;
+}
+
+// The cents a line saves and totals. A typed cost comes from its exact text, never from a
+// binary float; unitCostError has already refused any text that is not a plain amount with at
+// most two decimals whose cents its dollar number carries exactly.
+function unitCostCentsOf(item: ParsedPOItem): number {
+  if (item.unit_cost_text !== undefined) {
+    const typedCents = parseDollarsToCents(item.unit_cost_text.trim());
+    if (typedCents !== null) return typedCents;
+  }
+  return purchaseOrderUnitCostCents(item.unit_cost);
+}
+
+// Only a matched, positive-quantity line is saved, so only its cost can block the PO.
+function costBlocksImport(item: ParsedPOItem): boolean {
+  return Boolean(item.matched_product) && item.quantity_ordered > 0 && !hasWholeCentUnitCost(item);
+}
+
+function savedLinesHaveWholeCentCosts(po: ParsedPO): boolean {
+  return !po.items.some(costBlocksImport);
 }
 
 function fuzzyMatchProductWithScore(
@@ -177,6 +234,9 @@ async function parseWithVisionOCR(
 export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
+  // Purchase cost is admin-only (Mason, 2026-10-20, Option B): a non-admin's import carries no
+  // unit cost (the server would overrule it) and each line takes the catalog cost, flagged for an admin.
+  const isAdmin = profile?.role === 'admin';
 
   const [files, setFiles] = useState<File[]>([]);
   const [parsing, setParsing] = useState(false);
@@ -201,17 +261,32 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   const [productSearchOpen, setProductSearchOpen] = useState<{ poIdx: number; itemIdx: number } | null>(null);
   const [productQuery, setProductQuery] = useState('');
 
+  // Only the newest load installs products: the load re-runs when the role changes, so an older
+  // (cost-less) load must not overwrite an admin's costed list (Codex review).
+  const productLoadSeqRef = useRef(0);
   const fetchProducts = async () => {
+    const seq = ++productLoadSeqRef.current;
     const { data, error } = await supabase
       .from('products')
-      .select('*, product_family:product_families(name)')
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
       .eq('is_active', true)
       .order('product_name');
+    if (seq !== productLoadSeqRef.current) return;
     if (error) {
+      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_bulk_po_products' } });
       toast('error', 'Failed to load products');
       return;
     }
-    const prods = (data || []) as unknown as PickerProduct[];
+    let prods: PickerProduct[];
+    try {
+      prods = await withAdminCosts('products', (data || []) as unknown as PickerProduct[], isAdmin);
+    } catch (costErr) {
+      if (seq !== productLoadSeqRef.current) return;
+      Sentry.captureException(costErr, { tags: { source: 'fetch', action: 'load_bulk_po_product_costs' } });
+      toast('error', 'Failed to load products');
+      return;
+    }
+    if (seq !== productLoadSeqRef.current) return;
     setProducts(prods);
     setVendors([...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[]);
   };
@@ -219,7 +294,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   useEffect(() => {
     if (open) fetchProducts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, isAdmin]);
 
   useEffect(() => {
     if (!profile?.id || pendingProfileRef.current === profile.id) return;
@@ -302,7 +377,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   const updateItemField = (
     poIdx: number,
     itemIdx: number,
-    field: 'quantity_ordered' | 'unit_cost' | 'unit_size' | 'notes',
+    field: 'quantity_ordered' | 'unit_cost' | 'unit_cost_text' | 'unit_size' | 'notes',
     value: string | number,
   ) => {
     setParsedPOs((prev) => {
@@ -324,7 +399,11 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
         ...items[itemIdx],
         matched_product: product,
         match_confidence: 1,
-        unit_cost: items[itemIdx].unit_cost || product.current_cost || 0,
+        // A cost the admin typed (an explicit 0, or a cleared box still to fill) is never replaced by
+        // the catalog cost; only an untouched OCR line without a cost takes it.
+        unit_cost: items[itemIdx].unit_cost_text !== undefined
+          ? items[itemIdx].unit_cost
+          : items[itemIdx].unit_cost || product.current_cost || 0,
         unit_size: items[itemIdx].unit_size || product.unit_size || '',
       };
       copy[poIdx] = { ...copy[poIdx], items };
@@ -388,6 +467,13 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
           failedCount++;
           continue;
         }
+        // Only an admin sends cost; a rep's import never carries the OCR cost.
+        if (isAdmin && !savedLinesHaveWholeCentCosts(po)) {
+          const reason = unitCostError(po.items.find(costBlocksImport)!);
+          toast('error', `${po.source_file}: fix the unit cost. ${reason}`);
+          failedCount++;
+          continue;
+        }
         const validItems = po.items.filter((i) => i.matched_product && i.quantity_ordered > 0);
         if (validItems.length === 0) {
           failedCount++;
@@ -420,19 +506,22 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
         if (po.invoice_date) noteParts.push(`Vendor date: ${po.invoice_date}`);
 
         const itemsPayload = validItems.map((item) => {
-          const unitCostCents = purchaseOrderUnitCostCents(item.unit_cost);
-          return {
+          const line = {
             product_id: item.matched_product!.id,
             product_name: item.matched_product!.product_name,
             quantity_ordered: item.quantity_ordered,
-            // OCR may return extra decimal places. Send one canonical whole-cent
-            // value in both representations so the database never sees a raw,
-            // fractional-cent dollar amount that disagrees with our cents math.
-            unit_cost: purchaseOrderCentsToDollars(unitCostCents),
-            unit_cost_cents: unitCostCents,
             unit_size: item.unit_size || null,
             quantity_received: 0,
             notes: item.notes || null,
+          };
+          if (!isAdmin) return line;
+          const unitCostCents = unitCostCentsOf(item);
+          return {
+            ...line,
+            // savedLinesHaveWholeCentCosts refused any cost past two decimals
+            // above, so this conversion is exact; both representations agree.
+            unit_cost: purchaseOrderCentsToDollars(unitCostCents),
+            unit_cost_cents: unitCostCents,
           };
         });
         const { data: poData, error: poError } = await supabase.rpc('save_purchase_order', {
@@ -557,7 +646,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
     const positiveItems = po.items.filter((item) => item.quantity_ordered > 0);
     return intentKey !== null
       && positiveItems.length > 0
-      && positiveItems.every((item) => item.matched_product);
+      && positiveItems.every((item) => item.matched_product)
+      && (!isAdmin || savedLinesHaveWholeCentCosts(po));
   }).length ?? 0;
 
   const filteredProducts = products.filter((p) => {
@@ -653,8 +743,10 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
             {/* Parsed POs accordion */}
             <div className="space-y-3 max-h-[500px] overflow-y-auto">
               {parsedPOs.map((po, poIdx) => {
+                // The total sums every line, so any invalid cost makes it meaningless.
+                const poTotalValid = po.items.every(hasWholeCentUnitCost);
                 const poTotal = purchaseOrderCentsToDollars(po.items.reduce(
-                  (sum, item) => sum + purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
+                  (sum, item) => sum + purchaseOrderLineTotalCents(item.quantity_ordered, purchaseOrderCentsToDollars(unitCostCentsOf(item))),
                   0,
                 ));
                 const hasErrors = po.parse_errors.length > 0;
@@ -685,8 +777,8 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                         <p className="text-xs text-secondary">
                           {po.vendor_name || 'No vendor'} &middot;{' '}
                           {po.invoice_number || 'No ref #'} &middot;{' '}
-                          {po.items.length} item{po.items.length !== 1 ? 's' : ''} &middot;{' '}
-                          {fmt(poTotal)}
+                          {po.items.length} item{po.items.length !== 1 ? 's' : ''}
+                          {isAdmin && <> &middot;{' '}{poTotalValid ? fmt(poTotal) : '—'}</>}
                         </p>
                       </div>
                       {alreadyImported && (
@@ -802,9 +894,9 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                   <th className="px-3 py-2 font-medium">Matched Product</th>
                                   <th className="px-3 py-2 font-medium w-20">Conf.</th>
                                   <th className="px-3 py-2 font-medium w-24">Qty</th>
-                                  <th className="px-3 py-2 font-medium w-28">Unit Cost</th>
+                                  {isAdmin && <th className="px-3 py-2 font-medium w-28">Unit Cost</th>}
                                   <th className="px-3 py-2 font-medium w-20">Size</th>
-                                  <th className="px-3 py-2 font-medium w-28">Total</th>
+                                  {isAdmin && <th className="px-3 py-2 font-medium w-28">Total</th>}
                                   <th className="px-3 py-2 font-medium w-8" />
                                 </tr>
                               </thead>
@@ -863,18 +955,31 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                         className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                                       />
                                     </td>
+                                    {isAdmin && (
                                     <td className="px-3 py-2">
                                       <input
                                         type="number"
-                                        value={item.unit_cost || ''}
-                                        onChange={(e) =>
-                                          updateItemField(poIdx, itemIdx, 'unit_cost', parseFloat(e.target.value) || 0)
-                                        }
+                                        value={item.unit_cost_text || item.unit_cost || ''}
+                                        onChange={(e) => {
+                                          updateItemField(poIdx, itemIdx, 'unit_cost_text', e.target.value);
+                                          updateItemField(poIdx, itemIdx, 'unit_cost', parseFloat(e.target.value) || 0);
+                                        }}
                                         min="0"
                                         step="0.01"
-                                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
+                                        aria-label={`Unit cost for ${item.matched_product?.product_name ?? item.extracted_name}`}
+                                        aria-invalid={costBlocksImport(item)}
+                                        aria-describedby={costBlocksImport(item) ? `po-${poIdx}-item-${itemIdx}-cost-error` : undefined}
+                                        className={`w-full px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green ${
+                                          costBlocksImport(item) ? 'border-red-400' : 'border-gray-200'
+                                        }`}
                                       />
+                                      {costBlocksImport(item) && (
+                                        <p id={`po-${poIdx}-item-${itemIdx}-cost-error`} className="mt-1 text-xs text-red-600">
+                                          {unitCostError(item)}
+                                        </p>
+                                      )}
                                     </td>
+                                    )}
                                     <td className="px-3 py-2">
                                       <input
                                         type="text"
@@ -884,11 +989,15 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                         placeholder="GL"
                                       />
                                     </td>
+                                    {isAdmin && (
                                     <td className="px-3 py-2 font-mono text-sm text-nav-dark">
-                                      {fmt(purchaseOrderCentsToDollars(
-                                        purchaseOrderLineTotalCents(item.quantity_ordered, item.unit_cost),
-                                      ))}
+                                      {hasWholeCentUnitCost(item)
+                                        ? fmt(purchaseOrderCentsToDollars(
+                                          purchaseOrderLineTotalCents(item.quantity_ordered, purchaseOrderCentsToDollars(unitCostCentsOf(item))),
+                                        ))
+                                        : '—'}
                                     </td>
+                                    )}
                                     <td className="px-3 py-2">
                                       <button
                                         onClick={() => removeItem(poIdx, itemIdx)}
@@ -901,17 +1010,19 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                                   </tr>
                                 ))}
                               </tbody>
+                              {isAdmin && (
                               <tfoot>
                                 <tr className="border-t border-gray-200">
                                   <td colSpan={6} className="px-3 py-2 text-right text-xs font-medium text-secondary">
                                     PO Total
                                   </td>
                                   <td className="px-3 py-2 font-mono text-sm font-semibold text-nav-dark">
-                                    {fmt(poTotal)}
+                                    {poTotalValid ? fmt(poTotal) : '—'}
                                   </td>
                                   <td />
                                 </tr>
                               </tfoot>
+                              )}
                             </table>
                           </div>
                         ) : (
@@ -995,7 +1106,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
                       key={p.id}
                       product={p}
                       onClick={() => assignProduct(productSearchOpen.poIdx, productSearchOpen.itemIdx, p)}
-                      trailing={fmt(p.current_cost || 0)}
+                      trailing={isAdmin ? fmt(p.current_cost || 0) : undefined}
                     />
                   ))
                 )}

@@ -1,8 +1,8 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-21 (America/Chicago) for the migration ledger only (read-only
-`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-21 19:15 UTC (2:15 PM Central): 1041 rows / 1034 names, `max(version)` `20261021191058` = `20261021030000_void_order_governed_split_draft_claims` (PR #987); pending candidate `20261021120000_order_invoice_refuses_field_split` (row 962) is not applied. At 05:13 UTC (12:13 AM Central): unchanged since
-the 04:01 UTC read; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
+**Last verified:** 2026-10-22 (America/Chicago) for the migration ledger only (read-only
+`execute_sql` against project `rhyzpcqhnizqbxphqdkr`, 2026-10-22 12:39 UTC (7:39 AM Central): unchanged, and the pending candidate `20261021160000_order_invoice_refuses_field_split` (row 966, PR #1006) is not applied; at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+both unchanged since the 04:01 UTC read; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows,
 `max(version)` `20261021040052` = `20261020210000_blend_ticket_pricing_guards` (Goal 3 blend-ticket pricing, PR #982 merged
 as `948f238ad`), applied 2026-10-21 04:00:52 UTC under the autonomous-landing rule: an order made from a blend ticket
 never prices a product at $0 for a missing tier price, a blend invoice asks staff to pick when the job's quote lists a
@@ -152,6 +152,11 @@ ships or quarterly, whichever comes first.
   On 2026-10-20 (Central) it was brought to `migrations_high_water` `20261021024020` by delta, adding
   `20261019235000_bind_delivery_order_void_replay_receipts_batch3b`, which changed function bodies, grants and one
   trigger function only, none of which the registry tracks.
+  On 2026-10-21 (~20:50 UTC) it was regenerated from live introspection (all six queries) to
+  `migrations_high_water` `20261021204100`, adding `20261020210000_blend_ticket_pricing_guards`,
+  `20261021030000_void_order_governed_split_draft_claims`, `20261021050000_from_scratch_invoices_charge_lines_only`
+  and `20261021070000_blend_invoice_approval_binding`; `below_cost_approvals.operation` now lists
+  `create_invoice_from_blend_ticket`, and the section counts are unchanged (38 status lists, 120 parsed checks).
 - **Customer documents:** the `customer-document-files` Edge Function went live as v1 on
   2026-09-22 UTC, the Documents tab that calls it merged in PR #764 (2026-09-23 UTC, the evening
   of 2026-09-22 Chicago), and migration
@@ -515,8 +520,9 @@ PR #875) and was verified on the live site 2026-10-04.
   automatically — there is no separate deploy step. Since the `protect-main`
   ruleset landed (2026-07-14) nobody can push to `main` directly. Landing
   follows the protected path in `AGENTS.md` and `.claude/commands/ship.md`:
-  branch, PR (opened as a draft, marked ready once frozen so CodeRabbit gives
-  its one advisory review), Luna review rounds, required checks (CodeRabbit
+  branch, PR (opened as a draft, marked ready once frozen; since 2026-10-21
+  CodeRabbit reviews only when an agent requests it, on money or Mason-named
+  PRs), Luna review rounds, required checks (CodeRabbit
   approval no longer required since 2026-10-19), a fresh exact-SHA Sol review run last (every merge, since
   2026-09-26, except a documentation-only change as defined in
   `docs/reference/sol-exempt-paths.md`, since 2026-10-07), then an exact-head merge. The merge is the deploy; a

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261021120000 candidate: create_invoice_from_order refuses an order
+ * Full-chain proof for the 20261021160000 candidate: create_invoice_from_order refuses an order
  * whose lines are split across fields (ORDER_HAS_FIELD_SPLIT), after its replay lookup.
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
  * PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate (the
  * same skips as the other real-schema provers), then:
- *   0. FIDELITY: every body the candidate's preflight pins replayed with its live md5 of 2026-10-21;
+ *   0. FIDELITY: every body the candidate's preflight pins replayed with its live md5 of 2026-10-22 (re-read after PR #1010);
  *   1. BEFORE: the new chain fails first at its step 1 (an allocated order bills one customer), and
  *      every other registered chain covering the two order-invoice RPCs passes;
  *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the file stops at its preflight;
@@ -36,7 +36,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261021120000_order_invoice_refuses_field_split.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261021160000_order_invoice_refuses_field_split.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -184,7 +184,7 @@ function buildContainer() {
 
 // ------------------------------------------------------------------------------------------------
 // FIDELITY: the md5 pins the candidate's preflight checks, read from the candidate file itself.
-// The pins were read from live (read-only pg_proc queries, 2026-10-21); this checks the replay matches.
+// The pins were read from live (read-only pg_proc queries, 2026-10-22, after PR #1010); this checks the replay matches.
 function fidelity() {
   const sql = lf(CANDIDATE).split('$preflight$')[1];
   const contracts = [...sql.matchAll(/md5\(replace\(p\.prosrc, chr\(13\), ''\)\) = '([0-9a-f]{32})'/g)].map((m) => m[1]);
@@ -198,7 +198,7 @@ function fidelity() {
   for (const [sig, pin] of pins) {
     assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('${sig}');`), pin, `${sig} replayed with a body that differs from the live pin`);
   }
-  console.log(`[prover] FIDELITY: all ${pins.length} pinned bodies match the live pins of 2026-10-21`);
+  console.log(`[prover] FIDELITY: all ${pins.length} pinned bodies match the live pins of 2026-10-22`);
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -62,7 +62,7 @@ try {
 if (command.kind === "cancel") {
   if (stillLive) {
     emit([
-      `CODERABBIT SKIP NOT CANCELLED — Mason said "use coderabbit", but a waiver for this session could not be removed${failure ? ` (${failure})` : ""}, so the merge gates may still accept it.`,
+      `CODERABBIT SKIP NOT CANCELLED — Mason said "use coderabbit", but it could not be confirmed that this session's waivers were removed${failure ? ` (${failure})` : " (a waiver file could not be deleted, or the waiver folder could not be found through git)"}, so the merge gates may still accept one.`,
       "Tell him in one line, and request the CodeRabbit review on money PRs anyway: treat every waiver as withdrawn.",
     ].join("\n"));
   }

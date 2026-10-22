@@ -232,8 +232,20 @@ try {
       true, "a withdraw that cannot list a folder reports a waiver still live");
     eq(withdrawCodeRabbitSkip({ dirs: [path.join(temp, "missing", ".claude", "session-state")], sessionId: session }).stillLive,
       false, "a folder that does not exist holds no waiver");
+    // Final Sol review on #1035: no folder resolved (git lookup failed) cannot confirm a cancel.
+    eq(withdrawCodeRabbitSkip({ dirs: [], sessionId: session }).stillLive, true, "no folder to check: NOT confirmed cancelled");
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }), { removed: 1, stillLive: false }, "a normal withdraw removes it");
     eq(files(), [], "no waiver is left behind");
+  }
+  // End to end: "use coderabbit" from a folder outside git cannot reach the waiver folder.
+  {
+    const outside = path.join(temp, "outside");
+    mkdirSync(outside, { recursive: true });
+    recordCodeRabbitSkip({ dirs, sessionId: session, pullRequest: PR, said: "skip coderabbit #1018" });
+    ok(/CODERABBIT SKIP NOT CANCELLED/.test(run("use coderabbit", session, "session_id", outside)),
+      "use coderabbit where the waiver folder cannot be found says NOT CANCELLED");
+    ok(live(), "(the waiver really is still there)");
+    cancelCodeRabbitSkip({ dirs, sessionId: session });
   }
   ok(/CODERABBIT SKIP NOT RECORDED/.test(run("skip coderabbit #1018", "")), "with no session id it says the waiver was not saved");
   ok(!existsSync(path.join(dirs[0], coderabbitSkipFileName("", PR))), "and writes nothing");

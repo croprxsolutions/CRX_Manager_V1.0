@@ -216,6 +216,9 @@ export function mayExist(file, stat = lstatSync) {
 export function withdrawCodeRabbitSkip({ dirs, sessionId, remove, list = readdirSync, exists = (file) => mayExist(file) }) {
   const removed = cancelCodeRabbitSkip({ dirs, sessionId, list, ...(remove ? { remove } : {}) });
   if (!usableSkipSessionId(sessionId)) return { removed, stillLive: false };
+  // No folder to check (the git lookup failed) cannot confirm the waiver is
+  // gone: report it still live, so Mason is told (final Sol review, #1035).
+  if (!Array.isArray(dirs) || dirs.length === 0) return { removed, stillLive: true };
   const mine = sessionFileRe(sessionId);
   const stillLive = (dirs || []).some((dir) => {
     let names;

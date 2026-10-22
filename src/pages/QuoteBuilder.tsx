@@ -135,6 +135,9 @@ interface LocalItem {
   oz_per_acre: number | null;
   price_per_acre: number | null;
   acres: number | null;
+  // Where this page set the acres: a field pick or the Acres box. Not saved, so a loaded line has
+  // neither and a cleared field judges it by value (acres equal to the field's came from it).
+  acres_source?: 'field' | 'typed';
   total_units_needed: number | null;
   unit_size: string | null;
   profit: number;
@@ -160,6 +163,11 @@ type FieldOption = FieldSearchResult & {
   measured_acres: number | null;
   override_acres: number | null;
 };
+
+// Documented field-acre precedence: override → measured → legacy total.
+function fieldEffectiveAcres(field: FieldOption): number | null {
+  return field.override_acres ?? field.measured_acres ?? field.total_acres;
+}
 
 interface ActivePlannedHold {
   product_id: string;
@@ -1377,45 +1385,6 @@ export default function QuoteBuilder() {
     .sort()
     .join(',');
   const unresolvedFieldIds = unresolvedFieldKey ? unresolvedFieldKey.split(',') : [];
-  useEffect(() => {
-    if (!unresolvedFieldKey) {
-      setFieldLoadError(null);
-      return;
-    }
-    let cancelled = false;
-    const ids = unresolvedFieldKey.split(',');
-    const customerIdAtStart = customerIdRef.current;
-    supabase
-      .from('fields')
-      .select(QUOTE_FIELD_SELECT)
-      .in('id', ids)
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          Sentry.captureException(error, { tags: { source: 'fetch', page: 'quote_builder', action: 'load_section_fields' } });
-          setFieldLoadError("This quote's fields could not be loaded. Refresh the page before saving.");
-          return;
-        }
-        const rows = (data || []) as unknown as FieldOption[];
-        if (rows.length > 0) setFields((known) => ({ ...known, ...Object.fromEntries(rows.map((row) => [row.id, row])) }));
-        // The customer may have changed while these were loading: a field that belongs to another
-        // customer is then cleared, as a pick would have cleared it. A plain load never clears a
-        // saved field (CodeRabbit, #1017): a field later moved to another customer stays as saved.
-        const currentCustomerId = customerIdRef.current;
-        const customerChanged = currentCustomerId !== customerIdAtStart;
-        const foreign = new Set(rows
-          .filter((row) => customerChanged && currentCustomerId && row.customer_id !== currentCustomerId)
-          .map((row) => row.id));
-        if (foreign.size > 0) {
-          setSections((prev) => prev.map((sec) => (sec.field_id && foreign.has(sec.field_id) ? { ...sec, field_id: null } : sec)));
-          toast('warning', "The previous customer's field was removed from this quote. Check those lines' acres.");
-        }
-        if (rows.length < ids.length) {
-          setFieldLoadError('A field on this quote no longer exists. Choose the section\'s field again before saving.');
-        }
-      });
-    return () => { cancelled = true; };
-  }, [unresolvedFieldKey, customerIdRef, toast]);
 
   // Repricing lines before products and unit conversions load would convert every unit at a
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
@@ -1441,12 +1410,14 @@ export default function QuoteBuilder() {
     recalcAllForTier(cust.assigned_tier);
     // A section's field must belong to the quote's customer: clear any that does not. A saved
     // field still loading by id is kept; the unresolved-field check blocks saving until it loads.
-    // The lines keep their acres (they are the line's own values, as when a field is cleared by
-    // hand), so the user is told to check them (Luna, #1017).
+    // A field-filled acre count is dropped with the field; acres typed by hand are kept, so the
+    // user is told to check them (Luna, #1017).
     const clearedSections = sections.filter((sec) => sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id);
     if (clearedSections.length > 0) {
       setSections((prev) => prev.map((sec) => (
-        sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id ? { ...sec, field_id: null } : sec
+        sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id
+          ? clearSectionField(sec, fields[sec.field_id])
+          : sec
       )));
       toast('warning', `The previous customer's field was removed from ${clearedSections.map((sec) => sec.section_name || 'a section').join(', ')}. Check those lines' acres.`);
     }
@@ -1549,6 +1520,73 @@ export default function QuoteBuilder() {
     },
     [products, getTierPrice, getConversionFactor]
   );
+
+  // Clearing a section's field drops the acres that field filled in, and keeps acres typed by hand.
+  // A line loaded from the database has no recorded source: acres equal to the field's came from it.
+  // The line keeps its unit price (a customer change has already re-priced every line for the new
+  // tier), and nothing is converted: a rate line with no acres needs nothing (rate × no acres), and
+  // a units line's totals do not use acres, only its per-acre figures do. So this needs neither the
+  // product nor the unit conversions, which may still be loading.
+  const clearSectionField = (sec: LocalSection, field: FieldOption | undefined): LocalSection => {
+    const fieldAcres = field ? fieldEffectiveAcres(field) : null;
+    const filledByField = (item: LocalItem) => item.acres != null && (item.acres_source === 'field'
+      || (item.acres_source === undefined && item.acres === fieldAcres));
+    return {
+      ...sec,
+      field_id: null,
+      items: sec.items.map((item) => {
+        if (!filledByField(item)) return item;
+        const cleared: LocalItem = { ...item, acres: null, acres_source: undefined };
+        return item.calc_mode === 'units_direct'
+          ? { ...cleared, oz_per_acre: null, price_per_acre: null }
+          : { ...cleared, total_units_needed: 0, total_price: 0, profit: 0, net_margin: 0 };
+      }),
+    };
+  };
+  const clearSectionFieldRef = useLatestRef(clearSectionField);
+
+  // Load the saved sections' unresolved fields by id (see unresolvedFieldKey above).
+  useEffect(() => {
+    if (!unresolvedFieldKey) {
+      setFieldLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    const ids = unresolvedFieldKey.split(',');
+    const customerIdAtStart = customerIdRef.current;
+    supabase
+      .from('fields')
+      .select(QUOTE_FIELD_SELECT)
+      .in('id', ids)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          Sentry.captureException(error, { tags: { source: 'fetch', page: 'quote_builder', action: 'load_section_fields' } });
+          setFieldLoadError("This quote's fields could not be loaded. Refresh the page before saving.");
+          return;
+        }
+        const rows = (data || []) as unknown as FieldOption[];
+        if (rows.length > 0) setFields((known) => ({ ...known, ...Object.fromEntries(rows.map((row) => [row.id, row])) }));
+        // The customer may have changed while these were loading: a field that belongs to another
+        // customer is then cleared, as a pick would have cleared it. A plain load never clears a
+        // saved field (CodeRabbit, #1017): a field later moved to another customer stays as saved.
+        const currentCustomerId = customerIdRef.current;
+        const customerChanged = currentCustomerId !== customerIdAtStart;
+        const foreign = new Set(rows
+          .filter((row) => customerChanged && currentCustomerId && row.customer_id !== currentCustomerId)
+          .map((row) => row.id));
+        if (foreign.size > 0) {
+          setSections((prev) => prev.map((sec) => (sec.field_id && foreign.has(sec.field_id)
+            ? clearSectionFieldRef.current(sec, rows.find((row) => row.id === sec.field_id))
+            : sec)));
+          toast('warning', "The previous customer's field was removed from this quote. Check those lines' acres.");
+        }
+        if (rows.length < ids.length) {
+          setFieldLoadError('A field on this quote no longer exists. Choose the section\'s field again before saving.');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [unresolvedFieldKey, customerIdRef, clearSectionFieldRef, toast]);
 
   const recalcAllForTier = (tierNum: number) => {
     setSections((prev) =>
@@ -1712,8 +1750,7 @@ export default function QuoteBuilder() {
     }
     if (field) setFields((known) => ({ ...known, [field.id]: field }));
     updateSectionField(sectionKey, 'field_id', field?.id ?? null);
-    // Documented field-acre precedence: override → measured → legacy total.
-    const effectiveAcres = field?.override_acres ?? field?.measured_acres ?? field?.total_acres;
+    const effectiveAcres = field ? fieldEffectiveAcres(field) : null;
     if (effectiveAcres == null) return true;
 
     setSections((prev) =>
@@ -1726,6 +1763,7 @@ export default function QuoteBuilder() {
             return recalcItem({
               ...item,
               acres: effectiveAcres,
+              acres_source: 'field',
               calc_mode: item.calc_mode === 'units_direct' ? 'units_direct' : 'rate_acres',
             }, tier);
           }),
@@ -4711,6 +4749,7 @@ export default function QuoteBuilder() {
                                     acres: e.target.value
                                       ? parseFloat(e.target.value)
                                       : null,
+                                    acres_source: 'typed',
                                     calc_mode: item.calc_mode === 'units_direct'
                                       ? 'units_direct' // keep units_direct if typing acres alongside units
                                       : 'rate_acres',

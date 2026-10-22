@@ -437,6 +437,44 @@ async function submitOneUnitDraw(quoteId: string) {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
 }
 
+// The by-id read of a saved quote's section fields, held open until the test releases it.
+function holdFieldReadById() {
+  let release!: (result: { data: unknown; error: unknown }) => void;
+  const read = new Promise<{ data: unknown; error: unknown }>((resolve) => { release = resolve; });
+  let readsById = 0;
+  const fieldsChain = () => {
+    let byId = false;
+    const self: Record<string, unknown> = {};
+    for (const m of ['select', 'eq', 'neq', 'or', 'not', 'order', 'limit', 'range', 'ilike', 'is']) self[m] = () => self;
+    self.in = () => { byId = true; readsById += 1; return self; };
+    const settle = () => (byId ? read : Promise.resolve({ data: [], error: null }));
+    self.then = (...args: Parameters<Promise<unknown>['then']>) => settle().then(...args);
+    self.catch = (...args: Parameters<Promise<unknown>['catch']>) => settle().catch(...args);
+    self.finally = (...args: Parameters<Promise<unknown>['finally']>) => settle().finally(...args);
+    return self;
+  };
+  return { fieldsChain, release, read, readsById: () => readsById };
+}
+
+const FAR_FIELD_FARM = { id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true };
+const HOME_QUARTER_OF_CUSTOMER_1 = { id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 80, measured_acres: null, override_acres: null };
+
+// Picks Far Field Farm while the saved field is loading, then lets the field (the original
+// customer's) arrive: the only path that clears a saved section field on open.
+async function pickCustomerThenReleaseField(held: ReturnType<typeof holdFieldReadById>, afterPick?: () => void) {
+  await waitFor(() => expect(held.readsById()).toBeGreaterThan(0));
+  const customerBox = screen.getByRole('combobox', { name: 'Customer' });
+  fireEvent.change(customerBox, { target: { value: 'Far' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+  expect(customerBox).toHaveValue('Far Field Farm');
+  afterPick?.();
+  await act(async () => {
+    held.release({ data: [HOME_QUARTER_OF_CUSTOMER_1], error: null });
+    await held.read;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe('QuoteBuilder', () => {
   it('prefers customer-facing quoting guidance and falls back to the grower description', () => {
     expect(preferredQuoteNotes({ quoting_notes: 'Customer quote guidance', notes: 'Grower copy' }))
@@ -486,31 +524,119 @@ describe('QuoteBuilder', () => {
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining("Check those lines' acres"));
   });
 
+  it('drops the acres a cleared section field filled in when the customer changes, and keeps typed acres', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const typedItem = { ...item, id: 'item-2', sort_order: 1, acres: 15 };
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [section]
+          : table === 'quote_items'
+            ? [item, typedItem]
+            : table === 'customers'
+              ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }]
+              : table === 'fields'
+                ? [{ id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 80, measured_acres: 40, override_acres: null }]
+                : table === 'products'
+                  ? [product]
+                  : [],
+      error: null,
+    }));
+    renderQuoteBuilder(quote.id);
+
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    // The second line's acres are typed by hand, and happen to equal the field's.
+    await waitFor(() => expect(screen.getAllByLabelText('Acres')).toHaveLength(2));
+    fireEvent.change(screen.getAllByLabelText('Acres')[1], { target: { value: '40' } });
+    fireEvent.change(fieldBox, { target: { value: 'Ho' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
+    // The pick fills the empty line's acres from the field (measured before total); typed acres stay.
+    await waitFor(() => expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['40', '40']));
+
+    const customerBox = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customerBox, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+
+    // Home Quarter belongs to another customer: the section drops it and the acres it filled in.
+    await waitFor(() => expect(fieldBox).toHaveValue(''));
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['', '40']);
+  });
+
+  it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const savedItem = { ...item, acres: 80 };
+    const held = holdFieldReadById();
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [{ ...section, field_id: 'field-1' }]
+          : table === 'quote_items'
+            ? [savedItem]
+            : table === 'customers'
+              ? [FAR_FIELD_FARM]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    })));
+    renderQuoteBuilder(quote.id);
+
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    // The customer pick re-prices the line for its tier; clearing the field afterwards must not
+    // re-price it again.
+    const unitPrice = () => (screen.getByLabelText('Price per unit') as HTMLInputElement).value;
+    let priceAfterPick = '';
+    await pickCustomerThenReleaseField(held, () => { priceAfterPick = unitPrice(); });
+    expect(fieldBox).toHaveValue('');
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+    expect(priceAfterPick).not.toBe('');
+    expect(unitPrice()).toBe(priceAfterPick);
+  });
+
+  it('clears the field\'s acres and their total from a rate line whose product did not load', async () => {
+    const { quote, section, item } = makeQuoteFixture('draft', 7);
+    const unreadableItem = {
+      ...item, product: null, calc_mode: 'rate_acres', actual_rate: 1, rate_unit: 'gal',
+      acres: 80, total_units_needed: 80, total_price: 800, profit: 320,
+    };
+    const held = holdFieldReadById();
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [{ ...section, field_id: 'field-1' }]
+          : table === 'quote_items'
+            ? [unreadableItem]
+            : table === 'customers'
+              ? [FAR_FIELD_FARM]
+              : [],
+      error: null,
+    })));
+    renderQuoteBuilder(quote.id);
+
+    await screen.findByRole('combobox', { name: /^Field for/ });
+    expect(screen.getAllByText('$800.00').length).toBeGreaterThan(0);
+    await pickCustomerThenReleaseField(held);
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+    expect(screen.queryByText('$800.00')).not.toBeInTheDocument();
+  });
+
   it('clears a saved section field of the original customer when it loads after another customer was picked', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     const savedSection = { ...section, field_id: 'field-1' };
-    // The by-id read of the saved section's field is held open until the test releases it.
-    let releaseFieldRead!: (result: { data: unknown; error: unknown }) => void;
-    const fieldRead = new Promise<{ data: unknown; error: unknown }>((resolve) => { releaseFieldRead = resolve; });
-    let fieldReadsById = 0;
-    const fieldsChain = () => {
-      let byId = false;
-      const self: Record<string, unknown> = {};
-      for (const m of ['select', 'eq', 'neq', 'or', 'not', 'order', 'limit', 'range', 'ilike', 'is']) self[m] = () => self;
-      self.in = () => { byId = true; fieldReadsById += 1; return self; };
-      const settle = () => (byId ? fieldRead : Promise.resolve({ data: [], error: null }));
-      self.then = (...args: Parameters<Promise<unknown>['then']>) => settle().then(...args);
-      self.catch = (...args: Parameters<Promise<unknown>['catch']>) => settle().catch(...args);
-      self.finally = (...args: Parameters<Promise<unknown>['finally']>) => settle().finally(...args);
-      return self;
-    };
-    mockFrom.mockImplementation((table: string) => (table === 'fields' ? fieldsChain() : buildChain({
+    // The saved line's acres came from its field; the second line's were typed.
+    const fieldItem = { ...item, acres: 80 };
+    const typedItem = { ...item, id: 'item-2', sort_order: 1, acres: 15 };
+    const held = holdFieldReadById();
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
       data: table === 'quotes'
         ? quote
         : table === 'quote_sections'
           ? [savedSection]
           : table === 'quote_items'
-            ? [item]
+            ? [fieldItem, typedItem]
             : table === 'customers'
               ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }]
               : table === 'products'
@@ -521,25 +647,12 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
-    await waitFor(() => expect(fieldReadsById).toBeGreaterThan(0));
-
-    // While the saved field is still loading, the user picks a different customer.
-    const customerBox = screen.getByRole('combobox', { name: 'Customer' });
-    fireEvent.change(customerBox, { target: { value: 'Far' } });
-    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
-    expect(customerBox).toHaveValue('Far Field Farm');
-
-    // The saved field then arrives: it belongs to the ORIGINAL customer, so the section drops it.
-    await act(async () => {
-      releaseFieldRead({
-        data: [{ id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 80, measured_acres: null, override_acres: null }],
-        error: null,
-      });
-      await fieldRead;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    // While the saved field is still loading, the user picks a different customer; the saved
+    // field then arrives: it belongs to the ORIGINAL customer, so the section drops it.
+    await pickCustomerThenReleaseField(held);
     expect(fieldBox).toHaveValue('');
     expect(screen.queryByDisplayValue('Home Quarter')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['', '15']);
   });
 
   it('keeps a saved section field that now belongs to another customer when the quote is only opened (CodeRabbit, #1017)', async () => {

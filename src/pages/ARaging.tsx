@@ -42,6 +42,10 @@ import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparis
 type TabKey = 'aging' | 'statement' | 'season';
 type ARAgingRow = BaseARagingRow & { prepay_balance_cents: number | null; open_credit_cents: number | null };
 
+function statementKey(customerId: string, start: string, end: string): string {
+  return `${customerId}|${start}|${end}`;
+}
+
 export default function ARaging() {
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -90,6 +94,10 @@ export default function ARaging() {
   const [stmtEnd, setStmtEnd] = useState(localToday());
   const [statementData, setStatementData] = useState<CustomerStatementRow[]>([]);
   const [stmtCustomerName, setStmtCustomerName] = useState('');
+  // Which customer and date range the shown statement was loaded for, so an empty one can say
+  // so (and a changed customer or range goes back to the prompt).
+  const [stmtLoadedKey, setStmtLoadedKey] = useState<string | null>(null);
+  const statementIsCurrent = stmtLoadedKey === statementKey(selectedCustomer, stmtStart, stmtEnd);
 
   // Season Comparison
   const currentSeason = computeSeason();
@@ -167,10 +175,12 @@ export default function ARaging() {
       toast('error', 'Failed to load customer statement');
       // Never leave the previous customer's statement under this one's name.
       setStatementData([]);
+      setStmtLoadedKey(null);
       setLoading(false);
       return;
     }
     setStatementData(data ?? []);
+    setStmtLoadedKey(statementKey(selectedCustomer, stmtStart, stmtEnd));
     setTab('statement');
     setLoading(false);
   };
@@ -400,13 +410,16 @@ export default function ARaging() {
     const { data, error } = await fetchCustomerStatement(custId, stmtStart, stmtEnd);
     if (seq !== statementLoadSeq.current) return;
     if (error) {
+      Sentry.captureException(error, { tags: { source: 'fetch', page: 'ar_aging' } });
       toast('error', 'Failed to load statement');
       // Never leave the previous customer's statement under this one's name.
       setStatementData([]);
+      setStmtLoadedKey(null);
       setLoading(false);
       return;
     }
     setStatementData(data ?? []);
+    setStmtLoadedKey(statementKey(custId, stmtStart, stmtEnd));
     setTab('statement');
     setLoading(false);
   };
@@ -988,6 +1001,7 @@ export default function ARaging() {
                 <button
                   onClick={() => {
                     setStatementData([]);
+                    setStmtLoadedKey(null);
                     setTab('aging');
                   }}
                   className="flex items-center gap-1 text-sm text-crx-green hover:underline"
@@ -1047,7 +1061,8 @@ export default function ARaging() {
             </div>
           </Card>
 
-          {statementData.length > 0 && (
+          {/* Shown only for the customer and range it was loaded for: the period line reads the inputs. */}
+          {statementIsCurrent && statementData.length > 0 && (
             <>
               <Card>
                 <div className="flex items-center justify-between">
@@ -1106,11 +1121,15 @@ export default function ARaging() {
             </>
           )}
 
-          {statementData.length === 0 && !loading && selectedCustomer && (
+          {!(statementIsCurrent && statementData.length > 0) && !loading && selectedCustomer && (
             <Card>
               <div className="text-center py-8">
                 <DollarSign className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                <p className="text-secondary">Select a customer and date range, then click Generate Statement.</p>
+                <p className="text-secondary">
+                  {statementIsCurrent
+                    ? 'No transactions in this date range.'
+                    : 'Select a customer and date range, then click Load Transactions.'}
+                </p>
               </div>
             </Card>
           )}

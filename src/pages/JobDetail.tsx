@@ -373,6 +373,8 @@ export default function JobDetail() {
 
   // Lookup data
   const [customers, setCustomers] = useState<Customer[]>([]);
+  // The customers list has been read (or failed): only then is a customer missing from it read by id.
+  const [customersLookupDone, setCustomersLookupDone] = useState(false);
   const [allFields, setAllFields] = useState<Field[]>([]);
   // The field picker and manual field selector derive billable acres from this
   // lookup. Keep those entry points closed until the lookup has succeeded so
@@ -399,6 +401,40 @@ export default function JobDetail() {
   // (/jobs/new?customer_id=…). Only for a NEW job; existing jobs load their own
   // customer in fetchJob. A stale/bogus id simply renders as no selection.
   const [customerId, setCustomerId] = useState(() => (isNew ? (searchParams.get('customer_id') ?? '') : ''));
+  // The job's pricing tier. The customers list holds active customers only, so a job whose customer
+  // is not on it (an inactive customer) reads that customer by id. Until the tier is known, products
+  // are not priced: tier 1 is never assumed for a customer whose row did not load.
+  const listedCustomerTier = customers.find((c) => c.id === customerId)?.assigned_tier;
+  const [unlistedCustomerTier, setUnlistedCustomerTier] = useState<{ customerId: string; tier: number | null } | null>(null);
+  useEffect(() => {
+    if (!customersLookupDone || !customerId || listedCustomerTier != null) return;
+    let cancelled = false;
+    (async () => {
+      let tier: number | null = null;
+      try {
+        const { data, error } = await supabase.from('customers').select('id, assigned_tier').eq('id', customerId).maybeSingle();
+        if (error) Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_job_customer_tier' } });
+        else tier = data?.assigned_tier ?? null;
+      } catch (err) {
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'load_job_customer_tier' } });
+      }
+      if (!cancelled) setUnlistedCustomerTier({ customerId, tier });
+    })();
+    return () => { cancelled = true; };
+  }, [customersLookupDone, customerId, listedCustomerTier]);
+  const customerPricingTier = listedCustomerTier
+    ?? (unlistedCustomerTier?.customerId === customerId ? unlistedCustomerTier.tier : null);
+  // The tier to price products at, or null (with a message) when it is not known.
+  const requirePricingTier = (): 1 | 2 | 3 | null => {
+    if (customerPricingTier === 1 || customerPricingTier === 2 || customerPricingTier === 3) return customerPricingTier;
+    const tierReadFinished = listedCustomerTier != null || unlistedCustomerTier?.customerId === customerId;
+    toast('error', !customerId
+      ? 'Select a customer first: products are priced at the customer\'s tier.'
+      : tierReadFinished
+        ? "This job's customer could not be loaded, so products cannot be priced. Refresh the page and try again."
+        : "This job's customer is still loading. Try again in a moment.");
+    return null;
+  };
   const [jobDate, setJobDate] = useState(localToday());
   const [scheduledTime, setScheduledTime] = useState('');
   const [applicatorId, setApplicatorId] = useState('');
@@ -1685,6 +1721,7 @@ export default function JobDetail() {
     }
     // A failed read clears the list: never keep a previous or partial one.
     setCustomers(custResult.error ? [] : (custResult.data || []) as Customer[]);
+    setCustomersLookupDone(true);
     if (!fieldResult.error) {
       setAllFields((fieldResult.data || []) as Field[]);
       setFieldsLookupReady(true);
@@ -3326,6 +3363,8 @@ export default function JobDetail() {
    */
   const loadRecipeById = async (recipeId: string, mode: 'replace' | 'append') => {
     if (!recipeId) return;
+    const tier = requirePricingTier();
+    if (tier == null) return;
     setLoadingRecipe(true);
     try {
       const { data, error } = await supabase
@@ -3341,8 +3380,6 @@ export default function JobDetail() {
         return;
       }
 
-      const cust = customers.find((c) => c.id === customerId);
-      const tier = (cust?.assigned_tier ?? 1) as 1 | 2 | 3;
       const acres = sumAcres(fieldRows);
       const seeds: ChemRow[] = items.map((item, idx) => {
         const product = allProducts.find((p) => p.id === item.product_id);
@@ -3391,10 +3428,10 @@ export default function JobDetail() {
       toast('error', 'That program has no products.');
       return;
     }
+    const tier = requirePricingTier();
+    if (tier == null) return;
     setLoadingProgram(true);
     try {
-    const cust = customers.find((c) => c.id === customerId);
-    const tier = (cust?.assigned_tier ?? 1) as 1 | 2 | 3;
     const acres = sumAcres(fieldRows);
 
     // Build a product lookup that ALSO includes any since-deactivated products the
@@ -3658,6 +3695,10 @@ export default function JobDetail() {
     setChemRows(updated);
   };
   const updateChemRow = (i: number, key: keyof ChemRow, value: string) => {
+    // Picking a product prices it at the customer's tier: never at a guessed one.
+    const pickedProduct = key === 'product_id' ? allProducts.find((ap) => ap.id === value) : undefined;
+    const pickTier = pickedProduct ? requirePricingTier() : null;
+    if (pickedProduct && pickTier == null) return;
     const updated = [...chemRows];
     // RELABELLING THE STOCK UNIT MUST NOT KEEP THE OLD UNIT'S MONEY (Codex P1, 2026-08-24).
     // The banner's remedy tells the operator to set the Unit AND re-enter its cost/price —
@@ -3711,8 +3752,7 @@ export default function JobDetail() {
         // are NOT inflated. When the stock unit already equals the rate unit (or the
         // units can't be reconciled), this returns the stock unit + per-stock
         // cost/price unchanged — the common case is untouched.
-        const cust = customers.find((c) => c.id === customerId);
-        const tier = cust?.assigned_tier ?? 1;
+        const tier = pickTier;
         const tierPrice = tier === 3 ? p.tier3_price : tier === 2 ? p.tier2_price : p.tier1_price;
         const costPerStockCents = Math.round((p.current_cost || 0) * 100);
         const pricePerStockCents = tierPrice != null ? Math.round(tierPrice * 100) : 0;

@@ -3,7 +3,7 @@
 - Migration `20261022023000_handle_new_user_ignores_signup_role.sql` (migration-history row 969): the
   `handle_new_user` trigger no longer copies the role from signup metadata. Every user the Auth service creates
   (public signup, and the admin API behind the `create-user` Edge Function) starts as an inactive driver whose
-  login is blocked and whose name is its email, whatever name and role it asked for. Before,
+  login is blocked and named `Pending user <id>` (a placeholder that cannot collide with a real name), whatever name and role it asked for. Before,
   re-enabling public signup in the Supabase dashboard would have let anyone sign up as an active admin; that
   dashboard setting was the only protection. Direct SQL as `postgres`/`supabase_admin` (seeds, provers) keeps the
   old behaviour.

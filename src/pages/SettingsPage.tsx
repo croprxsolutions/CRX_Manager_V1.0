@@ -498,7 +498,7 @@ export default function SettingsPage() {
         toast('error', data?.error || `Request failed (${response.status})`);
       } else {
         // handle_new_user (migration 20261022023000) creates every new login as an inactive,
-        // login-blocked driver named by its email, whatever the signup metadata says, so the
+        // login-blocked driver named 'Pending user <id>', whatever the signup metadata says, so the
         // chosen name and role are set and the user is activated here, by an admin. The key is
         // scoped to the new user so a lost reply for one user never replays onto the next.
         const newUserId: string = data.user.id;

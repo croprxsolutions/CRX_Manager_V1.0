@@ -175,13 +175,13 @@ const meta = (role) => JSON.stringify(role ? { full_name: '[PROVER] New', role }
 function probe({ sessionUser, role, prefix = '', after = '' }) {
   const u = newId();
   const r = docker([...psqlArgs('supabase_admin'), '-A', '-t'], { allowFailure: true, input: `BEGIN;
-    ${prefix}
+    ${typeof prefix === 'function' ? prefix(u) : prefix}
     SET LOCAL SESSION AUTHORIZATION ${sessionUser};
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ('${u}', 'new-${u.slice(-4)}@example.invalid', '${meta(role)}'::jsonb);
     RESET SESSION AUTHORIZATION;
     ${after.replaceAll('$NEW', u)}
     SELECT 'RESULT=' || p.role || ':' || p.is_active || ':' || CASE WHEN a.banned_until IS NULL THEN 'open' ELSE 'banned' END
-           || ':' || CASE WHEN p.full_name = p.email THEN 'email' WHEN p.full_name = '[PROVER] New' THEN 'meta' ELSE 'set' END
+           || ':' || CASE WHEN p.full_name = 'Pending user ' || p.id::text THEN 'pending' WHEN p.full_name = p.email THEN 'email' WHEN p.full_name = '[PROVER] New' THEN 'meta' ELSE 'set' END
       FROM public.profiles p JOIN auth.users a ON a.id = p.id WHERE p.id = '${u}';
     ROLLBACK;` });
   const out = `${r.stdout}\n${r.stderr}`;
@@ -253,9 +253,14 @@ function main() {
   console.log('[prover] candidate applied; POSTFLIGHT_OK; owner, ACL and trigger unchanged');
 
   // 4. AFTER.
-  assert.equal(probe({ sessionUser: 'supabase_auth_admin', role: 'admin' }), 'driver:false:banned:email', 'AFTER: a signup with role admin was not defaulted');
-  assert.equal(probe({ sessionUser: 'supabase_auth_admin', role: null }), 'driver:false:banned:email', 'AFTER: a signup with no role was not defaulted');
-  console.log('[prover] AFTER: a signup with role admin (or none) gets an inactive driver, its login banned, named by its email');
+  assert.equal(probe({ sessionUser: 'supabase_auth_admin', role: 'admin' }), 'driver:false:banned:pending', 'AFTER: a signup with role admin was not defaulted');
+  assert.equal(probe({ sessionUser: 'supabase_auth_admin', role: null }), 'driver:false:banned:pending', 'AFTER: a signup with no role was not defaulted');
+  console.log('[prover] AFTER: a signup with role admin (or none) gets an inactive driver, its login banned, named "Pending user <id>"');
+  // An existing profile already carries the new user's email as its name (trusted direct insert,
+  // as supabase_admin): the placeholder must not collide with it (uq_profiles_full_name_ci).
+  const emailTaken = (u) => `INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ('7a530000-0000-4000-8000-0000000000e1', 'taken@example.invalid', '{"full_name":"new-${u.slice(-4)}@example.invalid","role":"driver"}'::jsonb);`;
+  assert.equal(probe({ sessionUser: 'supabase_auth_admin', role: 'admin', prefix: emailTaken }), 'driver:false:banned:pending', 'AFTER: a signup whose email is another profile\'s name was not created');
+  console.log('[prover] AFTER: a signup whose email equals an existing profile\'s name is still created (no name collision)');
   const selfUpdate = selfTry('7a530000-0000-4000-8000-0000000000f1', "UPDATE public.profiles SET is_active = true, role = 'admin' WHERE id = '7a530000-0000-4000-8000-0000000000f1';");
   assert.notEqual(selfUpdate.status, 0, 'the new user activated itself');
   assert.match(selfUpdate.stderr, /PROFILE_ROLE_LOCK/, `self-activation refused for the wrong reason: ${selfUpdate.stderr}`);
@@ -276,7 +281,7 @@ function main() {
     after: asUser(ADMIN, `DO $dup$ BEGIN PERFORM public.admin_update_profile('$NEW', 'sales_rep', '[PROVER] Admin', NULL, true, NULL, 'dup:$NEW');
       EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'DUP_REFUSED %: %', SQLSTATE, SQLERRM; END $dup$;`) });
   assert.match(lastOut, /DUP_REFUSED/, `ADMIN CREATE: a duplicate name was not refused:\n${lastOut}`);
-  assert.equal(dup, 'driver:false:banned:email', `ADMIN CREATE: a refused duplicate name left ${dup}`);
+  assert.equal(dup, 'driver:false:banned:pending', `ADMIN CREATE: a refused duplicate name left ${dup}`);
   console.log(`[prover] ADMIN CREATE: a duplicate name is refused and the login stays inactive and banned (${/DUP_REFUSED[^\n]*/.exec(lastOut)[0].slice(0, 160)})`);
 
   // 6. RE-APPLY.
@@ -296,6 +301,15 @@ function main() {
     assert.equal(got, 'admin:true:open:meta', `MUTATION ${label}: expected the gap to reopen, got ${got}`);
     console.log(`[prover] MUTATION: when the gate ${label}, the signup becomes an active admin again`);
   }
+
+  const placeholder = "VALUES (NEW.id, NEW.email, 'Pending user ' || NEW.id::text, 'driver', false);";
+  assert.ok(body().includes(placeholder), 'placeholder line not found');
+  let collided = '';
+  try {
+    probe({ sessionUser: 'supabase_auth_admin', role: 'admin', prefix: (u) => body().replace(placeholder, "VALUES (NEW.id, NEW.email, NEW.email, 'driver', false);") + emailTaken(u) });
+  } catch (e) { collided = String(e.message); }
+  assert.match(collided, /uq_profiles_full_name_ci/, `MUTATION email-as-name: expected the name collision to abort the signup, got: ${collided.slice(0, 300)}`);
+  console.log('[prover] MUTATION: with the email as the placeholder name, that signup aborts on uq_profiles_full_name_ci');
 
   console.log('HANDLE_NEW_USER_SIGNUP_ROLE_PROOF_PASS');
 }

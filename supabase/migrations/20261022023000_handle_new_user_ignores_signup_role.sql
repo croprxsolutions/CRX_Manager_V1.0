@@ -11,7 +11,7 @@
 --
 -- HOW: every user the Auth service creates (public signup, OTP or OAuth signup, and the admin API
 --   that the `create-user` Edge Function calls) now gets role 'driver', is_active = false, its
---   email as its name, and a login ban (auth.users.banned_until, as deactivation sets it), whatever
+--   placeholder name 'Pending user <id>', and a login ban (auth.users.banned_until, as deactivation sets it), whatever
 --   the metadata says (Supabase dashboard Add/Invite user lands here too). The ban refuses later
 --   sign-ins and refreshes; a token issued during the signup request itself (autoconfirm on)
 --   lives until it expires, so the inactive profile is the real boundary. An inactive profile passes none of is_admin / is_sales_rep /
@@ -40,7 +40,7 @@
 --   function's OID, owner (postgres) and ACL.
 --
 -- DEPLOY WINDOW: between this apply and the Settings page deploy, a user an admin creates arrives
---   as an inactive driver named by email; the admin opens the user, sets name and role and marks
+--   as an inactive driver named 'Pending user <id>'; the admin opens the user, sets name and role and marks
 --   them active.
 --
 -- ORDERING: lands right after #1018 (20261022022000, row 968) and before 025000 (swap A), 030000 (cost lock B),
@@ -109,11 +109,12 @@ BEGIN
       COALESCE(NEW.raw_user_meta_data->>'role', 'sales_rep')
     );
   ELSE
-    -- The name is the email, not the metadata name: a stranger must not be able to pose as an
-    -- expected hire, or take a real person's name (profile names are unique). Settings sets the
-    -- real name when the admin activates the user.
+    -- A placeholder name derived from the new id, not the metadata name: a stranger must not be
+    -- able to pose as an expected hire or take a real person's name, and the placeholder must not
+    -- collide with any existing name (uq_profiles_full_name_ci is global and case-insensitive; an
+    -- email can equal another profile's name). Settings sets the real name on activation.
     INSERT INTO profiles (id, email, full_name, role, is_active)
-    VALUES (NEW.id, NEW.email, NEW.email, 'driver', false);
+    VALUES (NEW.id, NEW.email, 'Pending user ' || NEW.id::text, 'driver', false);
 
     -- Ban the login too, as deactivation does (_sync_auth_access_on_profile_active fires on
     -- UPDATE only): later sign-ins and token refreshes are refused. A token the Auth service
@@ -148,7 +149,7 @@ BEGIN
     FROM pg_proc p WHERE p.oid = to_regprocedure('public.handle_new_user()');
   IF NOT v_fn.prosecdef OR v_fn.owner <> 'postgres'
      OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
-     OR v_fn.body_md5 IS DISTINCT FROM '23b1f9dc854abc9af009d4f647712d71' THEN
+     OR v_fn.body_md5 IS DISTINCT FROM 'b7d773d2fd6fe01f733bf97a00228ac9' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: handle_new_user is not the expected body/attributes';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK: handle_new_user ignores signup metadata role (acl %)', v_fn.acl;

@@ -315,18 +315,27 @@ BEGIN
     SELECT 1 FROM public.profiles
      WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')
   ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
-  -- Only orders whose split invoice for this customer the caller may read under invoices_select
-  -- (an admin, or the rep who created it or is its salesperson).
+  -- Only orders on which every active (posted, overdue or paid) invoice billing this customer is
+  -- one the caller may read under invoices_select (an admin, or the rep who created it or is its
+  -- salesperson); a voided or deleted invoice the caller can read grants nothing.
   RETURN QUERY
     SELECT DISTINCT p.order_id
       FROM public.split_invoice_provenance p
       JOIN public.orders o ON o.id = p.order_id
-      JOIN public.invoices i ON i.id = p.invoice_id
      WHERE p.customer_id = p_customer_id
        AND o.customer_id IS DISTINCT FROM p_customer_id
        AND o.deleted_at IS NULL
        AND public._return_customer_is_split_payer(p.order_id, p_customer_id)
-       AND (public.is_admin() OR i.created_by = auth.uid() OR i.salesman_id = auth.uid());
+       AND (public.is_admin() OR NOT EXISTS (
+         SELECT 1 FROM public.invoices hidden
+          WHERE hidden.order_id = p.order_id
+            AND hidden.customer_id = p_customer_id
+            AND hidden.invoice_type <> 'credit_memo'
+            AND hidden.deleted_at IS NULL
+            AND hidden.status IN ('posted', 'overdue', 'paid')
+            AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                     OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+       ));
 END;
 $function$;
 
@@ -354,9 +363,10 @@ BEGIN
   ) THEN
     RETURN;
   END IF;
-  -- A share-mode allowance is derived from the returner's invoices, so it is shown only to a
-  -- caller who may read one of them under invoices_select (an admin, or the rep who created it or
-  -- is its salesperson); anyone else gets nothing for a split order, as the invoice is hidden.
+  -- A share-mode allowance is derived from the returner's active invoices on this order, so it is
+  -- shown only to a caller who may read every one of them under invoices_select (an admin, or the
+  -- rep who created it or is its salesperson); a voided or deleted invoice the caller can read
+  -- grants nothing, and anyone else gets nothing for a split order.
   IF NOT public.is_admin()
      AND (
        v_order_customer_id IS DISTINCT FROM p_customer_id
@@ -366,13 +376,25 @@ BEGIN
           WHERE soi.order_id = p_order_id AND ss.share_mode
        )
      )
-     AND NOT EXISTS (
-       SELECT 1 FROM public.invoices vi
-        WHERE vi.order_id = p_order_id
-          AND vi.customer_id = p_customer_id
-          AND vi.invoice_type <> 'credit_memo'
-          AND vi.deleted_at IS NULL
-          AND (vi.created_by = auth.uid() OR vi.salesman_id = auth.uid())
+     AND (
+       NOT EXISTS (
+         SELECT 1 FROM public.invoices vi
+          WHERE vi.order_id = p_order_id
+            AND vi.customer_id = p_customer_id
+            AND vi.invoice_type <> 'credit_memo'
+            AND vi.deleted_at IS NULL
+            AND vi.status IN ('posted', 'overdue', 'paid')
+       )
+       OR EXISTS (
+         SELECT 1 FROM public.invoices hidden
+          WHERE hidden.order_id = p_order_id
+            AND hidden.customer_id = p_customer_id
+            AND hidden.invoice_type <> 'credit_memo'
+            AND hidden.deleted_at IS NULL
+            AND hidden.status IN ('posted', 'overdue', 'paid')
+            AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                     OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+       )
      ) THEN
     RETURN;
   END IF;

@@ -17,6 +17,7 @@
   return only its own billed share; a return credit memo passes the split-order invoice guard only
   inside the credit's claim (before this, no return on a split order could be credited). The Returns
   screen lists the orders a customer was split-billed on and caps each line, through two read-only
-  server lookups (right for sales reps too). Proof:
+  server lookups, which show a sales rep a split order only when the rep may read every active invoice
+  billing that customer there (as `invoices_select` allows), and an admin always. Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs` over
   `smoke-split-payer-return-credit.sql`, plus `src/__tests__/splitPayerReturnMigration.test.ts`.

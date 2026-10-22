@@ -419,7 +419,8 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
       return;
     }
 
-    if (catalogLoadFailed) {
+    // A recovered uncertain attempt re-sends its frozen payload and does not read the catalog.
+    if (catalogLoadFailed && !attemptUncertain) {
       setError('Failed to load Products. Close this window and open it again to retry.');
       return;
     }
@@ -894,7 +895,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         <Button variant="secondary" onClick={onComplete}>
           Cancel
         </Button>
-        <Button onClick={handleSave} disabled={saving || catalogLoadFailed}>
+        <Button onClick={handleSave} disabled={saving || (catalogLoadFailed && !attemptUncertain)}>
           <Save className="h-4 w-4" />
           {saving ? 'Saving...' : attemptUncertain ? 'Retry Same Ticket' : 'Create Ticket'}
         </Button>

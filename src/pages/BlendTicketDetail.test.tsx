@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockFrom, mockRpc, mockToast, mockNavigate, mockStorageFrom, mockCreateSignedUrl, mockInvoke, mockResetKey, mockResetKeyFor } = vi.hoisted(() => ({
   mockResetKey: vi.fn(),
@@ -1300,5 +1300,64 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     // The reload failed, so the page still shows the old ticket: an edit must count as unsaved.
     fireEvent.change(screen.getByPlaceholderText('Add notes...'), { target: { value: 'edited after a failed reload' } });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled());
+  });
+});
+
+describe('BlendTicketDetail — stale load guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    mockStorageFrom.mockReturnValue({ createSignedUrl: mockCreateSignedUrl });
+  });
+
+  it('a slower load of the previous ticket never replaces the ticket the route now shows', async () => {
+    const ticketA = { ...baseTicket, id: 'tk-A', ticket_number: 'BT-AAAA', customer_id: 'cust-A', customer: { id: 'cust-A', farm_name: 'Farm Alpha A' } };
+    const ticketB = { ...baseTicket, id: 'tk-B', ticket_number: 'BT-BBBB', customer_id: 'cust-B', customer: { id: 'cust-B', farm_name: 'Farm Bravo B' } };
+    let releaseTicketA: (() => void) | undefined;
+    const ticketAHeld = new Promise<{ data: unknown; error: unknown }>((resolve) => {
+      releaseTicketA = () => resolve({ data: ticketA, error: null });
+    });
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') {
+        // The read is answered by the id it was asked for: A waits, B answers at once.
+        let requestedId = '';
+        const chain = buildChain({ data: null, error: null });
+        chain.eq = (column: string, value: string) => {
+          if (column === 'id') requestedId = value;
+          return chain;
+        };
+        const answer = () => (requestedId === 'tk-A' ? ticketAHeld : Promise.resolve({ data: ticketB, error: null }));
+        chain.then = (onFulfilled?: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) => answer().then(onFulfilled, onRejected);
+        return chain;
+      }
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/blend-tickets/tk-A']}>
+        <Link to="/blend-tickets/tk-B">Open ticket B</Link>
+        <Routes>
+          <Route path="/blend-tickets/:id" element={<BlendTicketDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('blend_tickets'));
+
+    // The route moves to ticket B while A's read is still outstanding; B loads and shows.
+    fireEvent.click(screen.getByRole('link', { name: 'Open ticket B' }));
+    expect(await screen.findByRole('heading', { name: 'BT-BBBB' })).toBeInTheDocument();
+    expect(await screen.findByRole('combobox', { name: 'Customer' })).toHaveValue('Farm Bravo B');
+
+    // Now A's slower read finishes. It must not overwrite B.
+    await act(async () => {
+      releaseTicketA!();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(screen.getByRole('heading', { name: 'BT-BBBB' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'BT-AAAA' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('Farm Bravo B');
   });
 });

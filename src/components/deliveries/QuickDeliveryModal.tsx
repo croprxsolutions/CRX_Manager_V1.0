@@ -150,7 +150,7 @@ export default function QuickDeliveryModal({
       }
     };
     fetchData();
-  }, [open, profile, toast]);
+  }, [open, profile?.id, profile?.role, toast]);
 
   // U9 (#14): stock numbers for the product picker — a SEPARATE non-blocking
   // lookup so the modal (and its tests) never wait on it. Main Warehouse only

@@ -39,6 +39,9 @@ import QuotePriceChoiceModal from '../components/blendtickets/QuotePriceChoiceMo
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
+// Thrown inside loadTicketData when a newer load has started; it is not an error.
+const STALE_TICKET_LOAD = Symbol('stale blend ticket load');
+
 export function BlendTicketDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -79,6 +82,7 @@ export function BlendTicketDetail() {
   const [hasApplicationRecord, setHasApplicationRecord] = useState(false);
   const [hasActiveInvoice, setHasActiveInvoice] = useState(false);
   const initialLoadDone = useRef(false);
+  const loadSeqRef = useRef(0);
   const hasUnsavedChanges = isDirty || fieldsDirty || saveHydrationRequired;
   const blocker = useUnsavedChanges(hasUnsavedChanges);
 
@@ -214,6 +218,12 @@ export function BlendTicketDetail() {
     && !hasUnsavedChanges;
 
   const loadTicketData = useCallback(async () => {
+    // Only the newest load may apply its results: a slower load of the previous ticket
+    // (the route id changed, or an earlier refresh) must never overwrite this one.
+    const seq = ++loadSeqRef.current;
+    const ensureCurrent = () => {
+      if (seq !== loadSeqRef.current) throw STALE_TICKET_LOAD;
+    };
     const wasTrackingDirty = initialLoadDone.current;
     // Every call is a server hydration (initial load or an explicit refetch),
     // not a user edit. Suppress the form/products effects until all hydrated
@@ -281,6 +291,7 @@ export function BlendTicketDetail() {
           .or('status.is.null,status.not.in.(voided,cancelled)')
           .limit(1)
       ]);
+      ensureCurrent();
 
       if (ticketResult.error) throw ticketResult.error;
       if (imagesResult.error) throw imagesResult.error;
@@ -298,6 +309,7 @@ export function BlendTicketDetail() {
           .from('profile_public_view')
           .select('id, full_name')
           .in('id', profIds);
+        ensureCurrent();
         ((profRows || []) as { id: string; full_name: string }[]).forEach((p: { id: string; full_name: string }) => {
           profMap[p.id] = p;
         });
@@ -339,6 +351,7 @@ export function BlendTicketDetail() {
           `${unavailableImageCount} ticket image${unavailableImageCount === 1 ? '' : 's'} could not be loaded. The rest of the ticket is still available.`,
         );
       }
+      ensureCurrent();
       setImages(imagesWithSignedUrls);
       const hydratedProducts = (productsResult.data || []) as BlendTicketProduct[];
       hydratedStateRef.current.products = hydratedProducts;
@@ -371,6 +384,7 @@ export function BlendTicketDetail() {
       setSelectedJobId(ticketResult.data.job_id || '');
       // Fetch application services for dropdown
       const { data: svcData } = await supabase.from('application_services').select('id, name, vehicle_id').eq('is_active', true).order('sort_order');
+      ensureCurrent();
       setAppServices(svcData || []);
 
       // Load existing blend_ticket_fields
@@ -379,6 +393,7 @@ export function BlendTicketDetail() {
         .select('field_id, customer_id, planned_acres, sort_order')
         .eq('blend_ticket_id', id!)
         .order('sort_order');
+      ensureCurrent();
       if (btfError) throw btfError;
       setTicketFields((btfData || []).map((btf: { field_id: string; customer_id: string | null; planned_acres: number | null }) => {
           const f = allFields.find(af => af.id === btf.field_id);
@@ -416,6 +431,7 @@ export function BlendTicketDetail() {
           p_ticket_number: ticketResult.data.ticket_number,
           p_ticket_date: ticketResult.data.ticket_date,
         });
+        ensureCurrent();
         if (dupeError) throw dupeError;
         assertRpcResult(dupeData, 'check_duplicate_blend_ticket');
         const otherDupes = (dupeData || []).filter((d: { id: string }) => d.id !== ticketResult.data.id);
@@ -446,7 +462,8 @@ export function BlendTicketDetail() {
               mi.forEach(m => { ct[m.order_id] = (ct[m.order_id] || 0) + 1; });
               const best = Object.entries(ct).sort((a, b) => b[1] - a[1])[0];
               const bo = co.find(o => o.id === best[0]);
-              if (bo) setSuggestedOrder({ id: bo.id, order_number: bo.order_number, matchCount: best[1] });
+              ensureCurrent();
+            if (bo) setSuggestedOrder({ id: bo.id, order_number: bo.order_number, matchCount: best[1] });
             }
           }
         }
@@ -454,13 +471,14 @@ export function BlendTicketDetail() {
         // Non-critical: suggestion just won't appear
       }
     } catch (error) {
+      if (error === STALE_TICKET_LOAD) return;
       // A failed refetch did not replace local state, so preserve the prior
       // tracking mode and keep subsequent user edits protected.
       initialLoadDone.current = wasTrackingDirty;
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'blend_ticket_detail' } });
       toast('error', 'Failed to load blend ticket. Please try again.');
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [id, toast]);
 
@@ -1610,7 +1628,7 @@ export function BlendTicketDetail() {
       </div>
 
       <fieldset
-        disabled={contentLocked}
+        disabled={contentLocked || catalogLoadFailed}
         className="m-0 min-w-0 border-0 p-0"
         aria-label="Ticket products editor"
       >

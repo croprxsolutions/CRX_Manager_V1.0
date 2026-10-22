@@ -40,11 +40,12 @@ bookkeeper ([OWNER: Mason to name the bookkeeper]).
 
 **When:** Phase D requires every one of the first 30 days to be reconciled, so the sheet has one row
 per calendar day, January 1 through January 30, including weekends and holidays. **Draft
-suggestion:** run it each morning the office is open, by 10 AM Central, for the day before. After a
-closed day, the next morning's check covers each closed day on its own row. The first check is the
-morning of January 2 (a Saturday), so someone has to run it that day, or it waits for Monday,
-January 4, and covers January 1–3 separately (question 5 below). Roughly 30–45 minutes once
-practiced; the December rehearsal should time it.
+suggestion:** run it **every** morning by 10 AM Central, for the day before, starting Saturday,
+January 2. CRX runs in a web browser, so a weekend check can be done from home. Waiting until Monday
+is weaker: the Data Integrity screens and the A/R strip show only the current state, and CRX keeps
+no saved end-of-day balances. A problem that appeared and was corrected over the weekend could leave
+no trace on Monday (question 5 below). Roughly 30–45 minutes once practiced; the December rehearsal
+should time it.
 
 **Needs:** an admin login. The Data Integrity, A/R Workspace and Prepay screens are admin-only.
 
@@ -111,6 +112,12 @@ Then explain the change from yesterday. **Draft suggestion** (the bookkeeper set
 
 Payment money that wasn't applied to an invoice doesn't lower Total Owed, so it's tracked separately
 (Step 4). If it doesn't add up, the gap gets a Difference Log row.
+
+**Known gap: there's no screen for "invoices posted yesterday".** **Invoices — Chemical** shows and
+exports each invoice's **invoice date**, not the day it was posted. A draft created on Monday and
+posted on Tuesday counts in Tuesday's Total Owed but is filed under Monday. **Draft suggestion:**
+until a posting date is shown (question 9 below), whoever posts invoices writes each day's posted
+invoice numbers and totals on a posting list, and Step 3 uses that list.
 
 **The strip shows live balances, not last night's closing balances.** An invoice posted or a payment
 applied this morning, before the check, is already in today's numbers. **Draft suggestion:** write
@@ -181,7 +188,10 @@ The way this step works isn't decided yet. Mason decides at the 2026-12-15 check
 decision 3):
 
 - **If the QuickBooks Desktop sync is live (To-Do 14.2):** yesterday's sync finished with no failed
-  or unresolved entries. Its counts and totals of invoices, payments and credits match Steps 3–5.
+  or unresolved entries. Its counts and totals of invoices, payments and credits match CRX's for the
+  same day. Comparing balances alone isn't enough: a missing invoice and a doubled one can cancel out.
+  So the sheet also records the count and total of invoices posted (from the posting list in Step 3),
+  of payments recorded (Step 4) and of credits issued (Step 5).
 - **If QuickBooks is entered by hand (To-Do 14.3):** this branch can't be used until 14.3 is written
   and rehearsed. 14.3 requires a transaction-level CRX report, and written steps for entering
   invoices, payments **with their allocations**, credits, prepay and corrections by hand. Each one is
@@ -205,8 +215,9 @@ chosen.
 
 **Pilot Daily Check sheet columns (draft):** date · run by · time · Integrity discrepancies ·
 Cleanup counts (alerts / negative stock / over-received / deliveries without invoices / phantom
-rows) · Total Owed · Unused Prepay · Credit Memos · Net Position · payments recorded (count and
-total) · deposit total · QuickBooks status · paper records not yet entered · all clear? · Difference
+rows) · Total Owed · Unused Prepay · Credit Memos · Net Position · invoices posted (count and
+total) · payments recorded (count and total) · credits issued (count and total) · deposit total ·
+QuickBooks status · paper records not yet entered · all clear? · Difference
 Log rows opened · reviewed by.
 
 **Pilot Difference Log columns (draft):** number · date found · found by · what is different
@@ -221,14 +232,17 @@ app fix) · date fixed · checked by.
 3. Is 10 AM Central the right deadline?
 4. Where should the sheet and the log live: a shared spreadsheet, paper in a binder, or somewhere
    else?
-5. Does someone run the check on Saturdays and holidays (starting Saturday, January 2), or does the
-   next open morning cover each closed day on its own row?
+5. Does someone run the check on Saturdays, Sundays and holidays (starting Saturday, January 2)?
+   If not, accept that a weekend problem fixed before Monday may leave no record.
 6. Should the missing prepay check (To-Do 6.8) be built before January 1? It's ranked SHOULD
    today. Without it, Step 5 is a manual spot check.
 7. The payment-date fix (To-Do 6.7) is ranked MUST but not built. Until it is, is "enter payments
    before 6 PM Central" an acceptable rule for the office?
 8. Should the Deliveries screen get a "completed on" filter before the pilot? It would replace the
    spreadsheet step in Step 6. A saved end-of-day balance would likewise make Step 3 exact.
+9. Should the invoice list show **when** each invoice was posted, with a filter, before the pilot?
+   Today it shows only the invoice date, so Steps 3 and 8 have no screen for "invoices posted
+   yesterday".
 
 ---
 
@@ -288,7 +302,7 @@ number; write VOID across a spoiled form and keep it.
 |---|---|
 | Recording payments | number, date received, customer, amount, check number or transfer reference, invoices it pays (and amounts), who received it |
 | Completing deliveries | number, customer, delivery number if known, products and quantities, date, signer's printed name and signature, driver. Photograph it. (The Goal 5 signed paper ticket.) |
-| Posting or creating invoices | number, customer, delivery or order it bills, lines, quantities, prices, total, who prepared it |
+| Posting or creating invoices | number, customer, delivery or order it bills, lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. |
 | Issuing credits or returns | number, customer, original invoice, products and quantities returned, reason, amount, who approved it |
 | Receiving stock | number, supplier, PO number, products, quantities, package sizes, lot numbers, date, who received it |
 

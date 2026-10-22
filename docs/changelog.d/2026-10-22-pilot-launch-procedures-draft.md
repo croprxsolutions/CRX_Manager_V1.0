@@ -29,6 +29,12 @@
   CRX can't search a paper ticket number, so an outage ticket list guards against double entry.
   **New Delivery** needs an existing order, so a phone order taken during an outage is entered as an
   order first.
+- Third Codex GitHub App round (four findings, all confirmed and fixed). The daily check runs every
+  calendar day, because the integrity screens and A/R strip keep no history. The invoice list shows
+  only the invoice date, not the posting date, so posted invoices are written on a posting list (and
+  a question asks Mason about a posting-date filter). The sheet records counts and totals for the
+  QuickBooks comparison. Pausing invoice creation also pauses delivery completion, which creates
+  invoices automatically.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

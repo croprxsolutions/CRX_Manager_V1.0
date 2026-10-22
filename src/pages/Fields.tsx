@@ -89,6 +89,14 @@ export default function Fields() {
     // assertRpcResult coverage check still pairs the rpc capture above with its assert).
     const acreRes = await supabase.from('fields').select('id, override_acres, measured_acres, acres_source');
     if (seq !== loadSeqRef.current) return false;
+    if (acreRes.error) {
+      // Without these columns the list would quietly show legacy acres instead of the acres that bill.
+      Sentry.captureException(acreRes.error, { tags: { source: 'fetch', action: 'load_field_acres' } });
+      toast('error', 'Failed to load fields. Please try again.');
+      setLoadError(true);
+      setLoading(false);
+      return false;
+    }
     const acreMap = new Map<string, { override_acres: number | null; measured_acres: number | null; acres_source: Field['acres_source'] }>();
     if (!acreRes.error && acreRes.data) {
       for (const a of acreRes.data as Array<{ id: string; override_acres: number | null; measured_acres: number | null; acres_source: Field['acres_source'] }>) {

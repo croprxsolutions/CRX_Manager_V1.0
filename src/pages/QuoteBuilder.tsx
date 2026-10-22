@@ -1676,12 +1676,18 @@ export default function QuoteBuilder() {
     );
   };
 
-  const handleSectionFieldChange = (sectionKey: string, field: FieldOption | null) => {
+  // Returns false to refuse the pick (the picker keeps its label): a field's acres reprice the
+  // section's lines, which must wait for products and unit conversions (CodeRabbit, #1017).
+  const handleSectionFieldChange = (sectionKey: string, field: FieldOption | null): boolean => {
+    if (field && repriceBlocked) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return false;
+    }
     if (field) setFields((known) => ({ ...known, [field.id]: field }));
     updateSectionField(sectionKey, 'field_id', field?.id ?? null);
     // Documented field-acre precedence: override → measured → legacy total.
     const effectiveAcres = field?.override_acres ?? field?.measured_acres ?? field?.total_acres;
-    if (effectiveAcres == null) return;
+    if (effectiveAcres == null) return true;
 
     setSections((prev) =>
       prev.map((section) => {
@@ -1699,6 +1705,7 @@ export default function QuoteBuilder() {
         };
       })
     );
+    return true;
   };
 
   function addItem(sectionKey: string): string {

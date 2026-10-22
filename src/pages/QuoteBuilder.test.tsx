@@ -625,7 +625,7 @@ describe('QuoteBuilder', () => {
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
   });
 
-  it('refuses a customer or tier change while saved lines exist and products are still loading, then allows it', async () => {
+  it('refuses a customer, tier or section field change while saved lines exist and products are still loading, then allows it', async () => {
     // Repricing a saved line before unit conversions load would convert at a factor of 1.
     let releaseProducts!: (result: { data: unknown; error: unknown }) => void;
     const productsRead = new Promise<{ data: unknown; error: unknown }>((resolve) => { releaseProducts = resolve; });
@@ -659,10 +659,20 @@ describe('QuoteBuilder', () => {
         : table === 'quote_sections' ? [section]
           : table === 'quote_items' ? [item]
             : table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }]
-              : [];
+              : table === 'fields' ? [{ id: 'field-9', field_name: 'North Forty', customer_id: null, total_acres: 40, is_active: true }]
+                : [];
       return buildChain({ data, error: null });
     });
     renderQuoteBuilder(quote.id);
+
+    // A field's acres would reprice the saved line, so the field pick waits too (CodeRabbit, #1017).
+    const fieldBox = await screen.findByRole('combobox', { name: 'Field for Products' });
+    fireEvent.focus(fieldBox);
+    fireEvent.change(fieldBox, { target: { value: 'North' } });
+    fireEvent.click(await screen.findByRole('option', { name: /North Forty/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.');
+    expect(fieldBox).toHaveValue('');
+    mockToast.mockClear();
 
     const customerBox = await screen.findByRole('combobox', { name: 'Customer' });
     fireEvent.focus(customerBox);

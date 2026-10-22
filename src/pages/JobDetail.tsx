@@ -1652,7 +1652,13 @@ export default function JobDetail() {
     setIsDirty(snap !== baselineRef.current);
   }, [formSnapshot, loading, baselineSettleTick]);
 
+  // Bumped on every lookup load: only the newest load may write its lists, so a
+  // double-clicked Retry or a refresh racing the first load never lets an older
+  // result (or an older failure) overwrite a newer one (Codex review, #1017).
+  const lookupsLoadRef = useRef(0);
   const loadLookups = useCallback(async () => {
+    const loadId = ++lookupsLoadRef.current;
+    const superseded = () => loadId !== lookupsLoadRef.current;
     setFieldsLookupReady(false);
     // Customers, fields and products are read page by page (Goal 4): these lists
     // name billed customers, size fields and price chemicals across the page, so
@@ -1666,6 +1672,7 @@ export default function JobDetail() {
       supabase.from('profile_public_view').select('id, full_name, role, is_active').in('role', ['applicator', 'admin', 'sales_rep']).eq('is_active', true).order('full_name'),
       supabase.from('blend_recipes').select('*').eq('is_active', true).order('name'),
     ]);
+    if (superseded()) return;
     const failures: string[] = [];
     if (custResult.error) {
       Sentry.captureException(custResult.error, { tags: { source: 'fetch', action: 'load_job_customers' } });
@@ -1692,12 +1699,14 @@ export default function JobDetail() {
     try {
       productRows = await withAdminCosts('products', productRows, isAdmin);
     } catch (costErr) {
+      if (superseded()) return;
       // An admin's autofill would otherwise fill a zero cost into the line it saves.
       Sentry.captureException(costErr, { tags: { source: 'fetch', action: 'load_job_product_costs' } });
       toast('error', 'Failed to load Products. Retry before editing job chemicals.');
       productRows = [];
       if (!failures.includes('products')) failures.push('products');
     }
+    if (superseded()) return;
     setAllProducts(productRows);
     setLookupLoadFailures(failures);
     setVehicles((vehicleResult.data || []) as Vehicle[]);
@@ -1707,17 +1716,20 @@ export default function JobDetail() {
     // Field-app parity #6: active ground crews for the crew picker.
     const crewResult = await supabase
       .from('ground_crews').select('id, name').eq('is_active', true).order('name');
+    if (superseded()) return;
     setGroundCrews((crewResult.data || []) as { id: string; name: string }[]);
 
     // §5: load the label-rate guardrail policy (warn default; failed/absent => warn).
     const grResult = await supabase
       .from('app_settings').select('setting_value').eq('setting_key', LABEL_RATE_GUARDRAIL_MODE_KEY).maybeSingle();
+    if (superseded()) return;
     setGuardrailMode(parseGuardrailMode((grResult.data as { setting_value?: string } | null)?.setting_value ?? null));
     setGuardrailModeLoaded(true);
 
     // P2-4: load reusable crop-program templates (for "Load Program" into chemicals).
     const cpResult = await supabase
       .from('app_settings').select('setting_value').eq('setting_key', 'crop_programs').maybeSingle();
+    if (superseded()) return;
     setCropPrograms(parseCropPrograms((cpResult.data as { setting_value?: string } | null)?.setting_value ?? null));
 
     // Staff-held license rows for the license-gate badge + pre-save check (B5)
@@ -1729,6 +1741,7 @@ export default function JobDetail() {
       .not('profile_id', 'is', null)
       .order('id')
       .range(from, to));
+    if (superseded()) return;
     if (licResult.error) {
       Sentry.captureException(licResult.error, { tags: { source: 'fetch', action: 'job_license_gate' } });
       toast('error', 'Applicator licenses could not be loaded, so license checks may show a license as missing. Refresh to try again.');

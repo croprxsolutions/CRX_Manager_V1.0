@@ -809,4 +809,45 @@ describe('JobDetail customer/field/product lookups (Goal 4)', () => {
     expect(screen.queryByRole('button', { name: /Save Job/ })).toBeNull();
     expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load Customers. Retry before editing this job.');
   });
+
+  it('a double-clicked Retry keeps the newest load: an older failing load landing last never wins (Codex, #1017)', async () => {
+    // Load 0: products fail, so the Retry banner shows. Load 1 (first click): held open,
+    // and its customers read fails. Load 2 (second click): everything succeeds. Load 2
+    // lands first, then load 1; the page must keep load 2's lists and close the banner.
+    let phase = 0;
+    const olderLoad = deferred();
+    mockFrom.mockImplementation((table: string) => {
+      if (phase === 1 && (table === 'customers' || table === 'products' || table === 'fields')) {
+        return buildGatedChain(
+          table === 'customers' ? { data: null, error: { message: 'customers read failed' } } : { data: [], error: null },
+          olderLoad.promise,
+        );
+      }
+      if (table === 'customers') return buildChain({ data: [{ id: 'cust-1', farm_name: 'Farm Alpha', is_active: true }], error: null });
+      if (table === 'products') {
+        return phase === 0
+          ? buildChain({ data: null, error: { message: 'products read failed' } })
+          : buildChain({ data: [], error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((fn: string) => (fn === 'next_job_number'
+      ? Promise.resolve({ data: 'J-NEWNEW-9999', error: null })
+      : Promise.resolve({ data: null, error: null })));
+
+    mountAt('/jobs/new');
+    expect((await screen.findByRole('alert')).textContent).toContain('products');
+
+    phase = 1;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    phase = 2;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+
+    await act(async () => { olderLoad.release(); await olderLoad.promise; });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('option', { name: 'Farm Alpha' })).toBeInTheDocument();
+  });
 });

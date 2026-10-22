@@ -388,6 +388,10 @@ function runAfter() {
     { key: 'P9 admin creates', as: U.ADMIN, stmt: KEEP_ID(save(U.ADMIN, 2500, 'p9s')) },
     { key: 'P9 version read as the owner (the rep cannot read it)', as: 'owner', stmt: READ_VERSION() },
     { key: "P9 rep posts an admin invoice", as: U.REP, stmt: post('p9p') },
+    // The app sends 'withheld' (WITHHELD_POST_VERSION) for a row whose version came back NULL: the rep
+    // is told the invoice is not theirs, and anyone allowed to post it is told to reload.
+    { key: 'P9 rep posts with the withheld placeholder', as: U.REP, stmt: `PERFORM public.post_invoice(${INV}, 'withheld', 'p9w'); v := 'posted';` },
+    { key: 'P9 admin posts with the withheld placeholder', as: U.ADMIN, stmt: `PERFORM public.post_invoice(${INV}, 'withheld', 'p9a'); v := 'posted';` },
     // Called as an RPC with a made-up row, the field answers only for an invoice the caller may post.
     { key: 'P9 rep asks for an admin invoice version with a made-up row', as: U.REP, call: `public.invoice_post_version(jsonb_populate_record(NULL::public.invoices, jsonb_build_object('id', ${INV})))` },
     { key: 'P9 admin asks with a made-up row', as: U.ADMIN, call: `(public.invoice_post_version(jsonb_populate_record(NULL::public.invoices, jsonb_build_object('id', ${INV}))) ~ '^v1:')` },
@@ -440,6 +444,7 @@ function runAfter() {
   add(scenario([
     { key: 'G5 group read as the owner (the rep cannot read it)', as: 'owner', stmt: READ_MAP() },
     { key: "G5 rep posts an admin group", as: U.REP, stmt: postGroup('g5', U.REP) },
+    { key: 'G5 rep posts with withheld placeholders', as: U.REP, stmt: postGroup('g5w', U.REP, `jsonb_build_object('${GA}', 'withheld', '${GB}', 'withheld')`) },
     { key: 'G5 performed_by is not the caller', as: U.ADMIN, stmt: postGroup('g5b', U.ADMIN2) },
   ], group()));
   add(scenario([
@@ -527,6 +532,8 @@ const AFTER = [
   ['P8 authenticated calls _invoice_post_version', /^42501\|/],
   ['P8 authenticated calls _invoice_post_content_version', /^42501\|/],
   ["P9 rep posts an admin invoice", /^P0001\|INVOICE_SCOPE_DENIED/],
+  ['P9 rep posts with the withheld placeholder', /^P0001\|INVOICE_SCOPE_DENIED/],
+  ['P9 admin posts with the withheld placeholder', /^P0001\|INVOICE_CHANGED_SINCE_LOADED: invoice /],
   ['P9 rep asks for an admin invoice version with a made-up row', /^ok\|<null>$/],
   ['P9 admin asks with a made-up row', /^ok\|true$/],
   ['G8 posts with upper-case invoice ids', /^ok\|\{.*"member_count": 2/],
@@ -548,6 +555,7 @@ const AFTER = [
   ['G7 group-level location added', /^ok\|added$/],
   ['G7 post after location added', /^P0001\|INVOICE_CHANGED_SINCE_LOADED: invoice PROVER-G-A /],
   ["G5 rep posts an admin group", /^P0001\|INVOICE_SCOPE_DENIED/],
+  ['G5 rep posts with withheld placeholders', /^P0001\|INVOICE_SCOPE_DENIED/],
   ['G5 performed_by is not the caller', /^P0001\|ACTOR_MISMATCH/],
   ['G6 rep posts own group', /^ok\|\{.*"member_count": 2/],
   ['G6 state', /^ok\|PROVER-G-A:posted,PROVER-G-B:posted$/],

@@ -15,13 +15,25 @@ import type { InvoicePostTarget } from './invoiceBatchPosting';
 export const INVOICE_POST_VERSION_MISSING_MESSAGE =
   'This screen could not read the invoice version it needs to post. Reload the page, then post again.';
 
-/** The version a screen loaded, or an error the posting UI shows instead of posting. */
+/**
+ * Sent for a row that loaded with a NULL version. The computed field withholds the version from a
+ * sales rep for an invoice under another salesperson's name, so Post goes to the server, which
+ * refuses INVOICE_SCOPE_DENIED ("only invoices under your own name") before it compares versions,
+ * instead of telling the rep to reload forever. It never equals a real version, so it never posts.
+ */
+export const WITHHELD_POST_VERSION = 'withheld';
+
+/**
+ * The version a screen loaded; WITHHELD_POST_VERSION when the row loaded without one (the server
+ * then says why); or, when no version was read at all, an error the posting UI shows instead.
+ */
 export function requirePostVersion(version: string | null | undefined): string {
+  if (version === null) return WITHHELD_POST_VERSION;
   if (!version || !version.trim()) throw new Error(INVOICE_POST_VERSION_MISSING_MESSAGE);
   return version;
 }
 
-/** Every version in a loaded map, or the "reload" error when any is missing. */
+/** Every version in a loaded map (see requirePostVersion), or the "reload" error when none loaded. */
 export function requireGroupVersions(loaded: Record<string, string | null | undefined>): Record<string, string> {
   const entries = Object.entries(loaded);
   if (entries.length === 0) throw new Error(INVOICE_POST_VERSION_MISSING_MESSAGE);

@@ -6,7 +6,7 @@ vi.mock('./db', () => ({
   assertRpcResult: (data: unknown) => data,
 }));
 
-import { INVOICE_POST_VERSION_MISSING_MESSAGE, postInvoiceTarget, requireGroupVersions, requirePostVersion } from './invoicePostVersion';
+import { INVOICE_POST_VERSION_MISSING_MESSAGE, WITHHELD_POST_VERSION, postInvoiceTarget, requireGroupVersions, requirePostVersion } from './invoicePostVersion';
 import { buildInvoicePostTargets } from './invoiceBatchPosting';
 
 beforeEach(() => {
@@ -14,13 +14,19 @@ beforeEach(() => {
 });
 
 describe('requirePostVersion / requireGroupVersions', () => {
-  it('refuses to post without the version the screen loaded', () => {
-    expect(() => requirePostVersion(null)).toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
+  it('refuses to post when no version was read', () => {
+    expect(() => requirePostVersion(undefined)).toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
     expect(() => requirePostVersion('  ')).toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
     expect(requirePostVersion('v1:a')).toBe('v1:a');
     expect(() => requireGroupVersions({})).toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
-    expect(() => requireGroupVersions({ a: 'v1:a', b: null })).toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
+    expect(() => requireGroupVersions({ a: 'v1:a', b: undefined })).toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
     expect(requireGroupVersions({ a: 'v1:a', b: 'v1:b' })).toEqual({ a: 'v1:a', b: 'v1:b' });
+  });
+
+  it('lets the server explain a version withheld from the caller (another salesperson\'s invoice)', () => {
+    expect(requirePostVersion(null)).toBe(WITHHELD_POST_VERSION);
+    expect(requireGroupVersions({ a: 'v1:a', b: null })).toEqual({ a: 'v1:a', b: WITHHELD_POST_VERSION });
+    expect(WITHHELD_POST_VERSION).not.toMatch(/^v1:[0-9a-f]{64}$/);
   });
 });
 
@@ -48,10 +54,17 @@ describe('postInvoiceTarget', () => {
     });
   });
 
-  it('posts nothing when a row was loaded without a version', async () => {
-    const [target] = buildInvoicePostTargets([{ id: 'inv-1', invoice_number: 'INV-1', invoice_post_version: null }]);
+  it('posts nothing when a row was read without a version', async () => {
+    const [target] = buildInvoicePostTargets([{ id: 'inv-1', invoice_number: 'INV-1' }]);
     await expect(postInvoiceTarget(target, 'user-1', 'key-3')).rejects.toThrow(INVOICE_POST_VERSION_MISSING_MESSAGE);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('sends a withheld version to the server, which refuses with the own-name reason', async () => {
+    rpc.mockReturnValue({ throwOnError: () => Promise.reject(new Error('INVOICE_SCOPE_DENIED')) });
+    const [target] = buildInvoicePostTargets([{ id: 'inv-1', invoice_number: 'INV-1', invoice_post_version: null }]);
+    await expect(postInvoiceTarget(target, 'user-1', 'key-4')).rejects.toThrow('INVOICE_SCOPE_DENIED');
+    expect(rpc).toHaveBeenCalledWith('post_invoice', { p_invoice_id: 'inv-1', p_expected_version: WITHHELD_POST_VERSION, p_idempotency_key: 'key-4' });
   });
 });
 

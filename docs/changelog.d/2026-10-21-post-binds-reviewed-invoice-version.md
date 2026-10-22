@@ -44,5 +44,10 @@
   version map normalized and checked for duplicate ids before the retry check; the rep's
   own-name check before the version check; SHA-256 instead of md5; batch items must carry a
   version. The cost-column lock (Goal 1 step 3) must rework this field; see KNOWN_ISSUES.
+- A sales rep who posts an invoice under another salesperson's name is told "You can only change
+  or post invoices under your own name" instead of "reload" (Codex GitHub App P2 on PR #1018): the
+  version field is withheld from them, so the screens send the placeholder `withheld` for a row
+  loaded with no version and the server, which checks the own-name rule first, gives the reason.
+  Anyone allowed to post the invoice gets "changed, reload". Prover P9 and G5.
 - Deploy order: until the new app is live, the old screens get "function not found" when posting;
   nothing posts unseen.

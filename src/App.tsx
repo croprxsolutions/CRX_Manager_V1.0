@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
-import { createBrowserRouter, RouterProvider, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate, Outlet, useLocation, type RouteObject } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './components/ui/Toast';
 import { BelowCostApprovalProvider } from './contexts/BelowCostApprovalContext';
@@ -179,7 +179,9 @@ function RootLayout() {
   );
 }
 
-const router = createBrowserRouter([
+// Exported so src/routeBaseline.test.tsx can check every route for every role.
+// eslint-disable-next-line react-refresh/only-export-components
+export const appRoutes: RouteObject[] = [
   // Dev-only design-system gallery — top-level (outside the auth provider) so it
   // renders standalone for visual verification. Excluded from production builds.
   ...(SHOW_DESIGN_PREVIEW
@@ -322,7 +324,9 @@ const router = createBrowserRouter([
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
-]);
+];
+
+const router = createBrowserRouter(appRoutes);
 
 export default function App() {
   const envCheck = checkEnvVars();

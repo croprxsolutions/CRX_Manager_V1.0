@@ -23,6 +23,12 @@
   (`src/pages/PaymentHistory.tsx`), so the drafts no longer rely on Notes. The paper number goes in
   Record Payments' **Reference #** box next to the check number (it shows and searches that box), and
   the real received date stays on the paper form.
+- Second Codex GitHub App round (four findings, all confirmed in the code and fixed). The A/R strip is
+  a live snapshot, so the daily check records it before the day's money activity. The Deliveries
+  screen filters by scheduled date, so yesterday's completions come from Export CSV's Completed column.
+  CRX can't search a paper ticket number, so an outage ticket list guards against double entry.
+  **New Delivery** needs an existing order, so a phone order taken during an outage is entered as an
+  order first.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

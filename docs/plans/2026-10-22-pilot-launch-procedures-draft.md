@@ -110,7 +110,13 @@ Then explain the change from yesterday. **Draft suggestion** (the bookkeeper set
 > Owed
 
 Payment money that wasn't applied to an invoice doesn't lower Total Owed, so it's tracked separately
-(Step 4). If it doesn't add up, the gap gets a Difference Log row. The **AR Aging** tab on the same page shows
+(Step 4). If it doesn't add up, the gap gets a Difference Log row.
+
+**The strip shows live balances, not last night's closing balances.** An invoice posted or a payment
+applied this morning, before the check, is already in today's numbers. **Draft suggestion:** write
+the four numbers down first thing, before anyone posts an invoice or applies money that day. Or add
+this morning's activity to the right-hand side of the equation, and note on the sheet that you did.
+CRX has no saved end-of-day balances to compare against. The **AR Aging** tab on the same page shows
 each customer's balance when one needs a closer look.
 
 ### Step 4. Payments
@@ -152,8 +158,13 @@ On **A/R Workspace**, open the **Payment History** tab and list yesterday's paym
   stock CRX didn't show. Find out why.
 - Each delivery completed yesterday was billed. The Integrity Report's **Delivery-Invoice Quantity
   Parity** check passes (delivered quantity matches invoiced quantity for each order and product).
-  Then, on **Deliveries**, list yesterday's completed deliveries, and confirm each customer's draft or
-  posted invoice for it on **Invoices — Chemical** (completing a delivery creates a draft invoice).
+  Then list the deliveries completed yesterday, and confirm each one's draft or posted invoice on
+  **Invoices — Chemical** (completing a delivery creates a draft invoice). **The Deliveries screen's
+  date filters and date column use the scheduled date, not the completion date.** A delivery finished
+  later than scheduled would be missed. **Draft suggestion:** on **Deliveries**, set Status to
+  Completed and the date to **All Dates**, then press **Export CSV**. The spreadsheet has a
+  **Completed** column; keep the rows completed yesterday. The December rehearsal should confirm that
+  column shows the Central date. Question 8 below asks whether to add a completion-date filter.
 - Any count difference found in **Cycle Counts** gets a Difference Log row.
 
 ### Step 7. Work waiting for review
@@ -216,6 +227,8 @@ app fix) · date fixed · checked by.
    today. Without it, Step 5 is a manual spot check.
 7. The payment-date fix (To-Do 6.7) is ranked MUST but not built. Until it is, is "enter payments
    before 6 PM Central" an acceptable rule for the office?
+8. Should the Deliveries screen get a "completed on" filter before the pilot? It would replace the
+   spreadsheet step in Step 6. A saved end-of-day balance would likewise make Step 3 exact.
 
 ---
 
@@ -289,8 +302,10 @@ Keep each operation's forms together in one folder, in number order.
    Mason's OK first.
 3. **Enter the paper records** through the normal CRX screens, oldest number first. Put the paper
    number on the record where it can be found again (for payments, the **Reference #** box; see
-   below). Before entering one, search that customer's records for that number, so nothing goes in
-   twice. Tick each form only after the entered record has been compared with the paper.
+   below). Before entering one, search for that number, so nothing goes in twice. CRX can't search a
+   delivery for a paper number, so for deliveries keep a list of form numbers with the CRX delivery
+   number written next to each once it's entered (as in procedure 3). Tick each form only after the
+   entered record has been compared with the paper.
    - **Payments:** in **Record Payments**, type the check number and the paper number together in
      the **Reference #** box (for example `4471 B1-PAY-007`). That box is what **Payment History**
      shows and searches; Notes are neither shown nor searched there. CRX stamps the payment with the
@@ -371,6 +386,10 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
 - The customer keeps a copy if the ticket has one. **Draft suggestion:** two-part (carbon) tickets.
 - If the product isn't on the printed schedule, write "NOT ON SCHEDULE" on the ticket, so the
   office knows to look for it in CRX afterwards.
+- The office keeps one **outage ticket list**: every ticket number in order, with the customer. Once
+  a ticket is in CRX, the CRX delivery number is written next to it. CRX can't search for a paper
+  ticket number (Deliveries searches only delivery number, customer, driver and farm group), so this
+  list is the only guard against entering a ticket twice.
 
 **Payments**
 - Write every check, cash payment and transfer on the numbered payment log: line number, customer,
@@ -388,16 +407,22 @@ the one record until CRX is back.
 
 1. **Launch support confirms CRX is working** (it loads and saves) before anyone enters paper.
 2. **Enter oldest first**, using the normal screens. Before entering a record, check for its paper
-   number so nothing goes in twice, and put the paper number on the record where it can be found
-   again (for payments, the **Reference #** box). Tick it on the paper only after the entered
-   record has been compared with the paper.
+   number so nothing goes in twice. For payments, search **Payment History**, because the paper
+   number goes in the **Reference #** box. For deliveries, check the outage ticket list, because CRX
+   can't search a ticket number. Tick it on the paper only after the entered record has been compared
+   with the paper. **Draft suggestion:** one person enters all the outage delivery tickets, so two
+   people never work the same list.
    - **Dispatch changes:** update the deliveries in CRX to match the changes written on the schedule.
    - **Deliveries:** for a "NOT ON SCHEDULE" ticket, first search CRX for that customer's open
      orders and deliveries. A delivery missing from the printout may still exist in CRX. Use it if it
-     does; create a new delivery only once you've confirmed there isn't one. Then the assigned driver
-     completes each one from their own delivery screen. They tick **Customer signed a paper ticket
-     (no signal at the site)**, add the ticket photo, type the signer's name in **Signed By**, and
-     enter **Delivered on (date on the ticket)**.
+     does. If there's an open order but no delivery, create the delivery from that order (**New
+     Delivery** only works from an existing order, using that order's products). If there's no order
+     at all (for example, one taken by phone during the outage), the order has to be entered and
+     approved through the normal order steps first, then the delivery is created from it. Write the
+     new CRX delivery number on the outage ticket list. Then the assigned driver completes each
+     delivery from their own delivery screen. They tick **Customer signed a paper ticket (no signal
+     at the site)**, add the ticket photo, type the signer's name in **Signed By**, and enter
+     **Delivered on (date on the ticket)**.
    - **Payments:** enter each log line in **Record Payments**, with the check number and the log
      line number together in the **Reference #** box (for example `4471 OUT-012`). That box is what
      **Payment History** shows and searches. The real received date stays on the paper log: CRX

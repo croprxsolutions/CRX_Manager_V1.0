@@ -50,7 +50,7 @@ try {
   const dirs = skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
   if (command.kind === "skip") {
     for (const pullRequest of command.pullRequests) {
-      const one = recordCodeRabbitSkip({ dirs, sessionId, pullRequest, said: reply });
+      const one = recordCodeRabbitSkip({ dirs, sessionId, pullRequest, said: command.said });
       if (one) recorded.push(one);
     }
   } else ({ removed, stillLive } = withdrawCodeRabbitSkip({ dirs, sessionId }));

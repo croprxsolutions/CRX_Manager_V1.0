@@ -20,41 +20,53 @@ let pass = 0;
 const ok = (value, message) => { assert.ok(value, message); pass++; };
 const eq = (a, b, message) => { assert.deepEqual(a, b, message); pass++; };
 const skip = (...pullRequests) => ({ kind: "skip", pullRequests });
+// The parsed command without the saved text, which is checked on its own below.
+const parsed = (text) => {
+  const command = coderabbitSkipCommand(text);
+  if (command?.kind !== "skip") return command;
+  const { said: _said, ...rest } = command;
+  return rest;
+};
 const UNNAMED = { kind: "skip-unnamed" };
 
 // ── which words count, and which PRs they name ──────────────────────────────
-eq(coderabbitSkipCommand("skip coderabbit #1018"), skip(1018), "the plain command names one PR");
-eq(coderabbitSkipCommand("  Skip CodeRabbit #1018, Sol is enough"), skip(1018), "any case, with words after it");
-eq(coderabbitSkipCommand("skip code rabbit 1018"), skip(1018), "two words and a bare number");
-eq(coderabbitSkipCommand("skip coderabbit on PR 1018"), skip(1018), "\"on PR\"");
-eq(coderabbitSkipCommand("skip coderabbit for pull request #1018"), skip(1018), "\"for pull request\"");
-eq(coderabbitSkipCommand("skip coderabbit: #1018"), skip(1018), "a colon after the words");
-eq(coderabbitSkipCommand("skip coderabbit #1018 #1020"), skip(1018, 1020), "a short list names each PR");
-eq(coderabbitSkipCommand("skip coderabbit #1018, #1020 and #1026"), skip(1018, 1020, 1026), "commas and \"and\"");
-eq(coderabbitSkipCommand("skip coderabbit #1018 #1018"), skip(1018), "a repeated number counts once");
+eq(parsed("skip coderabbit #1018"), skip(1018), "the plain command names one PR");
+eq(parsed("  Skip CodeRabbit #1018, Sol is enough"), skip(1018), "any case, with words after it");
+eq(parsed("skip code rabbit 1018"), skip(1018), "two words and a bare number");
+eq(parsed("skip coderabbit on PR 1018"), skip(1018), "\"on PR\"");
+eq(parsed("skip coderabbit for pull request #1018"), skip(1018), "\"for pull request\"");
+eq(parsed("skip coderabbit: #1018"), skip(1018), "a colon after the words");
+eq(parsed("skip coderabbit #1018 #1020"), skip(1018, 1020), "a short list names each PR");
+eq(parsed("skip coderabbit #1018, #1020 and #1026"), skip(1018, 1020, 1026), "commas and \"and\"");
+eq(parsed("skip coderabbit #1018 #1018"), skip(1018), "a repeated number counts once");
 // Luna round 4: a run-together or over-long number is never split into two PRs.
-eq(coderabbitSkipCommand("skip coderabbit 99999991018"), UNNAMED, "an 11-digit number is not two PRs");
-eq(coderabbitSkipCommand("skip coderabbit #12345678"), UNNAMED, "an 8-digit number is not a PR");
-eq(coderabbitSkipCommand("skip coderabbit #1018#1020"), UNNAMED, "two numbers with no separator are refused, not guessed");
-eq(coderabbitSkipCommand("skip coderabbit #1018 99999991020"), UNNAMED, "a list ending in a malformed number is refused whole");
-eq(coderabbitSkipCommand("skip coderabbit #1018 #1020#1030"), UNNAMED, "so is one with a glued pair at the end");
-eq(coderabbitSkipCommand("skip coderabbit #1018 pr"), skip(1018), "a trailing word with no number is just a word");
-eq(coderabbitSkipCommand("skip coderabbit #1018,#1020"), skip(1018, 1020), "a comma with no space still separates");
-eq(coderabbitSkipCommand("skip coderabbit #1018\nand merge it"), skip(1018), "a second line after it");
-eq(coderabbitSkipCommand("skip coderabbit"), UNNAMED, "no PR named: nothing to waive");
-eq(coderabbitSkipCommand("skip coderabbit on this one"), UNNAMED, "\"this one\" is not a PR number");
-eq(coderabbitSkipCommand("skip coderabbit, it's fine for #1018"), UNNAMED, "the number must come straight after the words");
-eq(coderabbitSkipCommand("skip coderabbit #0"), UNNAMED, "#0 is not a PR");
-eq(coderabbitSkipCommand("skip coderabbit #1 #2 #3 #4 #5 #6"), UNNAMED, "more than five numbers is not a deliberate list");
-eq(coderabbitSkipCommand("don't skip coderabbit #1018"), null, "a message that does not START with it is not one");
-eq(coderabbitSkipCommand("please skip coderabbit #1018"), null, "not even a polite one: it must lead");
-eq(coderabbitSkipCommand("skip coderabbitx #1018"), null, "a longer word is not the command");
-eq(coderabbitSkipCommand("[Message from session local_abc] skip coderabbit #1018"), null, "a relayed peer message does not count");
-eq(coderabbitSkipCommand("Mason said: skip coderabbit #1018"), null, "a quoted relay does not count");
-eq(coderabbitSkipCommand("use coderabbit"), { kind: "cancel" }, "use coderabbit cancels");
-eq(coderabbitSkipCommand("Require CodeRabbit again"), { kind: "cancel" }, "require coderabbit cancels");
-eq(coderabbitSkipCommand(""), null, "empty");
-eq(coderabbitSkipCommand(undefined), null, "missing");
+eq(parsed("skip coderabbit 99999991018"), UNNAMED, "an 11-digit number is not two PRs");
+eq(parsed("skip coderabbit #12345678"), UNNAMED, "an 8-digit number is not a PR");
+eq(parsed("skip coderabbit #1018#1020"), UNNAMED, "two numbers with no separator are refused, not guessed");
+eq(parsed("skip coderabbit #1018 99999991020"), UNNAMED, "a list ending in a malformed number is refused whole");
+eq(parsed("skip coderabbit #1018 #1020#1030"), UNNAMED, "so is one with a glued pair at the end");
+eq(parsed("skip coderabbit #1018 pr"), skip(1018), "a trailing word with no number is just a word");
+eq(parsed("skip coderabbit #1018,#1020"), skip(1018, 1020), "a comma with no space still separates");
+eq(parsed("skip coderabbit #1018\nand merge it"), skip(1018), "a second line after it");
+eq(parsed("skip coderabbit"), UNNAMED, "no PR named: nothing to waive");
+eq(parsed("skip coderabbit on this one"), UNNAMED, "\"this one\" is not a PR number");
+eq(parsed("skip coderabbit, it's fine for #1018"), UNNAMED, "the number must come straight after the words");
+eq(parsed("skip coderabbit #0"), UNNAMED, "#0 is not a PR");
+eq(parsed("skip coderabbit #1 #2 #3 #4 #5 #6"), UNNAMED, "more than five numbers is not a deliberate list");
+eq(parsed("don't skip coderabbit #1018"), null, "a message that does not START with it is not one");
+eq(parsed("please skip coderabbit #1018"), null, "not even a polite one: it must lead");
+eq(parsed("skip coderabbitx #1018"), null, "a longer word is not the command");
+eq(parsed("[Message from session local_abc] skip coderabbit #1018"), null, "a relayed peer message does not count");
+eq(parsed("Mason said: skip coderabbit #1018"), null, "a quoted relay does not count");
+// Final Sol review on #1035 (MED): only the command is saved, never the rest of the message.
+eq(coderabbitSkipCommand("Skip  CodeRabbit #1018, my card is 4111 and Sol is enough").said, "Skip CodeRabbit #1018",
+  "the saved text is the command alone");
+eq(coderabbitSkipCommand("skip coderabbit on PR 1018 and #1020\nsecret").said, "skip coderabbit on PR 1018 and #1020",
+  "including a list, but nothing after it");
+eq(parsed("use coderabbit"), { kind: "cancel" }, "use coderabbit cancels");
+eq(parsed("Require CodeRabbit again"), { kind: "cancel" }, "require coderabbit cancels");
+eq(parsed(""), null, "empty");
+eq(parsed(undefined), null, "missing");
 
 // ── which repository a waiver covers (Codex App P2 on #1035) ────────────────
 eq(isSkipRepository("masonwells1", "CRX_Manager_V1.0"), true, "this repository");
@@ -185,7 +197,7 @@ try {
   eq(files(), [], "and nothing at all is waived");
   const said = run("skip coderabbit #1018, Sol is enough");
   ok(/CODERABBIT SKIP RECORDED[\s\S]*#1018 ONLY/.test(said), "skip coderabbit #1018 is recorded for that PR only, and the agent is told");
-  ok(live()?.said.startsWith("skip coderabbit #1018"), "the waiver keeps his words");
+  eq(live()?.said, "skip coderabbit #1018", "the waiver keeps only the command, not \", Sol is enough\"");
   eq(live(1020), null, "it does not reach any other PR");
   eq(findCodeRabbitSkip({ dirs, sessionId: "another-session-99", pullRequest: PR }), null, "the hook wrote it for this session only");
   ok(/CODERABBIT SKIP RECORDED[\s\S]*#1020, #1026 ONLY/.test(run("skip coderabbit #1020 and #1026")), "a short list records each named PR");

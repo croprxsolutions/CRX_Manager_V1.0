@@ -80,7 +80,10 @@ export function coderabbitSkipCommand(reply) {
     if (!list || LEFTOVER_REF_RE.test(text.slice(list.index + list[0].length))) return { kind: "skip-unnamed" };
     const numbers = [...new Set((list[1].match(/\d+/g) || []).map(Number))].filter((n) => n > 0);
     if (numbers.length === 0 || numbers.length > MAX_NAMED_PRS) return { kind: "skip-unnamed" };
-    return { kind: "skip", pullRequests: numbers };
+    // Only the command itself is kept, never the rest of his message, which
+    // could carry unrelated private text into the state file and gate notices
+    // (final Sol review on #1035, MED).
+    return { kind: "skip", pullRequests: numbers, said: list[0].trim().replace(/\s+/g, " ") };
   }
   if (CANCEL_RE.test(text)) return { kind: "cancel" };
   return null;

@@ -293,8 +293,8 @@ Two more consequences worth knowing before you carve a column out:
 
 ## A green CodeRabbit check does not mean a review happened (2026-08-17)
 
-Since 2026-10-19 CodeRabbit is advisory (one review per PR, comments only, no approval required to
-merge), but a CodeRabbit review that arrives before the merge must still be read and every comment
+Since 2026-10-19 CodeRabbit is advisory (comments only, no approval required to merge; since
+2026-10-21 no automatic reviews, only requested ones), but a CodeRabbit review that arrives before the merge must still be read and every comment
 fixed or refuted. The check row is **not** evidence that a review happened. On PR #411, `gh pr checks` reported:
 
 ```text

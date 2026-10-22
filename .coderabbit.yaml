@@ -209,7 +209,7 @@ reviews:
       mode: warning
 
     # ---- WARNING mode since 2026-10-19 (were `error`) ----------------------
-    # CodeRabbit is advisory and reviews each PR once, so a failed check could
+    # CodeRabbit is advisory and never re-reviews by itself, so a failed check could
     # never be cleared by a re-review, and a red CodeRabbit status would hold the
     # merge gates (they refuse any red check) on a finding the agent already
     # fixed (Luna round 2). As warnings they stay findings the agent must fix or

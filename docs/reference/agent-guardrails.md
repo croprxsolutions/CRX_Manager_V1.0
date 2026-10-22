@@ -466,7 +466,7 @@ Detail behind the `docs/manual/DECISION_LOG.md` entry of 2026-09-26 ("Fewer perm
 reviews every PR automatically; GitHub requires its approval again"), moved here so that entry stays short.
 
 > **Superseded in part 2026-10-19 (Mason, "cut coderabbit volume").** Points 2 and 3 below are history: CodeRabbit
-> now reviews each PR once and only comments, agents no longer post `@coderabbitai review`, the ruleset no longer
+> only comments (and since 2026-10-21 makes no automatic reviews), agents no longer post `@coderabbitai review`, the ruleset no longer
 > requires an approving review, and the merge gates no longer require CodeRabbit APPROVED. See the "CodeRabbit is
 > advisory" block at the top of this page. The other points stand.
 

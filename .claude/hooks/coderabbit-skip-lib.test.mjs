@@ -32,6 +32,14 @@ eq(coderabbitSkipCommand("skip coderabbit: #1018"), skip(1018), "a colon after t
 eq(coderabbitSkipCommand("skip coderabbit #1018 #1020"), skip(1018, 1020), "a short list names each PR");
 eq(coderabbitSkipCommand("skip coderabbit #1018, #1020 and #1026"), skip(1018, 1020, 1026), "commas and \"and\"");
 eq(coderabbitSkipCommand("skip coderabbit #1018 #1018"), skip(1018), "a repeated number counts once");
+// Luna round 4: a run-together or over-long number is never split into two PRs.
+eq(coderabbitSkipCommand("skip coderabbit 99999991018"), UNNAMED, "an 11-digit number is not two PRs");
+eq(coderabbitSkipCommand("skip coderabbit #12345678"), UNNAMED, "an 8-digit number is not a PR");
+eq(coderabbitSkipCommand("skip coderabbit #1018#1020"), UNNAMED, "two numbers with no separator are refused, not guessed");
+eq(coderabbitSkipCommand("skip coderabbit #1018 99999991020"), UNNAMED, "a list ending in a malformed number is refused whole");
+eq(coderabbitSkipCommand("skip coderabbit #1018 #1020#1030"), UNNAMED, "so is one with a glued pair at the end");
+eq(coderabbitSkipCommand("skip coderabbit #1018 pr"), skip(1018), "a trailing word with no number is just a word");
+eq(coderabbitSkipCommand("skip coderabbit #1018,#1020"), skip(1018, 1020), "a comma with no space still separates");
 eq(coderabbitSkipCommand("skip coderabbit #1018\nand merge it"), skip(1018), "a second line after it");
 eq(coderabbitSkipCommand("skip coderabbit"), UNNAMED, "no PR named: nothing to waive");
 eq(coderabbitSkipCommand("skip coderabbit on this one"), UNNAMED, "\"this one\" is not a PR number");

@@ -51,12 +51,20 @@ const SKIP_RE = /^\s*skip\s+code\s*rabbit\b/i;
 const CANCEL_RE = /^\s*(?:use|require)\s+code\s*rabbit\b/i;
 // What may follow the words: optional "on"/"for", then one or more PR numbers,
 // each optionally written "PR", "pull request" or "#", separated by spaces,
-// commas, "&" or "and". The list must come straight after the words.
-const PR_REF = String.raw`(?:(?:pr|pull\s+request)\s*)?#?\d{1,7}`;
+// commas, "&" or "and". The list must come straight after the words. Every
+// number must END where its digits end and be followed by a real separator, so
+// one long or run-together number is never split into two PRs (Luna round 4:
+// "99999991018" read as #9999999 and #1018).
+const PR_REF = String.raw`(?:(?:pr|pull\s+request)\s*)?#?\d{1,7}(?!\d)`;
+const PR_SEP = String.raw`(?:\s*(?:,|&|\band\b)\s*|\s+)`;
 const SKIP_LIST_RE = new RegExp(
-  String.raw`^\s*skip\s+code\s*rabbit[\s:,-]+(?:(?:on|for)\s+)?(${PR_REF}(?:\s*(?:,|&|\band\b)?\s*${PR_REF})*)(?!\d)`,
+  String.raw`^\s*skip\s+code\s*rabbit[\s:,-]+(?:(?:on|for)\s+)?(${PR_REF}(?:${PR_SEP}${PR_REF})*)`,
   "i",
 );
+// What follows a clean list must not look like one more PR number that failed
+// to parse ("#1018#1020", "#1018 99999991020"): such a message is refused, not
+// read as the part that parsed.
+const LEFTOVER_REF_RE = new RegExp(String.raw`^(?:${PR_SEP})?(?:(?:pr|pull\s+request)\s*)?#?\d`, "i");
 
 /**
  * What Mason's message asks for: { kind: "skip", pullRequests: [n, ...] } when
@@ -68,7 +76,8 @@ export function coderabbitSkipCommand(reply) {
   const text = String(reply ?? "");
   if (SKIP_RE.test(text)) {
     const list = SKIP_LIST_RE.exec(text);
-    const numbers = list ? [...new Set((list[1].match(/\d+/g) || []).map(Number))].filter((n) => n > 0) : [];
+    if (!list || LEFTOVER_REF_RE.test(text.slice(list.index + list[0].length))) return { kind: "skip-unnamed" };
+    const numbers = [...new Set((list[1].match(/\d+/g) || []).map(Number))].filter((n) => n > 0);
     if (numbers.length === 0 || numbers.length > MAX_NAMED_PRS) return { kind: "skip-unnamed" };
     return { kind: "skip", pullRequests: numbers };
   }

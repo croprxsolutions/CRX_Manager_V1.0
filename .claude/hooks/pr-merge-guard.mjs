@@ -277,7 +277,8 @@ function coderabbitSkipFor(hookPayload, pullRequest) {
   try {
     return findCodeRabbitSkip({
       dirs: skipStateDirs([hookPayload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
-      sessionId: hookPayload?.session_id,
+      // Same id the prompt hook records under (Luna round 4).
+      sessionId: hookPayload?.session_id ?? hookPayload?.sessionId,
       pullRequest,
     });
   } catch {

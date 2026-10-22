@@ -1,7 +1,8 @@
 ## 2026-10-22 — a list that fails to load says so, instead of "No … found" (To-Do List 10.5, non-money screens)
 
-- New shared `LoadFailedState` (in `src/components/ui/EmptyState.tsx`): "This list could not be loaded. Nothing has
-  been deleted." with a **Try again** button. `DataTable` and `EditableDataTable` show it when given `loadError`
+- New shared `LoadFailedState` (in `src/components/ui/EmptyState.tsx`): "This list could not be loaded. This does not
+  mean the records are gone." with a **Try again** button. Only a page's newest read sets or clears the error,
+  so a slow older read cannot hide a newer list. `DataTable` and `EditableDataTable` show it when given `loadError`
   (and `onRetry`).
 - Now used on Customers, Fields (list and map), Products, Vendors, Vehicles, Crop Programs, Program Tracker,
   Notifications and the Settings users list. Before, a failed read left these lists empty and showed "No customers

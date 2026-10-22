@@ -48,7 +48,7 @@ export function LoadFailedState({
       <EmptyState
         icon={<AlertTriangle className="w-6 h-6 text-amber-500" />}
         title={title}
-        description="Nothing has been deleted. Check your connection and try again."
+        description="This does not mean the records are gone. Check your connection and try again."
         action={
           onRetry ? (
             <Button variant="secondary" icon={<RefreshCw className="w-4 h-4" />} onClick={onRetry}>

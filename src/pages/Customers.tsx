@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Upload, Download, FileText, ToggleLeft, AlertTriangle, UserPlus, UserX } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -69,6 +69,8 @@ export default function Customers() {
   const [repsLoadNonce, setRepsLoadNonce] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // Only the newest read may set or clear loadError, so a slow older read cannot hide a newer list.
+  const loadSeqRef = useRef(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
@@ -78,6 +80,7 @@ export default function Customers() {
   const [exporting, setExporting] = useState(false);
 
   const fetchCustomers = useCallback(async (options: { reportError?: boolean } = {}): Promise<boolean> => {
+    const seq = ++loadSeqRef.current;
     const { data, error, count } = await supabase
       .from('customers')
       .select('*', { count: 'exact' })
@@ -88,7 +91,7 @@ export default function Customers() {
       // A silent refresh's caller keeps the rows on screen and explains the failure itself.
       if (options.reportError !== false) {
         toast('error', 'Failed to load customers. Please try again.');
-        setLoadError(true);
+        if (seq === loadSeqRef.current) setLoadError(true);
       }
       setLoading(false);
       return false;
@@ -106,7 +109,7 @@ export default function Customers() {
         : count > CUSTOMER_FETCH_LIMIT,
     );
     setCustomers(rows);
-    setLoadError(false);
+    if (seq === loadSeqRef.current) setLoadError(false);
     setLoading(false);
     return true;
   }, [toast]);

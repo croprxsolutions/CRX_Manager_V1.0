@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo , useCallback } from 'react';
+import { useEffect, useState, useMemo , useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Truck, Plane, Download, FileText, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -30,6 +30,8 @@ export default function Vehicles() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // Only the newest read may set or clear loadError, so a slow older read cannot hide a newer list.
+  const loadSeqRef = useRef(0);
   const [typeFilter, setTypeFilter] = useState<VehicleType | ''>('');
   const [statusFilter, setStatusFilter] = useState<VehicleStatus | ''>('');
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -39,6 +41,7 @@ export default function Vehicles() {
   const canBulkAction = role === 'admin' || role === 'sales_rep';
 
   const fetchVehicles = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     const { data, error } = await supabase
       .from('vehicles')
@@ -48,12 +51,12 @@ export default function Vehicles() {
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_vehicles' } });
       toast('error', 'Failed to load vehicles');
-      setLoadError(true);
+      if (seq === loadSeqRef.current) setLoadError(true);
       setLoading(false);
       return;
     }
     setVehicles((data || []) as Vehicle[]);
-    setLoadError(false);
+    if (seq === loadSeqRef.current) setLoadError(false);
     setLoading(false);
   }, [toast]);
 

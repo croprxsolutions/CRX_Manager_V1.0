@@ -53,7 +53,7 @@ describe('LoadFailedState', () => {
     const onRetry = vi.fn();
     render(<LoadFailedState onRetry={onRetry} />);
     expect(screen.getByRole('alert')).toHaveTextContent('This list could not be loaded');
-    expect(screen.getByRole('alert')).toHaveTextContent('Nothing has been deleted');
+    expect(screen.getByRole('alert')).toHaveTextContent('does not mean the records are gone');
     fireEvent.click(screen.getByRole('button', { name: /try again/i }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

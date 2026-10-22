@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckSquare, ChevronDown, ChevronRight } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -49,16 +49,21 @@ export default function ProgramTracker() {
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
+  // Only the newest read (e.g. the last season picked) may change the list or its error state.
+  const loadSeqRef = useRef(0);
   const fetchPrograms = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const { data, error } = await supabase.rpc('get_program_completion', { p_season: season });
       if (error) throw error;
       const result = assertRpcResult<ProgramRow[]>(data, 'get_program_completion');
+      if (seq !== loadSeqRef.current) return;
       setPrograms(result);
       setLoadError(false);
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      if (seq !== loadSeqRef.current) return;
       toast('error', 'Failed to load program data');
       setPrograms([]);
       setLoadError(true);

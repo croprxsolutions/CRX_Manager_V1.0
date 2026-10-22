@@ -296,7 +296,8 @@ export default function CropPrograms() {
           <SplitHeading title="Crop" accent="Programs" />
           <HelpTip text="Reusable product templates for common crop programs (e.g. '2026 Corn Program'). When building a quote, use 'Apply Program' to auto-fill sections and items with pre-set products and rates." />
         </span>
-        {/* Saving rewrites the whole program list, so it must never start from a list that failed to load. */}
+        {/* Saving rewrites the whole program list, so it must never start from a list that failed to load.
+            (Until a read finishes, the page renders only the loading skeleton above, so no save can start early.) */}
         {!loadError && (
           <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
             New Program

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, MapPin, List, Map as MapIcon, Upload, Download, FileText, Trash2, ChevronDown, ChevronRight, Link } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -40,6 +40,8 @@ export default function Fields() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [loadError, setLoadError] = useState(false);
+  // Only the newest read may set or clear loadError, so a slow older read cannot hide a newer list.
+  const loadSeqRef = useRef(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -67,6 +69,7 @@ export default function Fields() {
    * creates a duplicate field.
    */
   const fetchFields = useCallback(async (): Promise<boolean> => {
+    const seq = ++loadSeqRef.current;
     // get_fields_with_geojson returns total_acres only; the two-acre model's
     // override/measured acres live on the fields table. Pull them alongside (the
     // fields_select RLS policy allows it) so the list shows the acres that actually
@@ -76,7 +79,7 @@ export default function Fields() {
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_fields' } });
       toast('error', 'Failed to load fields. Please try again.');
-      setLoadError(true);
+      if (seq === loadSeqRef.current) setLoadError(true);
       setLoading(false);
       return false;
     }
@@ -105,7 +108,7 @@ export default function Fields() {
       };
     });
     setFields(rows);
-    setLoadError(false);
+    if (seq === loadSeqRef.current) setLoadError(false);
     setLoading(false);
     return true;
   }, [toast]);

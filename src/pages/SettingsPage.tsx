@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Fuel, ClipboardList, Bell, FileText } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
@@ -214,6 +214,8 @@ export default function SettingsPage() {
   const [settingPassword, setSettingPassword] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [usersLoadError, setUsersLoadError] = useState(false);
+  // Only the newest users read may set or clear usersLoadError (Try again can overlap a slower read).
+  const usersLoadSeqRef = useRef(0);
 
   const fetchSettings = async () => {
     const { data, error } = await supabase.from('app_settings').select('*');
@@ -246,6 +248,7 @@ export default function SettingsPage() {
   };
 
   const fetchUsers = async () => {
+    const seq = ++usersLoadSeqRef.current;
     // Codex P2 (PR #59, 2026-05-16): exclude entity_recipient service profiles
     // (CMCTW LLC, Crop Rx Solutions) from the user-management table — they
     // can't log in and showing them in the Edit/Set-Password UI risks an
@@ -258,10 +261,10 @@ export default function SettingsPage() {
       .order('full_name');
     if (error) {
       toast('error', 'Failed to load users');
-      setUsersLoadError(true);
+      if (seq === usersLoadSeqRef.current) setUsersLoadError(true);
       return;
     }
-    setUsersLoadError(false);
+    if (seq === usersLoadSeqRef.current) setUsersLoadError(false);
     setUsers((data || []) as Profile[]);
   };
 

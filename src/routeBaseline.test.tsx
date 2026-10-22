@@ -164,6 +164,10 @@ async function visit(routes: RouteObject[], url: string): Promise<string> {
 async function recordRoutes() {
   const leaves: Leaf[] = [];
   const routes = harnessRoutes(appRoutes, '', leaves);
+  // Rows are keyed by path, so a second route at the same path would hide behind the
+  // first one's row while the router picks one of them. Each path must appear once.
+  const patterns = leaves.map((l) => l.pattern);
+  expect(patterns.filter((p, i) => patterns.indexOf(p) !== i), 'duplicate route paths').toEqual([]);
   const out: Record<string, unknown> = {};
   for (const leaf of [...leaves].sort((a, b) => a.pattern.localeCompare(b.pattern))) {
     const url = sampleUrl(leaf.pattern);

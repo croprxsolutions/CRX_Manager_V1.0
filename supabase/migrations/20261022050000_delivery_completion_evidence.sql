@@ -30,8 +30,8 @@
 --      has none of them.
 --   2. Trigger require_delivery_completion_evidence (BEFORE INSERT OR UPDATE ON deliveries): a row may
 --      become 'completed', be inserted as 'completed', have any evidence or no-proof column written, or
---      have signature_url changed (at any status), or (once completed, voided or carrying evidence)
---      have signed_by changed, ONLY while the transaction-local marker
+--      have signature_url or signed_by set or changed (at any status, on insert too), ONLY while the
+--      transaction-local marker
 --      crx.delivery_completion_evidence names that row; and once the evidence is recorded those columns
 --      never change again, marker or not, whatever the status. Only complete_delivery sets it, after checking
 --      the evidence, and clears it right after the completion. There is no app.admin_override
@@ -68,9 +68,9 @@
 --   5. Storage: two NEW permissive delivery-signatures policies for the per-attempt pattern only —
 --      INSERT while the delivery is scheduled or in_progress, SELECT for display (any status) — for the
 --      same people as the existing policies (active admin, active sales rep, or the delivery's active
---      assigned driver). Four NEW RESTRICTIVE policies (ANDed with every permissive policy, existing or
---      future): no UPDATE or DELETE of a per-attempt signature object, and no UPDATE or DELETE of a
---      delivery-photos object accepted as a completion's ticket or drop-location photo. The four existing
+--      assigned driver). Two NEW RESTRICTIVE policies, one FOR UPDATE and one FOR DELETE (ANDed with
+--      every permissive policy, existing or future): no update or delete of a per-attempt signature
+--      object, or of a delivery-photos object accepted as a completion's ticket or drop-location photo. The four existing
 --      fixed-path signature policies (signatures/<id>.png) are UNCHANGED.
 --   5b. Trigger protect_accepted_delivery_photo (BEFORE UPDATE OR DELETE ON delivery_photos): an accepted
 --      ticket or drop-location photo row can no longer be changed (any column) or deleted.
@@ -273,7 +273,8 @@ BEGIN
     END IF;
     IF NEW.completion_evidence IS NOT NULL OR NEW.completion_evidence_ref IS NOT NULL
        OR NEW.completion_no_proof_by IS NOT NULL OR NEW.completion_no_proof_by_name IS NOT NULL
-       OR NEW.completion_no_proof_at IS NOT NULL THEN
+       OR NEW.completion_no_proof_at IS NOT NULL
+       OR NEW.signed_by IS NOT NULL OR NEW.signature_url IS NOT NULL THEN
       RAISE EXCEPTION 'COMPLETION_EVIDENCE_LOCKED: completion evidence is recorded only by complete_delivery'
         USING ERRCODE = '23514';
     END IF;
@@ -304,8 +305,8 @@ BEGIN
      -- The completion is the only writer of signature_url (the app never writes it), at any status, so a
      -- path set ahead of a paper or no-proof completion cannot pose as the customer's signature.
      OR NEW.signature_url IS DISTINCT FROM OLD.signature_url
-     OR ((OLD.status IN ('completed', 'voided') OR OLD.completion_evidence IS NOT NULL)
-         AND NEW.signed_by IS DISTINCT FROM OLD.signed_by) THEN
+     -- Likewise signed_by: only the completion names who confirmed it, so no one can pre-set a signer.
+     OR NEW.signed_by IS DISTINCT FROM OLD.signed_by THEN
     RAISE EXCEPTION 'COMPLETION_EVIDENCE_LOCKED: completion evidence is recorded only by complete_delivery'
       USING ERRCODE = '23514';
   END IF;
@@ -465,6 +466,7 @@ BEGIN
        OR NOT EXISTS (SELECT 1 FROM storage.objects o
                        WHERE o.bucket_id = 'delivery-signatures' AND o.name = v_signature_path
                          AND o.owner_id = v_actor::text
+                         AND o.metadata ->> 'mimetype' = 'image/png'
                          AND COALESCE(o.metadata ->> 'size', '') ~ '^[0-9]+$'
                          AND (o.metadata ->> 'size')::bigint > 0) THEN
       RAISE EXCEPTION 'SIGNATURE_IMAGE_MISSING: no signature image saved for this attempt' USING ERRCODE = '23514';

@@ -35,7 +35,8 @@ owner approval because it adds storage policies). Plan reviewed twice by Codex S
   advisory reviews.
 - **Accepted proof cannot be changed later.** The recorded evidence freezes once written. An accepted
   ticket or drop-location photo row cannot be edited or deleted, and restrictive storage rules stop
-  anyone replacing or deleting an accepted signature or photo file. The server refuses empty files.
+  anyone replacing or deleting an accepted signature or photo file. The server refuses empty files and
+  signature files that are not PNG images, and only a completion may set who signed.
 - **Lost-reply retries.** If a completion went through but the phone never heard back, tapping Complete
   again now asks the server, which replays the completion instead of the screen wrongly saying it failed.
 - **Driver receipts for hidden customers.** New read-only `get_delivery_receipt_recipient` gives an

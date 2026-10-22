@@ -140,7 +140,7 @@ BEGIN
   END;
   -- The image of another attempt (another key) of the same delivery and caller does not count.
   INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-signatures',
-    'signatures/' || v_del[1] || '/' || left(encode(sha256(convert_to(v_prefix || 'a-other', 'UTF8')), 'hex'), 32) || '.png', v_driver::text, '{"size": 1024}'::jsonb);
+    'signatures/' || v_del[1] || '/' || left(encode(sha256(convert_to(v_prefix || 'a-other', 'UTF8')), 'hex'), 32) || '.png', v_driver::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   BEGIN
     PERFORM public.complete_delivery(v_del[1], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_key, NULL, 'signature',
       'signatures/' || v_del[1] || '/' || left(encode(sha256(convert_to(v_prefix || 'a-other', 'UTF8')), 'hex'), 32) || '.png');
@@ -150,7 +150,7 @@ BEGIN
     IF v_err NOT LIKE 'SIGNATURE_IMAGE_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: a. other key: expected SIGNATURE_IMAGE_MISSING, got %', v_err; END IF;
   END;
   -- The right path uploaded by someone else does not count either.
-  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-signatures', v_path, v_driver_b::text, '{"size": 1024}'::jsonb);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-signatures', v_path, v_driver_b::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   BEGIN
     PERFORM public.complete_delivery(v_del[1], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_key, NULL, 'signature', v_path);
     RAISE EXCEPTION 'SMOKE_FAIL: a signature image uploaded by someone else was accepted';
@@ -166,7 +166,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a. a refused completion changed something (status %, evidence %, stock %)', v_status, v_evidence, v_avail;
   END IF;
   -- The caller's own image at the right path, but empty, does not count.
-  UPDATE storage.objects SET owner_id = v_driver::text, metadata = '{"size": 0}'::jsonb WHERE bucket_id = 'delivery-signatures' AND name = v_path;
+  UPDATE storage.objects SET owner_id = v_driver::text, metadata = '{"size": 0, "mimetype": "image/png"}'::jsonb WHERE bucket_id = 'delivery-signatures' AND name = v_path;
   BEGIN
     PERFORM public.complete_delivery(v_del[1], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_key, NULL, 'signature', v_path);
     RAISE EXCEPTION 'SMOKE_FAIL: a. an empty signature image was accepted';
@@ -174,7 +174,16 @@ BEGIN
     v_err := SQLERRM;
     IF v_err NOT LIKE 'SIGNATURE_IMAGE_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: a. empty image: expected SIGNATURE_IMAGE_MISSING, got %', v_err; END IF;
   END;
-  UPDATE storage.objects SET metadata = '{"size": 1024}'::jsonb WHERE bucket_id = 'delivery-signatures' AND name = v_path;
+  -- A non-image upload at the right path does not count either.
+  UPDATE storage.objects SET metadata = '{"size": 1024, "mimetype": "text/plain"}'::jsonb WHERE bucket_id = 'delivery-signatures' AND name = v_path;
+  BEGIN
+    PERFORM public.complete_delivery(v_del[1], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_key, NULL, 'signature', v_path);
+    RAISE EXCEPTION 'SMOKE_FAIL: a. a non-PNG signature file was accepted';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err NOT LIKE 'SIGNATURE_IMAGE_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: a. non-PNG: expected SIGNATURE_IMAGE_MISSING, got %', v_err; END IF;
+  END;
+  UPDATE storage.objects SET metadata = '{"size": 1024, "mimetype": "image/png"}'::jsonb WHERE bucket_id = 'delivery-signatures' AND name = v_path;
   v_res := public.complete_delivery(v_del[1], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_key, NULL, 'signature', v_path);
   SELECT status, completion_evidence, completion_evidence_ref, signature_url INTO v_status, v_evidence, v_ref, v_sig
     FROM public.deliveries WHERE id = v_del[1];
@@ -210,7 +219,7 @@ BEGIN
     IF v_err NOT LIKE 'PAPER_TICKET_PHOTO_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: b. expected PAPER_TICKET_PHOTO_MISSING, got %', v_err; END IF;
   END;
   -- A ticket photo of ANOTHER delivery does not count.
-  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[3] || '/t3.jpg', v_driver::text, '{"size": 1024}'::jsonb);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[3] || '/t3.jpg', v_driver::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[3], 'delivery-photos/' || v_del[3] || '/t3.jpg', 'x', v_driver, 'Signed paper delivery ticket', 0)
   RETURNING id INTO v_photo_other;
@@ -223,7 +232,7 @@ BEGIN
   END;
   -- Another delivery's row, even with its file stored in THIS delivery's folder, does not count
   -- (only the photo's own delivery id refuses this one).
-  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/x3.jpg', v_driver::text, '{"size": 1024}'::jsonb);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/x3.jpg', v_driver::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[3], 'delivery-photos/' || v_del[2] || '/x3.jpg', 'x', v_driver, 'Signed paper delivery ticket', 2)
   RETURNING id INTO v_photo;
@@ -260,7 +269,7 @@ BEGIN
     v_err := SQLERRM;
     IF v_err NOT LIKE 'PAPER_TICKET_PHOTO_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: b. empty photo: expected PAPER_TICKET_PHOTO_MISSING, got %', v_err; END IF;
   END;
-  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/t2.jpg', v_driver::text, '{"size": 1024}'::jsonb);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/t2.jpg', v_driver::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[2], 'delivery-photos/' || v_del[2] || '/t2.jpg', 'x', v_driver, 'Signed paper delivery ticket', 1)
   RETURNING id INTO v_photo;
@@ -273,7 +282,7 @@ BEGIN
 
   -- c. Left at site.
   INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES
-    ('delivery-photos', 'delivery-photos/' || v_del[3] || '/drop.jpg', v_driver::text, '{"size": 1024}'::jsonb);
+    ('delivery-photos', 'delivery-photos/' || v_del[3] || '/drop.jpg', v_driver::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[3], 'delivery-photos/' || v_del[3] || '/drop.jpg', 'x', v_driver, 'Left at site — drop location', 1)
   RETURNING id INTO v_photo;
@@ -344,7 +353,7 @@ BEGIN
   IF (SELECT status FROM public.deliveries WHERE id = v_del[5]) <> 'scheduled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: f. a refused list completion left the delivery started';
   END IF;
-  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-signatures', v_path, v_admin::text, '{"size": 1024}'::jsonb);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-signatures', v_path, v_admin::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
   v_res := public.start_and_complete_delivery(v_del[5], '[SMOKE] Signer', v_today, v_admin, NULL, NULL, NULL, v_key, 'signature', v_path);
   IF (v_res->>'started')::boolean IS DISTINCT FROM true
      OR (SELECT completion_evidence_ref FROM public.deliveries WHERE id = v_del[5]) IS DISTINCT FROM v_path THEN
@@ -454,6 +463,13 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     IF v_err NOT LIKE 'COMPLETION_EVIDENCE_LOCKED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: i. pre-set signature_url: expected COMPLETION_EVIDENCE_LOCKED, got %', v_err; END IF;
+  END;
+  BEGIN
+    UPDATE public.deliveries SET signed_by = '[SMOKE] Customer Name' WHERE id = v_del[7];
+    RAISE EXCEPTION 'SMOKE_FAIL: i. signed_by was pre-set on an open delivery';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err NOT LIKE 'COMPLETION_EVIDENCE_LOCKED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: i. pre-set signed_by: expected COMPLETION_EVIDENCE_LOCKED, got %', v_err; END IF;
   END;
   IF (SELECT status FROM public.deliveries WHERE id = v_del[7]) <> 'in_progress' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: i. a refused no-proof completion changed the delivery';

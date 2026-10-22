@@ -65,6 +65,8 @@ describe('Goal 5 completion evidence', () => {
     expect(isSignatureDataUrl('data:image/jpeg;base64,iVBORw0KGgo=')).toBe(false);
     expect(isSignatureDataUrl('data:image/png;base64,iVBOR w0KGgo=')).toBe(false);
     expect(isSignatureDataUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true);
+    // Labelled PNG but not PNG bytes.
+    expect(isSignatureDataUrl('data:image/png;base64,AAAAAAAAAAAA')).toBe(false);
   });
 
   it('explains each server refusal in plain English and says this attempt changed nothing', () => {

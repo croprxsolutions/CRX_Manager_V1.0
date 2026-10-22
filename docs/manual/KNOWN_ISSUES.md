@@ -3077,7 +3077,7 @@ makes the first one reachable more often by emitting several order lines per pro
    required (`IDEMPOTENCY_KEY_REQUIRED`), so a lost reply can always be replayed.
    **Four LOW leftovers of that migration (Sol round 5 and review notes), fixed by migration
    `20261022020000_blend_invoice_binding_lows` (not applied when written; live state in
-   `docs/reference/migration-history.md` row 964):** (1) a line stored its quantity rounded to 4
+   `docs/reference/migration-history.md` row 968):** (1) a line stored its quantity rounded to 4
    places but its amount and its share of the invoice cost used the unrounded quantity, so they could
    differ by cents; the per-unit line's amount and cost, and the "included in grower share" line's
    cost (its price stays $0), now use the stored quantity. (2) An approved $0 quoted line recorded the ticket line's editable cost copy instead of

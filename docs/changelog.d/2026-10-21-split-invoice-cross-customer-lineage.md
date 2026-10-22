@@ -11,3 +11,6 @@
   replayed, posted and voided; refusals at the exception's limits and of the unchanged rule; four
   mutations), plus
   `src/__tests__/splitInvoiceLineageMigration.test.ts`.
+- Known gap, accepted by Mason for now (2026-10-21, `DECISION_LOG.md`): a field owner billed this way
+  has no return-credit path yet; void the unpaid split group and split again until a split-aware
+  return path ships.

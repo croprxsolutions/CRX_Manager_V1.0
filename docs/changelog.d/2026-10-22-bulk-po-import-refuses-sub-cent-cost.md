@@ -16,3 +16,12 @@ The PO detail cost editor already refused sub-cent input; no database change.
 blocks the import (button reads **Import 0 POs**, input `aria-invalid`, no `save_purchase_order`
 call), then saves `3.33` / `333` cents after the admin corrects it; a second test proves a rep's
 import of the same document still goes through. The old test that asserted rounding was replaced.
+
+**Review fixes (same PR).** The check now uses the shared `isWholeCentPurchaseOrderCost` rule (the
+New PO screen's) and also checks the text the admin typed, so `10.0000000000000001` is refused rather
+than silently becoming `10`. The red error shows only on lines that are saved (matched, quantity above
+zero), is linked to the box for screen readers, and the line and PO totals show a dash instead of a
+rounded figure while a cost is invalid. **Known gap, not fixed here:** the `process-document` Edge
+Function turns OCR text into a number with `parseFloat`, so a cost with more than about 15 significant
+digits is shortened on the server before the browser sees it; closing that needs an Edge Function
+deploy.

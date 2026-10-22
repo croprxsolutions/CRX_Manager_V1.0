@@ -439,6 +439,31 @@ describe('BulkPOImport', () => {
     fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_purchase_order', expect.anything()));
+    const call = mocks.rpc.mock.calls.find(([name]) => name === 'save_purchase_order')!;
+    const items = (call[1] as { p_items: Array<Record<string, unknown>> }).p_items;
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(item).not.toHaveProperty('unit_cost');
+      expect(item).not.toHaveProperty('unit_cost_cents');
+    }
+  });
+
+  it('refuses a typed cost too precise for a number instead of shortening it', async () => {
+    render(<BulkPOImport {...defaultProps} />);
+    fireEvent.change(document.querySelector('#po-pdf-upload')!, {
+      target: { files: [new File(['one'], 'INV-TYPED.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    await screen.findByRole('button', { name: /import 1 po/i });
+
+    // parseFloat('10.0000000000000001') is exactly 10; the typed text must still be refused.
+    const costInput = screen.getByRole('spinbutton', { name: /unit cost for/i });
+    fireEvent.change(costInput, { target: { value: '10.0000000000000001' } });
+
+    expect(await screen.findByRole('button', { name: /import 0 pos/i })).toBeDisabled();
+    expect(costInput).toHaveAttribute('aria-invalid', 'true');
+    expect(costInput).toHaveAccessibleDescription(/no more than two decimal places/i);
+    expect(mocks.rpc).not.toHaveBeenCalledWith('save_purchase_order', expect.anything());
   });
 
   it('a sales rep import sends no cost and shows no cost columns (purchase cost is admin-only)', async () => {

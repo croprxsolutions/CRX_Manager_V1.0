@@ -215,7 +215,9 @@ The way this step works isn't decided yet. Mason decides at the 2026-12-15 check
 decision 3):
 
 - **If the QuickBooks Desktop sync is live (To-Do 14.2):** yesterday's sync finished with no failed
-  or unresolved entries. Its counts and totals of invoices, payments and credits match CRX's for the
+  or unresolved entries. Every QuickBooks-bound event on the Daily Money Activity List (including
+  corrections: unposted or voided invoices, voided payments, write-offs and prepay changes) appears
+  in the sync results. Its counts and totals of invoices, payments and credits match CRX's for the
   same day. Comparing balances alone isn't enough: a missing invoice and a doubled one can cancel out.
   So the sheet also records the count and total of invoices posted (from the Daily Money Activity List in Step 3),
   of payments recorded (Step 4) and of credits issued (Step 5).
@@ -439,7 +441,10 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
   delivered. It records the customer, order date, products and quantities, the agreed price for each
   (or "price later", if that was agreed), the delivery address, driver, delivery date and priority,
   and who took it. CRX will need all of these to create the order and its delivery afterwards;
-  without them, CRX falls back to its own defaults, such as today's tier price.
+  without them, CRX falls back to its own defaults, such as today's tier price. **Known gap:** a
+  "price later" order can't be back-dated in CRX: it always gets the day it's entered. Keep the real
+  order date on the paper form and in the order's notes. Question 7 below asks whether that is
+  acceptable.
 - The customer keeps a copy if the ticket has one. **Draft suggestion:** two-part (carbon) tickets.
 - If the product isn't on the printed schedule, write "NOT ON SCHEDULE" on the ticket, so the
   office knows to look for it in CRX afterwards.
@@ -509,6 +514,8 @@ drill log (section 4.9).
 5. If the outage lasts past one business day, does anything change? For example, holding deliveries
    that aren't urgent.
 6. When in December should the rehearsal happen, and who takes part?
+7. A "price later" order entered after an outage gets the entry date, not the day it was taken.
+   Is a note with the real date enough, or should CRX let that date be set?
 
 ---
 

@@ -58,6 +58,10 @@
   every filter and checks the count against the seven-day strip. A payment void records all its
   prepay effects. An order taken by phone during an outage goes on a paper order form with prices
   and delivery details.
+- Ninth Codex GitHub App round (two findings, both confirmed). A "price later" order always gets the
+  entry date (`create_rush_order` takes no order date), so the real date is kept on paper and in the
+  order notes, and Mason is asked whether that is enough. The QuickBooks check now matches every
+  QuickBooks-bound event on the Daily Money Activity List, corrections included.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

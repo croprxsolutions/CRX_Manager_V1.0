@@ -54,6 +54,10 @@
   invoice date and terms; receiving forms record the storage location and each item's condition. A
   general rule now says each paper form copies every field of its CRX screen, especially fields CRX
   fills in by default, and the December rehearsal checks each form against its screen.
+- Eighth Codex GitHub App round (three findings, all confirmed). The outage Load Sheet step clears
+  every filter and checks the count against the seven-day strip. A payment void records all its
+  prepay effects. An order taken by phone during an outage goes on a paper order form with prices
+  and delivery details.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

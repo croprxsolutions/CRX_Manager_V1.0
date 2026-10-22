@@ -135,7 +135,10 @@ done, customer, invoice or record number, amount, and their initials.
 - issuing a credit (a credited return), applying a credit memo to an invoice, or reversing that
   (the Returns screen shows the date a return was requested, not the day it was credited);
 - applying, editing or reversing prepay;
-- voiding a payment (with its original date and the amount it had applied to invoices);
+- voiding a payment, with its original date and everything the void undid: the amount it had
+  applied to invoices, and any prepay it had created (including prepay already applied to other
+  invoices, which the void also takes back). Write down the totals the void screen reports, and
+  check the customer's balances on **AR Aging** and **Prepay** right after;
 - **anything else that changes what a customer owes, their prepay or their credit.** When in doubt,
   write it down.
 
@@ -409,10 +412,12 @@ phone or one computer.
 - **Office:** printed blank delivery tickets and payment log sheets (numbered), a pen, this page, and
   the phone list of drivers, the office and launch support.
 - **Every evening before a delivery day:** print the next day's deliveries. On **Deliveries**, pick
-  the next day's date, make sure **no deliveries are ticked** (the button reads **Load Sheet**, not
-  **Load Sheet (3)**), and press it. With nothing ticked it prints every scheduled or in-progress
-  delivery in the list, with each customer's contact, address and products (**Download PDF** prints
-  only a one-line-per-delivery list). Check that the printout has as many deliveries as the screen.
+  the next day's date and **clear every other filter** (status, driver, customer, priority and the
+  search box): the Load Sheet prints only what the filtered list shows. Make sure **no deliveries
+  are ticked** (the button reads **Load Sheet**, not **Load Sheet (3)**), and press it. It prints
+  every scheduled or in-progress delivery in the list, with each customer's contact, address and
+  products (**Download PDF** prints only a one-line-per-delivery list). Check the printout's count
+  against the next day's count on the seven-day strip at the top of the page, which ignores filters.
   File it in the kit. This is the "last printed delivery schedule" the runbook relies on.
 - **Each truck:** blank numbered delivery tickets. These are the same signed paper tickets Goal 5
   uses when there's no signal at a customer.
@@ -430,6 +435,11 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
 **Deliveries**
 - The driver fills in a numbered paper ticket at the customer: customer, products and quantities,
   date, the signer's printed name and signature. Then they photograph it.
+- **An order taken by phone during the outage** goes on a numbered paper order form before it's
+  delivered. It records the customer, order date, products and quantities, the agreed price for each
+  (or "price later", if that was agreed), the delivery address, driver, delivery date and priority,
+  and who took it. CRX will need all of these to create the order and its delivery afterwards;
+  without them, CRX falls back to its own defaults, such as today's tier price.
 - The customer keeps a copy if the ticket has one. **Draft suggestion:** two-part (carbon) tickets.
 - If the product isn't on the printed schedule, write "NOT ON SCHEDULE" on the ticket, so the
   office knows to look for it in CRX afterwards.

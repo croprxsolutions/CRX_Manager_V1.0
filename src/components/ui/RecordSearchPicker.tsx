@@ -242,7 +242,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? `Search ${noun}...`}
-          className="w-full pl-9 pr-9 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500"
+          className="w-full pl-9 pr-9 py-2 text-base md:text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500"
         />
         {value && !disabled && (
           <button

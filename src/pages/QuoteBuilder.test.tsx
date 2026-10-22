@@ -540,6 +540,32 @@ describe('QuoteBuilder', () => {
     expect(screen.queryByDisplayValue('Home Quarter')).not.toBeInTheDocument();
   });
 
+  it('keeps a saved section field that now belongs to another customer when the quote is only opened (CodeRabbit, #1017)', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const savedSection = { ...section, field_id: 'field-1' };
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [savedSection]
+          : table === 'quote_items'
+            ? [item]
+            : table === 'fields'
+              // The field was moved to another customer after the quote was saved.
+              ? [{ id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-elsewhere', total_acres: 80, measured_acres: null, override_acres: null }]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    }));
+
+    renderQuoteBuilder(quote.id);
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(fieldBox).toHaveValue('Home Quarter'));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fieldBox).toHaveValue('Home Quarter');
+  });
+
   it('clears the product list and blocks new lines when a reload of the products fails', async () => {
     let productsFail = false;
     let failedReads = 0;

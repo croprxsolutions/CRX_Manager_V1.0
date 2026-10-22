@@ -40,7 +40,7 @@ describe('QuickReceivePanel mobile form', () => {
     );
 
     expect(screen.getByTestId('quick-receive-shipment-fields')).toHaveClass('grid-cols-1', 'md:grid-cols-2');
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Product' }));
 
     const quantity = await screen.findByRole('spinbutton', { name: 'Quantity received' });
     expect(quantity).toHaveAttribute('inputmode', 'decimal');

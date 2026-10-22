@@ -1369,6 +1369,7 @@ export default function QuoteBuilder() {
     }
     let cancelled = false;
     const ids = unresolvedFieldKey.split(',');
+    const customerIdAtStart = customerIdRef.current;
     supabase
       .from('fields')
       .select(QUOTE_FIELD_SELECT)
@@ -1383,9 +1384,13 @@ export default function QuoteBuilder() {
         const rows = (data || []) as unknown as FieldOption[];
         if (rows.length > 0) setFields((known) => ({ ...known, ...Object.fromEntries(rows.map((row) => [row.id, row])) }));
         // The customer may have changed while these were loading: a field that belongs to another
-        // customer is cleared, as a pick would have cleared it.
+        // customer is then cleared, as a pick would have cleared it. A plain load never clears a
+        // saved field (CodeRabbit, #1017): a field later moved to another customer stays as saved.
         const currentCustomerId = customerIdRef.current;
-        const foreign = new Set(rows.filter((row) => currentCustomerId && row.customer_id !== currentCustomerId).map((row) => row.id));
+        const customerChanged = currentCustomerId !== customerIdAtStart;
+        const foreign = new Set(rows
+          .filter((row) => customerChanged && currentCustomerId && row.customer_id !== currentCustomerId)
+          .map((row) => row.id));
         if (foreign.size > 0) {
           setSections((prev) => prev.map((sec) => (sec.field_id && foreign.has(sec.field_id) ? { ...sec, field_id: null } : sec)));
         }

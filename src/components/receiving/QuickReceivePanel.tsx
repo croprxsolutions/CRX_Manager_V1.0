@@ -118,6 +118,8 @@ export default function QuickReceivePanel() {
   const [products, setProducts] = useState<PickerProduct[]>([]);
   // The product list failed to load: no item can be added or matched until a reload.
   const [productsFailed, setProductsFailed] = useState(false);
+  // Until the catalog read finishes, picking would search an empty list (CodeRabbit, #1017).
+  const [productsLoading, setProductsLoading] = useState(true);
   const [vendors, setVendors] = useState<string[]>([]);
 
   /* ─── product search modal ─── */
@@ -167,9 +169,13 @@ export default function QuickReceivePanel() {
         setProducts([]);
         setVendors([]);
         setProductsFailed(true);
+        setProductsLoading(false);
+        // An open picker would show "No products found" over the failure; close it.
+        setProductSearchOpen(null);
         return;
       }
       setProductsFailed(false);
+      setProductsLoading(false);
       const prods = (data || []) as unknown as PickerProduct[];
       setProducts(prods);
       const uv = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
@@ -638,9 +644,9 @@ export default function QuickReceivePanel() {
                 icon={<Plus className="w-4 h-4" />}
                 showChevron={false}
                 onClick={addItem}
-                disabled={productsFailed}
+                disabled={productsFailed || productsLoading}
               >
-                Add Product
+                {productsLoading ? 'Loading products...' : 'Add Product'}
               </Button>
             </div>
             {productsFailed && (
@@ -655,9 +661,9 @@ export default function QuickReceivePanel() {
                   icon={<Plus className="w-4 h-4" />}
                   showChevron={false}
                   onClick={addItem}
-                  disabled={productsFailed}
+                  disabled={productsFailed || productsLoading}
                 >
-                  Add First Product
+                  {productsLoading ? 'Loading products...' : 'Add First Product'}
                 </Button>
               </div>
             ) : (
@@ -692,10 +698,11 @@ export default function QuickReceivePanel() {
                               setProductSearchOpen(item.key);
                               setProductQuery('');
                             }}
-                            className="flex items-center gap-2 text-crx-green hover:underline font-medium text-sm"
+                            disabled={productsFailed || productsLoading}
+                            className="flex items-center gap-2 text-crx-green hover:underline font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
                           >
                             <Search className="w-4 h-4" />
-                            Select Product
+                            {productsLoading ? 'Loading products...' : 'Select Product'}
                           </button>
                         )}
                       </div>

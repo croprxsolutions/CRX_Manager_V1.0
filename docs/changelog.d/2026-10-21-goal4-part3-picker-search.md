@@ -46,6 +46,11 @@ Not in this PR, because other sessions own those files: the Invoice Detail custo
 - Inventory keeps only the newest product and customer list reads.
 - Quote Builder refuses a customer, tier or section field change while saved lines exist and products are still loading, since repricing then would convert units at a factor of 1. With no lines, a pick or a `?customer_id=` link still works.
 
+**CodeRabbit review 5.**
+- Opening a saved quote never clears a section's field. Only a customer change during the field's load clears it.
+- Quick Receive offers no product until its catalog has loaded, and a failed load closes an open picker.
+- Search boxes use 16px text on phones, so iOS does not zoom in on focus.
+
 **Known limits, for part 4:**
 - Complete paged reads still grow with the table. They are correct at any size, but slow at very large sizes.
 - More than 20 records with identical names and no account number or SKU to tell them apart cannot all be reached.

@@ -8,10 +8,11 @@
 --   1. STORED QUANTITY. Each product line stores its quantity rounded to 4 places, but its amount
 --      (extended_cents) and its share of the invoice cost (total_cost_cents) were computed from the
 --      unrounded quantity, so on a fractional quantity they could differ by cents from quantity x
---      price (and quantity x cost). Both quantities are now rounded once, before either branch, and
---      the line, its amount, its cost and the invoice totals all use that stored quantity: the
---      "included in grower share" line (Mode A, the 20261021070000 finding) and the per-unit line
---      (Mode B, the same pre-existing pattern). This is what save_invoice already does when a line
+--      price (and quantity x cost). Both quantities are now rounded once, before either branch:
+--      the per-unit line (Mode B, the same pre-existing pattern) takes its amount, its cost and its
+--      share of the invoice totals from the stored quantity, and the "included in grower share"
+--      line (Mode A, the 20261021070000 finding) its share of the invoice cost; that line's price
+--      stays $0 and the per-acre share charge is unchanged. This is what save_invoice already does when a line
 --      is saved again (ROUND(quantity x unit price)). A customer's amount can move by a few cents
 --      on a fractional quantity; whole-number and 4-place quantities bill exactly as before.
 --   2. $0 LINE COST. An approved $0 quoted line now records the product's catalog cost (the cost the

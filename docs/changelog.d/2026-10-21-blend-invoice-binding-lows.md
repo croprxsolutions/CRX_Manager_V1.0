@@ -6,9 +6,11 @@ notes:
 
 - **Stored quantity.** A product line stores its quantity rounded to 4 places, but its amount and its
   share of the invoice cost were worked out from the unrounded quantity, so on a fractional quantity they
-  could differ by a few cents from quantity x price. Both the per-unit line and the "included in grower
-  share" line now price and cost from the stored quantity, as `save_invoice` already does when a line is
-  saved again. Whole-number and 4-place quantities bill exactly as before.
+  could differ by a few cents from quantity x price. The per-unit line now prices and costs from the
+  stored quantity, as `save_invoice` already does when a line is saved again. The "included in grower
+  share" line stays $0 (its customer charge is the per-acre share line, from acres and the override
+  price, unchanged); only its cost in the invoice total now uses the stored quantity. Whole-number and
+  4-place quantities bill exactly as before.
 - **$0 line cost.** An approved $0 quoted line now records the catalog cost the approval window showed
   (and `below_cost_approvals` records), not the ticket line's editable cost copy; the grower-share line
   already did. Other lines keep their cost source. Margin reporting only (the price is $0 either way).

@@ -3075,8 +3075,8 @@ makes the first one reachable more often by emitting several order lines per pro
    `20261022020000_blend_invoice_binding_lows` (not applied when written; live state in
    `docs/reference/migration-history.md` row 964):** (1) a line stored its quantity rounded to 4
    places but its amount and its share of the invoice cost used the unrounded quantity, so they could
-   differ by cents; both the per-unit and the "included in grower share" lines now use the stored
-   quantity. (2) An approved $0 quoted line recorded the ticket line's editable cost copy instead of
+   differ by cents; the per-unit line's amount and cost, and the "included in grower share" line's
+   cost (its price stays $0), now use the stored quantity. (2) An approved $0 quoted line recorded the ticket line's editable cost copy instead of
    the catalog cost the approval showed; it now records the catalog cost (margin reporting only).
    (3) The tier-price helper the invoice calls was not pinned by the migration's safety check; it is
    now, with the quote-pick and cents helpers. (4) A leftover "if a retry key was sent" test that could

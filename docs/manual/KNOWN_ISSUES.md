@@ -163,7 +163,10 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   billed share, priced from its own billed cents; on any order with split-billing evidence every payer,
   the order's customer included, is capped at its own billed share; and the credit memo is created
   inside the credit's private claim. The Returns screen reads each payer's allowance through two
-  read-only lookups, so it is right for sales reps too. Proof:
+  read-only lookups. They follow `invoices_select`: a sales rep sees a split order's allowance only
+  for a payer invoice the rep created or is the salesperson on (an admin sees all), so until reps may
+  read every invoice (Mason, 2026-10-13, not yet shipped) such a rep cannot start that payer's return
+  from the screen; an admin can. Proof:
   `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Both `receive_return` and `issue_return_credit`
   check a split return's share while holding the per-line locks a source void or edit try-takes, so a
   void cannot slip between the check and the restock or credit. Left open, by design (Luna on PR #1010):

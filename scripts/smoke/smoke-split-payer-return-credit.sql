@@ -32,6 +32,7 @@ DECLARE
   v_suffix text := substr(md5(random()::text), 1, 8);
   v_today date := (now() AT TIME ZONE 'America/Chicago')::date;  -- the business date
   v_admin uuid;
+  v_rep uuid;
   v_a uuid;
   v_b uuid;
   v_d uuid;
@@ -191,6 +192,20 @@ BEGIN
      OR (SELECT unit_credit_cents FROM public.get_return_line_allowances(v_order, v_b) WHERE order_item_id = v_line2) IS DISTINCT FROM (v_b_line2_cents * 2)::bigint THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the return lookup does not show B''s credit per unit from B''s own billed cents';
   END IF;
+  -- A sales rep who neither created B's split invoice nor is its salesperson cannot read it under
+  -- invoices_select, so the lookups show that rep nothing about it.
+  SELECT id INTO v_rep FROM public.profiles
+   WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1;
+  IF v_rep IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: active sales rep required'; END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  IF v_order IN (SELECT public.get_split_payer_return_orders(v_b))
+     OR EXISTS (SELECT 1 FROM public.get_return_line_allowances(v_order, v_b))
+     OR EXISTS (SELECT 1 FROM public.get_return_line_allowances(v_order, v_a)) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a sales rep who cannot read the split invoices saw their billing through the return lookups';
+  END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   -- 2a. B cannot return more than its open billed share (2 GL billed, 1 GL already open).
   BEGIN

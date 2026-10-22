@@ -146,14 +146,18 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   to any field and edit a field's owner or billing defaults, so a split can bill any customer those
   rows name. Claims and provenance stay unforgeable; the scope question (should an allocation be tied
   to the order's customer or the field's owners?) is Mason's.
-- **A non-order owner cannot get an order-backed return credit (accepted for now by Mason, 2026-10-21:
-  "Accept split gap for now"; Sol on PR #1010 rated it HIGH).** The return-credit paths require
-  the return's customer to equal the order's (`RETURN_ORDER_CUSTOMER_MISMATCH`), so field owner B's
-  posted split invoice cannot be credited through them; they refuse rather than misattribute. Until a
-  split-aware return path ships (a return for the split invoice's customer, capped at that customer's
-  billed share, credited to that invoice), correct B's share by voiding the unpaid split group
-  (`void_invoice_group`) and splitting again; a paid split invoice has no return-credit path. See
-  `DECISION_LOG.md` (2026-10-21).
+- **FIX PENDING APPLY (`20261021155000`, same PR): a non-order owner could not get an order-backed
+  return credit.** The return paths required the return's customer to equal the order's
+  (`RETURN_ORDER_CUSTOMER_MISMATCH`), and `guard_mono_invoice_split_billing_post` refused every posted
+  ungrouped invoice on a split order, so no return on a split order could be credited, even the order
+  customer's. Mason first accepted the gap, then chose "Build split returns first" (`DECISION_LOG.md`,
+  2026-10-21). `20261021155000` lets a payer a posted governed split invoice bills return its own
+  billed share, priced from its own billed cents, capped for every payer once another payer was billed
+  for the line, and credited to that payer inside the credit's private claim. Proof:
+  `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs`. Left open: a split payer's credit is
+  not auto-applied (as for every return credit, staff apply it), and a split return's quantity check
+  in `receive_return` runs without the per-line locks that `issue_return_credit` re-checks under, so a
+  source void racing a receive can leave a received return that the credit step then refuses.
 - **A billing-default edit committed mid-split can refuse that split (LOW, availability).** The guard
   re-reads the owners when each draft is written; a change committed by another session in between
   rolls the split back. It never admits a customer the split did not choose.

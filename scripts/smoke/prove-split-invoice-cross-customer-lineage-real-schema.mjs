@@ -141,7 +141,10 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
+  // Only 20261021155000 (split-payer returns, which builds on this guard) may follow it.
+  assert.deepEqual(all.slice(at + 1).map((f) => path.basename(f)),
+    all.length - 1 === at ? [] : ['20261021155000_split_payer_return_credit.sql'],
+    'the candidate must be the last migration in the replay plan, or followed only by 20261021155000');
   const before = all.slice(0, at);
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);

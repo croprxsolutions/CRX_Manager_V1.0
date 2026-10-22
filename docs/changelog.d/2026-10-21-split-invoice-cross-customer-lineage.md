@@ -11,6 +11,12 @@
   replayed, posted and voided; refusals at the exception's limits and of the unchanged rule; four
   mutations), plus
   `src/__tests__/splitInvoiceLineageMigration.test.ts`.
-- Known gap, accepted by Mason for now (2026-10-21, `DECISION_LOG.md`): a field owner billed this way
-  has no return-credit path yet; void the unpaid split group and split again until a split-aware
-  return path ships.
+- Split returns (same PR, `20261021155000_split_payer_return_credit.sql`, not applied yet; Mason:
+  "Build split returns first"): a field owner billed through a split can return its billed share and
+  gets its own return credit; once another payer was billed for a line, each payer can return only
+  its own share; a return credit memo passes the split-order invoice guard only inside the credit's
+  claim (before this, no return on a split order could be credited). The Returns screen lists the
+  orders a customer was split-billed on and caps each line at what that customer may return. Proof:
+  `scripts/smoke/prove-split-payer-return-credit-real-schema.mjs` over
+  `smoke-split-payer-return-credit.sql`, plus `src/__tests__/splitPayerReturnMigration.test.ts` and
+  `src/lib/splitReturnShare.test.ts`.

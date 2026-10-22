@@ -182,7 +182,10 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   non-office account (or hide the palette for field roles).
 - **B. Narrow the tables.** Change the applicator leg of `fields_select`, `field_crop_history_select`,
   `field_obstacles_select` and `field_app_locations_select`/`_shares_select` to `is_applicator() AND
-  _can_see_field(...)` (`field_polygons` follows automatically). Do **not** make `fbd_select` and `arf_select`
+  _can_see_field(...)` (`field_polygons` follows automatically). Also gate each row of
+  `job_fields_select_location_dispatchee` (`20260626120000_job_location_dispatches.sql`, which tests only
+  `_is_dispatched_to_me(job_id)`) with `_can_see_field(job_fields.field_id)`, so a split-job assignee cannot read the
+  job's other `job_fields` rows (field id, acres, crop) directly. Do **not** make `fbd_select` and `arf_select`
   office-only: applicator screens read both. Job Detail (`src/pages/JobDetail.tsx`, the grower-share banner) reads
   `field_billing_defaults` and would mislabel a denied read, and the applicator sheet
   (`src/lib/applicatorSheetPrintData.ts`) joins `application_record_fields` for a field's past applications. Scope
@@ -191,10 +194,12 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   row 11.3 cost-column work.
 - **C. End the whole-job route.** Add the dispatch route's window (open, or completed within 7 days; never cancelled or
   soft-deleted) to the whole-job applicator leg of `jobs_select`, the job child tables, `job-attachments` storage and
-  `customers_select`, and in every `SECURITY DEFINER` function that copies the old `jobs_select` test
-  (`get_job_fields_with_geojson`, `get_job_billed_customers`, `get_jobs_billed_customers`,
-  `get_dispatch_board_jobs` all accept `jobs.applicator_id = auth.uid()` with no window, and row security does not
-  apply inside them), with direct-call tests for each. Close the dispatch route's soft-delete hole too: add a `jobs.deleted_at IS NULL` test to
+  `customers_select`, and in every `SECURITY DEFINER` function that copies the old `jobs_select` test, since row
+  security does not apply inside them. A live search on 2026-10-22 for definer bodies that test `applicator_id` against
+  `auth.uid()` found seven: `_is_dispatched_to_me`, `get_dispatch_board_jobs`, `get_dispatched_list`,
+  `get_job_billed_customers`, `get_jobs_billed_customers`, `get_job_fields_with_geojson` and `stamp_job_printed`
+  (which also writes the job's print record). Re-run that search when writing the migration, and add a direct-call
+  test for each. Close the dispatch route's soft-delete hole too: add a `jobs.deleted_at IS NULL` test to
   `_is_dispatched_to_me` (or a trigger that cancels open dispatches when `deleted_at` is set), since the dispatch
   policies would otherwise keep a deleted job readable.
 - **Proof:** per-role impersonation before and after, in the disposable database and read-only on live after the apply:

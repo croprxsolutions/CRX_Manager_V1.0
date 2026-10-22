@@ -180,7 +180,11 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   page (`/dashboard`, open to every signed-in role in `src/App.tsx`) mounts `ActionQueue` unconditionally, which would
   catch the refusal and show a false "All Clear", so show `ActionQueue` to office roles only; and the command palette
   sits in the shared layout (`src/components/layout/AppLayout.tsx`), so make `global_search` return nothing to a
-  non-office account (or hide the palette for field roles).
+  non-office account (or hide the palette for field roles). The same page's `operational_dashboard_summary` is safe on
+  live: its installed body refuses anyone but active admins and sales reps (a read-only call as the applicator got
+  `Not authorized`, 2026-10-22). But the newest migration that defines it, `20260323100000_operational_dashboard_summary.sql`,
+  has no such check; live keeps the one from the older `20260311200000_wave2_audit_fixes.sql`. A rebuild from the
+  migration files would lose it, so part A re-emits it with the live check.
 - **B. Narrow the tables.** Change the applicator leg of `fields_select`, `field_crop_history_select`,
   `field_obstacles_select` and `field_app_locations_select`/`_shares_select` to `is_applicator() AND
   _can_see_field(...)` (`field_polygons` follows automatically). Also gate each row of

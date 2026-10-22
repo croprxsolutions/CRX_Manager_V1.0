@@ -1,5 +1,5 @@
 -- Written 2026-10-22. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migration-history.md (row 973).
+-- docs/reference/migration-history.md (row 969).
 --
 -- WHAT: a new login no longer picks its own role. `handle_new_user` (AFTER INSERT ON auth.users)
 --   copied `raw_user_meta_data->>'role'` into the new profile, and profiles start active. That
@@ -43,7 +43,8 @@
 --   as an inactive driver named by email; the admin opens the user, sets name and role and marks
 --   them active.
 --
--- ORDERING: sorts above every pending candidate (rows 968-972). Re-read the live ledger first.
+-- ORDERING: lands right after #1018 (20261022022000, row 968) and before 025000 (swap A), 030000 (cost lock B),
+--   040000 (#1026) and 050000 (#1024) (Mason, 2026-10-22: "Move #1039 ahead"). Re-read the live ledger first.
 
 SET LOCAL lock_timeout = '5s';
 -- pg_get_triggerdef omits a schema only when it is on the search_path; fix it for this transaction

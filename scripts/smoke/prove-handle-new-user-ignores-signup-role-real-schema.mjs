@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for the 20261022060000 candidate: a new login no longer picks its own role.
+ * Real-schema proof for the 20261022023000 candidate: a new login no longer picks its own role.
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
  * PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate (the
@@ -36,7 +36,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261022060000_handle_new_user_ignores_signup_role.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261022023000_handle_new_user_ignores_signup_role.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

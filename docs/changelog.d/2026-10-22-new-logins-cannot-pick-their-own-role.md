@@ -1,6 +1,6 @@
 ## 2026-10-22 — a new login can no longer pick its own role
 
-- Migration `20261022060000_handle_new_user_ignores_signup_role.sql` (migration-history row 973): the
+- Migration `20261022023000_handle_new_user_ignores_signup_role.sql` (migration-history row 969): the
   `handle_new_user` trigger no longer copies the role from signup metadata. Every user the Auth service creates
   (public signup, and the admin API behind the `create-user` Edge Function) starts as an inactive driver whose
   login is blocked and whose name is its email, whatever name and role it asked for. Before,

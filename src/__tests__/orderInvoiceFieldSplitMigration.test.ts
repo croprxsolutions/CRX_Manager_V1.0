@@ -1,5 +1,5 @@
 /**
- * Migration 20261021160000: create_invoice_from_order refuses an order split across fields
+ * Migration 20261022021000: create_invoice_from_order refuses an order split across fields
  * (ORDER_HAS_FIELD_SPLIT), inside its idempotency layer and AFTER the replay lookup, so an exact
  * retry of an invoice created before the split still returns its id. The order's lines are locked
  * before the test, so no allocation can commit between the test and the invoice insert.
@@ -16,7 +16,7 @@ import { sanitizeError } from '../lib/errorSanitizer';
 const read = (file: string) => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 const md5 = (text: string) => createHash('md5').update(text).digest('hex');
 
-const MIGRATION = 'supabase/migrations/20261021160000_order_invoice_refuses_field_split.sql';
+const MIGRATION = 'supabase/migrations/20261022021000_order_invoice_refuses_field_split.sql';
 const sql = read(MIGRATION);
 const header = sql.slice(
   sql.indexOf('CREATE OR REPLACE FUNCTION public._create_invoice_from_order_idem_impl_20260721('),
@@ -33,7 +33,7 @@ const at = (needle: string) => {
   return i;
 };
 
-describe('20261021160000 order invoice refuses a field split', () => {
+describe('20261022021000 order invoice refuses a field split', () => {
   it('replaces exactly one function, keeping its signature, definer mode and search_path, with no grant change', () => {
     expect(sql.match(/CREATE OR REPLACE FUNCTION/g)).toHaveLength(1);
     expect(header).toContain('p_order_id uuid,\n  p_salesman_id uuid DEFAULT NULL,\n  p_invoice_type text DEFAULT \'chemical_sale\',\n  p_idempotency_key text DEFAULT NULL\n)');
@@ -58,7 +58,7 @@ describe('20261021160000 order invoice refuses a field split', () => {
   });
 
   it('is the live body plus only the field-split hunk, matching the preflight and postflight pins', () => {
-    const hunkStart = at('  -- Field split (20261021160000)');
+    const hunkStart = at('  -- Field split (20261022021000)');
     const hunkEnd = at('  v_invoice_id := public._create_invoice_from_order_impl_20260718(');
     const original = body.slice(0, hunkStart) + body.slice(hunkEnd);
     expect(preflight).toContain(`md5(replace(p.prosrc, chr(13), '')) = '${md5(original)}'`);

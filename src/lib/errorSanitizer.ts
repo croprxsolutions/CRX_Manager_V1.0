@@ -68,7 +68,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Return credits are briefly paused while an accounting update finishes. Retry in a moment'],
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
-  // create_invoice_from_order refuses an order split across fields (20261021160000): it is billed
+  // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],

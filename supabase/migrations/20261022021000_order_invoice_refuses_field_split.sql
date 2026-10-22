@@ -1,4 +1,4 @@
--- Written 2026-10-21; restamped 2026-10-22 from 20261021120000 to 20261021160000 and re-pinned to the live
+-- Written 2026-10-21; restamped 2026-10-22 from 20261021120000 to 20261022021000 and re-pinned to the live
 -- bodies after PR #1010. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migration-history.md.
 --
@@ -204,7 +204,7 @@ BEGIN
     RAISE EXCEPTION 'ORDER_INVOICE_TERMINAL: cannot create an invoice for a cancelled, voided, or deleted order';
   END IF;
 
-  -- Field split (20261021160000): an order split across fields is billed per field owner, only
+  -- Field split (20261022021000): an order split across fields is billed per field owner, only
   -- through create_split_invoices_from_order. After the replay lookup above, so an exact retry of
   -- an invoice created before the split still returns its id. The lines are locked first: a new
   -- allocation row KEY SHARE-locks its line, so none can commit between this test and the insert.
@@ -262,7 +262,7 @@ BEGIN
         AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
         AND pg_get_function_arguments(p.oid) =
           'p_order_id uuid, p_salesman_id uuid DEFAULT NULL::uuid, p_invoice_type text DEFAULT ''chemical_sale''::text, p_idempotency_key text DEFAULT NULL::text'
-        AND md5(replace(p.prosrc, chr(13), '')) = 'be6f66979b8a19c933b7294fe5cb3105'
+        AND md5(replace(p.prosrc, chr(13), '')) = 'cca669b824623970d7ac617658d87cc1'
         AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
             FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS NOT DISTINCT FROM ARRAY['postgres']::text[]

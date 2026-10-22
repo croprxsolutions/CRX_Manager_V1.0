@@ -220,7 +220,8 @@ export default async function teardownFixtures(): Promise<void> {
   await del('invoice_items', () => deleteByFk(token, 'invoice_items', 'invoice_id', invoiceIds));
   await del('invoice_shares', () => deleteByFk(token, 'invoice_shares', 'invoice_id', invoiceIds));
   // invoice_line_allocations / allocation_sets are not deleted here: since 20261022040000 they are
-  // written only by the payment RPCs (allocate_payment, void_payment), so a browser DELETE is refused.
+  // written only by database functions (allocate_payment, void_payment, void_invoice and
+  // update_order_items), so a browser DELETE is refused.
   // An E2E run that records a payment leaves its allocation rows (and so its invoice and customer)
   // until a service-role cleanup exists for the staging project.
   await del('rup_sales_records (invoice)', () => deleteByFk(token, 'rup_sales_records', 'invoice_id', invoiceIds));

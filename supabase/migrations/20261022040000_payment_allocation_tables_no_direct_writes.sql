@@ -112,7 +112,7 @@ BEGIN
     JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
      AND (coalesce(p.prosrc, '') || coalesce(p.prosqlbody::text, ''))
-         ~* '(insert\s+into|update(\s+only)?|delete\s+from(\s+only)?|merge\s+into|truncate(\s+table)?(\s+only)?)\s+("?public"?\.)?"?(allocation_sets|invoice_line_allocations|order_line_allocations)\M';
+         ~* '(insert\s+into|update(\s+only)?|delete\s+from(\s+only)?|merge\s+into(\s+only)?|truncate(\s+table)?(\s+only)?)\s+("?public"?\.)?"?(allocation_sets|invoice_line_allocations|order_line_allocations)\M';
   IF v_writers IS DISTINCT FROM 'public._update_order_items_impl,public._void_invoice_split_provenance_impl_20260719,public._void_payment_replay_impl_20261015,public.allocate_payment' THEN
     RAISE EXCEPTION 'ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four this migration was reviewed for (re-check them first): %', v_writers;
   END IF;

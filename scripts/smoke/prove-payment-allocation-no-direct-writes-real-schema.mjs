@@ -439,7 +439,7 @@ function preflightRefuses() {
      /ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four .*prover_new_writer/],
     // ...also one in another schema that writes with MERGE.
     [`CREATE SCHEMA prover_y; CREATE FUNCTION prover_y.merger(p uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
-       AS $$ MERGE INTO public.allocation_sets s USING (SELECT p AS id) x ON s.id = x.id WHEN MATCHED THEN UPDATE SET notes = 'x' $$;`,
+       AS $$ MERGE INTO ONLY public.allocation_sets s USING (SELECT p AS id) x ON s.id = x.id WHEN MATCHED THEN UPDATE SET notes = 'x' $$;`,
      /ALLOCATION_WRITE_LOCK_PREFLIGHT: the writers of the allocation tables are not the four .*prover_y\.merger/],
     // ...and one that quotes the schema and table names.
     [`CREATE FUNCTION public.prover_quoted_writer(p uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp

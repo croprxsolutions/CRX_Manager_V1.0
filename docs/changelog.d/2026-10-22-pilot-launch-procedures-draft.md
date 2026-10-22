@@ -39,6 +39,13 @@
   sheet include write-offs, which CRX shows only per invoice, so they go on the posting list. Brake
   payment forms record the method (Record Payments starts on "Check"). Return forms record each
   item's condition and whether it is restocked.
+- Fifth Codex GitHub App round (four findings, all confirmed). Fixed by closing the two underlying
+  gaps throughout, not case by case. A hand-kept **Daily Money Activity List** records every money
+  event CRX can't list by date (postings, write-offs, credit and prepay applications and reversals,
+  payment voids); the A/R equation includes voids and reversals; and question 9 asks Mason about a
+  dated report to replace the list. Every brake operation keeps a **form list** mapping paper numbers
+  to CRX record numbers, because only payments can be searched by a paper number. Payment forms and
+  the outage log record the amount for each invoice and any prepay remainder.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

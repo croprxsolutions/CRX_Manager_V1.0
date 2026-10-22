@@ -107,21 +107,30 @@ and report it to launch support if the strip still doesn't appear.
 Then explain the change from yesterday. **Draft suggestion** (the bookkeeper sets the final rule):
 
 > yesterday's Total Owed + invoices posted yesterday − payment amounts applied to invoices yesterday
-> − credits and prepay applied yesterday − write-offs applied yesterday + write-offs reversed yesterday
-> ± other corrections (for example a reversed credit) = today's Total Owed
-
-Write-offs change an invoice's balance, but CRX shows them only on each invoice's own page; there's
-no list of yesterday's write-offs. **Draft suggestion:** whoever applies or reverses a write-off adds
-it to the posting list (Step 3's known gap below), with the invoice number and amount.
+> + applied amounts of payments voided yesterday − credits and prepay applied yesterday + credits and
+> prepay applications reversed yesterday − write-offs applied yesterday + write-offs reversed yesterday
+> = today's Total Owed
 
 Payment money that wasn't applied to an invoice doesn't lower Total Owed, so it's tracked separately
 (Step 4). If it doesn't add up, the gap gets a Difference Log row.
 
-**Known gap: there's no screen for "invoices posted yesterday".** **Invoices — Chemical** shows and
-exports each invoice's **invoice date**, not the day it was posted. A draft created on Monday and
-posted on Tuesday counts in Tuesday's Total Owed but is filed under Monday. **Draft suggestion:**
-until a posting date is shown (question 9 below), whoever posts invoices writes each day's posted
-invoice numbers and totals on a posting list, and Step 3 uses that list.
+**Known gap: CRX has no dated list for most of these events.** **Invoices — Chemical** shows each
+invoice's invoice date, not the day it was posted. Write-offs show only on each invoice's own page.
+Payment History keeps a voided payment under its original date and doesn't show when it was voided.
+Prepay and credit-memo screens show current balances, not a history of applications. So these
+numbers can't be read off a screen the next morning.
+
+**Draft suggestion: the Daily Money Activity List.** Until CRX can list these by date (question 9
+below), whoever does one of the following writes it on a shared list the same day: date, what was
+done, customer, invoice or record number, amount, and their initials.
+- posting an invoice;
+- applying or reversing a write-off;
+- applying a credit memo to an invoice, or reversing that;
+- applying, editing or reversing prepay;
+- voiding a payment (with its original date and the amount it had applied to invoices).
+
+Step 3's equation and Steps 5 and 8 use that list. If the list is incomplete, the day won't add up,
+so it has to be part of each person's routine from January 1.
 
 **The strip shows live balances, not last night's closing balances.** An invoice posted or a payment
 applied this morning, before the check, is already in today's numbers. **Draft suggestion:** write
@@ -154,10 +163,11 @@ On **A/R Workspace**, open the **Payment History** tab and list yesterday's paym
 
 - **Credits:** each return credited yesterday has its credit memo (the Integrity Report's
   Return-Credit Linkage check covers this). The **Credit Memos** total from Step 3 changed only by
-  credits issued, applied or reversed yesterday, or another approved correction.
-- **Prepay:** **Unused Prepay** from Step 3 changed only by prepay received, applied or edited
-  yesterday, or another approved correction. For a customer whose prepay changed, open **Prepay**
-  (Manager tab) and check their balance.
+  the credits issued, applied or reversed on the Daily Money Activity List, or another approved
+  correction.
+- **Prepay:** **Unused Prepay** from Step 3 changed only by the prepay received, applied, edited or
+  reversed on the Daily Money Activity List, or another approved correction. For each customer on
+  that list, open **Prepay** (Manager tab) and check their balance.
 - **Not built yet:** there's no automatic check that each customer's prepay balance equals the sum
   of their prepay credits (To-Do 6.8). Until it exists, this step is a manual spot check.
 
@@ -194,7 +204,7 @@ decision 3):
 - **If the QuickBooks Desktop sync is live (To-Do 14.2):** yesterday's sync finished with no failed
   or unresolved entries. Its counts and totals of invoices, payments and credits match CRX's for the
   same day. Comparing balances alone isn't enough: a missing invoice and a doubled one can cancel out.
-  So the sheet also records the count and total of invoices posted (from the posting list in Step 3),
+  So the sheet also records the count and total of invoices posted (from the Daily Money Activity List in Step 3),
   of payments recorded (Step 4) and of credits issued (Step 5).
 - **If QuickBooks is entered by hand (To-Do 14.3):** this branch can't be used until 14.3 is written
   and rehearsed. 14.3 requires a transaction-level CRX report, and written steps for entering
@@ -245,9 +255,10 @@ app fix) · date fixed · checked by.
    before 6 PM Central" an acceptable rule for the office?
 8. Should the Deliveries screen get a "completed on" filter before the pilot? It would replace the
    spreadsheet step in Step 6. A saved end-of-day balance would likewise make Step 3 exact.
-9. Should the invoice list show **when** each invoice was posted, with a filter, before the pilot?
-   Today it shows only the invoice date, so Steps 3 and 8 have no screen for "invoices posted
-   yesterday".
+9. Should CRX get a dated "money activity" report before the pilot? It would list invoices posted,
+   write-offs, credit and prepay applications and reversals, and payment voids, by the day they
+   happened. It would replace the hand-kept Daily Money Activity List, which works only if everyone
+   fills it in every time.
 
 ---
 
@@ -305,7 +316,7 @@ number; write VOID across a spoiled form and keep it.
 
 | Paused operation | What each paper record must show |
 |---|---|
-| Recording payments | number, date received, customer, amount, method (check, cash, ACH, card or other: Record Payments starts on "Check", so the method must be written down), check number or transfer reference, invoices it pays (and amounts), who received it |
+| Recording payments | number, date received, customer, amount, method (check, cash, ACH, card or other: Record Payments starts on "Check", so the method must be written down), check number or transfer reference, each invoice it pays and the amount for each, any remainder to be kept as prepay (Record Payments takes an amount per invoice and turns what's left into prepay), who received it |
 | Completing deliveries | number, customer, delivery number if known, products and quantities, date, signer's printed name and signature, driver. Photograph it. (The Goal 5 signed paper ticket.) |
 | Posting or creating invoices | number, customer, delivery or order it bills, lines, quantities, prices, total, who prepared it. **Note:** completing a delivery creates its draft invoice automatically. If the defect is in how invoices are *created*, completing deliveries has to pause too, or the bad invoices keep coming. If the defect is only in *posting*, pause posting and leave the drafts unposted. |
 | Issuing credits or returns | number, customer, original invoice, products and quantities returned, **each item's condition and whether it goes back into stock** (the Returns screen records both, and they decide what is restocked), reason, amount, who approved it |
@@ -319,12 +330,13 @@ Keep each operation's forms together in one folder, in number order.
 2. **Draft suggestion:** [OWNER: Mason to name] watches the first paper record go in and checks the
    result, before the rest are entered. Testing the fix on a real customer record any other way needs
    Mason's OK first.
-3. **Enter the paper records** through the normal CRX screens, oldest number first. Put the paper
-   number on the record where it can be found again (for payments, the **Reference #** box; see
-   below). Before entering one, search for that number, so nothing goes in twice. CRX can't search a
-   delivery for a paper number, so for deliveries keep a list of form numbers with the CRX delivery
-   number written next to each once it's entered (as in procedure 3). Tick each form only after the
-   entered record has been compared with the paper.
+3. **Enter the paper records** through the normal CRX screens, oldest number first. CRX can search
+   a paper number only for payments (the **Reference #** box, below). Invoices, returns, receiving
+   and deliveries can't be searched by a paper number. So **for every operation, keep a form list**:
+   each form number in order, with the CRX record number (invoice, return, PO receipt, delivery or
+   payment) written next to it once it's entered. Before entering a form, check the form list; a
+   form that already has a CRX number is never entered again. One person enters each operation's
+   forms. Tick each form only after the entered record has been compared with the paper.
    - **Payments:** in **Record Payments**, type the check number and the paper number together in
      the **Reference #** box (for example `4471 B1-PAY-007`). That box is what **Payment History**
      shows and searches; Notes are neither shown nor searched there. CRX stamps the payment with the
@@ -412,7 +424,9 @@ started, and that the paper fallback is on. **Draft suggestion:** a group text.
 
 **Payments**
 - Write every check, cash payment and transfer on the numbered payment log: line number, customer,
-  invoice numbers it pays, amount, date received, method and check number, who took it.
+  total amount, each invoice it pays and the amount for each, any remainder to be kept as prepay,
+  date received, method and check number, who took it. (Record Payments takes an amount per invoice
+  and turns what's left into prepay, so the split has to be on paper.)
 - **Draft suggestion:** photograph or copy each check and keep the copy with its log line. Then the
   check can be deposited as usual. Write the deposit date on each log line, so the log matches the
   deposit slip. The log and the copies, not the checks, are what get entered afterwards.

@@ -96,10 +96,14 @@ export default function RecordSearchPicker<T extends { id: string }>({
   const failureToastShownRef = useRef(false);
   // The search callback is usually an inline arrow; keep the latest without re-running the effect.
   const searchRef = useLatestRef(search);
+  // True once the user has typed since the box last took the selected record's name. Only typed
+  // text may clear a choice; an untouched box follows a late label instead (Codex review, #1017).
+  const editedRef = useRef(false);
 
-  // Follow the parent's label only while the box is closed, so a late label never overwrites typing.
+  // Follow the parent's label while the box is closed or untouched, so a late label never
+  // overwrites typing but still fills a box the user has not typed in.
   useEffect(() => {
-    if (!isOpen) setQuery(selectedLabel);
+    if (!isOpen || !editedRef.current) setQuery(selectedLabel);
   }, [selectedLabel, value, isOpen]);
 
   // A reply that lands after the box is disabled or gone must not touch it.
@@ -156,6 +160,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
 
   const select = (record: T) => {
     requestRef.current += 1;
+    editedRef.current = false;
     setResults([]);
     setIsOpen(false);
     if (onSelect(record) === false) {
@@ -167,6 +172,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
 
   const clear = () => {
     requestRef.current += 1;
+    editedRef.current = false;
     setResults([]);
     setIsOpen(false);
     if (value && onSelect(null) === false) {
@@ -183,11 +189,12 @@ export default function RecordSearchPicker<T extends { id: string }>({
 
   const handleBlur = () => {
     // Only text the user emptied clears the choice; a label still loading (or that failed
-    // to load) is empty too, and tabbing through it must not drop the saved record.
-    if (query !== selectedLabel && !query.trim()) {
+    // to load, or that arrived while the box had focus) must not drop the saved record.
+    if (editedRef.current && !query.trim()) {
       clear();
       return;
     }
+    editedRef.current = false;
     setQuery(selectedLabel);
     setIsOpen(false);
   };
@@ -217,6 +224,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
       event.preventDefault();
       select(options[highlightedIndex]);
     } else if (event.key === 'Escape') {
+      editedRef.current = false;
       setQuery(selectedLabel);
       setIsOpen(false);
     }
@@ -237,7 +245,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
           aria-activedescendant={showList && options[highlightedIndex] ? `${listId}-option-${highlightedIndex}` : undefined}
           value={query}
           disabled={disabled}
-          onChange={(e) => { setQuery(e.target.value); setIsOpen(true); setHighlightedIndex(0); }}
+          onChange={(e) => { editedRef.current = true; setQuery(e.target.value); setIsOpen(true); setHighlightedIndex(0); }}
           onFocus={(e) => { setIsOpen(true); e.currentTarget.select(); }}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}

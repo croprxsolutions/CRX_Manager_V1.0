@@ -145,6 +145,19 @@ describe('CustomerSearchPicker', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it('a saved label that arrives while the box has focus fills it, and leaving keeps the selection (Codex, #1017)', () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(<CustomerSearchPicker value="c-1" selectedLabel="" onSelect={onSelect} ariaLabel="Customer" />);
+    const input = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.focus(input);
+    // The by-id read finishes while the user is still in the box, without having typed.
+    rerender(<CustomerSearchPicker value="c-1" selectedLabel="Seed Farm 0001" onSelect={onSelect} ariaLabel="Customer" />);
+    expect(input).toHaveValue('Seed Farm 0001');
+    fireEvent.blur(input);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(input).toHaveValue('Seed Farm 0001');
+  });
+
   it('emptying the typed text and leaving the box still clears the selection', () => {
     const onSelect = vi.fn();
     render(<CustomerSearchPicker value="c-1" selectedLabel="Seed Farm 0001" onSelect={onSelect} ariaLabel="Customer" />);

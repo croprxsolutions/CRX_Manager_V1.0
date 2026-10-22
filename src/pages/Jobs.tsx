@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Download, FileText, Trash2, ChevronDown, ChevronRight, Tag, Tags, Search, SlidersHorizontal, Users, Layers, Pencil, Settings2, Truck, FlaskConical, ClipboardList, PackageOpen, Beaker, Printer, Map as MapIcon, Info } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -451,7 +451,12 @@ export default function Jobs() {
     void persistListSettings(next);
   }, [persistListSettings]);
 
+  // Only the newest load may write the list: a filter change or an action's refresh
+  // can start a load while an older one (now several paged reads long) is in flight.
+  const jobsLoadRef = useRef(0);
   const fetchJobs = useCallback(async () => {
+    const loadId = ++jobsLoadRef.current;
+    const superseded = () => loadId !== jobsLoadRef.current;
     setLoading(true);
     // PR-07 follow-up: dropped applicator FK embed; resolve via profile_public_view.
     // Field-app parity #6: county/state pulled on the joined field so the
@@ -494,6 +499,7 @@ export default function Jobs() {
         .eq('dispatch_status', 'dispatched')
         .order('id')
         .range(from, to));
+      if (superseded()) return;
       if (dispError) {
         Sentry.captureException(dispError, { tags: { source: 'fetch', action: 'load_jobs_applicator_filter' } });
         // Clear the list: the last one loaded does not match the filters now applied.
@@ -525,6 +531,7 @@ export default function Jobs() {
         .in('customer_id', applied.customerIds)
         .order('id')
         .range(from, to));
+      if (superseded()) return;
       if (shareError) {
         Sentry.captureException(shareError, { tags: { source: 'fetch', action: 'load_jobs_customer_filter' } });
         // Clear the list: the last one loaded does not match the filters now applied.
@@ -541,6 +548,7 @@ export default function Jobs() {
     }
 
     const { data, error } = await query;
+    if (superseded()) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_jobs' } });
@@ -720,6 +728,7 @@ export default function Jobs() {
         needs_dispatch: needsDispatch,
       };
     });
+    if (superseded()) return;
     setJobs(rows);
     setLoading(false);
   }, [applied, toast]);

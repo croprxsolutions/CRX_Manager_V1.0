@@ -292,6 +292,42 @@ describe('OrderDetail add-product catalog', () => {
     expect(productOps[0].filter(([m]) => m === 'order').map(([, a]) => a[0])).toEqual(['product_name', 'id']);
   });
 
+  it('an older catalog load that fails late never replaces a newer good one (Codex, #1017)', async () => {
+    // First edit-mode load: held open, then fails. Leaving and re-entering edit mode starts a
+    // second load that succeeds at once. The first one landing last must not win.
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+    let productLoads = 0;
+    mockTables({
+      products: () => {
+        productLoads += 1;
+        return productLoads === 1
+          ? buildChain(() => ({ data: null, error: { message: 'catalog down' } }))
+          : buildChain(() => ({ data: [PRODUCT], error: null }));
+      },
+    });
+    // Hold the first load's inventory read so the whole first load stays in flight.
+    let rpcCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_inventory_position') {
+        rpcCalls += 1;
+        if (rpcCalls === 1) return oldGate.then(() => ({ data: [], error: null }));
+      }
+      return Promise.resolve({ data: name === 'get_admin_cost_fields' ? {} : null, error: null });
+    });
+    renderOrder();
+    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Cancel$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Add Product/ }));
+    expect(await screen.findByText('Fungicide Z')).toBeInTheDocument();
+
+    releaseOld();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByText('Fungicide Z')).toBeInTheDocument();
+    expect(screen.queryByText(/Products could not be loaded/)).not.toBeInTheDocument();
+  });
+
   it('a failed catalog read shows an error and offers no products', async () => {
     mockTables({ products: () => buildChain(() => ({ data: null, error: { message: 'catalog down' } })) });
     await openCatalog();

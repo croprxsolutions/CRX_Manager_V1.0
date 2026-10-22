@@ -376,8 +376,12 @@ export default function OrderDetail() {
     if (id) fetchOrder();
   }, [id, fetchOrder]);
 
-  // Fetch products + inventory when entering edit mode (lazy load — only when needed)
+  // Fetch products + inventory when entering edit mode (lazy load — only when needed).
+  // Only the newest load may write: leaving and re-entering edit mode mid-load starts a
+  // second one, and the first must never land last over it (Codex review, #1017).
+  const productsLoadRef = useRef(0);
   const fetchProducts = useCallback(async () => {
+    const loadId = ++productsLoadRef.current;
     // The whole active catalog, page by page: the add-product modal filters, tier-prices and
     // cost-overlays this list locally, and one read stops at the server's row cap.
     const productsRes = await fetchAllRows((from, to) => supabase
@@ -388,6 +392,7 @@ export default function OrderDetail() {
       .order('id')
       .range(from, to));
     const { data: positionData, error: positionError } = await supabase.rpc('get_inventory_position');
+    if (loadId !== productsLoadRef.current) return;
 
     if (productsRes.error) {
       Sentry.captureException(productsRes.error, { tags: { source: 'fetch', action: 'load_products_for_order_edit' } });
@@ -403,12 +408,14 @@ export default function OrderDetail() {
     try {
       productRows = await withAdminCosts('products', productRows, isAdmin);
     } catch (err) {
+      if (loadId !== productsLoadRef.current) return;
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_product_costs_for_order_edit' } });
       toast('error', 'Failed to load product costs. Please refresh.');
       // Never offer an admin a product list without cost (Luna round 1).
       productRows = [];
       setProductsLoadFailed(true);
     }
+    if (loadId !== productsLoadRef.current) return;
     setProducts(productRows);
 
     if (positionError) {

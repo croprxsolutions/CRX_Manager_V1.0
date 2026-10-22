@@ -499,9 +499,11 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    moves to `allow`; the merge gates are its hard stop, and item 7 keeps them closed when the local guard breaks.
    `scripts/agent-manifest-parity.mjs` reads only each manifest's `hooks` block, so these `ask` rules are not mistaken
    for hook wiring.
-2. *(Superseded: 2026-10-19 cut this to one review per PR, and since 2026-10-21 `auto_review.enabled: false` means
-   no automatic reviews at all; see `docs/reference/coderabbit-native-review.md`.)*
-   **CodeRabbit reviews every non-draft PR automatically**, on open and on every push, never pausing
+2. **SUPERSEDED — history only, do not follow.** Today (since 2026-10-21) `auto_review.enabled: false`: CodeRabbit
+   makes **no** automatic reviews, so marking a PR ready starts none, and a money or Mason-named PR gets its review
+   only when the agent posts `@coderabbitai full review` (rules: `docs/reference/coderabbit-native-review.md`). The
+   rest of this item records what applied from 2026-09-26 to 2026-10-19 (cut to one review per PR on 2026-10-19):
+   CodeRabbit then reviewed every non-draft PR automatically, on open and on every push, never pausing
    (`auto_review.enabled: true`, no label restriction, `auto_pause_after_reviewed_commits: 0`). Proven on PR #822:
    CodeRabbit reviewed it with no label or command. With no label filter the `ready-for-coderabbit` provider label no
    longer triggers a review (the workflow stays installed), so **for a head CodeRabbit skipped or was rate limited on,

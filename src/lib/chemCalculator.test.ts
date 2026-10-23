@@ -316,6 +316,10 @@ describe('chemCalculator — priceTextInLineUnit', () => {
     expect(priceTextInLineUnit('GAL', '', 1280)).toBe('');
     expect(priceTextInLineUnit('GAL', 'gal', null)).toBe('');
   });
+  it('keeps a stated $0 price in any line unit (zero converts exactly)', () => {
+    expect(priceTextInLineUnit('GAL', 'oz', 0)).toBe('0');
+    expect(priceTextInLineUnit('GAL', '', 0)).toBe('');
+  });
 });
 
 describe('chemCalculator — reconcileChemAutofillUnits (P1 money fix)', () => {

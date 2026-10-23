@@ -627,7 +627,10 @@ export function priceTextInLineUnit(
   // Spellings of one unit ('gallon', 'gl', 'gal') compare equal.
   const line = normalizeRateUnit(lineUnit);
   const stock = normalizeRateUnit(stockUnit);
-  if (statedPricePerStockCents == null || line == null || line !== stock) return '';
+  if (statedPricePerStockCents == null || line == null) return '';
+  // $0 is $0 in any unit, so a stated free price needs no conversion.
+  if (statedPricePerStockCents === 0) return '0';
+  if (line !== stock) return '';
   return statedPricePerStockCents.toString();
 }
 

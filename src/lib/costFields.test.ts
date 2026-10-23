@@ -287,9 +287,11 @@ function missingViewRebuildParts(sql: string): string[] {
       || /ALTER\s+VIEW\s+(IF\s+EXISTS\s+)?public\.invoices_postable\s+(SET\s*\([^)]*security_invoker\s*=\s*(false|off)|RESET\s*\([^)]*security_invoker)/i.test(sql)) {
     missing.push('security_invoker view');
   }
-  // REVOKE ALL from every API role, then grants only SELECT, only to authenticated and service_role.
-  const revoke = statements.find((s) => /REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b/i.test(s)) ?? '';
-  const grants = statements.filter((s) => /GRANT\b[\s\S]*\bON\s+(TABLE\s+)?public\.invoices_postable\b/i.test(s));
+  // REVOKE ALL from every API role, then grants only SELECT, only to authenticated and service_role, all
+  // after the view is (re)created: a CASCADE drops whatever came before it (Codex GitHub App review).
+  const afterView = statements.slice(Math.max(createAt, 0) + 1);
+  const revoke = afterView.find((s) => /REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b/i.test(s)) ?? '';
+  const grants = afterView.filter((s) => /GRANT\b[\s\S]*\bON\s+(TABLE\s+)?public\.invoices_postable\b/i.test(s));
   const grantOk = (s: string) => {
     const m = /GRANT\s+([\s\S]*?)\s+ON\s+(?:TABLE\s+)?public\.invoices_postable\s+TO\s+([\s\S]*)/i.exec(s);
     return !!m && /^SELECT$/i.test(m[1].trim())
@@ -299,7 +301,7 @@ function missingViewRebuildParts(sql: string): string[] {
       || !grants.some((s) => /\bauthenticated\b/i.test(s)) || !grants.every(grantOk)) {
     missing.push('view grants');
   }
-  if (!/CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.invoice_post_version\s*\([^)]*\bpublic\.invoices_postable\b/i.test(sql)) {
+  if (!afterView.some((s) => /CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.invoice_post_version\s*\([^)]*\bpublic\.invoices_postable\b/i.test(s))) {
     missing.push('invoice_post_version(invoices_postable)');
   }
   return missing;
@@ -383,6 +385,9 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nALTER VIEW public.invoices_postable SET (security_invoker = false);`))
       .toEqual(['security_invoker view']);
     expect(missingViewRebuildParts(`ALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}\n${acl}\n${fn}`)).toEqual([]);
+    // Grants and the function placed before the cascade are dropped by it (Codex GitHub App review).
+    expect(missingViewRebuildParts(`${acl}\n${fn};\nALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}`))
+      .toEqual(['view grants', 'invoice_post_version(invoices_postable)']);
   });
 
   it('the invoices column-change detector catches each shape it exists for (mutation guard)', () => {

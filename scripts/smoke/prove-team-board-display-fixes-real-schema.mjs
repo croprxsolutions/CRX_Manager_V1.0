@@ -114,8 +114,12 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
+  // Replay only what sorts before the candidate. Later migrations (#1057 lands after this one) are
+  // not part of this proof; any that redefines these functions must carry its own proof.
   const before = all.slice(0, at);
+  for (const later of all.slice(at + 1)) {
+    if (COVERED.test(lf(later))) console.log(`[prover] NOTE: ${path.basename(later)} sorts after the candidate and touches what this proves; it is not replayed here`);
+  }
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
@@ -200,7 +204,8 @@ function seed() {
   // replica mode keeps the seeded updated_at instead of the touch trigger's now().
   // Board: same (NULL) scheduled_time, so priority alone orders each list. The driver is assigned
   // only the 'normal' and 'low' ones, so a driver's list exercises the same ranking.
-  // Recap: Y-EDITED was completed first (09:00) but edited after Y-LATE was completed (15:00).
+  // Recap: Y-EDITED was completed first (09:00) but edited at 20:00, after Y-LATE was completed
+  // (15:00). Fixed times, so no assertion depends on when the proof runs.
   psql(`SET session_replication_role = replica;
     INSERT INTO public.customers (id, farm_name, email, is_active) VALUES ('${CUSTOMER}', '[PROVER] Farm', 'farm@example.invalid', true);
     INSERT INTO public.orders (id, order_number, customer_id, order_date, status, salesman_id)
@@ -215,7 +220,7 @@ function seed() {
       ('PRV-M-URGENT', '${ORDER}', '${CUSTOMER}', '${U.ADMIN}', 'scheduled', current_date + 1, NULL, 'urgent');
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status, scheduled_date, assigned_driver, completed_at, updated_at) VALUES
       ('PRV-Y-EDITED', '${ORDER}', '${CUSTOMER}', '${U.ADMIN}', 'completed', current_date - 1, '${U.DRIVER}',
-        (current_date - 1) + time '09:00', now()),
+        (current_date - 1) + time '09:00', (current_date - 1) + time '20:00'),
       ('PRV-Y-LATE',   '${ORDER}', '${CUSTOMER}', '${U.ADMIN}', 'completed', current_date - 1, NULL,
         (current_date - 1) + time '15:00', (current_date - 1) + time '15:00');
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
@@ -290,7 +295,7 @@ function main() {
   const before = snapshot();
   for (const u of ['ADMIN', 'REP', 'DRIVER']) assert.equal(before[`${u}.board`], OLD[u].board, `BEFORE: ${u} board order`);
   // Ordered by the later edit, and the edited delivery shows the edit's time, not 09:00.
-  assert.match(before['ADMIN.recap'], /^PRV-Y-LATE,PRV-Y-EDITED\|15:00,(?!09:00)\d\d:\d\d$/, 'BEFORE: recap not ordered and timed by the later edit');
+  assert.equal(before['ADMIN.recap'], 'PRV-Y-LATE,PRV-Y-EDITED|15:00,20:00', 'BEFORE: recap not ordered and timed by the later edit');
   for (const u of ['IN_ADMIN', 'NO_PROFILE']) for (const c of Object.keys(CALLS)) assert.match(before[`${u}.${c}`], REFUSED, `BEFORE: ${u} ${c} not refused`);
   console.log(`[prover] BEFORE: 'low' ranks ahead of 'normal': ${before['ADMIN.board']}`);
   console.log(`[prover] BEFORE: recap follows the later edit:   ${before['ADMIN.recap']}`);
@@ -338,8 +343,8 @@ function main() {
   // 6. MUTATION: each fix is load-bearing.
   for (const [label, sigPrefix, call, expected, edit] of [
     ["board with 'medium' again", 'get_team_board_deliveries()', 'board', OLD.ADMIN.board, (b) => b.replaceAll("WHEN 'normal' THEN 2", "WHEN 'medium' THEN 2")],
-    ['recap ordered by updated_at again', 'get_yesterday_delivery_recap()', 'recap', /^PRV-Y-LATE,PRV-Y-EDITED\|15:00,09:00$/, (b) => b.replace('ORDER BY COALESCE(del.completed_at, del.updated_at)', 'ORDER BY del.updated_at')],
-    ['recap timed by updated_at again', 'get_yesterday_delivery_recap()', 'recap', /^PRV-Y-EDITED,PRV-Y-LATE\|(?!09:00)\d\d:\d\d,15:00$/, (b) => b.replace("'completed_at', COALESCE(del.completed_at, del.updated_at)", "'completed_at', del.updated_at")],
+    ['recap ordered by updated_at again', 'get_yesterday_delivery_recap()', 'recap', 'PRV-Y-LATE,PRV-Y-EDITED|15:00,09:00', (b) => b.replace('ORDER BY COALESCE(del.completed_at, del.updated_at)', 'ORDER BY del.updated_at')],
+    ['recap timed by updated_at again', 'get_yesterday_delivery_recap()', 'recap', 'PRV-Y-EDITED,PRV-Y-LATE|20:00,15:00', (b) => b.replace("'completed_at', COALESCE(del.completed_at, del.updated_at)", "'completed_at', del.updated_at")],
   ]) {
     const original = candidateBody(sigPrefix);
     const mutated = edit(original);

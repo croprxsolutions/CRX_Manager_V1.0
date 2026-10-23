@@ -603,7 +603,7 @@ describe('QuoteBuilder', () => {
     expect(acres()).toEqual(['', '15']);
   });
 
-  it('refuses to clear a saved field while it is still loading, then clears it and its acres once loaded', async () => {
+  it('refuses to clear a saved field while it is still loading, then clears it once loaded, keeping saved acres', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     const held = holdFieldReadById();
     mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
@@ -636,7 +636,7 @@ describe('QuoteBuilder', () => {
     expect(fieldBox).toHaveValue('Home Quarter');
     fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
     await waitFor(() => expect(fieldBox).toHaveValue(''));
-    expect(acres()).toEqual(['']);
+    expect(acres()).toEqual(['80']);
   });
 
   it('keeps a saved field whose read failed locked, with its acres and the refresh warning', async () => {
@@ -673,6 +673,36 @@ describe('QuoteBuilder', () => {
     expect(screen.getByText("This quote's fields could not be loaded. Refresh the page before saving.")).toBeInTheDocument();
   });
 
+  it('keeps a saved line\'s acres when its field is replaced after reopening, even when they match the old field', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [{ ...section, field_id: 'field-1' }]
+          : table === 'quote_items'
+            // Typed by hand as 80, the same as the saved field's acres; the source is not stored.
+            ? [{ ...item, acres: 80 }]
+            : table === 'fields'
+              ? [
+                { id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 80, measured_acres: null, override_acres: null },
+                { id: 'field-2', field_name: 'North Field', customer_id: 'customer-1', total_acres: 120, measured_acres: null, override_acres: null },
+              ]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    }));
+    renderQuoteBuilder(quote.id);
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(fieldBox).toHaveValue('Home Quarter'));
+
+    fireEvent.change(fieldBox, { target: { value: 'No' } });
+    fireEvent.click(await screen.findByRole('option', { name: /North Field/ }));
+    await waitFor(() => expect(fieldBox).toHaveValue('North Field'));
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
+  });
+
   it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {
     const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);
     // Tier 3 differs from the tier-1 price the saved line starts at.
@@ -702,12 +732,12 @@ describe('QuoteBuilder', () => {
     let priceAfterPick = '';
     await pickCustomerThenReleaseField(held, () => { priceAfterPick = unitPrice(); });
     expect(fieldBox).toHaveValue('');
-    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
     expect(Number(priceAfterPick)).toBe(7);
     expect(unitPrice()).toBe(priceAfterPick);
   });
 
-  it('clears the field\'s acres and their total from a rate line whose product did not load', async () => {
+  it('keeps a saved rate line\'s acres and total when its foreign field is cleared, product or not', async () => {
     const { quote, section, item } = makeQuoteFixture('draft', 7);
     const unreadableItem = {
       ...item, product: null, calc_mode: 'rate_acres', actual_rate: 1, rate_unit: 'gal',
@@ -731,8 +761,8 @@ describe('QuoteBuilder', () => {
     await screen.findByRole('combobox', { name: /^Field for/ });
     expect(screen.getAllByText('$800.00').length).toBeGreaterThan(0);
     await pickCustomerThenReleaseField(held);
-    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
-    expect(screen.queryByText('$800.00')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
+    expect(screen.getAllByText('$800.00').length).toBeGreaterThan(0);
   });
 
   it('clears a saved section field of the original customer when it loads after another customer was picked', async () => {
@@ -764,7 +794,7 @@ describe('QuoteBuilder', () => {
     await pickCustomerThenReleaseField(held);
     expect(fieldBox).toHaveValue('');
     expect(screen.queryByDisplayValue('Home Quarter')).not.toBeInTheDocument();
-    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['', '15']);
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80', '15']);
   });
 
   it('does not clear quote B\'s saved field when a field read started for quote A lands after the switch', async () => {
@@ -840,7 +870,7 @@ describe('QuoteBuilder', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(fieldBox).toHaveValue('');
-    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
   });
 
   it('clears quote B\'s foreign field when a customer is picked on B before quote A\'s field read lands', async () => {
@@ -873,7 +903,7 @@ describe('QuoteBuilder', () => {
     // On B the user picks another customer; A's read then lands with the original customer's field.
     await pickCustomerThenReleaseField(held);
     expect(screen.getByRole('combobox', { name: /^Field for/ })).toHaveValue('');
-    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
   });
 
   it('keeps a saved section field that now belongs to another customer when the quote is only opened (CodeRabbit, #1017)', async () => {

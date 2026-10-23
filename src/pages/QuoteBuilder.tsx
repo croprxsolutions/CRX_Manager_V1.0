@@ -1420,7 +1420,7 @@ export default function QuoteBuilder() {
     if (clearedSections.length > 0) {
       setSections((prev) => prev.map((sec) => (
         sec.field_id && fields[sec.field_id] && fields[sec.field_id].customer_id !== cust.id
-          ? clearSectionField(sec, fields[sec.field_id])
+          ? clearSectionField(sec)
           : sec
       )));
       toast('warning', `The previous customer's field was removed from ${clearedSections.map((sec) => sec.section_name || 'a section').join(', ')}. Check those lines' acres.`);
@@ -1525,16 +1525,16 @@ export default function QuoteBuilder() {
     [products, getTierPrice, getConversionFactor]
   );
 
-  // Clearing a section's field drops the acres that field filled in, and keeps acres typed by hand.
-  // A line loaded from the database has no recorded source: acres equal to the field's came from it.
+  // Clearing a section's field drops the acres that field filled in this session, and keeps acres
+  // typed by hand. A line loaded from the database has no recorded source, so its acres are kept
+  // even when they equal the field's: guessing could overwrite typed acres and bill them (Sol,
+  // #1049). The callers warn the user to check those lines' acres.
   // The line keeps its unit price (a customer change has already re-priced every line for the new
   // tier), and nothing is converted: a rate line with no acres needs nothing (rate × no acres), and
   // a units line's totals do not use acres, only its per-acre figures do. So this needs neither the
   // product nor the unit conversions, which may still be loading.
-  const clearSectionField = (sec: LocalSection, field: FieldOption | undefined): LocalSection => {
-    const fieldAcres = field ? fieldEffectiveAcres(field) : null;
-    const filledByField = (item: LocalItem) => item.acres != null && (item.acres_source === 'field'
-      || (item.acres_source === undefined && item.acres === fieldAcres));
+  const clearSectionField = (sec: LocalSection): LocalSection => {
+    const filledByField = (item: LocalItem) => item.acres != null && item.acres_source === 'field';
     return {
       ...sec,
       field_id: null,
@@ -1595,7 +1595,7 @@ export default function QuoteBuilder() {
           .map((row) => row.id));
         if (foreign.size > 0) {
           setSections((prev) => prev.map((sec) => (sec.field_id && foreign.has(sec.field_id)
-            ? clearSectionFieldRef.current(sec, rows.find((row) => row.id === sec.field_id))
+            ? clearSectionFieldRef.current(sec)
             : sec)));
           toast('warning', "The previous customer's field was removed from this quote. Check those lines' acres.");
         }
@@ -1789,8 +1789,7 @@ export default function QuoteBuilder() {
         if (section._key !== sectionKey) return section;
         // Clearing or replacing the field first drops the acres the old field filled in, as a
         // customer change does; typed acres stay (Codex, #1049).
-        const previousField = section.field_id ? fields[section.field_id] : undefined;
-        const cleared = section.field_id ? clearSectionField(section, previousField) : section;
+        const cleared = section.field_id ? clearSectionField(section) : section;
         const withField = { ...cleared, field_id: field?.id ?? null };
         if (effectiveAcres == null) return withField;
         return {

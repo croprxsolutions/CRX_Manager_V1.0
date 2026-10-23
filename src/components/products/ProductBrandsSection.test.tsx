@@ -244,6 +244,26 @@ describe('ProductBrandsSection', () => {
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('Bayer');
   });
 
+  it('re-reads the source before copying and stops when a chosen brand changed there since it was listed', async () => {
+    const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366', row_version: 2 };
+    let sourceReads = 0;
+    mocks.listProductBrands.mockImplementation(async (id: string) => {
+      if (id !== 'p2') return [slam];
+      sourceReads += 1;
+      return sourceReads === 1 ? [bulkMad] : [{ ...bulkMad, epa_registration: '228-999', row_version: 3 }];
+    });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /copy from another product/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
+    await screen.findByLabelText(/Mad Dog/);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy 1 brand' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('changed since they were listed')));
+    expect(mocks.saveProductBrand).not.toHaveBeenCalled();
+    // The dialog now shows the source as it is.
+    expect(await screen.findByText(/228-999/)).toBeInTheDocument();
+  });
+
   it('retires a failed copy’s key once a reload shows it arrived, so copying it again later is a new request', async () => {
     const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366' };
     const ownLists = [

@@ -358,12 +358,21 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       toast('error', 'Your account is still loading. Try again in a moment.');
       return;
     }
-    if (!brandsReady) return;
+    if (!brandsReady || !copySource) return;
+    const source = copySource;
     const chosen = copyChosen;
     const copiedIds = new Set<string>();
     let attempt: { scope: string; name: string } | null = null;
     setCopying(true);
     try {
+      // The dialog shows the source as it was read; a brand edited or retired there since would be
+      // copied with its old details. Re-read the source and stop if any chosen brand changed.
+      const current = new Map((await listProductBrands(source.id)).map((brand) => [brand.id, brand.row_version]));
+      if (chosen.some((brand) => current.get(brand.id) !== brand.row_version)) {
+        toast('error', `Brands on ${source.name} changed since they were listed. Check the list and copy again.`);
+        void loadCopySource(source);
+        return;
+      }
       for (const brand of chosen) {
         const scope = `copy:${productId}:${brand.id}`;
         attempt = { scope, name: brand.brand_name.toLowerCase() };

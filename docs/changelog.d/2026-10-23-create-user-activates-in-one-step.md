@@ -14,5 +14,6 @@
 - Not changed: the database, Auth settings, existing users. A pending login found by email is still never
   adopted automatically.
 - Proof: `deno test --node-modules-dir=none supabase/functions/create-user` (activation logic), a local run
-  of the real function against recorded fake Auth/database replies (activation sent with the admin's token),
-  and a live Create User after the function deploy.
+  of the real function against recorded fake Auth/database replies (activation sent with the admin's token).
+  Deployed as `create-user` v25 (ACTIVE; boots and answers the preflight, refuses a call with no login).
+- Not yet verified: a live Create User through the Settings page on v25. Owed, and recorded when done.

@@ -5,8 +5,11 @@ import type { BrandSignalWord, ProductBrand } from '../types';
 export const PRODUCT_BRAND_COLUMNS =
   'id, product_id, brand_name, epa_registration, manufacturer, is_currently_sourced, is_rup, signal_word, row_version, created_by, updated_by, created_at, updated_at';
 
-/** Same shape the database accepts: 524-475 or 100-1234-5905. */
-export const EPA_REGISTRATION_PATTERN = /^[0-9]+(-[0-9]+){1,2}$/;
+/**
+ * Same shapes the database and the EPA lookup accept: a Section 3 number (524-475) or a distributor
+ * number (100-1234-5905), each part non-zero-led and at most 6, 5 and 6 digits.
+ */
+export const EPA_REGISTRATION_PATTERN = /^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$/;
 
 export interface ProductBrandInput {
   productId: string;

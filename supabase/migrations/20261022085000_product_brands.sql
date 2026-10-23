@@ -79,7 +79,11 @@ CREATE TABLE public.product_brands (
     btrim(brand_name) <> '' AND brand_name = btrim(brand_name) AND char_length(brand_name) <= 200
   ),
   -- Blank only for an unregistered product (some adjuvants); PR B decides what paperwork prints then.
-  epa_registration text CHECK (epa_registration IS NULL OR epa_registration ~ '^[0-9]+(-[0-9]+){1,2}$'),
+  -- Same shapes the EPA lookup accepts (supabase/functions/epa-lookup/logic.ts): a Section 3 number
+  -- (company-product) or a distributor number (company-product-distributor), no zero-led parts.
+  epa_registration text CHECK (
+    epa_registration IS NULL OR epa_registration ~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$'
+  ),
   manufacturer text CHECK (
     manufacturer IS NULL
     OR (btrim(manufacturer) <> '' AND manufacturer = btrim(manufacturer) AND char_length(manufacturer) <= 200)
@@ -173,7 +177,7 @@ BEGIN
   IF char_length(v_brand_name) > 200 OR char_length(v_manufacturer) > 200 THEN
     RAISE EXCEPTION 'BRAND_TEXT_TOO_LONG: brand and manufacturer names are limited to 200 characters' USING ERRCODE = '22023';
   END IF;
-  IF v_epa IS NOT NULL AND v_epa !~ '^[0-9]+(-[0-9]+){1,2}$' THEN
+  IF v_epa IS NOT NULL AND v_epa !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$' THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_INVALID: % is not an EPA registration number (like 524-475 or 100-1234-5905)', v_epa
       USING ERRCODE = '22023';
   END IF;

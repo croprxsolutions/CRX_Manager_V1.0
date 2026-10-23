@@ -75,6 +75,18 @@ SELECT test.expect_error('B5b', $q$SELECT public.upsert_product_brand('00000000-
 SELECT test.pass('B5c', (r->>'epa_registration') IS NULL, 'blank EPA not stored as NULL')
   FROM (SELECT public.upsert_product_brand('00000000-0000-0000-0000-0000000000a1', 'Unregistered Adjuvant', '  ',
           NULL, true, NULL, NULL, NULL, NULL, 'key-b5c') AS r) s;
+-- B5d/B5e: the same shapes the EPA lookup accepts: no zero-led part, at most 6/5/6 digits.
+SELECT test.expect_error('B5d', $q$SELECT public.upsert_product_brand('00000000-0000-0000-0000-0000000000a1',
+  'Zero Epa', '0-1', NULL, true, NULL, NULL, NULL, NULL, 'key-b5d')$q$, 'EPA_REGISTRATION_INVALID');
+SELECT test.expect_error('B5e', $q$SELECT public.upsert_product_brand('00000000-0000-0000-0000-0000000000a1',
+  'Long Epa', '1234567-1', NULL, true, NULL, NULL, NULL, NULL, 'key-b5e')$q$, 'EPA_REGISTRATION_INVALID');
+-- B5f: the table refuses it too, so no other writer can store an invalid number.
+SELECT test.pass('B5f', count(*) = 1 AND bool_and(
+    pg_get_constraintdef(c.oid) LIKE '%[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$%'
+  ), 'the table has no single epa_registration check using the EPA lookup shapes')
+  FROM pg_constraint c
+ WHERE c.conrelid = 'public.product_brands'::regclass AND c.contype = 'c'
+   AND pg_get_constraintdef(c.oid) LIKE '%epa_registration%';
 
 -- B6: field checks.
 SELECT test.expect_error('B6a', $q$SELECT public.upsert_product_brand('00000000-0000-0000-0000-0000000000a1',

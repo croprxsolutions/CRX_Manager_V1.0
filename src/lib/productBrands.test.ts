@@ -52,6 +52,15 @@ describe('EPA_REGISTRATION_PATTERN', () => {
     expect(EPA_REGISTRATION_PATTERN.test('524-475 ')).toBe(false);
     expect(EPA_REGISTRATION_PATTERN.test('EPA 524-475')).toBe(false);
   });
+
+  it('matches the EPA lookup: no zero-led part, at most 6, 5 and 6 digits', () => {
+    expect(EPA_REGISTRATION_PATTERN.test('123456-12345-123456')).toBe(true);
+    expect(EPA_REGISTRATION_PATTERN.test('0-1')).toBe(false);
+    expect(EPA_REGISTRATION_PATTERN.test('524-0475')).toBe(false);
+    expect(EPA_REGISTRATION_PATTERN.test('1234567-1')).toBe(false);
+    expect(EPA_REGISTRATION_PATTERN.test('524-123456')).toBe(false);
+    expect(EPA_REGISTRATION_PATTERN.test('524-475-1234567')).toBe(false);
+  });
 });
 
 describe('saveProductBrand', () => {

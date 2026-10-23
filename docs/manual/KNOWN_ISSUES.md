@@ -246,7 +246,7 @@ sales rep (older counts).
 **LOW · OPEN · UI/database · unassigned**
 After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
 acres; deleting every drawn polygon of a multi-part field falls back to the old boundary
-(`src/pages/FieldSetup.tsx:526`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
+(`src/pages/FieldSetup.tsx:572`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
 check).
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped

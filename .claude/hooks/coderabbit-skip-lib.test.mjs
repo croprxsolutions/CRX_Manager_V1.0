@@ -262,6 +262,7 @@ try {
       false, "a folder that does not exist holds no waiver");
     // Final Sol review on #1035: no folder resolved (git lookup failed) cannot confirm a cancel.
     eq(withdrawCodeRabbitSkip({ dirs: [], sessionId: session }).stillLive, true, "no folder to check: NOT confirmed cancelled");
+    eq(withdrawCodeRabbitSkip({ dirs, sessionId: "" }).stillLive, true, "no usable session id: NOT confirmed cancelled (Codex App P2)");
     eq(withdrawCodeRabbitSkip({ dirs, sessionId: session }), { removed: 1, stillLive: false }, "a normal withdraw removes it");
     eq(files(), [], "no waiver is left behind");
   }
@@ -276,6 +277,7 @@ try {
     cancelCodeRabbitSkip({ dirs, sessionId: session });
   }
   ok(/CODERABBIT SKIP NOT RECORDED/.test(run("skip coderabbit #1018", "")), "with no session id it says the waiver was not saved");
+  ok(/CODERABBIT SKIP NOT CANCELLED/.test(run("use coderabbit", "")), "and use coderabbit with no session id says NOT CANCELLED");
   ok(!existsSync(path.join(dirs[0], coderabbitSkipFileName("", PR))), "and writes nothing");
 } finally {
   rmSync(temp, { recursive: true, force: true });

@@ -232,7 +232,9 @@ export function mayExist(file, stat = lstatSync) {
  */
 export function withdrawCodeRabbitSkip({ dirs, sessionId, remove, list = readdirSync, exists = (file) => mayExist(file) }) {
   const removed = cancelCodeRabbitSkip({ dirs, sessionId, list, ...(remove ? { remove } : {}) });
-  if (!usableSkipSessionId(sessionId)) return { removed, stillLive: false };
+  // A cancel that cannot name its session cannot confirm anything was removed
+  // (Codex App P2 on #1035): report it unconfirmed, like the no-folder case.
+  if (!usableSkipSessionId(sessionId)) return { removed, stillLive: true };
   // No folder to check (the git lookup failed) cannot confirm the waiver is
   // gone: report it still live, so Mason is told (final Sol review, #1035).
   if (!Array.isArray(dirs) || dirs.length === 0) return { removed, stillLive: true };

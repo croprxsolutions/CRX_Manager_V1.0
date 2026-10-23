@@ -91,6 +91,10 @@
   entered by the person running the recovery as part of runbook 4.7, while CRX stays closed to
   ordinary staff (the earlier wording contradicted the runbook). The completed-deliveries export
   first clears ticked rows, since Export CSV exports only ticked rows when any are ticked.
+- Later Codex rounds: three detail gaps were deferred to the December rehearsal under Mason's rule.
+  One factual correction was made: for an order split across fields or owners, a partial or
+  back-dated delivery completion creates no draft invoice (it marks the order for split billing), so
+  those drafts are made through split billing.
 - The drafts live in `docs/plans/` rather than `docs/operations/`, like the Goal 6 restore
   procedure draft: they move into `docs/operations/production-runbook.md` once approved and
   rehearsed.

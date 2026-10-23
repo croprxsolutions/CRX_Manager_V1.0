@@ -12,6 +12,7 @@ import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import Input from '../components/ui/Input';
+import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
@@ -35,13 +36,14 @@ import { downloadOrderSummaryPdf } from '../lib/orderSummaryPdf';
 import { downloadPickListPdf } from '../lib/orderPickListPdf';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { buildInvoicePostTargets } from '../lib/invoiceBatchPosting';
+import { postInvoiceTarget } from '../lib/invoicePostVersion';
 import type { OrderSummaryData } from '../lib/orderSummaryPdf';
 import type { PickListData } from '../lib/orderPickListPdf';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
-import { INVOICE_COLUMNS, ORDER_COLUMNS, ORDER_ITEM_COLUMNS, PRODUCT_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
+import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, ORDER_COLUMNS, ORDER_ITEM_COLUMNS, PRODUCT_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
 
 /** Temporary new item (not yet saved to DB — has no real id) */
@@ -110,8 +112,9 @@ export default function OrderDetail() {
   // Shares state
   const [shares, setShares] = useState<OrderShare[]>([]);
   const [showShareEditor, setShowShareEditor] = useState(false);
-  const [shareCustomers, setShareCustomers] = useState<{ id: string; farm_name: string }[]>([]);
   const [newShareCustomerId, setNewShareCustomerId] = useState('');
+  // Farm name of the customer picked for a new share (the picker searches; no list is loaded).
+  const [newShareCustomerName, setNewShareCustomerName] = useState('');
   const [newSharePct, setNewSharePct] = useState('');
   const [savingShares, setSavingShares] = useState(false);
 
@@ -134,6 +137,11 @@ export default function OrderDetail() {
 
   // Add-product modal state
   const [products, setProducts] = useState<Product[]>([]);
+  // A failed catalog read empties the list and blocks adding products (never a short list).
+  const [productsLoadFailed, setProductsLoadFailed] = useState(false);
+  // True while a catalog read is in flight: the add-product picker offers nothing until it lands,
+  // so no product is ever picked from an older list (Luna, #1017).
+  const [productsLoading, setProductsLoading] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [inventoryByProduct, setInventoryByProduct] = useState<Record<string, { available: number; prebooked: number; onOrder: number }>>({});
@@ -286,7 +294,8 @@ export default function OrderDetail() {
       // Load linked invoices (AR single source of truth)
       const { data: invoiceData } = await supabase
         .from('invoices')
-        .select(INVOICE_COLUMNS)
+        // invoice_post_version: "Post all drafts" refuses an invoice changed since this page loaded.
+        .select(`${INVOICE_COLUMNS}, ${INVOICE_POST_VERSION_COLUMNS}`)
         .eq('order_id', id!)
         .not('status', 'in', '("voided","cancelled")')
         .order('invoice_number');
@@ -372,15 +381,30 @@ export default function OrderDetail() {
     if (id) fetchOrder();
   }, [id, fetchOrder]);
 
-  // Fetch products + inventory when entering edit mode (lazy load — only when needed)
+  // Fetch products + inventory when entering edit mode (lazy load — only when needed).
+  // Only the newest load may write: leaving and re-entering edit mode mid-load starts a
+  // second one, and the first must never land last over it (Codex review, #1017).
+  const productsLoadRef = useRef(0);
   const fetchProducts = useCallback(async () => {
-    const productsRes = await supabase.from('products').select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`).eq('is_active', true).order('product_name');
+    const loadId = ++productsLoadRef.current;
+    setProductsLoading(true);
+    // The whole active catalog, page by page: the add-product modal filters, tier-prices and
+    // cost-overlays this list locally, and one read stops at the server's row cap.
+    const productsRes = await fetchAllRows((from, to) => supabase
+      .from('products')
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
+      .eq('is_active', true)
+      .order('product_name')
+      .order('id')
+      .range(from, to));
     const { data: positionData, error: positionError } = await supabase.rpc('get_inventory_position');
+    if (loadId !== productsLoadRef.current) return;
 
     if (productsRes.error) {
       Sentry.captureException(productsRes.error, { tags: { source: 'fetch', action: 'load_products_for_order_edit' } });
       toast('error', 'Failed to load products. Please refresh.');
     }
+    setProductsLoadFailed(!!productsRes.error);
     if (positionError) {
       Sentry.captureException(positionError, { tags: { source: 'fetch', action: 'load_inventory_position_for_order_edit' } });
       toast('error', 'Failed to load inventory positions. Please refresh.');
@@ -390,12 +414,16 @@ export default function OrderDetail() {
     try {
       productRows = await withAdminCosts('products', productRows, isAdmin);
     } catch (err) {
+      if (loadId !== productsLoadRef.current) return;
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_product_costs_for_order_edit' } });
       toast('error', 'Failed to load product costs. Please refresh.');
       // Never offer an admin a product list without cost (Luna round 1).
       productRows = [];
+      setProductsLoadFailed(true);
     }
+    if (loadId !== productsLoadRef.current) return;
     setProducts(productRows);
+    setProductsLoading(false);
 
     if (positionError) {
       setInventoryByProduct({});
@@ -845,21 +873,9 @@ export default function OrderDetail() {
   };
 
   // ── Share management ──────────────────────────────────────────────────
-  const openShareEditor = async () => {
-    // Load active customers for the dropdown (customers soft-delete via is_active, not deleted_at)
-    const { data, error } = await supabase
-      .from('customers')
-      .select('id, farm_name')
-      .eq('is_active', true)
-      .order('farm_name')
-      .limit(500);
-    if (error) {
-      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_customers_for_bill_split' } });
-      toast('error', 'Failed to load customers. Please try again.');
-      return;
-    }
-    setShareCustomers((data || []) as { id: string; farm_name: string }[]);
+  const openShareEditor = () => {
     setNewShareCustomerId('');
+    setNewShareCustomerName('');
     setNewSharePct('');
     setShowShareEditor(true);
   };
@@ -876,8 +892,9 @@ export default function OrderDetail() {
       toast('error', `Total split would exceed 100% (currently ${totalExisting}%)`);
       return;
     }
-    const selectedCust = shareCustomers.find((c) => c.id === newShareCustomerId);
-    if (!selectedCust) return;
+    // The picked customer's name, kept from the search picker.
+    const selectedCust = { id: newShareCustomerId, farm_name: newShareCustomerName };
+    if (!selectedCust.farm_name) return;
 
     setSavingShares(true);
     try {
@@ -894,6 +911,7 @@ export default function OrderDetail() {
       checkMutationResult(result, 'Add order share');
       toast('success', `Added ${selectedCust.farm_name} at ${pct}%`);
       setNewShareCustomerId('');
+      setNewShareCustomerName('');
       setNewSharePct('');
       fetchOrder();
     } catch (err: unknown) {
@@ -1106,7 +1124,7 @@ export default function OrderDetail() {
     if (!profile) { toast('error', 'You must be signed in to post invoices.'); return; }
     const drafts = invoices.filter((i) => i.status === 'draft' || i.status === 'unposted');
     if (drafts.length === 0) { toast('warning', 'No draft invoices to post.'); return; }
-    const targets = buildInvoicePostTargets(drafts);
+    const targets = buildInvoicePostTargets(drafts, invoices);
     setPostingAll(true);
     let posted = 0;
     let alreadyPosted = 0;
@@ -1136,20 +1154,8 @@ export default function OrderDetail() {
             `${profile.id}:${target.scopeId}`,
           );
         }
-        if (target.operation === 'post_invoice_group') {
-          const { data, error } = await supabase.rpc('post_invoice_group', {
-            p_invoice_group_id: target.invoiceGroupId!,
-            p_performed_by: profile.id,
-            p_idempotency_key: postDraftKeysRef.current[target.key],
-          });
-          if (error) throw error;
-          assertRpcResult(data, 'post_invoice_group');
-        } else {
-          await supabase.rpc('post_invoice', {
-            p_invoice_id: target.invoiceId!,
-            p_idempotency_key: postDraftKeysRef.current[target.key],
-          }).throwOnError();
-        }
+        // Posts with the versions this page loaded; a changed invoice is refused with a reload message.
+        await postInvoiceTarget(target, profile.id, postDraftKeysRef.current[target.key]);
         posted += target.selectedIds.length;
         delete postDraftKeysRef.current[target.key];
       } catch (err) {
@@ -2008,16 +2014,17 @@ export default function OrderDetail() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
                   <label className="text-xs font-medium text-secondary mb-1 block">Customer</label>
-                  <select
+                  <CustomerSearchPicker
                     value={newShareCustomerId}
-                    onChange={(e) => setNewShareCustomerId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                  >
-                    <option value="">Select customer...</option>
-                    {shareCustomers.map((c) => (
-                      <option key={c.id} value={c.id}>{c.farm_name}</option>
-                    ))}
-                  </select>
+                    selectedLabel={newShareCustomerName}
+                    onSelect={(c) => {
+                      setNewShareCustomerId(c?.id ?? '');
+                      setNewShareCustomerName(c?.farm_name ?? '');
+                    }}
+                    excludeIds={shares.map((s) => s.customer_id)}
+                    placeholder="Search customer..."
+                    ariaLabel="Bill split customer"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-secondary mb-1 block">Split %</label>
@@ -2241,7 +2248,7 @@ export default function OrderDetail() {
           />
 
           <div className="max-h-96 overflow-y-auto space-y-2">
-            {filteredProducts.map((product) => {
+            {!productsLoading && filteredProducts.map((product) => {
               const tierNum = customer?.assigned_tier || 1;
               // Cascade: tier3 → tier2 → tier1 fallback
               const t1 = product.tier1_price || 0;
@@ -2303,7 +2310,13 @@ export default function OrderDetail() {
             })}
           </div>
 
-          {filteredProducts.length === 0 && (
+          {productsLoading ? (
+            <div role="status" className="text-center py-8 text-secondary">Loading products...</div>
+          ) : productsLoadFailed ? (
+            <div role="alert" className="text-center py-8 text-red-600">
+              Products could not be loaded. Leave edit mode and edit again to retry.
+            </div>
+          ) : filteredProducts.length === 0 && (
             <div className="text-center py-8 text-secondary">No products found</div>
           )}
         </div>

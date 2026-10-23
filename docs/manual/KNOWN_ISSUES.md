@@ -31,9 +31,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-01 to KI-52; several bundle related small items; includes the 10 entries or sub-items marked UNVERIFIED) | 41 |
+| Open or partly open entries (KI-01 to KI-52 and KI-72 to KI-78; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 48 |
 | Accepted by Mason (KI-60 to KI-71) | 12 |
-| Closed as FIXED during this rewrite, with proof (bottom of file) | 8 |
+| Closed as FIXED during this rewrite, with proof (bottom of file) | 6 |
 
 Highest-priority open items, in order: KI-01 (field data readable by any signed-in user), KI-02 (cost and
 margin still readable at the table level), KI-10 (about 69 functions still replay a saved answer on the retry
@@ -397,6 +397,113 @@ server-side ruleset is the boundary).
 
 ---
 
+## Additional open details (carried from the archive after the Luna cross-check; not re-verified in this pass)
+
+These sub-items belong to the numbered entries above. They were found missing or blurred when a second reviewer
+(Luna) compared this file with the old one. Each is an open or accepted limitation as the old file recorded it.
+
+### KI-72 — Two fixes merged on `main` whose last steps are still pending (moved here from "closed")
+**MED · PARTIAL · security/money · Mason (item b)**
+(a) A driver's completion receipt skipped when the customer row is hidden: code merged (PR #1024, migration
+`20261022075000`), but the live-apply record (history row 973) exists only in draft PR #1061; the old file keeps the
+item open until that is recorded. (b) CRX-LIFE-001, reps creating a `field_application` invoice through the order
+pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record). Two proof gates remain: the 29th
+live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
+Mason's REAL-DATA-OK.
+
+### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
+**HIGH · OPEN · security · Mason approval to narrow permissions**
+- `global_search` lets any signed-in user search customer names and contacts, order/invoice/delivery numbers and
+  farm names; `get_notes_for_entity` lets any signed-in user with a record ID read its team notes (HIGH).
+- Every active account reads every `customer_addresses` row (To-Do row 11.7; HIGH).
+- Drivers can read every customer's billing splits and spray-record field/acres data through
+  `field_billing_defaults` and `application_record_fields` (MED).
+- Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
+  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH).
+- Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
+  details, attachments, or job-attachment photos (LOW).
+
+### KI-74 — More cost exposure and prerequisites (extends KI-02)
+**HIGH/MED · OPEN · security/money · Mason**
+`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).
+Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals which open PO line is cheaper
+(MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
+posting: the cost-column lock must ship with a column-safe version design in the same change (MED).
+
+### KI-75 — Retry-key detail (extends KI-10, KI-11)
+**HIGH on money paths · OPEN · money**
+Still on the replay-binding list: `transfer_invoice_to_job`, `update_field_app_invoice_billing`, and the after-lock
+race in `apply_credit_memo_to_invoice`. Screen-side: the `PrepaymentManagerPanel` split-check modal, JobDetail
+reset-before-call defects the scanner cannot see, and payload-sensitive actions in FieldStop, DeliveryDetail and
+OrderDetail.
+
+### KI-76 — Quote, season, invoice and return details (extends KI-12, KI-14, KI-18, KI-20, KI-69)
+**MED/LOW · OPEN · money**
+- Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
+  for the same product (LOW).
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()` (UTC) (LOW).
+- Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
+- Split billing: a split can bill any customer named in editable order allocations, field owners or billing
+  defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
+  split-return lines and prices under `return_items_select` (LOW).
+- `create_invoice_from_order` copies a blank unit, so a mono-billed order line with no unit cannot get a return
+  credit (MED). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
+  concurrent split-invoice void can leave a requested return unreceivable; credits apply manually; multi-price
+  billing is credited at an average price (MED, partly by design).
+- KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the
+  source invoice can be hard-deleted or re-saved.
+- Whole-order invoice quantities and unit prices are not capped server-side (MED). Voiding a delivery whose invoice
+  is posted leaves the invoice active; the office must issue a credit memo (MED). Removing a product from a
+  scheduled delivery can leave its drafted invoice unpostable, and lowering a quantity leaves the draft over the
+  delivery quantity until staff edit it (MED). Freezing a soft-deleted order can block cancelling or voiding its
+  completed delivery (reversal needs a reviewed migration) (LOW). Draft invoice CS-2026-0055 is deliberately left
+  (the other delivery was billed in Chem Man) (LOW). Integrity checks page by offset, so concurrent inserts or
+  deletes can make a run miss or repeat a row (LOW, accepted).
+
+### KI-77 — Lists, UI and CRM details (extends KI-26, KI-30, KI-32, KI-41)
+**MED/LOW · OPEN · UI/database**
+Still row-capped: the Invoice Detail customer selector, purchase-order product lists, bulk-import name matching,
+Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
+concurrent changes, load/count cost grows on large tables, more than 20 identical-name search results are hard to
+reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
+one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
+visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk
+import/assignment of sales reps, outbound-email logging (MED). Offline recovery also lacks notification replay,
+operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
+duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
+evidence: photo proof is not tied to who took it, and storage-rule guarantees do not cover dashboard or
+service-role tools (LOW).
+
+### KI-78 — Tooling and guard details (extends KI-04, KI-46, KI-47, KI-48, KI-49, KI-50, KI-65, KI-68)
+**MED/LOW · OPEN · tooling-guards**
+- CodeRabbit label gate (#516), four items: stale requested state can survive an invalid ready event; checks can be
+  stale after same-head invalidation; privileged workflow actions use mutable tags; merge guards do not bind
+  approval to the recorded request marker or reviewer identity (MED; relevance lowered since CodeRabbit became
+  advisory).
+- PR #605 hook gaps: MultiEdit edits are not inspected by several hooks; non-canonical path spellings can bypass
+  path-rule matching (LOW).
+- Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
+  outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
+  `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).
+- The three protections missing from closed PR #364: apply-time one-shot replay enforcement, fresh project-bound
+  live evidence, and event-trigger/transitive-fanout coverage (HIGH per the old record, exposure reduced).
+- Ahead-of-pending marker: the parked branch's file-digest binding is not rechecked at the end, and three refusal
+  tests assert only exit status, so an uncaught crash passes them (LOW).
+- Actor-binding guard (accepted, KI-65): hook and live sweeps share naming blind spots; rebinding, dynamic SQL and
+  temp-table paths evade checks; helper delegation is not followed; migrations written outside hooked tools bypass
+  the hook.
+- `sync-agent-workflows.mjs` limits (KI-49): external symlink targets can pass; external `GIT_INDEX_FILE` can be
+  ignored; case/Unicode staged paths can evade checks or collide; a directory-to-file change can make repair fail;
+  unowned manifest paths can be deleted; fail-closed wiring lacks regression coverage; some prune tests never reach
+  the prune loop; `source-command-` is treated as provenance; invalid UTF-8 can compare equal after replacement
+  decoding (MED).
+- Cloud sessions also fail the commit gates (not only push and backup); the only workaround is unverified (MED, KI-50).
+- `inventory.quantity_available` has no CHECK constraint, so a pre-existing NaN can propagate (MED, KI-68). The
+  parked control-character migration's postflight checks can be satisfied by a commented-out clause and no longer
+  inspect the cutover-trigger body (LOW, only if that branch is resumed).
+
+---
+
 ## Unverified items (could not confirm either way; treat as open until checked)
 
 KI-06 (audit log), KI-07 (profiles TRUNCATE grant, customer-document post-apply check), KI-16 (split-acre
@@ -411,24 +518,17 @@ positives). Live-database facts need a read-only query by someone with access.
 These were open-looking entries in the old file and are confirmed fixed on `main`. "Applied live" is the older
 record's claim; this pass had no database access.
 
-1. **A driver's completion receipt could be skipped when the customer row is hidden** — migration
-   `20261022075000_delivery_completion_evidence.sql`, PR #1024 (merge `e685b5d6c`). Live apply of row 973 is
-   recorded only in draft PR #1061, not yet on `main`.
-2. **Reps could create a `field_application` invoice through the order pipeline (CRX-LIFE-001)** — migration
-   `20261006200000_refuse_field_invoice_through_order_rpcs.sql`, PR #885 (merge `342135561`), ledger
-   `20261007114554` per the older record. Two proof gates remain for Mason: the 29th live-sweep predicate
-   (`quote-versions-rpc-owned`) was declined at its prompt, and live smoke chains need his REAL-DATA-OK.
-3. **Staff photo buckets were publicly readable** — `20261015230000_staff_photo_storage_access.sql` and
+1. **Staff photo buckets were publicly readable** — `20261015230000_staff_photo_storage_access.sql` and
    `20261016030000_staff_photo_buckets_private.sql`, PRs #929 and #947 (buckets read `public = false` live
    2026-10-16 per the older record).
-4. **Reps could name another salesperson on invoices, orders, blend tickets and quotes** —
+2. **Reps could name another salesperson on invoices, orders, blend tickets and quotes** —
    `20261014210000` (PR #928), `20261015130000` (PR #933), `20261015200000` (PR #938).
-5. **Free-form invoice could name any product** — `20261021050000_from_scratch_invoices_charge_lines_only`, PR #983.
-6. **Split billing could not bill a field owner who is not the order's customer** — `20261021150000` and
+3. **Free-form invoice could name any product** — `20261021050000_from_scratch_invoices_charge_lines_only`, PR #983.
+4. **Split billing could not bill a field owner who is not the order's customer** — `20261021150000` and
    `20261021155000`, PR #1010 (merge `d8dd88a6d`).
-7. **Order total overwritten by an unrounded sum in `_update_order_items_impl`** — fixed 2026-08-09; later bodies
+5. **Order total overwritten by an unrounded sum in `_update_order_items_impl`** — fixed 2026-08-09; later bodies
    (e.g. `20260914100500:2263`) set the rounded total.
-8. **`review-proof-guard` node-preload / `-pe` eval bypass (item 1 of the executor-bypass entry)** — PR #530
+6. **`review-proof-guard` node-preload / `-pe` eval bypass (item 1 of the executor-bypass entry)** — PR #530
    (merge `26e8a40d9`); items 2–3 stay open in KI-47.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the

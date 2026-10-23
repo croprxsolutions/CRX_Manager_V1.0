@@ -7,6 +7,6 @@ paragraph. The whole previous file is preserved unchanged at
 documentation-only); old section references (§0d, §4b, F06 and so on) resolve there.
 
 Each open entry was checked by reading current `main` (code, migration files, merged PRs) at `62ca3b640`.
-Eight items were confirmed fixed with a PR or migration cited (listed at the bottom of the new file). Nothing
+Six items were confirmed fixed with a PR or migration cited (listed at the bottom of the new file). Nothing
 was marked fixed on a document's say-so alone. Not verified: any live-database fact (no database access in this
 pass); those are labelled as the older record's claim or UNVERIFIED. No code, migration or hook changed.

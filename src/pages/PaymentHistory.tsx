@@ -15,7 +15,7 @@ import Modal from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult } from '../lib/db';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { runCriticalAction } from '../lib/criticalAction';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { parseLocalDate } from '../lib/dateUtils';
@@ -79,7 +79,7 @@ export default function PaymentHistory() {
   const fetchPayments = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
-    const { data, error } = await fetchAllRows((from, to) => supabase
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('allocation_sets')
       .select(`
         id, customer_id, total_payment_cents, total_allocated_cents,
@@ -89,7 +89,7 @@ export default function PaymentHistory() {
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .order('id')
-      .range(from, to));
+      .range(from, to)));
     if (seq !== fetchSeq.current) return;
 
     if (error || !data) {

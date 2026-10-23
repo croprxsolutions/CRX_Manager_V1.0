@@ -26,7 +26,7 @@ import { getIdempotencyBindingRejection } from '../../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { localToday } from '../../lib/dateUtils';
 import { formatCents as fmt } from '../../lib/money';
-import { fetchAllRows } from '../../lib/pagedRead';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { Sentry } from '../../lib/sentry';
 
 interface PrepayBucket {
@@ -87,14 +87,14 @@ export default function PrepayWorkspacePanel() {
   // the prepay-balance condition, so this stays a complete list.)
   useEffect(() => {
     let cancelled = false;
-    void fetchAllRows<{ id: string; farm_name: string }>((from, to) => supabase
+    void fetchAllRows<{ id: string; farm_name: string }>((from, to) => pageWithList(supabase
       .from('customers')
       .select('id, farm_name', { count: 'exact' })
       .gt('prepay_balance_cents', 0)
       .eq('is_active', true)
       .order('farm_name')
       .order('id')
-      .range(from, to))
+      .range(from, to)))
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error || !data) {
@@ -125,15 +125,15 @@ export default function PrepayWorkspacePanel() {
 
     // Both lists are read page by page (one request stops at the server's row cap).
     const [bucketsRes, invoicesRes] = await Promise.all([
-      fetchAllRows<PrepayBucket>((from, to) => supabase
+      fetchAllRows<PrepayBucket>((from, to) => pageWithList(supabase
         .from('prepay_credits')
         .select('id, customer_id, reference_number, bucket_label, original_amount_cents, balance_cents, created_at', { count: 'exact' })
         .eq('customer_id', selectedCustomerId)
         .gt('balance_cents', 0)
         .order('created_at', { ascending: true })
         .order('id')
-        .range(from, to)),
-      fetchAllRows((from, to) => supabase
+        .range(from, to))),
+      fetchAllRows((from, to) => pageWithList(supabase
         .from('invoices')
         .select('id, invoice_number, total_amount_cents, balance_cents, due_date, created_at', { count: 'exact' })
         .eq('customer_id', selectedCustomerId)
@@ -144,7 +144,7 @@ export default function PrepayWorkspacePanel() {
         .is('deleted_at', null)
         .order('due_date', { ascending: true })
         .order('id')
-        .range(from, to)),
+        .range(from, to))),
     ]);
     // Another customer was picked while this one loaded.
     if (seq !== loadSeq.current) return;

@@ -11,7 +11,7 @@ import Badge from '../components/ui/Badge';
 import ReportShell from '../components/reports/ReportShell';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
-import { fetchAllRows, PAGE_SIZE } from '../lib/pagedRead';
+import { fetchAllRows, PAGE_SIZE, pageWithList } from '../lib/pagedRead';
 import { isLedgerContinuous, isSameTransaction } from '../lib/transactionLedger';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
@@ -28,6 +28,8 @@ export default function CustomerTransactionReview() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [loadedRows, setData] = useState<CustomerTransactionRow[]>([]);
+  // The customer and range the last finished read was for (rows or failure).
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // A failed read must not look like a customer with no transactions.
   const [loadFailed, setLoadFailed] = useState(false);
@@ -38,13 +40,13 @@ export default function CustomerTransactionReview() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchAllRows<{ id: string; farm_name: string }>((from, to) => supabase
+    fetchAllRows<{ id: string; farm_name: string }>((from, to) => pageWithList(supabase
       .from('customers')
       .select('id, farm_name', { count: 'exact' })
       .eq('is_active', true)
       .order('farm_name')
       .order('id')
-      .range(from, to))
+      .range(from, to)))
       .then(({ data: rows, error }) => {
         if (cancelled) return;
         if (error || !rows) {
@@ -74,13 +76,13 @@ export default function CustomerTransactionReview() {
     let loaded: CustomerTransactionRow[] | null = null;
     let failure: string | null = null;
     for (let attempt = 1; attempt <= 2 && loaded === null; attempt += 1) {
-      const result = await fetchAllRows<CustomerTransactionRow>((from, to) => supabase
+      const result = await fetchAllRows<CustomerTransactionRow>((from, to) => pageWithList(supabase
         .rpc('get_customer_transaction_review', {
           p_customer_id: customerId,
           p_start_date: startDate,
           p_end_date: endDate,
         }, { count: 'exact' })
-        .range(from, to));
+        .range(from, to)));
       if (seq !== fetchSeq.current) return;
       if (result.error) {
         failure = result.error.message;
@@ -123,6 +125,7 @@ export default function CustomerTransactionReview() {
       setLoadFailed(false);
       setData(loaded);
     }
+    setLoadedKey(`${customerId}|${startDate}|${endDate}`);
     setLoading(false);
   }, [customerId, startDate, endDate, toast]);
 
@@ -134,9 +137,11 @@ export default function CustomerTransactionReview() {
   }, [ready, fetchData]);
 
   // Rows and totals only for a finished read of the current customer and range: never the
-  // previous customer's money under this one's name, in the totals or in an export.
-  const data = ready && !loading ? loadedRows : [];
-  const failed = ready && !loading && loadFailed;
+  // previous customer's money under this one's name, in the totals or in an export, even in
+  // the render between picking a customer and its read starting.
+  const current = ready && !loading && loadedKey === `${customerId}|${startDate}|${endDate}`;
+  const data = current ? loadedRows : [];
+  const failed = current && loadFailed;
 
   const customerName = customers.find((c) => c.id === customerId)?.farm_name || '';
 
@@ -291,7 +296,8 @@ export default function CustomerTransactionReview() {
               columns={columns as unknown as Column<Record<string, unknown>>[]}
               emptyTitle="No transactions"
               emptyDescription={!customerId ? 'Select a customer and date range' : undefined}
-              loading={loading}
+              // A read left running for a cleared customer never finishes its loading state.
+              loading={ready && loading}
               loadError={failed}
               onRetry={ready ? () => { void fetchData(); } : undefined}
             />

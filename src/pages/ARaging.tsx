@@ -21,7 +21,7 @@ import { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { Sentry } from '../lib/sentry';
@@ -117,12 +117,12 @@ export default function ARaging() {
     setLoading(true);
     // Read every page: the server cuts a function's rows off at 1,000, which
     // dropped the smallest balances from the list and the totals.
-    const { data, error } = await fetchAllRows<ARAgingRow>((from, to) => supabase
+    const { data, error } = await fetchAllRows<ARAgingRow>((from, to) => pageWithList(supabase
       .rpc('get_ar_aging', { p_as_of_date: asOfDate }, { count: 'exact' })
       // The function's own order (largest balance first), then the unique customer id.
       .order('total_outstanding', { ascending: false })
       .order('customer_id')
-      .range(from, to));
+      .range(from, to)));
     // A newer as-of date was picked while this one loaded.
     if (seq !== agingLoadSeq.current) return;
     if (error || data === null || data === undefined) {

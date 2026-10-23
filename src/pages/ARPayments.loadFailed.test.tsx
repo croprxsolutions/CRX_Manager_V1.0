@@ -227,6 +227,43 @@ describe('Customer Transactions totals', () => {
   });
 });
 
+describe('a paged read that answers with no list', () => {
+  it('Payment History shows the failed state, not "No payments yet"', async () => {
+    H.failing.set('allocation_sets', 'nodata');
+    at('/payment-history', <PaymentHistory />);
+    expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText('No payments yet')).not.toBeInTheDocument();
+  });
+
+  it('A/R Aging shows the failed state, not zero totals', async () => {
+    H.failing.set('get_ar_aging', 'nodata');
+    at('/ar-aging', <ARaging />);
+    expect(await screen.findByText('AR aging could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText('Total Outstanding')).not.toBeInTheDocument();
+  });
+
+  it('the A/R Workspace summary says it could not be loaded', async () => {
+    H.failing.set('prepay_credits', 'nodata');
+    at('/accounts-receivable?tab=ledger', <AccountsReceivable />);
+    expect(await screen.findByText('The money summary could not be loaded')).toBeInTheDocument();
+  });
+});
+
+describe('Customer Transactions cleared mid-read', () => {
+  it('clearing the customer while a read runs leaves no spinner and no rows when it lands', async () => {
+    let release!: (v: unknown) => void;
+    H.pending.set('get_customer_transaction_review', new Promise((r) => { release = r; }));
+    at('/customer-transactions?customer=c1', <CustomerTransactionReview />);
+    await screen.findByRole('option', { name: 'Small Farm' });
+    fireEvent.click(screen.getByRole('button', { name: 'Last 90d' }));
+
+    fireEvent.change(screen.getByLabelText('Select customer'), { target: { value: '' } });
+    release({ data: [{ transaction_date: '2026-10-01', transaction_type: 'invoice', reference_number: 'INV-LATE', description: null, debit_cents: 100, credit_cents: 0, running_balance_cents: 100 }], error: null });
+    expect(await screen.findByText('Select a customer and date range')).toBeInTheDocument();
+    expect(screen.queryByText('INV-LATE')).not.toBeInTheDocument();
+  });
+});
+
 describe('Payment History after a failed refresh', () => {
   it('a direct allocations read that answers with no list shows the failed state', async () => {
     H.tables.allocation_sets = [{ id: 'p1', customer_id: 'c1', total_payment_cents: 100, total_allocated_cents: 100, payment_method: 'check', check_number: 'CHK-1', reference_number: null, payment_date: '2026-10-01', season: 2027, is_active: true, notes: null, created_at: '2026-10-01T12:00:00Z', customers: { farm_name: 'Big Farm' } }];

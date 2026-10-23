@@ -25,7 +25,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCen
 import { logActivity } from '../../lib/activityLogger';
 import { formatCents as fmt } from '../../lib/money';
 import { getIdempotencyBindingRejection } from '../../lib/idempotency';
-import { fetchAllRows, fetchAllRowsForIds } from '../../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../../lib/pagedRead';
 
 interface CustomerPrepay {
   [k: string]: unknown;
@@ -140,21 +140,21 @@ export default function PrepaymentManagerPanel() {
     };
 
     // Every customer with a prepay balance, page by page (was the first 500).
-    const { data: custData, error } = await fetchAllRows<{ id: string; farm_name: string; prepay_balance_cents: number }>((from, to) => supabase
+    const { data: custData, error } = await fetchAllRows<{ id: string; farm_name: string; prepay_balance_cents: number }>((from, to) => pageWithList(supabase
       .from('customers')
       .select('id, farm_name, prepay_balance_cents', { count: 'exact' })
       .gt('prepay_balance_cents', 0)
       .eq('is_active', true)
       .order('farm_name')
       .order('id')
-      .range(from, to));
+      .range(from, to)));
     if (seq !== loadSeq.current) return;
     if (error || !custData) { fail(); return; }
     const customerRows = custData;
 
     // Their unpaid invoices in one paged read per chunk of customers (was one
     // unchecked read per customer, whose failure counted as "no unpaid invoices").
-    const { data: invData, error: invError } = await fetchAllRowsForIds(customerRows.map((c) => c.id), (idChunk, from, to) => supabase
+    const { data: invData, error: invError } = await fetchAllRowsForIds(customerRows.map((c) => c.id), (idChunk, from, to) => pageWithList(supabase
       .from('invoices')
       .select('id, customer_id, balance_cents', { count: 'exact' })
       .in('customer_id', idChunk)
@@ -164,7 +164,7 @@ export default function PrepaymentManagerPanel() {
       .gt('balance_cents', 0)
       .is('deleted_at', null)
       .order('id')
-      .range(from, to));
+      .range(from, to)));
     if (seq !== loadSeq.current) return;
     if (invError || !invData) { fail(); return; }
     const unpaidByCustomer = new Map<string, { count: number; cents: number }>();

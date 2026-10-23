@@ -25,5 +25,7 @@
 - Proof: forced each failure against a local fake Supabase server in the dev app and watched the
   failed state, then Try again showing the list. New tests (`src/pages/ARPayments.loadFailed.test.tsx`,
   `src/components/prepay/PrepayPanels.loadFailed.test.tsx`) fail on the old code.
-- Not changed: `fetchAllRows` (`src/lib/pagedRead.ts`) still reads a page that answers with no
-  list as an empty page, for every caller; that shared change is left for its own PR.
+- New `pageWithList` (`src/lib/pagedRead.ts`): wraps one page of a `fetchAllRows` read so a page
+  that answers with no list (and no error) fails the read instead of counting as empty. Every paged
+  read on these screens uses it. `fetchAllRows` itself is unchanged, so other screens still read
+  such a page as empty; changing it for every caller is left for its own PR.

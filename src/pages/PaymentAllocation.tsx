@@ -27,7 +27,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { formatCents as fmt } from '../lib/money';
 import type { PaymentAllocationEntry, PaymentAllocationResult, InvoiceType } from '../types';
@@ -166,7 +166,7 @@ export default function PaymentAllocation() {
     const today = new Date();
     // Every open invoice, page by page: a check could only be applied to the
     // customer's first 200 before (2026-10-20 Goal 4 part 2).
-    const { data, error } = await fetchAllRows((from, to) => supabase
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('invoices')
       .select('id, invoice_number, invoice_date, due_date, invoice_type, total_amount_cents, balance_cents', { count: 'exact' })
       .eq('customer_id', customerId)
@@ -179,7 +179,7 @@ export default function PaymentAllocation() {
       .order('invoice_date', { ascending: true })
       .order('created_at', { ascending: true })
       .order('id')
-      .range(from, to));
+      .range(from, to)));
     // Another customer was picked (or cleared) while this one loaded.
     if (seq !== invoiceLoadSeq.current) return;
 

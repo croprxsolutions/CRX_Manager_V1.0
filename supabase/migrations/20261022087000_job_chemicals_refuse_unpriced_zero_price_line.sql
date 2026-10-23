@@ -32,6 +32,13 @@
 --   quote lines (draft/sent/accepted), are an unpriced product at 0, so no current job or
 --   scheduling from a quote is refused.
 --
+-- LIMITS (accepted): the rule is checked when a line is written. A line saved at $0 for a product
+--   that had a price, whose price is later cleared (or whose job's customer later moves to a tier
+--   with no price), stays as it is until the job is saved again; that save is then refused until
+--   a price is typed. A quote line for an unpriced product at $0 is refused when the job is
+--   scheduled from it; the message says to price the quote line. To give away a product CRX does
+--   not price, give it a $0 price (a stated $0 is a price).
+--
 -- CALLERS (every app caller of a function whose behaviour changes here, checked 2026-10-23):
 -- caller-analysis: save_job :: JobDetail.tsx; a billable line whose product states no price must carry a price, else CHEM_PRICE_REQUIRED (the screen already refuses it first)
 -- caller-analysis: create_job_from_quote_section :: QuoteBuilder.tsx; an accepted quote line for a product with no price, priced $0, is refused when scheduled (0 such lines live)
@@ -107,7 +114,7 @@ BEGIN
     FROM products p WHERE p.id = NEW.product_id;
   IF FOUND AND v_stated IS NULL THEN
     RAISE EXCEPTION
-      'CHEM_PRICE_REQUIRED: % has no price for this customer''s tier, so its line would bill $0. Enter the price per unit, or tick Customer supplied if the grower supplied it.',
+      'CHEM_PRICE_REQUIRED: % has no price for this customer''s tier, so its line would bill $0. Enter a price for the line (on a quote, the quote line''s price), tick Customer supplied if the grower supplied it, or give the product a $0 price if you give it away.',
       COALESCE(v_product_name, 'A product')
       USING ERRCODE = 'P0001';
   END IF;
@@ -115,6 +122,7 @@ BEGIN
 END;
 $function$;
 
+ALTER FUNCTION public._job_chemical_price_required() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._job_chemical_price_required() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER job_chemicals_price_required
@@ -139,7 +147,7 @@ BEGIN
   IF NOT FOUND OR NOT v_fn.prosecdef OR v_fn.owner <> 'postgres'
      OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
      OR v_fn.acl IS DISTINCT FROM '{postgres=X/postgres}'
-     OR v_fn.body_md5 IS DISTINCT FROM '9ba3fa939da8171d66d16941427112c1' THEN
+     OR v_fn.body_md5 IS DISTINCT FROM '3a09059290d9bb1093b518e3dfd11649' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: public._job_chemical_price_required is not the expected body/attributes (md5 %, acl %)', v_fn.body_md5, v_fn.acl;
   END IF;
   IF NOT EXISTS (

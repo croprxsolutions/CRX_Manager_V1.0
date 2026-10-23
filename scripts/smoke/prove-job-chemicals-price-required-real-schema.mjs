@@ -21,8 +21,8 @@
  *      save; a driver still gets INSUFFICIENT_ROLE; the pre-change keyed save replays; a different
  *      payload under its key is still refused;
  *   5. RE-APPLY: refused by the preflight;
- *   6. MUTATION: dropping the tier-1 fallback, the check, the customer-supplied exemption or the
- *      quantity-0 exemption each changes an outcome.
+ *   6. MUTATION: dropping the tier-1 fallback, reading tier 2 from tier 3, the check, the
+ *      customer-supplied exemption or the quantity-0 exemption each changes an outcome.
  *
  * Run: node scripts/smoke/prove-job-chemicals-price-required-real-schema.mjs   (needs Docker)
  * Prints JOB_CHEMICALS_PRICE_REQUIRED_PROOF_PASS on success.
@@ -177,14 +177,17 @@ const id = (n) => `7a560000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const U = { ADMIN: id(1), REP: id(2), DRIVER: id(3) };
 const CUST3 = id(201); // tier 3
 const CUST1 = id(202); // tier 1
+const CUST2 = id(203); // tier 2
 const FIELD3 = id(211);
 const FIELD1 = id(212);
+const FIELD2 = id(213);
 const P = {
   UNPRICED: id(301), // no price at any tier
   PRICED: id(302), // tier1 $10, tier3 $7
   FREE: id(303), // tier1 stated $0
   TIER3_ONLY: id(304), // tier3 $5, no tier-1 price
   T1_ONLY: id(305), // tier1 $10, no tier-3 price
+  TIER2_ONLY: id(306), // tier2 $9, no tier-1 price
 };
 const TODAY = 'current_date';
 
@@ -194,15 +197,18 @@ function seed() {
     VALUES ('${U[k]}', 'price-required-${k.toLowerCase()}@example.invalid', '{"full_name":"[PROVER] ${k}","role":"${role}"}'::jsonb);`).join('\n'));
   psql(`SET session_replication_role = replica;
     INSERT INTO public.customers (id, farm_name, is_active, assigned_tier) VALUES
-      ('${CUST3}', '[PROVER] Tier 3 Farm', true, 3), ('${CUST1}', '[PROVER] Tier 1 Farm', true, 1);
+      ('${CUST3}', '[PROVER] Tier 3 Farm', true, 3), ('${CUST1}', '[PROVER] Tier 1 Farm', true, 1),
+      ('${CUST2}', '[PROVER] Tier 2 Farm', true, 2);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres) VALUES
-      ('${FIELD3}', '${CUST3}', '[PROVER] Field 3', 100), ('${FIELD1}', '${CUST1}', '[PROVER] Field 1', 100);
+      ('${FIELD3}', '${CUST3}', '[PROVER] Field 3', 100), ('${FIELD1}', '${CUST1}', '[PROVER] Field 1', 100),
+      ('${FIELD2}', '${CUST2}', '[PROVER] Field 2', 100);
     INSERT INTO public.products (id, product_name, unit_size, current_cost, tier1_price, tier2_price, tier3_price, product_form, is_active) VALUES
       ('${P.UNPRICED}', '[PROVER] Unpriced', 'gal', 5, NULL, NULL, NULL, 'liquid', true),
       ('${P.PRICED}', '[PROVER] Priced', 'gal', 5, 10, 9, 7, 'liquid', true),
       ('${P.FREE}', '[PROVER] Free', 'gal', 5, 0, NULL, NULL, 'liquid', true),
       ('${P.TIER3_ONLY}', '[PROVER] Tier3 only', 'gal', 5, NULL, NULL, 5, 'liquid', true),
-      ('${P.T1_ONLY}', '[PROVER] Tier1 only', 'gal', 5, 10, NULL, NULL, 'liquid', true);
+      ('${P.T1_ONLY}', '[PROVER] Tier1 only', 'gal', 5, 10, NULL, NULL, 'liquid', true),
+      ('${P.TIER2_ONLY}', '[PROVER] Tier2 only', 'gal', 5, NULL, 9, NULL, 'liquid', true);
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
 }
 
@@ -211,7 +217,7 @@ function line(product, { price = 0, qty = 10, supplied = false } = {}) {
   return { product_id: product, quantity: qty, unit: 'gal', rate_per_acre: qty / 10, rate_unit: 'gal/ac', cost_per_unit_cents: 500, price_per_unit_cents: price, customer_supplied: supplied, sort_order: 0 };
 }
 function save(cust, chems, key = null) {
-  const field = cust === CUST3 ? FIELD3 : FIELD1;
+  const field = cust === CUST3 ? FIELD3 : cust === CUST2 ? FIELD2 : FIELD1;
   return `public.save_job(NULL, jsonb_build_object('customer_id', '${cust}', 'job_date', ${TODAY}), ${j([{ field_id: field, acres_to_treat: 10, sort_order: 0 }])}, ${j(chems)}, auth.uid(), ${key ? `'${key}'` : 'NULL'})->>'success'`;
 }
 // Direct writes on the job the keyed save commits (staff hold INSERT/UPDATE policies on job_chemicals).
@@ -220,7 +226,11 @@ const KEYED_JOB = `(SELECT jc.job_id FROM public.job_chemicals jc WHERE jc.produ
 const DIRECT_INSERT = `STMT:INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order)
   SELECT ${KEYED_JOB}, '${P.UNPRICED}', 5, 'gal', 0, 99`;
 const DIRECT_UPDATE = `STMT:UPDATE public.job_chemicals SET quantity = 5 WHERE product_id = '${P.UNPRICED}'`;
-const DIRECT_INSERT_SUPPLIED = `STMT:INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+// Un-tick customer supplied on a committed unpriced line at 0 (seeded supplied by the keyed save's job).
+const DIRECT_UNTICK = `STMT:INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+  SELECT ${KEYED_JOB}, '${P.UNPRICED}', 5, 'gal', 0, true, 97;
+  UPDATE public.job_chemicals SET customer_supplied = false WHERE sort_order = 97`;
+const DIRECT_INSERT_SUPPLIED =`STMT:INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
   SELECT ${KEYED_JOB}, '${P.UNPRICED}', 5, 'gal', 0, true, 98`;
 
 /** `sql` as a signed-in user, rolled back unless `commit`. Returns the last value or ERR:<message>. */
@@ -239,7 +249,7 @@ function as(user, sql, { prefix = '', commit = false } = {}) {
   return /OUT=(.*)/.exec(r.stdout)?.[1] ?? `(no output) ${r.stdout}`;
 }
 
-const REFUSED = /CHEM_PRICE_REQUIRED: \[PROVER\] (Unpriced|Tier3 only) has no price for this customer's tier/;
+const REFUSED = /CHEM_PRICE_REQUIRED: \[PROVER\] (Unpriced|Tier3 only|Tier2 only) has no price for this customer's tier/;
 /** Writes the candidate must refuse (all succeed before it). [user, label, sql, result before] */
 const GAPS = [
   ['ADMIN', 'save_job: unpriced at 0, tier 3', save(CUST3, [line(P.UNPRICED)]), 'true'],
@@ -248,6 +258,9 @@ const GAPS = [
   ['ADMIN', 'save_job: tier-3-only product, tier-1 customer', save(CUST1, [line(P.TIER3_ONLY)]), 'true'],
   ['ADMIN', 'direct INSERT of an unpriced line at 0', DIRECT_INSERT, 'ok'],
   ['ADMIN', 'direct UPDATE of an unpriced line at 0', DIRECT_UPDATE, 'ok'],
+  ['REP', 'direct INSERT of an unpriced line at 0 (rep)', DIRECT_INSERT, 'ok'],
+  ['ADMIN', 'un-tick customer supplied on an unpriced line at 0', DIRECT_UNTICK, 'ok'],
+  ['ADMIN', 'save_job: tier-2-only product, tier-3 customer', save(CUST3, [line(P.TIER2_ONLY)]), 'true'],
 ];
 /** Writes that must keep working, with the same result before and after. */
 const KEPT = [
@@ -258,6 +271,7 @@ const KEPT = [
   ['ADMIN', 'priced product typed at 0', save(CUST3, [line(P.PRICED)])],
   ['ADMIN', 'tier-3-only product at 0, tier-3 customer', save(CUST3, [line(P.TIER3_ONLY)])],
   ['ADMIN', 'tier-1-only product at 0, tier-3 customer', save(CUST3, [line(P.T1_ONLY)])],
+  ['ADMIN', 'tier-2-only product at 0, tier-2 customer', save(CUST2, [line(P.TIER2_ONLY)])],
   ['REP', 'priced product at its price (rep)', save(CUST3, [line(P.PRICED, { price: 700 })])],
   ['ADMIN', 'direct INSERT, customer supplied', DIRECT_INSERT_SUPPLIED],
 ];
@@ -339,6 +353,7 @@ function main() {
   const fn = candidateFunction();
   for (const [label, edit, user, sql, expect] of [
     ['no tier-1 fallback', (b) => b.replace(/,\n\s+p\.tier1_price\)/, ')'), 'ADMIN', save(CUST3, [line(P.T1_ONLY)]), 'refuse'],
+    ['tier 2 reads the tier-3 price', (b) => b.replace('WHEN 2 THEN p.tier2_price', 'WHEN 2 THEN p.tier3_price'), 'ADMIN', save(CUST2, [line(P.TIER2_ONLY)]), 'refuse'],
     ['check removed', (b) => b.replace('IF FOUND AND v_stated IS NULL THEN', 'IF false THEN'), 'ADMIN', save(CUST3, [line(P.UNPRICED)]), 'save'],
     ['customer-supplied exemption removed', (b) => b.replace('IF COALESCE(NEW.customer_supplied, false)\n     OR ', 'IF '), 'ADMIN', save(CUST3, [line(P.UNPRICED, { supplied: true })]), 'refuse'],
     ['quantity-0 exemption removed', (b) => b.replace('OR COALESCE(NEW.quantity, 0) = 0\n     ', ''), 'ADMIN', save(CUST3, [{ ...line(P.UNPRICED, { qty: 0 }), rate_per_acre: null }]), 'refuse'],

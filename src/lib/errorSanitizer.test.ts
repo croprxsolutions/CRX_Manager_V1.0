@@ -4,8 +4,9 @@ import { sanitizeError } from './errorSanitizer';
 describe('sanitizeError', () => {
   // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.
   it('explains a CHEM_PRICE_REQUIRED save refusal without the raw token', () => {
-    expect(sanitizeError({ code: 'P0001', message: "CHEM_PRICE_REQUIRED: Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter the price per unit, or tick Customer supplied if the grower supplied it." }))
-      .toBe("Nothing was saved. Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter the price per unit, or tick Customer supplied if the grower supplied it.");
+    const sentence = "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line (on a quote, the quote line's price), tick Customer supplied if the grower supplied it, or give the product a $0 price if you give it away.";
+    expect(sanitizeError({ code: 'P0001', message: `CHEM_PRICE_REQUIRED: ${sentence}` }))
+      .toBe(`Nothing was saved. ${sentence}`);
   });
 
   it.each(['IN_PROGRESS', 'ISOLATION', 'STALE_CALL'])('explains exhausted %s cutover refusals without raw database tokens', (token) => {

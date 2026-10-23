@@ -280,6 +280,16 @@ describe('JobDetail recipe pricing tier', () => {
     expect(priceInput().value).toBe('0.5');
   });
 
+  it('MONEY: a typed $0 on a billable line whose product states no price cannot be saved (mirrors the server trigger)', async () => {
+    const UNPRICED = { ...PRODUCT, id: 'prod-unpriced', product_name: 'Unpriced Adjuvant', tier1_price: null, tier2_price: null, tier3_price: null };
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [UNPRICED]);
+    await openChemicalLine();
+    await pickProduct(/Unpriced Adjuvant/);
+    fireEvent.change(screen.getByText('Total Applied').nextElementSibling as HTMLInputElement, { target: { value: '5' } });
+    fireEvent.change(priceInput(), { target: { value: '0' } });
+    expect(await screen.findByText(/its product has no price for this customer's tier, so it would bill \$0/)).toBeInTheDocument();
+  });
+
   it('un-ticking customer supplied keeps a priced product\'s $0 price', async () => {
     const FREE = { ...PRODUCT, id: 'prod-free', product_name: 'Free Sample', tier1_price: 0, tier2_price: null, tier3_price: null };
     serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [FREE]);

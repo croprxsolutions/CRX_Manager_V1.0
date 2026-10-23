@@ -1663,10 +1663,21 @@ export default function JobDetail() {
       });
       if (badCents) {
         byIndex.set(i, `its ${badCents[0]} is blank, negative, or not a whole number of cents, and would not be billed correctly`);
+        return;
+      }
+      // Mirror of the job_chemicals CHEM_PRICE_REQUIRED trigger (20261022087000): a billable line at
+      // $0 whose product states no price for the customer's tier (tier 1 when it is not known yet,
+      // as the server reads it). A product with a stated $0 price is not caught.
+      if (!(c.customer_supplied ?? false) && parseFloat(c.quantity) !== 0 && Number(c.price_per_unit_cents) === 0) {
+        const product = allProducts.find((p) => p.id === c.product_id);
+        const tier = customerPricingTier === 2 || customerPricingTier === 3 ? customerPricingTier : 1;
+        if (product && getStatedTierPriceCents(product, tier) == null) {
+          byIndex.set(i, 'its product has no price for this customer\'s tier, so it would bill $0 — enter a price, tick Customer supplied if the grower supplied it, or give the product a $0 price if you give it away');
+        }
       }
     });
     return byIndex;
-  }, [chemRows, fieldRows]);
+  }, [chemRows, fieldRows, allProducts, customerPricingTier]);
 
   // SAFE-SCOPE U7: a job is "multi-owner" when its fields' billed shares span more
   // than one distinct customer — the same customer set transfer_job_to_invoice

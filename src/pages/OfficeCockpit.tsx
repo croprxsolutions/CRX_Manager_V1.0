@@ -954,6 +954,16 @@ export default function OfficeCockpit() {
       ]
       : [];
 
+    const failedTiles: FailedTiles = {
+      unbilledJobs: tileReadFailed(unbilledJobsRes),
+      postableInvoices: tileReadFailed(postableInvRes),
+      chemicalDrafts: tileReadFailed(chemicalDraftsRes),
+      upcomingJobs: tileReadFailed(upcomingJobsRes),
+      needsDispatchJobs: tileReadFailed(needsDispatchRes),
+      expiringLicenses: tileReadFailed(expiringLicRes),
+      overdueAR: tileReadFailed(overdueARRes),
+    };
+
     setData({
       unbilledJobs,
       postableInvoices,
@@ -972,16 +982,10 @@ export default function OfficeCockpit() {
       plannedBookingAttention,
       plannedBookingAttentionLoadOk,
       watchdogLoadOk,
-      allChecksLoadOk: errors.length === 0 && nextMorningSummaryLoadOk,
-      failedTiles: {
-        unbilledJobs: tileReadFailed(unbilledJobsRes),
-        postableInvoices: tileReadFailed(postableInvRes),
-        chemicalDrafts: tileReadFailed(chemicalDraftsRes),
-        upcomingJobs: tileReadFailed(upcomingJobsRes),
-        needsDispatchJobs: tileReadFailed(needsDispatchRes),
-        expiringLicenses: tileReadFailed(expiringLicRes),
-        overdueAR: tileReadFailed(overdueARRes),
-      },
+      // A tile that could not load has proved nothing clear, error or not.
+      allChecksLoadOk: errors.length === 0 && nextMorningSummaryLoadOk
+        && !Object.values(failedTiles).some(Boolean),
+      failedTiles,
     });
     setMorningSummary(nextMorningSummary);
     setMorningSummaryLoadOk(nextMorningSummaryLoadOk);

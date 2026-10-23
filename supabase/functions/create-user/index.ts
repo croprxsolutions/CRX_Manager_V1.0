@@ -137,7 +137,8 @@ Deno.serve(async (req: Request) => {
 
     // Activate in the same request, as the calling admin (see logic.ts). On
     // failure the login still exists but stays blocked; `activated: false`
-    // tells the page to retry the step itself or say so.
+    // tells the page to retry the step itself or say so. The reason goes to
+    // Sentry only, never into the reply.
     const newUserId = newUser.user.id;
     const activationError = await activateNewUser(callerClient, {
       userId: newUserId,
@@ -157,7 +158,6 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         user: { id: newUserId, email },
         activated: activationError === null,
-        ...(activationError ? { activation_error: activationError } : {}),
       }),
       {
         status: 201,

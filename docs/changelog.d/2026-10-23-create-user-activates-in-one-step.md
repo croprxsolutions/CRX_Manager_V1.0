@@ -6,7 +6,8 @@
   admin's own login, not the service-role key, so the database's active-admin check and profile guards still
   decide. Its idempotency key names the new user plus a random part (`create-user-activate:<user id>:<uuid>`),
   so no other call can use it up first and replay a cached success. The reply says
-  `activated: true`, or `activated: false` with `activation_error` (the login then exists but stays blocked).
+  `activated: true` or `activated: false` (the login then exists but stays blocked); the reason for a failure
+  goes to Sentry only, never into the reply.
 - Settings → Create User makes its own `admin_update_profile` call only when the reply is not
   `activated: true` (an older deployed function, or a failed activation), so the page and the function can go
   live in either order.

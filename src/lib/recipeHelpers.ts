@@ -77,11 +77,13 @@ export function recipeItemToChemRowSeed(
   tier: 1 | 2 | 3,
 ): RecipeChemRowSeed {
   const recipePrice = item.price_per_unit_cents ?? 0;
-  let priceCents = recipePrice;
-  if (priceCents <= 0 && product) {
-    // A missing tier-2/3 price falls back to tier 1 (never a silent $0); a stated $0 is kept.
+  // Blank when neither the recipe nor the product states a price: the job's save check then asks
+  // for one instead of billing the line at $0. A missing tier-2/3 price falls back to tier 1; a
+  // stated $0 is kept.
+  let price = recipePrice > 0 ? recipePrice.toString() : '';
+  if (recipePrice <= 0 && product) {
     const tierPriceCents = getStatedTierPriceCents(product, tier);
-    if (tierPriceCents != null) priceCents = tierPriceCents;
+    if (tierPriceCents != null) price = tierPriceCents.toString();
   }
 
   const costCents = product?.current_cost != null ? Math.round(product.current_cost * 100) : 0;
@@ -98,7 +100,7 @@ export function recipeItemToChemRowSeed(
     rate_per_acre: item.rate_per_acre != null ? item.rate_per_acre.toString() : '',
     rate_unit: rateUnit,
     cost_per_unit_cents: costCents.toString(),
-    price_per_unit_cents: priceCents.toString(),
+    price_per_unit_cents: price,
     diluent_rate: '',
     rei_hours: product?.rei_hours != null ? product.rei_hours.toString() : '',
     phi_days: product?.phi_days != null ? product.phi_days.toString() : '',

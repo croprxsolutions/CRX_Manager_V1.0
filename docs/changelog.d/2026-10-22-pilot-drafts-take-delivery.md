@@ -1,14 +1,13 @@
-## 2026-10-22 — Pilot procedure drafts: only a driver account can complete a paper-ticket delivery
+## 2026-10-22 — Pilot procedure drafts: which screens can complete a paper-ticket delivery
 
-- `docs/plans/2026-10-22-pilot-launch-procedures-draft.md` now says plainly that only a driver
-  account can complete a delivery from a signed paper ticket. `src/pages/DeliveryDetail.tsx` shows
-  the **Customer signed a paper ticket** checkbox and **Delivered on (date on the ticket)** only in the
-  driver layout (`role === 'driver'`). An admin or sales rep can press **Take Delivery**, but their
-  screen has no paper-ticket option, so CRX would record the delivery as made at that moment, not on
-  the ticket's date.
-- After a database restore, while CRX is closed to staff, drivers still have to sign in for that step
-  with the person running the recovery watching. New outage question 8 asks Mason whether that is
-  acceptable, or whether the admin screen should get the paper-ticket option (an app change).
-- Follow-up to PR #1041. An earlier version of this PR said admins could complete these deliveries
-  through **Take Delivery**; the Codex GitHub App review showed the paper-ticket controls are
-  driver-only, so that was corrected before merge. Documentation only.
+- `docs/plans/2026-10-22-pilot-launch-procedures-draft.md` now names the screens that have the
+  paper-ticket option (the **Customer signed a paper ticket** checkbox, ticket photo and **Delivered on
+  (date on the ticket)**): the driver layout of the delivery page, and **My Route**
+  (`/my-route/:id`, `src/pages/FieldStop.tsx`), which admins, sales reps and drivers can all open
+  (`src/appPages.tsx`). The office's normal delivery page (`src/pages/DeliveryDetail.tsx`, admin and
+  sales-rep layout) has no paper-ticket option, so it would record a delivery as made at that moment.
+  After a database restore, the person running the recovery completes the paper deliveries from **My
+  Route** while CRX stays closed to staff.
+- Follow-up to PR #1041. Two earlier heads of this PR were wrong in opposite directions ("admins can
+  use Take Delivery", then "only drivers can"); the Codex GitHub App reviews led to this version,
+  checked against the code. Documentation only.

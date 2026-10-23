@@ -374,7 +374,7 @@ each printed form next to its CRX screen, and add any field the form is missing.
      received date stays on the paper form. The bookkeeper decides how that affects deposit matching
      and QuickBooks (question below).
    - **Deliveries:** the assigned driver completes each delivery from their own delivery screen (or
-     an admin presses **Take Delivery** to become its driver, then completes it). They
+     an admin or sales rep presses **Take Delivery** to become its driver, then completes it). They
      tick **Customer signed a paper ticket (no signal at the site)**, add the photo of the signed
      ticket, type the signer's printed name from the ticket in the **Signed By** box, and enter
      **Delivered on (date on the ticket)**. The app never captures a signature after the fact.

@@ -96,7 +96,15 @@ function boundaryPartsFromGeometry(geometry: Polygon | MultiPolygon, fieldId: st
   });
 }
 
+// One fresh page per field: moving between fields (or to New Field) on the same route would
+// otherwise keep the previous field's form, billing splits and in-flight reads, and Save sends
+// the whole form and split list.
 export default function FieldSetup() {
+  const { id } = useParams();
+  return <FieldSetupPage key={id ?? 'none'} />;
+}
+
+function FieldSetupPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();

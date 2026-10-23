@@ -416,4 +416,21 @@ describe('FieldSetup load failure (To-Do 10.5)', () => {
     rerender(<FieldSetup />);
     await waitFor(() => expect(screen.queryByText('Leftover Split Farm')).not.toBeInTheDocument());
   });
+
+  it('opening New Field after a field with billing splits starts an empty form', async () => {
+    const base = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => (
+      table === 'field_billing_defaults'
+        ? listChain([{ customer_id: 'customer-9', customer: { farm_name: 'Leftover Split Farm' }, split_pct: 100, is_primary: true }])
+        : base(table)
+    ));
+    const { rerender } = render(<FieldSetup />);
+    expect(await screen.findByText('Leftover Split Farm')).toBeInTheDocument();
+
+    mockUseParams.mockReturnValue({ id: 'new' });
+    rerender(<FieldSetup />);
+    expect(await screen.findByRole('button', { name: 'Create Field' })).toBeInTheDocument();
+    expect(screen.queryByText('Leftover Split Farm')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('North 40')).not.toBeInTheDocument();
+  });
 });

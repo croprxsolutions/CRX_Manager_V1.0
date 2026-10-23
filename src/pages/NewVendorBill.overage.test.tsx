@@ -152,14 +152,16 @@ describe('NewVendorBill PO-overage handling', { timeout: 30_000 }, () => {
     // effect can still be pending when the prompt text appears, and it then wipes
     // the typed reason inside the same render, so the click is refused as too short
     // and no retry is sent (run 39958101798; reproduced 3 in 328 loaded runs).
-    // Type again until the reason sticks, and click only once it is in the box.
+    // Type again until the reason sticks, and click in the same step that saw it in
+    // the box, so nothing can run between the check and the click. The callback
+    // throws before clicking until then, and waitFor stops calling it once it clicks.
     const reason = 'Freight surcharge approved by the owner';
     await waitFor(() => {
       const box = screen.getByPlaceholderText(/Why should cumulative billing exceed/i);
       if ((box as HTMLTextAreaElement).value !== reason) fireEvent.change(box, { target: { value: reason } });
       expect(box).toHaveValue(reason);
+      fireEvent.click(screen.getAllByRole('button', { name: /^Create Bill$/ }).slice(-1)[0]);
     });
-    fireEvent.click(screen.getAllByRole('button', { name: /^Create Bill$/ }).slice(-1)[0]);
 
     await waitFor(() => expect(mockRpc.mock.calls.length).toBeGreaterThan(1));
     const retryArgs = mockRpc.mock.calls[mockRpc.mock.calls.length - 1][1];

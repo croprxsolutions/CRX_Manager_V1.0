@@ -1,4 +1,4 @@
--- Behaviour tests for 20261022085000_product_brands.sql, run by prove-product-brands.mjs after the
+-- Behaviour tests for 20261022086500_product_brands.sql, run by prove-product-brands.mjs after the
 -- migration applied on the harness. Every test prints "PASS <id>"; any failure raises TEST_FAIL.
 -- Actors: ...0a active admin, ...0b deactivated admin, ...0c sales rep, ...0d deactivated driver.
 

@@ -33,7 +33,7 @@
 --   authenticated, the function executable by authenticated); no existing object's access changes.
 --   service_role and metabase_ro get no access to the table; PR B reads it with the user's session.
 --
--- ORDERING: coordinator stamp 20261022085000, migration-history row 975. Re-read the live ledger
+-- ORDERING: coordinator stamp 20261022086500, migration-history row 975. Re-read the live ledger
 --   before applying and confirm this stamp sorts above its newest effective stamp.
 --
 -- ROLLBACK (only while no later table references product_brands):

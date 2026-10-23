@@ -320,7 +320,11 @@ authenticate proof contents. CodeRabbit's backstop was removed 2026-10-19, which
 
 ### KI-47 — Hook bypasses that remain
 **MED/LOW · mixed · tooling-guards · unassigned**
-- Autopilot approves `rm -Rf`, `git clean --force -d` and `commit -n` spellings (`.claude/hooks/autopilot-lib.mjs:214-216`). MED.
+- Autopilot approves these destructive spellings (`.claude/hooks/autopilot-lib.mjs:214-216`; reproduced by calling
+  `autopilotDecision`, re-confirmed by a reviewer): `rm -Rf`, `rm -r -f`, `rm --recursive --force`,
+  `Remove-Item -Recurse`, `git clean --force -d`, `git branch -d -f` and `git commit -n`. A fix sits on branch
+  `claude/autopilot-recursive-delete-alias-20260907` (18,131-command sweep) but must be rebuilt on current `main`.
+  MED.
 - A `[E2E]` marker exempts a whole SQL batch (`.claude/hooks/live-testdata-lib.mjs:731`). MED.
 - Bare `git clean` with a config override is not covered (`bash-safety-lib.mjs:280`). LOW.
 - `review-proof-guard`: the `GIT_EXTERNAL_DIFF` separate-export form and `gh` download over a protected path are

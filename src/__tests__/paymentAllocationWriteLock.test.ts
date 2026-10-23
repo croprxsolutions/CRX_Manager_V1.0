@@ -18,10 +18,10 @@ const later = readdirSync(MIGRATIONS)
   .filter((name) => name.endsWith('.sql') && name > LOCK)
   .map((name) => ({ name, sql: strip(readFileSync(path.join(MIGRATIONS, name), 'utf8')) }));
 
-// A GRANT of a write privilege on one of the tables, or on every table in public, to a browser role
+// A GRANT of a privilege the lock revokes (a write, or REFERENCES, TRIGGER or MAINTAIN) on one of the tables, or on every table in public, to a browser role
 // (or PUBLIC, which reaches them).
 const GRANT_WRITE = new RegExp(
-  `GRANT\\s+[^;]*\\b(INSERT|UPDATE|DELETE|TRUNCATE|ALL)\\b[^;]*\\bON\\s+(TABLE\\s+[^;]*${TABLE}|[^;]*${TABLE}|ALL\\s+TABLES\\s+IN\\s+SCHEMA\\s+[^;]*\\bpublic\\b)[^;]*\\bTO\\s+[^;]*\\b(anon|authenticated|PUBLIC)\\b`,
+  `GRANT\\s+[^;]*\\b(INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER|MAINTAIN|ALL)\\b[^;]*\\bON\\s+(TABLE\\s+[^;]*${TABLE}|[^;]*${TABLE}|ALL\\s+TABLES\\s+IN\\s+SCHEMA\\s+[^;]*\\bpublic\\b)[^;]*\\bTO\\s+[^;]*\\b(anon|authenticated|PUBLIC)\\b`,
   'i',
 );
 // Every CREATE POLICY on one of the tables that is not FOR SELECT (no FOR clause means FOR ALL).
@@ -64,6 +64,7 @@ describe('payment allocation tables: no direct browser writes (20261022040000)',
       'GRANT SELECT, DELETE ON public.order_line_allocations TO PUBLIC;',
       'GRANT INSERT ON ALL TABLES IN SCHEMA public TO authenticated;',
       'GRANT INSERT ON "public"."allocation_sets" TO authenticated;',
+      'GRANT TRIGGER, MAINTAIN ON public.invoice_line_allocations TO authenticated;',
     ]) expect(GRANT_WRITE.test(sql), sql).toBe(true);
     for (const sql of [
       'GRANT SELECT ON public.allocation_sets TO authenticated;',

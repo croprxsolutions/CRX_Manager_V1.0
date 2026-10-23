@@ -56,6 +56,7 @@ import {
 } from '../lib/labelGuardrailSetting';
 import { computeSeason } from '../utils/season';
 import { recipeItemToChemRowSeed, chemRowsToRecipeItems, getLastRecipeId, setLastRecipeId } from '../lib/recipeHelpers';
+import { getTierPrice } from '../lib/quoteCalc';
 import { programItemToChemRowSeed, parseCropPrograms, orderProgramsForJob, type CropProgram } from '../lib/cropProgramHelpers';
 import { moveItem, moveUp, moveDown } from '../lib/routeOrder';
 import { billableAcres } from '../lib/fieldGeometry';
@@ -3752,8 +3753,9 @@ export default function JobDetail() {
         // are NOT inflated. When the stock unit already equals the rate unit (or the
         // units can't be reconciled), this returns the stock unit + per-stock
         // cost/price unchanged — the common case is untouched.
-        const tier = pickTier;
-        const tierPrice = tier === 3 ? p.tier3_price : tier === 2 ? p.tier2_price : p.tier1_price;
+        // A missing tier-2/3 price falls back to tier 1, as on quotes (never a silent $0).
+        // pickTier is set whenever a product is picked (an unknown tier returned above).
+        const tierPrice = pickTier == null ? null : getTierPrice(p, pickTier);
         const costPerStockCents = Math.round((p.current_cost || 0) * 100);
         const pricePerStockCents = tierPrice != null ? Math.round(tierPrice * 100) : 0;
         const reconciled = reconcileChemAutofillUnits(
@@ -3765,9 +3767,9 @@ export default function JobDetail() {
         );
         updated[i].unit = reconciled.unit;
         updated[i].cost_per_unit_cents = reconciled.costPerUnitCents.toString();
-        // Only default the price when the product has a tier price; otherwise leave
-        // whatever was there (mirrors the prior tierPrice != null guard).
-        if (tierPrice != null) updated[i].price_per_unit_cents = reconciled.pricePerUnitCents.toString();
+        // Only default the price when the product has a tier price (or a tier-1 price to fall
+        // back to); otherwise leave whatever was there.
+        if (tierPrice) updated[i].price_per_unit_cents = reconciled.pricePerUnitCents.toString();
         // Re-derive the quantity now that a rate auto-filled.
         updated[i] = recomputeChemRowForAcres(updated[i], sumAcres(fieldRows));
       }

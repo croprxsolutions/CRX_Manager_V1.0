@@ -99,7 +99,7 @@ let customerByIdReads = 0;
 let customerByIdRequested: unknown[] = [];
 let recipeItemReads = 0;
 
-function serveTables(customerById: { data: unknown; error: unknown }) {
+function serveTables(customerById: { data: unknown; error: unknown }, product: object = PRODUCT) {
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs') return buildChain({ data: JOB, error: null });
     if (table === 'customers') {
@@ -116,7 +116,7 @@ function serveTables(customerById: { data: unknown; error: unknown }) {
       };
       return chain;
     }
-    if (table === 'products') return buildChain({ data: [PRODUCT], error: null });
+    if (table === 'products') return buildChain({ data: [product], error: null });
     if (table === 'blend_recipes') return buildChain({ data: [RECIPE], error: null });
     if (table === 'blend_recipe_items') { recipeItemReads += 1; return buildChain({ data: [RECIPE_ITEM], error: null }); }
     return buildChain({ data: [], error: null });
@@ -154,6 +154,15 @@ describe('JobDetail recipe pricing tier', () => {
     // Tier 3 is $7.00, not tier 1's $10.00.
     expect(screen.getByDisplayValue('700')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('1000')).not.toBeInTheDocument();
+  });
+
+  it('MONEY: prices at tier 1 when the product has no price for the customer tier, not $0', async () => {
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, { ...PRODUCT, tier3_price: null });
+    await loadRecipe();
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('from recipe')));
+    expect(screen.getByDisplayValue('1000')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('0')).not.toBeInTheDocument();
   });
 
   it('blocks pricing the recipe when the customer cannot be read, instead of using tier 1', async () => {

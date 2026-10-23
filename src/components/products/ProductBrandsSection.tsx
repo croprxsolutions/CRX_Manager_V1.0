@@ -287,6 +287,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     } finally {
       setSaving(false);
       // Reload after every attempt: a reply lost after the save committed must not leave a stale list.
+      // Marked loading at once, so new creates stay off until the reload shows what was saved.
+      setLoading(true);
       setReloadToken((token) => token + 1);
     }
   };
@@ -319,6 +321,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
 
   // Copying is only safe against this product's own list: until it has loaded (or after it failed),
   // a brand already here would look copyable, be refused as a duplicate, and stop the copy part-way.
+  // New creates wait for it too: after a save whose reply was lost, closing the form clears its lock,
+  // and a changed name saved before the reload showed the first brand would add a second one.
   // Candidates are filtered against the current list on every render, so a list that loads or
   // reloads after the source was picked still drops the brands this product already has.
   const brandsReady = !loading && loadError === null;
@@ -376,7 +380,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
             <Button size="sm" variant="secondary" disabled={!brandsReady} onClick={() => { setCopyOpen(true); void loadCopySource(null); }}>
               Copy from another product
             </Button>
-            <Button size="sm" icon={<Plus className="h-4 w-4" aria-hidden="true" />} showChevron={false} onClick={() => openDraft(emptyDraft())}>
+            <Button size="sm" icon={<Plus className="h-4 w-4" aria-hidden="true" />} showChevron={false} disabled={!brandsReady} onClick={() => openDraft(emptyDraft())}>
               Add brand
             </Button>
           </div>
@@ -395,6 +399,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
               size="sm"
               variant="ghost"
               icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+              disabled={!brandsReady}
               onClick={() => openDraft(emptyDraft(name.slice(0, NAME_MAX_LENGTH)))}
             >
               {name}

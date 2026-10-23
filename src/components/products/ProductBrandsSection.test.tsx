@@ -125,6 +125,29 @@ describe('ProductBrandsSection', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('after an uncertain create is cancelled, keeps new creates off until the reload shows the saved brand', async () => {
+    const madDog = { ...slam, id: 'b2', brand_name: 'Mad Dog', row_version: 1 };
+    let releaseReload: (rows: typeof slam[]) => void = () => {};
+    mocks.listProductBrands
+      .mockResolvedValueOnce([slam])
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseReload = resolve; }));
+    mocks.saveProductBrand.mockRejectedValueOnce(new Error('network down'));
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    expect(await screen.findByText(/may already have been saved/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Brand name')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /add brand/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /ag saver 5\.4/i })).toBeDisabled();
+    releaseReload([slam, madDog]);
+    expect(await screen.findByText('Mad Dog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add brand/i })).toBeEnabled();
+    expect(mocks.saveProductBrand).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a new brand’s form editable after a clear refusal such as a taken name', async () => {
     mocks.saveProductBrand.mockRejectedValueOnce({ message: 'BRAND_NAME_TAKEN: that brand is already listed' });
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);

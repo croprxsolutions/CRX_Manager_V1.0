@@ -1,0 +1,5 @@
+## 2026-10-23 — Product brands: new brands wait for the list to refresh after an unclear save (step 1, PR A)
+
+**What changed.** A Codex App review of PR #1050 (head `9d133c4c4`) found a way to add one brand twice. When saving a new brand fails without a clear answer (the reply was lost, so it may have been saved), the form locks as sent. But Cancel cleared that lock, and Add brand stayed on while the list was still refreshing, so an admin could reopen the form, change the name and save a second brand before the list showed the first. Add brand and the "Named in the product name" suggestions are now off whenever the product's own brand list is loading or failed to load, and the list is marked as loading the moment a save attempt ends. A new brand can only be started once the refreshed list shows what was actually saved.
+
+**Proof.** A new ProductBrandsSection test (an unclear save, then Cancel) fails on the old code and passes now: Add brand and the suggestion stay off until the refresh lists the saved brand, and no second save is sent.

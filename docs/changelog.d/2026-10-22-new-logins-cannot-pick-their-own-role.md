@@ -6,7 +6,7 @@
   login is blocked and named `Pending user <id>` (a placeholder that cannot collide with a real name), whatever name and role it asked for. Before,
   re-enabling public signup in the Supabase dashboard would have let anyone sign up as an active admin; that
   dashboard setting was the only protection. Direct SQL as `postgres`/`supabase_admin` (seeds, provers) keeps the
-  old behaviour.
+  old behaviour, but not after a `SET ROLE` (a login that switches accounts gets the safe default).
 - Settings → Create User now sets the chosen name and role and activates the user (which lifts the login block)
   right after the Edge Function returns, through `admin_update_profile`. If that second step fails (for example
   another user already has that name), the toast says the login exists but is blocked, and the admin finishes it

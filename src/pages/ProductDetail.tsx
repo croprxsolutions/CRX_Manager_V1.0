@@ -1381,13 +1381,13 @@ export default function ProductDetail() {
             </div>
           </Card>
 
-          {!isNew && id && (
+          {!isNew && id && persistedProduct?.id === id && (
             <ProductBrandsSection
-              // A new product id remounts the section, so one product's brands, open form or copy
-              // picker can never carry over to (or be saved onto) the next product.
+              // Shown only once this page's own product has loaded, and remounted for each product, so one
+              // product's name, brands, open form or copy picker never reach (or get saved onto) the next.
               key={id}
               productId={id}
-              productName={persistedProduct?.product_name ?? product.product_name ?? ''}
+              productName={persistedProduct.product_name}
               isAdmin={isAdmin}
               userId={profile?.id ?? null}
             />

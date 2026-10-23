@@ -692,8 +692,16 @@ export default function QuoteBuilder() {
     };
   }, [createOrderMenuOpen, moreActionsOpen]);
 
-  // Counts form edits, so Save Draft can tell whether the rep typed while its awaits ran.
+  // Counts form edits, so an action that leaves the page after a committed write can tell
+  // whether the rep typed while its awaits ran (the form stays editable meanwhile).
   const formEditCountRef = useRef(0);
+  // Those edits are not in what was written and cannot follow the page to its next
+  // screen, so say so rather than dropping them silently.
+  const warnIfEditedSince = (editCount: number, done: string) => {
+    if (formEditCountRef.current !== editCount) {
+      toast('warning', `${done}, but changes made while it was saving were not included. Please re-enter them.`);
+    }
+  };
 
   // Mark dirty whenever user changes form data (after initial load)
   useEffect(() => {
@@ -2249,9 +2257,7 @@ export default function QuoteBuilder() {
         // The quote now exists, so always open it: staying on /quotes/new would make the
         // next save create a second quote. Edits typed during the save cannot follow it there,
         // so say so instead of dropping them silently.
-        if (formEditCountRef.current !== editCountAtSave) {
-          toast('warning', 'Quote saved, but changes made while it was saving were not included. Please re-enter them.');
-        }
+        warnIfEditedSince(editCountAtSave, 'Quote saved');
         skipUnsavedPromptRef.current = true;
         navigate(`/quotes/${result}`, { replace: true });
       }
@@ -3111,6 +3117,7 @@ export default function QuoteBuilder() {
 
   const handleDrawDown = async () => {
     if (!id) return;
+    const editCountAtStart = formEditCountRef.current;
     const draws = drawRows
       .map((r) => ({ ...r, quantity: parseFloat(r.qty) || 0 }))
       .filter((d) => d.quantity > 0);
@@ -3143,6 +3150,7 @@ export default function QuoteBuilder() {
         data: { orderId: result.order_id ?? '', orderNumber: result.order_number ?? '', quoteId: id },
       });
       sendOrderConfirmedEmail(result.order_id!);
+      warnIfEditedSince(editCountAtStart, 'Order created');
       setIsDirty(false);
       setShowDrawModal(false);
       skipUnsavedPromptRef.current = true;
@@ -3289,6 +3297,7 @@ export default function QuoteBuilder() {
   const executeConvertToOrder = async () => {
     setDuplicateOrderConfirmOpen(false);
     setConverting(true);
+    const editCountAtStart = formEditCountRef.current;
     setConfirmConvertOpen(false);
 
     // A partially-drawn booking must never be whole-converted — and crucially
@@ -3412,6 +3421,7 @@ export default function QuoteBuilder() {
       }
 
       // Bug #31 fix: Clear dirty state before navigate to prevent unsaved changes dialog
+      warnIfEditedSince(editCountAtStart, 'Order created');
       setIsDirty(false);
       skipUnsavedPromptRef.current = true;
       navigate(`/orders/${result.order_id}`);
@@ -3466,6 +3476,7 @@ export default function QuoteBuilder() {
 
         if (createdOrderId) {
           toast('success', 'The order was created — opening it');
+          warnIfEditedSince(editCountAtStart, 'Order created');
           setIsDirty(false);
           skipUnsavedPromptRef.current = true;
           navigate(`/orders/${createdOrderId}`);

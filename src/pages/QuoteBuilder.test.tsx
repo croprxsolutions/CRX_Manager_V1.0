@@ -2435,6 +2435,58 @@ describe('QuoteBuilder', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/orders/order-1');
   });
 
+  it.each([
+    { editsDuringConvert: false },
+    { editsDuringConvert: true },
+  ])('opens the converted order and warns only about edits typed while it converted ($editsDuringConvert)', async ({ editsDuringConvert }) => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, status: 'sent', created_at: new Date().toISOString() };
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes' ? quote
+        : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [fixture.item]
+            : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+              : table === 'products' ? [fixture.product]
+                : [],
+      error: null,
+    }));
+    let releaseConvert!: () => void;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_quote') {
+        return Promise.resolve({ data: { quote_id: quote.id, row_version: 8, item_ids: {} }, error: null });
+      }
+      if (name === 'convert_quote_to_order') {
+        return new Promise((resolve) => {
+          releaseConvert = () => resolve({ data: { status: 'converted', order_id: 'order-2', order_number: 'O-2', warnings: [] }, error: null });
+        });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    renderQuoteBuilder(quote.id);
+    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    await waitFor(() => expect(opener).toBeEnabled());
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
+    const dialog = await screen.findByRole('dialog', { name: /Convert to.*Order/ });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    await waitFor(() => expect(convertButton).toBeEnabled());
+    fireEvent.click(convertButton);
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('convert_quote_to_order', expect.anything()));
+
+    if (editsDuringConvert) {
+      fireEvent.change(screen.getByDisplayValue(quote.header_notes), { target: { value: 'Typed while converting' } });
+    }
+    releaseConvert();
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-2'));
+    if (editsDuringConvert) {
+      expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Order created, but changes made while it was saving were not included'));
+    } else {
+      expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringContaining('were not included'));
+    }
+  });
+
   it('stops Book as Order when mark-presented cannot confirm the frozen quote token', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     let quoteReads = 0;

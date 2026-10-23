@@ -278,11 +278,25 @@ function changesInvoiceColumns(sql: string): boolean {
 /** What a migration must contain to rebuild invoices_postable after a CASCADE drop; empty when complete. */
 function missingViewRebuildParts(sql: string): string[] {
   const missing: string[] = [];
-  if (!/CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+public\.invoices_postable\s+WITH\s*\(\s*security_invoker\s*=\s*(true|on)\s*\)/i.test(sql)) {
+  const statements = sql.split(';');
+  const lastIndex = (re: RegExp) => statements.reduce((at, s, i) => (re.test(s) ? i : at), -1);
+  const createAt = lastIndex(/CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+public\.invoices_postable\s+WITH\s*\(\s*security_invoker\s*=\s*(true|on)\s*\)/i);
+  // The rebuild must follow the last invoices column change, and nothing may turn security_invoker off.
+  const alterAt = lastIndex(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:"?public"?\s*\.\s*)?"?invoices"?\s/i);
+  if (createAt === -1 || createAt < alterAt
+      || /ALTER\s+VIEW\s+(IF\s+EXISTS\s+)?public\.invoices_postable\s+(SET\s*\([^)]*security_invoker\s*=\s*(false|off)|RESET\s*\([^)]*security_invoker)/i.test(sql)) {
     missing.push('security_invoker view');
   }
-  if (!/REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b[^;]*\bPUBLIC\b[^;]*\bauthenticated\b/i.test(sql)
-      || !/GRANT\s+SELECT\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+TO\b[^;]*\bauthenticated\b/i.test(sql)) {
+  // REVOKE ALL from every API role, then grants only SELECT, only to authenticated and service_role.
+  const revoke = statements.find((s) => /REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b/i.test(s)) ?? '';
+  const grants = statements.filter((s) => /GRANT\b[\s\S]*\bON\s+(TABLE\s+)?public\.invoices_postable\b/i.test(s));
+  const grantOk = (s: string) => {
+    const m = /GRANT\s+([\s\S]*?)\s+ON\s+(?:TABLE\s+)?public\.invoices_postable\s+TO\s+([\s\S]*)/i.exec(s);
+    return !!m && /^SELECT$/i.test(m[1].trim())
+      && m[2].split(',').every((r) => ['authenticated', 'service_role'].includes(r.trim().toLowerCase()));
+  };
+  if (!['PUBLIC', 'anon', 'authenticated', 'service_role'].every((r) => new RegExp(`\\b${r}\\b`, 'i').test(revoke.replace(/^[\s\S]*?\bFROM\b/i, '')))
+      || !grants.some((s) => /\bauthenticated\b/i.test(s)) || !grants.every(grantOk)) {
     missing.push('view grants');
   }
   if (!/CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.invoice_post_version\s*\([^)]*\bpublic\.invoices_postable\b/i.test(sql)) {
@@ -361,6 +375,14 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(missingViewRebuildParts(`CREATE VIEW public.invoices_postable AS SELECT id FROM public.invoices;\n${acl}\n${fn}`))
       .toEqual(['security_invoker view']);
     expect(missingViewRebuildParts(`${view}\nGRANT SELECT ON public.invoices_postable TO authenticated;\n${fn}`)).toEqual(['view grants']);
+    // Security review: broad grants, a partial revoke, ordering and a later security_invoker reset.
+    expect(missingViewRebuildParts(`${view}\n${acl}\nGRANT SELECT ON public.invoices_postable TO anon;\n${fn}`)).toEqual(['view grants']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\nGRANT INSERT ON public.invoices_postable TO authenticated;\n${fn}`)).toEqual(['view grants']);
+    expect(missingViewRebuildParts(`${view}\n${acl.replace('PUBLIC, anon, ', 'PUBLIC, ')}\n${fn}`)).toEqual(['view grants']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nALTER TABLE public.invoices DROP COLUMN zz CASCADE;`)).toEqual(['security_invoker view']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nALTER VIEW public.invoices_postable SET (security_invoker = false);`))
+      .toEqual(['security_invoker view']);
+    expect(missingViewRebuildParts(`ALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}\n${acl}\n${fn}`)).toEqual([]);
   });
 
   it('the invoices column-change detector catches each shape it exists for (mutation guard)', () => {

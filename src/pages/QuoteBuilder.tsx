@@ -1783,6 +1783,11 @@ export default function QuoteBuilder() {
     }
     if (field) setFields((known) => ({ ...known, [field.id]: field }));
     const effectiveAcres = field ? fieldEffectiveAcres(field) : null;
+    // Saved lines keep acres whose source is unknown, so the user is told to check them (Luna, #1049).
+    const currentSection = sections.find((sec) => sec._key === sectionKey);
+    if (currentFieldId && currentFieldId !== field?.id && currentSection?.items.some((item) => !!item.acres && item.acres_source === undefined)) {
+      toast('warning', "This section's saved lines keep their acres. Check them against the new field.");
+    }
 
     setSections((prev) =>
       prev.map((section) => {

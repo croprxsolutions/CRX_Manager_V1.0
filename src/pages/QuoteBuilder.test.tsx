@@ -701,6 +701,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(await screen.findByRole('option', { name: /North Field/ }));
     await waitFor(() => expect(fieldBox).toHaveValue('North Field'));
     expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
+    expect(mockToast).toHaveBeenCalledWith('warning', "This section's saved lines keep their acres. Check them against the new field.");
   });
 
   it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {

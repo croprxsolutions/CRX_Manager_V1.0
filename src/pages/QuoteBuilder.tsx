@@ -2276,51 +2276,63 @@ export default function QuoteBuilder() {
 
   const handleSaveDraft = async () => {
     setSaving(true);
-    const result = await saveQuote('draft');
-    if (result) {
-      setIsDirty(false);
-      toast('success', 'Quote saved as draft');
-      trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
-        message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
-        data: { quoteId: result, quoteNumber, customer: selectedCustomer?.farm_name ?? '' },
-      });
-      // Quote activity is logged in-transaction by save_quote() (migration line 290-299).
-      // A frontend logActivity() here would double-log every save.
-      // Planned program hold management
-      if (isPlanned && profile) {
-        const holdIdemKey = plannedHoldsIdem.getKey();
-        const { data: holdData, error: holdError } = await supabase.rpc('create_planned_holds', {
-          p_quote_id: result,
-          p_performed_by: profile.id,
-          p_idempotency_key: holdIdemKey,
+    // Always unlock the form (it is locked while saving), whatever the steps below throw.
+    try {
+      const result = await saveQuote('draft');
+      if (result) {
+        setIsDirty(false);
+        toast('success', 'Quote saved as draft');
+        trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
+          message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
+          data: { quoteId: result, quoteNumber, customer: selectedCustomer?.farm_name ?? '' },
         });
-        if (holdError) {
-          // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
-          // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
-          const bindingRejection = getIdempotencyBindingRejection(holdError);
-          if (bindingRejection === 'intent' || bindingRejection === 'actor') plannedHoldsIdem.resetKey();
-          Sentry.captureException(holdError, { tags: { source: 'mutation', action: 'create_planned_holds' } });
-          toast('error', `Failed to create inventory holds: ${sanitizeError(holdError)}`);
+        // Quote activity is logged in-transaction by save_quote() (migration line 290-299).
+        // A frontend logActivity() here would double-log every save.
+        // Planned program hold management
+        if (isPlanned && profile) {
+          // The quote is already saved, so a hold failure must not stop the steps below: a new
+          // quote still has to open its saved page, or the next save would create a second quote.
+          try {
+            const holdIdemKey = plannedHoldsIdem.getKey();
+            const { data: holdData, error: holdError } = await supabase.rpc('create_planned_holds', {
+              p_quote_id: result,
+              p_performed_by: profile.id,
+              p_idempotency_key: holdIdemKey,
+            });
+            if (holdError) {
+              // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
+              // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
+              const bindingRejection = getIdempotencyBindingRejection(holdError);
+              if (bindingRejection === 'intent' || bindingRejection === 'actor') plannedHoldsIdem.resetKey();
+              Sentry.captureException(holdError, { tags: { source: 'mutation', action: 'create_planned_holds' } });
+              toast('error', `Failed to create inventory holds: ${sanitizeError(holdError)}`);
+            }
+            else {
+              assertRpcResult(holdData, 'create_planned_holds');
+              plannedHoldsIdem.resetKey();
+              toast('success', 'Inventory holds created for planned program');
+              await loadActivePlannedHolds(result);
+            }
+          } catch (holdErr) {
+            // An unconfirmed reply keeps the retry key, so the next save replays instead of holding twice.
+            Sentry.captureException(holdErr, { tags: { source: 'mutation', action: 'create_planned_holds' } });
+            toast('error', `The quote was saved, but its inventory holds could not be confirmed: ${sanitizeError(holdErr)}`);
+          }
+        } else if (!isPlanned && wasPlanned) {
+          // save_quote synchronizes planned holds in the same database transaction;
+          // no second client-side table mutation or not-yet-live RPC is needed.
+          setWasPlanned(false);
+          setActivePlannedHolds([]);
         }
-        else {
-          assertRpcResult(holdData, 'create_planned_holds');
-          plannedHoldsIdem.resetKey();
-          toast('success', 'Inventory holds created for planned program');
-          await loadActivePlannedHolds(result);
-        }
-      } else if (!isPlanned && wasPlanned) {
-        // save_quote synchronizes planned holds in the same database transaction;
-        // no second client-side table mutation or not-yet-live RPC is needed.
-        setWasPlanned(false);
-        setActivePlannedHolds([]);
-      }
 
-      if (!isEditing) {
-        skipUnsavedPromptRef.current = true;
-        navigate(`/quotes/${result}`, { replace: true });
+        if (!isEditing) {
+          skipUnsavedPromptRef.current = true;
+          navigate(`/quotes/${result}`, { replace: true });
+        }
       }
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   // Save as template handler

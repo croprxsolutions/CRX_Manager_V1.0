@@ -177,6 +177,26 @@ describe('QuoteBuilder — leaving a new quote', () => {
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
   });
 
+  it('still opens the saved planned quote when its hold creation cannot be confirmed', async () => {
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: SAVED_ID, row_version: 1, item_ids: {} }, error: null }
+      : name === 'generate_quote_number'
+        ? { data: 'Q-2026-0001', error: null }
+        // create_planned_holds answering nothing at all is the silent-denial reply assertRpcResult rejects.
+        : { data: null, error: null }));
+    const router = renderNewQuote();
+    await fillInNewQuote();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
+
+    fireEvent.click(screen.getByText('Save Draft'));
+
+    // Staying on /quotes/new with a locked form would strand the rep beside an already-saved quote.
+    expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(`/quotes/${SAVED_ID}`);
+    expect(mockRpc).toHaveBeenCalledWith('create_planned_holds', expect.anything());
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('inventory holds could not be confirmed'));
+  });
+
   it('marks the quote unsaved when the rep ticks Planned Program', async () => {
     const router = renderNewQuote();
     await screen.findByRole('combobox', { name: 'Customer' });

@@ -159,6 +159,18 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   // One retry key per exact request: a changed form is a new request, and an unchanged retry after a
   // lost reply replays the saved result instead of saving twice. Each copied brand is its own request.
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('upsert_product_brand', userId ?? '');
+  // A copied brand whose save failed keeps its key, so a retry replays a save that did land. Once a
+  // reload lists that brand here, the copy is settled: retire the key, so copying the same source
+  // brand again later (after the copy was renamed, say) is a new request, not a replay of the old one.
+  const unsettledCopies = useRef(new Map<string, string>());
+  useEffect(() => {
+    const present = new Set(brands.map((brand) => brand.brand_name.toLowerCase()));
+    for (const [scope, name] of unsettledCopies.current) {
+      if (!present.has(name)) continue;
+      resetKeyFor(scope);
+      unsettledCopies.current.delete(scope);
+    }
+  }, [brands, resetKeyFor]);
 
   useEffect(() => {
     let active = true;
@@ -347,17 +359,21 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     if (!brandsReady) return;
     const chosen = copyChosen;
     const copiedIds = new Set<string>();
+    let attempt: { scope: string; name: string } | null = null;
     setCopying(true);
     try {
       for (const brand of chosen) {
         const scope = `copy:${productId}:${brand.id}`;
+        attempt = { scope, name: brand.brand_name.toLowerCase() };
         await saveProductBrand(inputFromBrand(productId, brand), getKeyFor(scope));
         resetKeyFor(scope);
+        attempt = null;
         copiedIds.add(brand.id);
       }
       toast('success', `Copied ${copiedIds.size} brand${copiedIds.size === 1 ? '' : 's'}.`);
       setCopyOpen(false);
     } catch (err) {
+      if (attempt) unsettledCopies.current.set(attempt.scope, attempt.name);
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'copy_product_brands' } });
       toast('error', `Copied ${copiedIds.size} of ${chosen.length}. ${productBrandErrorMessage(err)}`);
     } finally {

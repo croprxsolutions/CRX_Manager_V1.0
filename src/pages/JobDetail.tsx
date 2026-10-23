@@ -57,7 +57,7 @@ import {
 } from '../lib/labelGuardrailSetting';
 import { computeSeason } from '../utils/season';
 import { recipeItemToChemRowSeed, chemRowsToRecipeItems, getLastRecipeId, setLastRecipeId } from '../lib/recipeHelpers';
-import { getStatedTierPrice } from '../lib/quoteCalc';
+import { getStatedTierPriceCents } from '../lib/quoteCalc';
 import { programItemToChemRowSeed, parseCropPrograms, orderProgramsForJob, type CropProgram } from '../lib/cropProgramHelpers';
 import { moveItem, moveUp, moveDown } from '../lib/routeOrder';
 import { billableAcres } from '../lib/fieldGeometry';
@@ -3770,9 +3770,9 @@ export default function JobDetail() {
         // A missing tier-2/3 price falls back to tier 1 (never a silent $0); a stated $0 is kept.
         // Null when the product states no price at all. pickTier is set whenever a product is
         // picked (an unknown tier returned above).
-        const tierPrice = pickTier == null ? null : getStatedTierPrice(p, pickTier);
+        const tierPriceCents = pickTier == null ? null : getStatedTierPriceCents(p, pickTier);
         const costPerStockCents = Math.round((p.current_cost || 0) * 100);
-        const pricePerStockCents = tierPrice != null ? Math.round(tierPrice * 100) : 0;
+        const pricePerStockCents = tierPriceCents ?? 0;
         const reconciled = reconcileChemAutofillUnits(
           p.unit_size,
           updated[i].rate_unit || p.rate_unit,
@@ -3784,7 +3784,7 @@ export default function JobDetail() {
         updated[i].cost_per_unit_cents = reconciled.costPerUnitCents.toString();
         // Only default the price when the product states one (a $0 price included); otherwise
         // leave whatever was there.
-        if (tierPrice != null) updated[i].price_per_unit_cents = reconciled.pricePerUnitCents.toString();
+        if (tierPriceCents != null) updated[i].price_per_unit_cents = reconciled.pricePerUnitCents.toString();
         // Re-derive the quantity now that a rate auto-filled.
         updated[i] = recomputeChemRowForAcres(updated[i], sumAcres(fieldRows));
       }

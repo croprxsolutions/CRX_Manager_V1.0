@@ -11,6 +11,7 @@
  * values after save instead. (Foundation audit P2-E, 2026-05-28.)
  */
 import type { Product, UnitConversion } from '../types';
+import { parseDollarsToCents } from './parseCents';
 
 export type CalcMode = 'rate_acres' | 'units_direct';
 
@@ -44,11 +45,13 @@ export function getTierPrice(product: Product, tierNum: number): number {
   return product.tier3_price || t1;
 }
 
-/** The product's price for a tier, keeping a stated $0: only a missing (null) tier-2/3 price
- * falls back to tier 1. Null when the product states neither. Used by job pricing. */
-export function getStatedTierPrice(product: Product, tierNum: 1 | 2 | 3): number | null {
+/** The product's price for a tier in integer cents, keeping a stated $0: only a missing (null)
+ * tier-2/3 price falls back to tier 1. Null when the product states neither (or states a price
+ * the whole-cent parser refuses). Used by job pricing. */
+export function getStatedTierPriceCents(product: Product, tierNum: 1 | 2 | 3): number | null {
   const own = tierNum === 3 ? product.tier3_price : tierNum === 2 ? product.tier2_price : product.tier1_price;
-  return own ?? product.tier1_price ?? null;
+  const dollars = own ?? product.tier1_price ?? null;
+  return dollars == null ? null : parseDollarsToCents(String(dollars));
 }
 
 /** Look up unit→oz conversion factor — pure function */

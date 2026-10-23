@@ -31,6 +31,7 @@ import Input from '../components/ui/Input';
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows } from '../lib/pagedRead';
+import { billableAcres } from '../lib/fieldGeometry';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import RecordVersionConflictDialog from '../components/ui/RecordVersionConflictDialog';
@@ -136,7 +137,8 @@ interface LocalItem {
   price_per_acre: number | null;
   acres: number | null;
   // Where this page set the acres: a field pick or the Acres box. Not saved, so a loaded line has
-  // neither and a cleared field judges it by value (acres equal to the field's came from it).
+  // neither, and a cleared field keeps its acres even when they equal the field's: the source
+  // cannot be told apart, and guessing could delete typed acres.
   acres_source?: 'field' | 'typed';
   total_units_needed: number | null;
   unit_size: string | null;
@@ -164,10 +166,6 @@ type FieldOption = FieldSearchResult & {
   override_acres: number | null;
 };
 
-// Documented field-acre precedence: override → measured → legacy total.
-function fieldEffectiveAcres(field: FieldOption): number | null {
-  return field.override_acres ?? field.measured_acres ?? field.total_acres;
-}
 
 interface ActivePlannedHold {
   product_id: string;
@@ -1782,7 +1780,7 @@ export default function QuoteBuilder() {
       return false;
     }
     if (field) setFields((known) => ({ ...known, [field.id]: field }));
-    const effectiveAcres = field ? fieldEffectiveAcres(field) : null;
+    const effectiveAcres = field ? billableAcres(field.override_acres, field.measured_acres, field.total_acres) : null;
     // Saved lines keep acres whose source is unknown, so the user is told to check them (Luna, #1049).
     const currentSection = sections.find((sec) => sec._key === sectionKey);
     if (currentFieldId && currentFieldId !== field?.id && currentSection?.items.some((item) => !!item.acres && item.acres_source === undefined)) {

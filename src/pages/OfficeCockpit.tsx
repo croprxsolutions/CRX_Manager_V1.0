@@ -418,6 +418,11 @@ const emptyMorningSummary: MorningSummaryData = {
   programCompletionPct: null,
 };
 
+// A tile's read failed when it errored or came back without a list: neither proves the tile clear.
+function tileReadFailed(res: { error: unknown; data: unknown }): boolean {
+  return !!res.error || !Array.isArray(res.data);
+}
+
 // ── Helper components ─────────────────────────────────────────────────────────
 
 function AllClear({ label }: { label: string }) {
@@ -969,13 +974,13 @@ export default function OfficeCockpit() {
       watchdogLoadOk,
       allChecksLoadOk: errors.length === 0 && nextMorningSummaryLoadOk,
       failedTiles: {
-        unbilledJobs: !!unbilledJobsRes.error,
-        postableInvoices: !!postableInvRes.error,
-        chemicalDrafts: !!chemicalDraftsRes.error,
-        upcomingJobs: !!upcomingJobsRes.error,
-        needsDispatchJobs: !!needsDispatchRes.error,
-        expiringLicenses: !!expiringLicRes.error,
-        overdueAR: !!overdueARRes.error,
+        unbilledJobs: tileReadFailed(unbilledJobsRes),
+        postableInvoices: tileReadFailed(postableInvRes),
+        chemicalDrafts: tileReadFailed(chemicalDraftsRes),
+        upcomingJobs: tileReadFailed(upcomingJobsRes),
+        needsDispatchJobs: tileReadFailed(needsDispatchRes),
+        expiringLicenses: tileReadFailed(expiringLicRes),
+        overdueAR: tileReadFailed(overdueARRes),
       },
     });
     setMorningSummary(nextMorningSummary);

@@ -749,7 +749,7 @@ export default function SettingsPage() {
             onRetry={() => void fetchSettings()}
           />
         </Card>
-      ) : (
+      ) : !settingsLoaded ? null : (
       <Card>
         <CardHeader
           title="Company"
@@ -856,7 +856,7 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {!settingsLoadError && (
+      {!settingsLoadError && settingsLoaded && (
       <>
       <Card>
         <CardHeader

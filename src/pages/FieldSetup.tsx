@@ -388,6 +388,8 @@ export default function FieldSetup() {
     if (!isNew && id) {
       fetchField();
     } else {
+      // A new field: a read still in flight for the field open before must not fill this form.
+      fieldLoadSeqRef.current += 1;
       setTimeout(() => { initialLoadDone.current = true; }, 0);
     }
   }, [id, isNew, fetchField]);

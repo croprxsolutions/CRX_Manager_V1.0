@@ -1548,21 +1548,27 @@ export default function QuoteBuilder() {
     };
   };
   const clearSectionFieldRef = useLatestRef(clearSectionField);
+  // The saved field ids whose by-id read is still out: until it lands, the acres a field filled in
+  // cannot be told apart, so the section's field cannot be cleared or replaced (Codex, #1049).
+  const fieldIdsLoadingRef = useRef<Set<string>>(new Set());
 
   // Load the saved sections' unresolved fields by id (see unresolvedFieldKey above).
   useEffect(() => {
     if (!unresolvedFieldKey) {
+      fieldIdsLoadingRef.current = new Set();
       setFieldLoadError(null);
       return;
     }
     let cancelled = false;
     const ids = unresolvedFieldKey.split(',');
+    fieldIdsLoadingRef.current = new Set(ids);
     supabase
       .from('fields')
       .select(QUOTE_FIELD_SELECT)
       .in('id', ids)
       .then(({ data, error }) => {
         if (cancelled) return;
+        fieldIdsLoadingRef.current = new Set();
         if (error) {
           Sentry.captureException(error, { tags: { source: 'fetch', page: 'quote_builder', action: 'load_section_fields' } });
           setFieldLoadError("This quote's fields could not be loaded. Refresh the page before saving.");
@@ -1752,6 +1758,11 @@ export default function QuoteBuilder() {
   const handleSectionFieldChange = (sectionKey: string, field: FieldOption | null): boolean => {
     if (field && repriceBlocked) {
       toast('error', 'Products are still loading. Try again in a moment.');
+      return false;
+    }
+    const currentFieldId = sections.find((sec) => sec._key === sectionKey)?.field_id;
+    if (currentFieldId && !fields[currentFieldId] && fieldIdsLoadingRef.current.has(currentFieldId)) {
+      toast('error', "This section's field is still loading. Try again in a moment.");
       return false;
     }
     if (field) setFields((known) => ({ ...known, [field.id]: field }));

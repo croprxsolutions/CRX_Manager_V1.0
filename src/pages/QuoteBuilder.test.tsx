@@ -603,6 +603,42 @@ describe('QuoteBuilder', () => {
     expect(acres()).toEqual(['', '15']);
   });
 
+  it('refuses to clear a saved field while it is still loading, then clears it and its acres once loaded', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const held = holdFieldReadById();
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [{ ...section, field_id: 'field-1' }]
+          : table === 'quote_items'
+            ? [{ ...item, acres: 80 }]
+            : table === 'products'
+              ? [product]
+              : [],
+      error: null,
+    })));
+    renderQuoteBuilder(quote.id);
+    const acres = () => screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value);
+    await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(held.readsById()).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', "This section's field is still loading. Try again in a moment.");
+    expect(acres()).toEqual(['80']);
+
+    await act(async () => {
+      held.release({ data: [{ ...HOME_QUARTER_OF_CUSTOMER_1, total_acres: 80 }], error: null });
+      await held.read;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const fieldBox = screen.getByRole('combobox', { name: /^Field for/ });
+    expect(fieldBox).toHaveValue('Home Quarter');
+    fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
+    await waitFor(() => expect(fieldBox).toHaveValue(''));
+    expect(acres()).toEqual(['']);
+  });
+
   it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {
     const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);
     // Tier 3 differs from the tier-1 price the saved line starts at.

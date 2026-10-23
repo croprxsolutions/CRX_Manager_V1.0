@@ -364,20 +364,20 @@ export default function FieldSetup() {
         return;
       }
 
-      if (defaults && defaults.length > 0) {
-        setBillingOpen(true);
-        setBillingSplits(
-          defaults.map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
-            customer_id: d.customer_id,
-            customer_name: d.customer?.farm_name || 'Unknown',
-            split_pct: Number(d.split_pct),
-            is_primary: d.is_primary,
-            notes: d.notes || '',
-            price_override_cents: d.price_override_cents ?? null,
-            pricing_note: d.pricing_note || '',
-          }))
-        );
-      }
+      if (defaults && defaults.length > 0) setBillingOpen(true);
+      // Always replace the splits, even with none: Save sends this whole list, so splits left over
+      // from another field (or an earlier read) must never stay on screen.
+      setBillingSplits(
+        (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
+          customer_id: d.customer_id,
+          customer_name: d.customer?.farm_name || 'Unknown',
+          split_pct: Number(d.split_pct),
+          is_primary: d.is_primary,
+          notes: d.notes || '',
+          price_override_cents: d.price_override_cents ?? null,
+          pricing_note: d.pricing_note || '',
+        }))
+      );
     }
     setLoadError(false);
     setLoading(false);

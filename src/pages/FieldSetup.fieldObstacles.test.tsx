@@ -401,4 +401,19 @@ describe('FieldSetup load failure (To-Do 10.5)', () => {
     expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
     expect(screen.queryByText('Field not found')).not.toBeInTheDocument();
   });
+
+  it('moving to a field with no billing splits clears the previous field\'s splits (Save sends the whole list)', async () => {
+    const base = mockFrom.getMockImplementation()!;
+    let splits: unknown[] = [{ customer_id: 'customer-9', customer: { farm_name: 'Leftover Split Farm' }, split_pct: 100, is_primary: true }];
+    mockFrom.mockImplementation((table: string) => (
+      table === 'field_billing_defaults' ? listChain(splits) : base(table)
+    ));
+    const { rerender } = render(<FieldSetup />);
+    expect(await screen.findByText('Leftover Split Farm')).toBeInTheDocument();
+
+    splits = [];
+    mockUseParams.mockReturnValue({ id: 'field-2' });
+    rerender(<FieldSetup />);
+    await waitFor(() => expect(screen.queryByText('Leftover Split Farm')).not.toBeInTheDocument());
+  });
 });

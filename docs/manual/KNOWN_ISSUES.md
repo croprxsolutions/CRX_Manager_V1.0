@@ -138,8 +138,10 @@ Findings, most severe first:
    deliveries and jobs, low stock, expiring quotes) and `global_search` (customer names and contacts, and order, invoice
    and delivery numbers with farm names). **Proven live:** both the applicator and an `entity_recipient` profile received
    the 2 overdue invoices with their balances and an accounts-receivable balance for a customer they cannot see.
-   Noticed in the same sweep and not traced further: `get_notes_for_entity` returns team notes on any record with no
-   check.
+   The same holds for team notes: `get_notes_for_entity(p_entity_type, p_entity_id)` is `SECURITY DEFINER`, executable
+   by `authenticated`, and its body has no role, active-profile or visibility check (confirmed live, 2026-10-22), so any
+   signed-in account holding a customer, order, delivery, job or purchase order id reads every team note on it. Part A
+   gates it.
 3. **HIGH — the `fields` table admits every applicator.** `fields_select` is `is_admin() OR is_sales_rep() OR
    is_applicator()` (`20260214210000`), so an active applicator reads every customer's fields. `field_polygons` (boundary
    parts) inherits it (`field_id IN (SELECT id FROM fields)`), and `field_crop_history`, `field_obstacles`,
@@ -185,7 +187,11 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   `roles: ['admin', 'sales_rep']` in `src/appPages.tsx`, and `src/App.tsx` wraps every listed route in
   `ProtectedRoute`, so a field role never reaches it. The command palette does sit in the shared layout
   (`src/components/layout/AppLayout.tsx`), so make `global_search` return nothing to a non-office account (or hide the
-  palette for field roles). The same page's `operational_dashboard_summary` is safe on
+  palette for field roles). Gate `get_notes_for_entity` by entity type rather than making it office-only, because
+  `src/components/team/RelatedNotes.tsx` also shows notes on Job Detail and Delivery Detail, which field roles open:
+  return notes only when the caller could read that record under its own table's row security (office staff; a job
+  the applicator may see under part C's window; a delivery the driver may see), and add a direct-call test per entity
+  type. The same page's `operational_dashboard_summary` is safe on
   live: its installed body refuses anyone but active admins and sales reps (a read-only call as the applicator got
   `Not authorized`, 2026-10-22). But the newest migration that defines it, `20260323100000_operational_dashboard_summary.sql`,
   has no such check; live keeps the one from the older `20260311200000_wave2_audit_fixes.sql`. A rebuild from the

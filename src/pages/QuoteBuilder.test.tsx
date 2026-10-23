@@ -3703,3 +3703,88 @@ describe('QuoteBuilder', () => {
     expect(refusalMessage).toMatch(/was not saved/i);
   });
 });
+
+// To-Do 10.5: a saved quote whose reads fail says so; it never shows an empty quote
+// (whose Save would replace the real lines) or prices at a factor of 1.
+describe('QuoteBuilder load failures', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    quoteIdempotencyState.reset();
+    quoteIdempotencyHandles.clear();
+    dirtyStates.length = 0;
+    authState.role = 'admin';
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
+  });
+
+  // Serves a saved quote; `fail` names a table whose read fails, and how.
+  function serveQuote(
+    fixture: ReturnType<typeof makeQuoteFixture>,
+    fail: { table?: string; mode?: 'error' | 'nodata' } = {},
+  ) {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === fail.table) {
+        return buildChain(fail.mode === 'nodata'
+          ? { data: null, error: null }
+          : { data: null, error: { message: 'connection reset' } });
+      }
+      const data = table === 'quotes'
+        ? fixture.quote
+        : table === 'quote_sections'
+          ? [fixture.section]
+          : table === 'quote_items'
+            ? [fixture.item]
+            : table === 'customers'
+              ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+              : table === 'products'
+                ? [fixture.product]
+                : [];
+      return buildChain({ data, error: null });
+    });
+  }
+
+  it.each([
+    ['quotes', 'error'],
+    ['quote_sections', 'nodata'],
+    ['quote_items', 'nodata'],
+  ] as const)('a first load whose %s read fails (%s) says the quote could not be loaded, with no Save, and Try again opens it', async (table, mode) => {
+    const fixture = makeQuoteFixture('draft', 3);
+    serveQuote(fixture, { table, mode });
+    renderQuoteBuilder(fixture.quote.id);
+
+    expect(await screen.findByText('This quote could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save Draft/ })).not.toBeInTheDocument();
+
+    serveQuote(fixture);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByRole('button', { name: /Save Draft/ })).toBeInTheDocument();
+    expect(screen.queryByText('This quote could not be loaded')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Q-version-test').length).toBeGreaterThan(0);
+  });
+
+  it('a unit-conversion read that answers with no list counts as failed, so lines are not priced at a factor of 1', async () => {
+    const fixture = makeQuoteFixture('draft', 3);
+    serveQuote(fixture, { table: 'unit_conversions', mode: 'nodata' });
+    renderQuoteBuilder(fixture.quote.id);
+
+    await screen.findByRole('button', { name: /Save Draft/ });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load unit conversions.'));
+  });
+
+  it('a failed booking settlement says so instead of hiding the booked / drawn / remaining card', async () => {
+    const fixture = makeQuoteFixture('sent', 3);
+    serveQuote(fixture);
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_booking_settlement'
+      ? { data: null, error: { message: 'connection reset' } }
+      : { data: null, error: null }));
+    renderQuoteBuilder(fixture.quote.id);
+
+    expect(await screen.findByText('The booking settlement could not be loaded')).toBeInTheDocument();
+
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_booking_settlement'
+      ? { data: { found: true, booked_cents: 12345, drawn_cents: 0, remaining_cents: 12345, prepay_remaining_cents: 0, prepay_earmarked_cents: 0, prepay_applied_cents: 0, lines: [] }, error: null }
+      : { data: null, error: null }));
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByText('Booked')).toBeInTheDocument();
+    expect(screen.queryByText('The booking settlement could not be loaded')).not.toBeInTheDocument();
+  });
+});

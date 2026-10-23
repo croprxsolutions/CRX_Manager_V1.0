@@ -6,6 +6,7 @@ import {
   PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import HelpTip from '../components/ui/HelpTip';
 import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
@@ -123,6 +124,10 @@ export default function DeliveryDetail() {
   const [photos, setPhotos] = useState<DeliveryPhoto[]>([]);
   const [remainders, setRemainders] = useState<DeliveryRemainder[]>([]);
   const [loading, setLoading] = useState(true);
+  // The delivery whose last load failed. The page then shows "could not be loaded"
+  // in place of a delivery with no lines (whose Edit could save over the real ones)
+  // or "Delivery not found" (To-Do 10.5).
+  const [loadFailedId, setLoadFailedId] = useState<string | null>(null);
   const [rupWarnings, setRupWarnings] = useState<string[]>([]);
   const [inventoryWarnings, setInventoryWarnings] = useState<string[]>([]);
 
@@ -309,6 +314,11 @@ export default function DeliveryDetail() {
     // This page is reused across deliveries: a slow load for the previous one must
     // never publish its items, quantities or photos onto the delivery now on screen.
     const isStale = () => signatureRouteIdRef.current !== id;
+    const failLoad = (message: string) => {
+      toast('error', message);
+      setLoadFailedId(id ?? null);
+      setLoading(false);
+    };
     const { data: delData, error: delError } = await supabase
       .from('deliveries')
       .select('*')
@@ -317,8 +327,7 @@ export default function DeliveryDetail() {
     if (isStale()) return;
 
     if (delError) {
-      toast('error', sanitizeError(delError));
-      setLoading(false);
+      failLoad(sanitizeError(delError));
       return;
     }
 
@@ -343,10 +352,11 @@ export default function DeliveryDetail() {
         ]);
         if (isStale()) return;
 
-        if (itemsRes.error) {
-          Sentry.captureException(itemsRes.error, { extra: { context: 'load_delivery_items', deliveryId: del.id } });
-          toast('error', 'Failed to load delivery items');
-          setLoading(false);
+        // No list, or no customer row read, is a failed load too: with no lines on screen
+        // Edit would offer every order line as new and save over the real ones.
+        if (itemsRes.error || !itemsRes.data || custRes.error) {
+          Sentry.captureException(itemsRes.error ?? custRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
+          failLoad('Failed to load delivery items');
           return;
         }
 
@@ -397,6 +407,13 @@ export default function DeliveryDetail() {
               .maybeSingle(),
           ]);
           if (isStale()) return;
+          // Without its invoices the page would hide them and could offer
+          // "Create invoice" for a delivery that is already billed.
+          if (invRes.error || !invRes.data) {
+            Sentry.captureException(invRes.error ?? new Error('invoices read returned no list'), { extra: { context: 'load_delivery_invoices', deliveryId: del.id } });
+            failLoad('Failed to load this delivery\'s invoices');
+            return;
+          }
           if (externalBillingRes.error) {
             // Fail OPEN like the split-billing read above: keep the button; the server's
             // DELIVERY_BILLED_OUTSIDE_CRX guard still refuses, in plain English.
@@ -432,7 +449,7 @@ export default function DeliveryDetail() {
           }
           setParentOrder(orderRes.data as { id: string; order_number: string } | null);
           setRelatedInvoices(
-            (invRes.data || []).map((inv: Record<string, unknown>) => ({
+            invRes.data.map((inv: Record<string, unknown>) => ({
               id: inv.id as string,
               invoice_number: inv.invoice_number as string,
               invoice_date: inv.invoice_date as string,
@@ -506,9 +523,11 @@ export default function DeliveryDetail() {
         }
       } catch {
         if (isStale()) return;
-        toast('error', 'Failed to load delivery details. Please refresh.');
+        failLoad('Failed to load delivery details. Please try again.');
+        return;
       }
     }
+    setLoadFailedId(null);
     setLoading(false);
   }, [id, toast]);
 
@@ -1538,6 +1557,15 @@ export default function DeliveryDetail() {
           <div key={i} className="h-32 bg-gray-100 rounded-xl animate-pulse" />
         ))}
       </div>
+    );
+  }
+
+  if (loadFailedId === id) {
+    return (
+      <LoadFailedState
+        title="This delivery could not be loaded"
+        onRetry={() => { setLoading(true); fetchDelivery(); }}
+      />
     );
   }
 

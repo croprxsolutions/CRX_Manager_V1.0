@@ -1,9 +1,14 @@
-## 2026-10-22 — Pilot procedure drafts: admins can Take Delivery to complete paper deliveries
+## 2026-10-22 — Pilot procedure drafts: only a driver account can complete a paper-ticket delivery
 
-- `docs/plans/2026-10-22-pilot-launch-procedures-draft.md` said only the assigned driver can complete
-  a paper-ticket delivery. An admin or sales rep can press **Take Delivery** on the delivery's page to
-  become its driver and then complete it (`canTakeDelivery` in `src/pages/DeliveryDetail.tsx`). The
-  emergency-brake and outage steps now say so. After a database restore, while CRX is closed to staff,
-  the person running the recovery completes the paper deliveries this way.
-- Follow-up to PR #1041, which merged before this correction from its last Codex GitHub App review
-  could land. Documentation only.
+- `docs/plans/2026-10-22-pilot-launch-procedures-draft.md` now says plainly that only a driver
+  account can complete a delivery from a signed paper ticket. `src/pages/DeliveryDetail.tsx` shows
+  the **Customer signed a paper ticket** checkbox and **Delivered on (date on the ticket)** only in the
+  driver layout (`role === 'driver'`). An admin or sales rep can press **Take Delivery**, but their
+  screen has no paper-ticket option, so CRX would record the delivery as made at that moment, not on
+  the ticket's date.
+- After a database restore, while CRX is closed to staff, drivers still have to sign in for that step
+  with the person running the recovery watching. New outage question 8 asks Mason whether that is
+  acceptable, or whether the admin screen should get the paper-ticket option (an app change).
+- Follow-up to PR #1041. An earlier version of this PR said admins could complete these deliveries
+  through **Take Delivery**; the Codex GitHub App review showed the paper-ticket controls are
+  driver-only, so that was corrected before merge. Documentation only.

@@ -111,13 +111,11 @@ describe('recipeItemToChemRowSeed', () => {
     expect(recipeItemToChemRowSeed(recipeItem({ price_per_unit_cents: 0 }), free, 3).price_per_unit_cents).toBe('0');
   });
 
-  it('MONEY: a catalog price is put in the recipe line\'s unit, blank when it cannot be', () => {
-    // $12.80/GAL product on an oz recipe line: 10 cents per oz, not 1280 per oz.
+  it('MONEY: a catalog price fills a recipe line only in the product\'s stock unit, blank otherwise', () => {
     const perGal = product({ unit_size: 'GAL', product_form: 'liquid', tier1_price: 12.8 });
-    expect(recipeItemToChemRowSeed(recipeItem({ unit: 'oz', price_per_unit_cents: 0 }), perGal, 1).price_per_unit_cents).toBe('10');
-    // $0.50/GAL on an oz line rounds to 0 cents: blank, never $0.
-    const cheap = product({ unit_size: 'GAL', product_form: 'liquid', tier1_price: 0.5 });
-    expect(recipeItemToChemRowSeed(recipeItem({ unit: 'oz', price_per_unit_cents: 0 }), cheap, 1).price_per_unit_cents).toBe('');
+    expect(recipeItemToChemRowSeed(recipeItem({ unit: 'gal', price_per_unit_cents: 0 }), perGal, 1).price_per_unit_cents).toBe('1280');
+    // An oz line would need a rounded conversion: blank, so a price is typed.
+    expect(recipeItemToChemRowSeed(recipeItem({ unit: 'oz', price_per_unit_cents: 0 }), perGal, 1).price_per_unit_cents).toBe('');
   });
 
   it('MONEY: leaves the price blank when neither the recipe nor the product states one', () => {

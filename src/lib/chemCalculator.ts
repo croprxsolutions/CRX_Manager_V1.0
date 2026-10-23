@@ -614,21 +614,20 @@ export function autofillPriceText(statedPriceCents: number | null, reconciledPri
 }
 
 /**
- * A stated per-stock-unit price re-expressed per the line's own billed unit (the unit its
- * quantity is in), as price text. Blank when there is no stated price, the line has no unit,
- * or the stock price cannot be converted to the line's unit — never a price in another unit.
+ * A stated per-stock-unit price as price text for a line billed in `lineUnit`. Filled in only when
+ * the line is billed in the product's own stock unit: converting to another unit rounds to whole
+ * cents (64¢/GAL is 0.5¢/oz), which would bill the line wrongly. Blank otherwise, and when there
+ * is no stated price, so the job's save check asks for a price to be typed.
  */
 export function priceTextInLineUnit(
   stockUnit: string | null | undefined,
   lineUnit: string | null | undefined,
   statedPricePerStockCents: number | null,
-  productForm?: 'liquid' | 'dry' | null,
 ): string {
   const line = (lineUnit || '').trim().toLowerCase();
-  if (statedPricePerStockCents == null || line === '') return '';
-  const r = reconcileChemAutofillUnits(stockUnit, line, 0, statedPricePerStockCents, productForm);
-  if (r.unit.trim().toLowerCase() !== line) return '';
-  return autofillPriceText(statedPricePerStockCents, r.pricePerUnitCents);
+  const stock = (stockUnit || '').trim().toLowerCase();
+  if (statedPricePerStockCents == null || line === '' || line !== stock) return '';
+  return statedPricePerStockCents.toString();
 }
 
 export function reconcileChemAutofillUnits(

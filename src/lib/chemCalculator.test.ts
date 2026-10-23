@@ -301,18 +301,17 @@ describe('chemCalculator — autofillPriceText', () => {
 });
 
 describe('chemCalculator — priceTextInLineUnit', () => {
-  it('MONEY: prices in the line\'s billed unit, whatever the rate unit (no 16× per-lb price on an oz line)', () => {
-    // $1.00/oz stock, line billed in oz: $1.00 per oz.
-    expect(priceTextInLineUnit('oz', 'oz', 100, 'dry')).toBe('100');
-    // $12.80/GAL stock, line billed in oz: 10 cents per oz.
-    expect(priceTextInLineUnit('GAL', 'oz', 1280, 'liquid')).toBe('10');
+  it('MONEY: fills the stated price only for a line billed in the stock unit, whatever the rate unit', () => {
+    expect(priceTextInLineUnit('oz', 'oz', 100)).toBe('100');
+    expect(priceTextInLineUnit('GAL', 'gal', 1280)).toBe('1280');
+    expect(priceTextInLineUnit('GAL', 'gal', 0)).toBe('0');
   });
-  it('MONEY: blank when the price cannot be put in the line unit, or there is no unit or price', () => {
-    expect(priceTextInLineUnit('GAL', 'lb', 1280, 'liquid')).toBe('');
-    expect(priceTextInLineUnit('GAL', '', 1280, 'liquid')).toBe('');
-    expect(priceTextInLineUnit('GAL', 'gal', null, 'liquid')).toBe('');
-    // A positive price that rounds to 0 cents in the line unit.
-    expect(priceTextInLineUnit('GAL', 'oz', 50, 'liquid')).toBe('');
+  it('MONEY: blank for any other line unit (no rounded conversion), no unit, or no price', () => {
+    // 64¢/GAL per oz would round to 1¢/oz and bill 128 oz at $1.28 instead of $0.64.
+    expect(priceTextInLineUnit('GAL', 'oz', 64)).toBe('');
+    expect(priceTextInLineUnit('GAL', 'oz', 1280)).toBe('');
+    expect(priceTextInLineUnit('GAL', '', 1280)).toBe('');
+    expect(priceTextInLineUnit('GAL', 'gal', null)).toBe('');
   });
 });
 

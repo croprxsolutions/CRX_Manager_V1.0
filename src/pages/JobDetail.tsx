@@ -3728,7 +3728,7 @@ export default function JobDetail() {
         : null;
       const statedCents = p && tier != null ? getStatedTierPriceCents(p, tier) : null;
       // Priced per the line's own billed unit (its quantity is in it), not the rate's.
-      updated[i].price_per_unit_cents = p ? priceTextInLineUnit(p.unit_size, row.unit, statedCents, p.product_form) : '';
+      updated[i].price_per_unit_cents = p ? priceTextInLineUnit(p.unit_size, row.unit, statedCents) : '';
     }
     setChemRows(updated);
   };

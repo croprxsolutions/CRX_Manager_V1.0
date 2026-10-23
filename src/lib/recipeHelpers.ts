@@ -87,7 +87,7 @@ export function recipeItemToChemRowSeed(
   // it cannot be).
   let price = recipePrice > 0 ? recipePrice.toString() : '';
   if (recipePrice <= 0 && product) {
-    price = priceTextInLineUnit(product.unit_size, unit, getStatedTierPriceCents(product, tier), product.product_form);
+    price = priceTextInLineUnit(product.unit_size, unit, getStatedTierPriceCents(product, tier));
   }
 
   const costCents = product?.current_cost != null ? Math.round(product.current_cost * 100) : 0;

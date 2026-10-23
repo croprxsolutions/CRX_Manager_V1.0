@@ -603,6 +603,16 @@ export interface ChemAutofillUnits {
  *
  * Pure + tested (chemCalculator.test.ts).
  */
+/**
+ * The price text an autofilled chemical line gets: blank when the product states no price, or
+ * when a positive stated price rounds to 0 cents in the reconciled unit (e.g. $0.50/GAL per oz).
+ * A blank price makes the job's save check ask for one instead of billing the line at $0.
+ */
+export function autofillPriceText(statedPriceCents: number | null, reconciledPriceCents: number): string {
+  if (statedPriceCents == null || (statedPriceCents > 0 && reconciledPriceCents === 0)) return '';
+  return reconciledPriceCents.toString();
+}
+
 export function reconcileChemAutofillUnits(
   stockUnit: string | null | undefined,
   rateUnit: string | null | undefined,

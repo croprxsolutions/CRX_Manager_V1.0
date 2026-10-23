@@ -9,6 +9,7 @@ import {
   fieldAppPricedQuantity,
   baseUnitOfRate,
   reconcileChemAutofillUnits,
+  autofillPriceText,
   chemLineBillingHazard,
   chemUnitUnspecifiedSides,
   rateDenominatorIsUnrecognized,
@@ -284,6 +285,20 @@ describe('chemCalculator — baseUnitOfRate (strip the per-acre suffix)', () => 
 
 // ── P1 MONEY fix: the bug was stock unit (GAL) != rate base unit (pt) → the saved
 // row read "240 GAL" with per-GAL cost/price, inflating cost/price/loader ~8×. ──
+describe('chemCalculator — autofillPriceText', () => {
+  it('MONEY: blanks a positive price that rounds to 0 cents in the reconciled unit, never $0', () => {
+    // $0.50/GAL per oz: 50 / 128 rounds to 0.
+    const r = reconcileChemAutofillUnits('GAL', 'oz/ac', 0, 50, 'liquid');
+    expect(r.pricePerUnitCents).toBe(0);
+    expect(autofillPriceText(50, r.pricePerUnitCents)).toBe('');
+  });
+  it('keeps a stated $0 and a converted positive price; blanks no stated price', () => {
+    expect(autofillPriceText(0, 0)).toBe('0');
+    expect(autofillPriceText(2800, 350)).toBe('350');
+    expect(autofillPriceText(null, 0)).toBe('');
+  });
+});
+
 describe('chemCalculator — reconcileChemAutofillUnits (P1 money fix)', () => {
   it('THE BUG CASE: GAL stock + pt/ac rate → unit pt, cost/price per pint (÷8), so the line is NOT ~8× inflated', () => {
     // Roundup PowerMax: unit_size=GAL, rate_unit=pt/ac, cost $22.50/GAL (2250¢),

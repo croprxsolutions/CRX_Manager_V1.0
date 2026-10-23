@@ -17,7 +17,7 @@
 
 import type { Product } from '../types';
 import type { RecipeChemRowSeed } from './recipeHelpers';
-import { reconcileChemAutofillUnits } from './chemCalculator';
+import { autofillPriceText, reconcileChemAutofillUnits } from './chemCalculator';
 import { getStatedTierPriceCents } from './quoteCalc';
 
 /** One product line inside a crop program. Mirrors the shape written by
@@ -135,7 +135,7 @@ export function programItemToChemRowSeed(
     rate_per_acre: rate != null ? rate.toString() : '',
     rate_unit: rateUnit,
     cost_per_unit_cents: reconciled.costPerUnitCents.toString(),
-    price_per_unit_cents: tierPriceCents == null ? '' : reconciled.pricePerUnitCents.toString(),
+    price_per_unit_cents: autofillPriceText(tierPriceCents, reconciled.pricePerUnitCents),
     diluent_rate: '',
     rei_hours: product?.rei_hours != null ? product.rei_hours.toString() : '',
     phi_days: product?.phi_days != null ? product.phi_days.toString() : '',

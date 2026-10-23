@@ -46,7 +46,7 @@ import { fetchCurrentWeather, parseCentroid } from '../lib/weatherCapture';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
-import { applyChemEdit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
+import { applyChemEdit, autofillPriceText, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
 import {
@@ -3729,8 +3729,9 @@ export default function JobDetail() {
       const statedCents = p && tier != null ? getStatedTierPriceCents(p, tier) : null;
       updated[i].price_per_unit_cents = statedCents == null
         ? ''
-        : reconcileChemAutofillUnits(p?.unit_size, row.rate_unit || p?.rate_unit, 0, statedCents, p?.product_form)
-          .pricePerUnitCents.toString();
+        : autofillPriceText(statedCents, reconcileChemAutofillUnits(
+          p?.unit_size, row.rate_unit || p?.rate_unit, 0, statedCents, p?.product_form,
+        ).pricePerUnitCents);
     }
     setChemRows(updated);
   };
@@ -3809,7 +3810,7 @@ export default function JobDetail() {
         updated[i].cost_per_unit_cents = reconciled.costPerUnitCents.toString();
         // A product that states no price blanks the line's price rather than keeping the
         // previous product's: chemRowDefects then refuses the save until a price is typed.
-        updated[i].price_per_unit_cents = tierPriceCents == null ? '' : reconciled.pricePerUnitCents.toString();
+        updated[i].price_per_unit_cents = autofillPriceText(tierPriceCents, reconciled.pricePerUnitCents);
         // Re-derive the quantity now that a rate auto-filled.
         updated[i] = recomputeChemRowForAcres(updated[i], sumAcres(fieldRows));
       }

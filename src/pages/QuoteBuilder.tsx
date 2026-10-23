@@ -397,8 +397,8 @@ export default function QuoteBuilder() {
 
   const [customerId, setCustomerId] = useState('');
   const customerIdRef = useLatestRef(customerId);
-  // The customer the open quote was saved with: a picked customer differs from it.
-  const savedQuoteCustomerIdRef = useRef<string | null>(null);
+  // Whether a customer was picked since the open quote loaded (picking one and back still counts).
+  const customerPickedSinceLoadRef = useRef(false);
   const [tier, setTier] = useState(1);
   const [validDays, setValidDays] = useState(15);
   const [headerNotes, setHeaderNotes] = useState('');
@@ -1189,7 +1189,7 @@ export default function QuoteBuilder() {
     setQuoteId(q.id);
     setQuoteNumber(q.quote_number);
     setCustomerId(q.customer_id);
-    savedQuoteCustomerIdRef.current = q.customer_id;
+    customerPickedSinceLoadRef.current = false;
     // The quote read embeds its customer (customer:customers(*)); a quote whose customer did not
     // come back cannot be saved, since the screen cannot show who it is for.
     const loadedCustomer = (q as Quote & { customer?: QuoteCustomer | null }).customer ?? null;
@@ -1402,6 +1402,7 @@ export default function QuoteBuilder() {
       toast('error', 'Products are still loading. Try again in a moment.');
       return false;
     }
+    customerPickedSinceLoadRef.current = true;
     setCustomerId(cust.id);
     setCustomerRow(cust);
     setCustomerLoadError(null);
@@ -1572,11 +1573,11 @@ export default function QuoteBuilder() {
         // The customer may have changed while these were loading: a field that belongs to another
         // customer is then cleared, as a pick would have cleared it. A plain load never clears a
         // saved field (CodeRabbit, #1017): a field later moved to another customer stays as saved.
-        // The comparison is with the customer the open quote was saved with, not the one when the
-        // read started: another quote sharing these field ids may be open by now, and opening it is
-        // not a pick (CodeRabbit and Luna, #1049).
+        // What counts is a pick since the open quote loaded, not the customer when the read started:
+        // another quote sharing these field ids may be open by now, and opening it is not a pick; a
+        // pick and a pick back to the saved customer still is (CodeRabbit and Luna, #1049).
         const currentCustomerId = customerIdRef.current;
-        const customerChanged = currentCustomerId !== savedQuoteCustomerIdRef.current;
+        const customerChanged = customerPickedSinceLoadRef.current;
         const foreign = new Set(rows
           .filter((row) => customerChanged && currentCustomerId && row.customer_id !== currentCustomerId)
           .map((row) => row.id));

@@ -693,6 +693,46 @@ describe('QuoteBuilder', () => {
     expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
   });
 
+  it('clears a foreign saved field when the customer is picked away and back while the field loads', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const savedSection = { ...section, field_id: 'field-1' };
+    const held = holdFieldReadById();
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [savedSection]
+          : table === 'quote_items'
+            ? [{ ...item, acres: 80 }]
+            : table === 'customers'
+              ? [FAR_FIELD_FARM, QUOTE_FIXTURE_CUSTOMER]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    })));
+    renderQuoteBuilder(quote.id);
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(held.readsById()).toBeGreaterThan(0));
+
+    // Far Field Farm is picked, then the quote's own customer again, before the field arrives.
+    const customerBox = screen.getByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customerBox, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    fireEvent.change(customerBox, { target: { value: 'Farm' } });
+    fireEvent.click(await screen.findByRole('option', { name: /^Farm/ }));
+    expect(customerBox).toHaveValue('Farm');
+
+    // The field belongs to neither: the picks count, so the section drops it.
+    await act(async () => {
+      held.release({ data: [{ ...HOME_QUARTER_OF_CUSTOMER_1, customer_id: 'customer-elsewhere' }], error: null });
+      await held.read;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(fieldBox).toHaveValue('');
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+  });
+
   it('clears quote B\'s foreign field when a customer is picked on B before quote A\'s field read lands', async () => {
     const { quote: quoteA, product, section, item } = makeQuoteFixture('draft', 7);
     const quoteB = { ...quoteA, id: 'quote-b', quote_number: 'Q-b', header_notes: 'Quote B header', customer_id: 'customer-2' };

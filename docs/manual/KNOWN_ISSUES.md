@@ -1,7 +1,7 @@
 # Known Issues — Consolidated
 
-**Last verified: 2026-10-22 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-23 03:52 UTC (10:52 PM Central, 2026-10-22): 1052 rows, `max(version)` `20261023033311` = `20261022040000_payment_allocation_tables_no_direct_writes` (row 970, PR #1026 merged as `c5f596285`, applied 03:33:11 UTC on Mason's in-chat `I approve`: sales reps and admins can no longer write payment-allocation rows directly through the Data API; reads unchanged); effective ordering high-water `20261022040000`; the read before it, 2026-10-23 03:21 UTC (10:21 PM Central, 2026-10-22): 1051 rows, `max(version)` `20261023031652` = `20261022023000_handle_new_user_ignores_signup_role` (row 969, PR #1039 merged as `f1f6e6aa3`, applied 03:16:52 UTC on Mason's in-chat `I approve`: a login the Auth service creates starts as an inactive, login-banned driver, whatever role its signup asks for; row 970 was not yet applied at this read); effective ordering high-water `20261022023000`; the read before it, 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22): 1050 rows (row 970, `20261022040000_payment_allocation_tables_no_direct_writes`, was then not yet applied, so any active sales rep could still insert payment-allocation rows directly through the Data API; no misuse found, 1/1/0 rows on 2026-10-22; CLOSED when row 970 applied 2026-10-23 03:33 UTC), `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968, PR #1018 merged as `3ab57a80c`, applied on Mason's in-chat `I approve`); at 2026-10-22 16:35 UTC (11:35 AM Central): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006 merged as `afe1dadb5`), and before it `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020); at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+**Last verified: 2026-10-23 (America/Chicago) against the live migration ledger** (read-only
+`execute_sql`, 2026-10-23 12:47 UTC (7:47 AM Central): 1054 rows, `max(version)` `20261023123930` = `20261022075000_delivery_completion_evidence` (row 973, PR #1024 merged as `e685b5d6c`, applied 12:39:30 UTC on Mason's in-chat `I approve`: every delivery completion now needs server-checked proof, an admin may record one without proof, and a driver's receipt reads the customer through `get_delivery_receipt_recipient`); effective ordering high-water `20261022075000`; `20261022070000_role_reads_require_active_profile` (row 974, PR #1042, ledger `20261023044719`) is also applied, recorded by its own PR; the read before it, 2026-10-23 03:52 UTC (10:52 PM Central, 2026-10-22): 1052 rows, `max(version)` `20261023033311` = `20261022040000_payment_allocation_tables_no_direct_writes` (row 970, PR #1026 merged as `c5f596285`, applied 03:33:11 UTC on Mason's in-chat `I approve`: sales reps and admins can no longer write payment-allocation rows directly through the Data API; reads unchanged); effective ordering high-water `20261022040000`; the read before it, 2026-10-23 03:21 UTC (10:21 PM Central, 2026-10-22): 1051 rows, `max(version)` `20261023031652` = `20261022023000_handle_new_user_ignores_signup_role` (row 969, PR #1039 merged as `f1f6e6aa3`, applied 03:16:52 UTC on Mason's in-chat `I approve`: a login the Auth service creates starts as an inactive, login-banned driver, whatever role its signup asks for; row 970 was not yet applied at this read); effective ordering high-water `20261022023000`; the read before it, 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22): 1050 rows (row 970, `20261022040000_payment_allocation_tables_no_direct_writes`, was then not yet applied, so any active sales rep could still insert payment-allocation rows directly through the Data API; no misuse found, 1/1/0 rows on 2026-10-22; CLOSED when row 970 applied 2026-10-23 03:33 UTC), `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968, PR #1018 merged as `3ab57a80c`, applied on Mason's in-chat `I approve`); at 2026-10-22 16:35 UTC (11:35 AM Central): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006 merged as `afe1dadb5`), and before it `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020); at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
 at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
@@ -204,22 +204,6 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   percentages across lines and passed the guard. The split writer now locks the allocated fields'
   rows (FOR SHARE) and then `field_billing_defaults` in SHARE mode before it reads them, so no
   billing-default write can commit until the split does (the same order `save_field` writes them).
-
-## OPEN 2026-10-19 (MED; fix pending apply of `20261022075000`, PR #1024; moves to the archive once applied) — a driver's completion receipt can be skipped when the customer row is hidden from them
-
-The customer receipt email after a delivery is sent by the phone, and the delivery page and the field
-stop read the customer through the client. Under `customers_select`, an assigned driver may not see the
-customer of a stop whose `scheduled_date` is older than yesterday, so the page had no email and sent no
-receipt (on the on-screen-signature path, with no warning). Found by the Codex GitHub review on #955.
-**Fix:** the new read-only `get_delivery_receipt_recipient(p_delivery_id)` returns the customer's name and
-receipt email to an active admin or sales rep, or the delivery's active assigned driver while the delivery
-is scheduled or in progress (another driver, or a closed delivery, is refused with the same message as an
-unknown id). The delivery page (open deliveries only) and the field stop call it when the customer row is not
-visible and use its address for the receipt checkbox and the email. `customers_select` is unchanged.
-Proof: in the browser preview against a local test database, a driver completing a stop scheduled ten
-days ago (shown on the route as "Unknown customer") saw the receipt option, and the page read the
-customer's address through the new function before sending; `smoke-delivery-completion-evidence.sql`
-step h. The email itself is still sent by the phone after the completion; see the next entry.
 
 ## DEFERRED 2026-10-21 (MED; Goal 5 follow-up 3) — a customer receipt that fails to send after a completion is not retried
 
@@ -3796,6 +3780,24 @@ date they were resolved; each keeps its original heading with the status word up
 evidence note where the status changed on 2026-09-26. Any piece of an archived entry that is still open
 is listed in "OPEN — smaller items carried out of resolved entries" near the top of this file. Moved
 here on 2026-09-26.
+
+### FIXED 2026-10-23 (migration `20261022075000` applied live as ledger `20261023123930`, PR #1024 merged as `e685b5d6c`; opened 2026-10-19, MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
+
+**Closed 2026-10-23:** a read-only live check at 12:48 UTC (7:48 AM Central) found `get_delivery_receipt_recipient` live (STABLE SECURITY DEFINER), with the PR #1024 app code that calls it merged as `e685b5d6c`. The original text follows.
+
+The customer receipt email after a delivery is sent by the phone, and the delivery page and the field
+stop read the customer through the client. Under `customers_select`, an assigned driver may not see the
+customer of a stop whose `scheduled_date` is older than yesterday, so the page had no email and sent no
+receipt (on the on-screen-signature path, with no warning). Found by the Codex GitHub review on #955.
+**Fix:** the new read-only `get_delivery_receipt_recipient(p_delivery_id)` returns the customer's name and
+receipt email to an active admin or sales rep, or the delivery's active assigned driver while the delivery
+is scheduled or in progress (another driver, or a closed delivery, is refused with the same message as an
+unknown id). The delivery page (open deliveries only) and the field stop call it when the customer row is not
+visible and use its address for the receipt checkbox and the email. `customers_select` is unchanged.
+Proof: in the browser preview against a local test database, a driver completing a stop scheduled ten
+days ago (shown on the route as "Unknown customer") saw the receipt option, and the page read the
+customer's address through the new function before sending; `smoke-delivery-completion-evidence.sql`
+step h. The email itself is still sent by the phone after the completion; see the next entry.
 
 ### FIXED 2026-10-04 (verified live) — a sales rep could not remove a customer document (admins could)
 

@@ -15,7 +15,7 @@ The order, job and purchase-order pickers no longer stop at 200 or 1,000 rows. F
 - New Vendor Bill link-to-PO (200; M47). An admin's results carry the PO total, and a failed cost read fails the search, so no PO is picked without its total. Picking still fills vendor and amount. A bill recovered from an unconfirmed save reads its PO's name by id.
 
 **Now complete paged reads** (`fetchAllRows`):
-- New Purchase Order product catalog (1,000; M49). A failed read clears the list.
+- New Purchase Order product catalog (1,000; M49). A failed read clears the list, shows Retry, and blocks Save and Submit until the catalog loads; the draft on screen is kept.
 - Cycle count locations (1,000; N6): the inventory locations are read whole, page by page, with no database change. A failed read clears the list, says so, and blocks Start Count.
 
 **Still open, for later PRs:**

@@ -68,6 +68,8 @@ export default function NewPurchaseOrder() {
   const [productSearchOpen, setProductSearchOpen] = useState<string | null>(null);
   const [productQuery, setProductQuery] = useState('');
   const [productsLoading, setProductsLoading] = useState(true);
+  // A failed catalog load blocks save and submit and offers Retry; the draft on screen is kept.
+  const [productsLoadFailed, setProductsLoadFailed] = useState(false);
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
@@ -121,10 +123,12 @@ export default function NewPurchaseOrder() {
       toast('error', 'Failed to load Products. Retry before creating this purchase order.');
       // Never a short or earlier list.
       setProducts([]);
+      setProductsLoadFailed(true);
       setProductsLoading(false);
       return;
     }
     setProducts(prods);
+    setProductsLoadFailed(false);
     if (isAdmin) {
       // A promoted session: lines picked while cost was hidden take the costed catalog's cost now.
       const byId = new Map(prods.map((p) => [p.id, p]));
@@ -208,6 +212,10 @@ export default function NewPurchaseOrder() {
   const totalCost = purchaseOrderCentsToDollars(totalCostCents);
 
   const handleSave = async (submitStatus: 'draft' | 'submitted') => {
+    if (productsLoadFailed) {
+      toast('error', 'Products could not be loaded. Use Retry before saving this purchase order.');
+      return;
+    }
     if (!vendor.trim()) {
       toast('error', 'Please enter a vendor name');
       return;
@@ -427,6 +435,19 @@ export default function NewPurchaseOrder() {
             </Button>
           </div>
 
+          {productsLoadFailed && (
+            <p role="alert" className="px-4 pt-3 text-sm text-red-600">
+              Products could not be loaded. This purchase order cannot be saved until they load.
+              <button
+                type="button"
+                onClick={() => fetchProducts()}
+                className="ml-2 font-medium text-red-700 underline hover:text-red-800"
+              >
+                Retry
+              </button>
+            </p>
+          )}
+
           {items.length === 0 ? (
             <p className="text-sm text-secondary text-center py-6">
               No items added.{' '}
@@ -561,13 +582,13 @@ export default function NewPurchaseOrder() {
           icon={<Save className="w-4 h-4" />}
           showChevron={false}
           onClick={() => handleSave('draft')}
-          disabled={saving}
+          disabled={saving || productsLoadFailed}
         >
           {savedPoId ? 'Save Draft' : 'Save as Draft'}
         </Button>
         <Button
           onClick={() => handleSave('submitted')}
-          disabled={saving}
+          disabled={saving || productsLoadFailed}
         >
           {saving ? 'Saving...' : 'Submit PO'}
         </Button>
@@ -592,7 +613,9 @@ export default function NewPurchaseOrder() {
               />
               <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
                 {filteredProducts.length === 0 ? (
-                  <p className="text-sm text-secondary py-4 text-center">No products found</p>
+                  <p className="text-sm text-secondary py-4 text-center">
+                    {productsLoadFailed ? 'Products could not be loaded. Close this and use Retry.' : 'No products found'}
+                  </p>
                 ) : (
                   filteredProducts.map((p) => (
                     <ProductSearchResultRow

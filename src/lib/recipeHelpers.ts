@@ -17,6 +17,7 @@
 
 import type { BlendRecipeItem, Product } from '../types';
 import { getStatedTierPriceCents } from './quoteCalc';
+import { priceTextInLineUnit } from './chemCalculator';
 
 /** localStorage key for the per-browser "last used recipe" shortcut. */
 const LAST_RECIPE_KEY = 'crx-last-recipe-id';
@@ -80,15 +81,16 @@ export function recipeItemToChemRowSeed(
   // Blank when neither the recipe nor the product states a price: the job's save check then asks
   // for one instead of billing the line at $0. A missing tier-2/3 price falls back to tier 1; a
   // stated $0 is kept.
+  // Unit of the recipe item wins; fall back to the product's pack unit.
+  const unit = item.unit || product?.unit_size || '';
+  // The catalog price is per the product's stock unit, so it is put in the line's unit (blank when
+  // it cannot be).
   let price = recipePrice > 0 ? recipePrice.toString() : '';
   if (recipePrice <= 0 && product) {
-    const tierPriceCents = getStatedTierPriceCents(product, tier);
-    if (tierPriceCents != null) price = tierPriceCents.toString();
+    price = priceTextInLineUnit(product.unit_size, unit, getStatedTierPriceCents(product, tier), product.product_form);
   }
 
   const costCents = product?.current_cost != null ? Math.round(product.current_cost * 100) : 0;
-  // Unit of the recipe item wins; fall back to the product's pack unit.
-  const unit = item.unit || product?.unit_size || '';
   // rate_unit isn't stored on the recipe item — pull the product's default.
   const rateUnit = product?.rate_unit || '';
 

@@ -70,7 +70,9 @@
 --      same people as the existing policies (active admin, active sales rep, or the delivery's active
 --      assigned driver). Two NEW RESTRICTIVE policies, one FOR UPDATE and one FOR DELETE (ANDed with
 --      every permissive policy, existing or future): no update or delete of a per-attempt signature
---      object, or of a delivery-photos object accepted as a completion's ticket or drop-location photo. The four existing
+--      object, or of a delivery-photos object accepted as a completion's ticket or drop-location photo
+--      (a delete or replace in a delivery's photo folder first waits for that delivery's row lock, so it
+--      cannot slip between an in-flight completion's file check and its commit). The four existing
 --      fixed-path signature policies (signatures/<id>.png) are UNCHANGED.
 --   5b. Trigger protect_accepted_delivery_photo (BEFORE UPDATE OR DELETE ON delivery_photos): an accepted
 --      ticket or drop-location photo row can no longer be changed (any column) or deleted.
@@ -780,21 +782,37 @@ USING (
 
 -- Accepted proof can never be replaced or deleted. RESTRICTIVE policies are ANDed with every permissive
 -- policy on storage.objects (existing, dashboard-made or future), so none can reopen these paths.
+-- VOLATILE so the final check takes a fresh snapshot after the lock wait below.
 CREATE FUNCTION public._is_accepted_delivery_evidence_object(p_bucket_id text, p_name text)
 RETURNS boolean
-LANGUAGE sql
-STABLE
+LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  SELECT (p_bucket_id = 'delivery-signatures'
-          AND p_name ~ '^signatures/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{32}\.png$')
-      OR (p_bucket_id = 'delivery-photos'
-          AND EXISTS (SELECT 1
-                        FROM public.delivery_photos dp
-                        JOIN public.deliveries d ON d.completion_evidence_ref = dp.id::text
-                       WHERE dp.storage_path = p_name
-                         AND d.completion_evidence IN ('paper_ticket', 'left_at_site')));
+DECLARE
+  v_folder text := split_part(p_name, '/', 2);
+BEGIN
+  IF p_bucket_id = 'delivery-signatures' THEN
+    RETURN p_name ~ '^signatures/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{32}\.png$';
+  END IF;
+  IF p_bucket_id IS DISTINCT FROM 'delivery-photos' THEN
+    RETURN false;
+  END IF;
+  -- A completion locks its delivery row FOR UPDATE before it checks the photo and holds it to commit,
+  -- and an accepted photo always lives in its own delivery's folder. Waiting for that row here makes a
+  -- delete or replace of the file wait for an in-flight completion and then see what it accepted; a
+  -- delete that goes first holds this lock, so the completion waits and then finds the file gone.
+  IF split_part(p_name, '/', 1) = 'delivery-photos'
+     AND v_folder ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+    PERFORM 1 FROM public.deliveries WHERE id = v_folder::uuid FOR SHARE;
+  END IF;
+  RETURN EXISTS (SELECT 1
+                   FROM public.delivery_photos dp
+                   JOIN public.deliveries d ON d.completion_evidence_ref = dp.id::text
+                  WHERE dp.storage_path = p_name
+                    AND d.completion_evidence IN ('paper_ticket', 'left_at_site'));
+END;
 $function$;
 ALTER FUNCTION public._is_accepted_delivery_evidence_object(text, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) FROM PUBLIC, anon, service_role;
@@ -945,7 +963,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_PHOTO_TRIGGER';
   END IF;
   IF (SELECT provolatile FROM pg_proc WHERE oid = 'public.get_delivery_receipt_recipient(uuid)'::regprocedure) <> 's'
-     OR (SELECT provolatile FROM pg_proc WHERE oid = 'public._is_accepted_delivery_evidence_object(text,text)'::regprocedure) <> 's' THEN
+     OR (SELECT provolatile FROM pg_proc WHERE oid = 'public._is_accepted_delivery_evidence_object(text,text)'::regprocedure) <> 'v' THEN
     RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_COMPLETION_EVIDENCE_VOLATILITY';
   END IF;
   -- Columns, types and the three validated constraints.

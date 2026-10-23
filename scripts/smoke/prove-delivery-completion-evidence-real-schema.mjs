@@ -345,8 +345,8 @@ BEGIN
 END
 $replay$;`;
 
-// Committed fixtures for the two-session tests (after the candidate is applied): two in_progress
-// deliveries; the second has a saved, non-empty ticket photo.
+// Committed fixtures for the two-session tests (after the candidate is applied): four in_progress
+// deliveries; the second, third and fourth each have a saved, non-empty ticket photo.
 const CONC_SETUP = `
 DO $conc$
 DECLARE
@@ -359,7 +359,7 @@ BEGIN
   SELECT customer_id INTO v_customer FROM public.deliveries WHERE id = (SELECT delivery_id FROM public._prover_legacy LIMIT 1);
   INSERT INTO public.orders (order_number, customer_id, status, booking_draw) VALUES ('[PROVER] CONC', v_customer, 'confirmed', false) RETURNING id INTO v_order;
   CREATE TABLE public._prover_conc (k text PRIMARY KEY, id uuid);
-  FOR v_i IN 1..2 LOOP
+  FOR v_i IN 1..4 LOOP
     INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, cost_per_unit,
       total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining)
     VALUES (v_order, v_product, '[PROVER] conc ' || v_i, 10, 6, 2, 20, 8, 40, 0, 2) RETURNING id INTO v_oi;
@@ -376,8 +376,33 @@ BEGIN
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_id, 'delivery-photos/' || v_id || '/conc.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0) RETURNING id INTO v_photo;
   INSERT INTO public._prover_conc VALUES ('photo', v_photo);
+  FOR v_i IN 3..4 LOOP
+    SELECT id INTO v_id FROM public._prover_conc WHERE k = 'delivery' || v_i;
+    INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+    VALUES ('delivery-photos', 'delivery-photos/' || v_id || '/ticket.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/jpeg"}'::jsonb);
+    INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
+    VALUES (v_id, 'delivery-photos/' || v_id || '/ticket.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0) RETURNING id INTO v_photo;
+    INSERT INTO public._prover_conc VALUES ('photo' || v_i, v_photo);
+  END LOOP;
 END
 $conc$;`;
+
+// As live (read 2026-10-22): storage.objects has row security on; postgres bypasses it; an
+// authenticated caller may DELETE, and only an admin's delivery-photos rows pass the permissive
+// rules (delivery_photos_delete; SELECT trimmed to the admin arm). The candidate's restrictive
+// policies are already on the table.
+const STORAGE_RLS = `
+ALTER ROLE postgres BYPASSRLS;
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+GRANT USAGE ON SCHEMA storage TO authenticated;
+GRANT SELECT, DELETE ON storage.objects TO authenticated;
+-- An earlier replayed migration may already have made these two; pin them to live's definitions.
+DROP POLICY IF EXISTS delivery_photos_delete ON storage.objects;
+DROP POLICY IF EXISTS staff_photos_delivery_select ON storage.objects;
+CREATE POLICY delivery_photos_delete ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'delivery-photos' AND public.is_admin());
+CREATE POLICY staff_photos_delivery_select ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'delivery-photos' AND public.is_admin());`;
 
 /**
  * Session A runs `body` in a transaction it holds open for 4 s (ending with `finish`); 1.5 s in,
@@ -427,6 +452,39 @@ function concurrency() {
   assert.match(r.output, /COMPLETION_EVIDENCE_LOCKED/, `CONCURRENCY: the re-caption after the completion was not refused: ${r.output}`);
   assert.equal(scalar(`SELECT caption FROM public.delivery_photos WHERE id = '${conc('photo')}';`), 'Signed paper delivery ticket', 'CONCURRENCY: the accepted photo changed');
   console.log(`[prover] CONCURRENCY: a re-caption of the accepted photo waits for the completion (${r.waited} ms), then is refused; without the row lock it did not wait`);
+
+  // An admin's storage delete of the ticket file racing the completion that accepts it. Live, the
+  // delete runs as authenticated under the storage rules, whose restrictive arm calls the helper.
+  psql(STORAGE_RLS, { user: 'supabase_admin' });
+  const file = (n) => scalar(`SELECT storage_path FROM public.delivery_photos WHERE id = '${conc(`photo${n}`)}';`);
+  const [file3, file4] = [file(3), file(4)];
+  const asAdmin = `SET LOCAL ROLE authenticated; ${claims(admin1)}`;
+  const del = (name) => `DELETE FROM storage.objects WHERE bucket_id = 'delivery-photos' AND name = '${name}' RETURNING 'DELETED ' || name;`;
+  const paperFor = (n, key) => `SELECT public.complete_delivery('${conc(`delivery${n}`)}', '[PROVER] Signer', '${admin1}', NULL, NULL, NULL, '${key}', NULL, 'paper_ticket', '${conc(`photo${n}`)}');`;
+  const noFolderLock = mutate("    PERFORM 1 FROM public.deliveries WHERE id = v_folder::uuid FOR SHARE;\n", "    NULL;\n", 'storage helper folder lock');
+  const objects = (name) => scalar(`SELECT count(*) FROM storage.objects WHERE bucket_id = 'delivery-photos' AND name = '${name}';`);
+  const stateOf = (n) => scalar(`SELECT status || ':' || COALESCE(completion_evidence, '-') FROM public.deliveries WHERE id = '${conc(`delivery${n}`)}';`);
+
+  // Completion first. Mutation (all rolled back): without the folder lock the delete does not wait and removes the file.
+  r = race('', claims(admin1) + paperFor(3, 'prover-conc-del-mut'), 'ROLLBACK', `BEGIN; ${noFolderLock} ${asAdmin} ${del(file3)} ROLLBACK;`);
+  assert.ok(r.waited < 1000 && /DELETED /.test(r.output), `CONCURRENCY mutation: without the folder lock the delete still waited or removed nothing (${r.waited} ms): ${r.output}`);
+  r = race('', claims(admin1) + paperFor(3, 'prover-conc-del'), 'COMMIT', `BEGIN; ${asAdmin} ${del(file3)} COMMIT;`);
+  assert.ok(r.waited >= 1500, `CONCURRENCY: an admin's delete of the ticket file did not wait for the completion (${r.waited} ms)`);
+  assert.ok(!/DELETED |ERROR/.test(r.output), `CONCURRENCY: the delete after the completion removed the accepted file or failed: ${r.output}`);
+  assert.equal(objects(file3), '1', 'CONCURRENCY: the accepted ticket file is gone');
+  assert.equal(stateOf(3), 'completed:paper_ticket', 'CONCURRENCY: the ticket completion did not commit');
+  console.log(`[prover] CONCURRENCY: an admin's delete of the ticket file waits for the completion (${r.waited} ms), then removes nothing; without the folder lock it did not wait and removed it`);
+
+  // Delete first. Mutation (all rolled back): without the folder lock the completion does not wait and accepts the file being deleted.
+  r = race(noFolderLock, `${asAdmin} ${del(file4)}`, 'ROLLBACK', `BEGIN; ${claims(admin1)} ${paperFor(4, 'prover-conc-del2-mut')} ROLLBACK;`);
+  assert.ok(r.waited < 1000 && !/ERROR/.test(r.output), `CONCURRENCY mutation: without the folder lock the completion still waited or was refused (${r.waited} ms): ${r.output}`);
+  // One transaction, so the caller's claims (set transaction-locally) still hold when the completion runs.
+  r = race('', `${asAdmin} ${del(file4)}`, 'COMMIT', `BEGIN; ${claims(admin1)} ${paperFor(4, 'prover-conc-del2')} COMMIT;`);
+  assert.ok(r.waited >= 1500, `CONCURRENCY: the completion did not wait for an admin's delete in progress (${r.waited} ms)`);
+  assert.match(r.output, /PAPER_TICKET_PHOTO_MISSING/, `CONCURRENCY: the completion after the delete was not refused: ${r.output}`);
+  assert.equal(objects(file4), '0', 'CONCURRENCY: the delete did not commit');
+  assert.equal(stateOf(4), 'in_progress:-', 'CONCURRENCY: the refused completion changed the delivery');
+  console.log(`[prover] CONCURRENCY: a completion waits for an admin's delete of its ticket file (${r.waited} ms), then is refused; without the folder lock it did not wait`);
 }
 
 function main() {
@@ -526,7 +584,7 @@ function main() {
       /SMOKE_FAIL: i\. a recorded no-proof reason was rewritten under the marker/],
     ['accepted photo row protection', "     AND (TG_OP = 'DELETE' OR NEW IS DISTINCT FROM OLD) THEN", "     AND false THEN",
       /SMOKE_FAIL: i\. an accepted ticket photo row was changed/],
-    ['storage helper', "      OR (p_bucket_id = 'delivery-photos'\n", "      OR (false\n",
+    ['storage helper', "  IF p_bucket_id IS DISTINCT FROM 'delivery-photos' THEN\n    RETURN false;", "  IF true THEN\n    RETURN false;",
       /SMOKE_FAIL: i\. the storage helper marked the wrong objects/],
   ];
   for (const [label, find, replacement, expected] of mutations) {

@@ -280,16 +280,16 @@ folder); the path and reference are recorded in `deliveries.completion_evidence`
 9. **File contents are not inspected.** The database cannot read a stored file's bytes, so the server
    trusts the upload's recorded type and size; a deliberately crafted file of the right type and size
    would pass. The screens only ever upload a real drawn signature or camera photo.
-10. **A file deleted in the same instant as its completion.** The completion locks the accepted photo
-   row, but not the stored file; an admin deleting that exact file while the completion is still
-   running could leave the record pointing at nothing. Once the completion commits, the restrictive
-   storage rules refuse any later delete or replace. Not reachable through the app (Luna round 3 MED,
-   refuted 2026-10-22): the only storage rule that allows deleting a `delivery-photos` file is
-   `delivery_photos_delete`, admins only (live read 2026-10-22; no update rule exists), and no screen,
-   library or Edge Function deletes a delivery-photo file (`src/` and `supabase/functions/` have no
-   `.remove(` on that bucket). Reaching it takes an admin's own hand-written storage call timed inside
-   the completion's commit; the dashboard and service-role tools bypass storage rules entirely, so a
-   lock would not cover them either.
+10. **A file deleted in the same instant as its completion: closed in the same migration (2026-10-22).**
+   Only admins may delete a `delivery-photos` file (`delivery_photos_delete`, live read 2026-10-22), and
+   no screen or Edge Function does; but an admin's own storage call could once slip between a
+   completion's file check and its commit (Luna round 3 MED, then Sol HIGH on `12336f569`). The
+   restrictive rule's helper `_is_accepted_delivery_evidence_object` now first waits for the row lock of
+   the delivery whose folder holds the file, which every completion takes before its checks: a delete
+   during a completion waits, then sees the accepted photo and removes nothing; a delete that goes first
+   makes the completion wait, which then finds the file gone and refuses. The prover runs both orders
+   in two sessions, each failing without the lock. Still outside storage rules by design: the
+   dashboard and service-role tools.
 
 ## FIXED 2026-10-19 (migration `20261019220000` applied live 2026-10-20 02:22 UTC (9:22 PM Central, 2026-10-19), PR #964) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
 

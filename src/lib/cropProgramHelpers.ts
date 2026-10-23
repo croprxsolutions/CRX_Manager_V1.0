@@ -18,7 +18,7 @@
 import type { Product } from '../types';
 import type { RecipeChemRowSeed } from './recipeHelpers';
 import { reconcileChemAutofillUnits } from './chemCalculator';
-import { getTierPrice } from './quoteCalc';
+import { getStatedTierPrice } from './quoteCalc';
 
 /** One product line inside a crop program. Mirrors the shape written by
  *  src/pages/CropPrograms.tsx (kept in sync — the store has no DB table). */
@@ -101,8 +101,9 @@ export function programItemToChemRowSeed(
 ): RecipeChemRowSeed {
   let priceStockCents = 0;
   if (product) {
-    // A missing tier-2/3 price falls back to tier 1, as on quotes (never a silent $0).
-    priceStockCents = Math.round(getTierPrice(product, tier) * 100);
+    // A missing tier-2/3 price falls back to tier 1 (never a silent $0); a stated $0 is kept.
+    const tierPrice = getStatedTierPrice(product, tier);
+    if (tierPrice != null) priceStockCents = Math.round(tierPrice * 100);
   }
   const costStockCents = product?.current_cost != null ? Math.round(product.current_cost * 100) : 0;
   const rate = typeof item.rate === 'number' && Number.isFinite(item.rate) ? item.rate : null;

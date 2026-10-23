@@ -96,6 +96,11 @@ describe('programItemToChemRowSeed', () => {
     expect(programItemToChemRowSeed(item, ozProduct, 3).price_per_unit_cents).toBe('1000');
   });
 
+  it('MONEY: a stated zero tier price stays zero, not the tier-1 price', () => {
+    const ozProduct = { ...galProduct, unit_size: 'oz', tier3_price: 0 } as unknown as Product;
+    expect(programItemToChemRowSeed(item, ozProduct, 3).price_per_unit_cents).toBe('0');
+  });
+
   it('leaves per-stock cost/price untouched when the units already match', () => {
     const ozProduct = { ...galProduct, unit_size: 'oz' } as unknown as Product;
     const seed = programItemToChemRowSeed(item, ozProduct, 1);

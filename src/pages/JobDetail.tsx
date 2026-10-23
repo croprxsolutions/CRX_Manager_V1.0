@@ -56,7 +56,7 @@ import {
 } from '../lib/labelGuardrailSetting';
 import { computeSeason } from '../utils/season';
 import { recipeItemToChemRowSeed, chemRowsToRecipeItems, getLastRecipeId, setLastRecipeId } from '../lib/recipeHelpers';
-import { getTierPrice } from '../lib/quoteCalc';
+import { getStatedTierPrice } from '../lib/quoteCalc';
 import { programItemToChemRowSeed, parseCropPrograms, orderProgramsForJob, type CropProgram } from '../lib/cropProgramHelpers';
 import { moveItem, moveUp, moveDown } from '../lib/routeOrder';
 import { billableAcres } from '../lib/fieldGeometry';
@@ -3753,13 +3753,10 @@ export default function JobDetail() {
         // are NOT inflated. When the stock unit already equals the rate unit (or the
         // units can't be reconciled), this returns the stock unit + per-stock
         // cost/price unchanged — the common case is untouched.
-        // A missing tier-2/3 price falls back to tier 1, as on quotes (never a silent $0).
-        // pickTier is set whenever a product is picked (an unknown tier returned above).
-        const ownTierPrice = pickTier === 3 ? p.tier3_price : pickTier === 2 ? p.tier2_price : p.tier1_price;
-        // Null only when the product states no price at all (neither its tier's nor tier 1's).
-        const tierPrice = pickTier == null || (ownTierPrice == null && p.tier1_price == null)
-          ? null
-          : getTierPrice(p, pickTier);
+        // A missing tier-2/3 price falls back to tier 1 (never a silent $0); a stated $0 is kept.
+        // Null when the product states no price at all. pickTier is set whenever a product is
+        // picked (an unknown tier returned above).
+        const tierPrice = pickTier == null ? null : getStatedTierPrice(p, pickTier);
         const costPerStockCents = Math.round((p.current_cost || 0) * 100);
         const pricePerStockCents = tierPrice != null ? Math.round(tierPrice * 100) : 0;
         const reconciled = reconcileChemAutofillUnits(

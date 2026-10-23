@@ -44,6 +44,13 @@ export function getTierPrice(product: Product, tierNum: number): number {
   return product.tier3_price || t1;
 }
 
+/** The product's price for a tier, keeping a stated $0: only a missing (null) tier-2/3 price
+ * falls back to tier 1. Null when the product states neither. Used by job pricing. */
+export function getStatedTierPrice(product: Product, tierNum: 1 | 2 | 3): number | null {
+  const own = tierNum === 3 ? product.tier3_price : tierNum === 2 ? product.tier2_price : product.tier1_price;
+  return own ?? product.tier1_price ?? null;
+}
+
 /** Look up unit→oz conversion factor — pure function */
 export function getConversionFactor(
   unit: string | null,

@@ -14,9 +14,14 @@ vi.mock('../../lib/activityLogger', () => ({ logActivity: mocks.logActivity }));
 vi.mock('../../lib/epaLookupClient', () => ({ lookupEpaRegistration: mocks.lookupEpaRegistration }));
 vi.mock('./ProductSearchPicker', () => ({
   default: ({ onSelect }: { onSelect: (product: { id: string; product_name: string }) => void }) => (
-    <button type="button" onClick={() => onSelect({ id: 'p2', product_name: 'Roundup 5.4# Generic - Bulk' })}>
-      Pick bulk size
-    </button>
+    <>
+      <button type="button" onClick={() => onSelect({ id: 'p2', product_name: 'Roundup 5.4# Generic - Bulk' })}>
+        Pick bulk size
+      </button>
+      <button type="button" onClick={() => onSelect({ id: 'p3', product_name: 'Roundup 5.4# Generic - Jug' })}>
+        Pick jug size
+      </button>
+    </>
   ),
 }));
 vi.mock('../../lib/productBrands', async () => {
@@ -171,6 +176,28 @@ describe('ProductBrandsSection', () => {
     expect(mocks.saveProductBrand).toHaveBeenCalledTimes(3);
     expect(mocks.saveProductBrand.mock.calls[2][0]).toMatchObject({ productId: 'p1', brandName: 'Mad Dog', epaRegistration: '228-366' });
     expect(mocks.saveProductBrand.mock.calls[2][1]).toBe(failedKey);
+  });
+
+  it('drops a late reply for an earlier copy source, so the picked product’s brands are the ones copied', async () => {
+    const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366' };
+    const jugAg = { ...slam, id: 'y1', product_id: 'p3', brand_name: 'Ag Saver 5.4', epa_registration: '100-1234-5905' };
+    let releaseBulk: (rows: typeof slam[]) => void = () => {};
+    mocks.listProductBrands.mockImplementation((id: string) => {
+      if (id === 'p2') return new Promise((resolve) => { releaseBulk = resolve; });
+      return Promise.resolve(id === 'p3' ? [jugAg] : [slam]);
+    });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /copy from another product/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick jug size' }));
+    expect(await screen.findByLabelText(/Ag Saver 5\.4/)).toBeInTheDocument();
+    releaseBulk([bulkMad]);
+    await waitFor(() => expect(mocks.listProductBrands).toHaveBeenCalledWith('p2'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByLabelText(/Mad Dog/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Ag Saver 5\.4/)).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Copy 1 brand' })).toBeEnabled();
   });
 
   it('says so when brands fail to load and offers a retry', async () => {

@@ -25,11 +25,18 @@ brand at delivery and printing it is PR B of `docs/plans/2026-10-22-product-bran
 - `node scripts/smoke/prove-product-brands.mjs` runs on a throwaway PostgreSQL 17 database. It uses the
   live helper bodies and Supabase-style default grants. All phases pass:
   - the migration applies and its postflight passes;
-  - 34 behavior tests pass (admin add and edit, replay, intent mismatch, name, EPA and field checks,
-    versions, no direct writes, who can read and write);
+  - 35 behavior tests pass (admin add and edit, replay, intent mismatch, name, EPA and field checks,
+    versions, no direct writes, who can read and write, and an index on each profile reference);
   - a re-apply is refused by the preflight;
   - the live smoke chain passes and rolls back;
   - a copy that over-grants write access is refused by the postflight and leaves nothing behind.
 - New unit and screen tests: `src/lib/productBrands.test.ts` and
   `src/components/products/ProductBrandsSection.test.tsx`. The existing product page tests still pass.
 - After apply, `scripts/smoke/smoke-upsert-product-brand.sql` runs on live (spec `upsert_product_brand`).
+
+**Review fixes (Codex App, three P1s).**
+- The Brands section is keyed by product, so going straight from one product's page to another starts it
+  fresh; an open form can't be saved onto the next product.
+- In "Copy from another product", a late reply for an earlier pick is ignored, so the brands copied are
+  the picked product's.
+- `created_by` and `updated_by` each get an index, so a profile change never scans the brand table.

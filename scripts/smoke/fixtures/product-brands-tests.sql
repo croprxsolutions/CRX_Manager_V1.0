@@ -163,3 +163,10 @@ SELECT test.pass('B11b', (SELECT count(*) FROM public.idempotency_keys
                            WHERE operation = 'upsert_product_brand'
                              AND (request_actor_id IS NULL OR request_fingerprint IS NULL)) = 0,
                  'a receipt was left unbound');
+
+-- B12: both profile references have an index that starts with them, so a profile change never scans brands.
+SELECT test.pass('B12', (SELECT count(DISTINCT a.attname) FROM pg_index i
+                          JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+                         WHERE i.indrelid = 'public.product_brands'::regclass
+                           AND a.attname IN ('created_by', 'updated_by')) = 2,
+                 'a profile reference has no index');

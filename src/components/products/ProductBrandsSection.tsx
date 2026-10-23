@@ -128,6 +128,9 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const [copySelected, setCopySelected] = useState<Set<string>>(new Set());
   const [copyLoading, setCopyLoading] = useState(false);
   const [copying, setCopying] = useState(false);
+  // Same idea for the copy source: if the admin picks product A then B, A's late reply is dropped so
+  // B's label never sits over A's brands.
+  const copySourceSeq = useRef(0);
 
   // One retry key per exact request: a changed form is a new request, and an unchanged retry after a
   // lost reply replays the saved result instead of saving twice. Each copied brand is its own request.
@@ -263,22 +266,28 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   };
 
   const loadCopySource = useCallback(async (source: { id: string; name: string } | null) => {
+    const seq = ++copySourceSeq.current;
     setCopySource(source);
     setCopyCandidates([]);
     setCopySelected(new Set());
-    if (!source) return;
+    if (!source) {
+      setCopyLoading(false);
+      return;
+    }
     setCopyLoading(true);
     try {
       const taken = new Set(brands.map((brand) => brand.brand_name.toLowerCase()));
       const rows = (await listProductBrands(source.id)).filter((brand) => !taken.has(brand.brand_name.toLowerCase()));
+      if (seq !== copySourceSeq.current) return;
       setCopyCandidates(rows);
       // Brands the source no longer buys are listed but not pre-ticked.
       setCopySelected(new Set(rows.filter((brand) => brand.is_currently_sourced).map((brand) => brand.id)));
     } catch (err) {
+      if (seq !== copySourceSeq.current) return;
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands_copy' } });
       toast('error', sanitizeError(err));
     } finally {
-      setCopyLoading(false);
+      if (seq === copySourceSeq.current) setCopyLoading(false);
     }
   }, [brands, toast]);
 

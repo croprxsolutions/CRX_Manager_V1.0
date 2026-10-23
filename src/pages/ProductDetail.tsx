@@ -1383,6 +1383,9 @@ export default function ProductDetail() {
 
           {!isNew && id && (
             <ProductBrandsSection
+              // A new product id remounts the section, so one product's brands, open form or copy
+              // picker can never carry over to (or be saved onto) the next product.
+              key={id}
               productId={id}
               productName={persistedProduct?.product_name ?? product.product_name ?? ''}
               isAdmin={isAdmin}

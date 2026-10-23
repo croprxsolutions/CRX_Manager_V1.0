@@ -38,7 +38,7 @@ const SMOKE_CHAIN = join(HERE, "smoke-upsert-product-brand.sql");
 const TEST_IDS = [
   "B1", "B2", "B3", "B4a", "B4b", "B5a", "B5b", "B5c", "B6a", "B6b", "B6c", "B6d", "B6e", "B6f",
   "B7a", "B7b", "B7c", "B7d", "B7e", "B8a", "B8b", "B8c", "B8d", "B9a", "B9b", "B9c", "B9d", "B9e",
-  "B10a", "B10b", "B10c", "B10d", "B11a", "B11b",
+  "B10a", "B10b", "B10c", "B10d", "B11a", "B11b", "B12",
 ];
 
 const log = (m) => process.stdout.write(`${m}\n`);

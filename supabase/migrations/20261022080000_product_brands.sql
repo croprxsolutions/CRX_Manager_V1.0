@@ -103,6 +103,11 @@ ALTER TABLE public.product_brands OWNER TO postgres;
 CREATE UNIQUE INDEX uq_product_brands_product_name
   ON public.product_brands(product_id, lower(brand_name));
 
+-- product_id is already covered by the two unique keys above; the profile references need their own
+-- so a profile change never scans this table for its RESTRICT check.
+CREATE INDEX idx_product_brands_created_by ON public.product_brands(created_by);
+CREATE INDEX idx_product_brands_updated_by ON public.product_brands(updated_by);
+
 ALTER TABLE public.product_brands ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY product_brands_select

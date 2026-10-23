@@ -87,7 +87,7 @@ describe('Fields — the refresh contract the bulk import depends on', () => {
     await expect(result).resolves.toBe(false);
   });
 
-  it('hides bulk actions for a selection the failed reload has hidden', async () => {
+  it('hides bulk actions and the field counts once a reload fails', async () => {
     // Sol, PR #1043: a failed reload shows the load-failed state over the rows, so a bulk
     // Delete left live would act on fields the user can no longer see.
     const field = {
@@ -103,10 +103,13 @@ describe('Fields — the refresh contract the bulk import depends on', () => {
     const row = (await screen.findByText('North Forty')).closest('tr')!;
     fireEvent.click(row.querySelector('input[type="checkbox"]')!);
     expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(screen.getByText(/billable acres/)).toBeInTheDocument();
 
     await expect(capturedOnSuccess!()).resolves.toBe(false);
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('This list could not be loaded'));
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+    // Counts left on screen would read as "0 fields" or a stale total next to the failure.
+    expect(screen.queryByText(/billable acres/)).not.toBeInTheDocument();
   });
 });

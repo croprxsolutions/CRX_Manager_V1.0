@@ -82,6 +82,7 @@ export default function ProgramTracker() {
   const uniqueCustomers = [...new Map(programs.map((p) => [p.customer_id, p.customer_name])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
 
+  // A failed load shows dashes in the summary cards, never zeroes that read as "no programs".
   const total = filtered.length;
   const avgPct = total > 0 ? Math.round(filtered.reduce((s, p) => s + Math.min(p.completion_pct, 100), 0) / total) : 0;
   const inProgress = filtered.filter((p) => p.status === 'in_progress').length;
@@ -125,10 +126,10 @@ export default function ProgramTracker() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card><div className="text-center"><p className="text-2xl font-bold text-nav-dark">{total}</p><p className="text-xs text-secondary">Total Programs</p></div></Card>
-        <Card><div className="text-center"><p className="text-2xl font-bold text-crx-green">{avgPct}%</p><p className="text-xs text-secondary">Avg Completion</p></div></Card>
-        <Card><div className="text-center"><p className="text-2xl font-bold text-amber-600">{inProgress}</p><p className="text-xs text-secondary">In Progress</p></div></Card>
-        <Card><div className="text-center"><p className="text-2xl font-bold text-gray-500">{notStarted}</p><p className="text-xs text-secondary">Not Started</p></div></Card>
+        <Card><div className="text-center"><p className="text-2xl font-bold text-nav-dark">{loadError ? '—' : total}</p><p className="text-xs text-secondary">Total Programs</p></div></Card>
+        <Card><div className="text-center"><p className="text-2xl font-bold text-crx-green">{loadError ? '—' : `${avgPct}%`}</p><p className="text-xs text-secondary">Avg Completion</p></div></Card>
+        <Card><div className="text-center"><p className="text-2xl font-bold text-amber-600">{loadError ? '—' : inProgress}</p><p className="text-xs text-secondary">In Progress</p></div></Card>
+        <Card><div className="text-center"><p className="text-2xl font-bold text-gray-500">{loadError ? '—' : notStarted}</p><p className="text-xs text-secondary">Not Started</p></div></Card>
       </div>
 
       <Card padding={false}>

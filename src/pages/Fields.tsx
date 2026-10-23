@@ -444,12 +444,14 @@ export default function Fields() {
         </div>
       </div>
 
-      {/* Stats Bar */}
-      <div className="flex gap-4 text-sm text-secondary">
-        <span><strong className="text-nav-dark">{filtered.length}</strong> fields</span>
-        <span><strong className="text-nav-dark">{totalAcres.toLocaleString()}</strong> billable acres</span>
-        <span><strong className="text-nav-dark">{withBoundary}</strong> with boundaries</span>
-      </div>
+      {/* Stats Bar — hidden after a failed load, where its counts would read as "no fields". */}
+      {!loadError && (
+        <div className="flex gap-4 text-sm text-secondary">
+          <span><strong className="text-nav-dark">{filtered.length}</strong> fields</span>
+          <span><strong className="text-nav-dark">{totalAcres.toLocaleString()}</strong> billable acres</span>
+          <span><strong className="text-nav-dark">{withBoundary}</strong> with boundaries</span>
+        </div>
+      )}
 
       {viewMode === 'map' ? (
         <Card>

@@ -496,7 +496,7 @@ export default function Customers() {
         </div>
       )}
 
-      {unassignedCount > 0 && repFilter !== UNASSIGNED_REP && (
+      {!loadError && unassignedCount > 0 && repFilter !== UNASSIGNED_REP && (
         <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-secondary">
           <UserX className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <span>

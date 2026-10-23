@@ -6,16 +6,24 @@
   until that quote has loaded. A sections or lines read that answers with no list counts as failed
   (it used to install an empty quote). A unit-conversion read with no list counts as failed too: lines
   would otherwise convert at a factor of 1. A failed booking settlement says so instead of hiding the
-  booked / drawn / remaining card. A failed switch from one saved quote to another still keeps the
-  first quote's edits on screen with Save refused, as before.
+  booked / drawn / remaining card. A failed switch from one saved quote to another now shows the
+  failed state too: it used to keep the first quote's form under the second quote's address, where
+  Save was refused but Close and Revert were still offered and would have acted on the second quote.
 - **Quotes:** a failed list said "No quotes yet"; a failed open-booking rollover said "No open
   bookings." Both now show the failed state with Try again.
 - **Orders:** a failed list said "No orders yet"; a failed order-lines or deliveries read showed
-  every order at 0% fulfilled with nothing scheduled. All three now fail the list with Try again.
+  every order at 0% fulfilled with nothing scheduled; a failed farm-group read dropped the labels.
+  All now fail the list with Try again. The shared invoice-coverage read
+  (`src/lib/deliveryInvoiceCoverage.ts`, also used by Office Cockpit and the integrity panel) treats
+  a page with no list as a failed read, so "Invoiced" says unavailable instead of 0%.
+- **Quotes:** only the newest open-booking rollover read may set its rows.
 - **Delivery Detail:** a failed lines read showed the delivery with no lines, where Edit offers every
   order line as new and saves over the real ones; a failed invoices read hid the invoices and could
   offer Create Invoice for a delivery already billed; a failed delivery read said "Delivery not
-  found". Each now shows "This delivery could not be loaded" with Try again.
+  found". Each now shows "This delivery could not be loaded" with Try again, as does a completed
+  delivery whose remaining items fail to load. The order, invoices, sibling deliveries, quote link
+  and remaining items are cleared on a move to another delivery, and only the newest load of a
+  delivery may publish (an older failed refresh can no longer hide a newer page).
 - **Returns:** a failed list said "No returns yet". A return whose lines failed showed an empty list
   and a $0 credit with Approve, Receive and Issue Credit still offered; it now shows the failed state
   with Try again and no actions until the lines load.

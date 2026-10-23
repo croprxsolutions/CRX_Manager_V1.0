@@ -85,7 +85,7 @@ export default function Orders() {
     // A failed read shows "could not be loaded": an older list would look current,
     // and an empty one would read as "No orders yet".
     const failLoad = (err: unknown) => {
-      Sentry.captureException(err instanceof Error ? err : new Error(String((err as { message?: string })?.message ?? err)));
+      Sentry.captureException(err instanceof Error ? err : new Error(String((err as { message?: string })?.message ?? err)), { tags: { source: 'fetch', action: 'load_orders' } });
       toast('error', 'Failed to load orders. Please try again.');
       setOrders([]);
       setLoadFailed(true);
@@ -128,12 +128,12 @@ export default function Orders() {
         .order('id')
         .range(from, to))),
       fetchActiveInvoiceCoveragePages(orderIds),
-      fetchAllRowsForIds(parentIds, (idChunk, from, to) => supabase
+      fetchAllRowsForIds(parentIds, (idChunk, from, to) => pageWithList(supabase
         .from('customers')
         .select('id, farm_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
-        .range(from, to)),
+        .range(from, to))),
       fetchAllRowsForIds(orderIds, (idChunk, from, to) => pageWithList(supabase
         .from('deliveries')
         .select('id, order_id, scheduled_date, status', { count: 'exact' })
@@ -146,10 +146,12 @@ export default function Orders() {
 
     // Without the lines every order would show 0% fulfilled and no products to
     // search by; without the deliveries every order would show none scheduled.
+    // Without the parent names, grouped farms would show no farm-group label as if they had none.
     const { data: itemsData, error: itemsError } = itemsResult;
     const { data: deliveryData, error: deliveryError } = deliveryResult;
-    if (itemsError || !itemsData || deliveryError || !deliveryData) {
-      failLoad(itemsError ?? deliveryError ?? new Error('order lines or deliveries read returned no list'));
+    const { data: parents, error: parentsError } = parentsResult;
+    if (itemsError || !itemsData || deliveryError || !deliveryData || parentsError || !parents) {
+      failLoad(itemsError ?? deliveryError ?? parentsError ?? new Error('order lines, deliveries or farm groups read returned no list'));
       return;
     }
 
@@ -185,8 +187,7 @@ export default function Orders() {
     });
 
     const parentNameMap: Record<string, string> = {};
-    const { data: parents } = parentsResult;
-    (parents || []).forEach((p: { id: string; farm_name: string }) => { parentNameMap[p.id] = p.farm_name; });
+    parents.forEach((p: { id: string; farm_name: string }) => { parentNameMap[p.id] = p.farm_name; });
 
     // Build active delivery info per order (scheduled + in_progress only)
     const deliveryByOrder: Record<string, { count: number; earliestDate: string | null }> = {};

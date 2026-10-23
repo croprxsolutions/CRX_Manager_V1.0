@@ -91,11 +91,16 @@ export default function Quotes() {
   // The last rollover read failed: "No open bookings." would read as nothing outstanding.
   const [rolloverFailed, setRolloverFailed] = useState(false);
 
+  // Only the newest rollover read may set the rows: a slower, older one (the panel
+  // closed and reopened while it ran) must not overwrite them (Luna round 1).
+  const rolloverSeq = useRef(0);
   const loadRollover = useCallback(async () => {
+    const seq = ++rolloverSeq.current;
     setRolloverLoading(true);
     setRolloverFailed(false);
     try {
       const { data, error } = await supabase.rpc('get_open_booking_rollover', { p_customer_id: undefined, p_season: undefined });
+      if (seq !== rolloverSeq.current) return;
       if (error) throw error;
       const result = assertRpcResult<{ success: boolean; bookings: BookingRolloverRow[] }>(data, 'get_open_booking_rollover');
       // The function always answers with a list; none at all is a failed read.
@@ -103,13 +108,14 @@ export default function Quotes() {
       setRolloverRows(result.bookings);
       setRolloverLoaded(true);
     } catch (err) {
+      if (seq !== rolloverSeq.current) return;
       setRolloverRows([]);
       setRolloverFailed(true);
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'get_open_booking_rollover' } });
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) toast('error', 'Only admin or sales can view the booking rollover.');
       else toast('error', sanitizeError(err));
     } finally {
-      setRolloverLoading(false);
+      if (seq === rolloverSeq.current) setRolloverLoading(false);
     }
   }, [toast]);
 

@@ -3211,21 +3211,17 @@ describe('QuoteBuilder', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
     await screen.findByRole('button', { name: /Reload Quote/i });
 
-    // Move to quote B; its load fails, so `loading` clears and quote A's form -
-    // and this still-open dialog - come back under quote B's address.
+    // Move to quote B; its load fails. Quote A's form - and this still-open dialog -
+    // no longer come back under quote B's address: the page says quote B could not be
+    // loaded (To-Do 10.5), so the stale reload cannot even be fired.
     await goToQuote(router, 'quote-b');
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
       expect.stringContaining('Could not load the complete quote'),
     ));
-
-    fireEvent.click(await screen.findByRole('button', { name: /Reload Quote/i }));
+    expect(await screen.findByText('This quote could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reload Quote/i })).not.toBeInTheDocument();
     await flushPendingWork();
-
-    // The reload was refused, so the dialog stays open and reports that it did
-    // not finish - rather than silently installing quote A over quote B's route.
-    expect(screen.getByRole('button', { name: /Reload Quote/i })).toBeInTheDocument();
-    expect(screen.getByText(/Reload could not finish/)).toBeInTheDocument();
     expect(screen.queryAllByText('Q-AAA-RELOADED')).toHaveLength(0);
     // The reload never completed, so the key that may represent a committed
     // save must NOT have been rotated.
@@ -3262,43 +3258,41 @@ describe('QuoteBuilder', () => {
       expect.stringContaining('Could not load the complete quote'),
     ));
 
-    const readsBeforeDoomedReload = mockFrom.mock.calls.filter((c) => c[0] === 'quotes').length;
-    fireEvent.click(await screen.findByRole('button', { name: /Reload Quote/i }));
+    // The failed switch shows quote B's failed state, so the reload dialog that
+    // names quote A is gone: the doomed reload has no button to start it.
+    expect(await screen.findByText('This quote could not be loaded')).toBeInTheDocument();
+    const readsAfterFailedSwitch = mockFrom.mock.calls.filter((c) => c[0] === 'quotes').length;
+    expect(screen.queryByRole('button', { name: /Reload Quote/i })).not.toBeInTheDocument();
     await flushPendingWork();
 
-    // The decisive check. The doomed load must turn round at the door: no read
-    // issued, so no serial consumed, so nothing legitimately in flight for the
-    // quote on screen can be superseded by it.
+    // No read of quote A is issued afterwards, so no serial is consumed.
     expect(mockFrom.mock.calls.filter((c) => c[0] === 'quotes').length)
-      .toBe(readsBeforeDoomedReload);
-    // And it still must not install, which is what the sibling test above pins.
+      .toBe(readsAfterFailedSwitch);
     expect(screen.queryAllByText('Q-AAA-RELOADED')).toHaveLength(0);
   });
 
-  it('refuses the save when a failed switch leaves quote A on screen under quote B address', async () => {
+  it('a failed switch shows quote B could not be loaded, with no Save, Close or Revert over quote A', async () => {
     const quoteA = makeSwitchFixture('quote-a', 'Q-AAA-1');
     const quoteB = makeSwitchFixture('quote-b', 'Q-BBB-2');
     const router = renderQuoteSwitch([quoteA, quoteB], {}, { failSectionsFor: 'quote-b' });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
 
-    // A load that fails part-way deliberately KEEPS the operator's current
-    // edits rather than blanking them — which puts quote A's form, and a live
-    // Save button, under quote B's URL.
+    // Quote A's form used to stay under quote B's URL, where Save was refused but
+    // Close / Revert (which send the URL's quote B) were still offered from quote A's
+    // status. The page now says quote B could not be loaded instead.
     await goToQuote(router, 'quote-b');
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
       expect.stringContaining('Could not load the complete quote'),
     ));
 
-    const saveDraft = await screen.findByRole('button', { name: /Save Draft/ });
-    fireEvent.click(saveDraft);
-
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-      'error',
-      expect.stringContaining('has not finished loading'),
-    ));
+    expect(await screen.findByText('This quote could not be loaded')).toBeInTheDocument();
+    expect(screen.queryAllByText('Q-AAA-1')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /Save Draft/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Close|Revert/ })).not.toBeInTheDocument();
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('revert_quote_status', expect.anything());
   });
 
   // ── ...and neither may a save's REPLY ──────────────────────────────────────

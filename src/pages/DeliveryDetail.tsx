@@ -274,6 +274,18 @@ export default function DeliveryDetail() {
   // Sibling deliveries + quote context for transaction thread
   const [siblingDeliveries, setSiblingDeliveries] = useState<{ id: string; delivery_number: string }[]>([]);
   const [parentQuote, setParentQuote] = useState<{ id: string; quote_number: string } | null>(null);
+  // Load call order, so only the newest fetchDelivery for this route may publish.
+  const fetchSeqRef = useRef(0);
+
+  // The order context, invoices and remainders belong to the delivery they were read for:
+  // drop them on a route change so none shows under the next delivery while it loads.
+  useLayoutEffect(() => {
+    setRemainders([]);
+    setParentOrder(null);
+    setRelatedInvoices([]);
+    setSiblingDeliveries([]);
+    setParentQuote(null);
+  }, [id]);
 
   const isDriver = role === 'driver';
   const isAdmin = role === 'admin';
@@ -313,7 +325,10 @@ export default function DeliveryDetail() {
     setBilledOutsideCrxReason(null);
     // This page is reused across deliveries: a slow load for the previous one must
     // never publish its items, quantities or photos onto the delivery now on screen.
-    const isStale = () => signatureRouteIdRef.current !== id;
+    // Two loads of the SAME delivery can overlap (the first open and a refresh after an
+    // action): only the newest may publish, so an older failure cannot hide a newer page.
+    const seq = ++fetchSeqRef.current;
+    const isStale = () => signatureRouteIdRef.current !== id || seq !== fetchSeqRef.current;
     const failLoad = (message: string) => {
       toast('error', message);
       setLoadFailedId(id ?? null);
@@ -327,6 +342,7 @@ export default function DeliveryDetail() {
     if (isStale()) return;
 
     if (delError) {
+      Sentry.captureException(delError, { extra: { context: 'load_delivery', deliveryId: id } });
       failLoad(sanitizeError(delError));
       return;
     }
@@ -481,12 +497,19 @@ export default function DeliveryDetail() {
               if (isStale()) return;
               setParentQuote(qData as { id: string; quote_number: string } | null);
             } else { setParentQuote(null); }
+          } else {
+            // The order read failed or found nothing: never keep another delivery's quote link.
+            setParentQuote(null);
           }
         } else {
-          // Orphan delivery: no order, so no split-billing state to carry over
-          // from a previously viewed delivery.
+          // Orphan delivery: no order, so no split-billing state, order, invoices,
+          // sibling deliveries or quote to carry over from a previously viewed delivery.
           setOrderNeedsSplitBilling(false);
           setBilledOutsideCrxReason(null);
+          setParentOrder(null);
+          setRelatedInvoices([]);
+          setSiblingDeliveries([]);
+          setParentQuote(null);
         }
 
         // Fetch remainders for completed deliveries
@@ -496,10 +519,14 @@ export default function DeliveryDetail() {
             .select('*, product:products(product_name)')
             .eq('original_delivery_id', id!);
           if (isStale()) return;
-          if (remError) {
-            toast('error', sanitizeError(remError));
+          // Without its remainders a completed delivery would show none (or another
+          // delivery's) under "Remaining Items", so a failed read fails the page.
+          if (remError || !remData) {
+            Sentry.captureException(remError ?? new Error('delivery_remainders read returned no list'), { extra: { context: 'load_delivery_remainders', deliveryId: del.id } });
+            failLoad('Failed to load this delivery\'s remaining items');
+            return;
           } else {
-            setRemainders(((remData || []) as Array<DeliveryRemainder & { product?: { product_name: string } | null }>).map((r) => ({
+            setRemainders((remData as Array<DeliveryRemainder & { product?: { product_name: string } | null }>).map((r) => ({
               ...r,
               product_name: r.product?.product_name || 'Unknown',
             })) as DeliveryRemainder[]);

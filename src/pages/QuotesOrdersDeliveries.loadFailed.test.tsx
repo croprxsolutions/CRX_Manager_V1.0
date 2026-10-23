@@ -16,6 +16,8 @@ const H = vi.hoisted(() => ({
   functions: {} as Record<string, unknown>,
   // Table or function name -> how its reads fail.
   failing: new Map<string, 'error' | 'nodata'>(),
+  // Function name -> replies the test releases later, one per call, in call order.
+  pending: new Map<string, Array<Promise<unknown>>>(),
   toast: vi.fn(),
 }));
 
@@ -47,7 +49,11 @@ vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const client = {
     from: (table: string) => fixedQuery(replyFor(table, H.tables[table] ?? [])),
-    rpc: (name: string) => fixedQuery(replyFor(name, H.functions[name] ?? [])),
+    rpc: (name: string) => {
+      const slow = H.pending.get(name)?.shift();
+      if (slow) return { then: (resolve: (v: unknown) => unknown) => slow.then(resolve) };
+      return fixedQuery(replyFor(name, H.functions[name] ?? []));
+    },
   };
   return { ...actual, supabase: client, supabaseUntyped: client };
 });
@@ -79,6 +85,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   H.failing = new Map();
   H.functions = {};
+  H.pending = new Map();
   H.tables = {};
 });
 afterEach(cleanup);
@@ -111,6 +118,27 @@ describe('Quotes list', () => {
     expect(await screen.findByText('Q-BOOK-1')).toBeInTheDocument();
   });
 
+  it('an older failed rollover read that lands last does not replace the newer rows', async () => {
+    let releaseFirst!: (v: unknown) => void;
+    let releaseSecond!: (v: unknown) => void;
+    H.pending.set('get_open_booking_rollover', [
+      new Promise((r) => { releaseFirst = r; }),
+      new Promise((r) => { releaseSecond = r; }),
+    ]);
+    at('/quotes', <Quotes />);
+    const toggle = await screen.findByRole('button', { name: /Open booking rollover/ });
+    fireEvent.click(toggle); // first read starts
+    fireEvent.click(toggle); // close
+    fireEvent.click(toggle); // reopen: a second read starts (nothing loaded yet)
+
+    releaseSecond({ data: { success: true, bookings: [{ quote_id: 'q1', quote_number: 'Q-NEWER', customer_name: 'Big Farm', booked_cents: 100, drawn_cents: 0, remaining_cents: 100, prepay_remaining_cents: 0, prepay_earmarked_cents: 0 }] }, error: null });
+    expect(await screen.findByText('Q-NEWER')).toBeInTheDocument();
+    releaseFirst({ data: null, error: { message: 'connection reset' } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByText('Q-NEWER')).toBeInTheDocument();
+    expect(screen.queryByText('The booking rollover could not be loaded')).not.toBeInTheDocument();
+  });
+
   it('a rollover reply with no bookings list counts as failed', async () => {
     H.functions.get_open_booking_rollover = { success: true };
     at('/quotes', <Quotes />);
@@ -137,6 +165,13 @@ describe('Orders list', () => {
   it.each(['order_items', 'deliveries'])('a failed %s read fails the list instead of showing zero fulfilled or no deliveries', async (table) => {
     H.tables.orders = [order()];
     H.failing.set(table, 'error');
+    at('/orders', <Orders />);
+    expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-77')).not.toBeInTheDocument();
+  });
+  it('a failed farm-group name read fails the list instead of dropping the farm-group labels', async () => {
+    H.tables.orders = [{ ...order(), customer: { farm_name: 'Big Farm', parent_customer_id: 'parent-1' } }];
+    H.failing.set('customers', 'nodata');
     at('/orders', <Orders />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('ORD-77')).not.toBeInTheDocument();

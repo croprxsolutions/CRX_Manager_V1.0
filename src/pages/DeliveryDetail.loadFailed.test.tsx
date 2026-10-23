@@ -125,12 +125,26 @@ beforeEach(() => {
 const renderPage = () => render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
 
 describe('Delivery Detail load failures', () => {
+  it('a failure on one delivery does not follow the page to the next delivery', async () => {
+    failing.set('delivery_items', 'error');
+    const view = renderPage();
+    expect(await screen.findByText('This delivery could not be loaded')).toBeInTheDocument();
+
+    failing.clear();
+    tables.data.deliveries = [{ ...COMPLETED_DELIVERY, id: 'del-2', delivery_number: 'DEL-2' }];
+    route.id = 'del-2';
+    view.rerender(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    expect((await screen.findAllByText('DEL-2')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('This delivery could not be loaded')).not.toBeInTheDocument();
+  });
+
   it.each([
     ['deliveries', 'error'],
     ['delivery_items', 'error'],
     ['delivery_items', 'nodata'],
     ['invoices', 'error'],
     ['invoices', 'nodata'],
+    ['delivery_remainders', 'error'],
   ] as const)('a failed %s read (%s) says the delivery could not be loaded, and Try again shows it', async (table, mode) => {
     failing.set(table, mode);
     renderPage();

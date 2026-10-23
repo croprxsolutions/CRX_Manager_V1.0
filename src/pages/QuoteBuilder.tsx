@@ -734,6 +734,9 @@ export default function QuoteBuilder() {
   useEffect(() => {
     const isOpenBooking = isEditing && quoteId && (currentStatus === 'sent' || currentStatus === 'revised');
     if (!isOpenBooking) { setBookingSettlement(null); setBookingSettlementFailed(false); return; }
+    // A new read (Try again, or another quote) starts clean: no earlier failure or figures.
+    setBookingSettlementFailed(false);
+    setBookingSettlement(null);
     let cancelled = false;
     (async () => {
       try {
@@ -3712,10 +3715,10 @@ export default function QuoteBuilder() {
     );
   }
 
-  // The saved quote never loaded and nothing else is on screen: an empty form here would
-  // read as a quote with no lines. (A failed switch from another quote keeps that quote's
-  // edits on screen, with Save refused, as before.)
-  if (isEditing && id && installedQuoteId === null && quoteLoadFailedId === id) {
+  // The quote this URL names never loaded. An empty form would read as a quote with no lines,
+  // and another quote's form left on screen would offer Close / Revert, which act on this
+  // URL's quote while showing the other one's status (compliance review, PR #1073).
+  if (isEditing && id && installedQuoteId !== id && quoteLoadFailedId === id) {
     return (
       <LoadFailedState
         title="This quote could not be loaded"

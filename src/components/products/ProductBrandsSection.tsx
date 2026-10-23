@@ -165,11 +165,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const unsettledCopies = useRef(new Map<string, string>());
   useEffect(() => {
     const present = new Set(brands.map((brand) => brand.brand_name.toLowerCase()));
+    const stillUnsettled = new Map<string, string>();
     for (const [scope, name] of unsettledCopies.current) {
-      if (!present.has(name)) continue;
-      resetKeyFor(scope);
-      unsettledCopies.current.delete(scope);
+      if (present.has(name)) resetKeyFor(scope);
+      else stillUnsettled.set(scope, name);
     }
+    unsettledCopies.current = stillUnsettled;
   }, [brands, resetKeyFor]);
 
   useEffect(() => {

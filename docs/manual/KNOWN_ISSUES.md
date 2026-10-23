@@ -107,7 +107,9 @@ through `_is_dispatched_to_me`, the applicator or active crew member of a curren
 active profile and an active crew, drops a cancelled dispatch at once and a completed one after 7 days. The job-level
 functions `get_job_fields_with_geojson`, `get_dispatch_board_jobs`, `get_dispatched_list` and
 `get_job_billed_customers` repeat the same gate (which is job-level, so once a split-job assignee passes it,
-`get_job_fields_with_geojson` and `get_dispatch_board_jobs` return every field on the job; part B narrows them). Reassigning a job moves `jobs.applicator_id`, so the old applicator
+`get_job_fields_with_geojson` and `get_dispatch_board_jobs` return every field on the job, and
+`get_job_billed_customers` and `get_jobs_billed_customers` return every field's billed customer with farm name and
+account number; part B narrows them). Reassigning a job moves `jobs.applicator_id`, so the old applicator
 loses it. No view in `public` exposes these tables. **One gap the other way (missing access, not a leak):**
 `job_field_shares`, `job_applied_records` and its children, `job_attachments` and the `job-attachments` storage bucket
 admit only the whole-job applicator, not a per-field or crew assignee, so a dispatch-only applicator cannot read those
@@ -192,8 +194,10 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   `_is_dispatched_to_me(job_id)`) with `_can_see_field(job_fields.field_id)`, so a split-job assignee cannot read the
   job's other `job_fields` rows (field id, acres, crop) directly. For the same reason add `_can_see_field(jf.field_id)`
   to the field rows that `get_job_fields_with_geojson` (`20260713030000_geojson_rpc_dispatched_visibility.sql`) and
-  `get_dispatch_board_jobs` (`20261013220000_reps_work_any_customer.sql`) return, so only office staff and the
-  whole-job applicator get every field of a job. Do **not** make `fbd_select` and `arf_select`
+  `get_dispatch_board_jobs` (`20261013220000_reps_work_any_customer.sql`) return, and to the `job_field_ids` rows of
+  `get_job_billed_customers` (`20260629180000_get_job_billed_customers_dispatch.sql`) and `get_jobs_billed_customers`
+  (`20260629160000_get_jobs_billed_customers.sql`), whose live bodies take every `job_fields` row after the job-level
+  gate, so only office staff and the whole-job applicator get every field, and every billed customer, of a job. Do **not** make `fbd_select` and `arf_select`
   office-only: applicator screens read both. Job Detail (`src/pages/JobDetail.tsx`, the grower-share banner) reads
   `field_billing_defaults` and would mislabel a denied read, and the applicator sheet
   (`src/lib/applicatorSheetPrintData.ts`) joins `application_record_fields` for a field's past applications. Scope

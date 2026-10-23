@@ -6,8 +6,8 @@
 // name, role and phone are set and the user is activated through
 // admin_update_profile, called with the CALLING admin's own client (never the
 // service role), so that function's active-admin check and the profile guards
-// still decide. The idempotency key is tied to the new user's id, so a retry of
-// this step can never land on another user.
+// still decide. The idempotency key names the new user's id plus a random part,
+// so it can never land on another user or be used up in advance.
 
 // Loose shape so the caller's SupabaseClient (or a test double) fits without
 // importing its generics.
@@ -34,8 +34,11 @@ function assertRpcResult<T>(data: unknown, rpcName: string): T {
   return data as T;
 }
 
+// Unguessable as well as user-scoped: idempotency keys are shared across
+// actors, so a key predictable from the user id could be used up first by
+// another admin call and replay its cached success here.
 export function activationKeyFor(userId: string): string {
-  return `create-user-activate:${userId}`;
+  return `create-user-activate:${userId}:${crypto.randomUUID()}`;
 }
 
 // Resolves to null when the user is active with the chosen name and role, or to

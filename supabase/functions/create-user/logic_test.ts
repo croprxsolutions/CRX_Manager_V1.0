@@ -39,17 +39,21 @@ Deno.test("activates through admin_update_profile with the chosen name, role and
     phone: "555-0100",
   });
   assertEquals(result, null);
-  assertEquals(calls, [{
-    fn: "admin_update_profile",
-    args: {
-      target_user_id: USER,
-      new_role: "applicator",
-      new_full_name: "Jane Doe",
-      new_phone: "555-0100",
-      new_is_active: true,
-      p_idempotency_key: `create-user-activate:${USER}`,
-    },
-  }]);
+  const { p_idempotency_key, ...rest } = calls[0].args;
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].fn, "admin_update_profile");
+  assertEquals(rest, {
+    target_user_id: USER,
+    new_role: "applicator",
+    new_full_name: "Jane Doe",
+    new_phone: "555-0100",
+    new_is_active: true,
+  });
+  assertEquals(
+    /^create-user-activate:11111111-2222-3333-4444-555555555555:[0-9a-f-]{36}$/.test(String(p_idempotency_key)),
+    true,
+    `key ${p_idempotency_key}`,
+  );
 });
 
 Deno.test("an empty phone is sent as null, never as an empty string", async () => {
@@ -58,9 +62,9 @@ Deno.test("an empty phone is sent as null, never as an empty string", async () =
   assertEquals(calls[0].args.new_phone, null);
 });
 
-Deno.test("the retry key is tied to the new user, so it differs per user", () => {
-  assertEquals(activationKeyFor(USER) === activationKeyFor("other"), false);
-  assertEquals(activationKeyFor(USER), activationKeyFor(USER));
+Deno.test("the key names the new user but cannot be predicted from its id", () => {
+  assertEquals(activationKeyFor(USER).startsWith(`create-user-activate:${USER}:`), true);
+  assertEquals(activationKeyFor(USER) === activationKeyFor(USER), false);
 });
 
 Deno.test("a database error is reported, not swallowed", async () => {

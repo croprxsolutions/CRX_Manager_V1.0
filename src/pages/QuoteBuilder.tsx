@@ -5178,7 +5178,8 @@ export default function QuoteBuilder() {
                               max={row.remaining}
                               step="any"
                               value={row.qty}
-                              disabled={row.remaining <= 0}
+                              // Locked while the order is created: a later change would not be in it.
+                              disabled={drawing || row.remaining <= 0}
                               onChange={(e) => {
                                 const next = [...drawRows];
                                 next[idx] = { ...row, qty: e.target.value };

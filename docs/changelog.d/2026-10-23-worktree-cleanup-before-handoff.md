@@ -45,7 +45,7 @@ name had moved on separately and was not overwritten.
 | `C:/CRX_admin_invoicing` | `claude/invoicing-admin-only-20261009` | Bulk-Post safety work, never merged; now pushed | Owner decides: revive or retire |
 | `C:/CRX_invoice_safety` | `claude/invoice-screen-safety-20261009` | Closed PR #892; pushed | Delete folder after OK |
 | `C:/CRX_mergeperm` | `claude/audit-brace-expansion-fast-uri` | Closed PR #847 (dependency fix); pushed | Delete folder after OK |
-| `C:/CRX_rmguard` | `claude/autopilot-recursive-delete-alias-20260907` | Closed PR #631, 1 uncommitted guard edit; commit pushed | Delete folder after OK |
+| `C:/CRX_rmguard` | `claude/autopilot-recursive-delete-alias-20260907` | Closed PR #631; commit pushed. One uncommitted edit, saved nowhere: a one-character comment fix in `.claude/hooks/autopilot-lib.mjs` (restores a missing `\`), with no behaviour change | Delete after OK; doing so discards that comment fix, so carry it into a PR first if it is wanted |
 | `C:/CRX_autoland` | `claude/autonomous-landing` | Merged #804, but locked ("build session in progress", 2026-09-27) | Unlock and delete after OK |
 | `.claude/worktrees/hand-of-orchestrator-ab5605` | `claude/crx-manager-backlog-review-651851` | Inside main; only generated `.agents/skills/source-command-*` folders | Delete after OK (a guard blocks agent deletes under `.claude/`) |
 | Temp `scratchpad/part1` | `claude/guard-cleanup-noisy-20261002` | Merged #874; about 3,200 tracked files missing, nothing new | Force-remove after OK |

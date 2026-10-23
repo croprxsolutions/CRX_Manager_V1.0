@@ -15,7 +15,8 @@ either already inside `origin/main` or was the exact head GitHub merged:
 `C:/CRX_pr827` (#827), `C:/CRX_pricingplan` (#930), `C:/CRX_rep_own_name` (#931),
 `C:/CRX_replay_batch3` (#954), `C:/CRX_replay_batch3b` (#967), `C:/CRX_salesman_own_name` (#933),
 `C:/CRX_season_clock` (#858), `C:/CRX_shared_shortage` (#925), `C:/CRX_tailwind4` (#877),
-`C:/CRX_void_order_split` (#1008). `git worktree prune` also dropped one dead entry (`mainwt`).
+`C:/CRX_void_order_split` (#1008). `git worktree prune` also dropped one dead bookkeeping entry (`mainwt`). Its pointer file was
+broken, so `git worktree list` never showed it, and it is not among the 44: 44 − 18 = 26.
 
 **Saved to GitHub first.** `claude/invoicing-admin-only-20261009` (22 commits that existed only on
 this PC) was pushed under its own name. One local-only commit on

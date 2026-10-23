@@ -9,6 +9,6 @@
   exist. The full ledger is 1054 rows; the effective ordering high-water is `20261022075000`.
 - The live site serves bundle `index-Ckax77dz.js`; its Deliveries, Delivery Detail and Field Stop chunks carry
   the new completion-proof and receipt calls, which no build before #1024 had.
-- Row 973, a new live capture in `migration-history.md`, the `CURRENT_STATE.md` and `KNOWN_ISSUES.md` ledger
-  headers, `rpc-functions.md`, and the schema registry now reflect live. The driver-receipt known issue moved to
-  the archive as FIXED.
+- Row 973, a new live capture in `migration-history.md`, the `CURRENT_STATE.md` ledger header,
+  `rpc-functions.md`, and the schema registry now reflect live. The driver-receipt item (KI-72 (a)) is closed in
+  `KNOWN_ISSUES.md` and its closing record is appended to `docs/manual/archive/KNOWN_ISSUES-history-2026-10.md`.

@@ -89,8 +89,8 @@
 > after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 24-hour terms as a full proof (the 24 hours also bind the
-> original full review at the root of the chain; the migration landing gate keeps 30 minutes), so both merge gates, the
-> push gate and the migration landing gate honour it; `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows
+> original full review at the root of the chain), so both merge gates and the push gate honour it, and the migration
+> landing gate honours it too but only while it is under 30 minutes old (`APPLY_SOL_PROOF_MAX_AGE_MS`); `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows
 > one. The minter is the same protected wrapper, so `review-proof-guard.mjs` still blocks hand-written proofs.
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they

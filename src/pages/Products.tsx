@@ -794,13 +794,14 @@ export default function Products() {
             />
           )}
           <div className="flex flex-wrap gap-2">
-          {/* Download All dropdown */}
+          {/* Download All dropdown. Exports wait while a failed load hides the rows: they would
+              export the old catalog as if it were current. */}
           <div className="relative">
             <Button
               variant="secondary"
               icon={<Download className="w-4 h-4" />}
               onClick={() => setExportMenuOpen((v) => !v)}
-              disabled={exporting || filtered.length === 0}
+              disabled={exporting || loadError || filtered.length === 0}
             >
               {exporting ? 'Exporting...' : 'Download'} <ChevronDown className="w-3 h-3 ml-1 inline" />
             </Button>
@@ -838,7 +839,7 @@ export default function Products() {
                 icon={<FileSpreadsheet className="w-4 h-4" />}
                 onClick={handleExportPricingWorkbook}
                 loading={workbookBusy}
-                disabled={filtered.length === 0}
+                disabled={loadError || filtered.length === 0}
               >
                 Pricing .xlsx
               </Button>

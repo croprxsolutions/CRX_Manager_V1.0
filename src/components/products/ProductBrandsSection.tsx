@@ -106,18 +106,16 @@ function rupLabel(isRup: boolean | null): string {
  */
 // Refusals the server makes before writing anything: after one of these the save certainly did not
 // happen, so the admin may correct the form. Anything else (a lost reply, a timeout) is uncertain.
-const CLEAR_REFUSAL_CODES = [
-  RpcErrorCodes.BRAND_NAME_TAKEN,
-  RpcErrorCodes.BRAND_NAME_REQUIRED,
-  RpcErrorCodes.BRAND_TEXT_TOO_LONG,
-  RpcErrorCodes.EPA_REGISTRATION_INVALID,
-  RpcErrorCodes.NOT_AUTHORIZED,
-  RpcErrorCodes.PRODUCT_NOT_FOUND,
-  RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH,
-] as const;
-
 function isClearRefusal(err: unknown): boolean {
-  return CLEAR_REFUSAL_CODES.some((code) => hasRpcCode(err, code));
+  return [
+    RpcErrorCodes.BRAND_NAME_TAKEN,
+    RpcErrorCodes.BRAND_NAME_REQUIRED,
+    RpcErrorCodes.BRAND_TEXT_TOO_LONG,
+    RpcErrorCodes.EPA_REGISTRATION_INVALID,
+    RpcErrorCodes.NOT_AUTHORIZED,
+    RpcErrorCodes.PRODUCT_NOT_FOUND,
+    RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH,
+  ].some((code) => hasRpcCode(err, code));
 }
 
 export default function ProductBrandsSection({ productId, productName, isAdmin, userId }: ProductBrandsSectionProps) {

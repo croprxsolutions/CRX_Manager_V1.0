@@ -301,10 +301,39 @@ function missingViewRebuildParts(sql: string): string[] {
       || !grants.some((s) => /\bauthenticated\b/i.test(s)) || !grants.every(grantOk)) {
     missing.push('view grants');
   }
-  if (!afterView.some((s) => /CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.invoice_post_version\s*\([^)]*\bpublic\.invoices_postable\b/i.test(s))) {
+  // The overload keeps its contract: SECURITY DEFINER with the safe search_path (API roles cannot run
+  // _invoice_post_version), closed to PUBLIC and anon, EXECUTE only for authenticated and service_role.
+  const fnSig = 'public\\.invoice_post_version\\s*\\(\\s*(?:\\w+\\s+)?public\\.invoices_postable\\s*\\)';
+  const fn = afterView.find((s) => new RegExp(`CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+${fnSig}`, 'i').test(s)) ?? '';
+  const fnRevoke = afterView.find((s) => new RegExp(`REVOKE\\s+ALL\\s+ON\\s+FUNCTION\\s+${fnSig}\\s+FROM\\b`, 'i').test(s)) ?? '';
+  const fnGrants = afterView.filter((s) => new RegExp(`GRANT\\b[\\s\\S]*\\bON\\s+FUNCTION\\s+${fnSig}`, 'i').test(s));
+  const fnGrantOk = (s: string) => {
+    const m = new RegExp(`GRANT\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+${fnSig}\\s+TO\\s+([\\s\\S]*)`, 'i').exec(s);
+    return !!m && m[1].split(',').every((r) => ['authenticated', 'service_role'].includes(r.trim().toLowerCase()));
+  };
+  if (!fn || !/\bSECURITY\s+DEFINER\b/i.test(fn) || !/\bSET\s+search_path\s*(=|TO)\s*public\s*,\s*pg_temp\b/i.test(fn)
+      || !['PUBLIC', 'anon'].every((r) => new RegExp(`\\b${r}\\b`, 'i').test(fnRevoke.replace(/^[\s\S]*?\bFROM\b/i, '')))
+      || !fnGrants.some((s) => /\bauthenticated\b/i.test(s)) || !fnGrants.every(fnGrantOk)) {
     missing.push('invoice_post_version(invoices_postable)');
   }
   return missing;
+}
+
+/** The invoices columns after this migration's own ADD / DROP / RENAME COLUMN statements. */
+function invoicesColumnsAfter(sql: string, before: string[]): string[] {
+  const cols = new Set(before);
+  const table = /ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:"?public"?\s*\.\s*)?"?invoices"?\s+([^;]*);/gi;
+  for (const [, actions] of sql.matchAll(table)) {
+    for (const action of actions.split(',')) {
+      const add = /^\s*ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s/i.exec(action);
+      const drop = /^\s*DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?"?(\w+)"?/i.exec(action);
+      const rename = /^\s*RENAME\s+(?:COLUMN\s+)?"?(\w+)"?\s+TO\s+"?(\w+)"?/i.exec(action);
+      if (add && !/^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)$/i.test(add[1])) cols.add(add[1]);
+      else if (drop && !/^(CONSTRAINT|NOT|DEFAULT|EXPRESSION|IDENTITY)$/i.test(drop[1])) cols.delete(drop[1]);
+      else if (rename) { cols.delete(rename[1]); cols.add(rename[2]); }
+    }
+  }
+  return [...cols];
 }
 
 describe('the posting version is read only from invoices_postable', () => {
@@ -344,7 +373,20 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(body, 'could not read the view column list').not.toBeNull();
     const viewColumns = body![1].split(',').map((c) => c.trim());
     const cost: string[] = [...COST_COLUMNS.invoices];
-    expect([...viewColumns].sort()).toEqual(registry.columns.invoices.filter((c) => !cost.includes(c)).sort());
+    // The registry is refreshed only after a live apply, so apply the defining migration's own column
+    // changes to it first (the rebuild check keeps those changes in the same file as the view).
+    const expected = invoicesColumnsAfter(sql, registry.columns.invoices).filter((c) => !cost.includes(c));
+    expect([...viewColumns].sort()).toEqual(expected.sort());
+  });
+
+  it('the expected view columns follow the migration\'s own column changes (mutation guard)', () => {
+    const before = ['id', 'status', 'total_cost_cents'];
+    expect(invoicesColumnsAfter('ALTER TABLE public.invoices ADD COLUMN memo text;', before).sort()).toEqual(['id', 'memo', 'status', 'total_cost_cents']);
+    expect(invoicesColumnsAfter('ALTER TABLE public.invoices DROP COLUMN IF EXISTS status CASCADE;', before).sort()).toEqual(['id', 'total_cost_cents']);
+    expect(invoicesColumnsAfter('ALTER TABLE public.invoices RENAME COLUMN status TO state;', before).sort()).toEqual(['id', 'state', 'total_cost_cents']);
+    expect(invoicesColumnsAfter('ALTER TABLE public.invoices ADD CONSTRAINT x CHECK (true), ALTER COLUMN status DROP NOT NULL;', before).sort())
+      .toEqual(['id', 'status', 'total_cost_cents']);
+    expect(invoicesColumnsAfter('ALTER TABLE public.invoices ADD COLUMN memo text;', [...before, 'memo']).sort()).toEqual(['id', 'memo', 'status', 'total_cost_cents']);
   });
 
   // The registry is refreshed after a live apply, so the test above can lag a migration on disk. Any
@@ -371,7 +413,10 @@ describe('the posting version is read only from invoices_postable', () => {
     const view = 'CREATE VIEW public.invoices_postable WITH (security_invoker = true) AS SELECT id FROM public.invoices;';
     const acl = 'REVOKE ALL ON public.invoices_postable FROM PUBLIC, anon, authenticated, service_role;\n'
       + 'GRANT SELECT ON public.invoices_postable TO authenticated, service_role;';
-    const fn = 'CREATE OR REPLACE FUNCTION public.invoice_post_version(p_invoice public.invoices_postable) RETURNS text';
+    const fn = 'CREATE OR REPLACE FUNCTION public.invoice_post_version(p_invoice public.invoices_postable) RETURNS text\n'
+      + 'LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$ SELECT 1 $fn$;\n'
+      + 'REVOKE ALL ON FUNCTION public.invoice_post_version(public.invoices_postable) FROM PUBLIC, anon;\n'
+      + 'GRANT EXECUTE ON FUNCTION public.invoice_post_version(public.invoices_postable) TO authenticated, service_role';
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn}`)).toEqual([]);
     expect(missingViewRebuildParts(view)).toEqual(['view grants', 'invoice_post_version(invoices_postable)']);
     expect(missingViewRebuildParts(`CREATE VIEW public.invoices_postable AS SELECT id FROM public.invoices;\n${acl}\n${fn}`))
@@ -385,6 +430,12 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nALTER VIEW public.invoices_postable SET (security_invoker = false);`))
       .toEqual(['security_invoker view']);
     expect(missingViewRebuildParts(`ALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}\n${acl}\n${fn}`)).toEqual([]);
+    // The overload's own contract (Codex GitHub App review): definer, search_path, closed, narrow grant.
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('SECURITY DEFINER ', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(' SET search_path = public, pg_temp', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('FROM PUBLIC, anon', 'FROM anon')}`)).toEqual(['invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('TO authenticated, service_role', 'TO authenticated, anon')}`))
+      .toEqual(['invoice_post_version(invoices_postable)']);
     // Grants and the function placed before the cascade are dropped by it (Codex GitHub App review).
     expect(missingViewRebuildParts(`${acl}\n${fn};\nALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}`))
       .toEqual(['view grants', 'invoice_post_version(invoices_postable)']);

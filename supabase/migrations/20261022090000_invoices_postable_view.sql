@@ -158,7 +158,9 @@ BEGIN
     RAISE EXCEPTION 'INVOICES_POSTABLE_POSTFLIGHT: the view columns are not every invoices column but total_cost_cents: %', v_cols;
   END IF;
   -- Every privilege of every API role (and PUBLIC), table-wide and on any column: SELECT for
-  -- authenticated and service_role, nothing else for anyone.
+  -- authenticated and service_role, nothing else for anyone. The role name 'public' is the PUBLIC
+  -- pseudo-role in has_table_privilege / has_any_column_privilege (PostgreSQL docs, "Access Privilege
+  -- Inquiry Functions"): it reads PUBLIC's own grants, false after REVOKE ... FROM PUBLIC.
   SELECT string_agg(format('%s %s', r.rol, p.priv), ', ' ORDER BY r.rol, p.priv) INTO v_cols
     FROM (VALUES ('authenticated'), ('service_role'), ('anon'), ('public')) AS r(rol)
     CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv)

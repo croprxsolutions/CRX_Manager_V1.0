@@ -27,7 +27,9 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: invoices_postable columns are not every invoices column but total_cost_cents';
   END IF;
 
-  -- SELECT-only for authenticated and service_role; nothing for anon or PUBLIC.
+  -- SELECT-only for authenticated and service_role; nothing for anon or PUBLIC. The role name 'public'
+  -- is the PUBLIC pseudo-role in has_table_privilege / has_any_column_privilege (PostgreSQL docs,
+  -- "Access Privilege Inquiry Functions"): it reads PUBLIC's own grants.
   SELECT string_agg(format('%s %s', r.rol, p.priv), ', ') INTO v_bad
     FROM (VALUES ('authenticated'), ('service_role'), ('anon'), ('public')) AS r(rol)
     CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv)

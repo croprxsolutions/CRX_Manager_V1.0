@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Isolated, re-runnable proof for supabase/migrations/20261022080000_product_brands.sql.
+// Isolated, re-runnable proof for supabase/migrations/20261022090500_product_brands.sql.
 //
 // WHAT IT PROVES, in order:
 //   1. on the real-shape harness (live helper bodies, Supabase-style default privileges) the
@@ -31,7 +31,7 @@ const CONTAINER = `crx-prove-product-brands-${RUN_ID}`;
 const OWNER_LABEL = "crx.prover=product-brands";
 const IMAGE = "postgres:17";
 
-const MIGRATION = join(REPO, "supabase", "migrations", "20261022080000_product_brands.sql");
+const MIGRATION = join(REPO, "supabase", "migrations", "20261022090500_product_brands.sql");
 const HARNESS = join(HERE, "fixtures", "product-brands-harness.sql");
 const TESTS = join(HERE, "fixtures", "product-brands-tests.sql");
 const SMOKE_CHAIN = join(HERE, "smoke-upsert-product-brand.sql");

@@ -1,6 +1,6 @@
 ## 2026-10-22 — Products list their real brands, each with its own EPA number (step 1, PR A)
 
-**What changed.** New migration `20261022080000_product_brands.sql` (migration-history row 975, not yet
+**What changed.** New migration `20261022090500_product_brands.sql` (migration-history row 975, not yet
 applied). It adds `product_brands`, one row per acceptable brand of a product: name, its own EPA
 registration number, manufacturer, a "currently sourced" switch, restricted-use flag (or "not
 confirmed") and signal word. It also adds the admin-only `upsert_product_brand` operation that writes it:

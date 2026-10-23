@@ -1,5 +1,5 @@
 -- Real-shape harness for prove-product-brands.mjs: the roles, auth.uid(), tables and helper
--- functions 20261022090500_product_brands.sql depends on. Helper bodies are the live definitions
+-- functions 20261022085000_product_brands.sql depends on. Helper bodies are the live definitions
 -- read with pg_get_functiondef on 2026-10-22; tables carry only the columns the migration touches.
 -- Default privileges copy Supabase's (every new table and function granted to the API roles), so
 -- the migration's own REVOKEs and its postflight are exercised for real.

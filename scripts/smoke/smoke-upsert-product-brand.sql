@@ -1,6 +1,6 @@
 -- ============================================================================
 -- SMOKE CHAIN (rolled back by design): upsert_product_brand / product_brands
--- (20261022090500_product_brands.sql). Run after apply, as ONE statement.
+-- (20261022085000_product_brands.sql). Run after apply, as ONE statement.
 --
 -- Auth probes (template smoke-auth-probe-template.sql; the RPC has NO actor parameter, the actor is
 -- auth.uid(), so P4 "forged actor" does not apply):

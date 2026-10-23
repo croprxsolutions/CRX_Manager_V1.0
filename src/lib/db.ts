@@ -414,7 +414,7 @@ export const RpcErrorCodes = {
   // already removed" (before 20261013220000 also "a customer not assigned to
   // this rep"; reps may now remove documents of any customer).
   CUSTOMER_DOCUMENT_NOT_FOUND: 'CUSTOMER_DOCUMENT_NOT_FOUND',
-  // upsert_product_brand (20261022090500_product_brands).
+  // upsert_product_brand (20261022085000_product_brands).
   BRAND_NAME_TAKEN: 'BRAND_NAME_TAKEN',
   BRAND_CHANGED: 'BRAND_CHANGED',
   BRAND_NAME_REQUIRED: 'BRAND_NAME_REQUIRED',

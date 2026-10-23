@@ -127,6 +127,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const [copyCandidates, setCopyCandidates] = useState<ProductBrand[]>([]);
   const [copySelected, setCopySelected] = useState<Set<string>>(new Set());
   const [copyLoading, setCopyLoading] = useState(false);
+  // A failed read of the source is shown as a failure with a retry, never as "no brands to copy".
+  const [copyLoadError, setCopyLoadError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
   // Same idea for the copy source: if the admin picks product A then B, A's late reply is dropped so
   // B's label never sits over A's brands.
@@ -270,6 +272,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     setCopySource(source);
     setCopyCandidates([]);
     setCopySelected(new Set());
+    setCopyLoadError(null);
     if (!source) {
       setCopyLoading(false);
       return;
@@ -284,11 +287,11 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     } catch (err) {
       if (seq !== copySourceSeq.current) return;
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands_copy' } });
-      toast('error', sanitizeError(err));
+      setCopyLoadError(sanitizeError(err));
     } finally {
       if (seq === copySourceSeq.current) setCopyLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   // Copying is only safe against this product's own list: until it has loaded (or after it failed),
   // a brand already here would look copyable, be refused as a duplicate, and stop the copy part-way.
@@ -561,6 +564,11 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
           ) : null}
           {copyLoading ? (
             <p className="text-sm text-secondary">Loading brands…</p>
+          ) : copyLoadError && copySource ? (
+            <div className="flex items-center gap-3 text-sm text-red-600" role="alert">
+              <span>Couldn’t load {copySource.name}’s brands: {copyLoadError}</span>
+              <Button size="sm" variant="secondary" onClick={() => void loadCopySource(copySource)}>Try again</Button>
+            </div>
           ) : copySource && copyableCandidates.length === 0 ? (
             <p className="text-sm text-secondary">That product has no brands this one doesn’t already list.</p>
           ) : (

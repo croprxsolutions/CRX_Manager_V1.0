@@ -260,6 +260,25 @@ describe('ProductBrandsSection', () => {
     expect(screen.getByRole('button', { name: 'Copy 0 brands' })).toBeDisabled();
   });
 
+  it('shows a failed copy-source read as a failure with a retry, not as "no brands"', async () => {
+    const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366' };
+    let sourceLoads = 0;
+    mocks.listProductBrands.mockImplementation((id: string) => {
+      if (id !== 'p2') return Promise.resolve([slam]);
+      sourceLoads += 1;
+      return sourceLoads === 1 ? Promise.reject(new Error('network down')) : Promise.resolve([bulkMad]);
+    });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /copy from another product/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
+    expect(await screen.findByText(/couldn’t load Roundup 5\.4# Generic - Bulk’s brands/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no brands this one doesn’t already list/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+    expect(await screen.findByLabelText(/Mad Dog/)).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Copy 1 brand' })).toBeEnabled();
+  });
+
   it('says so when brands fail to load and offers a retry', async () => {
     mocks.listProductBrands.mockRejectedValueOnce(new Error('network down')).mockResolvedValueOnce([slam]);
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="u2" />);

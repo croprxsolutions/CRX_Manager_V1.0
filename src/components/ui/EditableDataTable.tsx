@@ -168,7 +168,8 @@ export default function EditableDataTable<T extends Record<string, any>>({
   };
 
   const handleSave = async () => {
-    if (!onSave || dirtyCount === 0) return;
+    // Never save edits to rows a failed load has hidden from view.
+    if (!onSave || dirtyCount === 0 || loadError) return;
     setSaving(true);
     try {
       const shouldCloseEditMode = await onSave(dirtyRows);
@@ -285,7 +286,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
         {/* Edit mode controls */}
         <div className="flex gap-2 items-center shrink-0">
           {headerActions}
-          {canEdit && !editMode && (
+          {canEdit && !editMode && !loadError && (
             <Button
               variant="secondary"
               size="sm"
@@ -310,7 +311,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
                 icon={<Save className="w-4 h-4" />}
                 onClick={handleSave}
                 loading={saving}
-                disabled={dirtyCount === 0}
+                disabled={dirtyCount === 0 || loadError}
               >
                 Save{dirtyCount > 0 ? ` (${dirtyCount})` : ''}
               </Button>

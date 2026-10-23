@@ -885,7 +885,9 @@ BEGIN
   SELECT role INTO v_actor_role FROM public.profiles WHERE id = v_actor AND is_active = true;
   SELECT assigned_driver, customer_id, status INTO v_assigned_driver, v_customer_id, v_status
     FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL;
-  -- One message whether the delivery is missing or not the caller's.
+  -- One message whether the delivery is missing or not the caller's. An active admin or sales rep
+  -- gets any delivery's recipient: customers_select already lets both read every customer row
+  -- (live 2026-10-22; reps work any customer, PRs #907/#913), so this adds nothing for them.
   IF v_customer_id IS NULL OR v_actor_role IS NULL OR NOT (
     v_actor_role IN ('admin', 'sales_rep')
     OR (v_actor_role = 'driver' AND v_actor = v_assigned_driver AND v_status IN ('scheduled', 'in_progress'))

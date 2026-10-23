@@ -206,6 +206,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     lookupSeq.current += 1;
     // Closing settles an unclear create: Add waits for the reload, which shows whether it was saved.
     // Retire its key, so the same values entered later are a new request, not a replay of that save.
+    // If that save is still landing when the reload reads, the name index refuses a second brand of
+    // the same name (BRAND_NAME_TAKEN); a changed name was always a new request with its own key.
     if (createUncertain && draft) resetKeyFor(saveScope(inputFromDraft(productId, draft)));
     setCreateUncertain(false);
     setDraft(null);

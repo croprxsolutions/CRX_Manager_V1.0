@@ -206,8 +206,13 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   security does not apply inside them. A live search on 2026-10-22 for definer bodies that test `applicator_id` against
   `auth.uid()` found seven: `_is_dispatched_to_me`, `get_dispatch_board_jobs`, `get_dispatched_list`,
   `get_job_billed_customers`, `get_jobs_billed_customers`, `get_job_fields_with_geojson` and `stamp_job_printed`
-  (which also writes the job's print record). Re-run that search when writing the migration, and add a direct-call
-  test for each. Close the dispatch route's soft-delete hole too: add a `jobs.deleted_at IS NULL` test to
+  (which also writes the job's print record). That search missed two that copy `auth.uid()` into a variable first:
+  `start_job` and `complete_job` (whose body is `_complete_job_replay_impl_20261015` behind the replay wrapper) test
+  `v_job.applicator_id = v_actor` and never check `jobs.deleted_at` (confirmed live, 2026-10-22), so the former
+  assignee can still start a soft-deleted scheduled job or complete a soft-deleted in-progress job, which writes
+  application records and takes inventory. Both need the `deleted_at` test and the window; `stage_offline_action`'s
+  dispatch-row check (`applicator_id = v_actor`) needs the same review. Re-run the search when writing the migration,
+  matching actor variables as well as `auth.uid()`, and add a direct-call test for each. Close the dispatch route's soft-delete hole too: add a `jobs.deleted_at IS NULL` test to
   `_is_dispatched_to_me` (or a trigger that cancels open dispatches when `deleted_at` is set), since the dispatch
   policies would otherwise keep a deleted job readable.
 - **Proof:** per-role impersonation before and after, in the disposable database and read-only on live after the apply:

@@ -86,6 +86,25 @@ describe('ProductBrandsSection', () => {
     }));
   });
 
+  it('locks the brand form while a save is in flight, so the saved values are the ones shown', async () => {
+    let releaseSave: (row: unknown) => void = () => {};
+    mocks.saveProductBrand.mockReturnValue(new Promise((resolve) => { releaseSave = resolve; }));
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    await waitFor(() => expect(mocks.saveProductBrand).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('Brand name')).toBeDisabled();
+    expect(screen.getByLabelText('EPA Reg. No.')).toBeDisabled();
+    expect(screen.getByLabelText('Signal word')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /look up/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog Plus' } });
+    expect(screen.getByLabelText('Brand name')).toHaveValue('Mad Dog');
+    releaseSave({ ...slam, id: 'b2', brand_name: 'Mad Dog', row_version: 1 });
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Brand added.'));
+  });
+
   it('refuses a malformed EPA number before calling the server', async () => {
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
     await screen.findByText('Slam 5.4');

@@ -173,11 +173,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   };
 
   const updateDraft = (patch: Partial<BrandDraft>) => {
+    if (saving) return;
     setDraft((current) => (current ? { ...current, ...patch } : current));
   };
 
   const handleLookup = async () => {
-    if (!draft) return;
+    if (!draft || saving) return;
     const regNumber = draft.epaRegistration.trim();
     if (!EPA_REGISTRATION_PATTERN.test(regNumber)) {
       setDraftError('Enter an EPA registration number (like 524-475) to look it up.');
@@ -441,7 +442,10 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
         )}
       >
         {draft && (
-          <div className="space-y-3">
+          // The save sends the form as it was when Save was pressed, so the whole form (lookup and
+          // apply included) is locked until it answers: an edit made mid-save would otherwise be
+          // dropped on success, or become a second create after a lost reply.
+          <fieldset disabled={saving} className="min-w-0 space-y-3">
             <Input
               id="brand-name"
               label="Brand name"
@@ -527,7 +531,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
               Currently sourced (switch off when we stop buying this brand; it stays on old records)
             </label>
             {draftError && <p className="text-sm text-red-600" role="alert">{draftError}</p>}
-          </div>
+          </fieldset>
         )}
       </Modal>
 

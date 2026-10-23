@@ -5,5 +5,6 @@
 - The brands offered for copying are checked against the product's current list on every redraw. A brand that appears on a reload, such as one another admin just added, drops out of the copy list.
 - A second Codex App review (head `3a4ea25b9`) found that a failed read of the product being copied from showed as "no brands to copy". The dialog now says the read failed and offers Try again. A fourth screen test fails on the old code.
 - A third Codex App review (head `ea1c1774e`) found that the ticks and the product picker still worked during a copy. Unticking a brand mid-copy did not stop it being copied, and a copied brand can only be retired, not deleted. Both are now locked while a copy runs. A fifth screen test fails on the old code.
+- A fourth Codex App review (head `b4f0049f3`) found the Add/Edit brand form stayed editable during a save. Edits made mid-save were dropped on success, or became a second create after a lost reply. The whole form, EPA lookup included, is now locked while it saves. A sixth screen test fails on the old code.
 
 **Proof.** Three new screen tests in `ProductBrandsSection.test.tsx`: Copy is off while loading, a retry is paused after a failed reload, and a brand that shows up on a reload is no longer offered. All three fail on the old code and pass on the fixed code. No database change.

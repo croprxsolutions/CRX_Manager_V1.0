@@ -261,6 +261,10 @@ export default function FieldSetup() {
     const superseded = () => seq !== fieldLoadSeqRef.current;
     // Moving to another field must not leave the previous field's form usable while this one loads.
     setLoading(true);
+    // What this read fills in is not an edit: otherwise "Field not found" or the failed state
+    // would block leaving the page with no unsaved-changes dialog on screen.
+    initialLoadDone.current = false;
+    setIsDirty(false);
     const { data, error } = await supabase
       .from('fields')
       .select('*, customer:customers!fields_customer_id_fkey(farm_name)')
@@ -939,11 +943,12 @@ export default function FieldSetup() {
     }
   };
 
-  if (loading) {
+  // A new field has nothing to load: a superseded read for the field open before may leave `loading` set.
+  if (loading && !isNew) {
     return <div className="animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>;
   }
 
-  if (loadError) {
+  if (loadError && !isNew) {
     return (
       <div className="space-y-4">
         <LoadFailedState

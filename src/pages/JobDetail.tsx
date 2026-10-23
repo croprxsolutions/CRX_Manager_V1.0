@@ -3711,7 +3711,20 @@ export default function JobDetail() {
   const removeChemRow = (i: number) => setChemRows(chemRows.filter((_, idx) => idx !== i));
   const toggleChemSupplied = (i: number) => {
     const updated = [...chemRows];
-    updated[i] = { ...updated[i], customer_supplied: !updated[i].customer_supplied };
+    const row = updated[i];
+    updated[i] = { ...row, customer_supplied: !row.customer_supplied };
+    // Un-ticking makes the line billable again. A customer-supplied line may have been saved at $0
+    // only because its product states no price, so a $0 or blank price on such a product is blanked
+    // and chemRowDefects asks for one, instead of billing it at $0.
+    if (row.customer_supplied && row.product_id && (parseInt(row.price_per_unit_cents) || 0) === 0) {
+      const p = allProducts.find((ap) => ap.id === row.product_id);
+      const tier = customerPricingTier === 1 || customerPricingTier === 2 || customerPricingTier === 3
+        ? customerPricingTier
+        : null;
+      const statesNoPrice = !p
+        || (tier != null ? getStatedTierPriceCents(p, tier) == null : p.tier1_price == null);
+      if (statesNoPrice) updated[i].price_per_unit_cents = '';
+    }
     setChemRows(updated);
   };
   const updateChemRow = (i: number, key: keyof ChemRow, value: string) => {

@@ -231,6 +231,32 @@ describe('JobDetail recipe pricing tier', () => {
     await waitFor(() => expect(screen.queryByText(/its price is blank, negative, or not a whole number of cents/)).not.toBeInTheDocument());
   });
 
+  it('MONEY: un-ticking customer supplied on an unpriced product at $0 blanks the price, so it cannot bill $0', async () => {
+    const UNPRICED = { ...PRODUCT, id: 'prod-unpriced', product_name: 'Unpriced Adjuvant', tier1_price: null, tier2_price: null, tier3_price: null };
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [UNPRICED]);
+    await openChemicalLine();
+    await pickProduct(/Unpriced Adjuvant/);
+    // As if reloaded after a customer-supplied save: ticked, price stored as 0.
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    fireEvent.change(priceInput(), { target: { value: '0' } });
+    expect(priceInput().value).toBe('0');
+
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    await waitFor(() => expect(priceInput().value).toBe(''));
+    expect(screen.getByText(/its price is blank, negative, or not a whole number of cents/)).toBeInTheDocument();
+  });
+
+  it('un-ticking customer supplied keeps a priced product\'s $0 price', async () => {
+    const FREE = { ...PRODUCT, id: 'prod-free', product_name: 'Free Sample', tier1_price: 0, tier2_price: null, tier3_price: null };
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [FREE]);
+    await openChemicalLine();
+    await pickProduct(/Free Sample/);
+    await waitFor(() => expect(priceInput().value).toBe('0'));
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    expect(priceInput().value).toBe('0');
+  });
+
   it('MONEY: drops a recipe load whose customer changed while its products were loading', async () => {
     serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null });
     // The recipe's products are held until the customer has been changed.

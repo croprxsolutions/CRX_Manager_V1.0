@@ -171,7 +171,10 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
 - **A. Gate the functions.** Add one helper, `_can_see_field(field_id)`: true for active office staff; for the
   whole-job applicator, any field on that job (under part C's window); and for a per-field or crew assignee, only the
   field their own dispatch row points at (`job_location_dispatches.job_field_id` → `job_fields.field_id`), never the
-  job's other fields. It must not reuse `_is_dispatched_to_me(job_id)`, which is true for the whole job once any one
+  job's other fields. That per-field match must keep every check `_is_dispatched_to_me` makes today (the dispatch is
+  open, or completed within 7 days, never cancelled; the caller's profile is active; a crew dispatch needs an active
+  crew and membership) plus `jobs.deleted_at IS NULL`, since cancelled and expired dispatch rows stay in the table and
+  must not keep the field visible. It must not reuse `_is_dispatched_to_me(job_id)`, which is true for the whole job once any one
   of its fields is dispatched to the caller. (That job-level test is why `job_fields_select_location_dispatchee`
   today shows a split-job assignee the job's other field rows; 0 split assignments live.) Make
   `get_fields_geojson_by_ids` (Field View) and `get_field_geojson` (Job Detail) return only fields that pass it. Make

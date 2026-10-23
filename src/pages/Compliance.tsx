@@ -182,9 +182,10 @@ export default function Compliance() {
       .order('product_name');
     if (seq !== rupProductsLoadSeq.current) return;
 
-    if (error) {
+    // No list is not "No RUP products": treat it as a failed read.
+    if (error || !Array.isArray(data)) {
       toast('error', 'Failed to load RUP products');
-      Sentry.captureException(error);
+      Sentry.captureException(error ?? new Error('RUP products read returned no list'));
       setRUPProducts([]);
       setRupProductsFailed(true);
       return;

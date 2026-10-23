@@ -228,7 +228,8 @@ export default function SettingsPage() {
     const seq = ++settingsLoadSeqRef.current;
     const { data, error } = await supabase.from('app_settings').select('*');
     if (seq !== settingsLoadSeqRef.current) return;
-    if (error) {
+    // No list is not a load: the forms would show defaults that a save writes over the real values.
+    if (error || !Array.isArray(data)) {
       toast('error', 'Failed to load settings');
       setSettingsLoadError(true);
       return;

@@ -273,6 +273,18 @@ describe('Payment History after a failed refresh', () => {
     expect(await screen.findByText("This payment's allocations could not be loaded")).toBeInTheDocument();
   });
 
+  it('closes an open void confirmation when the list read fails', async () => {
+    H.tables.allocation_sets = [{ id: 'p1', customer_id: 'c1', total_payment_cents: 100, total_allocated_cents: 100, payment_method: 'check', check_number: 'CHK-1', reference_number: null, payment_date: '2026-10-01', season: 2027, is_active: true, notes: null, created_at: '2026-10-01T12:00:00Z', customers: { farm_name: 'Big Farm' } }];
+    at('/payment-history', <PaymentHistory />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Void$/ }));
+    expect(await screen.findByRole('heading', { name: 'Void Payment' })).toBeInTheDocument();
+
+    H.failing.set('allocation_sets', 'error');
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/, hidden: true }));
+    expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Void Payment' })).not.toBeInTheDocument();
+  });
+
   it("closes the open payment's allocations when the list read fails", async () => {
     H.tables.allocation_sets = [{ id: 'p1', customer_id: 'c1', total_payment_cents: 100, total_allocated_cents: 100, payment_method: 'check', check_number: 'CHK-1', reference_number: null, payment_date: '2026-10-01', season: 2027, is_active: true, notes: null, created_at: '2026-10-01T12:00:00Z', customers: { farm_name: 'Big Farm' } }];
     H.tables.invoice_line_allocations = [{ id: 'a1', allocation_set_id: 'p1', invoice_id: 'i1', amount_cents: 100, split_percentage: 100, bill_to_customer_id: 'c1', created_at: '2026-10-01', invoices: { invoice_number: 'INV-OPENED' }, customers: { farm_name: 'Big Farm' } }];

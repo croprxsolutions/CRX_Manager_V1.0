@@ -183,8 +183,8 @@ export default function ARaging() {
     // Every row, page by page (src/lib/customerStatement.ts).
     const { data, error } = await fetchCustomerStatement(selectedCustomer, stmtStart, stmtEnd);
     if (seq !== statementLoadSeq.current) return;
-    if (error) {
-      Sentry.captureException(error, { tags: { source: 'fetch', page: 'ar_aging' } });
+    if (error || !data) {
+      Sentry.captureException(error ?? new Error('get_customer_statement returned no data'), { tags: { source: 'fetch', page: 'ar_aging' } });
       toast('error', 'Failed to load customer statement');
       // Never leave the previous customer's statement under this one's name.
       setStatementData([]);
@@ -193,7 +193,7 @@ export default function ARaging() {
       setLoading(false);
       return;
     }
-    setStatementData(data ?? []);
+    setStatementData(data);
     setStmtLoadedKey(statementKey(selectedCustomer, stmtStart, stmtEnd));
     setStmtFailedKey(null);
     setTab('statement');
@@ -424,8 +424,8 @@ export default function ARaging() {
     // Every row, page by page (src/lib/customerStatement.ts).
     const { data, error } = await fetchCustomerStatement(custId, stmtStart, stmtEnd);
     if (seq !== statementLoadSeq.current) return;
-    if (error) {
-      Sentry.captureException(error, { tags: { source: 'fetch', page: 'ar_aging' } });
+    if (error || !data) {
+      Sentry.captureException(error ?? new Error('get_customer_statement returned no data'), { tags: { source: 'fetch', page: 'ar_aging' } });
       toast('error', 'Failed to load statement');
       // Never leave the previous customer's statement under this one's name.
       setStatementData([]);
@@ -436,7 +436,7 @@ export default function ARaging() {
       setLoading(false);
       return;
     }
-    setStatementData(data ?? []);
+    setStatementData(data);
     setStmtLoadedKey(statementKey(custId, stmtStart, stmtEnd));
     setStmtFailedKey(null);
     setTab('statement');

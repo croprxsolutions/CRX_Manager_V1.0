@@ -103,6 +103,8 @@ export default function PaymentHistory() {
       setAllocations([]);
       setAllocsFailed(false);
       setLoadingAllocs(false);
+      // And any open void confirmation: it shows a payment from the list that failed to load.
+      setVoidPayment(null);
       setLoading(false);
       return;
     }

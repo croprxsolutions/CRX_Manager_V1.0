@@ -347,11 +347,14 @@ export default function PrepaymentManagerPanel() {
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
+        // A failed read offers no labels at all, not ones left from an earlier read.
         if (error) {
+          setBucketLabels([]);
           setLabelsFailed(true);
           return;
         }
         if (!data?.setting_value) {
+          setBucketLabels([]);
           setLabelsFailed(false);
           return;
         }
@@ -363,6 +366,7 @@ export default function PrepaymentManagerPanel() {
           labels = null;
         }
         if (!Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
+          setBucketLabels([]);
           setLabelsFailed(true);
           return;
         }

@@ -692,10 +692,14 @@ export default function QuoteBuilder() {
     };
   }, [createOrderMenuOpen, moreActionsOpen]);
 
+  // Counts form edits, so Save Draft can tell whether the rep typed while its awaits ran.
+  const formEditCountRef = useRef(0);
+
   // Mark dirty whenever user changes form data (after initial load)
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
+    formEditCountRef.current += 1;
     setIsDirty(true);
   }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit]);
 
@@ -2199,9 +2203,12 @@ export default function QuoteBuilder() {
 
   const handleSaveDraft = async () => {
     setSaving(true);
+    // The form stays editable while the save (and planned holds) run; anything typed
+    // meanwhile is not in what was saved.
+    const editCountAtSave = formEditCountRef.current;
     const result = await saveQuote('draft');
     if (result) {
-      setIsDirty(false);
+      if (formEditCountRef.current === editCountAtSave) setIsDirty(false);
       toast('success', 'Quote saved as draft');
       trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
         message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
@@ -2239,6 +2246,12 @@ export default function QuoteBuilder() {
       }
 
       if (!isEditing) {
+        // The quote now exists, so always open it: staying on /quotes/new would make the
+        // next save create a second quote. Edits typed during the save cannot follow it there,
+        // so say so instead of dropping them silently.
+        if (formEditCountRef.current !== editCountAtSave) {
+          toast('warning', 'Quote saved, but changes made while it was saving were not included. Please re-enter them.');
+        }
         skipUnsavedPromptRef.current = true;
         navigate(`/quotes/${result}`, { replace: true });
       }

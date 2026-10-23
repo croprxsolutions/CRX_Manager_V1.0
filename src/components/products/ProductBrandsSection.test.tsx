@@ -148,6 +148,27 @@ describe('ProductBrandsSection', () => {
     expect(mocks.saveProductBrand).toHaveBeenCalledTimes(1);
   });
 
+  it('after an uncertain create is cancelled, the same values entered later are a new request, not a replay', async () => {
+    mocks.saveProductBrand
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({ ...slam, id: 'b3', brand_name: 'Mad Dog', row_version: 1 });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    expect(await screen.findByText(/may already have been saved/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /add brand/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Brand added.'));
+    const [[firstInput, firstKey], [secondInput, secondKey]] = mocks.saveProductBrand.mock.calls;
+    expect(secondInput).toEqual(firstInput);
+    expect(secondKey).not.toBe(firstKey);
+  });
+
   it('keeps a new brand’s form editable after a clear refusal such as a taken name', async () => {
     mocks.saveProductBrand.mockRejectedValueOnce({ message: 'BRAND_NAME_TAKEN: that brand is already listed' });
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);

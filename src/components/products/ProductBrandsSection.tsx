@@ -83,6 +83,10 @@ function inputFromDraft(productId: string, draft: BrandDraft): ProductBrandInput
   };
 }
 
+function saveScope(input: ProductBrandInput): string {
+  return `save:${JSON.stringify(input)}`;
+}
+
 function inputFromBrand(productId: string, brand: ProductBrand): ProductBrandInput {
   return {
     productId,
@@ -188,6 +192,9 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const closeDraft = () => {
     if (saving) return;
     lookupSeq.current += 1;
+    // Closing settles an unclear create: Add waits for the reload, which shows whether it was saved.
+    // Retire its key, so the same values entered later are a new request, not a replay of that save.
+    if (createUncertain && draft) resetKeyFor(saveScope(inputFromDraft(productId, draft)));
     setCreateUncertain(false);
     setDraft(null);
   };
@@ -257,7 +264,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       return;
     }
     const input = inputFromDraft(productId, draft);
-    const scope = `save:${JSON.stringify(input)}`;
+    const scope = saveScope(input);
     setSaving(true);
     setDraftError(null);
     try {

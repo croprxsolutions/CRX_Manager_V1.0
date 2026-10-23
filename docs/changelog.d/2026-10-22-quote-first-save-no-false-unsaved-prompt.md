@@ -8,10 +8,10 @@
   `QuoteBuilder` now passes a one-shot skip ref to `useUnsavedChanges` and sets it right before each navigation that
   follows a committed write — first Save Draft, booking draw-down to an order, Convert to an order, and Convert's
   "order already created" recovery. A real unsaved edit still prompts.
-- Edits typed while Save Draft is still running (the save itself, and a planned program's hold creation) are not in
-  what was saved (Codex review on this PR). A new quote still opens its saved page, because staying on `/quotes/new`
-  would make the next save create a second quote, and a warning says the late changes were not included. On an
-  existing quote such an edit now keeps the screen marked unsaved instead of being cleared. Draw-down, Convert and
-  Convert's recovery give the same warning when the rep typed while the order was being created (Luna round 2).
+- The quote form (template picker, details, Planned Program, sections, footer notes) is now locked while Save Draft,
+  Convert or a booking draw-down runs, and the draw-down quantities are locked while that order is created. An edit
+  made during those few seconds would not be in what was written, and the page then moves on (Codex review, Luna and
+  Sol on this PR).
+- Ticking Planned Program now marks the quote as having unsaved changes; before, it was the one field that did not.
 - New `src/pages/QuoteBuilder.saveNavigation.test.tsx` uses the real router, hook and dialog to cover both cases.
 - Frontend only; the save payload, line ids and every RPC are unchanged.

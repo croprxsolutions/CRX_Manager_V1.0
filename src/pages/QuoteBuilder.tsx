@@ -692,22 +692,10 @@ export default function QuoteBuilder() {
     };
   }, [createOrderMenuOpen, moreActionsOpen]);
 
-  // Counts form edits, so an action that leaves the page after a committed write can tell
-  // whether the rep typed while its awaits ran (the form stays editable meanwhile).
-  const formEditCountRef = useRef(0);
-  // Those edits are not in what was written and cannot follow the page to its next
-  // screen, so say so rather than dropping them silently.
-  const warnIfEditedSince = (editCount: number, done: string) => {
-    if (formEditCountRef.current !== editCount) {
-      toast('warning', `${done}, but changes made while it was saving were not included. Please re-enter them.`);
-    }
-  };
-
   // Mark dirty whenever user changes form data (after initial load)
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
-    formEditCountRef.current += 1;
     setIsDirty(true);
   }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
 
@@ -2211,12 +2199,9 @@ export default function QuoteBuilder() {
 
   const handleSaveDraft = async () => {
     setSaving(true);
-    // The form stays editable while the save (and planned holds) run; anything typed
-    // meanwhile is not in what was saved.
-    const editCountAtSave = formEditCountRef.current;
     const result = await saveQuote('draft');
     if (result) {
-      if (formEditCountRef.current === editCountAtSave) setIsDirty(false);
+      setIsDirty(false);
       toast('success', 'Quote saved as draft');
       trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
         message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
@@ -2254,10 +2239,6 @@ export default function QuoteBuilder() {
       }
 
       if (!isEditing) {
-        // The quote now exists, so always open it: staying on /quotes/new would make the
-        // next save create a second quote. Edits typed during the save cannot follow it there,
-        // so say so instead of dropping them silently.
-        warnIfEditedSince(editCountAtSave, 'Quote saved');
         skipUnsavedPromptRef.current = true;
         navigate(`/quotes/${result}`, { replace: true });
       }
@@ -3117,7 +3098,6 @@ export default function QuoteBuilder() {
 
   const handleDrawDown = async () => {
     if (!id) return;
-    const editCountAtStart = formEditCountRef.current;
     const draws = drawRows
       .map((r) => ({ ...r, quantity: parseFloat(r.qty) || 0 }))
       .filter((d) => d.quantity > 0);
@@ -3150,7 +3130,6 @@ export default function QuoteBuilder() {
         data: { orderId: result.order_id ?? '', orderNumber: result.order_number ?? '', quoteId: id },
       });
       sendOrderConfirmedEmail(result.order_id!);
-      warnIfEditedSince(editCountAtStart, 'Order created');
       setIsDirty(false);
       setShowDrawModal(false);
       skipUnsavedPromptRef.current = true;
@@ -3297,7 +3276,6 @@ export default function QuoteBuilder() {
   const executeConvertToOrder = async () => {
     setDuplicateOrderConfirmOpen(false);
     setConverting(true);
-    const editCountAtStart = formEditCountRef.current;
     setConfirmConvertOpen(false);
 
     // A partially-drawn booking must never be whole-converted — and crucially
@@ -3421,7 +3399,6 @@ export default function QuoteBuilder() {
       }
 
       // Bug #31 fix: Clear dirty state before navigate to prevent unsaved changes dialog
-      warnIfEditedSince(editCountAtStart, 'Order created');
       setIsDirty(false);
       skipUnsavedPromptRef.current = true;
       navigate(`/orders/${result.order_id}`);
@@ -3476,7 +3453,6 @@ export default function QuoteBuilder() {
 
         if (createdOrderId) {
           toast('success', 'The order was created — opening it');
-          warnIfEditedSince(editCountAtStart, 'Order created');
           setIsDirty(false);
           skipUnsavedPromptRef.current = true;
           navigate(`/orders/${createdOrderId}`);
@@ -3615,6 +3591,10 @@ export default function QuoteBuilder() {
     );
   }
 
+  // The quote cannot be edited while a save or order creation runs: an edit made then
+  // would not be in what was written, and the page usually moves on afterwards.
+  const formLocked = saving || converting || drawing;
+
   return (
     <div className="space-y-4">
       <Breadcrumbs items={[
@@ -3651,7 +3631,7 @@ export default function QuoteBuilder() {
               checked={isPlanned}
               onChange={(e) => setIsPlanned(e.target.checked)}
               className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
-              disabled={!canEdit && isEditing}
+              disabled={formLocked || (!canEdit && isEditing)}
             />
             <span className="font-medium">Planned Program</span>
             <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="ml-1" />
@@ -4283,6 +4263,7 @@ export default function QuoteBuilder() {
         </Card>
       )}
 
+      <fieldset disabled={formLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
       {!id && quoteTemplates.length > 0 && (
         <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
           <label className="text-sm font-medium">Start from Template:</label>
@@ -4868,6 +4849,7 @@ export default function QuoteBuilder() {
           />
         </div>
       </Card>
+      </fieldset>
 
       <Card>
         <CardHeader title="Quote" accent="Totals" />

@@ -2435,10 +2435,7 @@ describe('QuoteBuilder', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/orders/order-1');
   });
 
-  it.each([
-    { editsDuringConvert: false },
-    { editsDuringConvert: true },
-  ])('opens the converted order and warns only about edits typed while it converted ($editsDuringConvert)', async ({ editsDuringConvert }) => {
+  it('locks the quote while it converts to an order, then opens the order', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const quote = { ...fixture.quote, status: 'sent', created_at: new Date().toISOString() };
     mockFrom.mockImplementation((table: string) => buildChain({
@@ -2474,17 +2471,12 @@ describe('QuoteBuilder', () => {
     fireEvent.click(convertButton);
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('convert_quote_to_order', expect.anything()));
 
-    if (editsDuringConvert) {
-      fireEvent.change(screen.getByDisplayValue(quote.header_notes), { target: { value: 'Typed while converting' } });
-    }
+    // An edit made now would not be in the order, and the page leaves for it afterwards.
+    expect(screen.getByDisplayValue(quote.header_notes)).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Planned Program/ })).toBeDisabled();
     releaseConvert();
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-2'));
-    if (editsDuringConvert) {
-      expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Order created, but changes made while it was saving were not included'));
-    } else {
-      expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringContaining('were not included'));
-    }
   });
 
   it('stops Book as Order when mark-presented cannot confirm the frozen quote token', async () => {

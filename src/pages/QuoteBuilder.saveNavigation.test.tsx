@@ -152,12 +152,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(1);
   });
 
-  it.each([
-    ['typed a note', () => fireEvent.change(screen.getByPlaceholderText(/Notes visible at the top of the quote/), {
-      target: { value: 'Typed while saving' },
-    })],
-    ['ticked Planned Program', () => fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }))],
-  ])('opens the saved quote and warns when the rep %s while the first save was running', async (_label, editDuringSave) => {
+  it('locks the quote while the first save runs, so no edit can be left out of it', async () => {
     let releaseSave!: () => void;
     mockRpc.mockImplementation((name: string) => (name === 'save_quote'
       ? new Promise((resolve) => {
@@ -169,15 +164,31 @@ describe('QuoteBuilder — leaving a new quote', () => {
 
     fireEvent.click(screen.getByText('Save Draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
-    editDuringSave();
+    // The page leaves for the saved quote once the save lands, so an edit made now would
+    // be lost: every field, including Planned Program, is locked until then.
+    expect(screen.getByPlaceholderText(/Notes visible at the top of the quote/)).toBeDisabled();
+    expect(screen.getByLabelText('Units needed')).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Planned Program/ })).toBeDisabled();
     releaseSave();
 
-    // Staying on /quotes/new would make the next save create a second quote, so the page
-    // still opens the saved quote, and says the late edit was not kept.
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(`/quotes/${SAVED_ID}`);
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
-    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changes made while it was saving were not included'));
+  });
+
+  it('marks the quote unsaved when the rep ticks Planned Program', async () => {
+    const router = renderNewQuote();
+    await screen.findByRole('combobox', { name: 'Customer' });
+    // Let the new quote finish loading so edits are tracked from here on.
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'generate_quote_number')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
+    fireEvent.click(screen.getByText('Quotes list'));
+
+    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/quotes/new');
   });
 
   it('still prompts when the rep leaves a new quote with real unsaved edits', async () => {

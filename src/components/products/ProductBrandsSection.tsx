@@ -553,6 +553,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
             value={copySource?.id ?? ''}
             selectedLabel={copySource?.name ?? ''}
             ariaLabel="Product to copy brands from"
+            // A copy works from the ticks taken when it started, so nothing here may change mid-copy.
+            disabled={copying}
             onSelect={(picked) => { void loadCopySource(picked ? { id: picked.id, name: picked.product_name } : null); }}
           />
           {loadError ? (
@@ -567,7 +569,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
           ) : copyLoadError && copySource ? (
             <div className="flex items-center gap-3 text-sm text-red-600" role="alert">
               <span>Couldn’t load {copySource.name}’s brands: {copyLoadError}</span>
-              <Button size="sm" variant="secondary" onClick={() => void loadCopySource(copySource)}>Try again</Button>
+              <Button size="sm" variant="secondary" disabled={copying} onClick={() => void loadCopySource(copySource)}>Try again</Button>
             </div>
           ) : copySource && copyableCandidates.length === 0 ? (
             <p className="text-sm text-secondary">That product has no brands this one doesn’t already list.</p>
@@ -579,6 +581,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                     <input
                       type="checkbox"
                       checked={copySelected.has(brand.id)}
+                      disabled={copying}
                       onChange={(event) => {
                         setCopySelected((current) => {
                           const next = new Set(current);

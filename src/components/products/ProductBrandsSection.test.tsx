@@ -13,12 +13,12 @@ vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../../lib/activityLogger', () => ({ logActivity: mocks.logActivity }));
 vi.mock('../../lib/epaLookupClient', () => ({ lookupEpaRegistration: mocks.lookupEpaRegistration }));
 vi.mock('./ProductSearchPicker', () => ({
-  default: ({ onSelect }: { onSelect: (product: { id: string; product_name: string }) => void }) => (
+  default: ({ onSelect, disabled }: { onSelect: (product: { id: string; product_name: string }) => void; disabled?: boolean }) => (
     <>
-      <button type="button" onClick={() => onSelect({ id: 'p2', product_name: 'Roundup 5.4# Generic - Bulk' })}>
+      <button type="button" disabled={disabled} onClick={() => onSelect({ id: 'p2', product_name: 'Roundup 5.4# Generic - Bulk' })}>
         Pick bulk size
       </button>
-      <button type="button" onClick={() => onSelect({ id: 'p3', product_name: 'Roundup 5.4# Generic - Jug' })}>
+      <button type="button" disabled={disabled} onClick={() => onSelect({ id: 'p3', product_name: 'Roundup 5.4# Generic - Jug' })}>
         Pick jug size
       </button>
     </>
@@ -277,6 +277,27 @@ describe('ProductBrandsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: /try again/i }));
     expect(await screen.findByLabelText(/Mad Dog/)).toBeChecked();
     expect(screen.getByRole('button', { name: 'Copy 1 brand' })).toBeEnabled();
+  });
+
+  it('locks the ticks and the source picker while a copy is running', async () => {
+    const bulkAg = { ...slam, id: 'x1', product_id: 'p2', brand_name: 'Ag Saver 5.4', epa_registration: '100-1234-5905' };
+    const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366' };
+    mocks.listProductBrands.mockImplementation(async (id: string) => (id === 'p2' ? [bulkAg, bulkMad] : [slam]));
+    let releaseFirst: (row: unknown) => void = () => {};
+    mocks.saveProductBrand
+      .mockReturnValueOnce(new Promise((resolve) => { releaseFirst = resolve; }))
+      .mockResolvedValueOnce({ ...bulkMad, id: 'n2', product_id: 'p1' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /copy from another product/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy 2 brands' }));
+    await waitFor(() => expect(mocks.saveProductBrand).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText(/Mad Dog/)).toBeDisabled();
+    expect(screen.getByLabelText(/Ag Saver 5\.4/)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pick jug size' })).toBeDisabled();
+    releaseFirst({ ...bulkAg, id: 'n1', product_id: 'p1' });
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Copied 2 brands.'));
   });
 
   it('says so when brands fail to load and offers a retry', async () => {

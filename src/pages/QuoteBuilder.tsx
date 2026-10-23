@@ -397,6 +397,8 @@ export default function QuoteBuilder() {
 
   const [customerId, setCustomerId] = useState('');
   const customerIdRef = useLatestRef(customerId);
+  // The customer the open quote was saved with: a picked customer differs from it.
+  const savedQuoteCustomerIdRef = useRef<string | null>(null);
   const [tier, setTier] = useState(1);
   const [validDays, setValidDays] = useState(15);
   const [headerNotes, setHeaderNotes] = useState('');
@@ -1187,6 +1189,7 @@ export default function QuoteBuilder() {
     setQuoteId(q.id);
     setQuoteNumber(q.quote_number);
     setCustomerId(q.customer_id);
+    savedQuoteCustomerIdRef.current = q.customer_id;
     // The quote read embeds its customer (customer:customers(*)); a quote whose customer did not
     // come back cannot be saved, since the screen cannot show who it is for.
     const loadedCustomer = (q as Quote & { customer?: QuoteCustomer | null }).customer ?? null;
@@ -1553,9 +1556,6 @@ export default function QuoteBuilder() {
     }
     let cancelled = false;
     const ids = unresolvedFieldKey.split(',');
-    const customerIdAtStart = customerIdRef.current;
-    // Another quote may share these field ids, so the read survives a switch to it.
-    const quoteIdAtStart = routeQuoteIdRef.current;
     supabase
       .from('fields')
       .select(QUOTE_FIELD_SELECT)
@@ -1572,9 +1572,11 @@ export default function QuoteBuilder() {
         // The customer may have changed while these were loading: a field that belongs to another
         // customer is then cleared, as a pick would have cleared it. A plain load never clears a
         // saved field (CodeRabbit, #1017): a field later moved to another customer stays as saved.
+        // The comparison is with the customer the open quote was saved with, not the one when the
+        // read started: another quote sharing these field ids may be open by now, and opening it is
+        // not a pick (CodeRabbit and Luna, #1049).
         const currentCustomerId = customerIdRef.current;
-        // A switch to another quote is an open, not a customer pick (CodeRabbit, #1049).
-        const customerChanged = routeQuoteIdRef.current === quoteIdAtStart && currentCustomerId !== customerIdAtStart;
+        const customerChanged = currentCustomerId !== savedQuoteCustomerIdRef.current;
         const foreign = new Set(rows
           .filter((row) => customerChanged && currentCustomerId && row.customer_id !== currentCustomerId)
           .map((row) => row.id));

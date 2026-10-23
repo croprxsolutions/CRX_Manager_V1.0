@@ -693,6 +693,39 @@ describe('QuoteBuilder', () => {
     expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
   });
 
+  it('clears quote B\'s foreign field when a customer is picked on B before quote A\'s field read lands', async () => {
+    const { quote: quoteA, product, section, item } = makeQuoteFixture('draft', 7);
+    const quoteB = { ...quoteA, id: 'quote-b', quote_number: 'Q-b', header_notes: 'Quote B header', customer_id: 'customer-2' };
+    const savedSection = { ...section, field_id: 'field-1' };
+    const savedItem = { ...item, acres: 80 };
+    const held = holdFieldReadById();
+    let quoteReads = 0;
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? (quoteReads++ === 0 ? quoteA : quoteB)
+        : table === 'quote_sections'
+          ? [savedSection]
+          : table === 'quote_items'
+            ? [savedItem]
+            : table === 'customers'
+              ? [FAR_FIELD_FARM]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    })));
+
+    renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
+    await waitFor(() => expect(held.readsById()).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('link', { name: 'Jump to quote B' }));
+    await screen.findByDisplayValue('Quote B header');
+
+    // On B the user picks another customer; A's read then lands with the original customer's field.
+    await pickCustomerThenReleaseField(held);
+    expect(screen.getByRole('combobox', { name: /^Field for/ })).toHaveValue('');
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
+  });
+
   it('keeps a saved section field that now belongs to another customer when the quote is only opened (CodeRabbit, #1017)', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     const savedSection = { ...section, field_id: 'field-1' };

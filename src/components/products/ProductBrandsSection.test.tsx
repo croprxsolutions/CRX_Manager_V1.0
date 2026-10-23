@@ -171,6 +171,7 @@ describe('ProductBrandsSection', () => {
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('Copied 1 of 2')));
     const failedKey = mocks.saveProductBrand.mock.calls[1][1];
     expect(screen.queryByLabelText(/Ag Saver 5\.4/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Copy 1 brand' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Copy 1 brand' }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Copied 1 brand.'));
     expect(mocks.saveProductBrand).toHaveBeenCalledTimes(3);
@@ -198,6 +199,65 @@ describe('ProductBrandsSection', () => {
     expect(screen.queryByLabelText(/Mad Dog/)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Ag Saver 5\.4/)).toBeChecked();
     expect(screen.getByRole('button', { name: 'Copy 1 brand' })).toBeEnabled();
+  });
+
+  it('keeps Copy off until this product’s own brands have loaded', async () => {
+    let releaseOwn: (rows: typeof slam[]) => void = () => {};
+    mocks.listProductBrands.mockImplementation((id: string) => (
+      id === 'p1' ? new Promise((resolve) => { releaseOwn = resolve; }) : Promise.resolve([{ ...slam, id: 'x4', product_id: 'p2' }])
+    ));
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    expect(screen.getByRole('button', { name: /copy from another product/i })).toBeDisabled();
+    releaseOwn([slam]);
+    await screen.findByText('Slam 5.4');
+    expect(screen.getByRole('button', { name: /copy from another product/i })).toBeEnabled();
+  });
+
+  it('pauses a retry when this product’s list fails to reload after a partial copy', async () => {
+    const bulkAg = { ...slam, id: 'x1', product_id: 'p2', brand_name: 'Ag Saver 5.4', epa_registration: '100-1234-5905' };
+    const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366' };
+    let ownLoads = 0;
+    mocks.listProductBrands.mockImplementation((id: string) => {
+      if (id === 'p2') return Promise.resolve([bulkAg, bulkMad]);
+      ownLoads += 1;
+      return ownLoads === 1 ? Promise.resolve([slam]) : Promise.reject(new Error('network down'));
+    });
+    mocks.saveProductBrand
+      .mockResolvedValueOnce({ ...bulkAg, id: 'n1', product_id: 'p1' })
+      .mockRejectedValueOnce(new Error('network down'));
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /copy from another product/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy 2 brands' }));
+    expect(await screen.findByText(/copying is paused/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy 1 brand' })).toBeDisabled();
+    expect(mocks.saveProductBrand).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops offering a brand that a reload shows this product already has', async () => {
+    const bulkAg = { ...slam, id: 'x1', product_id: 'p2', brand_name: 'Ag Saver 5.4', epa_registration: '100-1234-5905' };
+    const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366' };
+    let ownLoads = 0;
+    mocks.listProductBrands.mockImplementation((id: string) => {
+      if (id === 'p2') return Promise.resolve([bulkAg, bulkMad]);
+      ownLoads += 1;
+      // After the partial copy, the reload shows Ag Saver (copied) and Mad Dog (another admin added it).
+      return Promise.resolve(ownLoads === 1 ? [slam] : [
+        slam, { ...bulkAg, id: 'n1', product_id: 'p1' }, { ...bulkMad, id: 'b9', product_id: 'p1' },
+      ]);
+    });
+    mocks.saveProductBrand
+      .mockResolvedValueOnce({ ...bulkAg, id: 'n1', product_id: 'p1' })
+      .mockRejectedValueOnce({ message: 'BRAND_NAME_TAKEN: that brand is already listed' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /copy from another product/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick bulk size' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy 2 brands' }));
+    expect(await screen.findByText(/no brands this one doesn’t already list/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Mad Dog/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy 0 brands' })).toBeDisabled();
   });
 
   it('says so when brands fail to load and offers a retry', async () => {

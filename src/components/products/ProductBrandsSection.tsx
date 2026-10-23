@@ -276,8 +276,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     }
     setCopyLoading(true);
     try {
-      const taken = new Set(brands.map((brand) => brand.brand_name.toLowerCase()));
-      const rows = (await listProductBrands(source.id)).filter((brand) => !taken.has(brand.brand_name.toLowerCase()));
+      const rows = await listProductBrands(source.id);
       if (seq !== copySourceSeq.current) return;
       setCopyCandidates(rows);
       // Brands the source no longer buys are listed but not pre-ticked.
@@ -289,14 +288,26 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     } finally {
       if (seq === copySourceSeq.current) setCopyLoading(false);
     }
-  }, [brands, toast]);
+  }, [toast]);
+
+  // Copying is only safe against this product's own list: until it has loaded (or after it failed),
+  // a brand already here would look copyable, be refused as a duplicate, and stop the copy part-way.
+  // Candidates are filtered against the current list on every render, so a list that loads or
+  // reloads after the source was picked still drops the brands this product already has.
+  const brandsReady = !loading && loadError === null;
+  const copyableCandidates = useMemo(() => {
+    const taken = new Set(brands.map((brand) => brand.brand_name.toLowerCase()));
+    return copyCandidates.filter((brand) => !taken.has(brand.brand_name.toLowerCase()));
+  }, [brands, copyCandidates]);
+  const copyChosen = copyableCandidates.filter((brand) => copySelected.has(brand.id));
 
   const handleCopy = async () => {
     if (!userId) {
       toast('error', 'Your account is still loading. Try again in a moment.');
       return;
     }
-    const chosen = copyCandidates.filter((brand) => copySelected.has(brand.id));
+    if (!brandsReady) return;
+    const chosen = copyChosen;
     const copiedIds = new Set<string>();
     setCopying(true);
     try {
@@ -335,7 +346,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
         title="Brands"
         action={isAdmin ? (
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={() => { setCopyOpen(true); void loadCopySource(null); }}>
+            <Button size="sm" variant="secondary" disabled={!brandsReady} onClick={() => { setCopyOpen(true); void loadCopySource(null); }}>
               Copy from another product
             </Button>
             <Button size="sm" icon={<Plus className="h-4 w-4" aria-hidden="true" />} showChevron={false} onClick={() => openDraft(emptyDraft())}>
@@ -525,8 +536,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
         footer={(
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setCopyOpen(false)} disabled={copying}>Cancel</Button>
-            <Button onClick={() => void handleCopy()} loading={copying} disabled={copySelected.size === 0}>
-              Copy {copySelected.size} brand{copySelected.size === 1 ? '' : 's'}
+            <Button onClick={() => void handleCopy()} loading={copying} disabled={copyChosen.length === 0 || !brandsReady}>
+              Copy {copyChosen.length} brand{copyChosen.length === 1 ? '' : 's'}
             </Button>
           </div>
         )}
@@ -541,13 +552,20 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
             ariaLabel="Product to copy brands from"
             onSelect={(picked) => { void loadCopySource(picked ? { id: picked.id, name: picked.product_name } : null); }}
           />
+          {loadError ? (
+            <p className="text-sm text-red-600" role="alert">
+              Couldn’t load this product’s own brands, so copying is paused. Close this and use Try again.
+            </p>
+          ) : loading ? (
+            <p className="text-sm text-secondary">Checking this product’s brands…</p>
+          ) : null}
           {copyLoading ? (
             <p className="text-sm text-secondary">Loading brands…</p>
-          ) : copySource && copyCandidates.length === 0 ? (
+          ) : copySource && copyableCandidates.length === 0 ? (
             <p className="text-sm text-secondary">That product has no brands this one doesn’t already list.</p>
           ) : (
             <ul className="space-y-1">
-              {copyCandidates.map((brand) => (
+              {copyableCandidates.map((brand) => (
                 <li key={brand.id}>
                   <label className="flex items-center gap-2 text-sm">
                     <input

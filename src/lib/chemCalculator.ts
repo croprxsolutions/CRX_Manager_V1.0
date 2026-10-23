@@ -624,9 +624,10 @@ export function priceTextInLineUnit(
   lineUnit: string | null | undefined,
   statedPricePerStockCents: number | null,
 ): string {
-  const line = (lineUnit || '').trim().toLowerCase();
-  const stock = (stockUnit || '').trim().toLowerCase();
-  if (statedPricePerStockCents == null || line === '' || line !== stock) return '';
+  // Spellings of one unit ('gallon', 'gl', 'gal') compare equal.
+  const line = normalizeRateUnit(lineUnit);
+  const stock = normalizeRateUnit(stockUnit);
+  if (statedPricePerStockCents == null || line == null || line !== stock) return '';
   return statedPricePerStockCents.toString();
 }
 

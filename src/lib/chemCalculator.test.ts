@@ -305,6 +305,9 @@ describe('chemCalculator — priceTextInLineUnit', () => {
     expect(priceTextInLineUnit('oz', 'oz', 100)).toBe('100');
     expect(priceTextInLineUnit('GAL', 'gal', 1280)).toBe('1280');
     expect(priceTextInLineUnit('GAL', 'gal', 0)).toBe('0');
+    // Spellings of the same unit are the same unit.
+    expect(priceTextInLineUnit('gallon', 'gal', 1280)).toBe('1280');
+    expect(priceTextInLineUnit('pounds', 'lb', 450)).toBe('450');
   });
   it('MONEY: blank for any other line unit (no rounded conversion), no unit, or no price', () => {
     // 64¢/GAL per oz would round to 1¢/oz and bill 128 oz at $1.28 instead of $0.64.

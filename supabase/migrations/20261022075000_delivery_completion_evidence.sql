@@ -105,9 +105,9 @@
 --   that policy lets staff read. The columns and constraints may stay. Either order of app and database
 --   rollback leaves a window where completions fail; do it outside delivery hours.
 --
--- ORDERING: stamp 20261022050000 and history row 973 assigned by the coordination session; it lands after
---   #1010, #1006, #1020 (20261022020000), #1018, #1039, #1026 and the coordinator's queued cost changes, none of
---   which touches these functions, the deliveries table or these policies. Re-read the live ledger
+-- ORDERING: stamp 20261022075000 assigned by the coordination session (restamped 2026-10-22 from 20261022050000;
+--   history row stays 973, listed after row 974); it lands after #1042 (20261022070000, row 974) and everything before it, none of which
+--   touches these functions, the deliveries table or these policies. Re-read the live ledger
 --   (list_migrations, effective stamp row by row) before applying.
 --
 -- idempotency-body-check: exempt. Both wrappers read idempotency_keys through check_idempotency_intent
@@ -243,7 +243,7 @@ CREATE INDEX deliveries_completion_evidence_ref_idx ON public.deliveries (comple
   WHERE completion_evidence_ref IS NOT NULL;
 
 COMMENT ON COLUMN public.deliveries.completion_evidence IS
-  'How the completion was confirmed, checked by complete_delivery before it ran: signature, paper_ticket or left_at_site (customer proof), or no_proof (an admin recorded it without proof, with a written reason). NULL on deliveries completed before 20261022050000.';
+  'How the completion was confirmed, checked by complete_delivery before it ran: signature, paper_ticket or left_at_site (customer proof), or no_proof (an admin recorded it without proof, with a written reason). NULL on deliveries completed before 20261022075000.';
 COMMENT ON COLUMN public.deliveries.completion_evidence_ref IS
   'What complete_delivery accepted: the signature object path (signatures/<id>/<hash>.png), the delivery_photos id of the ticket or drop-location photo, or, when completion_evidence = no_proof, the admin''s written reason (NOT an artifact).';
 COMMENT ON COLUMN public.deliveries.completion_no_proof_by IS
@@ -541,7 +541,7 @@ REVOKE ALL ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, t
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text) IS
-  'Completes a delivery with server-checked evidence (p_evidence + p_evidence_ref; 20261022050000): signature, paper_ticket, left_at_site, or (active admin only, written reason as p_evidence_ref) no_proof. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022050000.';
+  'Completes a delivery with server-checked evidence (p_evidence + p_evidence_ref; 20261022075000): signature, paper_ticket, left_at_site, or (active admin only, written reason as p_evidence_ref) no_proof. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022075000.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. start_and_complete_delivery (Deliveries list): the 20261019220000 body plus the evidence.
@@ -722,7 +722,7 @@ REVOKE ALL ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid
 GRANT EXECUTE ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text) TO authenticated;
 
 COMMENT ON FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text) IS
-  'Deliveries list Mark Delivered: starts a scheduled delivery (confirm_delivery) and completes it (complete_delivery, with its evidence under <key>:complete) in one transaction, on the chosen America/Chicago business date. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022050000.';
+  'Deliveries list Mark Delivered: starts a scheduled delivery (confirm_delivery) and completes it (complete_delivery, with its evidence under <key>:complete) in one transaction, on the chosen America/Chicago business date. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022075000.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 5. Per-attempt signature images: written while the delivery is open, never updated or deleted.
@@ -818,7 +818,7 @@ ALTER FUNCTION public._is_accepted_delivery_evidence_object(text, text) OWNER TO
 REVOKE ALL ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) TO authenticated;
 COMMENT ON FUNCTION public._is_accepted_delivery_evidence_object(text, text) IS
-  'Storage-policy helper (20261022050000): true for a per-attempt signature object or a delivery-photos object accepted as a completion''s ticket or drop-location photo. Definer so the answer does not depend on the caller''s row visibility.';
+  'Storage-policy helper (20261022075000): true for a per-attempt signature object or a delivery-photos object accepted as a completion''s ticket or drop-location photo. Definer so the answer does not depend on the caller''s row visibility.';
 
 CREATE POLICY "delivery_evidence_objects_no_update"
 ON storage.objects

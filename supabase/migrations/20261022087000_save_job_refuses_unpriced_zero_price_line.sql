@@ -22,9 +22,11 @@
 -- HOW: the check runs in the save_job wrapper before the impl, on the chemicals the caller sent,
 --   and only for an active admin or sales rep (is_admin() / is_sales_rep(), the roles the impl
 --   lets save): any other caller reaches the impl's INSUFFICIENT_ROLE first, so it cannot learn a
---   customer's tier or a product's name from this refusal (rls-security-reviewer M1, 2026-10-23). It is skipped when p_idempotency_key is already on file
---   (unexpired), so a replay of a save that succeeded before this migration is still answered by
---   the impl's receipt, and a different payload under that key is still refused by the impl.
+--   customer's tier or a product's name from this refusal (rls-security-reviewer M1, 2026-10-23).
+--   It is skipped when p_idempotency_key is already on file as an unexpired save_job receipt, so a
+--   replay of a save that succeeded before this migration is still answered by the impl's
+--   receipt, and a different payload under that key is still refused by the impl. Another
+--   operation's key is not exempt: it gets this check, then the impl's cross-operation refusal.
 --
 -- NOT CHANGED: everything else save_job does (the impl body, its idempotency, unit and total
 --   checks; the non-admin cost derivation). Signature, owner (postgres), SECURITY DEFINER,
@@ -110,7 +112,8 @@ BEGIN
      AND jsonb_typeof(p_chemicals) = 'array'
      AND (p_idempotency_key IS NULL OR NOT EXISTS (
        SELECT 1 FROM idempotency_keys k
-        WHERE k.idempotency_key = p_idempotency_key AND k.expires_at >= now())) THEN
+        WHERE k.idempotency_key = p_idempotency_key AND k.operation = 'save_job'
+          AND k.expires_at >= now())) THEN
     v_customer_id := NULLIF(p_job_payload->>'customer_id', '')::uuid;
     SELECT c.assigned_tier INTO v_tier FROM customers c WHERE c.id = v_customer_id;
     SELECT p.product_name INTO v_product_name
@@ -161,7 +164,7 @@ BEGIN
   IF NOT FOUND OR NOT v_fn.prosecdef OR v_fn.owner <> 'postgres'
      OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
      OR v_fn.acl IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'
-     OR v_fn.body_md5 IS DISTINCT FROM 'c826e0e6455d91706b19de35d1f04f65' THEN
+     OR v_fn.body_md5 IS DISTINCT FROM 'a6be249b69e788cfc5b9e5e8c161b737' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: public.save_job is not the expected body/attributes (md5 %, acl %)', v_fn.body_md5, v_fn.acl;
   END IF;
   IF (SELECT count(*) FROM pg_proc WHERE proname = 'save_job' AND pronamespace = 'public'::regnamespace) <> 1 THEN

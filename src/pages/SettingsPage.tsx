@@ -220,6 +220,8 @@ export default function SettingsPage() {
   // The settings read failed: the forms would show blank defaults, and saving them would overwrite the
   // real values, so they are replaced by the failed state and every save is refused (To-Do 10.5).
   const [settingsLoadError, setSettingsLoadError] = useState(false);
+  // True once a settings read has succeeded: until then the forms hold defaults, not saved values.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const settingsLoadSeqRef = useRef(0);
 
   const fetchSettings = async () => {
@@ -254,6 +256,7 @@ export default function SettingsPage() {
     // #41: blank/absent => the seeded default post-notification wording.
     setPostNoticeTemplate(parsePostNotificationTemplate(map['post_application_notice_template']));
     setSettingsLoadError(false);
+    setSettingsLoaded(true);
   };
 
   const fetchUsers = async () => {
@@ -288,7 +291,7 @@ export default function SettingsPage() {
   }, [role, navigate]);
 
   const saveSetting = async (key: string, value: string) => {
-    if (settingsLoadError) throw new Error('Settings did not load. Press Try again before saving.');
+    if (settingsLoadError || !settingsLoaded) throw new Error('Settings did not load. Press Try again before saving.');
     const result = await supabase
       .from('app_settings')
       .upsert(

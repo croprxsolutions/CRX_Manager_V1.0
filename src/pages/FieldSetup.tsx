@@ -252,13 +252,19 @@ export default function FieldSetup() {
     setIsDirty(true);
   }, [field, billingSplits]);
 
+  // Only the newest field read may set the page: moving to another field (or Try again) can
+  // start one while an older read is still in flight.
+  const fieldLoadSeqRef = useRef(0);
   const fetchField = useCallback(async () => {
     if (!id) return;
+    const seq = ++fieldLoadSeqRef.current;
+    const superseded = () => seq !== fieldLoadSeqRef.current;
     const { data, error } = await supabase
       .from('fields')
       .select('*, customer:customers!fields_customer_id_fkey(farm_name)')
       .eq('id', id)
       .maybeSingle();
+    if (superseded()) return;
 
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_field' } });
@@ -280,6 +286,7 @@ export default function FieldSetup() {
       // Fetch GeoJSON for map display
       let loadedBoundary: Feature<Polygon | MultiPolygon> | null = null;
       const { data: geoData, error: geoError } = await supabase.rpc('get_field_geojson', { p_field_id: id });
+      if (superseded()) return;
       if (geoError) {
         Sentry.captureException(geoError, { tags: { source: 'fetch', action: 'load_field_geometry' } });
         toast('warning', 'Could not load field boundary');
@@ -316,6 +323,7 @@ export default function FieldSetup() {
       // Load multi-polygon data if available. Older boundaries without field_polygons are
       // converted into the same DrawnPolygon state so adding a second part is additive too.
       const { data: polyData, error: polyError } = await supabase.rpc('get_field_polygons', { p_field_id: id });
+      if (superseded()) return;
       let loadedPolygons: DrawnPolygon[] = [];
       if (!polyError && polyData) {
         const polyRows = assertRpcResult<Array<{ id: string; polygon_geojson: object; label: string | null; acres: number | null; sort_order: number }>>(polyData, 'get_field_polygons');
@@ -346,6 +354,7 @@ export default function FieldSetup() {
         .select('*, customer:customers!field_billing_defaults_customer_id_fkey(farm_name)')
         .eq('field_id', id)
         .order('split_pct', { ascending: false });
+      if (superseded()) return;
       // Save sends the whole split list, so a form shown without the saved splits would erase them.
       if (defaultsError) {
         Sentry.captureException(defaultsError, { tags: { source: 'fetch', action: 'load_field_billing_defaults' } });

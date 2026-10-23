@@ -563,6 +563,46 @@ describe('QuoteBuilder', () => {
     expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['', '40']);
   });
 
+  it('drops the acres a field filled in when the field is cleared or replaced by hand, and keeps typed acres', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const typedItem = { ...item, id: 'item-2', sort_order: 1, acres: 15 };
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [section]
+          : table === 'quote_items'
+            ? [item, typedItem]
+            : table === 'fields'
+              ? [
+                { id: 'field-1', field_name: 'Home Quarter', customer_id: 'customer-1', total_acres: 40, measured_acres: null, override_acres: null },
+                { id: 'field-2', field_name: 'North Eighty', customer_id: 'customer-1', total_acres: 80, measured_acres: null, override_acres: null },
+              ]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    }));
+    renderQuoteBuilder(quote.id);
+    const acres = () => screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value);
+    const fieldBox = await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(acres()).toHaveLength(2));
+
+    fireEvent.change(fieldBox, { target: { value: 'Ho' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Home Quarter/ }));
+    await waitFor(() => expect(acres()).toEqual(['40', '15']));
+
+    // Replacing the field swaps in the new field's acres; the typed line is untouched.
+    fireEvent.change(fieldBox, { target: { value: 'No' } });
+    fireEvent.click(await screen.findByRole('option', { name: /North Eighty/ }));
+    await waitFor(() => expect(acres()).toEqual(['80', '15']));
+
+    // Clearing the field drops the acres it filled in.
+    fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
+    await waitFor(() => expect(fieldBox).toHaveValue(''));
+    expect(acres()).toEqual(['', '15']);
+  });
+
   it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {
     const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);
     // Tier 3 differs from the tier-1 price the saved line starts at.

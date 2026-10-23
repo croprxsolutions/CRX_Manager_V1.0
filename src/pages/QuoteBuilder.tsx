@@ -1755,16 +1755,20 @@ export default function QuoteBuilder() {
       return false;
     }
     if (field) setFields((known) => ({ ...known, [field.id]: field }));
-    updateSectionField(sectionKey, 'field_id', field?.id ?? null);
     const effectiveAcres = field ? fieldEffectiveAcres(field) : null;
-    if (effectiveAcres == null) return true;
 
     setSections((prev) =>
       prev.map((section) => {
         if (section._key !== sectionKey) return section;
+        // Clearing or replacing the field first drops the acres the old field filled in, as a
+        // customer change does; typed acres stay (Codex, #1049).
+        const previousField = section.field_id ? fields[section.field_id] : undefined;
+        const cleared = section.field_id ? clearSectionField(section, previousField) : section;
+        const withField = { ...cleared, field_id: field?.id ?? null };
+        if (effectiveAcres == null) return withField;
         return {
-          ...section,
-          items: section.items.map((item) => {
+          ...withField,
+          items: withField.items.map((item) => {
             if ((item.acres ?? 0) !== 0) return item;
             return recalcItem({
               ...item,

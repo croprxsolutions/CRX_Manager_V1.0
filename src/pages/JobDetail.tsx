@@ -3755,7 +3755,11 @@ export default function JobDetail() {
         // cost/price unchanged — the common case is untouched.
         // A missing tier-2/3 price falls back to tier 1, as on quotes (never a silent $0).
         // pickTier is set whenever a product is picked (an unknown tier returned above).
-        const tierPrice = pickTier == null ? null : getTierPrice(p, pickTier);
+        const ownTierPrice = pickTier === 3 ? p.tier3_price : pickTier === 2 ? p.tier2_price : p.tier1_price;
+        // Null only when the product states no price at all (neither its tier's nor tier 1's).
+        const tierPrice = pickTier == null || (ownTierPrice == null && p.tier1_price == null)
+          ? null
+          : getTierPrice(p, pickTier);
         const costPerStockCents = Math.round((p.current_cost || 0) * 100);
         const pricePerStockCents = tierPrice != null ? Math.round(tierPrice * 100) : 0;
         const reconciled = reconcileChemAutofillUnits(
@@ -3767,9 +3771,9 @@ export default function JobDetail() {
         );
         updated[i].unit = reconciled.unit;
         updated[i].cost_per_unit_cents = reconciled.costPerUnitCents.toString();
-        // Only default the price when the product has a tier price (or a tier-1 price to fall
-        // back to); otherwise leave whatever was there.
-        if (tierPrice) updated[i].price_per_unit_cents = reconciled.pricePerUnitCents.toString();
+        // Only default the price when the product states one (a $0 price included); otherwise
+        // leave whatever was there.
+        if (tierPrice != null) updated[i].price_per_unit_cents = reconciled.pricePerUnitCents.toString();
         // Re-derive the quantity now that a rate auto-filled.
         updated[i] = recomputeChemRowForAcres(updated[i], sumAcres(fieldRows));
       }

@@ -99,7 +99,7 @@ let customerByIdReads = 0;
 let customerByIdRequested: unknown[] = [];
 let recipeItemReads = 0;
 
-function serveTables(customerById: { data: unknown; error: unknown }, product: object = PRODUCT) {
+function serveTables(customerById: { data: unknown; error: unknown }, product: object = PRODUCT, extraProducts: object[] = []) {
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs') return buildChain({ data: JOB, error: null });
     if (table === 'customers') {
@@ -116,7 +116,7 @@ function serveTables(customerById: { data: unknown; error: unknown }, product: o
       };
       return chain;
     }
-    if (table === 'products') return buildChain({ data: [product], error: null });
+    if (table === 'products') return buildChain({ data: [product, ...extraProducts], error: null });
     if (table === 'blend_recipes') return buildChain({ data: [RECIPE], error: null });
     if (table === 'blend_recipe_items') { recipeItemReads += 1; return buildChain({ data: [RECIPE_ITEM], error: null }); }
     return buildChain({ data: [], error: null });
@@ -177,5 +177,30 @@ describe('JobDetail recipe pricing tier', () => {
     expect(mockCapture).toHaveBeenCalledWith(readError, { tags: { source: 'fetch', action: 'load_job_customer_tier' } });
     expect(recipeItemReads).toBe(0);
     expect(screen.queryByDisplayValue('1000')).not.toBeInTheDocument();
+  });
+
+  it('MONEY: a product priced at $0 replaces the previous product\'s price on a picked line', async () => {
+    // Free Sample has no tier-3 price and a $0 tier-1 price: the line must not keep Herbicide X's.
+    const FREE = { ...PRODUCT, id: 'prod-free', product_name: 'Free Sample', tier1_price: 0, tier2_price: null, tier3_price: null };
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [FREE]);
+    const router = createMemoryRouter(
+      [{ path: '/jobs/:id', element: <JobDetail /> }],
+      { initialEntries: ['/jobs/job-1?tab=chemicals'] },
+    );
+    render(<RouterProvider router={router} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Add Chemical/ }));
+
+    const pick = async (name: RegExp) => {
+      const box = screen.getByPlaceholderText('Select product...');
+      fireEvent.click(box);
+      fireEvent.change(box, { target: { value: name.source.split(' ')[0] } });
+      fireEvent.click(await screen.findByRole('option', { name }));
+    };
+    await pick(/Herbicide X/);
+    // Tier 3 is $7.00.
+    expect(await screen.findByDisplayValue('700')).toBeInTheDocument();
+
+    await pick(/Free Sample/);
+    await waitFor(() => expect(screen.queryByDisplayValue('700')).not.toBeInTheDocument());
   });
 });

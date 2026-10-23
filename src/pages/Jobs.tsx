@@ -555,8 +555,9 @@ export default function Jobs() {
     const { data, error } = await query;
     if (superseded()) return;
 
-    if (error) {
-      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_jobs' } });
+    // No list is not "No jobs found": treat it as a failed read.
+    if (error || !Array.isArray(data)) {
+      Sentry.captureException(error ?? new Error('Jobs read returned no list'), { tags: { source: 'fetch', action: 'load_jobs' } });
       setJobs([]);
       setLoadError(true);
       toast('error', 'Failed to load jobs');

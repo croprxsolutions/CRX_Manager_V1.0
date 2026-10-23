@@ -1811,7 +1811,8 @@ export interface Invoice {
   created_by: string;
   /**
    * Computed field `invoice_post_version` (migrations 20261022022000, 20261022090000), present only
-   * when a query selects it, and selectable only from the `invoices_postable` view (INVOICES_POSTABLE).
+   * when a query selects it: `invoice_postable_version` on the `invoices_postable` view
+   * (INVOICES_POSTABLE), aliased to this name by INVOICE_POST_VERSION_COLUMNS.
    * Posting sends it back; the server refuses if the saved invoice changed since.
    */
   invoice_post_version?: string | null;

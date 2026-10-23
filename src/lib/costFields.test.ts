@@ -231,7 +231,7 @@ describe('admin cost helpers', () => {
 // The posting version is a computed field: it receives the whole row, so it may only be selected from
 // invoices_postable (migration 20261022090000), whose row has no cost column. On `invoices` it fails
 // for everyone once the cost column lock revokes total_cost_cents.
-const VERSION_TOKEN = /\binvoice_post_version\b|\bINVOICE_POST_VERSION_COLUMNS\b/;
+const VERSION_TOKEN = /\binvoice_post(?:able)?_version\b|\bINVOICE_POST_VERSION_COLUMNS\b/;
 
 /** Every exported string constant in src/, so a select that names an imported constant is resolved too. */
 function exportedStringConstants(files: string[]): Map<string, string> {
@@ -276,7 +276,7 @@ function changesInvoiceColumns(sql: string): boolean {
   return false;
 }
 
-// The reviewed body of invoice_post_version(invoices_postable) (20261022090000), whitespace-collapsed: the
+// The reviewed body of invoice_postable_version(invoices_postable) (20261022090000), whitespace-collapsed: the
 // re-read by id, the active-profile and ownership scope, and the _invoice_post_version(i.id) call.
 const REVIEWED_POST_VERSION_BODY = 'SELECT public._invoice_post_version(i.id) FROM public.invoices i '
   + 'JOIN public.profiles p ON p.id = auth.uid() AND p.is_active = true WHERE i.id = p_invoice.id '
@@ -321,10 +321,10 @@ function missingViewRebuildParts(sql: string): string[] {
       || !grantsAfterRevoke.some((s) => /\bauthenticated\b/i.test(s)) || !grants.every(grantOk)) {
     missing.push('view grants');
   }
-  // The overload keeps its contract: the reviewed body, SECURITY DEFINER with the safe search_path (API
+  // The view's version function keeps its contract: the reviewed body, SECURITY DEFINER with the safe search_path (API
   // roles cannot run _invoice_post_version), closed to PUBLIC and anon, EXECUTE only for authenticated
   // and service_role (Codex GitHub App review: a rebuilt body could refuse every Post or lose the scope).
-  const fnSig = 'public\\.invoice_post_version\\s*\\(\\s*(?:\\w+\\s+)?public\\.invoices_postable\\s*\\)';
+  const fnSig = 'public\\.invoice_postable_version\\s*\\(\\s*(?:\\w+\\s+)?public\\.invoices_postable\\s*\\)';
   const fn = afterView.find((s) => new RegExp(`CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+${fnSig}`, 'i').test(s)) ?? '';
   const fnRevokeAt = lastAt(new RegExp(`REVOKE\\b[\\s\\S]*\\bON\\s+FUNCTION\\s+${fnSig}`, 'i'));
   const fnRevoke = fnRevokeAt === -1 || !new RegExp(`REVOKE\\s+ALL\\s+ON\\s+FUNCTION\\s+${fnSig}\\s+FROM\\b`, 'i').test(afterView[fnRevokeAt])
@@ -338,7 +338,7 @@ function missingViewRebuildParts(sql: string): string[] {
   if (!fn || dollarBody(fn) !== REVIEWED_POST_VERSION_BODY || !/\bSECURITY\s+DEFINER\b/i.test(fn) || !/\bSET\s+search_path\s*(=|TO)\s*public\s*,\s*pg_temp\b/i.test(fn)
       || !['PUBLIC', 'anon'].every((r) => new RegExp(`\\b${r}\\b`, 'i').test(fnRevoke.replace(/^[\s\S]*?\bFROM\b/i, '')))
       || !fnGrantsAfterRevoke.some((s) => /\bauthenticated\b/i.test(s)) || !fnGrants.every(fnGrantOk)) {
-    missing.push('invoice_post_version(invoices_postable)');
+    missing.push('invoice_postable_version(invoices_postable)');
   }
   return missing;
 }
@@ -377,11 +377,12 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(versionReadsOffView("const LIST = `${INVOICE_POST_VERSION_COLUMNS}, id`;\nsupabase.from('invoices').select(LIST, { count: 'exact' });")).toEqual([2]);
     expect(versionReadsOffView("supabase.from(INVOICES_POSTABLE).select(`${INVOICE_COLUMNS}, ${INVOICE_POST_VERSION_COLUMNS}`).eq('id', x);")).toEqual([]);
     expect(versionReadsOffView("supabase.from('invoices').select('id, status').eq('id', x);")).toEqual([]);
+    expect(versionReadsOffView("supabase.from('invoices').select('id, invoice_postable_version').eq('id', x);")).toEqual([1]);
     // A constant imported from another file (Luna round 3).
     const exported = new Map([['POSTING_COLUMNS', '${INVOICE_COLUMNS}, ${INVOICE_POST_VERSION_COLUMNS}']]);
     expect(versionReadsOffView("supabase.from('invoices').select(POSTING_COLUMNS).eq('id', x);", exported)).toEqual([1]);
     expect(versionReadsOffView("supabase.from(INVOICES_POSTABLE).select(POSTING_COLUMNS).eq('id', x);", exported)).toEqual([]);
-    expect(exportedStringConstants([join(HERE, 'costFields.ts')]).get('INVOICE_POST_VERSION_COLUMNS')).toBe('invoice_post_version');
+    expect(exportedStringConstants([join(HERE, 'costFields.ts')]).get('INVOICE_POST_VERSION_COLUMNS')).toBe('invoice_post_version:invoice_postable_version');
   });
 
   it("the view's columns are every invoices column except the cost columns (schema registry)", () => {
@@ -416,7 +417,7 @@ describe('the posting version is read only from invoices_postable', () => {
   // The registry is refreshed after a live apply, so the test above can lag a migration on disk. Any
   // migration after the view's newest definition that adds, drops or renames an invoices column must
   // rebuild the view in the same file: a DROP COLUMN ... CASCADE silently drops the view AND the
-  // invoice_post_version overload on it, and a bare CREATE VIEW would lose security_invoker and the
+  // invoice_postable_version function on it, and a bare CREATE VIEW would lose security_invoker and the
   // SELECT-only grants (Codex GitHub App review).
   it('a migration that changes invoices columns after the view rebuilds all of it', () => {
     const migrations = join(HERE, '..', '..', 'supabase', 'migrations');
@@ -430,19 +431,19 @@ describe('the posting version is read only from invoices_postable', () => {
       const missing = changesInvoiceColumns(sql) ? missingViewRebuildParts(sql) : [];
       return missing.length ? [`${n}: ${missing.join(', ')}`] : [];
     });
-    expect(offences, 'rebuild public.invoices_postable, its grants and invoice_post_version(invoices_postable) in the same migration').toEqual([]);
+    expect(offences, 'rebuild public.invoices_postable, its grants and invoice_postable_version(invoices_postable) in the same migration').toEqual([]);
   });
 
   it('the rebuild check names each missing part (mutation guard)', () => {
     const view = 'CREATE VIEW public.invoices_postable WITH (security_invoker = true) AS SELECT id FROM public.invoices;';
     const acl = 'REVOKE ALL ON public.invoices_postable FROM PUBLIC, anon, authenticated, service_role;\n'
       + 'GRANT SELECT ON public.invoices_postable TO authenticated, service_role;';
-    const fn = 'CREATE OR REPLACE FUNCTION public.invoice_post_version(p_invoice public.invoices_postable) RETURNS text\n'
+    const fn = 'CREATE OR REPLACE FUNCTION public.invoice_postable_version(p_invoice public.invoices_postable) RETURNS text\n'
       + `LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$\n  ${REVIEWED_POST_VERSION_BODY}\n$fn$;\n`
-      + 'REVOKE ALL ON FUNCTION public.invoice_post_version(public.invoices_postable) FROM PUBLIC, anon;\n'
-      + 'GRANT EXECUTE ON FUNCTION public.invoice_post_version(public.invoices_postable) TO authenticated, service_role';
+      + 'REVOKE ALL ON FUNCTION public.invoice_postable_version(public.invoices_postable) FROM PUBLIC, anon;\n'
+      + 'GRANT EXECUTE ON FUNCTION public.invoice_postable_version(public.invoices_postable) TO authenticated, service_role';
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn}`)).toEqual([]);
-    expect(missingViewRebuildParts(view)).toEqual(['view grants', 'invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(view)).toEqual(['view grants', 'invoice_postable_version(invoices_postable)']);
     expect(missingViewRebuildParts(`CREATE VIEW public.invoices_postable AS SELECT id FROM public.invoices;\n${acl}\n${fn}`))
       .toEqual(['security_invoker view']);
     expect(missingViewRebuildParts(`${view}\nGRANT SELECT ON public.invoices_postable TO authenticated;\n${fn}`)).toEqual(['view grants']);
@@ -458,11 +459,11 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(missingViewRebuildParts(`ALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}\n${acl}\n${fn};\n`
       + 'ALTER TABLE public.invoices ADD CONSTRAINT zz_check CHECK (true);')).toEqual([]);
     // The overload's own contract (Codex GitHub App review): definer, search_path, closed, narrow grant.
-    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('SECURITY DEFINER ', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);
-    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(' SET search_path = public, pg_temp', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);
-    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('FROM PUBLIC, anon', 'FROM anon')}`)).toEqual(['invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('SECURITY DEFINER ', '')}`)).toEqual(['invoice_postable_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(' SET search_path = public, pg_temp', '')}`)).toEqual(['invoice_postable_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('FROM PUBLIC, anon', 'FROM anon')}`)).toEqual(['invoice_postable_version(invoices_postable)']);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('TO authenticated, service_role', 'TO authenticated, anon')}`))
-      .toEqual(['invoice_post_version(invoices_postable)']);
+      .toEqual(['invoice_postable_version(invoices_postable)']);
     // ACL order: a grant before the revoke, or a later revoke, is undone (Codex GitHub App review).
     const [viewRevoke, viewGrant] = acl.split('\n');
     expect(missingViewRebuildParts(`${view}\n${viewGrant}\n${viewRevoke}\n${fn}`)).toEqual(['view grants']);
@@ -470,19 +471,19 @@ describe('the posting version is read only from invoices_postable', () => {
       .toEqual(['view grants']);
     const [fnCreate, fnRevokeLine, fnGrantLine] = fn.split(/;\n(?=REVOKE|GRANT)/);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fnCreate};\n${fnGrantLine};\n${fnRevokeLine}`))
-      .toEqual(['invoice_post_version(invoices_postable)']);
-    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nREVOKE EXECUTE ON FUNCTION public.invoice_post_version(public.invoices_postable) FROM authenticated;`))
-      .toEqual(['invoice_post_version(invoices_postable)']);
+      .toEqual(['invoice_postable_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nREVOKE EXECUTE ON FUNCTION public.invoice_postable_version(public.invoices_postable) FROM authenticated;`))
+      .toEqual(['invoice_postable_version(invoices_postable)']);
     // A rebuilt body that is not the reviewed one (Codex GitHub App review).
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(REVIEWED_POST_VERSION_BODY, 'SELECT 1')}`))
-      .toEqual(['invoice_post_version(invoices_postable)']);
+      .toEqual(['invoice_postable_version(invoices_postable)']);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(' AND p.is_active = true', '')}`))
-      .toEqual(['invoice_post_version(invoices_postable)']);
+      .toEqual(['invoice_postable_version(invoices_postable)']);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace("p.role = 'admin' OR ", '')}`))
-      .toEqual(['invoice_post_version(invoices_postable)']);
+      .toEqual(['invoice_postable_version(invoices_postable)']);
     // Grants and the function placed before the cascade are dropped by it (Codex GitHub App review).
     expect(missingViewRebuildParts(`${acl}\n${fn};\nALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}`))
-      .toEqual(['view grants', 'invoice_post_version(invoices_postable)']);
+      .toEqual(['view grants', 'invoice_postable_version(invoices_postable)']);
   });
 
   it('the invoices column-change detector catches each shape it exists for (mutation guard)', () => {

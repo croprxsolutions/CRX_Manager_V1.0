@@ -593,7 +593,7 @@ export default function OfficeCockpit() {
       // (b) Draft/unposted field-app invoices (§4 auto-populates these)
       supabase
         .from(INVOICES_POSTABLE)
-        .select('id, invoice_number, invoice_date, status, total_amount_cents, job_id, invoice_group_id, pricing_pending, invoice_post_version, customer:customers(farm_name)')
+        .select('id, invoice_number, invoice_date, status, total_amount_cents, job_id, invoice_group_id, pricing_pending, invoice_post_version:invoice_postable_version, customer:customers(farm_name)')
         .in('status', ['draft', 'unposted'])
         .eq('invoice_type', 'field_application')
         .is('deleted_at', null)

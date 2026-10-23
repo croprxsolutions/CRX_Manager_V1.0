@@ -303,16 +303,22 @@ function missingViewRebuildParts(sql: string): string[] {
   }
   // REVOKE ALL from every API role, then grants only SELECT, only to authenticated and service_role, all
   // after the view is (re)created: a CASCADE drops whatever came before it (Codex GitHub App review).
+  // PostgreSQL applies ACL statements in order, so the LAST revoke must be the REVOKE ALL and the
+  // authenticated grant must follow it; a revoke after the grants would undo them (Codex GitHub App review).
   const afterView = statements.slice(Math.max(createAt, 0) + 1);
-  const revoke = afterView.find((s) => /REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b/i.test(s)) ?? '';
+  const lastAt = (re: RegExp) => afterView.reduce((at, s, i) => (re.test(s) ? i : at), -1);
+  const revokeAt = lastAt(/REVOKE\b[\s\S]*\bON\s+(TABLE\s+)?public\.invoices_postable\b/i);
+  const revoke = revokeAt === -1 || !/REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b/i.test(afterView[revokeAt])
+    ? '' : afterView[revokeAt];
   const grants = afterView.filter((s) => /GRANT\b[\s\S]*\bON\s+(TABLE\s+)?public\.invoices_postable\b/i.test(s));
+  const grantsAfterRevoke = afterView.slice(revokeAt + 1).filter((s) => grants.includes(s));
   const grantOk = (s: string) => {
     const m = /GRANT\s+([\s\S]*?)\s+ON\s+(?:TABLE\s+)?public\.invoices_postable\s+TO\s+([\s\S]*)/i.exec(s);
     return !!m && /^SELECT$/i.test(m[1].trim())
       && m[2].split(',').every((r) => ['authenticated', 'service_role'].includes(r.trim().toLowerCase()));
   };
   if (!['PUBLIC', 'anon', 'authenticated', 'service_role'].every((r) => new RegExp(`\\b${r}\\b`, 'i').test(revoke.replace(/^[\s\S]*?\bFROM\b/i, '')))
-      || !grants.some((s) => /\bauthenticated\b/i.test(s)) || !grants.every(grantOk)) {
+      || !grantsAfterRevoke.some((s) => /\bauthenticated\b/i.test(s)) || !grants.every(grantOk)) {
     missing.push('view grants');
   }
   // The overload keeps its contract: the reviewed body, SECURITY DEFINER with the safe search_path (API
@@ -320,15 +326,18 @@ function missingViewRebuildParts(sql: string): string[] {
   // and service_role (Codex GitHub App review: a rebuilt body could refuse every Post or lose the scope).
   const fnSig = 'public\\.invoice_post_version\\s*\\(\\s*(?:\\w+\\s+)?public\\.invoices_postable\\s*\\)';
   const fn = afterView.find((s) => new RegExp(`CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+${fnSig}`, 'i').test(s)) ?? '';
-  const fnRevoke = afterView.find((s) => new RegExp(`REVOKE\\s+ALL\\s+ON\\s+FUNCTION\\s+${fnSig}\\s+FROM\\b`, 'i').test(s)) ?? '';
+  const fnRevokeAt = lastAt(new RegExp(`REVOKE\\b[\\s\\S]*\\bON\\s+FUNCTION\\s+${fnSig}`, 'i'));
+  const fnRevoke = fnRevokeAt === -1 || !new RegExp(`REVOKE\\s+ALL\\s+ON\\s+FUNCTION\\s+${fnSig}\\s+FROM\\b`, 'i').test(afterView[fnRevokeAt])
+    ? '' : afterView[fnRevokeAt];
   const fnGrants = afterView.filter((s) => new RegExp(`GRANT\\b[\\s\\S]*\\bON\\s+FUNCTION\\s+${fnSig}`, 'i').test(s));
+  const fnGrantsAfterRevoke = afterView.slice(fnRevokeAt + 1).filter((s) => fnGrants.includes(s));
   const fnGrantOk = (s: string) => {
     const m = new RegExp(`GRANT\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+${fnSig}\\s+TO\\s+([\\s\\S]*)`, 'i').exec(s);
     return !!m && m[1].split(',').every((r) => ['authenticated', 'service_role'].includes(r.trim().toLowerCase()));
   };
   if (!fn || dollarBody(fn) !== REVIEWED_POST_VERSION_BODY || !/\bSECURITY\s+DEFINER\b/i.test(fn) || !/\bSET\s+search_path\s*(=|TO)\s*public\s*,\s*pg_temp\b/i.test(fn)
       || !['PUBLIC', 'anon'].every((r) => new RegExp(`\\b${r}\\b`, 'i').test(fnRevoke.replace(/^[\s\S]*?\bFROM\b/i, '')))
-      || !fnGrants.some((s) => /\bauthenticated\b/i.test(s)) || !fnGrants.every(fnGrantOk)) {
+      || !fnGrantsAfterRevoke.some((s) => /\bauthenticated\b/i.test(s)) || !fnGrants.every(fnGrantOk)) {
     missing.push('invoice_post_version(invoices_postable)');
   }
   return missing;
@@ -453,6 +462,16 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(' SET search_path = public, pg_temp', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('FROM PUBLIC, anon', 'FROM anon')}`)).toEqual(['invoice_post_version(invoices_postable)']);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('TO authenticated, service_role', 'TO authenticated, anon')}`))
+      .toEqual(['invoice_post_version(invoices_postable)']);
+    // ACL order: a grant before the revoke, or a later revoke, is undone (Codex GitHub App review).
+    const [viewRevoke, viewGrant] = acl.split('\n');
+    expect(missingViewRebuildParts(`${view}\n${viewGrant}\n${viewRevoke}\n${fn}`)).toEqual(['view grants']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nREVOKE SELECT ON public.invoices_postable FROM authenticated;`))
+      .toEqual(['view grants']);
+    const [fnCreate, fnRevokeLine, fnGrantLine] = fn.split(/;\n(?=REVOKE|GRANT)/);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fnCreate};\n${fnGrantLine};\n${fnRevokeLine}`))
+      .toEqual(['invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nREVOKE EXECUTE ON FUNCTION public.invoice_post_version(public.invoices_postable) FROM authenticated;`))
       .toEqual(['invoice_post_version(invoices_postable)']);
     // A rebuilt body that is not the reviewed one (Codex GitHub App review).
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(REVIEWED_POST_VERSION_BODY, 'SELECT 1')}`))

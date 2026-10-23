@@ -80,7 +80,7 @@ const product = {
 /** A Supabase-like query chain: every filter returns itself, awaiting it answers `data`. */
 function chain(data: unknown) {
   const self: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'neq', 'in', 'is', 'not', 'or', 'gte', 'lte', 'order', 'limit', 'range']) {
+  for (const m of ['select', 'eq', 'neq', 'in', 'is', 'not', 'or', 'gte', 'lte', 'order', 'limit', 'range', 'ilike']) {
     self[m] = () => self;
   }
   self.single = () => Promise.resolve({ data: null, error: null });
@@ -114,8 +114,8 @@ function renderNewQuote() {
 
 /** Pick a customer and one product with 2 units: a quote Save Draft will accept. */
 async function fillInNewQuote() {
-  const customerBox = await screen.findByPlaceholderText('Select a customer...');
-  fireEvent.click(customerBox);
+  const customerBox = await screen.findByRole('combobox', { name: 'Customer' });
+  fireEvent.change(customerBox, { target: { value: 'North' } });
   fireEvent.click(await screen.findByRole('option', { name: /North Farm/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
   fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));

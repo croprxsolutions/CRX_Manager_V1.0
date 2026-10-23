@@ -275,6 +275,22 @@ function changesInvoiceColumns(sql: string): boolean {
   return false;
 }
 
+/** What a migration must contain to rebuild invoices_postable after a CASCADE drop; empty when complete. */
+function missingViewRebuildParts(sql: string): string[] {
+  const missing: string[] = [];
+  if (!/CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+public\.invoices_postable\s+WITH\s*\(\s*security_invoker\s*=\s*(true|on)\s*\)/i.test(sql)) {
+    missing.push('security_invoker view');
+  }
+  if (!/REVOKE\s+ALL\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+FROM\b[^;]*\bPUBLIC\b[^;]*\bauthenticated\b/i.test(sql)
+      || !/GRANT\s+SELECT\s+ON\s+(TABLE\s+)?public\.invoices_postable\s+TO\b[^;]*\bauthenticated\b/i.test(sql)) {
+    missing.push('view grants');
+  }
+  if (!/CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.invoice_post_version\s*\([^)]*\bpublic\.invoices_postable\b/i.test(sql)) {
+    missing.push('invoice_post_version(invoices_postable)');
+  }
+  return missing;
+}
+
 describe('the posting version is read only from invoices_postable', () => {
   it('every select of invoice_post_version in src/ is on invoices_postable', () => {
     const offences: string[] = [];
@@ -317,18 +333,34 @@ describe('the posting version is read only from invoices_postable', () => {
 
   // The registry is refreshed after a live apply, so the test above can lag a migration on disk. Any
   // migration after the view's newest definition that adds, drops or renames an invoices column must
-  // re-create the view in the same file (a DROP COLUMN ... CASCADE would silently drop it).
-  it('a migration that changes invoices columns after the view re-creates the view', () => {
+  // rebuild the view in the same file: a DROP COLUMN ... CASCADE silently drops the view AND the
+  // invoice_post_version overload on it, and a bare CREATE VIEW would lose security_invoker and the
+  // SELECT-only grants (Codex GitHub App review).
+  it('a migration that changes invoices columns after the view rebuilds all of it', () => {
     const migrations = join(HERE, '..', '..', 'supabase', 'migrations');
     const names = readdirSync(migrations).filter((n) => n.endsWith('.sql')).sort();
     const defines = (sql: string) => /CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+public\.invoices_postable\b/i.test(sql);
     const firstView = names.findIndex((n) => defines(readFileSync(join(migrations, n), 'utf8')));
     expect(firstView).toBeGreaterThanOrEqual(0);
-    const offences = names.slice(firstView + 1).filter((n) => {
+    expect(missingViewRebuildParts(readFileSync(join(migrations, names[firstView]), 'utf8').replace(/--[^\n]*/g, ''))).toEqual([]);
+    const offences = names.slice(firstView + 1).flatMap((n) => {
       const sql = readFileSync(join(migrations, n), 'utf8').replace(/--[^\n]*/g, '');
-      return changesInvoiceColumns(sql) && !defines(sql);
+      const missing = changesInvoiceColumns(sql) ? missingViewRebuildParts(sql) : [];
+      return missing.length ? [`${n}: ${missing.join(', ')}`] : [];
     });
-    expect(offences, 're-create public.invoices_postable (every invoices column but cost) in the same migration').toEqual([]);
+    expect(offences, 'rebuild public.invoices_postable, its grants and invoice_post_version(invoices_postable) in the same migration').toEqual([]);
+  });
+
+  it('the rebuild check names each missing part (mutation guard)', () => {
+    const view = 'CREATE VIEW public.invoices_postable WITH (security_invoker = true) AS SELECT id FROM public.invoices;';
+    const acl = 'REVOKE ALL ON public.invoices_postable FROM PUBLIC, anon, authenticated, service_role;\n'
+      + 'GRANT SELECT ON public.invoices_postable TO authenticated, service_role;';
+    const fn = 'CREATE OR REPLACE FUNCTION public.invoice_post_version(p_invoice public.invoices_postable) RETURNS text';
+    expect(missingViewRebuildParts(`${view}\n${acl}\n${fn}`)).toEqual([]);
+    expect(missingViewRebuildParts(view)).toEqual(['view grants', 'invoice_post_version(invoices_postable)']);
+    expect(missingViewRebuildParts(`CREATE VIEW public.invoices_postable AS SELECT id FROM public.invoices;\n${acl}\n${fn}`))
+      .toEqual(['security_invoker view']);
+    expect(missingViewRebuildParts(`${view}\nGRANT SELECT ON public.invoices_postable TO authenticated;\n${fn}`)).toEqual(['view grants']);
   });
 
   it('the invoices column-change detector catches each shape it exists for (mutation guard)', () => {

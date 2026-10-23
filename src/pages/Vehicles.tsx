@@ -198,7 +198,8 @@ export default function Vehicles() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex-1 flex items-center gap-3">
           <SplitHeading title="Vehicles" accent="& Equipment" />
-          {canBulkAction && (
+          {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
+          {canBulkAction && !loadError && (
             <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
           )}
         </div>
@@ -233,7 +234,7 @@ export default function Vehicles() {
           <option value="inactive">Inactive</option>
           <option value="maintenance">Maintenance</option>
         </select>
-        {canBulkAction && filtered.length > 0 && (
+        {canBulkAction && !loadError && filtered.length > 0 && (
           <button
             onClick={toggleAll}
             className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"

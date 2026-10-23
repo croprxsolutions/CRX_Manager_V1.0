@@ -424,7 +424,8 @@ export default function Fields() {
               Map
             </button>
           </div>
-          {canBulkAction && viewMode === 'list' && (
+          {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
+          {canBulkAction && !loadError && viewMode === 'list' && (
             <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
           )}
         </div>
@@ -532,7 +533,7 @@ export default function Fields() {
                     <option value="inactive">Inactive</option>
                     <option value="all">All Status</option>
                   </select>
-                  {canBulkAction && filtered.length > 0 && (
+                  {canBulkAction && !loadError && filtered.length > 0 && (
                     <button
                       onClick={toggleAll}
                       className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"

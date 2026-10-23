@@ -785,7 +785,8 @@ export default function Products() {
         subtitle={<HelpTip text="Your product master list. Set tier pricing (1/2/3) for customer-specific pricing, mark products as RUP for compliance tracking, and manage unit sizes. Edit inline by clicking any editable cell." />}
         actions={(
           <>
-          {canBulkAction && (
+          {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
+          {canBulkAction && !loadError && (
             <BulkActionBar
               selectedCount={selectedCount}
               actions={bulkActions}
@@ -935,7 +936,7 @@ export default function Products() {
                     <option key={v} value={v}>{v}</option>
                   ))}
                 </select>
-                {canBulkAction && filtered.length > 0 && (
+                {canBulkAction && !loadError && filtered.length > 0 && (
                   <button
                     onClick={toggleAll}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"

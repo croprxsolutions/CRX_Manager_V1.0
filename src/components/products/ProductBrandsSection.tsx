@@ -104,6 +104,22 @@ function rupLabel(isRup: boolean | null): string {
  * The real brands that can fill this product, each with its own EPA registration. Quotes, prices and
  * cost stay on the product; the brand that actually ships is recorded on the delivery (step 1, PR B).
  */
+// Refusals the server makes before writing anything: after one of these the save certainly did not
+// happen, so the admin may correct the form. Anything else (a lost reply, a timeout) is uncertain.
+const CLEAR_REFUSAL_CODES = [
+  RpcErrorCodes.BRAND_NAME_TAKEN,
+  RpcErrorCodes.BRAND_NAME_REQUIRED,
+  RpcErrorCodes.BRAND_TEXT_TOO_LONG,
+  RpcErrorCodes.EPA_REGISTRATION_INVALID,
+  RpcErrorCodes.NOT_AUTHORIZED,
+  RpcErrorCodes.PRODUCT_NOT_FOUND,
+  RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH,
+] as const;
+
+function isClearRefusal(err: unknown): boolean {
+  return CLEAR_REFUSAL_CODES.some((code) => hasRpcCode(err, code));
+}
+
 export default function ProductBrandsSection({ productId, productName, isAdmin, userId }: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
@@ -114,6 +130,10 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const [draft, setDraft] = useState<BrandDraft | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // A new brand whose save failed without a clear refusal may have been created anyway (the reply
+  // was lost). Its form stays locked as sent: Save retries that exact request, which the server
+  // replays instead of creating it twice; an edited resubmit would be a new request and a second brand.
+  const [createUncertain, setCreateUncertain] = useState(false);
   const [epaResult, setEpaResult] = useState<EpaLookupResult | null>(null);
   const [epaResultNumber, setEpaResultNumber] = useState('');
   const [epaLookupLoading, setEpaLookupLoading] = useState(false);
@@ -160,6 +180,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
 
   const openDraft = (next: BrandDraft) => {
     lookupSeq.current += 1;
+    setCreateUncertain(false);
     setDraft(next);
     setDraftError(null);
     setEpaResult(null);
@@ -169,16 +190,17 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const closeDraft = () => {
     if (saving) return;
     lookupSeq.current += 1;
+    setCreateUncertain(false);
     setDraft(null);
   };
 
   const updateDraft = (patch: Partial<BrandDraft>) => {
-    if (saving) return;
+    if (saving || createUncertain) return;
     setDraft((current) => (current ? { ...current, ...patch } : current));
   };
 
   const handleLookup = async () => {
-    if (!draft || saving) return;
+    if (!draft || saving || createUncertain) return;
     const regNumber = draft.epaRegistration.trim();
     if (!EPA_REGISTRATION_PATTERN.test(regNumber)) {
       setDraftError('Enter an EPA registration number (like 524-475) to look it up.');
@@ -251,9 +273,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
         entityId: productId,
       });
       toast('success', draft.brandId ? 'Brand updated.' : 'Brand added.');
+      setCreateUncertain(false);
       setDraft(null);
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'upsert_product_brand' } });
+      // An edit needs no lock: a changed resubmit after a lost-but-committed edit fails BRAND_CHANGED.
+      if (!draft.brandId && !isClearRefusal(err)) setCreateUncertain(true);
       if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED)) {
         // The form holds a version that is no longer current; close it so the next edit starts fresh.
         toast('error', productBrandErrorMessage(err));
@@ -445,7 +470,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
           // The save sends the form as it was when Save was pressed, so the whole form (lookup and
           // apply included) is locked until it answers: an edit made mid-save would otherwise be
           // dropped on success, or become a second create after a lost reply.
-          <fieldset disabled={saving} className="min-w-0 space-y-3">
+          <fieldset disabled={saving || createUncertain} className="min-w-0 space-y-3">
+            {createUncertain && (
+              <p className="text-sm text-amber-700" role="status">
+                This brand may already have been saved. Save again to finish the same save (it will not be added twice), or Cancel and check the list.
+              </p>
+            )}
             <Input
               id="brand-name"
               label="Brand name"

@@ -105,6 +105,38 @@ describe('ProductBrandsSection', () => {
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Brand added.'));
   });
 
+  it('after a new brand’s save fails without a clear refusal, keeps the form as sent and retries the same request', async () => {
+    mocks.saveProductBrand
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({ ...slam, id: 'b2', brand_name: 'Mad Dog', row_version: 1 });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    expect(await screen.findByText(/may already have been saved/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toBeDisabled());
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog Plus' } });
+    expect(screen.getByLabelText('Brand name')).toHaveValue('Mad Dog');
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Brand added.'));
+    const [[firstInput, firstKey], [retryInput, retryKey]] = mocks.saveProductBrand.mock.calls;
+    expect(retryInput).toEqual(firstInput);
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it('keeps a new brand’s form editable after a clear refusal such as a taken name', async () => {
+    mocks.saveProductBrand.mockRejectedValueOnce({ message: 'BRAND_NAME_TAKEN: that brand is already listed' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Slam 5.4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/already lists a brand with that name/i);
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toBeEnabled());
+    expect(screen.queryByText(/may already have been saved/i)).not.toBeInTheDocument();
+  });
+
   it('refuses a malformed EPA number before calling the server', async () => {
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
     await screen.findByText('Slam 5.4');

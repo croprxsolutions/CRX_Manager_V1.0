@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
-  // The RAISE text of 20261022087000_save_job_refuses_unpriced_zero_price_line.sql with the product filled in.
+  // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.
   it('explains a CHEM_PRICE_REQUIRED save refusal without the raw token', () => {
     expect(sanitizeError({ code: 'P0001', message: "CHEM_PRICE_REQUIRED: Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter the price per unit, or tick Customer supplied if the grower supplied it." }))
       .toBe("Nothing was saved. Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter the price per unit, or tick Customer supplied if the grower supplied it.");

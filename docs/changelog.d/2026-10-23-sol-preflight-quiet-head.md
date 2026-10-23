@@ -2,8 +2,9 @@
 
 - `scripts/write-codex-push-proof.mjs`: a full Sol run first checks the head is quiet and refuses,
   with no Codex call, unless an open non-draft PR has this exact commit as its head; the Codex
-  GitHub App's summary comment shows a completed review of it (or the commit is 15 minutes old
-  with none); no Codex App thread on it and no CodeRabbit thread is unanswered; CodeRabbit is not
+  GitHub App's summary comment shows a completed review of it (or 15 minutes have passed with none
+  since the later of the push and the PR's last switch to ready; a review of it still running waits
+  until its summary has not changed for an hour); no Codex App thread on it and no CodeRabbit thread is unanswered; CodeRabbit is not
   mid-review; and a money or Mason-named PR has CodeRabbit's completed review or Mason's skip
   waiver. Unreadable answers refuse. `--dry-run` prints the decision; `--carry-forward` skips it.
   It reuses the merge gate's predicates in `.claude/hooks/codex-bot-review-lib.mjs`.

@@ -1115,7 +1115,8 @@ const CODEX_REVIEW_STATE_RE = /<!--\s*codex-review-state:v1\s+(\{.*?\})\s*-->/s;
 // The commit the Codex App last reviewed, from its summary comment. Only a
 // comment written by the App counts (anyone can paste the marker); the newest
 // one wins, and a newest one whose state cannot be read is UNREADABLE — never a
-// reason to fall back to an older one (Luna round 1). Returns { sha, status },
+// reason to fall back to an older one (Luna round 1). Returns { sha, status, at }
+// (at = when the App last touched the summary, NaN if unreadable),
 // { unreadable: true }, or null (the App has posted no summary).
 export function codexAppReviewState(comments) {
   let newest = null;
@@ -1130,13 +1131,16 @@ export function codexAppReviewState(comments) {
     try { state = match ? JSON.parse(match[1]) : null; } catch { state = null; }
     const sha = String(state?.code_review?.commit_sha || "").trim().toLowerCase();
     const status = String(state?.code_review?.status || "").trim().toLowerCase();
-    newest = { at: Number.isFinite(at) ? at : 0, state: state && status ? { sha, status } : { unreadable: true } };
+    newest = { at: Number.isFinite(at) ? at : 0, state: state && status ? { sha, status, at } : { unreadable: true } };
   }
   return newest ? newest.state : null;
 }
 
-// A Codex App review of this exact commit still running after this long is a
-// review that died; the 15-minute rule cannot cut one short (Luna round 1).
+// A Codex App review of this exact commit whose summary has not changed for
+// this long is a review that died; the 15-minute rule cannot cut one short
+// (Luna round 1). Measured from the summary's own last update, never the
+// commit's age: a draft's old head can start its review only when marked ready
+// (Codex App on #1075).
 export const CODEX_APP_STALE_RUN_MS = 60 * 60 * 1000;
 
 // A CodeRabbit "Review in progress" older than this is a review that died, not
@@ -1177,6 +1181,19 @@ export function headPushedAt(checkSuites) {
   return earliest;
 }
 
+// When the PR was last marked ready, from its timeline: the App reviews on that
+// switch, so a draft's head is not "quiet" until 15 minutes after it (Codex App
+// on #1075). NaN when it was never a draft (no such event).
+export function readyForReviewAt(events) {
+  let latest = Number.NaN;
+  for (const event of Array.isArray(events) ? events : []) {
+    if (event?.event !== "ready_for_review") continue;
+    const at = Date.parse(event?.created_at || "");
+    if (Number.isFinite(at) && !(at <= latest)) latest = at;
+  }
+  return latest;
+}
+
 // The decision, from facts already read. Every fact that could not be read is
 // null and refuses. Returns { ok, problems, notes }.
 export function evaluateSolPreflight({
@@ -1189,6 +1206,7 @@ export function evaluateSolPreflight({
   coderabbitRequirement,
   waiverFound,
   headPushedMs,
+  readyForReviewMs = Number.NaN,
   nowMs = Date.now(),
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
@@ -1210,14 +1228,18 @@ export function evaluateSolPreflight({
     problems.push(`${which} is still a draft. Mark it ready (the Codex GitHub App reviews on that switch), then wait for its review.`);
   }
 
-  const quietFor = Number.isFinite(headPushedMs) ? nowMs - headPushedMs : -1;
+  // Quiet since the later of the push and the last switch to ready; a ready
+  // time that could not be read (null) never counts as quiet.
+  const quietSince = readyForReviewMs === null ? Number.NaN : Math.max(headPushedMs, Number.isFinite(readyForReviewMs) ? readyForReviewMs : -Infinity);
+  const quietFor = Number.isFinite(quietSince) ? nowMs - quietSince : -1;
+  const runningFor = Number.isFinite(codexState?.at) ? nowMs - codexState.at : -1;
   const reviewedHere = codexState?.sha === head && codexState?.status === "completed";
   if (codexState === undefined || codexState?.unreadable) {
     problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
   } else if (!reviewedHere && codexState?.sha === head) {
     // Its review of THIS commit has started and not finished: wait for it, however long, until it is plainly dead.
-    if (quietFor >= CODEX_APP_STALE_RUN_MS) {
-      notes.push(`the Codex GitHub App's review of ${head.slice(0, 9)} has shown "${codexState.status}" for over an hour, so it is treated as dead and Sol may run.`);
+    if (runningFor >= CODEX_APP_STALE_RUN_MS) {
+      notes.push(`the Codex GitHub App's review of ${head.slice(0, 9)} has shown "${codexState.status}" with no update for over an hour, so it is treated as dead and Sol may run.`);
     } else {
       problems.push(
         `the Codex GitHub App is still reviewing ${head.slice(0, 9)} (status "${codexState.status}"). Wait for it to finish, answer what it finds, then run Sol.`,
@@ -1361,6 +1383,12 @@ export function readSolPreflightFacts(root, headSha) {
     ]));
     facts.headPushedMs = headPushedAt(pages.flatMap((page) => page?.check_suites || []));
   } catch { /* NaN: never quiet */ }
+  try {
+    const pages = JSON.parse(preflightGh(root, [
+      "api", `repos/${owner}/${name}/issues/${number}/timeline?per_page=100`, "--paginate", "--slurp",
+    ]));
+    facts.readyForReviewMs = readyForReviewAt(pages.flat());
+  } catch { facts.readyForReviewMs = null; }
   try {
     const node = collectCodexThreads((cursor) => {
       const args = [

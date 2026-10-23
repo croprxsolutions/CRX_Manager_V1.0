@@ -17,6 +17,7 @@ import {
   parseRawDiff,
   planCarryForward,
   codexAppReviewState,
+  readyForReviewAt,
   coderabbitReviewInProgress,
   evaluateSolPreflight,
   headPushedAt,
@@ -1288,7 +1289,7 @@ function collisionPromptSkipsWork(prompt) {
       JSON.stringify({ code_review: { commit_sha: sha, has_any_findings: false, has_unresolved_findings: false, status } }) +
       " -->\n## Codex Review Summary",
   });
-  assert.deepEqual(codexAppReviewState([summary(head)]), { sha: head, status: "completed" }, "preflight: reads the App's state");
+  assert.deepEqual(codexAppReviewState([summary(head)]), { sha: head, status: "completed", at: Date.parse("2026-10-23T17:45:39Z") }, "preflight: reads the App's state and when it last changed");
   assert.equal(codexAppReviewState([summary(head, "completed", "someone-else")]), null, "preflight: a pasted marker from anyone else is ignored");
   assert.equal(
     codexAppReviewState([summary("a".repeat(40), "completed", "chatgpt-codex-connector", "2026-10-23T17:00:00Z"), summary(head)]).sha,
@@ -1344,7 +1345,18 @@ function collisionPromptSkipsWork(prompt) {
   assert.match(check({ codexState: { sha: "b".repeat(40), status: "completed" } }).problems.join(" "), /has not finished/, "preflight: an App review of an OLDER commit does not count");
   assert.match(check({ codexState: { sha: head, status: "in_progress" } }).problems.join(" "), /still reviewing/, "preflight: a running App review does not count");
   assert.equal(check({ codexState: { sha: head, status: "in_progress" }, headPushedMs: now - 30 * 60_000 }).ok, false, "preflight: 15 minutes do not cut short a review of THIS commit that is still running");
-  assert.match(check({ codexState: { sha: head, status: "in_progress" }, headPushedMs: now - 61 * 60_000 }).notes.join(" "), /treated as dead/, "preflight: a run stuck over an hour is dead");
+  assert.match(check({ codexState: { sha: head, status: "in_progress", at: now - 61 * 60_000 }, headPushedMs: now - 61 * 60_000 }).notes.join(" "), /treated as dead/, "preflight: a run stuck over an hour is dead");
+  assert.equal(
+    check({ codexState: { sha: head, status: "in_progress", at: now - 30_000 }, headPushedMs: now - 2 * 3_600_000 }).ok,
+    false,
+    "preflight: an OLD head whose review started 30 seconds ago is still reviewing (Codex App on #1075)",
+  );
+  assert.equal(check({ codexState: { sha: head, status: "in_progress", at: Number.NaN }, headPushedMs: now - 2 * 3_600_000 }).ok, false, "preflight: a running review with no readable time is never dead");
+  assert.equal(check({ codexState: null, headPushedMs: now - 2 * 3_600_000, readyForReviewMs: now - 60_000 }).ok, false, "preflight: a draft's old head marked ready a minute ago is not quiet");
+  assert.equal(check({ codexState: null, headPushedMs: now - 2 * 3_600_000, readyForReviewMs: now - SOL_PREFLIGHT_QUIET_MS }).ok, true, "preflight: 15 minutes after marking ready it is quiet");
+  assert.equal(check({ codexState: null, headPushedMs: now - 2 * 3_600_000, readyForReviewMs: null }).ok, false, "preflight: an unreadable ready time never counts as quiet");
+  assert.equal(readyForReviewAt([{ event: "ready_for_review", created_at: t(30) }, { event: "convert_to_draft", created_at: t(20) }, { event: "ready_for_review", created_at: t(10) }]), now - 10 * 60_000, "preflight: the LAST switch to ready counts");
+  assert.equal(readyForReviewAt([{ event: "labeled", created_at: t(1) }]), Number.NaN, "preflight: never a draft gives no ready time");
   assert.match(check({ codexState: undefined, headPushedMs: now - 30 * 60_000 }).problems.join(" "), /could not read the Codex GitHub App's review summary/, "preflight: an unreadable summary refuses, even after 15 minutes");
   assert.equal(check({ codexState: { unreadable: true }, headPushedMs: now - 30 * 60_000 }).ok, false, "preflight: a malformed summary refuses, even after 15 minutes");
   assert.match(check({ pr: { ambiguous: [1, 2] } }).problems.join(" "), /more than one open pull request \(#1, #2\)/, "preflight: two open PRs on one head refuse");

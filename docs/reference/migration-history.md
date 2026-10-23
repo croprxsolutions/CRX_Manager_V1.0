@@ -4,6 +4,8 @@
 > `list_migrations` observation is at the top of this file, immediately below.
 > Do not scroll for it, and do not treat any older dated block as the latest.
 
+**Live capture — 2026-10-23 02:48 UTC (9:48 PM Central, 2026-10-22; read-only `execute_sql`, before row 969 applies for PR #1039), row by row:** 1050 rows; each row's effective stamp is the 14-digit stamp leading its `name`, or its `version` when the name has none (627 rows). The effective ordering high-water is `20261022022000` (`20261022022000_post_binds_reviewed_invoice_version`, row 968, version `20261023004246`); 0 rows have an effective stamp at or after `20261022023000`, so row 969 sorts strictly after every applied migration. (`max(version)` overall is that same row 968's `20261023004246`; its name carries the stamp, so it does not set the high-water.)
+
 **Live capture — 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22; read-only `execute_sql`, after row 968 applied for PR #1018, merged as `3ab57a80c`): 1050 rows / 1043 names, `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968), so the effective ordering high-water is `20261022022000`.**
 
 **Live capture — 2026-10-22 16:36 UTC (11:36 AM Central; read-only `execute_sql`, after row 967 applied for PR #1006, merged as `afe1dadb5`): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967), so the effective ordering high-water is `20261022021000`.**

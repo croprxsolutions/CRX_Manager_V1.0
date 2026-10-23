@@ -225,6 +225,10 @@ describe('JobDetail recipe pricing tier', () => {
     await pickProduct(/Unpriced Adjuvant/);
     await waitFor(() => expect(priceInput().value).toBe(''));
     expect(screen.getByText(/its price is blank, negative, or not a whole number of cents/)).toBeInTheDocument();
+
+    // A customer-supplied line is never billed, so its blank price no longer blocks the save.
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    await waitFor(() => expect(screen.queryByText(/its price is blank, negative, or not a whole number of cents/)).not.toBeInTheDocument());
   });
 
   it('MONEY: drops a recipe load whose customer changed while its products were loading', async () => {

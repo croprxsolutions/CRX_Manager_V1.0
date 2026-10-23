@@ -1655,7 +1655,12 @@ export default function JobDetail() {
       // ...992 and still reports as an integer, so the looser check would admit a value
       // that has already lost precision before any arithmetic runs. Refusing above 2^53
       // keeps every cents amount that reaches the total exactly representable.
-      ] as const).find(([, raw]) => !isExactDecimalText(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 0);
+      ] as const).find(([side, raw]) => {
+        // A customer-supplied line is never billed, so a blank price there (a picked product that
+        // states no price) saves as 0 instead of blocking the save.
+        if (side === 'price' && raw === '' && (c.customer_supplied ?? false)) return false;
+        return !isExactDecimalText(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 0;
+      });
       if (badCents) {
         byIndex.set(i, `its ${badCents[0]} is blank, negative, or not a whole number of cents, and would not be billed correctly`);
       }

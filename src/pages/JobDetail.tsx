@@ -46,7 +46,7 @@ import { fetchCurrentWeather, parseCentroid } from '../lib/weatherCapture';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
-import { applyChemEdit, autofillPriceText, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
+import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
 import {
@@ -3727,11 +3727,8 @@ export default function JobDetail() {
         ? customerPricingTier
         : null;
       const statedCents = p && tier != null ? getStatedTierPriceCents(p, tier) : null;
-      updated[i].price_per_unit_cents = statedCents == null
-        ? ''
-        : autofillPriceText(statedCents, reconcileChemAutofillUnits(
-          p?.unit_size, row.rate_unit || p?.rate_unit, 0, statedCents, p?.product_form,
-        ).pricePerUnitCents);
+      // Priced per the line's own billed unit (its quantity is in it), not the rate's.
+      updated[i].price_per_unit_cents = p ? priceTextInLineUnit(p.unit_size, row.unit, statedCents, p.product_form) : '';
     }
     setChemRows(updated);
   };

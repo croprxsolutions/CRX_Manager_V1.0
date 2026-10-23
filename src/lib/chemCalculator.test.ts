@@ -10,6 +10,7 @@ import {
   baseUnitOfRate,
   reconcileChemAutofillUnits,
   autofillPriceText,
+  priceTextInLineUnit,
   chemLineBillingHazard,
   chemUnitUnspecifiedSides,
   rateDenominatorIsUnrecognized,
@@ -296,6 +297,22 @@ describe('chemCalculator — autofillPriceText', () => {
     expect(autofillPriceText(0, 0)).toBe('0');
     expect(autofillPriceText(2800, 350)).toBe('350');
     expect(autofillPriceText(null, 0)).toBe('');
+  });
+});
+
+describe('chemCalculator — priceTextInLineUnit', () => {
+  it('MONEY: prices in the line\'s billed unit, whatever the rate unit (no 16× per-lb price on an oz line)', () => {
+    // $1.00/oz stock, line billed in oz: $1.00 per oz.
+    expect(priceTextInLineUnit('oz', 'oz', 100, 'dry')).toBe('100');
+    // $12.80/GAL stock, line billed in oz: 10 cents per oz.
+    expect(priceTextInLineUnit('GAL', 'oz', 1280, 'liquid')).toBe('10');
+  });
+  it('MONEY: blank when the price cannot be put in the line unit, or there is no unit or price', () => {
+    expect(priceTextInLineUnit('GAL', 'lb', 1280, 'liquid')).toBe('');
+    expect(priceTextInLineUnit('GAL', '', 1280, 'liquid')).toBe('');
+    expect(priceTextInLineUnit('GAL', 'gal', null, 'liquid')).toBe('');
+    // A positive price that rounds to 0 cents in the line unit.
+    expect(priceTextInLineUnit('GAL', 'oz', 50, 'liquid')).toBe('');
   });
 });
 

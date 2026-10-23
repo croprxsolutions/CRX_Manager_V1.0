@@ -260,6 +260,16 @@ describe('JobDetail recipe pricing tier', () => {
     await waitFor(() => expect(priceInput().value).toBe('700'));
   });
 
+  it('MONEY: un-ticking customer supplied re-prices a price written as 0.0', async () => {
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null });
+    await openChemicalLine();
+    await pickProduct(/Herbicide X/);
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    fireEvent.change(priceInput(), { target: { value: '0.0' } });
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    await waitFor(() => expect(priceInput().value).toBe('700'));
+  });
+
   it('un-ticking customer supplied leaves a malformed price for the save check, not the catalog price', async () => {
     serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null });
     await openChemicalLine();

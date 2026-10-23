@@ -3717,8 +3717,11 @@ export default function JobDetail() {
     // only because its product stated no price then, so a $0 or blank price is re-priced from the
     // catalog at the customer's tier now (a stated $0 included). With no stated price, or no known
     // tier, it is blanked and chemRowDefects asks for one, instead of billing it at $0.
-    // Exactly blank or zero: a malformed price such as '0.5' stays for chemRowDefects to refuse.
-    if (row.customer_supplied && row.product_id && /^\s*0*\s*$/.test(row.price_per_unit_cents)) {
+    // Blank, or any exact spelling of zero ('0', '0.0'): a malformed price such as '0.5' stays for
+    // chemRowDefects to refuse.
+    const rawPrice = row.price_per_unit_cents.trim();
+    const blankOrZero = rawPrice === '' || (isExactDecimalText(rawPrice) && Number(rawPrice) === 0);
+    if (row.customer_supplied && row.product_id && blankOrZero) {
       const p = allProducts.find((ap) => ap.id === row.product_id);
       const tier = customerPricingTier === 1 || customerPricingTier === 2 || customerPricingTier === 3
         ? customerPricingTier

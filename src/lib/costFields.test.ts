@@ -269,8 +269,9 @@ function changesInvoiceColumns(sql: string): boolean {
   for (const m of sql.matchAll(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:"?public"?\s*\.\s*)?"?invoices"?\s+([^;]*);/gi)) {
     // ADD/DROP COLUMN, or the bare form `ADD name type` / `DROP name` (not a constraint, nor an
     // ALTER COLUMN sub-action such as DROP NOT NULL / DROP DEFAULT / DROP EXPRESSION / DROP IDENTITY).
-    if (/\b(ADD|DROP)\s+(COLUMN\b|(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE|NOT|DEFAULT|EXPRESSION|IDENTITY)\b)\w+\s)/i.test(m[1])) return true;
-    if (/\bRENAME\s+(COLUMN\s+)?\w+\s+TO\b/i.test(m[1])) return true;
+    // Names may be quoted ("status"), and a bare DROP may end the statement (Codex GitHub App review).
+    if (/\b(ADD|DROP)\s+(COLUMN\b|"\w+"|(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE|NOT|DEFAULT|EXPRESSION|IDENTITY)\b)\w+(\s|$))/i.test(m[1])) return true;
+    if (/\bRENAME\s+(COLUMN\s+)?("\w+"|\w+)\s+TO\b/i.test(m[1])) return true;
   }
   return false;
 }
@@ -478,5 +479,13 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(changesInvoiceColumns('ALTER TABLE "public"."invoices" ADD COLUMN zz text;')).toBe(true);
     expect(changesInvoiceColumns('ALTER TABLE IF EXISTS ONLY "invoices" DROP COLUMN zz;')).toBe(true);
     expect(changesInvoiceColumns('ALTER TABLE "public"."invoices_postable" ADD COLUMN zz text;')).toBe(false);
+    // Quoted names and a bare trailing DROP (Codex GitHub App review).
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices RENAME COLUMN "status" TO "state";')).toBe(true);
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices RENAME "status" TO "state";')).toBe(true);
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices ADD "zz" integer;')).toBe(true);
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices DROP "zz";')).toBe(true);
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices DROP zz;')).toBe(true);
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices RENAME CONSTRAINT "a" TO "b";')).toBe(false);
+    expect(changesInvoiceColumns('ALTER TABLE public.invoices ALTER COLUMN "zz" DROP NOT NULL;')).toBe(false);
   });
 });

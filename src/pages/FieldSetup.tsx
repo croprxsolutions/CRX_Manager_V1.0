@@ -411,6 +411,10 @@ function FieldSetupPage() {
     }
   }, [id, isNew, fetchField]);
 
+  // Each field route mounts a fresh page, so a read still in flight when this one unmounts
+  // must not toast "Failed to load field" over the next field.
+  useEffect(() => () => { fieldLoadSeqRef.current += 1; }, []);
+
   useEffect(() => {
     if (isNew || !id) {
       setObstacles([]);

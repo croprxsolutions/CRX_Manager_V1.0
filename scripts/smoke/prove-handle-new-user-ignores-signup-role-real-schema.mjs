@@ -248,8 +248,10 @@ function main() {
   const acl = scalar(`SELECT proacl::text || ' ' || pg_get_userbyid(proowner) ${FN}`);
   const trgSql = "SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname = 'on_auth_user_created';";
   const trg = scalar(trgSql);
-  // ORDERING: #1018's 20261022022000 is not in this tree; until its ledger row exists the
-  // candidate refuses, so it can never strand that migration below the live high-water.
+  // ORDERING: until #1018's 20261022022000 ledger row exists the candidate refuses, so it can
+  // never strand that migration below the live high-water. #1018 is on main now and the replay
+  // recorded it, so take its row out of this disposable ledger for the check and put it back.
+  psql("DELETE FROM supabase_migrations.schema_migrations WHERE name = '20261022022000_post_binds_reviewed_invoice_version';");
   const early = apply('candidate.sql');
   assert.notEqual(early.status, 0, 'the candidate applied before #1018 was in the ledger');
   assert.match(early.output, /apply 20261022022000_post_binds_reviewed_invoice_version \(#1018\) first/, `refused for the wrong reason:\n${early.output}`);

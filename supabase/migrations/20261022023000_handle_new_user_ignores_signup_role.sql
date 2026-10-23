@@ -31,7 +31,9 @@
 --   writes as `supabase_auth_admin` (live pg_stat_statements, 2026-10-22: every INSERT/UPDATE on
 --   auth tables runs as that role). Only a direct SQL session as `postgres` or `supabase_admin`,
 --   principals that can already write profiles.role directly, keeps the old metadata behaviour
---   (the real-schema provers' user seeds use it).
+--   (the real-schema provers' user seeds use it), and only while no SET ROLE is in effect
+--   (current_setting('role') = 'none'): a service that logs in as postgres/supabase_admin and then
+--   switches role is not trusted (Luna, 2026-10-22).
 --   Any other session, including an unknown one, gets the safe default: the test fails closed.
 --
 -- NOT CHANGED: the `create-user` Edge Function (it still sends the role as metadata; the trigger
@@ -109,8 +111,9 @@ BEGIN
   -- session_user, not current_user: inside SECURITY DEFINER current_user is the owner. Only a
   -- direct SQL session as postgres or supabase_admin may set the role through metadata; the Auth
   -- service (supabase_auth_admin) and anything else get an inactive driver until an admin assigns
-  -- the role.
-  IF session_user IN ('postgres', 'supabase_admin') THEN
+  -- the role. The role setting must also be unset: a session that logged in as postgres or
+  -- supabase_admin and then ran SET ROLE (to supabase_auth_admin or anyone) is not trusted.
+  IF session_user IN ('postgres', 'supabase_admin') AND current_setting('role') = 'none' THEN
     INSERT INTO profiles (id, email, full_name, role)
     VALUES (
       NEW.id,
@@ -140,7 +143,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.handle_new_user() IS
-  'AFTER INSERT ON auth.users: creates the profile. Users created through the Auth service (signup or admin API) start as an inactive driver whatever their metadata says; an admin sets the role and activates them (admin_update_profile). Only direct postgres/supabase_admin SQL may set the role through metadata.';
+  'AFTER INSERT ON auth.users: creates the profile. Users created through the Auth service (signup or admin API) start as an inactive driver whatever their metadata says; an admin sets the role and activates them (admin_update_profile). Only direct postgres/supabase_admin SQL with no SET ROLE in effect may set the role through metadata.';
 
 DO $postflight$
 DECLARE
@@ -159,7 +162,7 @@ BEGIN
     FROM pg_proc p WHERE p.oid = to_regprocedure('public.handle_new_user()');
   IF NOT v_fn.prosecdef OR v_fn.owner <> 'postgres'
      OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
-     OR v_fn.body_md5 IS DISTINCT FROM 'b7d773d2fd6fe01f733bf97a00228ac9' THEN
+     OR v_fn.body_md5 IS DISTINCT FROM '737785431fdbfc9b6b38c1ed6f2cd0f4' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: handle_new_user is not the expected body/attributes';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK: handle_new_user ignores signup metadata role (acl %)', v_fn.acl;

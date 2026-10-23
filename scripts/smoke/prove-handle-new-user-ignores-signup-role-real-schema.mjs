@@ -20,7 +20,7 @@
  *      active and unbanned, for each of the four roles the Edge Function accepts; an admin can find
  *      a pending login by email; a duplicate name is refused and leaves it inactive and banned;
  *   6. RE-APPLY: refused by the preflight;
- *   7. MUTATION: trusting supabase_auth_admin, or testing current_user, lets the signup be admin;
+ *   7. MUTATION: trusting supabase_auth_admin, testing current_user, or ignoring SET ROLE lets the signup be admin;
  *      the email as the placeholder name aborts a signup whose email is another profile's name.
  *
  * Run: node scripts/smoke/prove-handle-new-user-ignores-signup-role-real-schema.mjs   (needs Docker)
@@ -118,7 +118,8 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
+  // Later candidates (other PRs, stamped after this one) are left out: the proof covers live as it
+  // stands when this file applies.
   const before = all.slice(0, at);
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
@@ -175,12 +176,14 @@ const meta = (role) => JSON.stringify(role ? { full_name: '[PROVER] New', role }
 
 /** One rolled-back transaction as supabase_admin: optional prefix, an insert into auth.users made
  * as `sessionUser`, then optional `after` SQL; returns the new profile as role:is_active. */
-function probe({ sessionUser, role, prefix = '', after = '' }) {
+function probe({ sessionUser, role, prefix = '', after = '', setRole = '' }) {
   const u = newId();
   const r = docker([...psqlArgs('supabase_admin'), '-A', '-t'], { allowFailure: true, input: `BEGIN;
     ${typeof prefix === 'function' ? prefix(u) : prefix}
     SET LOCAL SESSION AUTHORIZATION ${sessionUser};
+    ${setRole ? `SET LOCAL ROLE ${setRole};` : ''}
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ('${u}', 'new-${u.slice(-4)}@example.invalid', '${meta(role)}'::jsonb);
+    RESET ROLE;
     RESET SESSION AUTHORIZATION;
     ${after.replaceAll('$NEW', u)}
     SELECT 'RESULT=' || p.role || ':' || p.is_active || ':' || CASE WHEN a.banned_until IS NULL THEN 'open' ELSE 'banned' END
@@ -282,6 +285,12 @@ function main() {
   console.log(`[prover] AFTER: the new user cannot activate or promote itself (UPDATE: PROFILE_ROLE_LOCK; admin_update_profile: ${selfRpc.stderr.trim().split('\n')[0].slice(0, 70)})`);
   assert.equal(probe({ sessionUser: 'postgres', role: 'entity_recipient' }), 'entity_recipient:true:open:meta', 'AFTER: a direct postgres insert lost its metadata role');
   console.log('[prover] AFTER: a direct postgres SQL insert still sets its metadata role (seeds, entity recipients)');
+  assert.equal(probe({ sessionUser: 'supabase_admin', setRole: 'supabase_auth_admin', role: 'admin' }), 'driver:false:banned:pending', 'AFTER: a supabase_admin login that SET ROLE supabase_auth_admin kept its metadata role');
+  // postgres is not a member of supabase_auth_admin (here and live: pg_has_role(..., 'SET') is false, 2026-10-22).
+  let denied = '';
+  try { probe({ sessionUser: 'postgres', setRole: 'supabase_auth_admin', role: 'admin' }); } catch (e) { denied = String(e.message); }
+  assert.match(denied, /permission denied to set role "supabase_auth_admin"/, `AFTER: postgres could SET ROLE supabase_auth_admin: ${denied.slice(0, 200)}`);
+  console.log('[prover] AFTER: a supabase_admin login that switches to supabase_auth_admin (SET ROLE) gets an inactive driver; postgres cannot switch to it');
 
   // 5. ADMIN CREATE: the Edge Function's Auth-service insert, then the Settings page's call.
   for (const role of ['admin', 'sales_rep', 'driver', 'applicator']) {
@@ -312,13 +321,14 @@ function main() {
   console.log('[prover] RE-APPLY: refused by the preflight');
 
   // 7. MUTATION.
-  const gate = "IF session_user IN ('postgres', 'supabase_admin') THEN";
+  const gate = "IF session_user IN ('postgres', 'supabase_admin') AND current_setting('role') = 'none' THEN";
   assert.ok(body().includes(gate), 'gate line not found');
-  for (const [label, line] of [
+  for (const [label, line, sessionUser, setRole] of [
     ['trusts supabase_auth_admin', "IF session_user IN ('postgres', 'supabase_admin', 'supabase_auth_admin') THEN"],
     ['tests current_user', "IF current_user IN ('postgres', 'supabase_admin') THEN"],
+    ['ignores SET ROLE', "IF session_user IN ('postgres', 'supabase_admin') THEN", 'supabase_admin', 'supabase_auth_admin'],
   ]) {
-    const got = probe({ sessionUser: 'supabase_auth_admin', role: 'admin', prefix: body().replace(gate, line) });
+    const got = probe({ sessionUser: sessionUser || 'supabase_auth_admin', setRole, role: 'admin', prefix: body().replace(gate, line) });
     assert.equal(got, 'admin:true:open:meta', `MUTATION ${label}: expected the gap to reopen, got ${got}`);
     console.log(`[prover] MUTATION: when the gate ${label}, the signup becomes an active admin again`);
   }

@@ -246,6 +246,20 @@ describe('JobDetail recipe pricing tier', () => {
     expect(screen.getByText(/its price is blank, negative, or not a whole number of cents/)).toBeInTheDocument();
   });
 
+  it('MONEY: un-ticking customer supplied on a $0 line re-prices it from the catalog at the customer tier', async () => {
+    // As if saved customer-supplied at $0 when the product had no price, and it has one now.
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null });
+    await openChemicalLine();
+    await pickProduct(/Herbicide X/);
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    fireEvent.change(priceInput(), { target: { value: '0' } });
+    expect(priceInput().value).toBe('0');
+
+    fireEvent.click(document.getElementById('cust-supp-0') as HTMLInputElement);
+    // Tier 3 is $7.00.
+    await waitFor(() => expect(priceInput().value).toBe('700'));
+  });
+
   it('un-ticking customer supplied keeps a priced product\'s $0 price', async () => {
     const FREE = { ...PRODUCT, id: 'prod-free', product_name: 'Free Sample', tier1_price: 0, tier2_price: null, tier3_price: null };
     serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [FREE]);

@@ -3714,16 +3714,19 @@ export default function JobDetail() {
     const row = updated[i];
     updated[i] = { ...row, customer_supplied: !row.customer_supplied };
     // Un-ticking makes the line billable again. A customer-supplied line may have been saved at $0
-    // only because its product states no price, so a $0 or blank price on such a product is blanked
-    // and chemRowDefects asks for one, instead of billing it at $0.
+    // only because its product stated no price then, so a $0 or blank price is re-priced from the
+    // catalog at the customer's tier now (a stated $0 included). With no stated price, or no known
+    // tier, it is blanked and chemRowDefects asks for one, instead of billing it at $0.
     if (row.customer_supplied && row.product_id && (parseInt(row.price_per_unit_cents) || 0) === 0) {
       const p = allProducts.find((ap) => ap.id === row.product_id);
       const tier = customerPricingTier === 1 || customerPricingTier === 2 || customerPricingTier === 3
         ? customerPricingTier
         : null;
-      const statesNoPrice = !p
-        || (tier != null ? getStatedTierPriceCents(p, tier) == null : p.tier1_price == null);
-      if (statesNoPrice) updated[i].price_per_unit_cents = '';
+      const statedCents = p && tier != null ? getStatedTierPriceCents(p, tier) : null;
+      updated[i].price_per_unit_cents = statedCents == null
+        ? ''
+        : reconcileChemAutofillUnits(p?.unit_size, row.rate_unit || p?.rate_unit, 0, statedCents, p?.product_form)
+          .pricePerUnitCents.toString();
     }
     setChemRows(updated);
   };

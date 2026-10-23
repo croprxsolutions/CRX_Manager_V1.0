@@ -370,8 +370,8 @@ function FieldSetupPage() {
         .order('split_pct', { ascending: false });
       if (superseded()) return;
       // Save sends the whole split list, so a form shown without the saved splits would erase them.
-      if (defaultsError) {
-        Sentry.captureException(defaultsError, { tags: { source: 'fetch', action: 'load_field_billing_defaults' } });
+      if (defaultsError || !Array.isArray(defaults)) {
+        Sentry.captureException(defaultsError ?? new Error('Billing splits read returned no list'), { tags: { source: 'fetch', action: 'load_field_billing_defaults' } });
         toast('error', 'Failed to load field');
         setLoadError(true);
         setLoading(false);

@@ -2425,7 +2425,18 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
   return reviewProofValid(candidate, headSha, nowMs, "codex_ran", expectedBaseSha, Math.min(maxAgeMs, SOL_PROOF_MAX_AGE_MS))
     && data.model === "gpt-6-sol"
     && data.reasoning_effort === "high"
-    && (!carried || proofAgeOk(data.carry.root_review?.timestamp, nowMs, SOL_PROOF_MAX_AGE_MS));
+    && (!carried || carryRootReviewOk(data, nowMs));
+}
+
+// The full review at the root of a carry chain must name a real head and base,
+// come no later than the carry itself, and be inside the 24 hours.
+function carryRootReviewOk(data, nowMs) {
+  const root = data.carry.root_review;
+  if (!root || typeof root !== "object") return false;
+  if (!CARRY_SHA_RE.test(String(root.head_sha || "")) || !CARRY_SHA_RE.test(String(root.base_sha || ""))) return false;
+  const rootT = Date.parse(root.timestamp || "");
+  if (!(rootT <= Date.parse(data.timestamp))) return false;
+  return proofAgeOk(root.timestamp, nowMs, SOL_PROOF_MAX_AGE_MS);
 }
 
 // Mirror validation for Codex's Claude-review proof shape.

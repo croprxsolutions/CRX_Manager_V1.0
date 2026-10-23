@@ -1445,6 +1445,14 @@ assert.equal(
     false,
     "carried proof that does not record its full review fails",
   );
+  const rootWith = (patch) => ({ ...carriedProof, carry: { ...carriedProof.carry, root_review: { ...carriedProof.carry.root_review, ...patch } } });
+  assert.equal(proofValid(rootWith({ head_sha: undefined }), sha, now, base), false, "carried proof whose full review names no head fails");
+  assert.equal(proofValid(rootWith({ base_sha: "short" }), sha, now, base), false, "carried proof whose full review names no real base fails");
+  assert.equal(
+    proofValid({ ...rootWith({ timestamp: new Date(now - 60_000).toISOString() }), timestamp: new Date(now - 120_000).toISOString() }, sha, now, base),
+    false,
+    "carried proof whose full review is dated after the carry fails",
+  );
   assert.equal(proofValid({ ...carriedProof, carried_forward: false }, sha, now, base), false, "codex_ran:false without the carry flag fails");
   assert.equal(proofValid({ ...carriedProof, carry: undefined }, sha, now, base), false, "carry flag without carry details fails");
   assert.equal(proofValid({ ...carriedProof, carry: { ...carriedProof.carry, mode: "trust-me" } }, sha, now, base), false, "unknown carry mode fails");

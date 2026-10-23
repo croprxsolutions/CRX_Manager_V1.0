@@ -111,10 +111,11 @@ functions `get_job_fields_with_geojson`, `get_dispatch_board_jobs`, `get_dispatc
 `get_job_billed_customers` and `get_jobs_billed_customers` return every field's billed customer with farm name and
 account number; part B narrows them). Reassigning a job moves `jobs.applicator_id`, so the old applicator
 loses it. No view in `public` exposes these tables. **One gap the other way (missing access, not a leak):**
-`job_field_shares`, `job_applied_records` and its children, `job_attachments` and the `job-attachments` storage bucket
-admit only the whole-job applicator, not a per-field or crew assignee, so a dispatch-only applicator cannot read those
-records for the fields they were sent to. Part C below does not change that; widening them to `_is_dispatched_to_me`
-is a separate decision.
+`job_field_shares`, `job_applied_records` and its children, `job_applied_info` (the completion weather, gallons and
+notes Job Detail shows; `job_applied_info_select`, live 2026-10-22), `job_attachments` and the `job-attachments`
+storage bucket admit only the whole-job applicator, not a per-field or crew assignee, so a dispatch-only applicator
+cannot read those records for the fields they were sent to. Part C below does not change that; widening them to the
+dispatch route, under the same window, is a separate decision.
 
 Findings, most severe first:
 

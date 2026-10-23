@@ -710,7 +710,7 @@ export default function Compliance() {
               data={rupProducts}
               loading={loading}
               loadError={rupProductsFailed}
-              onRetry={() => void fetchData()}
+              onRetry={() => void fetchRUPProducts()}
               searchable
               searchPlaceholder="Search RUP products..."
               searchKeys={['product_name', 'sku', 'manufacturer', 'epa_registration']}

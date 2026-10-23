@@ -205,7 +205,7 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   rows (FOR SHARE) and then `field_billing_defaults` in SHARE mode before it reads them, so no
   billing-default write can commit until the split does (the same order `save_field` writes them).
 
-## FIXED 2026-10-21 (migration `20261022075000`, NOT YET APPLIED; ships with its PR) — a driver's completion receipt can be skipped when the customer row is hidden from them
+## OPEN 2026-10-19 (MED; fix pending apply of `20261022075000`, PR #1024; moves to the archive once applied) — a driver's completion receipt can be skipped when the customer row is hidden from them
 
 The customer receipt email after a delivery is sent by the phone, and the delivery page and the field
 stop read the customer through the client. Under `customers_select`, an assigned driver may not see the

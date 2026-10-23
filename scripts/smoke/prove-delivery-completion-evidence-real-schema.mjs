@@ -23,7 +23,7 @@
  * Prints DELIVERY_COMPLETION_EVIDENCE_PROOF_PASS on success.
  */
 import assert from 'node:assert/strict';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -406,16 +406,26 @@ CREATE POLICY staff_photos_delivery_select ON storage.objects FOR SELECT TO auth
 
 /**
  * Session A runs `body` in a transaction it holds open for 4 s (ending with `finish`); 1.5 s in,
- * session B runs `other`. Returns how long B waited and B's output.
+ * session B runs `other`. Returns how long B waited and B's output. Session A's output goes to a
+ * file (wait() blocks the event loop, so a pipe or exitCode would never be read): A must have
+ * reached its sleep before B starts and must end with no error, or the race proves nothing.
  */
 function race(prefix, body, finish, other) {
-  const a = spawn('docker', [...psqlArgs(), '-c', `BEGIN; ${prefix} ${body} SELECT pg_sleep(4); ${finish};`], { stdio: 'ignore' });
+  const log = path.join(tmpdir(), `${NAME}-race-${Date.now()}.log`);
+  const fd = openSync(log, 'w');
+  spawn('docker', [...psqlArgs(), '-A', '-t', '-c', 'BEGIN', '-c', `${prefix} ${body}`, '-c', "SELECT 'A_HOLDING'",
+    '-c', 'SELECT pg_sleep(4)', '-c', finish, '-c', "SELECT 'A_DONE'"], { stdio: ['ignore', fd, fd] });
+  closeSync(fd);
   wait(1500);
+  const holding = readFileSync(log, 'utf8');
+  assert.ok(/A_HOLDING/.test(holding) && !/ERROR/.test(holding), `race: session A did not reach its lock-holding sleep: ${holding}`);
   const started = Date.now();
   const b = docker([...psqlArgs()], { input: other, allowFailure: true });
   const waited = Date.now() - started;
-  wait(Math.max(0, 4000 - waited));
-  for (let i = 0; i < 50 && a.exitCode === null; i += 1) wait(200);
+  for (let i = 0; i < 50 && !/A_DONE/.test(readFileSync(log, 'utf8')); i += 1) wait(200);
+  const a = readFileSync(log, 'utf8');
+  unlinkSync(log);
+  assert.ok(/A_DONE/.test(a) && !/ERROR/.test(a), `race: session A did not finish cleanly: ${a}`);
   return { waited, output: `${b.stdout}\n${b.stderr}` };
 }
 function concurrency() {

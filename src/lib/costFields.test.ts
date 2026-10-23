@@ -282,7 +282,8 @@ function missingViewRebuildParts(sql: string): string[] {
   const lastIndex = (re: RegExp) => statements.reduce((at, s, i) => (re.test(s) ? i : at), -1);
   const createAt = lastIndex(/CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+public\.invoices_postable\s+WITH\s*\(\s*security_invoker\s*=\s*(true|on)\s*\)/i);
   // The rebuild must follow the last invoices column change, and nothing may turn security_invoker off.
-  const alterAt = lastIndex(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:"?public"?\s*\.\s*)?"?invoices"?\s/i);
+  // Only an ALTER that adds, drops or renames a column counts (a later constraint is harmless).
+  const alterAt = statements.reduce((at, s, i) => (changesInvoiceColumns(`${s};`) ? i : at), -1);
   if (createAt === -1 || createAt < alterAt
       || /ALTER\s+VIEW\s+(IF\s+EXISTS\s+)?public\.invoices_postable\s+(SET\s*\([^)]*security_invoker\s*=\s*(false|off)|RESET\s*\([^)]*security_invoker)/i.test(sql)) {
     missing.push('security_invoker view');
@@ -430,6 +431,9 @@ describe('the posting version is read only from invoices_postable', () => {
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn};\nALTER VIEW public.invoices_postable SET (security_invoker = false);`))
       .toEqual(['security_invoker view']);
     expect(missingViewRebuildParts(`ALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}\n${acl}\n${fn}`)).toEqual([]);
+    // A later non-column ALTER does not demand another rebuild (Codex GitHub App review).
+    expect(missingViewRebuildParts(`ALTER TABLE public.invoices DROP COLUMN zz CASCADE;\n${view}\n${acl}\n${fn};\n`
+      + 'ALTER TABLE public.invoices ADD CONSTRAINT zz_check CHECK (true);')).toEqual([]);
     // The overload's own contract (Codex GitHub App review): definer, search_path, closed, narrow grant.
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace('SECURITY DEFINER ', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);
     expect(missingViewRebuildParts(`${view}\n${acl}\n${fn.replace(' SET search_path = public, pg_temp', '')}`)).toEqual(['invoice_post_version(invoices_postable)']);

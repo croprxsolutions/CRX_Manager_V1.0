@@ -2438,12 +2438,14 @@ describe('Idempotency BODY verification (reads migration SQL)', () => {
   it('batch_post_invoices binds replay and forwards a deterministic key to every child post', () => {
     const body = latestFunctionBody('batch_post_invoices');
     expect(body).not.toBeNull();
-    expect(body).toContain("v_contract CONSTANT text := 'batch_post_invoices_v2'");
+    // v3 (20261022022000): each row carries the invoice version the screen loaded, the request
+    // binding covers them, and every child post forwards it.
+    expect(body).toContain("v_contract CONSTANT text := 'batch_post_invoices_v3'");
     expect(body).toContain('public._claim_bound_lifecycle_idempotency(');
     expect(body).toContain('public._bind_completed_lifecycle_idempotency(');
     expect(body).toContain("'actor_id', v_actor");
-    expect(body).toContain("'invoice_ids', to_jsonb(p_invoice_ids)");
-    expect(body).toContain("p_idempotency_key || ':post:' || v_index::text");
+    expect(body).toContain("'invoices', p_invoices");
+    expect(body).toContain("v_id, v_item ->> 'expected_version', 'batch_post_invoices:' || p_idempotency_key || ':post:' || v_index::text");
     expect(body).not.toMatch(/post_invoice\s*\(\s*v_id\s*\)/);
     expect(IDEMPOTENCY_BODY_EXEMPT.batch_post_invoices).toBe('delegated');
   });
@@ -3010,7 +3012,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * is applied and the high-water moves past it. `notify_team_note_assignment`
  * (20260810010308) and `trg_recalc_order_totals` (20260809230500) were pruned
  * on 2026-08-10 for exactly that reason — both are live; neither is exempt from
- * anything, they are simply no longer discovered.
+ * anything, they are simply no longer discovered. `_lock_invoice_post_inputs`
+ * (20261022022000, a lock-only posting helper with no API-role EXECUTE) was
+ * pruned on 2026-10-22, when that migration applied live.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _close_undelivered_order_remainder_20260718:

@@ -21,7 +21,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -135,6 +135,7 @@ function main() {
   }
   const leftover = psqlCommand("mutation", "SELECT to_regclass('public.product_brands') IS NULL");
   if (leftover.out !== "t") fail("the refused apply left a product_brands table behind", leftover.out);
+  rmSync(workDir, { recursive: true, force: true });
   log("PASS phase 4: over-granting copy refused by the postflight, nothing left behind");
 
   cleanup();

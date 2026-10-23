@@ -131,7 +131,7 @@ SELECT test.expect_error('B9a', $q$SELECT public.upsert_product_brand('00000000-
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', false);
 SELECT test.expect_error('B9b', $q$SELECT public.upsert_product_brand('00000000-0000-0000-0000-0000000000a1',
   'Rep Brand', NULL, NULL, true, NULL, NULL, NULL, NULL, 'key-b9b')$q$, 'NOT_AUTHORIZED');
-SELECT test.pass('B9c', (SELECT count(*) FROM public.product_brands) = 4, 'an active sales rep cannot read brands');
+SELECT test.pass('B9c', (SELECT count(*) FROM public.product_brands) = 4, 'expected an active sales rep to read all four brands');
 
 -- ── As a deactivated driver ─────────────────────────────────────────────────────────────────
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', false);
@@ -156,8 +156,9 @@ SELECT test.expect_error('B10d', $q$SELECT public.upsert_product_brand('00000000
 RESET ROLE;
 
 -- B11: the updated_at stamp moves on an edit and the replay receipt is bound to the admin.
-SELECT test.pass('B11a', (SELECT updated_at >= created_at FROM public.product_brands WHERE brand_name = 'Slam 5.4'
-                            AND product_id = '00000000-0000-0000-0000-0000000000a1'), 'updated_at not maintained');
+-- The edit (B7a) ran in a later statement than the insert (B1), so a working trigger leaves updated_at strictly later.
+SELECT test.pass('B11a', (SELECT updated_at > created_at FROM public.product_brands WHERE brand_name = 'Slam 5.4'
+                            AND product_id = '00000000-0000-0000-0000-0000000000a1'), 'updated_at did not move on the edit');
 SELECT test.pass('B11b', (SELECT count(*) FROM public.idempotency_keys
                            WHERE operation = 'upsert_product_brand'
                              AND (request_actor_id IS NULL OR request_fingerprint IS NULL)) = 0,

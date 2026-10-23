@@ -96,6 +96,7 @@ const RECIPE_ITEM = {
 };
 
 let customerByIdReads = 0;
+let customerByIdRequested: unknown[] = [];
 let recipeItemReads = 0;
 
 function serveTables(customerById: { data: unknown; error: unknown }) {
@@ -104,7 +105,15 @@ function serveTables(customerById: { data: unknown; error: unknown }) {
     if (table === 'customers') {
       // The list read pages with .range(); the by-id tier read ends in .maybeSingle().
       const chain = buildChain({ data: [{ id: 'cust-active', farm_name: 'Active Farm', assigned_tier: 1, is_active: true }], error: null });
-      chain.maybeSingle = () => { customerByIdReads += 1; return buildChain(customerById); };
+      let idFilter: unknown;
+      const eq = chain.eq as (...args: unknown[]) => unknown;
+      chain.eq = (column: unknown, value: unknown) => { if (column === 'id') idFilter = value; return eq(column, value); };
+      // The fixture answers only a read for the job's own customer.
+      chain.maybeSingle = () => {
+        customerByIdReads += 1;
+        customerByIdRequested.push(idFilter);
+        return buildChain(idFilter === 'cust-inactive' ? customerById : { data: null, error: null });
+      };
       return chain;
     }
     if (table === 'products') return buildChain({ data: [PRODUCT], error: null });
@@ -128,6 +137,7 @@ async function loadRecipe() {
 beforeEach(() => {
   vi.clearAllMocks();
   customerByIdReads = 0;
+  customerByIdRequested = [];
   recipeItemReads = 0;
   mockRpc.mockResolvedValue({ data: null, error: null });
 });
@@ -139,6 +149,8 @@ describe('JobDetail recipe pricing tier', () => {
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('from recipe')));
     expect(customerByIdReads).toBeGreaterThan(0);
+    // Every by-id read asked for the job's own customer.
+    expect(new Set(customerByIdRequested)).toEqual(new Set(['cust-inactive']));
     // Tier 3 is $7.00, not tier 1's $10.00.
     expect(screen.getByDisplayValue('700')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('1000')).not.toBeInTheDocument();

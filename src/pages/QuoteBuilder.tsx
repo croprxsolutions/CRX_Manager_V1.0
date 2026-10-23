@@ -1554,6 +1554,8 @@ export default function QuoteBuilder() {
     let cancelled = false;
     const ids = unresolvedFieldKey.split(',');
     const customerIdAtStart = customerIdRef.current;
+    // Another quote may share these field ids, so the read survives a switch to it.
+    const quoteIdAtStart = routeQuoteIdRef.current;
     supabase
       .from('fields')
       .select(QUOTE_FIELD_SELECT)
@@ -1571,7 +1573,8 @@ export default function QuoteBuilder() {
         // customer is then cleared, as a pick would have cleared it. A plain load never clears a
         // saved field (CodeRabbit, #1017): a field later moved to another customer stays as saved.
         const currentCustomerId = customerIdRef.current;
-        const customerChanged = currentCustomerId !== customerIdAtStart;
+        // A switch to another quote is an open, not a customer pick (CodeRabbit, #1049).
+        const customerChanged = routeQuoteIdRef.current === quoteIdAtStart && currentCustomerId !== customerIdAtStart;
         const foreign = new Set(rows
           .filter((row) => customerChanged && currentCustomerId && row.customer_id !== currentCustomerId)
           .map((row) => row.id));

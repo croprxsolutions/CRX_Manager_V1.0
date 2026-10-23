@@ -564,8 +564,10 @@ describe('QuoteBuilder', () => {
   });
 
   it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {
-    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
-    const savedItem = { ...item, acres: 80 };
+    const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);
+    // Tier 3 differs from the tier-1 price the saved line starts at.
+    const product = { ...baseProduct, tier3_price: 7 };
+    const savedItem = { ...item, acres: 80, product };
     const held = holdFieldReadById();
     mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
       data: table === 'quotes'
@@ -591,7 +593,7 @@ describe('QuoteBuilder', () => {
     await pickCustomerThenReleaseField(held, () => { priceAfterPick = unitPrice(); });
     expect(fieldBox).toHaveValue('');
     expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['']);
-    expect(priceAfterPick).not.toBe('');
+    expect(Number(priceAfterPick)).toBe(7);
     expect(unitPrice()).toBe(priceAfterPick);
   });
 
@@ -653,6 +655,42 @@ describe('QuoteBuilder', () => {
     expect(fieldBox).toHaveValue('');
     expect(screen.queryByDisplayValue('Home Quarter')).not.toBeInTheDocument();
     expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['', '15']);
+  });
+
+  it('does not clear quote B\'s saved field when a field read started for quote A lands after the switch', async () => {
+    const { quote: quoteA, product, section, item } = makeQuoteFixture('draft', 7);
+    // B belongs to another customer but keeps the same saved field (it was moved after B was saved).
+    const quoteB = { ...quoteA, id: 'quote-b', quote_number: 'Q-b', header_notes: 'Quote B header', customer_id: 'customer-2' };
+    const savedSection = { ...section, field_id: 'field-1' };
+    const savedItem = { ...item, acres: 80 };
+    const held = holdFieldReadById();
+    let quoteReads = 0;
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? (quoteReads++ === 0 ? quoteA : quoteB)
+        : table === 'quote_sections'
+          ? [savedSection]
+          : table === 'quote_items'
+            ? [savedItem]
+            : table === 'products'
+              ? [product]
+              : [],
+      error: null,
+    })));
+
+    renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
+    await waitFor(() => expect(held.readsById()).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('link', { name: 'Jump to quote B' }));
+    await screen.findByDisplayValue('Quote B header');
+
+    // A's read lands while B is open: B was only opened, so its saved field and acres stay.
+    await act(async () => {
+      held.release({ data: [HOME_QUARTER_OF_CUSTOMER_1], error: null });
+      await held.read;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByRole('combobox', { name: /^Field for/ })).toHaveValue('Home Quarter');
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
   });
 
   it('keeps a saved section field that now belongs to another customer when the quote is only opened (CodeRabbit, #1017)', async () => {

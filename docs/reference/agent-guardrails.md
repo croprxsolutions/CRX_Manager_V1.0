@@ -95,10 +95,14 @@
 >
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
 > refuses with no Codex call otherwise: an open non-draft PR whose head is this commit; the Codex GitHub App's summary
-> comment (`codex-review-state:v1`, written by the App's own login) shows a completed review of this commit, or the
-> commit is at least 15 minutes old (`SOL_PREFLIGHT_QUIET_MS`); no unanswered Codex App thread on this commit
-> (`evaluateCodexBotReview`) and no unanswered CodeRabbit thread (`coderabbitThreadCount`); no `CodeRabbit` PENDING
-> status set by CodeRabbit on this commit; and a money or Mason-named PR's completed CodeRabbit review
+> comment (`codex-review-state:v1`, written by the App's own login) shows a completed review of this commit, or it
+> was pushed at least 15 minutes ago with no App review of it started (`SOL_PREFLIGHT_QUIET_MS`; push time = the
+> commit's earliest check suite, which GitHub sets — a commit's own date is never used, and no suite never counts as
+> quiet); an App review of this commit that is still running is waited for until it has run over an hour
+> (`CODEX_APP_STALE_RUN_MS`); a newest App summary that cannot be parsed refuses; exactly one open PR has this head,
+> re-read after every other read; no unanswered Codex App thread on this commit (`evaluateCodexBotReview`) and no unanswered
+> CodeRabbit thread (`coderabbitThreadCount`); CodeRabbit's newest status on this commit is not a PENDING it set less
+> than an hour ago (an older one is a dead review); and a money or Mason-named PR's completed CodeRabbit review
 > (`readCodeRabbitRequirement`) or a live `skip coderabbit` waiver for that PR from any session. Every unreadable answer
 > refuses. It is a cost control: the merge gates check the same things again, unchanged, and a refusal leaves any
 > existing proof in place. `--carry-forward` does not run it.

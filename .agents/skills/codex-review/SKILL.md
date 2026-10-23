@@ -411,8 +411,8 @@ proof under 30 minutes (the migration landing gate).
 CodeRabbit finding voids the proof, and those two reviewers caused more than half of the commits
 pushed after a PR was marked ready (2026-10-14 to 10-23). So the wrapper first runs a pre-flight
 and refuses, spending no Sol tokens, unless an open non-draft PR has this exact commit as its head;
-the Codex App's summary comment shows a completed review of this commit (or the commit is 15 minutes
-old with none); no Codex App thread on this commit and no CodeRabbit thread on the PR is unanswered;
+the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
+ago with none); no Codex App thread on this commit and no CodeRabbit thread on the PR is unanswered;
 CodeRabbit is not reviewing it; and a money or Mason-named PR has CodeRabbit's completed review (or
 Mason's `skip coderabbit #<PR>` waiver, from any session — the merging session must still hold it).
 An unreadable answer refuses; retry in a minute. `--dry-run` prints the decision; `--carry-forward`

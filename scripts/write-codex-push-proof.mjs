@@ -1114,33 +1114,61 @@ const CODEX_REVIEW_STATE_RE = /<!--\s*codex-review-state:v1\s+(\{.*?\})\s*-->/s;
 
 // The commit the Codex App last reviewed, from its summary comment. Only a
 // comment written by the App counts (anyone can paste the marker); the newest
-// one wins. Returns { sha, status } or null.
+// one wins, and a newest one whose state cannot be read is UNREADABLE — never a
+// reason to fall back to an older one (Luna round 1). Returns { sha, status },
+// { unreadable: true }, or null (the App has posted no summary).
 export function codexAppReviewState(comments) {
   let newest = null;
   for (const comment of Array.isArray(comments) ? comments : []) {
     if (!isCodexBotLogin(comment?.user?.login)) continue;
-    const match = String(comment?.body || "").match(CODEX_REVIEW_STATE_RE);
-    if (!match) continue;
-    let state;
-    try { state = JSON.parse(match[1]); } catch { continue; }
+    const body = String(comment?.body || "");
+    if (!/codex-review-state|codex-pull-request-review-summary/.test(body)) continue;
     const at = Date.parse(comment?.updated_at || comment?.created_at || "");
     if (newest && !(at > newest.at)) continue;
-    newest = {
-      at: Number.isFinite(at) ? at : 0,
-      sha: String(state?.code_review?.commit_sha || "").trim().toLowerCase(),
-      status: String(state?.code_review?.status || "").trim().toLowerCase(),
-    };
+    let state = null;
+    const match = body.match(CODEX_REVIEW_STATE_RE);
+    try { state = match ? JSON.parse(match[1]) : null; } catch { state = null; }
+    const sha = String(state?.code_review?.commit_sha || "").trim().toLowerCase();
+    const status = String(state?.code_review?.status || "").trim().toLowerCase();
+    newest = { at: Number.isFinite(at) ? at : 0, state: state && status ? { sha, status } : { unreadable: true } };
   }
-  return newest && { sha: newest.sha, status: newest.status };
+  return newest ? newest.state : null;
 }
 
-// Is CodeRabbit reviewing this commit right now? Its own commit status says
-// PENDING while it works; a status set by anyone else does not count.
-export function coderabbitReviewInProgress(statuses) {
-  return (Array.isArray(statuses) ? statuses : []).some((status) =>
-    String(status?.context || "").trim().toLowerCase() === "coderabbit"
-    && isCodeRabbitLogin(status?.creator?.login)
-    && String(status?.state || "").trim().toLowerCase() === "pending");
+// A Codex App review of this exact commit still running after this long is a
+// review that died; the 15-minute rule cannot cut one short (Luna round 1).
+export const CODEX_APP_STALE_RUN_MS = 60 * 60 * 1000;
+
+// A CodeRabbit "Review in progress" older than this is a review that died, not
+// one to wait for (the merge gates do not read it, so waiting would deadlock).
+export const CODERABBIT_STALE_PENDING_MS = 60 * 60 * 1000;
+
+// Is CodeRabbit reviewing this commit right now? GitHub lists EVERY status ever
+// set on the commit, so only CodeRabbit's NEWEST one counts (an old "in
+// progress" is followed by its result). A status set by anyone else is ignored.
+export function coderabbitReviewInProgress(statuses, nowMs = Date.now()) {
+  let newest = null;
+  for (const status of Array.isArray(statuses) ? statuses : []) {
+    if (String(status?.context || "").trim().toLowerCase() !== "coderabbit") continue;
+    if (!isCodeRabbitLogin(status?.creator?.login)) continue;
+    const at = Date.parse(status?.created_at || "");
+    if (!Number.isFinite(at)) continue;
+    if (!newest || at > newest.at) newest = { at, state: String(status?.state || "").trim().toLowerCase() };
+  }
+  return Boolean(newest && newest.state === "pending" && nowMs - newest.at < CODERABBIT_STALE_PENDING_MS);
+}
+
+// When GitHub first saw this commit: the earliest check suite created for it
+// (one is created on every push). GitHub sets that time; a commit's own date is
+// whatever its author wrote, so it is never used (Luna round 1). NaN when
+// there is none, which never counts as quiet.
+export function headPushedAt(checkSuites) {
+  let earliest = Number.NaN;
+  for (const suite of Array.isArray(checkSuites) ? checkSuites : []) {
+    const at = Date.parse(suite?.created_at || "");
+    if (Number.isFinite(at) && !(at >= earliest)) earliest = at;
+  }
+  return earliest;
 }
 
 // The decision, from facts already read. Every fact that could not be read is
@@ -1154,7 +1182,7 @@ export function evaluateSolPreflight({
   coderabbitBusy,
   coderabbitRequirement,
   waiverFound,
-  headCommittedMs,
+  headPushedMs,
   nowMs = Date.now(),
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
@@ -1167,16 +1195,31 @@ export function evaluateSolPreflight({
     );
     return { ok: false, problems, notes };
   }
+  if (pr.ambiguous) {
+    problems.push(`more than one open pull request (${pr.ambiguous.map((n) => `#${n}`).join(", ")}) has this commit as its head. Close the extra one, then run Sol.`);
+    return { ok: false, problems, notes };
+  }
   const which = `#${pr.number}`;
   if (pr.draft) {
     problems.push(`${which} is still a draft. Mark it ready (the Codex GitHub App reviews on that switch), then wait for its review.`);
   }
 
-  const reviewedHere = codexState && codexState.sha === head && codexState.status === "completed";
-  if (!reviewedHere) {
-    const quietFor = Number.isFinite(headCommittedMs) ? nowMs - headCommittedMs : -1;
+  const quietFor = Number.isFinite(headPushedMs) ? nowMs - headPushedMs : -1;
+  const reviewedHere = codexState?.sha === head && codexState?.status === "completed";
+  if (codexState === undefined || codexState?.unreadable) {
+    problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
+  } else if (!reviewedHere && codexState?.sha === head) {
+    // Its review of THIS commit has started and not finished: wait for it, however long, until it is plainly dead.
+    if (quietFor >= CODEX_APP_STALE_RUN_MS) {
+      notes.push(`the Codex GitHub App's review of ${head.slice(0, 9)} has shown "${codexState.status}" for over an hour, so it is treated as dead and Sol may run.`);
+    } else {
+      problems.push(
+        `the Codex GitHub App is still reviewing ${head.slice(0, 9)} (status "${codexState.status}"). Wait for it to finish, answer what it finds, then run Sol.`,
+      );
+    }
+  } else if (!reviewedHere) {
     if (quietFor >= 0 && quietFor >= SOL_PREFLIGHT_QUIET_MS) {
-      notes.push(`the Codex GitHub App has not reviewed ${head.slice(0, 9)}, but 15 minutes have passed since that commit, so Sol may run.`);
+      notes.push(`the Codex GitHub App has not reviewed ${head.slice(0, 9)}, but 15 minutes have passed since it was pushed, so Sol may run.`);
     } else {
       const left = quietFor >= 0 ? Math.ceil((SOL_PREFLIGHT_QUIET_MS - quietFor) / 60000) : 15;
       problems.push(
@@ -1264,22 +1307,29 @@ function anyCodeRabbitWaiver(root, number) {
 
 // Read every fact evaluateSolPreflight() needs. Any read that fails leaves its
 // fact null, which refuses.
+// The open pull requests whose head is exactly this commit, or null when GitHub
+// could not be read.
+function openPullsAtHead(root, owner, name, headSha) {
+  let pulls;
+  try {
+    pulls = JSON.parse(preflightGh(root, ["api", `repos/${owner}/${name}/commits/${headSha}/pulls?per_page=100`]));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(pulls)) return null;
+  return pulls.filter((pull) => pull?.state === "open" && String(pull?.head?.sha || "").toLowerCase() === headSha.toLowerCase());
+}
+
 export function readSolPreflightFacts(root, headSha) {
-  const facts = { headSha, pr: null, nowMs: Date.now() };
-  const committed = runGit(["show", "-s", "--format=%cI", headSha], { cwd: root });
-  facts.headCommittedMs = Date.parse(committed);
+  const facts = { headSha, pr: null, nowMs: Date.now(), headPushedMs: Number.NaN };
   const slug = parseGithubSlug(runGit(["remote", "get-url", "origin"], { cwd: root }));
   if (!slug) return { ...facts, unreadable: "could not read the origin remote's GitHub owner and name" };
   const { owner, name } = slug;
-  let pulls;
-  try {
-    pulls = JSON.parse(preflightGh(root, ["api", `repos/${owner}/${name}/commits/${headSha}/pulls`]));
-  } catch (error) {
-    return { ...facts, unreadable: `could not ask GitHub which pull request has this head (${error.message.split("\n")[0]})` };
-  }
-  const open = (Array.isArray(pulls) ? pulls : []).find((pull) =>
-    pull?.state === "open" && String(pull?.head?.sha || "").toLowerCase() === headSha.toLowerCase());
-  if (!open) return facts;
+  const pulls = openPullsAtHead(root, owner, name, headSha);
+  if (!pulls) return { ...facts, unreadable: "could not ask GitHub which pull request has this head" };
+  if (pulls.length === 0) return facts;
+  if (pulls.length > 1) return { ...facts, pr: { ambiguous: pulls.map((pull) => pull.number) } };
+  const [open] = pulls;
   facts.pr = { number: open.number, draft: open.draft === true };
   const number = open.number;
   try {
@@ -1287,16 +1337,24 @@ export function readSolPreflightFacts(root, headSha) {
       "api", `repos/${owner}/${name}/issues/${number}/comments?per_page=100`, "--paginate", "--slurp",
     ])).flat();
     facts.codexState = codexAppReviewState(comments);
-  } catch { facts.codexState = null; }
+  } catch { facts.codexState = undefined; }
   try {
     // Read CodeRabbit's completion BEFORE the threads, as the merge gate does: a
     // review finishing between the reads must not pair with a stale thread list.
     facts.coderabbitRequirement = readCodeRabbitRequirement((args) => preflightGh(root, args), { owner, name, number });
   } catch { facts.coderabbitRequirement = null; }
   try {
-    const statuses = JSON.parse(preflightGh(root, ["api", `repos/${owner}/${name}/commits/${headSha}/statuses?per_page=100`]));
-    facts.coderabbitBusy = coderabbitReviewInProgress(statuses);
+    const statuses = JSON.parse(preflightGh(root, [
+      "api", `repos/${owner}/${name}/commits/${headSha}/statuses?per_page=100`, "--paginate", "--slurp",
+    ])).flat();
+    facts.coderabbitBusy = coderabbitReviewInProgress(statuses, facts.nowMs);
   } catch { facts.coderabbitBusy = null; }
+  try {
+    const pages = JSON.parse(preflightGh(root, [
+      "api", `repos/${owner}/${name}/commits/${headSha}/check-suites?per_page=100`, "--paginate", "--slurp",
+    ]));
+    facts.headPushedMs = headPushedAt(pages.flatMap((page) => page?.check_suites || []));
+  } catch { /* NaN: never quiet */ }
   try {
     const node = collectCodexThreads((cursor) => {
       const args = [
@@ -1316,8 +1374,19 @@ export function readSolPreflightFacts(root, headSha) {
       facts.coderabbitOpen = coderabbitThreadCount(node);
     }
   } catch { /* left null: refuses */ }
+  // The CodeRabbit read must describe this head too, or it proves nothing.
+  if (facts.coderabbitRequirement && facts.coderabbitRequirement.headOid !== headSha.toLowerCase()) {
+    facts.coderabbitRequirement = null;
+  }
   if (facts.coderabbitRequirement?.status === "missing") {
     try { facts.waiverFound = anyCodeRabbitWaiver(root, number); } catch { facts.waiverFound = false; }
+  }
+  // Read the PR's head once more LAST: a push during the reads above would leave
+  // them describing a commit the PR no longer points at (Luna round 1).
+  const after = openPullsAtHead(root, owner, name, headSha);
+  if (!after) return { ...facts, unreadable: "could not re-read which pull request has this head" };
+  if (after.length !== 1 || after[0].number !== number) {
+    return { ...facts, unreadable: `#${number} no longer has this commit as its head (a push landed during the check)` };
   }
   return facts;
 }

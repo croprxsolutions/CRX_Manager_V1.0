@@ -68,7 +68,11 @@ approval. Includes the older sub-items "reps can recover application-service cos
 **MED · OPEN · security/money · Mason decided, build unassigned**
 Mason decided reps may see all invoices read-only but only act on their own, and that only admins may change
 commission splits on jobs, quotes and orders. Neither is built: no migration widens rep invoice reads or adds
-own-name checks to `unpost_invoice`, `transfer_invoice_to_job`, `consolidate_draft_invoices`; and any rep can
+own-name checks (`INVOICE_SCOPE_DENIED`) to the full set of invoice actions any active rep can call today on any
+invoice id: `unpost_invoice`, `unpost_invoice_group`, `transfer_invoice_to_job`, `consolidate_draft_invoices`,
+`update_field_app_applied_info`, `update_field_app_invoice_billing`, `save_field_app_invoice` (existing invoice) and
+the `invoice_shares_insert` policy (checked live 2026-10-13: no ownership test); screens must also hide Edit/Post
+on other reps' invoices, and payments and prepay/credit application stay open to reps. Any rep can
 still change a commission split on a job, quote or order (only the customer default is protected). Any rep can
 also roll over any rep's quote.
 
@@ -251,9 +255,13 @@ check).
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
-Most lists now page through every row (PRs #959, #1017, #1048). Still capped: Customers (1000), Jobs (500), Crop
-Programs (500), Dispatch Board (500), order/job/PO pickers (200), cycle-count locations; a Jobs `.or(id.in)` URL-
-size risk; the blend-ticket scanner Edge Function. Past a cap, a record cannot be chosen.
+Most lists now page through every row (PRs #959, #1017, #1048). The order, job and purchase-order pickers now search
+the database, and cycle-count locations read every row (PR #1048). Still capped: Customers (1000), Jobs (500),
+Crop Programs (500), Dispatch Board (500); a Jobs `.or(id.in)` URL-size risk; the blend-ticket scanner Edge
+Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk
+PO Import products (open PRs #1018/#1021 at the time), Label Data Quality, Product Detail choice lists, bulk import
+name matching, and the Field Customer Assignment dropdown. A customer-name search looks through only the first 50
+matching customers (alphabetical) without saying so. Past a cap, a record cannot be chosen.
 
 ---
 
@@ -462,7 +470,7 @@ OrderDetail.
 
 ### KI-77 — Lists, UI and CRM details (extends KI-26, KI-30, KI-32, KI-41)
 **MED/LOW · OPEN · UI/database**
-Still row-capped: the Invoice Detail customer selector, purchase-order product lists, bulk-import name matching,
+Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,
 Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
 concurrent changes, load/count cost grows on large tables, more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer

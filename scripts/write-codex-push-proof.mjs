@@ -1141,27 +1141,33 @@ export const CODEX_APP_STALE_RUN_MS = 60 * 60 * 1000;
 
 // A CodeRabbit "Review in progress" older than this is a review that died, not
 // one to wait for (the merge gates do not read it, so waiting would deadlock).
+// Deliberate (Luna round 2 raised it): a slower live review can still land after
+// Sol on a non-money PR, which costs a second Sol run, never a bad merge.
 export const CODERABBIT_STALE_PENDING_MS = 60 * 60 * 1000;
 
 // Is CodeRabbit reviewing this commit right now? GitHub lists EVERY status ever
 // set on the commit, so only CodeRabbit's NEWEST one counts (an old "in
 // progress" is followed by its result). A status set by anyone else is ignored.
+// One of CodeRabbit's own statuses with no readable time cannot be ordered, so
+// the answer is null (unreadable, refuses) rather than "not busy" (Luna round 2).
 export function coderabbitReviewInProgress(statuses, nowMs = Date.now()) {
   let newest = null;
   for (const status of Array.isArray(statuses) ? statuses : []) {
     if (String(status?.context || "").trim().toLowerCase() !== "coderabbit") continue;
     if (!isCodeRabbitLogin(status?.creator?.login)) continue;
     const at = Date.parse(status?.created_at || "");
-    if (!Number.isFinite(at)) continue;
+    if (!Number.isFinite(at)) return null;
     if (!newest || at > newest.at) newest = { at, state: String(status?.state || "").trim().toLowerCase() };
   }
   return Boolean(newest && newest.state === "pending" && nowMs - newest.at < CODERABBIT_STALE_PENDING_MS);
 }
 
-// When GitHub first saw this commit: the earliest check suite created for it
-// (one is created on every push). GitHub sets that time; a commit's own date is
-// whatever its author wrote, so it is never used (Luna round 1). NaN when
-// there is none, which never counts as quiet.
+// When GitHub first saw this commit: the earliest check suite created for it.
+// GitHub sets that time; a commit's own date is whatever its author wrote, so
+// it is never used (Luna round 1). NaN when there is none, which never counts
+// as quiet. ACCEPTED GAP (Luna round 2): suites belong to the commit, not the
+// branch, so a commit pushed to another branch first can look quiet sooner. The
+// cost is one early Sol run in that rare case; the merge gates are unaffected.
 export function headPushedAt(checkSuites) {
   let earliest = Number.NaN;
   for (const suite of Array.isArray(checkSuites) ? checkSuites : []) {

@@ -1312,7 +1312,9 @@ function collisionPromptSkipsWork(prompt) {
   assert.equal(coderabbitReviewInProgress([crStatus("success", t(5)), crStatus("pending", t(1))], now), true, "preflight: newest is by time, not list order");
   assert.equal(coderabbitReviewInProgress([crStatus("pending", t(1), "masonwells1")], now), false, "preflight: only CodeRabbit's own status counts");
   assert.equal(coderabbitReviewInProgress([crStatus("pending", t(61))], now), false, "preflight: a pending over an hour old is a dead review, not one to wait for");
-  assert.equal(coderabbitReviewInProgress([crStatus("pending", "not a date")], now), false, "preflight: an undated status is ignored");
+  assert.equal(coderabbitReviewInProgress([crStatus("pending", "not a date")], now), null, "preflight: an undated CodeRabbit status is unreadable");
+  assert.equal(coderabbitReviewInProgress([crStatus("pending", "not a date", "someone-else")], now), false, "preflight: an undated status from anyone else is ignored");
+  assert.equal(evaluateSolPreflight({ ...{ headSha: head, pr: { number: 1, draft: false }, codexState: { sha: head, status: "completed" }, codexThreads: { status: "stale" }, coderabbitOpen: 0, coderabbitRequirement: { status: "not-required" }, headPushedMs: now - 60_000, nowMs: now }, coderabbitBusy: null }).ok, false, "preflight: an unreadable CodeRabbit status refuses");
 
   assert.equal(headPushedAt([{ created_at: t(3) }, { created_at: t(4) }]), now - 4 * 60_000, "preflight: push time = the earliest check suite");
   assert.equal(headPushedAt([]), Number.NaN, "preflight: no check suite gives no push time (a commit's own date is never used)");

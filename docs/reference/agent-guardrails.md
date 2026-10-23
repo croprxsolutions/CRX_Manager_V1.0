@@ -98,7 +98,7 @@
 > comment (`codex-review-state:v1`, written by the App's own login) shows a completed review of this commit, or it
 > was pushed at least 15 minutes ago with no App review of it started (`SOL_PREFLIGHT_QUIET_MS`; push time = the
 > commit's earliest check suite, which GitHub sets — a commit's own date is never used, and no suite never counts as
-> quiet); an App review of this commit that is still running is waited for until it has run over an hour
+> quiet; a commit pushed to another branch first can look quiet sooner, an accepted gap that costs one early Sol run); an App review of this commit that is still running is waited for until it has run over an hour
 > (`CODEX_APP_STALE_RUN_MS`); a newest App summary that cannot be parsed refuses; exactly one open PR has this head,
 > re-read after every other read; no unanswered Codex App thread on this commit (`evaluateCodexBotReview`) and no unanswered
 > CodeRabbit thread (`coderabbitThreadCount`); CodeRabbit's newest status on this commit is not a PENDING it set less

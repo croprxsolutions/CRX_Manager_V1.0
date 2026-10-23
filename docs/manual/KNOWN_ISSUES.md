@@ -177,12 +177,12 @@ Mason's "I approve").** Part A first, since it closes the HIGHs that reach every
   `get_fields_geojson_by_ids` (Field View) and `get_field_geojson` (Job Detail) return only fields that pass it. Make
   `get_fields_with_geojson`, `get_field_polygons`, `get_field_dashboard`, `derive_customer_shares_from_fields`,
   `get_customer_farm_group`, both `get_field_billing_splits_for_*`, `get_customer_summary`,
-  `check_customer_credit_limit` and `get_dashboard_action_items` office-only (`require_admin_or_sales_rep()`). Two of
-  their callers are open to every role, so part A also needs two small screen changes in the same PR: the Overview
-  page (`/dashboard`, open to every signed-in role in `src/App.tsx`) mounts `ActionQueue` unconditionally, which would
-  catch the refusal and show a false "All Clear", so show `ActionQueue` to office roles only; and the command palette
-  sits in the shared layout (`src/components/layout/AppLayout.tsx`), so make `global_search` return nothing to a
-  non-office account (or hide the palette for field roles). The same page's `operational_dashboard_summary` is safe on
+  `check_customer_credit_limit` and `get_dashboard_action_items` office-only (`require_admin_or_sales_rep()`). The
+  Overview page that mounts `ActionQueue` needs no change: since the shared page list (#1045) `/dashboard` is
+  `roles: ['admin', 'sales_rep']` in `src/appPages.tsx`, and `src/App.tsx` wraps every listed route in
+  `ProtectedRoute`, so a field role never reaches it. The command palette does sit in the shared layout
+  (`src/components/layout/AppLayout.tsx`), so make `global_search` return nothing to a non-office account (or hide the
+  palette for field roles). The same page's `operational_dashboard_summary` is safe on
   live: its installed body refuses anyone but active admins and sales reps (a read-only call as the applicator got
   `Not authorized`, 2026-10-22). But the newest migration that defines it, `20260323100000_operational_dashboard_summary.sql`,
   has no such check; live keeps the one from the older `20260311200000_wave2_audit_fixes.sql`. A rebuild from the

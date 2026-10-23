@@ -6,6 +6,7 @@ import { todayInBusinessTz } from '../lib/dateUtils';
 import { fetchAllRows } from '../lib/pagedRead';
 import Card from '../components/ui/Card';
 import PageHeader from '../components/ui/PageHeader';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import ARaging from './ARaging';
 import PaymentHistory from './PaymentHistory';
 import PrepaymentManagerPanel from '../components/prepay/PrepaymentManagerPanel';
@@ -39,6 +40,10 @@ export default function AccountsReceivable() {
   const [owed, setOwed] = useState<number | null>(null);
   const [prepay, setPrepay] = useState<number>(0);
   const [openCredit, setOpenCredit] = useState<number>(0);
+  // The strip's last read failed: it says so instead of silently disappearing.
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  // Bumped by Try again to read the strip once more.
+  const [summaryAttempt, setSummaryAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,13 +91,16 @@ export default function AccountsReceivable() {
           setOpenCredit(creditSum);
         }
       } catch {
-        if (!cancelled) setOwed(null);
+        if (!cancelled) {
+          setOwed(null);
+          setSummaryFailed(true);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [summaryAttempt]);
 
   const net = owed !== null ? owed - prepay - openCredit : null;
 
@@ -103,6 +111,16 @@ export default function AccountsReceivable() {
         accent="Receivable"
         subtitle="Aging, payments, prepayments, and the customer ledger — in one place."
       />
+
+      {owed === null && !summaryFailed && (
+        <p className="text-sm text-secondary">Loading the money summary…</p>
+      )}
+
+      {summaryFailed && (
+        <Card>
+          <LoadFailedState title="The money summary could not be loaded" onRetry={() => { setSummaryFailed(false); setSummaryAttempt((n) => n + 1); }} />
+        </Card>
+      )}
 
       {owed !== null && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

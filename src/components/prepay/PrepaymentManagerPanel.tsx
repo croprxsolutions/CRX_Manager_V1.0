@@ -11,6 +11,7 @@ import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import Input from '../ui/Input';
 import DataTable, { type Column } from '../ui/DataTable';
+import { LoadFailedState } from '../ui/EmptyState';
 import Modal from '../ui/Modal';
 import CustomerSearchPicker from '../customers/CustomerSearchPicker';
 import { useToast } from '../ui/Toast';
@@ -98,6 +99,9 @@ export default function PrepaymentManagerPanel() {
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
   const [customerCredits, setCustomerCredits] = useState<PrepayCredit[]>([]);
   const [loadingCredits, setLoadingCredits] = useState(false);
+  const [creditsFailed, setCreditsFailed] = useState(false);
+  // Only the latest opened customer's read may set the credits.
+  const creditsSeq = useRef(0);
 
   // Edit credit modal
   const [editCredit, setEditCredit] = useState<PrepayCredit | null>(null);
@@ -145,8 +149,8 @@ export default function PrepaymentManagerPanel() {
       .order('id')
       .range(from, to));
     if (seq !== loadSeq.current) return;
-    if (error) { fail(); return; }
-    const customerRows = custData || [];
+    if (error || !custData) { fail(); return; }
+    const customerRows = custData;
 
     // Their unpaid invoices in one paged read per chunk of customers (was one
     // unchecked read per customer, whose failure counted as "no unpaid invoices").
@@ -162,7 +166,7 @@ export default function PrepaymentManagerPanel() {
       .order('id')
       .range(from, to));
     if (seq !== loadSeq.current) return;
-    if (invError) { fail(); return; }
+    if (invError || !invData) { fail(); return; }
     const unpaidByCustomer = new Map<string, { count: number; cents: number }>();
     for (const inv of (invData || []) as Array<{ customer_id: string; balance_cents: number | null }>) {
       const sum = unpaidByCustomer.get(inv.customer_id) ?? { count: 0, cents: 0 };
@@ -188,24 +192,35 @@ export default function PrepaymentManagerPanel() {
 
   // Fetch individual credits for a customer
   const fetchCredits = useCallback(async (customerId: string) => {
+    const seq = ++creditsSeq.current;
     setLoadingCredits(true);
+    // Never show the previously opened customer's credits (with Edit and Delete) under this one.
+    setCustomerCredits([]);
+    setCreditsFailed(false);
     const { data, error } = await supabase
       .from('prepay_credits')
       .select('id, customer_id, original_amount_cents, balance_cents, reference_number, bucket_label, notes, payment_method, source_type, created_at')
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false });
-    if (error) {
+    // Another customer was opened (or this one closed) while this loaded.
+    if (seq !== creditsSeq.current) return;
+    if (error || !data) {
       toast('error', 'Failed to load credits');
+      setCreditsFailed(true);
     } else {
-      setCustomerCredits((data || []) as PrepayCredit[]);
+      setCustomerCredits(data as PrepayCredit[]);
     }
     setLoadingCredits(false);
   }, [toast]);
 
   const toggleExpand = (customerId: string) => {
     if (expandedCustomer === customerId) {
+      // A read still running for the closed customer must not fill the list.
+      creditsSeq.current += 1;
       setExpandedCustomer(null);
       setCustomerCredits([]);
+      setCreditsFailed(false);
+      setLoadingCredits(false);
     } else {
       setExpandedCustomer(customerId);
       fetchCredits(customerId);
@@ -320,16 +335,55 @@ export default function PrepaymentManagerPanel() {
   // booking-prepay earmark engine is shelved: docs/roadmap/shelved-earmark-engine/)
 
   // Fetch bucket labels for the New Check modal
+  // A failed read says so under the bucket pickers instead of offering no buckets.
+  const [labelsFailed, setLabelsFailed] = useState(false);
+  const [labelsAttempt, setLabelsAttempt] = useState(0);
   useEffect(() => {
+    let cancelled = false;
     supabase
       .from('app_settings')
       .select('setting_value')
       .eq('setting_key', 'prepay_bucket_labels')
       .maybeSingle()
-      .then(({ data }) => {
-        if (data?.setting_value) setBucketLabels(JSON.parse(data.setting_value as string));
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          setLabelsFailed(true);
+          return;
+        }
+        if (!data?.setting_value) {
+          setLabelsFailed(false);
+          return;
+        }
+        // A malformed setting is a failed read too, not an empty list of buckets.
+        let labels: unknown;
+        try {
+          labels = JSON.parse(data.setting_value as string);
+        } catch {
+          labels = null;
+        }
+        if (!Array.isArray(labels) || !labels.every((l) => typeof l === 'string')) {
+          setLabelsFailed(true);
+          return;
+        }
+        setBucketLabels(labels);
+        setLabelsFailed(false);
       });
-  }, []);
+    return () => { cancelled = true; };
+  }, [labelsAttempt]);
+
+  const labelsFailedNote = labelsFailed ? (
+    <p role="alert" className="mt-1 text-xs text-red-600">
+      Bucket labels could not be loaded.{' '}
+      <button
+        type="button"
+        className="underline font-medium"
+        onClick={() => { setLabelsFailed(false); setLabelsAttempt((n) => n + 1); }}
+      >
+        Try again
+      </button>
+    </p>
+  ) : null;
 
   const openNewCheck = () => {
     // Codex P2 fix (PR #59, 2026-05-16): reset the splitCheckIdem key on
@@ -673,13 +727,14 @@ export default function PrepaymentManagerPanel() {
       </div>
 
       {/* A failed load shows no totals or table: $0 would read as "no prepay to apply". */}
-      {loadFailed ? (
+      {loadFailed && !loading ? (
         <Card>
-          <p role="alert" className="text-center text-red-600 py-8 text-sm">Prepayments could not be loaded. Press Refresh to try again.</p>
+          <LoadFailedState title="Prepayments could not be loaded" onRetry={() => { void fetchCustomers(); }} />
         </Card>
       ) : (
       <>
-      {/* Summary Cards */}
+      {/* Summary Cards: hidden while loading, where $0 would read as "no prepay". */}
+      {!loading && (
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <div className="flex items-center gap-3 mb-2">
@@ -716,6 +771,7 @@ export default function PrepaymentManagerPanel() {
           <p className="text-xs text-secondary mt-1">could be applied (one-click apply is off; use Allocate)</p>
         </Card>
       </div>
+      )}
 
       {/* Data Table */}
       <Card padding={false}>
@@ -739,6 +795,8 @@ export default function PrepaymentManagerPanel() {
               </h3>
               {loadingCredits ? (
                 <p className="text-sm text-secondary py-4 text-center">Loading credits...</p>
+              ) : creditsFailed ? (
+                <LoadFailedState title="This customer's credits could not be loaded" onRetry={() => { void fetchCredits(expandedCustomer); }} />
               ) : customerCredits.length === 0 ? (
                 <p className="text-sm text-secondary py-4 text-center">No prepay credit records found for this customer</p>
               ) : (
@@ -848,6 +906,7 @@ export default function PrepaymentManagerPanel() {
                   <option key={l} value={l}>{l}</option>
                 ))}
               </select>
+              {labelsFailedNote}
             </div>
             <Input
               label="Notes"
@@ -1056,6 +1115,7 @@ export default function PrepaymentManagerPanel() {
                 </div>
               ))}
             </div>
+            {labelsFailedNote}
             <button
               onClick={() => setBucketSplits([...bucketSplits, { label: '', amount: '' }])}
               className="mt-2 text-sm text-crx-green hover:underline flex items-center gap-1"

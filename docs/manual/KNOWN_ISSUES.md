@@ -1,7 +1,7 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-22 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22): 1050 rows (the pending candidate `20261022040000_payment_allocation_tables_no_direct_writes`, row 970, PR #1026, payment-allocation tables lose direct Data API writes, is not applied; until it is, any active sales rep can insert payment-allocation rows directly through the Data API, no misuse found, 1/1/0 rows on 2026-10-22), `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968, PR #1018 merged as `3ab57a80c`, applied on Mason's in-chat `I approve`); at 2026-10-22 16:35 UTC (11:35 AM Central): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006 merged as `afe1dadb5`), and before it `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020); at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+`execute_sql`, 2026-10-23 03:52 UTC (10:52 PM Central, 2026-10-22): 1052 rows, `max(version)` `20261023033311` = `20261022040000_payment_allocation_tables_no_direct_writes` (row 970, PR #1026 merged as `c5f596285`, applied 03:33:11 UTC on Mason's in-chat `I approve`: sales reps and admins can no longer write payment-allocation rows directly through the Data API; reads unchanged); effective ordering high-water `20261022040000`; the read before it, 2026-10-23 03:21 UTC (10:21 PM Central, 2026-10-22): 1051 rows, `max(version)` `20261023031652` = `20261022023000_handle_new_user_ignores_signup_role` (row 969, PR #1039 merged as `f1f6e6aa3`, applied 03:16:52 UTC on Mason's in-chat `I approve`: a login the Auth service creates starts as an inactive, login-banned driver, whatever role its signup asks for; row 970 was not yet applied at this read); effective ordering high-water `20261022023000`; the read before it, 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22): 1050 rows (row 970, `20261022040000_payment_allocation_tables_no_direct_writes`, was then not yet applied, so any active sales rep could still insert payment-allocation rows directly through the Data API; no misuse found, 1/1/0 rows on 2026-10-22; CLOSED when row 970 applied 2026-10-23 03:33 UTC), `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968, PR #1018 merged as `3ab57a80c`, applied on Mason's in-chat `I approve`); at 2026-10-22 16:35 UTC (11:35 AM Central): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006 merged as `afe1dadb5`), and before it `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020); at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
 at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
@@ -205,19 +205,92 @@ Left open, by design or for later (reviewers on the PR, 2026-10-21):
   rows (FOR SHARE) and then `field_billing_defaults` in SHARE mode before it reads them, so no
   billing-default write can commit until the split does (the same order `save_field` writes them).
 
-## OPEN 2026-10-19 (MED) — a driver's completion receipt can be skipped when the customer row is hidden from them
+## OPEN 2026-10-19 (MED; fix pending apply of `20261022075000`, PR #1024; moves to the archive once applied) — a driver's completion receipt can be skipped when the customer row is hidden from them
 
-The customer receipt email after a delivery (including Goal 5's paper-ticket path, where it follows the
-same opt-in as an on-screen signature) is sent by the phone, and the delivery page and the field stop
-read the customer through the client. Under the current
-`customers_select` policy, an assigned driver may not see the customer of a stop whose
-`scheduled_date` is NULL or older than yesterday, so the page has no email and no receipt is sent.
-Since PR #955, on a **paper-ticket** completion the driver is told no receipt was sent from the phone
-and that the office can send it with **Email Confirmation**. A normal on-screen-signature completion
-still skips the receipt without a warning in this case (unchanged from before Goal 5). **Fix:** read the receipt recipient through an
-authorized RPC (or widen the policy for an assigned driver's open delivery); a server-side receipt
-queue would also cover it. Found by the Codex GitHub review on #955. Source:
-`src/pages/DeliveryDetail.tsx`, `src/pages/FieldStop.tsx` (receipt send after completion).
+The customer receipt email after a delivery is sent by the phone, and the delivery page and the field
+stop read the customer through the client. Under `customers_select`, an assigned driver may not see the
+customer of a stop whose `scheduled_date` is older than yesterday, so the page had no email and sent no
+receipt (on the on-screen-signature path, with no warning). Found by the Codex GitHub review on #955.
+**Fix:** the new read-only `get_delivery_receipt_recipient(p_delivery_id)` returns the customer's name and
+receipt email to an active admin or sales rep, or the delivery's active assigned driver while the delivery
+is scheduled or in progress (another driver, or a closed delivery, is refused with the same message as an
+unknown id). The delivery page (open deliveries only) and the field stop call it when the customer row is not
+visible and use its address for the receipt checkbox and the email. `customers_select` is unchanged.
+Proof: in the browser preview against a local test database, a driver completing a stop scheduled ten
+days ago (shown on the route as "Unknown customer") saw the receipt option, and the page read the
+customer's address through the new function before sending; `smoke-delivery-completion-evidence.sql`
+step h. The email itself is still sent by the phone after the completion; see the next entry.
+
+## DEFERRED 2026-10-21 (MED; Goal 5 follow-up 3) — a customer receipt that fails to send after a completion is not retried
+
+The receipt email is sent by the phone after `complete_delivery` succeeds. If signal drops between the
+two, the delivery is completed but no receipt goes out; the driver is told so
+(`RECEIPT_NOT_SENT_MESSAGE`) and the office can resend it with **Email Confirmation**. A guaranteed
+retry is not small, so it is written down here instead of built:
+
+- **Design.** A new `delivery_receipt_queue` table (delivery id unique, recipient email, status
+  `pending | sent | failed`, attempts, last error, created and sent times; RLS on, no client writes).
+  `complete_delivery` inserts the row in the same transaction as the completion when the caller asks for
+  a receipt (a new `p_send_receipt` flag, fingerprinted), reading the address on the server, so a lost
+  reply can never lose the request. A scheduled job (pg_cron every few minutes, or a Supabase scheduled
+  Edge Function) claims pending rows with `FOR UPDATE SKIP LOCKED`, builds the same receipt the phone
+  builds today (`src/lib/deliveryCompletionEmail.ts`), sends it through `send-email` with the existing
+  idempotency key `delivery-completed-<id>`, and marks it sent; after a few failed attempts it marks it
+  failed and surfaces it to the office. The phone then stops sending the receipt itself.
+- **Why deferred.** It needs a new table, a change to the completion call, server-side email rendering
+  and a new scheduled job (an Edge Function deployment, which needs Mason's approval), and its own
+  review and live test. Owner: the next Goal 5 or Goal 6 change.
+
+## OPEN 2026-10-21 (LOW; follows from `20261022075000`) — completion-evidence leftovers
+
+`20261022075000` (Goal 5 follow-up 2) makes every completion carry server-checked proof:
+`complete_delivery` and `start_and_complete_delivery` take `p_evidence` (`signature`, `paper_ticket`,
+`left_at_site`, or the admin-only `no_proof` with a 10–500 character written reason as `p_evidence_ref`)
+and `p_evidence_ref`, and refuse, changing nothing, unless that exact proof is saved (the signature image
+this attempt uploaded, or the named, correctly captioned photo in the delivery's own folder; for
+`no_proof`, an active admin and the reason, recorded with who and when); the path and reference are recorded in `deliveries.completion_evidence` and
+`completion_evidence_ref`. What it leaves:
+
+1. **Old app versions stop completing.** A phone still running the app from before this change sends no
+   `p_evidence`; an exact retry of a completion it already saved still replays, but a new completion is
+   refused with `COMPLETION_EVIDENCE_REQUIRED` ("this version of the app is out of date") until it reloads. Apply the migration
+   and merge the PR together, outside delivery hours.
+2. **Completions queued offline before Goal 5 (2026-10-19).** They carry no evidence, so
+   `process_offline_action` now refuses them and they go to Offline Work Review (`needs_review`, nothing
+   committed); the office completes them from the delivery page with a signature or a ticket photo.
+3. **Deliveries completed before the change** keep `completion_evidence` NULL.
+4. **Older proof chains** (`smoke-start-and-complete-delivery.sql`, the batch-3a, field-invoice and
+   return-credit chains) complete deliveries without evidence and now stop at
+   `COMPLETION_EVIDENCE_REQUIRED`; the new prover checks that this is their only new failure. Update them
+   to send evidence if they are reused. (The accounting-period, aggregate and offline-receipt chains were
+   updated in this change and pass.)
+5. **Not yet tried on a real phone** (Goal 5's airplane-mode check is still owed).
+6. **Signature files from abandoned attempts stay stored.** Each completion attempt uploads its
+   signature to its own path before the server call, and no rule lets anyone delete those files (so an
+   accepted one can never be replaced). A refused or abandoned attempt leaves its file behind; a
+   service-role cleanup of files no delivery references is a possible follow-up. By design, not a
+   defect (Luna round 3 LOW, refuted 2026-10-22): letting app users delete a not-yet-accepted attempt
+   file would reopen the replace-or-delete window this rule closes, the files are small (live
+   2026-10-22: smallest signature 2,356 bytes), and nothing reads an unreferenced attempt file.
+7. **Older signature rules unchanged.** The four policies for the old fixed path
+   (`signatures/<id>.png`) still let staff replace that image on deliveries completed before this change.
+   Narrowing them is an access change for a follow-up, on Mason's approval.
+8. **Photo proof is not tied to who took it.** Office staff may complete with a ticket photo a driver
+   saved, by design; the server checks the delivery, caption, folder, an image file type and a
+   minimum size (signatures: a PNG of at least 500 bytes; photos: at least 1,000 bytes).
+9. **File contents are not inspected.** The database cannot read a stored file's bytes, so the server
+   trusts the upload's recorded type and size; a deliberately crafted file of the right type and size
+   would pass. The screens only ever upload a real drawn signature or camera photo.
+10. **A file deleted in the same instant as its completion: closed in the same migration (2026-10-22).**
+   Only admins may delete a `delivery-photos` file (`delivery_photos_delete`, live read 2026-10-22), and
+   no screen or Edge Function does; but an admin's own storage call could once slip between a
+   completion's file check and its commit (Luna round 3 MED, then Sol HIGH on `12336f569`). The
+   restrictive rule's helper `_is_accepted_delivery_evidence_object` now first waits for the row lock of
+   the delivery whose folder holds the file, which every completion takes before its checks: a delete
+   during a completion waits, then sees the accepted photo and removes nothing; a delete that goes first
+   makes the completion wait, which then finds the file gone and refuses. The prover runs both orders
+   in two sessions, each failing without the lock. Still outside storage rules by design: the
+   dashboard and service-role tools.
 
 ## FIXED 2026-10-19 (migration `20261019220000` applied live 2026-10-20 02:22 UTC (9:22 PM Central, 2026-10-19), PR #964) — the Deliveries list can leave a scheduled delivery In Progress if signal drops between its two steps
 
@@ -397,7 +470,7 @@ rollback-only live smoke.
 
 **Found in passing — not replay binding.** `reverse_write_off`'s role test
 `(SELECT role … AND is_active) != 'admin'` and `mark_inventory_row_verified`'s `v_role != 'admin'`
-both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through. Batch 1 closes it for `reverse_write_off` (its wrapper requires an active admin); `mark_inventory_row_verified` stays open.
+both evaluate to NULL for a deactivated or missing profile, and NULL lets the call through. Batch 1 closes it for `reverse_write_off` (its wrapper requires an active admin); migration `20261022070000` (migration-history row 974) closes it for `mark_inventory_row_verified` (active admins only, NULL-safe, and its retry-key cache is read only after that check), together with three other role reads that ignored `is_active` (`get_team_board_deliveries`, `get_yesterday_delivery_recap`, `get_ar_reminder_candidates`).
 
 **Screen side (CodeRabbit on PR #942), fixed in batch 1.** The split-check, reverse-write-off and void-payment dialogs used to mint a fresh key on every open (to stop the old cross-record replay), so reopening one after an uncertain response threw away the unresolved key. With the server binding, a retained key used for a different request is refused and then retired, so those three dialogs now keep their key across opens and an unchanged resubmit replays instead of running twice. Other screens in the 2026-09-03 F1 entry keep their existing behavior.
 
@@ -799,7 +872,7 @@ leave these open:
 - **The never-posted draft CS-2026-0055** (ORD-2026-0186's May delivery DEL-00074) is left as is; its
   order's other delivery was recorded as billed in Chem Man.
 
-## OPEN 2026-10-22 — Smoke chains rotted by the PO cost lock: `adversarial_money_inventory_closeout` fails live at its bulk-PO step
+## RESOLVED 2026-10-22 (same day) — Smoke chains rotted by the PO cost lock: `adversarial_money_inventory_closeout` fails live at its bulk-PO step
 
 **What it is.** Running `scripts/smoke/smoke-adversarial-money-inventory-closeout.sql` live on
 2026-10-22 (after row 968 applied) failed at file line 376: an admin re-importing the same vendor
@@ -811,11 +884,18 @@ chain rolled back, so nothing was kept. Its posting step (a rep refused for an i
 name) ran before the failure and passed. The later assertions in the chain that expect the rep's line
 costs (`3372` / `333` cents) would fail for the same reason.
 
-**Open question for the fix (business behaviour, not just the test):** should a rep's import and an
-admin's import of the same vendor document count as one document? Today they do not, so an admin
-re-entering a rep's bulk import is refused rather than told it already exists. The fix is either a
-smoke update (rep imports without cost, admin sets cost through `set_purchase_order_item_costs`) or a
-fingerprint that ignores cost for non-admins. Logged with the coordinator 2026-10-22.
+**Fixed in the test, behaviour kept (2026-10-22, evening).** The chain now follows the admin-only cost
+flow: its bulk imports send no cost, so a rep's and an admin's import of one document fingerprint the
+same and the admin gets `already_imported`; the admin then prices the line with
+`set_purchase_order_item_costs`, and the `3372` / `333` cent checks hold. It returned
+`SMOKE_PASS_ROLLBACK` live the same evening and in a disposable copy of the real schema with every
+migration replayed.
+
+The app behaviour stays as it is: when an admin's import of a document a rep already imported carries
+costs, it is refused with `BULK_PO_DOCUMENT_CONTENT_CONFLICT` instead of being told it already exists.
+That is safe (no second purchase order is made). The admin's path is to open the rep's purchase order
+and set its costs. Making the message friendlier would need a fingerprint that ignores cost, which is
+a migration on the import path for a rare case; not planned unless it causes confusion in use.
 
 ## RESOLVED 2026-10-22 (opened 2026-10-09) — the regular invoice editor posts the old saved amounts when Post is pressed with unsaved edits
 

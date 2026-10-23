@@ -709,7 +709,7 @@ export default function QuoteBuilder() {
     if (suppressDirtyUntilReloadSettlesRef.current) return;
     formEditCountRef.current += 1;
     setIsDirty(true);
-  }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit]);
+  }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
 
   // Release initial-load dirty suppression only after React has committed the
   // complete installed snapshot. Timer/frame releases can run before that

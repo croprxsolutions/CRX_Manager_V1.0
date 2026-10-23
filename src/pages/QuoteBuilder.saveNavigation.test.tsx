@@ -152,7 +152,12 @@ describe('QuoteBuilder — leaving a new quote', () => {
     expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(1);
   });
 
-  it('opens the saved quote and warns when the rep typed while the first save was running', async () => {
+  it.each([
+    ['typed a note', () => fireEvent.change(screen.getByPlaceholderText(/Notes visible at the top of the quote/), {
+      target: { value: 'Typed while saving' },
+    })],
+    ['ticked Planned Program', () => fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }))],
+  ])('opens the saved quote and warns when the rep %s while the first save was running', async (_label, editDuringSave) => {
     let releaseSave!: () => void;
     mockRpc.mockImplementation((name: string) => (name === 'save_quote'
       ? new Promise((resolve) => {
@@ -164,9 +169,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
 
     fireEvent.click(screen.getByText('Save Draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
-    fireEvent.change(screen.getByPlaceholderText(/Notes visible at the top of the quote/), {
-      target: { value: 'Typed while saving' },
-    });
+    editDuringSave();
     releaseSave();
 
     // Staying on /quotes/new would make the next save create a second quote, so the page

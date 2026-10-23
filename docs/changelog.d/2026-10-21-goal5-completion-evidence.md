@@ -14,8 +14,9 @@ owner approval because it adds storage policies). Plan reviewed twice by Codex S
   `signature_url` itself. A trigger refuses any other way of marking a delivery completed and freezes the
   proof, the signer and the signature once it is completed.
 - **Signature saved before the completion.** The delivery page, the field stop and the Deliveries list
-  upload the signature image first, to a path unique to that attempt; a failed upload completes nothing
-  and says so. Two new storage rules let the delivery's people add and read those images while it is
+  upload the signature image first, to a path unique to that attempt. If that upload fails, the page still
+  sends the completion under the same key (after a lost reply it may replay an earlier commit); otherwise
+  the server refuses it with `SIGNATURE_IMAGE_MISSING` and nothing changes, and the page says so. Two new storage rules let the delivery's people add and read those images while it is
   scheduled or in progress; there is no rule to replace or delete them. The four older signature rules
   are unchanged.
 - **Old app versions.** An exact retry from the old app (no evidence) still replays a completion that was
@@ -48,8 +49,9 @@ owner approval because it adds storage policies). Plan reviewed twice by Codex S
   page as a driver with an on-screen signature (hidden customer; receipt address read through the new
   function), field stop with a paper ticket and with "left at site", Deliveries list with a signature
   and with a paper ticket, office layout with a paper ticket; each recorded its path and reference,
-  moved stock and drew one draft invoice. Refusals: a signature upload that failed stopped before any
-  completion call; a server refusal (ticket file removed behind the screen's back) showed "The delivery
+  moved stock and drew one draft invoice. Refusals: a failed signature upload still sends the
+  completion, which the server refuses (`SIGNATURE_IMAGE_MISSING`) with nothing changed
+  (`DeliveryDetail.completion.test.tsx`); a server refusal (ticket file removed behind the screen's back) showed "The delivery
   was not completed (no stock or invoice change)…" with the delivery still In Progress, no stock moved
   and no invoice. Chain `smoke-delivery-completion-evidence.sql` (steps a–h) and container prover
   `scripts/smoke/prove-delivery-completion-evidence-real-schema.mjs` (old-app completions made before

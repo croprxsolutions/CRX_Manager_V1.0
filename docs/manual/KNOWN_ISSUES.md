@@ -1,7 +1,7 @@
 # Known Issues — Consolidated
 
 **Last verified: 2026-10-22 (America/Chicago) against the live migration ledger** (read-only
-`execute_sql`, 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22): 1050 rows, `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968, PR #1018 merged as `3ab57a80c`, applied on Mason's in-chat `I approve`); at 2026-10-22 16:35 UTC (11:35 AM Central): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006 merged as `afe1dadb5`), and before it `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020); at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
+`execute_sql`, 2026-10-23 00:55 UTC (7:55 PM Central, 2026-10-22): 1050 rows (the pending candidate `20261022040000_payment_allocation_tables_no_direct_writes`, row 970, PR #1026, payment-allocation tables lose direct Data API writes, is not applied; until it is, any active sales rep can insert payment-allocation rows directly through the Data API, no misuse found, 1/1/0 rows on 2026-10-22), `max(version)` `20261023004246` = `20261022022000_post_binds_reviewed_invoice_version` (row 968, PR #1018 merged as `3ab57a80c`, applied on Mason's in-chat `I approve`); at 2026-10-22 16:35 UTC (11:35 AM Central): 1049 rows, `max(version)` `20261022163441` = `20261022021000_order_invoice_refuses_field_split` (row 967, PR #1006 merged as `afe1dadb5`), and before it `20261022155943` = `20261022020000_blend_invoice_binding_lows` (row 966, PR #1020); at 12:03 UTC (7:03 AM Central): 1047 rows, `max(version)` `20261022115547` = `20261021155000_split_payer_return_credit` and before it `20261022114024` = `20261021150000_split_invoice_cross_customer_lineage` (rows 965 and 964, PR #1010 merged as `d8dd88a6d`; both applied on Mason's in-chat `I approve`); effective ordering high-water `20261021155000`; the read before it, 2026-10-22 00:27 UTC (7:27 PM Central, 2026-10-21): 1045 rows, `max(version)` `20261022002748` = `20261021141000_po_cost_columns_admin_only` and before it `20261021224056` = `20261021140000_po_cost_admin_only_and_corrections` (purchase-order cost is admin-only, PR #980 merged as `8399309dc`; both applied on Mason's in-chat `I approve`); rows 964 and 965 (PR #1010) were then still pending; the read before it, 2026-10-21 20:44 UTC (3:44 PM Central): 1043 rows, `max(version)` `20261021204100` = `20261021070000_blend_invoice_approval_binding` (PR #995); before it `20261021200526` = `20261021050000_from_scratch_invoices_charge_lines_only` (Goal 3 "invoices made from scratch take charge lines only", PR #983 merged as `454ae3831`, applied 20:05:26 UTC under the autonomous-landing rule) and `20261021191058` = `20261021030000` (PR #987); earlier reads: 13:52 UTC and 05:13 UTC,
 at 05:13 UTC still 0 `split_invoice_provenance` rows; at 04:01 UTC (11:01 PM Central, 2026-10-20): 1040 rows; the one change since the 02:43 UTC read is that
 Goal 3 blend-ticket pricing `20261020210000` (ledger `20261021040052`, PR #982 merged as `948f238ad`) is now applied; at
 02:43 UTC: 1039 rows / 1032 names; the changes since the 2026-10-19
@@ -799,7 +799,7 @@ leave these open:
 - **The never-posted draft CS-2026-0055** (ORD-2026-0186's May delivery DEL-00074) is left as is; its
   order's other delivery was recorded as billed in Chem Man.
 
-## OPEN 2026-10-22 — Smoke chains rotted by the PO cost lock: `adversarial_money_inventory_closeout` fails live at its bulk-PO step
+## RESOLVED 2026-10-22 (same day) — Smoke chains rotted by the PO cost lock: `adversarial_money_inventory_closeout` fails live at its bulk-PO step
 
 **What it is.** Running `scripts/smoke/smoke-adversarial-money-inventory-closeout.sql` live on
 2026-10-22 (after row 968 applied) failed at file line 376: an admin re-importing the same vendor
@@ -811,11 +811,18 @@ chain rolled back, so nothing was kept. Its posting step (a rep refused for an i
 name) ran before the failure and passed. The later assertions in the chain that expect the rep's line
 costs (`3372` / `333` cents) would fail for the same reason.
 
-**Open question for the fix (business behaviour, not just the test):** should a rep's import and an
-admin's import of the same vendor document count as one document? Today they do not, so an admin
-re-entering a rep's bulk import is refused rather than told it already exists. The fix is either a
-smoke update (rep imports without cost, admin sets cost through `set_purchase_order_item_costs`) or a
-fingerprint that ignores cost for non-admins. Logged with the coordinator 2026-10-22.
+**Fixed in the test, behaviour kept (2026-10-22, evening).** The chain now follows the admin-only cost
+flow: its bulk imports send no cost, so a rep's and an admin's import of one document fingerprint the
+same and the admin gets `already_imported`; the admin then prices the line with
+`set_purchase_order_item_costs`, and the `3372` / `333` cent checks hold. It returned
+`SMOKE_PASS_ROLLBACK` live the same evening and in a disposable copy of the real schema with every
+migration replayed.
+
+The app behaviour stays as it is: when an admin's import of a document a rep already imported carries
+costs, it is refused with `BULK_PO_DOCUMENT_CONTENT_CONFLICT` instead of being told it already exists.
+That is safe (no second purchase order is made). The admin's path is to open the rep's purchase order
+and set its costs. Making the message friendlier would need a fingerprint that ignores cost, which is
+a migration on the import path for a rare case; not planned unless it causes confusion in use.
 
 ## RESOLVED 2026-10-22 (opened 2026-10-09) — the regular invoice editor posts the old saved amounts when Post is pressed with unsaved edits
 

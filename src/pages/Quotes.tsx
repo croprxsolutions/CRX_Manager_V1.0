@@ -314,23 +314,24 @@ export default function Quotes() {
     if (quoteIds.length > 0) {
       // Chunked and paged: a full quote list has more ids than one URL holds and
       // more item rows than the server's row cap.
-      const { data: itemRows, error: itemErr } = await fetchAllRowsForIds(quoteIds, (idChunk, from, to) => supabase
+      // pageWithList: a page with no list reports the names as failed, not as "no products".
+      const { data: itemRows, error: itemErr } = await fetchAllRowsForIds(quoteIds, (idChunk, from, to) => pageWithList(supabase
         .from('quote_items')
         .select('id, quote_id, product_id', { count: 'exact' })
         .in('quote_id', idChunk)
         .order('id')
-        .range(from, to));
+        .range(from, to)));
       if (itemErr) {
         Sentry.captureException(itemErr, { tags: { source: 'fetch', action: 'load_quote_items' } });
         productNamesFailed = true;
       } else if (itemRows && itemRows.length > 0) {
         const productIds = [...new Set(itemRows.map((r) => r.product_id).filter(Boolean) as string[])];
-        const { data: prodRows, error: prodErr } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => supabase
+        const { data: prodRows, error: prodErr } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => pageWithList(supabase
           .from('products')
           .select('id, product_name', { count: 'exact' })
           .in('id', idChunk)
           .order('id')
-          .range(from, to));
+          .range(from, to)));
         if (prodErr) {
           Sentry.captureException(prodErr, { tags: { source: 'fetch', action: 'load_quote_products' } });
           productNamesFailed = true;

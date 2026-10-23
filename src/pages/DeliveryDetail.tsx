@@ -423,6 +423,12 @@ export default function DeliveryDetail() {
               .maybeSingle(),
           ]);
           if (isStale()) return;
+          // A failed order read would show the delivery with no order, quote or thread.
+          if (orderRes.error) {
+            Sentry.captureException(orderRes.error, { extra: { context: 'load_delivery_order', deliveryId: del.id } });
+            failLoad('Failed to load this delivery\'s order');
+            return;
+          }
           // Without its invoices the page would hide them and could offer
           // "Create invoice" for a delivery that is already billed.
           if (invRes.error || !invRes.data) {

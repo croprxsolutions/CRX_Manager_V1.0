@@ -173,7 +173,9 @@ export default function Orders() {
     });
 
     // Fetch invoice totals per order for invoiced %
-    const { data: invoiceData, error: invoiceError } = invoiceResult;
+    // No list is a failed read too: it must say "unavailable", never 0% invoiced (Luna round 2).
+    const { data: invoiceData } = invoiceResult;
+    const invoiceError = invoiceResult.error ?? (invoiceData ? null : { message: 'invoice coverage read returned no list' });
     if (invoiceError) {
       Sentry.captureException(invoiceError);
       toast('error', 'Failed to load invoice coverage. Invoiced percentages are unavailable; refresh to try again.');

@@ -105,6 +105,14 @@ describe('Quotes list', () => {
     expect(await screen.findByText('Q-2026-0042')).toBeInTheDocument();
   });
 
+  it('a product-name read with no list says product search may miss quotes', async () => {
+    H.tables.quotes = [quote];
+    H.failing.set('quote_items', 'nodata');
+    at('/quotes', <Quotes />);
+    expect(await screen.findByText('Q-2026-0042')).toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Product names could not be loaded'));
+  });
+
   it('a failed booking rollover says so instead of "No open bookings."', async () => {
     H.failing.set('get_open_booking_rollover', 'error');
     at('/quotes', <Quotes />);
@@ -169,6 +177,14 @@ describe('Orders list', () => {
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('ORD-77')).not.toBeInTheDocument();
   });
+  it('an invoice read with no list says invoiced is unavailable, not 0%', async () => {
+    H.tables.orders = [order()];
+    H.failing.set('invoices', 'nodata');
+    at('/orders', <Orders />);
+    expect(await screen.findByText('ORD-77')).toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Invoiced percentages are unavailable'));
+  });
+
   it('a failed farm-group name read fails the list instead of dropping the farm-group labels', async () => {
     H.tables.orders = [{ ...order(), customer: { farm_name: 'Big Farm', parent_customer_id: 'parent-1' } }];
     H.failing.set('customers', 'nodata');

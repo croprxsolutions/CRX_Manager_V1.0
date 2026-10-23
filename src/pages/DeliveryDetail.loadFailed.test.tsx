@@ -145,6 +145,7 @@ describe('Delivery Detail load failures', () => {
     ['invoices', 'error'],
     ['invoices', 'nodata'],
     ['delivery_remainders', 'error'],
+    ['orders', 'error'],
   ] as const)('a failed %s read (%s) says the delivery could not be loaded, and Try again shows it', async (table, mode) => {
     failing.set(table, mode);
     renderPage();

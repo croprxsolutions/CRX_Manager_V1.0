@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Trash2, MapPin, ChevronDown, ChevronUp, AlertTriangle, Eye, EyeOff, MapPinned, MousePointerSquareDashed, Plus, X } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
@@ -124,6 +125,8 @@ export default function FieldSetup() {
 
   const [billingSplits, setBillingSplits] = useState<BillingSplit[]>([]);
   const [loading, setLoading] = useState(!isNew);
+  // The field's read failed: say so, never "Field not found" or a form missing its saved values (To-Do 10.5).
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Map / geo state
@@ -258,7 +261,9 @@ export default function FieldSetup() {
       .maybeSingle();
 
     if (error) {
+      Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_field' } });
       toast('error', 'Failed to load field');
+      setLoadError(true);
       setLoading(false);
       return;
     }
@@ -336,11 +341,19 @@ export default function FieldSetup() {
       }
 
       // Fetch billing defaults
-      const { data: defaults } = await supabase
+      const { data: defaults, error: defaultsError } = await supabase
         .from('field_billing_defaults')
         .select('*, customer:customers!field_billing_defaults_customer_id_fkey(farm_name)')
         .eq('field_id', id)
         .order('split_pct', { ascending: false });
+      // Save sends the whole split list, so a form shown without the saved splits would erase them.
+      if (defaultsError) {
+        Sentry.captureException(defaultsError, { tags: { source: 'fetch', action: 'load_field_billing_defaults' } });
+        toast('error', 'Failed to load field');
+        setLoadError(true);
+        setLoading(false);
+        return;
+      }
 
       if (defaults && defaults.length > 0) {
         setBillingOpen(true);
@@ -357,6 +370,7 @@ export default function FieldSetup() {
         );
       }
     }
+    setLoadError(false);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [id, toast]);
@@ -911,6 +925,24 @@ export default function FieldSetup() {
 
   if (loading) {
     return <div className="animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <LoadFailedState
+          title="This field could not be loaded"
+          onRetry={() => {
+            setLoadError(false);
+            setLoading(true);
+            void fetchField();
+          }}
+        />
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={() => navigate('/fields')}>Back to Fields</Button>
+        </div>
+      </div>
+    );
   }
 
   if (!isNew && !field.id) {

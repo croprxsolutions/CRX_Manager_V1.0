@@ -67,6 +67,19 @@ describe('OfficeCockpit "All clear!" banner', () => {
     expect(screen.queryByText('All clear!')).toBeNull();
   });
 
+  it('a tile whose read failed says so instead of its all-clear line (To-Do 10.5)', async () => {
+    failTable = 'jobs';
+    nullRpc = null;
+    render(<OfficeCockpit />);
+    expect(await screen.findByText('Unbilled jobs could not be loaded', {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByText('Upcoming jobs could not be loaded')).toBeTruthy();
+    expect(screen.getByText('Jobs needing dispatch could not be loaded')).toBeTruthy();
+    expect(screen.queryByText('No completed jobs without an invoice.')).toBeNull();
+    expect(screen.queryByText('No scheduled jobs in the next 7 days.')).toBeNull();
+    // Tiles whose reads loaded keep their all-clear line.
+    expect(screen.getByText('No overdue field-app receivables.')).toBeTruthy();
+  });
+
   it.each(['operational_dashboard_summary', 'get_program_completion'])(
     'stays hidden when %s returns no data and no error',
     async (rpcName) => {

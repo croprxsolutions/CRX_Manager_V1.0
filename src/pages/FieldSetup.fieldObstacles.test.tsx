@@ -382,3 +382,23 @@ describe('FieldSetup field obstacles', () => {
     expect(screen.queryByRole('button', { name: 'Delete obstacle West well' })).not.toBeInTheDocument();
   });
 });
+
+describe('FieldSetup load failure (To-Do 10.5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseParams.mockReturnValue({ id: 'field-1' });
+    mockUseAuth.mockReturnValue({ profile: { id: 'user-1', role: 'admin' } });
+    configureSupabase();
+  });
+
+  it('a failed billing-split read shows the load error, not a form whose Save would drop the splits', async () => {
+    const base = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => (
+      table === 'field_billing_defaults' ? listChain(null, { message: 'unavailable' }) : base(table)
+    ));
+    render(<FieldSetup />);
+    expect(await screen.findByText('This field could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Field not found')).not.toBeInTheDocument();
+  });
+});

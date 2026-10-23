@@ -259,6 +259,8 @@ export default function FieldSetup() {
     if (!id) return;
     const seq = ++fieldLoadSeqRef.current;
     const superseded = () => seq !== fieldLoadSeqRef.current;
+    // Moving to another field must not leave the previous field's form usable while this one loads.
+    setLoading(true);
     const { data, error } = await supabase
       .from('fields')
       .select('*, customer:customers!fields_customer_id_fkey(farm_name)')
@@ -378,6 +380,9 @@ export default function FieldSetup() {
           pricing_note: d.pricing_note || '',
         }))
       );
+    } else {
+      // No such field: show "Field not found", never the form of the field open before.
+      setField({});
     }
     setLoadError(false);
     setLoading(false);

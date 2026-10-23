@@ -639,6 +639,40 @@ describe('QuoteBuilder', () => {
     expect(acres()).toEqual(['']);
   });
 
+  it('keeps a saved field whose read failed locked, with its acres and the refresh warning', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    const held = holdFieldReadById();
+    mockFrom.mockImplementation((table: string) => (table === 'fields' ? held.fieldsChain() : buildChain({
+      data: table === 'quotes'
+        ? quote
+        : table === 'quote_sections'
+          ? [{ ...section, field_id: 'field-1' }]
+          : table === 'quote_items'
+            ? [{ ...item, acres: 80 }]
+            : table === 'products'
+              ? [product]
+              : [],
+      error: null,
+    })));
+    renderQuoteBuilder(quote.id);
+    await screen.findByRole('combobox', { name: /^Field for/ });
+    await waitFor(() => expect(held.readsById()).toBeGreaterThan(0));
+    await act(async () => {
+      held.release({ data: null, error: { message: 'fields unavailable' } });
+      await held.read;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The read failed: the field cannot be cleared (its acres cannot be attributed, and clearing it
+    // would drop the refresh-before-saving warning), and nothing changes.
+    expect(screen.getByText("This quote's fields could not be loaded. Refresh the page before saving.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Clear field/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', "This section's field could not be loaded. Refresh the page before changing it.");
+    expect(screen.getByRole('button', { name: /^Clear field/ })).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Acres').map((el) => (el as HTMLInputElement).value)).toEqual(['80']);
+    expect(screen.getByText("This quote's fields could not be loaded. Refresh the page before saving.")).toBeInTheDocument();
+  });
+
   it('keeps a line\'s unit price when a late-loading foreign field is cleared', async () => {
     const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);
     // Tier 3 differs from the tier-1 price the saved line starts at.

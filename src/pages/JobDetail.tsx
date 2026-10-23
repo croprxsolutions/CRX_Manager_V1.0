@@ -16,6 +16,7 @@ import { notifyApplicatorDispatched, notifyApplicatorRescheduled, notifyApplicat
 import { supabase, checkMutationResult, assertRpcResult, assertTransferDataPresent, assertTransferResultForJob, hasRpcCode, isTransferInvoiceResultInvalid, RpcErrorCodes, sanitizeError, transferInvoiceErrorMessage } from '../lib/db';
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
@@ -402,6 +403,8 @@ export default function JobDetail() {
   // (/jobs/new?customer_id=…). Only for a NEW job; existing jobs load their own
   // customer in fetchJob. A stale/bogus id simply renders as no selection.
   const [customerId, setCustomerId] = useState(() => (isNew ? (searchParams.get('customer_id') ?? '') : ''));
+  // Read after an await: lines priced for one customer's tier must not land on another's job.
+  const customerIdRef = useLatestRef(customerId);
   // The job's pricing tier. The customers list holds active customers only, so a job whose customer
   // is not on it (an inactive customer) reads that customer by id. Until the tier is known, products
   // are not priced: tier 1 is never assumed for a customer whose row did not load.
@@ -3366,6 +3369,7 @@ export default function JobDetail() {
     if (!recipeId) return;
     const tier = requirePricingTier();
     if (tier == null) return;
+    const customerIdAtStart = customerId;
     setLoadingRecipe(true);
     try {
       const { data, error } = await supabase
@@ -3374,6 +3378,11 @@ export default function JobDetail() {
         .eq('recipe_id', recipeId)
         .order('sort_order');
       if (error) throw error;
+      if (customerIdRef.current !== customerIdAtStart) {
+        toast('error', "The job's customer changed while the products were loading. Load them again to price them for this customer.");
+        setLoadingRecipe(false);
+        return;
+      }
       const items = (data || []) as BlendRecipeItem[];
       if (items.length === 0) {
         toast('error', 'That recipe has no products.');
@@ -3431,6 +3440,7 @@ export default function JobDetail() {
     }
     const tier = requirePricingTier();
     if (tier == null) return;
+    const customerIdAtStart = customerId;
     setLoadingProgram(true);
     try {
     const acres = sumAcres(fieldRows);
@@ -3456,6 +3466,10 @@ export default function JobDetail() {
         Sentry.captureException(extraErr || extraCostErr, { tags: { source: 'fetch', action: 'load_program_inactive_products' } });
       } else {
         extraProducts.forEach((p) => byId.set(p.id, p));
+      }
+      if (customerIdRef.current !== customerIdAtStart) {
+        toast('error', "The job's customer changed while the products were loading. Load them again to price them for this customer.");
+        return;
       }
     }
 

@@ -1548,28 +1548,34 @@ export default function QuoteBuilder() {
     };
   };
   const clearSectionFieldRef = useLatestRef(clearSectionField);
-  // The saved field ids whose by-id read is still out: until it lands, the acres a field filled in
-  // cannot be told apart, so the section's field cannot be cleared or replaced (Codex, #1049).
-  const fieldIdsLoadingRef = useRef<Set<string>>(new Set());
+  // The saved field ids whose by-id read has finished (loaded, missing or failed). Until it has, the
+  // acres a field filled in cannot be told apart, so the section's field cannot be cleared or
+  // replaced (Codex and Luna, #1049). Unknown ids count as loading, even before the read starts.
+  const fieldIdsSettledRef = useRef<Set<string>>(new Set());
+  // Saved field ids whose read FAILED: their acres still cannot be told apart, and clearing the
+  // field would also drop the refresh-before-saving warning, so they stay locked until a reload.
+  // A field that no longer exists (read fine, row missing) can be replaced (Codex, #1049).
+  const fieldIdsFailedRef = useRef<Set<string>>(new Set());
 
   // Load the saved sections' unresolved fields by id (see unresolvedFieldKey above).
   useEffect(() => {
     if (!unresolvedFieldKey) {
-      fieldIdsLoadingRef.current = new Set();
       setFieldLoadError(null);
       return;
     }
     let cancelled = false;
     const ids = unresolvedFieldKey.split(',');
-    fieldIdsLoadingRef.current = new Set(ids);
+    const settle = () => { ids.forEach((fieldId) => fieldIdsSettledRef.current.add(fieldId)); };
+    const fail = () => { ids.forEach((fieldId) => fieldIdsFailedRef.current.add(fieldId)); };
     supabase
       .from('fields')
       .select(QUOTE_FIELD_SELECT)
       .in('id', ids)
       .then(({ data, error }) => {
         if (cancelled) return;
-        fieldIdsLoadingRef.current = new Set();
+        settle();
         if (error) {
+          fail();
           Sentry.captureException(error, { tags: { source: 'fetch', page: 'quote_builder', action: 'load_section_fields' } });
           setFieldLoadError("This quote's fields could not be loaded. Refresh the page before saving.");
           return;
@@ -1596,6 +1602,12 @@ export default function QuoteBuilder() {
         if (rows.length < ids.length) {
           setFieldLoadError('A field on this quote no longer exists. Choose the section\'s field again before saving.');
         }
+      }, (err: unknown) => {
+        if (cancelled) return;
+        settle();
+        fail();
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', page: 'quote_builder', action: 'load_section_fields' } });
+        setFieldLoadError("This quote's fields could not be loaded. Refresh the page before saving.");
       });
     return () => { cancelled = true; };
   }, [unresolvedFieldKey, customerIdRef, clearSectionFieldRef, toast]);
@@ -1761,7 +1773,11 @@ export default function QuoteBuilder() {
       return false;
     }
     const currentFieldId = sections.find((sec) => sec._key === sectionKey)?.field_id;
-    if (currentFieldId && !fields[currentFieldId] && fieldIdsLoadingRef.current.has(currentFieldId)) {
+    if (currentFieldId && !fields[currentFieldId] && fieldIdsFailedRef.current.has(currentFieldId)) {
+      toast('error', "This section's field could not be loaded. Refresh the page before changing it.");
+      return false;
+    }
+    if (currentFieldId && !fields[currentFieldId] && !fieldIdsSettledRef.current.has(currentFieldId)) {
       toast('error', "This section's field is still loading. Try again in a moment.");
       return false;
     }

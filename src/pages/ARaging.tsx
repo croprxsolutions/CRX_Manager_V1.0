@@ -1018,6 +1018,8 @@ export default function ARaging() {
                   onSelect={(customer) => {
                     setSelectedCustomer(customer?.id ?? '');
                     setSelectedCustomerName(customer?.farm_name ?? '');
+                    // A changed customer or date needs a fresh load, even back to a loaded one (Sol, #1049).
+                    setStmtLoadedKey(null);
                   }}
                   activeOnly={false}
                   placeholder="Select customer..."
@@ -1030,7 +1032,7 @@ export default function ARaging() {
                 <input
                   type="date"
                   value={stmtStart}
-                  onChange={(e) => setStmtStart(e.target.value)}
+                  onChange={(e) => { setStmtStart(e.target.value); setStmtLoadedKey(null); }}
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
               </div>
@@ -1039,7 +1041,7 @@ export default function ARaging() {
                 <input
                   type="date"
                   value={stmtEnd}
-                  onChange={(e) => setStmtEnd(e.target.value)}
+                  onChange={(e) => { setStmtEnd(e.target.value); setStmtLoadedKey(null); }}
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
               </div>

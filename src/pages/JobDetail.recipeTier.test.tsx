@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { mockFrom, mockRpc, mockToast, mockNavigate, mockCapture } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
@@ -202,5 +202,36 @@ describe('JobDetail recipe pricing tier', () => {
 
     await pick(/Free Sample/);
     await waitFor(() => expect(screen.queryByDisplayValue('700')).not.toBeInTheDocument());
+  });
+
+  it('MONEY: drops a recipe load whose customer changed while its products were loading', async () => {
+    serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null });
+    // The recipe's products are held until the customer has been changed.
+    let release!: (result: { data: unknown; error: unknown }) => void;
+    const held = new Promise<{ data: unknown; error: unknown }>((resolve) => { release = resolve; });
+    const served = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'blend_recipe_items') return served(table);
+      const chain: Record<string, unknown> = {};
+      for (const m of CHAIN_METHODS) chain[m] = () => chain;
+      chain.then = (...args: Parameters<Promise<unknown>['then']>) => held.then(...args);
+      return chain;
+    });
+    await loadRecipe();
+
+    // The recipe dialog hides the page from role queries, so the customer box (the one listing the
+    // active customers) is found directly.
+    const customerSelect = [...document.querySelectorAll('select')]
+      .find((el) => [...el.options].some((o) => o.value === 'cust-active')) as HTMLSelectElement;
+    fireEvent.change(customerSelect, { target: { value: 'cust-active' } });
+    await act(async () => {
+      release({ data: [RECIPE_ITEM], error: null });
+      await held;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mockToast).toHaveBeenCalledWith('error', "The job's customer changed while the products were loading. Load them again to price them for this customer.");
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.stringContaining('from recipe'));
+    expect(screen.queryByDisplayValue('700')).not.toBeInTheDocument();
   });
 });

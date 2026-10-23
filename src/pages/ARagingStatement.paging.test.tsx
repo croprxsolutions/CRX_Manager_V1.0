@@ -127,9 +127,14 @@ describe('AR Aging customer statement past the 1,000-row server cap (M57)', () =
 
     // The period line would show the new dates over the old range's rows.
     const [from] = document.querySelectorAll('input[type="date"]');
+    const loadedFrom = (from as HTMLInputElement).value;
     fireEvent.change(from, { target: { value: '2026-01-01' } });
     expect(screen.queryByText('Ending Balance')).not.toBeInTheDocument();
     expect(screen.getByText('Select a customer and date range, then click Load Transactions.')).toBeInTheDocument();
+
+    // Changing back to the loaded range still needs a fresh load: the old rows do not come back.
+    fireEvent.change(from, { target: { value: loadedFrom } });
+    expect(screen.queryByText('Ending Balance')).not.toBeInTheDocument();
   });
 
   it('does not call a statement empty after Back to Aging and reopening the tab', async () => {

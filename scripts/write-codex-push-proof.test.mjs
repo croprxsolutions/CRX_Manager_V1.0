@@ -16,6 +16,11 @@ import {
   carrySourceProofProblem,
   parseRawDiff,
   planCarryForward,
+  codexAppReviewState,
+  coderabbitReviewInProgress,
+  evaluateSolPreflight,
+  parseGithubSlug,
+  SOL_PREFLIGHT_QUIET_MS,
   buildCodexPushProof,
   buildCodexReviewPrompt,
   CODEX_VERDICT_TOKEN,
@@ -1268,6 +1273,90 @@ function collisionPromptSkipsWork(prompt) {
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+}
+
+// ── Sol pre-flight: Sol runs only on a quiet head (Mason, 2026-10-23) ────────
+{
+  const head = "f6adfe82ab17e710da063f2d927a9cb74faac90e";
+  const now = Date.parse("2026-10-23T18:00:00Z");
+  // A summary comment shaped like the App's real one on PR #1069.
+  const summary = (sha, status = "completed", login = "chatgpt-codex-connector[bot]", updated = "2026-10-23T17:45:39Z") => ({
+    user: { login },
+    updated_at: updated,
+    body: "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 " +
+      JSON.stringify({ code_review: { commit_sha: sha, has_any_findings: false, has_unresolved_findings: false, status } }) +
+      " -->\n## Codex Review Summary",
+  });
+  assert.deepEqual(codexAppReviewState([summary(head)]), { sha: head, status: "completed" }, "preflight: reads the App's state");
+  assert.equal(codexAppReviewState([summary(head, "completed", "someone-else")]), null, "preflight: a pasted marker from anyone else is ignored");
+  assert.equal(
+    codexAppReviewState([summary("a".repeat(40), "completed", "chatgpt-codex-connector", "2026-10-23T17:00:00Z"), summary(head)]).sha,
+    head,
+    "preflight: the newest App summary wins",
+  );
+  assert.equal(codexAppReviewState([{ user: { login: "chatgpt-codex-connector" }, body: "<!-- codex-review-state:v1 {not json} -->" }]), null, "preflight: an unparseable state is no state");
+
+  const crStatus = (state, login = "coderabbitai") => ({ context: "CodeRabbit", state, creator: { login } });
+  assert.equal(coderabbitReviewInProgress([crStatus("pending")]), true, "preflight: CodeRabbit pending = reviewing");
+  assert.equal(coderabbitReviewInProgress([crStatus("success")]), false, "preflight: a finished review is not in progress");
+  assert.equal(coderabbitReviewInProgress([crStatus("pending", "masonwells1")]), false, "preflight: only CodeRabbit's own status counts");
+
+  assert.deepEqual(parseGithubSlug("https://github.com/masonwells1/CRX_Manager_V1.0.git"), { owner: "masonwells1", name: "CRX_Manager_V1.0" });
+  assert.deepEqual(parseGithubSlug("git@github.com:masonwells1/CRX_Manager_V1.0"), { owner: "masonwells1", name: "CRX_Manager_V1.0" });
+  assert.equal(parseGithubSlug("https://example.com/x/y"), null, "preflight: a non-GitHub remote is unreadable");
+
+  const quiet = {
+    headSha: head,
+    pr: { number: 1069, draft: false },
+    codexState: { sha: head, status: "completed" },
+    codexThreads: { status: "stale", unresolvedAtHead: 0 },
+    coderabbitOpen: 0,
+    coderabbitBusy: false,
+    coderabbitRequirement: { status: "not-required" },
+    waiverFound: false,
+    headCommittedMs: now - 60_000,
+    nowMs: now,
+  };
+  const check = (changes) => evaluateSolPreflight({ ...quiet, ...changes });
+  assert.deepEqual(check({}), { ok: true, problems: [], notes: [] }, "preflight: a quiet head runs Sol");
+  assert.match(check({ pr: null }).problems.join(" "), /no open pull request/, "preflight: no PR refuses");
+  assert.match(check({ pr: { number: 1, draft: true } }).problems.join(" "), /still a draft/, "preflight: a draft refuses");
+  assert.match(check({ codexState: null }).problems.join(" "), /has not finished reviewing f6adfe82a/, "preflight: no App review of a new head refuses");
+  assert.match(check({ codexState: { sha: "b".repeat(40), status: "completed" } }).problems.join(" "), /has not finished/, "preflight: an App review of an OLDER commit does not count");
+  assert.match(check({ codexState: { sha: head, status: "in_progress" } }).problems.join(" "), /has not finished/, "preflight: a running App review does not count");
+  const late = check({ codexState: null, headCommittedMs: now - SOL_PREFLIGHT_QUIET_MS });
+  assert.equal(late.ok, true, "preflight: 15 quiet minutes without an App review lets Sol run");
+  assert.match(late.notes.join(" "), /15 minutes have passed/, "preflight: and says so");
+  assert.equal(check({ codexState: null, headCommittedMs: now - SOL_PREFLIGHT_QUIET_MS + 1000 }).ok, false, "preflight: 14m59s is not quiet");
+  assert.equal(check({ codexState: null, headCommittedMs: Number.NaN }).ok, false, "preflight: an unreadable commit time never counts as quiet");
+  assert.equal(check({ codexState: null, headCommittedMs: now + 3_600_000 }).ok, false, "preflight: a future commit time never counts as quiet");
+  assert.match(check({ codexThreads: { status: "findings-at-head", unresolvedAtHead: 2 } }).problems.join(" "), /2 unanswered comment/, "preflight: App findings on the head refuse");
+  assert.match(check({ codexThreads: null }).problems.join(" "), /could not read #1069's Codex/, "preflight: unreadable App threads refuse");
+  assert.equal(check({ codexThreads: { status: "incomplete" } }).ok, false, "preflight: a partial thread read refuses");
+  assert.match(check({ coderabbitOpen: 1 }).problems.join(" "), /CodeRabbit has 1 unanswered/, "preflight: open CodeRabbit threads refuse");
+  assert.equal(check({ coderabbitOpen: null }).ok, false, "preflight: unreadable CodeRabbit threads refuse");
+  assert.match(check({ coderabbitBusy: true }).problems.join(" "), /reviewing this commit right now/, "preflight: CodeRabbit mid-review refuses");
+  assert.equal(check({ coderabbitBusy: null }).ok, false, "preflight: unreadable CodeRabbit status refuses");
+  const missing = { status: "missing", why: "it changes money files" };
+  assert.match(check({ coderabbitRequirement: missing }).problems.join(" "), /needs a completed CodeRabbit review.*money files/, "preflight: a money PR without its CodeRabbit review refuses");
+  const waived = check({ coderabbitRequirement: missing, waiverFound: true });
+  assert.equal(waived.ok, true, "preflight: Mason's skip waiver lets a money PR run Sol");
+  assert.match(waived.notes.join(" "), /waived/, "preflight: and says the merging session needs it");
+  assert.equal(check({ coderabbitRequirement: { status: "reviewed" } }).ok, true, "preflight: a completed CodeRabbit review passes");
+  assert.equal(check({ coderabbitRequirement: { status: "unreadable" } }).ok, false, "preflight: an unreadable requirement refuses");
+  assert.equal(check({ coderabbitRequirement: null }).ok, false, "preflight: a failed requirement read refuses");
+
+  // Wired in: a real run checks the pre-flight on the captured head BEFORE any
+  // review workspace or Codex call, and a refusal leaves an existing proof alone.
+  const wrapperSource = readFileSync(fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
+  const runBody = wrapperSource.slice(wrapperSource.indexOf("export function run("));
+  const preflightAt = runBody.indexOf("const preflight = solPreflight(root, headBefore);");
+  assert.ok(preflightAt > 0, "preflight: run() checks the head it will review");
+  assert.ok(preflightAt < runBody.indexOf("reviewWorkspace = createSanitizedReviewWorkspace("), "preflight: before the review workspace or Codex run");
+  assert.ok(runBody.indexOf("if (options.carryForward) return runCarryForward(root, options);") < preflightAt, "preflight: carry-forward (no full review) skips it");
+  const refusal = runBody.slice(preflightAt, runBody.indexOf("let reviewWorkspace;"));
+  assert.equal(refusal.includes("clearCodexPushProof"), false, "preflight: a refusal does not revoke an existing proof");
+  assert.match(refusal, /return 1;/, "preflight: a refusal exits non-zero");
 }
 
 console.log("OK - write-codex-push-proof helpers passed.");

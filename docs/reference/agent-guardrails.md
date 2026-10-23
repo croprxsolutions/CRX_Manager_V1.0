@@ -93,6 +93,16 @@
 > landing gate honours it too but only while it is under 30 minutes old (`APPLY_SOL_PROOF_MAX_AGE_MS`); `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows
 > one. The minter is the same protected wrapper, so `review-proof-guard.mjs` still blocks hand-written proofs.
 >
+> **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
+> refuses with no Codex call otherwise: an open non-draft PR whose head is this commit; the Codex GitHub App's summary
+> comment (`codex-review-state:v1`, written by the App's own login) shows a completed review of this commit, or the
+> commit is at least 15 minutes old (`SOL_PREFLIGHT_QUIET_MS`); no unanswered Codex App thread on this commit
+> (`evaluateCodexBotReview`) and no unanswered CodeRabbit thread (`coderabbitThreadCount`); no `CodeRabbit` PENDING
+> status set by CodeRabbit on this commit; and a money or Mason-named PR's completed CodeRabbit review
+> (`readCodeRabbitRequirement`) or a live `skip coderabbit` waiver for that PR from any session. Every unreadable answer
+> refuses. It is a cost control: the merge gates check the same things again, unchanged, and a refusal leaves any
+> existing proof in place. `--carry-forward` does not run it.
+>
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
 > differ.** (1) `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` merge route now deny any merge into
 > `main` unless (until 2026-10-19 only: CodeRabbit's latest verdict was APPROVED on the exact `headRefOid`,

@@ -373,7 +373,8 @@ each printed form next to its CRX screen, and add any field the form is missing.
      server's date, not the day it was received (see the known gap in procedure 1, Step 4). The real
      received date stays on the paper form. The bookkeeper decides how that affects deposit matching
      and QuickBooks (question below).
-   - **Deliveries:** the assigned driver completes each delivery from their own delivery screen. They
+   - **Deliveries:** the assigned driver completes each delivery from their own delivery screen (or
+     an admin presses **Take Delivery** to become its driver, then completes it). They
      tick **Customer signed a paper ticket (no signal at the site)**, add the photo of the signed
      ticket, type the signer's printed name from the ticket in the **Signed By** box, and enter
      **Delivered on (date on the ticket)**. The app never captures a signature after the fact.
@@ -505,9 +506,11 @@ the one record until CRX is back.
      Delivery** only works from an existing order, using that order's products). If there's no order
      at all (for example, one taken by phone during the outage), the order has to be entered and
      approved through the normal order steps first, then the delivery is created from it. Write the
-     new CRX delivery number on the outage ticket list. Then the assigned driver completes each
-     delivery from their own delivery screen. They tick **Customer signed a paper ticket (no signal
-     at the site)**, add the ticket photo, type the signer's name in **Signed By**, and enter
+     new CRX delivery number on the outage ticket list. Then each delivery is completed by its
+     assigned driver from their own delivery screen. After a restore, while CRX is closed to staff,
+     the person running the recovery does it instead: an admin or sales rep can press **Take
+     Delivery** on the delivery's page to become its driver, then complete it. They tick **Customer
+     signed a paper ticket (no signal at the site)**, add the ticket photo, type the signer's name in **Signed By**, and enter
      **Delivered on (date on the ticket)**.
    - **Payments:** enter each log line in **Record Payments**, with the check number and the log
      line number together in the **Reference #** box (for example `4471 OUT-012`). That box is what

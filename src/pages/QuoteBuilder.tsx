@@ -3338,6 +3338,9 @@ export default function QuoteBuilder() {
 
     // Duplicate order warning: check for recent orders for same customer
     if (customerId) {
+      // Lock the form (and the confirm dialog's Cancel) from the click: this handler converts
+      // from the quote as it is now, so nothing may change or be cancelled during the lookup.
+      setConverting(true);
       try {
         const sevenDaysAgo = localDatePlusDays(-7);
         const { data: recentOrders } = await supabase
@@ -3354,6 +3357,7 @@ export default function QuoteBuilder() {
           const daysAgo = Math.ceil((Date.now() - new Date(recent.order_date + 'T00:00:00').getTime()) / 86400000);
           setDuplicateOrderMsg(`This customer already has order ${recent.order_number} from ${daysAgo} day(s) ago. Convert this quote to another order?`);
           setDuplicateOrderConfirmOpen(true);
+          setConverting(false);
           return;
         }
       } catch { /* ignore — don't block conversion if check fails */ }
@@ -5051,7 +5055,7 @@ export default function QuoteBuilder() {
 
       <Modal
         open={confirmConvertOpen}
-        onClose={() => setConfirmConvertOpen(false)}
+        onClose={() => { if (!converting) setConfirmConvertOpen(false); }}
         title="Convert to"
         accent="Order"
       >
@@ -5067,6 +5071,7 @@ export default function QuoteBuilder() {
               variant="secondary"
               showChevron={false}
               onClick={() => setConfirmConvertOpen(false)}
+              disabled={converting}
             >
               Cancel
             </Button>

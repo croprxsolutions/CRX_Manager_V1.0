@@ -69,6 +69,12 @@ write a cost, profit or margin column directly (the server-only `service_role` k
 accepted by Mason (2026-10-21): commission amount and rate together imply profit, and below-cost refusals let a
 rep narrow a cost by trial and error. Includes the older sub-items "reps can recover application-service cost" and "retire the old
 `admin_set_application_service_cost` function" (no caller left in `src/`; no DROP migration exists).
+Follow-up (Mason, 2026-10-25, kept out of the column lock): column grants cannot limit owner-rights (SECURITY
+DEFINER) functions. The 45 signed-in-executable ones whose body names a cost field were read live on 2026-10-25,
+but 22 more that reach cost only through inner helper functions (`create_quote_version`, `save_invoice`,
+`price_order`, `save_job` and others) are not yet traced, and nothing re-checks function bodies after a later
+change. Owed: audit those 22 call chains, and add a standing DB invariant sweep that flags any signed-in-executable
+function returning cost, profit or margin to a non-admin.
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**

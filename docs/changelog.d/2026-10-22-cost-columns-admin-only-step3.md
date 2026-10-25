@@ -54,3 +54,9 @@ of a generated column; the `invoices_postable` view not readable by signed-in us
 ones); and any signed-in-executable SECURITY DEFINER function that reads cost but is not one of the 45 reviewed
 live on 2026-10-25, so the review above is re-checked at apply time rather than trusted. The new-column test
 guard also refuses a new column named like cost, profit or margin that is not listed as a cost field.
+
+**Deferred (Mason, 2026-10-25).** Luna round 5 asked the preflight to pin the bodies of the 45 reviewed
+functions and to follow their calls into inner helper functions. Both concern owner-rights functions, which
+column grants never limit; this lock neither widens nor narrows them, so Mason chose to ship the lock as is and
+track the function audit separately (`KNOWN_ISSUES.md` KI-02 follow-up: trace the 22 pass-through call chains and
+add a standing invariant sweep).

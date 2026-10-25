@@ -29,7 +29,7 @@
  *   7. Privilege diff: every (role, table, column, privilege) is unchanged except the cost columns
  *      (and the generated jobs.remaining_acres write grant); table-level DELETE/TRUNCATE/TRIGGER
  *      untouched (PUBLIC included). Preflight drift refuses: a new column on each table, either
- *      admin function missing, re-bodied, made INVOKER or re-granted, a role privilege lost or gained,
+ *      admin function missing, re-bodied, made INVOKER, re-owned, given another search_path or re-granted, a role privilege lost or gained,
  *      a whole-row function executable by an API role, a cost or whole-row view; so does a run outside
  *      one transaction, before any change. A second apply succeeds and changes nothing.
  *   8. MUTATIONS: the candidate with the products REVOKE removed, with a non-cost column dropped
@@ -613,6 +613,7 @@ function preflightRefusesDrift() {
     ['ALTER VIEW public.invoices_postable RESET (security_invoker);', /COST_LOCK_PREFLIGHT: 20261022090000 \(invoices_postable\) is not applied, or the view drifted/],
     ['DROP FUNCTION public.invoice_postable_version(public.invoices_postable);', /COST_LOCK_PREFLIGHT: invoice_postable_version\(invoices_postable\) is missing or drifted/],
     ['GRANT EXECUTE ON FUNCTION public.invoice_postable_version(public.invoices_postable) TO anon;', /COST_LOCK_PREFLIGHT: invoice_postable_version\(invoices_postable\) is missing or drifted/],
+    ['ALTER FUNCTION public.invoice_postable_version(public.invoices_postable) SET search_path = public, pg_catalog;', /COST_LOCK_PREFLIGHT: invoice_postable_version\(invoices_postable\) is missing or drifted/],
     [`DO $b$ BEGIN EXECUTE format('CREATE OR REPLACE FUNCTION public.invoice_post_version(p_invoice public.invoices) RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS %L', (SELECT prosrc FROM pg_proc WHERE oid = 'public.invoice_post_version(public.invoices)'::regprocedure) || E'\\n-- prover: any body edit\\n'); END $b$;`,
       /COST_LOCK_PREFLIGHT: invoice_post_version\(invoices\) drifted from 20261022022000/],
     ['ALTER TABLE public.products DROP COLUMN tier3_gross_margin;', /COST_LOCK_PREFLIGHT: products columns are not the ones/],
@@ -640,6 +641,8 @@ function preflightRefusesDrift() {
     ['ALTER FUNCTION public.get_quote_versions(uuid) SECURITY INVOKER;', /COST_LOCK_PREFLIGHT: not the reviewed admin-checked SECURITY DEFINER bodies and grants: public\.get_quote_versions\(uuid\)/],
     ['GRANT EXECUTE ON FUNCTION public.get_admin_cost_fields(text, uuid[]) TO anon;', /COST_LOCK_PREFLIGHT: not the reviewed admin-checked SECURITY DEFINER bodies and grants: public\.get_admin_cost_fields\(text,uuid\[\]\)/],
     ['REVOKE EXECUTE ON FUNCTION public.get_quote_versions(uuid) FROM authenticated;', /COST_LOCK_PREFLIGHT: not the reviewed admin-checked SECURITY DEFINER bodies and grants: public\.get_quote_versions\(uuid\)/],
+    ['ALTER FUNCTION public.get_admin_cost_fields(text, uuid[]) RESET search_path;', /COST_LOCK_PREFLIGHT: not the reviewed admin-checked SECURITY DEFINER bodies and grants: public\.get_admin_cost_fields\(text,uuid\[\]\)/],
+    ['CREATE ROLE zz_prover_owner; GRANT zz_prover_owner TO postgres; GRANT CREATE ON SCHEMA public TO zz_prover_owner; ALTER FUNCTION public.get_quote_versions(uuid) OWNER TO zz_prover_owner;', /COST_LOCK_PREFLIGHT: not the reviewed admin-checked SECURITY DEFINER bodies and grants: public\.get_quote_versions\(uuid\)/],
     [`DO $b$ BEGIN EXECUTE format('CREATE OR REPLACE FUNCTION public.get_admin_cost_fields(p_table text, p_ids uuid[]) RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS %L', (SELECT prosrc FROM pg_proc WHERE oid = 'public.get_admin_cost_fields(text,uuid[])'::regprocedure) || E'\\n-- prover: any body edit\\n'); END $b$;`,
       /COST_LOCK_PREFLIGHT: not the reviewed admin-checked SECURITY DEFINER bodies and grants: public\.get_admin_cost_fields\(text,uuid\[\]\)/],
   ];
@@ -657,7 +660,7 @@ function preflightRefusesDrift() {
   const privPost = privileges();
   assert.deepEqual([...privPost.tbl].filter(([k, v]) => privPre.tbl.get(k) !== v), [], 'the autocommit refusal changed a table privilege');
   assert.deepEqual([...privPost.col].filter(([k, v]) => privPre.col.get(k) !== v), [], 'the autocommit refusal changed a column privilege');
-  console.log(`[prover] PREFLIGHT: ${cases.length} drifted states each abort the candidate (a new column on each of the ${LOCKED_TABLES.length} tables, a dropped column, either admin function missing, a lost, gained or narrowed role privilege, a whole-row function for authenticated or anon, a cost or whole-row view, an admin reader made INVOKER / opened to anon / closed to authenticated / re-bodied); under autocommit it refuses before any change`);
+  console.log(`[prover] PREFLIGHT: ${cases.length} drifted states each abort the candidate (a new column on each of the ${LOCKED_TABLES.length} tables, a dropped column, either admin function missing, a lost, gained or narrowed role privilege, a whole-row function for authenticated or anon, a cost or whole-row view, an admin reader made INVOKER / opened to anon / closed to authenticated / re-bodied / search_path or owner drifted); under autocommit it refuses before any change`);
 }
 
 // MUTATIONS: copies of the candidate with one grant edit each must fail the candidate's own verify block.

@@ -207,7 +207,10 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
     expect(prodArr.length).toBe(1);
     // Cost is admin-only and not a readable column (20261022101000): read it through the admin function.
     const costs = await supabaseRpc(page, 'get_admin_cost_fields', { p_table: 'products', p_ids: [S.poProductId] }) as Record<string, Record<string, unknown>>;
-    const prod = { ...(prodArr[0] as Record<string, unknown>), current_cost: costs?.[S.poProductId as string]?.current_cost };
+    const adminCost = costs?.[S.poProductId as string]?.current_cost;
+    // A missing cost must fail here, not later as an unrelated PO failure or a $0 line.
+    expect(adminCost === null || adminCost === undefined || adminCost === '', 'no admin cost for the PO product').toBe(false);
+    const prod: Record<string, unknown> = { ...(prodArr[0] as Record<string, unknown>), current_cost: adminCost };
 
     // Get auto-generated PO number and user ID (both required NOT NULL)
     const userId = await getUserId(page);

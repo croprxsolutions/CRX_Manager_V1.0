@@ -14,6 +14,7 @@ import { test, expect, Page } from '@playwright/test';
 import { login, TEST_USER } from './utils/auth';
 import { waitForPageStable } from './utils/math-helpers';
 import { supabaseRest, supabaseRpc, asArray } from './golive/utils/supabase-helpers';
+import { parseDollarsToCents } from '../../src/lib/parseCents';
 
 // ── Node-level Supabase REST (bypasses browser context) ─────────
 const SUPA_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
@@ -319,12 +320,14 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
         // Cost is admin-only and not a readable column (20261022101000): read it through the admin function.
         const costs = await supabaseRpc(page, 'get_admin_cost_fields', { p_table: 'products', p_ids: [found.id] }) as Record<string, Record<string, unknown>>;
         const cost = costs?.[found.id as string]?.current_cost;
-        // A missing cost must fail the fixture, never become a free product.
-        expect(typeof cost === 'number' || (typeof cost === 'string' && cost !== ''), `no admin cost for ${info.name}`).toBe(true);
+        // A missing or non-whole-cent cost must fail the fixture, never become a free or rounded product.
+        const costCents = (typeof cost === 'number' || typeof cost === 'string') && String(cost).trim() !== ''
+          ? parseDollarsToCents(String(cost)) : null;
+        expect(costCents, `no whole-cent admin cost for ${info.name}`).not.toBeNull();
         (S.products as Array<{ id: string; name: string; costCents: number; tier1Price: number }>).push({
           id: found.id as string,
           name: found.product_name as string,
-          costCents: Math.round(Number(cost) * 100),
+          costCents: costCents as number,
           tier1Price: (found.tier1_price as number) || 0,
         });
       }

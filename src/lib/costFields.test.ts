@@ -208,7 +208,8 @@ function ungrantedNewColumns(sql: string): string[] {
   const text = sql.replace(/--[^\n]*/g, '');
   const missing: string[] = [];
   const tables = COLUMN_CARVED.join('|');
-  const alter = new RegExp(`ALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:IF\\s+EXISTS\\s+)?(?:public\\.)?"?(${tables})"?\\b([^;]*);`, 'gi');
+  // Postgres writes ALTER TABLE [IF EXISTS] [ONLY]; accept either order so neither spelling slips past.
+  const alter = new RegExp(`ALTER\\s+TABLE\\s+(?:(?:ONLY|IF\\s+EXISTS)\\s+)*(?:public\\.)?"?(${tables})"?\\b([^;]*);`, 'gi');
   for (const m of text.matchAll(alter)) {
     const table = m[1].toLowerCase();
     for (const add of m[2].matchAll(/ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?([a-z_][a-z0-9_]*)"?/gi)) {
@@ -241,6 +242,7 @@ describe('new columns on the column-carved cost tables ship with their grants', 
     const ALL_READS = (t: string, c: string) => [`${t}.${c}: authenticated SELECT`, `${t}.${c}: authenticated REFERENCES`, `${t}.${c}: anon SELECT`];
     expect(ungrantedNewColumns('ALTER TABLE public.invoices ADD COLUMN zz_new text;')).toEqual(ALL_READS('invoices', 'zz_new'));
     expect(ungrantedNewColumns('ALTER TABLE ONLY quotes ADD COLUMN IF NOT EXISTS zz_a int, ADD zz_b int;')).toEqual([...ALL_READS('quotes', 'zz_a'), ...ALL_READS('quotes', 'zz_b')]);
+    expect(ungrantedNewColumns('ALTER TABLE IF EXISTS ONLY public.quotes ADD COLUMN zz_c int;')).toEqual(ALL_READS('quotes', 'zz_c'));
     // quote_versions: authenticated SELECT only; quote_items: no anon.
     expect(ungrantedNewColumns('ALTER TABLE public.quote_versions ADD COLUMN zz_new text;')).toEqual(['quote_versions.zz_new: authenticated SELECT']);
     expect(ungrantedNewColumns('ALTER TABLE public.quote_items ADD COLUMN zz_new text;')).toEqual(['quote_items.zz_new: authenticated SELECT', 'quote_items.zz_new: authenticated REFERENCES']);

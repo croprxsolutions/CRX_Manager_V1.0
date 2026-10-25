@@ -103,10 +103,15 @@ BEGIN
                              AND attname <> 'total_cost_cents') THEN
     RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: 20261022090000 (invoices_postable) is not applied, or the view drifted';
   END IF;
-  -- Both functions carry the same reviewed body (#1018's rule over _invoice_post_version(id)).
+  -- Both functions carry the same reviewed body (#1018's rule over _invoice_post_version(id)); the view's
+  -- is SECURITY DEFINER owned by postgres with search_path = public, pg_temp (live 2026-10-23).
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.invoice_postable_version(public.invoices_postable)')), chr(13), ''))
        IS DISTINCT FROM 'f353b5c3078efb42544ea7b76c7b16e6'
      OR NOT (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public.invoice_postable_version(public.invoices_postable)'))
+     OR (SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE oid = to_regprocedure('public.invoice_postable_version(public.invoices_postable)'))
+          IS DISTINCT FROM 'postgres'
+     OR (SELECT proconfig FROM pg_proc WHERE oid = to_regprocedure('public.invoice_postable_version(public.invoices_postable)'))
+          IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
      OR NOT has_function_privilege('authenticated', 'public.invoice_postable_version(public.invoices_postable)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.invoice_postable_version(public.invoices_postable)', 'EXECUTE') THEN
     RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: invoice_postable_version(invoices_postable) is missing or drifted';
@@ -343,7 +348,8 @@ BEGIN
     RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: commissions columns are not the ones this grant list covers (re-read them): %', v_cols;
   END IF;
   -- The two admin-checked readers this lock leaves as the only way to cost: the reviewed 20261019230000
-  -- bodies (live md5 2026-10-22), SECURITY DEFINER, executable by authenticated and not by anon.
+  -- bodies (live md5 2026-10-22), SECURITY DEFINER owned by postgres with search_path = public, pg_temp
+  -- (live 2026-10-23), executable by authenticated and not by anon.
   IF to_regprocedure('public.get_admin_cost_fields(text,uuid[])') IS NULL THEN
     RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: get_admin_cost_fields(text, uuid[]) is missing; admins would lose cost';
   END IF;
@@ -356,6 +362,8 @@ BEGIN
     JOIN pg_proc p ON p.oid = to_regprocedure(f.sig)
    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM f.body_md5
       OR NOT p.prosecdef
+      OR pg_get_userbyid(p.proowner) IS DISTINCT FROM 'postgres'
+      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
       OR NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
       OR has_function_privilege('anon', p.oid, 'EXECUTE');
   IF v_bad IS NOT NULL THEN

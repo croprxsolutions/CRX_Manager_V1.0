@@ -87,12 +87,12 @@ BEGIN
   SELECT id INTO v_any FROM public.invoices WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1;
   IF v_any IS NOT NULL THEN
     IF to_regclass('public.invoices_postable') IS NOT NULL THEN
-      EXECUTE 'SELECT public.invoice_post_version(i) FROM public.invoices_postable i WHERE i.id = $1' INTO v_version USING v_any;
+      EXECUTE 'SELECT public.invoice_postable_version(i) FROM public.invoices_postable i WHERE i.id = $1' INTO v_version USING v_any;
     ELSE
       EXECUTE 'SELECT public.invoice_post_version(i) FROM public.invoices i WHERE i.id = $1' INTO v_version USING v_any;
     END IF;
     IF v_version IS NULL
-       OR v_version !~ '^v1:[0-9a-f]{64}
+       OR v_version !~ '^v1:[0-9a-f]{64}$'
        OR v_version IS DISTINCT FROM public._invoice_post_version(v_any) THEN
       RAISE EXCEPTION 'SMOKE_FAIL: invoice_post_version returned % for an admin', v_version;
     END IF;

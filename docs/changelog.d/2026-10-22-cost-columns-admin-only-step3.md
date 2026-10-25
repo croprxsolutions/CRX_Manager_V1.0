@@ -31,3 +31,9 @@ throwaway database, replays every migration, and checks the lock role by role be
 Screens read the version from `invoices_postable` (migration 20261022090000) since that change, and
 the lock refuses to run unless that view and its function are in place. The proof replays both first,
 then shows an admin and a rep still get the version from the view after the lock.
+
+**Review fixes (2026-10-25).** The lock also refuses to run unless the three functions it leaves as the
+only way to cost or the invoice version (`get_admin_cost_fields`, `get_quote_versions`,
+`invoice_postable_version`) are still owned by `postgres` and still pinned to `search_path = public, pg_temp`,
+as live has them (read 2026-10-23); the proof shows each drift is refused. The rollback smoke check for
+posting versions now reads the view's function, and two test fixtures read admin cost in exact cents.

@@ -3397,6 +3397,17 @@ try {
     "backslash and case spelling": nativePatch("*** Update File: .CLAUDE\\HOOKS\\CODEX-PUSH-LIB.MJS", "@@", "-a", "+b"),
     "hook registration": nativePatch("*** Update File: .codex/hooks.json", "@@", "-a", "+b"),
     "claude settings": nativePatch("*** Update File: .claude/settings.json", "@@", "-a", "+b"),
+    // The files beyond the short protected list that still decide whether the commit/push/CI/review
+    // gates run (Sol, PR #1083): the older patch shapes were denied for these, so this route must be.
+    "migration apply guard": nativePatch("*** Update File: .claude/hooks/migration-apply-guard.mjs", "@@", "-a", "+b"),
+    "husky hook": nativePatch("*** Update File: .husky/pre-push", "@@", "-a", "+b"),
+    "ci workflow": nativePatch("*** Update File: .github/workflows/ci.yml", "@@", "-a", "+b"),
+    "coderabbit config": nativePatch("*** Update File: .coderabbit.yaml", "@@", "-a", "+b"),
+    "validator script": nativePatch("*** Update File: scripts/check-doc-drift.mjs", "@@", "-a", "+b"),
+    "proof minter script": nativePatch("*** Update File: scripts/write-codex-push-proof.mjs", "@@", "-a", "+b"),
+    "codex config": nativePatch("*** Update File: .codex/config.toml", "@@", "-a", "+b"),
+    "move onto a gate hook": nativePatch("*** Update File: docs/a.md", "*** Move to: .claude/hooks/pr-merge-guard.mjs", "@@", "-a", "+b"),
+    "delete a gate hook": nativePatch("*** Delete File: .claude/hooks/pr-merge-guard.mjs"),
     "second file protected": nativePatch("*** Add File: src/ok.ts", "+ok", "*** Update File: .codex/hooks/codex-hook-adapter.mjs", "@@", "-a", "+b"),
     "claude review proof": nativePatch("*** Add File: .claude/session-state/claude-review-push.json", "+{}"),
     "codex review proof": nativePatch(`*** Add File: .claude/session-state/codex-review-${"a".repeat(40)}.json`, "+{}"),
@@ -3439,12 +3450,16 @@ try {
     mkdirSync(path.join(linkRoot, "docs"), { recursive: true });
     writeFileSync(path.join(linkRoot, ".codex", "hooks", "production-action-guard.mjs"), "// guard\n");
     writeFileSync(path.join(linkRoot, "src", "plain.ts"), "export const a = 1;\n");
+    mkdirSync(path.join(linkRoot, ".husky"), { recursive: true });
+    writeFileSync(path.join(linkRoot, ".husky", "pre-push"), "#!/bin/sh\n");
+    symlinkSync(path.join(linkRoot, ".husky"), path.join(linkRoot, "src", "linked-husky"), "junction");
     symlinkSync(path.join(linkRoot, ".codex", "hooks"), path.join(linkRoot, "src", "linked-dir"), "junction");
     symlinkSync(path.join(linkRoot, ".claude", "session-state"), path.join(linkRoot, "docs", "linked-state"), "junction");
     symlinkSync(path.join(linkRoot, ".codex", "hooks", "not-created-yet"), path.join(linkRoot, "src", "dangling-dir"), "junction");
     linkSync(path.join(linkRoot, ".codex", "hooks", "production-action-guard.mjs"), path.join(linkRoot, "src", "guard-hardlink.mjs"));
     const linkCases = [
       ["file inside a linked directory", "src/linked-dir/production-action-guard.mjs", true],
+      ["a file reached through a link to .husky", "src/linked-husky/pre-push", true],
       ["new file inside a linked proof directory", "docs/linked-state/claude-review-push.json", true],
       ["a junction whose target does not resolve", "src/dangling-dir/new-file.ts", true],
       ["a dot-dot after a linked directory", "src/linked-dir/../hooks/production-action-guard.mjs", true],

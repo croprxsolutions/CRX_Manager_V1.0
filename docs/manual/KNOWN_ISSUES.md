@@ -166,6 +166,10 @@ the server report `get_profitability_report` (cost at time of sale) has no calle
   can still create such lines. MED.
 - A zero-width character pasted into a rate unit makes a blend ticket un-invoiceable (fails closed; staff must
   retype). `normalize_rate_unit` does not strip invisible characters. LOW-MED.
+- A job chemical line's per-unit COST is still rounded to whole cents when it is converted from the product's
+  stock unit to the rate's unit (`reconcileChemAutofillUnits`, and `save_job`'s cost fill in `20261019230000`):
+  $5/GAL is 3.90625¢/oz, saved as 4¢, so 400 oz shows $16.00 of cost against $15.625 and the job's margin is off
+  by that much. The PRICE is no longer rounded (2026-10-23: left blank unless exact). Cost is not billed. LOW-MED.
 - Split-acre shares are rounded to 2 decimals, so totals can differ from the field's acres by cents. UNVERIFIED
   (current body of `derive_customer_shares_from_fields` not located).
 - Quote Builder's line math (`recalcItem`, `catalogPricePerAcre` in `src/lib/quoteCalc.ts`) multiplies and rounds
@@ -448,7 +452,7 @@ Mason's REAL-DATA-OK.
 Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals which open PO line is cheaper
 (MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
 posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in
-`20261022090000` (written 2026-10-22, not applied):** the version is a computed field, `invoice_postable_version`, on
+`20261022090000` (PR #1057, applied live 2026-10-23):** the version is a computed field, `invoice_postable_version`, on
 the `invoices_postable` view (every column but `total_cost_cents`), the seven screens read it there, and the cost lock then drops the
 `invoices` overload.
 

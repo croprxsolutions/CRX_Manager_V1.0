@@ -12,11 +12,22 @@ final `DO` block that always ends in `RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK…'` 
 ROLLBACK or CALL that could skip or split it, no EXCEPTION section and no label on the outermost block,
 and only a leading `BEGIN` or temp-object setup before it). The outer-handler rule came from the
 automated security review: a raise that sits only in the outer handler runs only when something else
-failed. Such a batch may call RPCs, write fixtures and touch the audit log, since
-none of it persists; TRUNCATE and `setval`/`nextval` stay refused, and dblink, pg_background or http
-calls disqualify it. String literals, comments and nested function bodies are walked in one pass, so
-they cannot fake or hide any of this. `smoke-fuel-surcharge.sql` gained a leading `BEGIN;` so its two
-DO blocks share one transaction. Real live writes outside such a batch are unchanged.
+failed. Such a batch may call RPCs, write fixtures and touch the audit log, since none of it persists.
+TRUNCATE and direct `setval`/`nextval` stay refused. A sequence advanced INSIDE a called RPC is not
+undone by the rollback: that leaves a numbering gap, the same as the smoke runs did before #1084, and is
+accepted. Anything else a rollback does not undo disqualifies the batch: dblink, pg_background, http or
+pg_net calls, session advisory locks, signalling other backends, server-side file writes, and CREATE
+EXTENSION / SERVER / FOREIGN DATA WRAPPER / USER MAPPING (on 2026-10-25 none of the remote-call
+extensions were installed live, so dynamic SQL cannot reach them without creating one). String
+literals, quoted identifiers, comments and nested function bodies are walked in one pass, so they
+cannot fake or hide any of this. `smoke-fuel-surcharge.sql` gained a leading `BEGIN;` so its two DO
+blocks share one transaction.
+
+**Holes closed on the way (reported by the #1093 session and Luna).** The older textual "rolled back"
+test, which exempted DDL, accepted `BEGIN; <DDL>; END; … ROLLBACK;`, and END is COMMIT; that exemption
+now uses the same verified check. RPC calls inside a DO body (`PERFORM save_x()`, `v := save_x()`) or a
+`CALL proc()` were never scanned, because the scanner required the word SELECT; outside a verified
+rollback batch they are now refused. Real live writes outside such a batch are otherwise unchanged.
 
 **Proof.** All 69 live-runnable smoke chains classify as allowed (before: 65 refused), with or without a
 marker; 30 attack shapes (conditional or swallowed raise, a raise only in the outer handler, a labeled

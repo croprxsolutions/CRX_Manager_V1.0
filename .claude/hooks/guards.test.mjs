@@ -534,6 +534,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["identifier ending in $x$ hides a RETURN", rb(`PERFORM a$x$; RETURN; ${del} PERFORM b$x$;`)],
     ["non-ASCII identifier ending in $x$ hides a RETURN (Codex App)", `DO $$ DECLARE "é$x$" integer := 1; BEGIN ${del} PERFORM é$x$; RETURN; PERFORM é$x$; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["E'' string continued on the next line hides a RETURN (Codex App)", `DO $$ BEGIN ${del} PERFORM E'a'\n'\\''; RETURN; PERFORM E'a'\n'\\''; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["non-ASCII dollar-quote tag hides a RETURN (Codex App)", `DO $$ BEGIN ${del} PERFORM $é$'$é$; RETURN; PERFORM $é$'$é$; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

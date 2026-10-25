@@ -256,25 +256,22 @@ describe('JobDetail recipe pricing tier', () => {
     await pickProduct(/Oz Rate Chem/);
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('is not a whole number of cents per oz')));
     expect(priceInput().value).toBe('');
-    // Even at quantity 0 this blank blocks: the product HAS a price, so a saved $0 would pass every
-    // check once the quantity rose and bill nothing.
+    // Even at quantity 0 the blank blocks: a saved blank becomes $0, which would bill nothing once
+    // the quantity rose.
     fireEvent.change(screen.getByText('Total Applied').nextElementSibling as HTMLInputElement, { target: { value: '0' } });
     expect(await screen.findByText(/its price is blank, negative, or not a whole number of cents/)).toBeInTheDocument();
   });
 
-  it('a blank price on a quantity-0 line does not block the save (it bills nothing)', async () => {
+  it('MONEY: a blank price on a quantity-0 line of an unpriced product still blocks the save', async () => {
+    // A saved blank becomes an explicit $0; if the product is priced later and the quantity
+    // raised, nothing could tell it from an intended $0 (Sol).
     const UNPRICED = { ...PRODUCT, id: 'prod-unpriced', product_name: 'Unpriced Adjuvant', tier1_price: null, tier2_price: null, tier3_price: null };
     serveTables({ data: { id: 'cust-inactive', assigned_tier: 3 }, error: null }, PRODUCT, [UNPRICED]);
     await openChemicalLine();
     await pickProduct(/Unpriced Adjuvant/);
     await waitFor(() => expect(priceInput().value).toBe(''));
-    const quantityInput = screen.getByText('Total Applied').nextElementSibling as HTMLInputElement;
-    fireEvent.change(quantityInput, { target: { value: '5' } });
+    fireEvent.change(screen.getByText('Total Applied').nextElementSibling as HTMLInputElement, { target: { value: '0' } });
     expect(await screen.findByText(/its price is blank, negative, or not a whole number of cents/)).toBeInTheDocument();
-
-    fireEvent.change(quantityInput, { target: { value: '0' } });
-    await waitFor(() => expect(screen.queryByText(/its price is blank, negative, or not a whole number of cents/)).not.toBeInTheDocument());
-    expect(priceInput().value).toBe('');
   });
 
   it('MONEY: un-ticking customer supplied on a $0 line re-prices it from the catalog at the customer tier', async () => {

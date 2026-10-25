@@ -168,6 +168,9 @@ the server report `get_profitability_report` (cost at time of sale) has no calle
   retype). `normalize_rate_unit` does not strip invisible characters. LOW-MED.
 - Split-acre shares are rounded to 2 decimals, so totals can differ from the field's acres by cents. UNVERIFIED
   (current body of `derive_customer_shares_from_fields` not located).
+- Quote Builder's line math (`recalcItem`, `catalogPricePerAcre` in `src/lib/quoteCalc.ts`) multiplies and rounds
+  in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
+  changes rounding on every quote line, so it needs its own money PR. LOW.
 
 ### KI-17 — Blend-ticket linkage picks one order line per product
 **MED · PARTIAL · money · automatic matching unassigned**

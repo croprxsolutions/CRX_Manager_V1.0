@@ -525,6 +525,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["quoted pg_terminate_backend", "BEGIN; SELECT \"pg_terminate_backend\"(123); ROLLBACK;"],
     ["quoted nextval inside a smoke DO block", rb("PERFORM \"nextval\"('invoice_number_seq');")],
     ["smoke raise only inside a dollar-quoted string (Codex App)", `DO $do$ BEGIN ${del} PERFORM $msg$raise exception 'SMOKE_PASS_ROLLBACK'$msg$; END $do$;`],
+    ["qualified columns named begin/end hide the outer handler (Codex App)", `DO $$ BEGIN ${del} PERFORM t.begin FROM (VALUES (1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN PERFORM t.end FROM (VALUES (1)) AS t("end"); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

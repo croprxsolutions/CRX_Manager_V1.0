@@ -325,20 +325,30 @@ const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*en
 // BEGIN, so a word such as a variable named `raise` cannot hide one. BEGIN and
 // CASE open a level, a bare END or END CASE closes one, END IF / END LOOP close
 // neither. Any unbalanced count is ambiguous and refuses the batch.
+// A block keyword only counts where PL/pgSQL puts one: at the start of a
+// statement, or right after BEGIN/THEN/ELSE/LOOP/DECLARE — never after a dot,
+// so a column such as `t.begin` or `t.end` is not a delimiter (Codex App,
+// #1092). A CASE expression (CASE … END inside a statement) is ignored whole:
+// neither its CASE nor its END is in such a position.
 function outerBlockHasHandler(stmts) {
   const stack = [];
+  const OPENERS = new Set(["begin", "then", "else", "loop", "declare"]);
   for (const s of stmts) {
-    const words = s.text.toLowerCase().match(/[a-z_][a-z0-9_]*/g) || [];
+    const toks = [...s.text.toLowerCase().matchAll(/[a-z_][a-z0-9_]*/g)].map((m) => ({
+      w: m[0], dotted: m.index > 0 && s.text[m.index - 1] === ".",
+    }));
+    const words = toks.map((t) => t.w);
+    const structural = (i) => !toks[i].dotted && (i === 0 || OPENERS.has(words[i - 1]));
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if (w === "begin" || w === "case") stack.push(w);
-      else if (w === "end") {
+      if ((w === "begin" || w === "case") && structural(i)) stack.push(w);
+      else if (w === "end" && i === 0 && !toks[i].dotted) {
         const next = words[i + 1];
         if (next === "if" || next === "loop") { i++; continue; }
         if (stack.length === 0) return true;
         stack.pop();
         if (next === "case") i++;
-      } else if (w === "exception" && (i === 0 || words[i - 1] === "begin") && stack.length <= 1) return true;
+      } else if (w === "exception" && !toks[i].dotted && (i === 0 || words[i - 1] === "begin") && stack.length <= 1) return true;
     }
   }
   return stack.length !== 0;

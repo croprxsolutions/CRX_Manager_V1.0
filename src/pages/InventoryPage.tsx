@@ -177,6 +177,8 @@ export default function InventoryPage() {
   const [holdsFailed, setHoldsFailed] = useState(false);
   // A failed forecast read says so instead of "No planned demand data".
   const [forecastFailed, setForecastFailed] = useState(false);
+  // Set once a forecast read succeeds (even an empty one), so the tab does not read again by itself.
+  const [forecastLoaded, setForecastLoaded] = useState(false);
   // A failed open-PO read in the receive dialog says so instead of "No open purchase orders found".
   const [receivePOsFailed, setReceivePOsFailed] = useState(false);
   const [locationFilter, setLocationFilter] = useState('');
@@ -448,6 +450,7 @@ export default function InventoryPage() {
       if (!Array.isArray(rows)) throw new Error('get_inventory_forecast returned no list');
       setForecastData(rows);
       setForecastFailed(false);
+      setForecastLoaded(true);
     } catch (loadErr) {
       Sentry.captureException(loadErr, { tags: { source: 'fetch', page: 'inventory' } });
       toast('error', 'Failed to load forecast data');
@@ -457,10 +460,11 @@ export default function InventoryPage() {
     setForecastLoading(false);
   }, [toast]);
 
-  // A failed read is not retried by itself (Try again does that), so it cannot loop.
+  // The tab reads once by itself. A failed read waits for Try again, and a successful
+  // empty read stays shown as "No planned demand data" instead of reading again.
   useEffect(() => {
-    if (activeTab === 'forecast' && forecastData.length === 0 && !forecastFailed) fetchForecast();
-  }, [activeTab, forecastData.length, forecastFailed, fetchForecast]);
+    if (activeTab === 'forecast' && !forecastLoaded && !forecastFailed) fetchForecast();
+  }, [activeTab, forecastLoaded, forecastFailed, fetchForecast]);
 
   // Both pickers below filter these lists locally and a locked hold retry shows
   // its frozen product/customer from them, so each list is read in full, page

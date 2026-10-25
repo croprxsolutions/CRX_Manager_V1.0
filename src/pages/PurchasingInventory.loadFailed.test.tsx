@@ -5,7 +5,7 @@
  * empty count with a live Complete button; Try again shows the rows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { IDBFactory } from 'fake-indexeddb';
 
@@ -16,6 +16,8 @@ const H = vi.hoisted(() => ({
   functions: {} as Record<string, unknown>,
   // Table or function name -> how its reads fail.
   failing: new Map<string, 'error' | 'nodata'>(),
+  // Every RPC name called, in order.
+  rpcCalls: [] as string[],
   toast: vi.fn(),
 }));
 
@@ -47,7 +49,7 @@ vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const client = {
     from: (table: string) => fixedQuery(replyFor(table, H.tables[table] ?? [])),
-    rpc: (name: string) => fixedQuery(replyFor(name, H.functions[name] ?? [])),
+    rpc: (name: string) => { H.rpcCalls.push(name); return fixedQuery(replyFor(name, H.functions[name] ?? [])); },
   };
   return { ...actual, supabase: client, supabaseUntyped: client };
 });
@@ -92,6 +94,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   globalThis.indexedDB = new IDBFactory();
   H.failing = new Map();
+  H.rpcCalls = [];
   H.tables = {};
   H.functions = { get_admin_cost_fields: {} };
 });
@@ -287,6 +290,22 @@ describe('Inventory', () => {
     fireEvent.click(await screen.findByRole('tab', { name: /Forecast/ }));
     expect(await screen.findByText('The demand forecast could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText(/No planned demand data/)).not.toBeInTheDocument();
+  });
+
+  it('a successful empty forecast after Try again stays shown and is not read again', async () => {
+    H.functions.get_inventory_position = [position];
+    H.failing.set('get_inventory_forecast', 'error');
+    at('/inventory', <InventoryPage />);
+    fireEvent.click(await screen.findByRole('tab', { name: /Forecast/ }));
+    expect(await screen.findByText('The demand forecast could not be loaded')).toBeInTheDocument();
+
+    H.failing.delete('get_inventory_forecast');
+    H.functions.get_inventory_forecast = [];
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByText(/No planned demand data/)).toBeInTheDocument();
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(H.rpcCalls.filter((n) => n === 'get_inventory_forecast')).toHaveLength(2);
+    expect(screen.queryByText('The demand forecast could not be loaded')).not.toBeInTheDocument();
   });
 
   it.each(['error', 'nodata'] as const)('a %s ledger read in the transaction history does not load forever or say "No transactions"', async (mode) => {

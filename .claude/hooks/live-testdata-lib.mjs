@@ -341,14 +341,24 @@ function outerBlockHasHandler(stmts) {
     const structural = (i) => !toks[i].dotted && (i === 0 || OPENERS.has(words[i - 1]));
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if ((w === "begin" || w === "case") && structural(i)) stack.push(w);
-      else if (w === "end" && i === 0 && !toks[i].dotted) {
+      if (toks[i].dotted) continue;
+      const top = stack[stack.length - 1];
+      // Every CASE opens a level and the next END closes it (CASE expression or
+      // END CASE). Inside one, `begin` can only be a name (Codex App: `CASE WHEN
+      // true THEN begin …`), so it never opens a block there.
+      if (w === "case") { stack.push("case"); continue; }
+      if (w === "end") {
         const next = words[i + 1];
+        if (top === "case") { stack.pop(); if (next === "case") i++; continue; }
+        if (i !== 0) continue;
         if (next === "if" || next === "loop") { i++; continue; }
         if (stack.length === 0) return true;
         stack.pop();
-        if (next === "case") i++;
-      } else if (w === "exception" && !toks[i].dotted && (i === 0 || words[i - 1] === "begin") && stack.length <= 1) return true;
+        continue;
+      }
+      if (top === "case") continue;
+      if (w === "begin" && structural(i)) stack.push("begin");
+      else if (w === "exception" && (i === 0 || words[i - 1] === "begin") && stack.length <= 1) return true;
     }
   }
   return stack.length !== 0;
@@ -393,8 +403,10 @@ export function isVerifiedRollbackBatch(query) {
   const n = bodyStmts.length;
   if (n < 2 || !/^end$/i.test(bodyStmts[n - 1].text) ||
       !/^(?:[\s\S]*\bbegin\s+)?raise\s+exception\s+''(?:\s*,[\s\S]*|\s+using\s[\s\S]*)?$/i.test(bodyStmts[n - 2].text)) return false;
-  // A label on the outermost block lets `EXIT <label>` jump past the raise.
-  if (/^\s*<</.test(bodyStmts[0]?.text || "") || outerBlockHasHandler(bodyStmts)) return false;
+  // Block labels are refused anywhere in the body: on the outermost block
+  // `EXIT <label>` jumps past the raise, and a labeled inner BEGIN is not
+  // counted as a block (Codex App). No live smoke chain uses a label.
+  if (bodyStmts.some((s) => s.text.includes("<<")) || outerBlockHasHandler(bodyStmts)) return false;
   // Earlier statements without a leading BEGIN: temp setup, or other DO blocks
   // free of transaction control. PostgreSQL runs a multi-statement query string
   // as ONE implicit transaction (simple Query protocol), so the final raise

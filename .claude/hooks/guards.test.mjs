@@ -526,6 +526,8 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["quoted nextval inside a smoke DO block", rb("PERFORM \"nextval\"('invoice_number_seq');")],
     ["smoke raise only inside a dollar-quoted string (Codex App)", `DO $do$ BEGIN ${del} PERFORM $msg$raise exception 'SMOKE_PASS_ROLLBACK'$msg$; END $do$;`],
     ["qualified columns named begin/end hide the outer handler (Codex App)", `DO $$ BEGIN ${del} PERFORM t.begin FROM (VALUES (1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN PERFORM t.end FROM (VALUES (1)) AS t("end"); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["CASE expression naming begin plus a labeled block (Codex App)", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN <<b>> BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["CASE expression naming begin, no label", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

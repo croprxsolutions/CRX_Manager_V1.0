@@ -181,8 +181,10 @@ describe('New Purchase Order', () => {
 
     H.failing.delete('products');
     H.tables.products = [{ id: 'p1', product_name: 'Widget 2.5 GL', is_active: true, vendor: 'Acme Chem' }];
+    expect(screen.getByRole('button', { name: /Save as Draft/ })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save as Draft/ })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
   });
 });
 
@@ -222,12 +224,19 @@ describe('Receiving', () => {
     H.functions.get_receiving_summary = { expected_today: 0, pending_receipt: 0, received_this_week: 0, received_ytd: 0, damaged_this_week: 2 };
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     await waitFor(() => expect(screen.queryByText(/The receiving totals could not be loaded/)).not.toBeInTheDocument());
+    expect(screen.getByText(/received\s+with issues this week/)).toBeInTheDocument();
   });
 
   it('a Quick Receive catalog read with no list is a failure, not "No products found"', async () => {
     H.failing.set('products', 'nodata');
     at('/receiving?tab=quick', <QuickReceivePanel />);
     expect(await screen.findByText(/Products could not be loaded, so items cannot be added or matched/)).toBeInTheDocument();
+
+    H.failing.delete('products');
+    H.tables.products = [{ id: 'p1', product_name: 'Widget 2.5 GL', is_active: true, vendor: 'Acme Chem' }];
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    await waitFor(() => expect(screen.queryByText(/Products could not be loaded/)).not.toBeInTheDocument());
+    expect(screen.getAllByRole('button', { name: /Add (First )?Product/ })[0]).toBeEnabled();
   });
 });
 
@@ -261,6 +270,7 @@ describe('Inventory', () => {
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     await waitFor(() => expect(screen.queryByText('Open purchase orders for this product could not be loaded.')).not.toBeInTheDocument());
     expect(screen.queryByText(/No open purchase orders found/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/PO-1001/).length).toBeGreaterThan(0);
   });
 
   it.each(['error', 'nodata'] as const)('a %s holds read says so instead of hiding the holds', async (mode) => {
@@ -295,6 +305,12 @@ describe('Inventory', () => {
     await waitFor(() => expect(screen.queryByText('Loading transactions...')).not.toBeInTheDocument());
     expect(screen.queryByText('No transactions found for this product.')).not.toBeInTheDocument();
     expect(screen.getByText(/no list/i)).toBeInTheDocument();
+
+    H.failing.delete('inventory_transactions');
+    H.tables.inventory_transactions = [{ id: 't1', product_id: 'p1', transaction_type: 'receive', quantity: 2, created_at: '2026-10-20T12:00:00Z', performed_by: null, requires_review: false, order: null, purchase_order: { po_number: 'PO-1001' }, delivery: null }];
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByText(/1 transaction\b/)).toBeInTheDocument();
+    expect(screen.queryByText(/no list/i)).not.toBeInTheDocument();
   });
 });
 

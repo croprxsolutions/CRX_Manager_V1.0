@@ -537,7 +537,7 @@ export default function ReceivingLogPanel() {
           )}
           {/* The phone cards have no loading state: show a placeholder rather than "No receiving records". */}
           {loading ? (
-            <div className="h-20 rounded-lg bg-gray-50 animate-pulse" />
+            <div className="h-20 rounded-lg bg-gray-50 motion-safe:animate-pulse" />
           ) : loadFailed ? (
             <LoadFailedState title="The receiving log could not be loaded" onRetry={() => { setLoading(true); fetchData(); }} />
           ) : (

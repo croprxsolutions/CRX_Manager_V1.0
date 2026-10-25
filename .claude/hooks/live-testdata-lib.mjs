@@ -77,6 +77,8 @@ const DELETE_ANY_RE = new RegExp(`\\bdelete\\s+from\\s+${QUAL}(${tableAlt(BUSINE
 // COMMIT mid-transaction), so unlike a stored function body it must stay visible
 // to the classifier. Matches "DO $tag$" and "DO LANGUAGE plpgsql $tag$".
 const DO_PREFIX_RE = /\bdo(?:\s+language\s+[a-z_][a-z0-9_]*)?\s*$/i;
+// A character that can continue a PostgreSQL identifier (non-ASCII included).
+const IDENT_CHAR_RE = /[A-Za-z0-9_$\u0080-￿]/;
 
 // Comments are legal between DO and its dollar quote (`DO /* x */ $$...$$`,
 // `DO -- note\n$$...$$`) and used to hide the executable body from the DO
@@ -138,8 +140,9 @@ function stripDollarQuotedCore(sql, keepBody) {
       out += src.slice(i, j); i = j; continue;
     }
     // As in PostgreSQL's lexer, a `$` right after an identifier character
-    // continues the identifier (`a$x$`); it never opens a dollar quote.
-    if (ch === "$" && !/[A-Za-z0-9_$]/.test(src[i - 1] || "")) {
+    // (non-ASCII letters included: `é$x$`) continues the identifier; it never
+    // opens a dollar quote.
+    if (ch === "$" && !IDENT_CHAR_RE.test(src[i - 1] || "")) {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i, i + 66));
       if (tag) {
         const open = tag[0];
@@ -203,7 +206,7 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
       while (j < n && src[j] !== '"') j++;
       out += src.slice(i, j + 1); i = j + 1; continue;
     }
-    if (ch === "$" && !/[A-Za-z0-9_$]/.test(src[i - 1] || "")) {
+    if (ch === "$" && !IDENT_CHAR_RE.test(src[i - 1] || "")) {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i, i + 66));
       if (tag) {
         const open = tag[0];
@@ -285,7 +288,7 @@ function topLevelStatements(c) {
       if (close === -1) return null;
       cur.text += ' "" '; i = close + 1; continue;
     }
-    if (ch === "$" && !/[A-Za-z0-9_$]/.test(c[i - 1] || "")) {
+    if (ch === "$" && !IDENT_CHAR_RE.test(c[i - 1] || "")) {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(c.slice(i, i + 66));
       if (tag) {
         const close = c.indexOf(tag[0], i + tag[0].length);

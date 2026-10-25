@@ -1584,8 +1584,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       .eq('invoice_id', id!)
       .order('sort_order');
     // A failed line read must stop the print or email: otherwise the customer gets a PDF
-    // with no lines under the stored total. Print and Email toast this through runCriticalAction.
-    if (itemsError || !enrichedItems) {
+    // with no lines under the stored total. A read that returns no lines for an invoice with a
+    // non-zero total is the same failure. Print and Email toast this through runCriticalAction.
+    const noLinesUnderTotal = (enrichedItems?.length ?? 0) === 0 && (invoice.total_amount_cents ?? 0) !== 0;
+    if (itemsError || !enrichedItems || noLinesUnderTotal) {
       throw new Error('Could not load the invoice lines, so no PDF was made. Please try again.');
     }
 

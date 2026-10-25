@@ -306,8 +306,17 @@ for (const sql of [
   "INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'",
   "WITH d AS (DELETE FROM customers WHERE name LIKE '[E2E]%' RETURNING id) SELECT count(*) FROM d",
   "DO $$ DECLARE v uuid; BEGIN INSERT INTO customers (name) VALUES ('[E2E] X') RETURNING id INTO v; " +
-    "UPDATE customers SET phone = '1' WHERE id = v AND name LIKE '[E2E]%'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
+    "UPDATE customers SET phone = '1' WHERE id = v AND customers.name LIKE '[E2E]%'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
+  "DO $$ BEGIN DELETE FROM customers AS c WHERE c.name LIKE '[E2E]%'; END $$",
 ]) ok(!classifySql(sql).block, `[E2E]-targeted write allowed: ${sql.slice(0, 70)}`);
+// Inside a DO body a bare name may be a PL/pgSQL variable, so `v_note = '[E2E]'`
+// says nothing about the row: the column must be qualified with the table or alias.
+for (const sql of [
+  "DO $$ DECLARE v_note text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND v_note = '[E2E]'; END $$",
+  "DO $$ BEGIN UPDATE customers SET phone = '1' WHERE id = 7 AND name LIKE '[E2E]%'; END $$",
+  "DO $$ BEGIN DELETE FROM customers c WHERE c.id = 7 AND customers.name LIKE '[E2E]%'; END $$",
+  "DO $$ #variable_conflict use_variable\n<<customers>> DECLARE name text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND customers.name = '[E2E]'; END $$",
+]) ok(classifySql(sql).block, `DO-body write without a provable column refused: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
 for (const [sql, kind] of [
   ["UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]", "financial-amount-update"],
   ["INSERT INTO customers (name) VALUES ('Real') /* [E2E] */", "real-insert"],
@@ -331,10 +340,52 @@ for (const [sql, kind] of [
   ["DELETE FROM invoices USING customers c WHERE invoices.id = 7 AND c.name LIKE '[E2E]%'", "financial-delete"],
   ["WITH d AS (DELETE FROM invoices WHERE id = 7 RETURNING 1) SELECT * FROM customers WHERE name LIKE '[E2E]%'", "financial-delete"],
   ["DO $$ BEGIN DELETE FROM invoices WHERE id = 7 -- AND notes LIKE '[E2E]%'\n; END $$", "financial-delete"],
-  ["DO $$ BEGIN EXECUTE 'DELETE FROM invoices WHERE notes LIKE ''[E2E]%'''; END $$", "financial-delete"],
+  ["DO $$ BEGIN EXECUTE 'DELETE FROM invoices WHERE notes LIKE ''[E2E]%'''; END $$", "dynamic-sql"],
+  // Luna round 1: SQL assembled at run time, MERGE, Unicode-escaped names, mixed VALUES rows.
+  ["DO $$ BEGIN EXECUTE 'UPDATE ' || 'customers SET phone = ''555-0100'' WHERE id = 1'; END $$;", "dynamic-sql"],
+  ["MERGE INTO customers AS c USING (VALUES (1, 'Real')) AS s(id, name) ON c.id = s.id WHEN MATCHED THEN UPDATE SET name = s.name", "real-merge"],
+  ["UPDATE U&\"custome\\0072s\" SET phone = '555-0100' WHERE id = 1", "unicode-identifier"],
+  ["INSERT INTO customers (name) VALUES ('[E2E] test'), ('Real Customer')", "real-insert"],
+  ["INSERT INTO customers (name) VALUES (CASE WHEN false THEN '[E2E]' END)", "real-insert"],
+  ["INSERT INTO customers (name) VALUES ('[E2E] x') UNION ALL VALUES ('Real')", "real-insert"],
+  ["INSERT INTO customers DEFAULT VALUES", "real-insert"],
+  ["DELETE FROM customers WHERE name LIKE '[E2E]%' AND \"returning\" = TRUE OR id = 7", "real-delete"],
   ["SELECT 1; DELETE FROM customers WHERE name = 'x'''; SELECT '[E2E]'", "real-delete"],
   ["DELETE FROM ONLY financial_audit_log WHERE id = 1", "audit-log-write"],
+  ["INSERT INTO customers (name) VALUES ('Real') RETURNING '[E2E]'", "real-insert"],
+  ["DO $$ BEGIN EXECUTE 'UPDATE customers SET phone = ''1'' WHERE name LIKE ''[E2E]%'''; END $$", "dynamic-sql"],
+  ["SELECT 'UPDATE customers SET phone = ''1'' WHERE id = 1'", "dynamic-sql-write"],
+  ["SELECT proname FROM pg_proc WHERE prosrc ILIKE '%insert into invoices%'", "dynamic-sql-write"],
 ]) eq(classifySql(sql).kind, kind, `not [E2E]-targeted, refused as ${kind}: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
+ok(!classifySql("SELECT proname FROM pg_proc WHERE prosrc ILIKE '%insert%invoices%'").block, "a catalog search with the words split is a read");
+// INSERT … SELECT does not show its rows. (Its column list also reads as a call
+// to the older RPC rule, so only the refusal is asserted, not which rule fired.)
+for (const sql of [
+  "INSERT INTO customers (name) SELECT 'Real' UNION ALL VALUES ('[E2E] x')",
+  "INSERT INTO customers (name) VALUES ('[E2E] x') UNION ALL SELECT 'Real'",
+  "INSERT INTO customers SELECT * FROM customers WHERE name LIKE '[E2E]%'",
+]) ok(classifySql(sql).block, `INSERT … SELECT is not provably fake: ${sql.slice(0, 60)}`);
+eq(classifySql("INSERT INTO customers SELECT * FROM customers WHERE name LIKE '[E2E]%'").kind, "real-insert",
+  "INSERT … SELECT without a column list is refused as a real insert");
+eq(classifySql("SELECT 'UPDATE customers SET phone = ''1'' WHERE id = 1'", { realDataOk: true }).kind,
+  "dynamic-sql-write", "REAL-DATA-OK does not relax a write spelled inside a string literal");
+eq(classifySql("DO $$ BEGIN EXECUTE 'UPDATE customers SET phone = ''1'' WHERE id = 1'; END $$", { realDataOk: true }).kind,
+  "dynamic-sql", "REAL-DATA-OK does not relax EXECUTE in a DO block");
+eq(classifySql("MERGE INTO customers c USING customers s ON false WHEN NOT MATCHED THEN INSERT (name) VALUES ('[E2E] x')", { realDataOk: true }).kind,
+  "real-merge", "MERGE is refused even for [E2E] rows and with REAL-DATA-OK");
+for (const sql of [
+  "INSERT INTO customers (name, phone) VALUES ('[E2E] a', '1'), ('[E2E] b', '2') RETURNING id",
+  "INSERT INTO customers AS c (name) OVERRIDING USER VALUE VALUES ('[E2E] a') ON CONFLICT DO NOTHING",
+  "INSERT INTO customers (phone, name) VALUES (lower('X'), '[E2E] it''s')",
+]) ok(!classifySql(sql).block, `every VALUES row marked: allowed (${sql.slice(0, 60)})`);
+eq(classifySql("update customers ".repeat(20000)).kind, "unclassifiable-writes", "a flood of unterminated writes is refused, not timed out");
+{
+  // Linear, not quadratic: a literal packed with write keywords took 4 s before the dynamic-write rule.
+  const t0 = Date.now();
+  classifySql("SELECT '" + "update customers ".repeat(20000) + "'");
+  classifySql("delete from customers ".repeat(80000));
+  ok(Date.now() - t0 < 3000, `write-keyword floods classify quickly (${Date.now() - t0} ms)`);
+}
 
 // ── dollar-quoted machine content (2026-07-11) ───────────────────────────
 // Function bodies re-emitted by a BEGIN;...;ROLLBACK; migration smoke are

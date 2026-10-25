@@ -37,8 +37,9 @@ function tableAlt(tables) {
 // valid SQL forms. Codex P1 2026-07-13 round 3: `UPDATE "public"."customers"`
 // evaded the earlier `(?:public\.)?` prefix entirely.
 const QUAL = `(?:"?public"?\\s*\\.\\s*)?"?`;
-// `UPDATE ONLY t` and `DELETE FROM ONLY t` are the same writes (2026-10-25).
-const DML_VERB = `insert\\s+into|update(?:\\s+only)?|delete\\s+from(?:\\s+only)?`;
+// `UPDATE ONLY t` and `DELETE FROM ONLY t` are the same writes, and MERGE can
+// insert, update and delete (2026-10-25).
+const DML_VERB = `insert\\s+into|update(?:\\s+only)?|delete\\s+from(?:\\s+only)?|merge\\s+into(?:\\s+only)?`;
 
 // Every INSERT/UPDATE/DELETE on a live business table, wherever it sits: a
 // statement, a data-modifying CTE, a DO body, or a string literal (dynamic SQL).
@@ -732,12 +733,29 @@ function classifySqlInner(query, realDataOk) {
   // Comments removed, DO bodies included, so `-- [E2E]` or `/* [E2E] */` cannot
   // exempt anything below.
   const code = stripCommentsQuoteAware(t, { intoDollarBodies: true });
-  const writes = findWrites(code);
-  const real = writes.filter((w) => !w.fake);
+  const scan = findWrites(code);
+  if (scan.block) return scan;
+  const real = scan.writes.filter((w) => !w.fake);
   const isFin = (w) => FINANCIAL_TABLES.includes(w.table);
 
-  // 4. Deletes and cancels/voids that do not target [E2E] rows. Never relaxed.
+  // 4. Deletes, cancels/voids and MERGEs that do not target [E2E] rows, and any
+  //    insert or update spelled inside a string literal (its SET list cannot be
+  //    read). Never relaxed.
   for (const w of real) {
+    if (w.verb === "merge") {
+      return {
+        block: true,
+        kind: "real-merge",
+        reason: `This MERGEs into the live business table "${w.table}". MERGE can update, insert and delete in one statement, so it is refused even for [E2E] rows and with REAL-DATA-OK; write the separate INSERT/UPDATE/DELETE statements instead.`,
+      };
+    }
+    if (w.dynamic && w.verb !== "delete") {
+      return {
+        block: true,
+        kind: "dynamic-sql-write",
+        reason: `This SQL spells an ${w.verb.toUpperCase()} of the live business table "${w.table}" inside a string literal (dynamic SQL such as EXECUTE '…'). The guard cannot read what it changes, so it is refused even with REAL-DATA-OK: write the statement out plainly. For a catalog search, break up the words (e.g. ILIKE '%${w.verb}%${w.table}%').`,
+      };
+    }
     if (w.verb === "delete" && isFin(w)) {
       return {
         block: true,
@@ -795,8 +813,10 @@ function classifySqlInner(query, realDataOk) {
 
 // ── The [E2E] fake-data exemption, judged per write (2026-10-25) ─────────────
 // A write is exempt only when the write ITSELF shows it touches [E2E] rows:
-//   - an INSERT carries an '[E2E]…' string value somewhere in its own text
-//     (and is not an ON CONFLICT … DO UPDATE, which can overwrite a real row);
+//   - an INSERT … VALUES has, in EVERY row, a value that is exactly a string
+//     literal containing [E2E] (and is not ON CONFLICT … DO UPDATE, which can
+//     overwrite a real row); INSERT … SELECT does not show its rows, so it is
+//     never exempt;
 //   - an UPDATE or DELETE has, at the top level of its own WHERE clause, a
 //     conjunct `<column> = | LIKE | ILIKE '<text containing [E2E]>'`, joined to
 //     the rest only by AND, with no OR, no USING/FROM join and nothing nested.
@@ -812,10 +832,13 @@ function classifySqlInner(query, realDataOk) {
 // A regex classifier cannot see what a subquery or a foreign key reaches, so
 // whatever it cannot prove is refused: clearing [E2E] child rows needs a marker
 // on the child row itself, or a delete of the marked parent.
-const E2E_TARGET_HINT = "To work on fake data, an INSERT must carry an '[E2E]…' value in the statement itself, and an UPDATE or DELETE needs `AND <column> LIKE '[E2E]%'` (or `= '[E2E] …'`) at the top level of its own WHERE clause; a marker in a comment, another statement, the SET list or a subquery does not count.";
+const E2E_TARGET_HINT = "To work on fake data, an INSERT … VALUES must have an '[E2E]…' string value in every row, and an UPDATE or DELETE needs `AND <column> LIKE '[E2E]%'` (or `= '[E2E] …'`) at the top level of its own WHERE clause (inside a DO block, qualify the column with the table or alias: `c.name LIKE '[E2E]%'`); a marker in a comment, another statement, the SET list or a subquery does not count.";
 
 const MARKER_IDENT = `(?:"[^"]+"|[a-z_][a-z0-9_$]*)`;
-const MARKER_PREDICATE_RE = new RegExp(`^(${MARKER_IDENT})(?:\\s*\\.\\s*${MARKER_IDENT})?\\s*(?:=|like|ilike)\\s*'((?:[^']|'')*)'$`, "i");
+const MARKER_PREDICATE_RE = new RegExp(`^(${MARKER_IDENT})(?:\\s*\\.\\s*(${MARKER_IDENT}))?\\s*(?:=|like|ilike)\\s*'((?:[^']|'')*)'$`, "i");
+// The alias after `UPDATE t` / `DELETE FROM t`, when the next word is not a clause keyword.
+const ALIAS_RE = new RegExp(`^\\s+(?:as\\s+)?(${MARKER_IDENT})`, "i");
+const NOT_ALIAS = new Set(["set", "where", "using", "returning"]);
 // Bare words that parse as values, not columns, so they can never name a marked row.
 const VALUE_KEYWORDS = new Set(["true", "false", "null", "user", "current_user", "session_user", "current_role",
   "system_user", "current_catalog", "current_schema", "current_date", "current_time", "current_timestamp",
@@ -823,16 +846,28 @@ const VALUE_KEYWORDS = new Set(["true", "false", "null", "user", "current_user",
 
 // A same-length copy of `code` with the contents of single-quoted literals and
 // quoted identifiers blanked, plus a flag for each character inside a
-// single-quoted literal. Dollar quotes are code here: classifySqlInner already
-// blanked every body except a DO block's, whose statements execute. An
-// unterminated quote runs to the end, so nothing after it can be exempt.
+// single-quoted literal and for each inside a dollar-quoted span. Dollar quotes
+// are code here: classifySqlInner already blanked every body except a DO
+// block's, whose statements execute. An unterminated quote runs to the end, so
+// nothing after it can be exempt.
 function maskQuotes(code) {
   const n = code.length;
   const masked = code.split("");
   const inLiteral = new Uint8Array(n);
+  const inDollar = new Uint8Array(n);
+  let dollarEnd = 0;
   let i = 0;
   while (i < n) {
     const ch = code[i];
+    if (ch === "$" && i >= dollarEnd) {
+      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(code.slice(i, i + 66));
+      if (tag) {
+        const close = code.indexOf(tag[0], i + tag[0].length);
+        dollarEnd = close === -1 ? n : close + tag[0].length;
+        inDollar.fill(1, i, dollarEnd);
+        i += tag[0].length; continue;
+      }
+    }
     const escapeString = (ch === "e" || ch === "E") && code[i + 1] === "'" &&
       !/[A-Za-z0-9_$]/.test(code[i - 1] || "");
     if (ch === "'" || escapeString) {
@@ -855,7 +890,7 @@ function maskQuotes(code) {
     }
     i++;
   }
-  return { masked: masked.join(""), inLiteral };
+  return { masked: masked.join(""), inLiteral, inDollar };
 }
 
 // Only what sits at parenthesis depth 0; anything nested (and the parens) becomes spaces.
@@ -882,55 +917,148 @@ function writeEnd(masked, start) {
   return masked.length;
 }
 
-function isMarkerPredicate(conjunct) {
+// Unquoted identifiers fold to lower case; quoted ones keep their case.
+const identName = (ident) => (ident.startsWith('"') ? ident.slice(1, -1) : ident.toLowerCase());
+
+// `qualifier` is set inside a DO body, where a bare name such as `v_note` may be
+// a PL/pgSQL variable, not a column (`… AND v_note = '[E2E]'` is then always
+// true). There the column must be qualified with the table's name or alias.
+function isMarkerPredicate(conjunct, qualifier) {
   const m = MARKER_PREDICATE_RE.exec(conjunct.trim());
-  return !!m && !VALUE_KEYWORDS.has(m[1].toLowerCase()) && m[2].includes("[E2E]");
+  if (!m || !m[3].includes("[E2E]")) return false;
+  if (!m[2]) return !qualifier && !VALUE_KEYWORDS.has(m[1].toLowerCase());
+  return !qualifier || identName(m[1]) === qualifier;
 }
 
-function targetsFakeRows(verb, text, masked, inLiteral) {
+// One VALUES row, text[s..e) inside its parentheses: true when one of its
+// values is exactly a string literal containing [E2E].
+function rowCarriesMarker(text, masked, s, e) {
+  let depth = 0, from = s;
+  for (let i = s; i <= e; i++) {
+    const ch = i < e ? masked[i] : ",";
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      const value = text.slice(from, i).trim();
+      if (/^'(?:[^']|'')*'$/.test(value) && value.includes("[E2E]")) return true;
+      from = i + 1;
+    }
+  }
+  return false;
+}
+
+// `headLen` is the length of the `INSERT INTO t` / `UPDATE t` / `DELETE FROM t` head.
+function targetsFakeRows(verb, text, masked, inLiteral, qualifier, headLen) {
   // A comment or dollar quote left at code level means the text could not be
   // cleaned, so code and data cannot be told apart.
   if (/--|\/\*|\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.test(masked)) return false;
   const flat = topLevel(masked);
   if (verb === "insert") {
+    // Every row of a plain VALUES list must carry the marker: one marked row
+    // does not make its neighbours fake, and a literal in RETURNING marks
+    // nothing. INSERT … SELECT and DEFAULT VALUES do not show their rows.
     if (/\bon\s+conflict\b[\s\S]*\bdo\s+update\b/i.test(flat)) return false;
-    for (let i = text.indexOf("[E2E]"); i !== -1; i = text.indexOf("[E2E]", i + 1)) {
-      if (inLiteral[i]) return true;
+    const values = flat.search(/\bvalues\b/i);
+    if (values === -1) return false;
+    if (!/^\s*(?:as\s+\S+\s*)?(?:overriding\s+(?:system|user)\s+value\s*)?$/i.test(flat.slice(headLen, values))) return false;
+    let depth = 0, rowStart = 0, rows = 0;
+    for (let i = values + "values".length; i < masked.length; i++) {
+      const ch = masked[i];
+      if (ch === "(") { if (depth++ === 0) rowStart = i + 1; continue; }
+      if (ch === ")") {
+        if (--depth === 0) {
+          if (!rowCarriesMarker(text, masked, rowStart, i)) return false;
+          rows++;
+        }
+        continue;
+      }
+      if (depth > 0 || /[\s,]/.test(ch)) continue;
+      // After the rows only ON CONFLICT … DO NOTHING or RETURNING may follow
+      // (not UNION, ORDER BY or another row source).
+      return rows > 0 && /^(?:on\s+conflict\b|returning\b)/i.test(flat.slice(i));
     }
-    return false;
+    return rows > 0 && depth === 0;
   }
-  const afterVerb = flat.replace(/^\s*(?:update|delete\s+from)\b/i, "");
+  const afterVerb = flat.slice(headLen);
   if (/\b(?:from|using)\b/i.test(afterVerb)) return false;
   const where = flat.search(/\bwhere\b/i);
   if (where === -1) return false;
   const bodyStart = where + "where".length;
+  // OR or BETWEEN anywhere after WHERE (RETURNING included, so a column that
+  // merely looks like RETURNING cannot hide one) makes the AND-split unsound.
+  if (/\b(?:or|between)\b/i.test(flat.slice(bodyStart))) return false;
   const returning = flat.slice(bodyStart).search(/\breturning\b/i);
   const bodyEnd = returning === -1 ? flat.length : bodyStart + returning;
   const body = flat.slice(bodyStart, bodyEnd);
-  if (/\b(?:or|between)\b/i.test(body)) return false;
   let from = bodyStart;
   for (const and of body.matchAll(/\band\b/gi)) {
-    if (isMarkerPredicate(text.slice(from, bodyStart + and.index))) return true;
+    if (isMarkerPredicate(text.slice(from, bodyStart + and.index), qualifier)) return true;
     from = bodyStart + and.index + 3;
   }
-  return isMarkerPredicate(text.slice(from, bodyEnd));
+  return isMarkerPredicate(text.slice(from, bodyEnd), qualifier);
 }
 
 // Every write on a live business table in `code`, each with its own text and
-// whether it provably targets [E2E] rows. A write found inside a string literal
-// is dynamic SQL (EXECUTE '…') and is never exempt.
+// whether it provably targets [E2E] rows: `{ block: false, writes }`, or a
+// refusal when the text hides what it writes. A write found inside a string
+// literal is marked `dynamic` (EXECUTE '…', or text that only looks like SQL):
+// it is never exempt and its extent is not measured, which keeps a literal
+// packed with write keywords linear instead of quadratic.
 function findWrites(code) {
-  const { masked, inLiteral } = maskQuotes(code);
-  const writes = [];
-  for (const m of code.matchAll(WRITE_RE)) {
-    const start = m.index, end = writeEnd(masked, start);
-    const verb = /^insert/i.test(m[1]) ? "insert" : /^update/i.test(m[1]) ? "update" : "delete";
-    const text = code.slice(start, end);
-    const fake = !inLiteral[start] &&
-      targetsFakeRows(verb, text, masked.slice(start, end), inLiteral.subarray(start, end));
-    writes.push({ verb, table: m[2].toLowerCase(), text, fake });
+  const { masked, inLiteral, inDollar } = maskQuotes(code);
+  // U&"custome\0072s" is the customers table, spelled so no name list can match it.
+  if (/\bu&"/i.test(masked)) {
+    return {
+      block: true,
+      kind: "unicode-identifier",
+      reason: "This SQL spells a name with a Unicode escape (U&\"…\"), which hides which table it touches. Write the name plainly.",
+    };
   }
-  return writes;
+  // EXECUTE in a DO body runs SQL assembled at run time ('UPDATE ' || 'customers …'),
+  // which no text check can read.
+  for (const m of masked.matchAll(/\bexecute\b/gi)) {
+    if (inDollar[m.index]) {
+      return {
+        block: true,
+        kind: "dynamic-sql",
+        reason: "This DO block runs dynamic SQL with EXECUTE, so the guard cannot see what it writes; it is refused even with REAL-DATA-OK. Write each statement out plainly.",
+      };
+    }
+  }
+  // `#variable_conflict use_variable` (or the session setting) lets a variable
+  // win over a same-named qualified column, so no DO-body write is provable.
+  const variableConflict = /variable_conflict/i.test(code);
+  const writes = [];
+  // Real statements end at their own `;` or `)`, so their extents barely overlap;
+  // only malformed text (writes with no terminator) makes them pile up.
+  let budget = 8 * code.length + 100000;
+  for (const m of code.matchAll(WRITE_RE)) {
+    const start = m.index;
+    const verb = m[1].toLowerCase().match(/^(insert|update|delete|merge)/)[1];
+    const table = m[2].toLowerCase();
+    if (inLiteral[start] || verb === "merge") {
+      writes.push({ verb, table, text: m[0], fake: false, dynamic: !!inLiteral[start] });
+      continue;
+    }
+    const end = writeEnd(masked, start);
+    if ((budget -= end - start) < 0) {
+      return {
+        block: true,
+        kind: "unclassifiable-writes",
+        reason: "This SQL holds so many overlapping, unterminated writes to live business tables that the guard cannot check them in time, so it is refused. End each statement with `;`.",
+      };
+    }
+    const text = code.slice(start, end);
+    let qualifier = null;
+    if (inDollar[start]) {
+      const alias = ALIAS_RE.exec(code.slice(start + m[0].length, start + m[0].length + 200));
+      qualifier = alias && !NOT_ALIAS.has(alias[1].toLowerCase()) ? identName(alias[1]) : table;
+    }
+    const fake = !(qualifier && variableConflict) &&
+      targetsFakeRows(verb, text, masked.slice(start, end), inLiteral.subarray(start, end), qualifier, m[0].length);
+    writes.push({ verb, table, text, fake, dynamic: false });
+  }
+  return { block: false, writes };
 }
 
 // ── Destructive-migration classifier (Mason's settled 2026-07-13 policy) ─────

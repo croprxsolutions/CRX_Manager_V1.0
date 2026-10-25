@@ -81,7 +81,13 @@ const DO_PREFIX_RE = /\bdo(?:\s+language\s+[a-z_][a-z0-9_]*)?\s*$/i;
 const IDENT_CHAR_RE = /[A-Za-z0-9_$\u0080-￿]/;
 // A dollar-quote opener, with PostgreSQL's tag rules: non-ASCII letters are
 // allowed in the tag (`$é$`, Codex App on #1092).
-const DOLLAR_TAG_RE = /^\$([A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/;
+// Matched in place at any length (a tag longer than a fixed window used to be
+// cut short, Codex App on #1092).
+const DOLLAR_TAG_STICKY_RE = /\$([A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/y;
+function matchDollarTag(s, i) {
+  DOLLAR_TAG_STICKY_RE.lastIndex = i;
+  return DOLLAR_TAG_STICKY_RE.exec(s);
+}
 
 // Comments are legal between DO and its dollar quote (`DO /* x */ $$...$$`,
 // `DO -- note\n$$...$$`) and used to hide the executable body from the DO
@@ -146,7 +152,7 @@ function stripDollarQuotedCore(sql, keepBody) {
     // (non-ASCII letters included: `é$x$`) continues the identifier; it never
     // opens a dollar quote.
     if (ch === "$" && !IDENT_CHAR_RE.test(src[i - 1] || "")) {
-      const tag = DOLLAR_TAG_RE.exec(src.slice(i, i + 66));
+      const tag = matchDollarTag(src, i);
       if (tag) {
         const open = tag[0];
         const close = src.indexOf(open, i + open.length);
@@ -210,7 +216,7 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
       out += src.slice(i, j + 1); i = j + 1; continue;
     }
     if (ch === "$" && !IDENT_CHAR_RE.test(src[i - 1] || "")) {
-      const tag = DOLLAR_TAG_RE.exec(src.slice(i, i + 66));
+      const tag = matchDollarTag(src, i);
       if (tag) {
         const open = tag[0];
         const close = src.indexOf(open, i + open.length);
@@ -292,7 +298,7 @@ function topLevelStatements(c) {
       cur.text += ' "" '; i = close + 1; continue;
     }
     if (ch === "$" && !IDENT_CHAR_RE.test(c[i - 1] || "")) {
-      const tag = DOLLAR_TAG_RE.exec(c.slice(i, i + 66));
+      const tag = matchDollarTag(c, i);
       if (tag) {
         const close = c.indexOf(tag[0], i + tag[0].length);
         if (close === -1) return null;

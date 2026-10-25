@@ -191,7 +191,7 @@ describe('BulkPOImport', () => {
     // The import fingerprint ignores cost, so an admin is told a re-import never changes costs.
     expect(mocks.toast).toHaveBeenCalledWith(
       'info',
-      'Skipped 1 document already imported. A re-import does not change its costs; check them in Supplier POs.',
+      'Skipped 1 document already imported. Re-importing does not change existing costs; check them in Supplier POs.',
     );
     expect(defaultProps.onSuccess).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalledWith('next_po_number');

@@ -610,7 +610,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
       // The import fingerprint ignores cost (20261022100000), so a skipped document may carry costs
       // that differ from the saved purchase order; a re-import never changes them.
       const costNote = isAdmin
-        ? ' A re-import does not change its costs; check them in Supplier POs.'
+        ? ' Re-importing does not change existing costs; check them in Supplier POs.'
         : '';
       toast('info', `Skipped ${skippedCount} document${skippedCount !== 1 ? 's' : ''} already imported.${costNote}`);
     }

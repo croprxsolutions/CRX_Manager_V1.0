@@ -272,6 +272,13 @@ function topLevelStatements(c) {
       if (!closed) return null;
       cur.text += "''"; i = j; continue;
     }
+    // A quoted identifier ("begin", "end", "a;b") is a name, not a keyword or a
+    // statement break (security review, 2026-10-25).
+    if (ch === '"') {
+      const close = c.indexOf('"', i + 1);
+      if (close === -1) return null;
+      cur.text += ' "" '; i = close + 1; continue;
+    }
     if (ch === "$") {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(c.slice(i, i + 66));
       if (tag) {
@@ -293,29 +300,41 @@ const TX_ROLLBACK_RE = /^(?:rollback|abort)(?:\s+(?:transaction|work))?$/i;
 const DO_STMT_RE = /^do\s*(?:language\s+[a-z_]+\s*)?\$\$\s*(?:language\s+[a-z_]+)?$/i;
 const TEMP_SETUP_RE = /^create\s+(?:(?:or\s+replace\s+)?function\s+pg_temp\.|(?:temp|temporary)\s+table\s)/i;
 const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|rollback|call)\b/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+)\s*\(/i;
+// Effects a ROLLBACK does not undo: remote calls (dblink, pg_background, http,
+// pg_net), session advisory locks, signalling other backends, server-side file
+// writes, and installing an extension or foreign server, which a batch could then
+// reach through dynamic SQL built from pieces (Luna, 2026-10-25). On 2026-10-25
+// the live database had none of dblink, pg_background, http, pg_net or
+// postgres_fdw installed.
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_lock(?:_shared)?|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]{0,400}?\bto\s+(?:program\b|')/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
 // EXCEPTION 'SMOKE_PASS_ROLLBACK'; END` ends the same way, but its raise runs
 // only when something else failed (security review, 2026-10-25). So the
-// OUTERMOST block may carry no EXCEPTION section at all. BEGIN and CASE open a
-// level, a bare END or END CASE closes one, END IF / END LOOP close neither.
-// A miscount can only find a handler that is not there, which refuses.
-function outerBlockHasHandler(text) {
-  const words = text.toLowerCase().match(/[a-z_][a-z0-9_]*/g) || [];
+// OUTERMOST block may carry no EXCEPTION section at all. Works on the body's
+// statements (strings, quoted identifiers and nested dollar bodies already
+// blanked): an EXCEPTION section keyword can only open a statement or follow
+// BEGIN, so a word such as a variable named `raise` cannot hide one. BEGIN and
+// CASE open a level, a bare END or END CASE closes one, END IF / END LOOP close
+// neither. Any unbalanced count is ambiguous and refuses the batch.
+function outerBlockHasHandler(stmts) {
   const stack = [];
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i];
-    if (w === "begin" || w === "case") stack.push(w);
-    else if (w === "end") {
-      const next = words[i + 1];
-      if (next === "if" || next === "loop") { i++; continue; }
-      stack.pop();
-      if (next === "case") i++;
-    } else if (w === "exception" && words[i - 1] !== "raise" && stack.length <= 1) return true;
+  for (const s of stmts) {
+    const words = s.text.toLowerCase().match(/[a-z_][a-z0-9_]*/g) || [];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (w === "begin" || w === "case") stack.push(w);
+      else if (w === "end") {
+        const next = words[i + 1];
+        if (next === "if" || next === "loop") { i++; continue; }
+        if (stack.length === 0) return true;
+        stack.pop();
+        if (next === "case") i++;
+      } else if (w === "exception" && (i === 0 || words[i - 1] === "begin") && stack.length <= 1) return true;
+    }
   }
-  return false;
+  return stack.length !== 0;
 }
 
 export function isVerifiedRollbackBatch(query) {
@@ -325,7 +344,12 @@ export function isVerifiedRollbackBatch(query) {
   if (!st || st.length === 0) return false;
   const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);
   if (st.length >= 2 && TX_BEGIN_RE.test(st[0].text) && TX_ROLLBACK_RE.test(st[st.length - 1].text) &&
-      tx.length === 2 && tx[0] === 0 && tx[1] === st.length - 1) return true;
+      tx.length === 2 && tx[0] === 0 && tx[1] === st.length - 1) {
+    // Inside BEGIN a DO block cannot commit (PostgreSQL raises), but a COMMIT
+    // or ROLLBACK statement in one still disqualifies the batch, as it always has.
+    return !st.some((s) => DO_STMT_RE.test(s.text) &&
+      s.spans.some((b) => (topLevelStatements(b) || [{ text: "commit" }]).some((x) => /(?:^|\b(?:begin|then|else|loop))\s*(?:commit|rollback)\b/i.test(x.text))));
+  }
   const lead = TX_BEGIN_RE.test(st[0].text) ? 1 : 0;
   if (tx.some((i) => !(lead && i === 0))) return false;
   const last = st[st.length - 1];
@@ -337,9 +361,8 @@ export function isVerifiedRollbackBatch(query) {
   // literals are blanked. Both come from the same one-pass walk of the body.
   const bodyStmts = topLevelStatements(body);
   if (!bodyStmts || bodyStmts.some((s) => SKIPS_RAISE_RE.test(s.text))) return false;
-  const bodyText = bodyStmts.map((s) => s.text).join(" ; ");
   // A label on the outermost block lets `EXIT <label>` jump past the raise.
-  if (/^\s*<</.test(bodyText) || outerBlockHasHandler(bodyText)) return false;
+  if (/^\s*<</.test(bodyStmts[0]?.text || "") || outerBlockHasHandler(bodyStmts)) return false;
   if (!lead && !st.slice(lead, -1).every((s) => TEMP_SETUP_RE.test(s.text))) return false;
   return true;
 }
@@ -817,11 +840,10 @@ function classifySqlInner(query, realDataOk) {
   //    statement AND ROLLBACK is the last), or a DO-block smoke that force-aborts
   //    via an actual RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Any statement-anchored
   //    COMMIT disqualifies the batch.
-  const hasCommitStmt = /(?:^|;)\s*commit\b/i.test(q);
-  const txWrapped = /^\s*begin\s*;[\s\S]*;\s*rollback\s*;?\s*$/i.test(q);
-  const smokeAbort = /raise\s+exception\s+'?SMOKE_PASS_ROLLBACK/i.test(q);
-  const rolledBack = !hasCommitStmt && (txWrapped || smokeAbort);
-  if (!rolledBack && (DDL_STMT_RE.test(t) || GRANT_REVOKE_RE.test(t))) {
+  //    Since 2026-10-25 "rolled back" is isVerifiedRollbackBatch(): the older
+  //    textual test let `BEGIN; <DDL>; END; ... ROLLBACK;` through, and END is
+  //    COMMIT (reported by the #1093 session).
+  if (!verifiedRollback && (DDL_STMT_RE.test(t) || GRANT_REVOKE_RE.test(t))) {
     return {
       block: true,
       kind: "raw-ddl",
@@ -847,7 +869,11 @@ function classifySqlInner(query, realDataOk) {
     };
   }
   if (verifiedRollback) return { block: false, kind: "rolled-back-smoke" };
-  const rpc = findNonReadFunctionCall(t);
+  // findNonReadFunctionCall only scans text that contains SELECT, so a DO body
+  // (`PERFORM save_x()`, `v := save_x()`) or a `CALL proc()` slipped past it
+  // (reported by the #1093 session). Such a batch is scanned as if it were one.
+  const runsCode = /\bdo\s*(?:language\s+[a-z_]+\s*)?\$|\bcall\s+[a-z_"]/i.test(t);
+  const rpc = findNonReadFunctionCall(runsCode ? `SELECT ${t}` : t);
   if (rpc) {
     return {
       block: true,

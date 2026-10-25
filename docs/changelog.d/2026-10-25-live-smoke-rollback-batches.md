@@ -19,9 +19,12 @@ they cannot fake or hide any of this. `smoke-fuel-surcharge.sql` gained a leadin
 DO blocks share one transaction. Real live writes outside such a batch are unchanged.
 
 **Proof.** All 69 live-runnable smoke chains classify as allowed (before: 65 refused), with or without a
-marker; 19 attack shapes (conditional or swallowed raise, a raise only in the outer handler, a labeled
+marker; 30 attack shapes (conditional or swallowed raise, a raise only in the outer handler, a labeled
 outer block left with EXIT, early RETURN, COMMIT/END mid-batch, CALL, dblink, a write before the DO
-block, a raise only in a string or comment, quote and `$tag$` tricks) are refused. Guard suite: 512
-assertions.
+block, a raise only in a string or comment, quote and `$tag$` tricks, END or COMMIT AND CHAIN before
+ROLLBACK, a variable or quoted identifier named raise/end, CREATE EXTENSION plus dynamic SQL, session
+advisory locks) are refused, and RPC calls via PERFORM, assignment or CALL are refused outside such a
+batch. Guard suite: 540 assertions.
 
-**Known gap, unchanged.** `PERFORM fn()` inside a DO body is not detected as an RPC call (pre-existing).
+**Residual risk.** A text check cannot follow dynamic SQL; a batch would have to assemble both an
+extension install and its call from string pieces to get around it.

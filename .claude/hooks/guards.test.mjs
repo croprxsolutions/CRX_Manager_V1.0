@@ -499,10 +499,33 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["quote inside a nested body hides a RETURN", rb(`EXECUTE $f$ it's $f$; RETURN; ${del} PERFORM 'x';`)],
     ["$tag$ inside a string hides a RETURN", rb(`PERFORM 'a$x$'; RETURN; ${del} PERFORM 'b$x$';`)],
     ["TRUNCATE inside a wrapper", "BEGIN; TRUNCATE customers; ROLLBACK;"],
+    // From the #1093 session (2026-10-25): END is COMMIT, as are COMMIT AND CHAIN and a second BEGIN's split.
+    ["END (commit) before the final ROLLBACK", "BEGIN; DROP TABLE invoices; END; ROLLBACK;"],
+    ["END before ROLLBACK around a delete", `BEGIN; ${del} END; ROLLBACK;`],
+    ["COMMIT AND CHAIN inside a wrapper", `BEGIN; ${del} COMMIT AND CHAIN; ROLLBACK;`],
+    ["second BEGIN inside a wrapper", `BEGIN; ${del} BEGIN; ROLLBACK;`],
+    // Security review (2026-10-25): a variable named raise or a quoted "end" must not hide an outer handler.
+    ["variable named raise hides the outer handler", `DO $$ DECLARE raise int; BEGIN ${del} PERFORM raise; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["quoted \"end\" shifts the block count", `DO $$ BEGIN ${del} PERFORM "end"; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    // Luna round 1 on #1092.
+    ["quoted \"raise\" before the outer handler", `DO $$ BEGIN ${del} PERFORM t."raise" FROM (VALUES (1)) AS t("raise"); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["extension installed, then reached by dynamic SQL", `BEGIN; CREATE EXTENSION dblink; ${rb(`EXECUTE 'SELECT dblink_' || 'exec(1)'; ${del}`)}`],
+    ["session advisory lock survives the rollback", "BEGIN; SELECT pg_advisory_lock(42); ROLLBACK;"],
+    ["another backend terminated", "BEGIN; SELECT pg_terminate_backend(123); ROLLBACK;"],
     ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
   ]) {
     ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);
   }
+  // RPC calls hidden in a DO body or a CALL were never scanned (the scanner keyed
+  // on SELECT); outside a rollback-only batch they are now refused.
+  for (const [label, query] of [
+    ["PERFORM in a DO block", "DO $$ BEGIN PERFORM save_customer('{}'); END $$;"],
+    ["assignment in a DO block", "DO $$ DECLARE v int; BEGIN v := save_customer('{}'); END $$;"],
+    ["CALL of a procedure", "CALL some_proc();"],
+  ]) {
+    ok(sql(query).includes("deny"), `RPC call outside a rollback-only batch denied: ${label}`);
+  }
+  eq(sql("DO $$ BEGIN RAISE NOTICE '%', now(); END $$;").trim(), "", "a read-only DO block using builtins is still allowed");
   // Every live-runnable smoke chain in the repo classifies as rollback-only.
   const smokeDir = path.join(__dirname, "..", "..", "scripts", "smoke");
   const smokeSpecs = JSON.parse(fs.readFileSync(path.join(smokeDir, "smoke-specs.json"), "utf8")).specs;
@@ -512,7 +535,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     smokeCount++;
     eq(classifySql(fs.readFileSync(path.join(smokeDir, spec.chain), "utf8")).block, false, `live smoke chain runs through the guard: ${key}`);
   }
-  ok(smokeCount > 50, `smoke chain sweep covered ${smokeCount} chains`);
+  ok(smokeCount >= 69, `smoke chain sweep covered ${smokeCount} chains (69 on 2026-10-25)`);
   fs.rmSync(proj, { recursive: true, force: true });
 }
 // codex-push-guard: a non-push command → silent passthrough (plain git push of a

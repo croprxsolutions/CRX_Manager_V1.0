@@ -202,20 +202,23 @@ BEGIN
   END IF;
 
   -- A whole-row reference needs SELECT on every column, so any API-executable function that takes one
-  -- of these row types (a PostgREST computed field) would fail for everyone once a cost column is gone.
+  -- of these row types (a PostgREST computed field) or returns one would fail for everyone once a cost column
+  -- is gone (an invoker body), or would keep handing out cost (a definer body).
   SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_bad
     FROM pg_proc p
    WHERE (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))
      AND EXISTS (
-       SELECT 1 FROM unnest(p.proargtypes::oid[]) AS a(typ)
+       -- Arguments, OUT/TABLE columns and the result, each as a row or an array of rows.
+       SELECT 1 FROM unnest(p.proargtypes::oid[] || coalesce(p.proallargtypes, '{}'::oid[]) || ARRAY[p.prorettype]) AS a(typ)
          JOIN pg_type ty ON ty.oid = a.typ
-        WHERE ty.typrelid IN ('public.products'::regclass, 'public.quotes'::regclass, 'public.quote_items'::regclass,
+         LEFT JOIN pg_type el ON el.oid = ty.typelem AND ty.typcategory = 'A'
+        WHERE coalesce(nullif(ty.typrelid, 0), el.typrelid) IN ('public.products'::regclass, 'public.quotes'::regclass, 'public.quote_items'::regclass,
                               'public.quote_versions'::regclass, 'public.orders'::regclass, 'public.order_items'::regclass,
                               'public.invoices'::regclass, 'public.invoice_items'::regclass, 'public.jobs'::regclass,
                               'public.job_chemicals'::regclass, 'public.blend_ticket_products'::regclass,
                               'public.commissions'::regclass));
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: these API-executable functions take a whole locked row and would fail once cost is revoked; move them to an id-based form first: %', v_bad;
+    RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row and would fail or leak once cost is revoked; move them to an id-based form first: %', v_bad;
   END IF;
 
   -- No view or materialized view may read a cost column (a definer view would keep exposing it; an

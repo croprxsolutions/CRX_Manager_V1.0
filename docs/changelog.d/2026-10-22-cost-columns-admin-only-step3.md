@@ -17,6 +17,15 @@ tables and the 20 places it writes them: none asks for a cost column or a whole 
 Functions read them only with the service role. Every function or trigger that reads cost runs with its owner's
 rights (SECURITY DEFINER) or is a helper only those call; the triggers that run as the caller only touch the row being
 written, which needs no column privilege. None of the tables feeds a realtime subscription.
+Server functions that run with owner rights (SECURITY DEFINER) cannot be closed by column grants, so the 45
+that a signed-in user can execute and whose body names a cost, profit or margin field were read live on
+2026-10-25 (Luna round 2), plus every such function whose output columns name one and the three pass-through
+wrappers whose inner function does. Each one that returns cost, profit or margin is admin-only (`require_admin()`
+or `is_admin()`: the reports, statements, dashboards, application-service costs, `get_admin_cost_fields`,
+`get_quote_versions`) or blanks those fields for non-admins (`get_sales_detail_report`, `get_sales_summary_report`,
+`get_inventory_position`, `match_quick_receive_items`, `save_quote`). The rest return none: `load_recipe_into_job`
+a count, `manual_inventory_add` and `bulk_import_order` a status and quantity warnings, and
+`get_customer_year_end_summary`'s `total_cost_cents` is the customer's billed line total, not CRX cost.
 
 **Docs.** `KNOWN_ISSUES.md` entry updated, to be closed after the apply (two residuals accepted for now by Mason on
 2026-10-21: commission amount and rate imply profit; a below-cost refusal lets a rep narrow a cost by trial and
@@ -36,4 +45,8 @@ then shows an admin and a rep still get the version from the view after the lock
 only way to cost or the invoice version (`get_admin_cost_fields`, `get_quote_versions`,
 `invoice_postable_version`) are still owned by `postgres` and still pinned to `search_path = public, pg_temp`,
 as live has them (read 2026-10-23); the proof shows each drift is refused. The rollback smoke check for
-posting versions now reads the view's function, and two test fixtures read admin cost in exact cents.
+posting versions now reads the view's function, and two test fixtures read admin cost in exact cents. The
+whole-row check now also refuses a signed-in-executable function that RETURNS a locked row (or has one as an
+OUT/TABLE column, or takes or returns an array of them): a definer one would keep handing out cost. Live has
+none besides the old `invoice_post_version`, which this file drops first. The proof runs the posting-version
+rollback smoke before and after the lock.

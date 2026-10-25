@@ -30,7 +30,7 @@
  *      (and the generated jobs.remaining_acres write grant); table-level DELETE/TRUNCATE/TRIGGER
  *      untouched (PUBLIC included). Preflight drift refuses: a new column on each table, either
  *      admin function missing, re-bodied, made INVOKER, re-owned, given another search_path or re-granted, a role privilege lost or gained,
- *      a whole-row function executable by an API role, a cost or whole-row view; so does a run outside
+ *      a function taking or returning a whole locked row executable by an API role, a cost or whole-row view; so does a run outside
  *      one transaction, before any change. A second apply succeeds and changes nothing.
  *   8. MUTATIONS: the candidate with the products REVOKE removed, with a non-cost column dropped
  *      from a grant list, and with a cost column added to one, each fails its own verify block.
@@ -631,9 +631,14 @@ function preflightRefusesDrift() {
       /COST_LOCK_PREFLIGHT: a role holds a privilege on only some non-cost columns[^\n]*authenticated UPDATE jobs\.additional_info/],
     // A PostgREST computed field (whole-row argument) the lock would break for every role.
     ["CREATE FUNCTION public.zz_prover_rowfn(p public.invoices) RETURNS int LANGUAGE sql STABLE AS 'SELECT 1'; GRANT EXECUTE ON FUNCTION public.zz_prover_rowfn(public.invoices) TO authenticated;",
-      /COST_LOCK_PREFLIGHT: these API-executable functions take a whole locked row[^\n]*zz_prover_rowfn\(invoices\)/],
+      /COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row[^\n]*zz_prover_rowfn\(invoices\)/],
     ["CREATE FUNCTION public.zz_prover_rowfn(p public.order_items) RETURNS int LANGUAGE sql STABLE AS 'SELECT 1'; REVOKE ALL ON FUNCTION public.zz_prover_rowfn(public.order_items) FROM PUBLIC; GRANT EXECUTE ON FUNCTION public.zz_prover_rowfn(public.order_items) TO anon;",
-      /COST_LOCK_PREFLIGHT: these API-executable functions take a whole locked row[^\n]*zz_prover_rowfn\(order_items\)/],
+      /COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row[^\n]*zz_prover_rowfn\(order_items\)/],
+    // A definer function that RETURNS a locked row would keep handing out cost; one with an array-of-rows TABLE column too.
+    ["CREATE FUNCTION public.zz_prover_retfn(p_id uuid) RETURNS SETOF public.products LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS 'SELECT * FROM public.products WHERE id = p_id'; GRANT EXECUTE ON FUNCTION public.zz_prover_retfn(uuid) TO authenticated;",
+      /COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row[^\n]*zz_prover_retfn\(uuid\)/],
+    ["CREATE FUNCTION public.zz_prover_tblfn(p_id uuid) RETURNS TABLE (rows public.commissions[]) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS 'SELECT array_agg(c) FROM public.commissions c WHERE c.id = p_id'; GRANT EXECUTE ON FUNCTION public.zz_prover_tblfn(uuid) TO authenticated;",
+      /COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row[^\n]*zz_prover_tblfn\(uuid\)/],
     // Views: a cost column, and a whole locked row.
     ['CREATE VIEW public.zz_prover_cost_view AS SELECT id, current_cost FROM public.products;', /COST_LOCK_PREFLIGHT: a view reads a cost column or a whole locked row: zz_prover_cost_view reads products\.current_cost/],
     ['CREATE VIEW public.zz_prover_row_view AS SELECT c FROM public.commissions c;', /COST_LOCK_PREFLIGHT: a view reads a cost column or a whole locked row: zz_prover_row_view reads commissions\.\*/],
@@ -660,7 +665,7 @@ function preflightRefusesDrift() {
   const privPost = privileges();
   assert.deepEqual([...privPost.tbl].filter(([k, v]) => privPre.tbl.get(k) !== v), [], 'the autocommit refusal changed a table privilege');
   assert.deepEqual([...privPost.col].filter(([k, v]) => privPre.col.get(k) !== v), [], 'the autocommit refusal changed a column privilege');
-  console.log(`[prover] PREFLIGHT: ${cases.length} drifted states each abort the candidate (a new column on each of the ${LOCKED_TABLES.length} tables, a dropped column, either admin function missing, a lost, gained or narrowed role privilege, a whole-row function for authenticated or anon, a cost or whole-row view, an admin reader made INVOKER / opened to anon / closed to authenticated / re-bodied / search_path or owner drifted); under autocommit it refuses before any change`);
+  console.log(`[prover] PREFLIGHT: ${cases.length} drifted states each abort the candidate (a new column on each of the ${LOCKED_TABLES.length} tables, a dropped column, either admin function missing, a lost, gained or narrowed role privilege, a whole-row function (argument, result or TABLE column) for authenticated or anon, a cost or whole-row view, an admin reader made INVOKER / opened to anon / closed to authenticated / re-bodied / search_path or owner drifted); under autocommit it refuses before any change`);
 }
 
 // MUTATIONS: copies of the candidate with one grant edit each must fail the candidate's own verify block.
@@ -716,6 +721,14 @@ function postableAfterLock() {
   console.log('[prover] SWAP: invoice_post_version(invoices) dropped; admin and rep still read the version from invoices_postable; a whole invoices row is refused');
 }
 
+/** The live rollback smoke for posting versions must pass on this schema, before and after the lock. */
+function postingSmoke(label) {
+  stageText('smoke-post.sql', lf(path.join(ROOT, 'scripts', 'smoke', 'smoke-post-binds-reviewed-invoice-version.sql')));
+  const r = docker([...psqlArgs(), '-f', '/tmp/smoke-post.sql'], { allowFailure: true });
+  assert.match(r.stderr, /SMOKE_PASS_ROLLBACK/, `the posting-version smoke did not pass ${label} the lock:\n${r.stderr}`);
+  console.log(`[prover] SMOKE ${label}: smoke-post-binds-reviewed-invoice-version.sql reads the version from invoices_postable on a seeded invoice and ends SMOKE_PASS_ROLLBACK`);
+}
+
 function main() {
   const started = Date.now();
   if (!REUSE) buildContainer();
@@ -730,6 +743,7 @@ function main() {
   check('before', before);
   preflightRefusesDrift();
   mutations();
+  postingSmoke('before');
 
   stageText('candidate.sql', lf(CANDIDATE));
   const a = apply('candidate.sql');
@@ -741,6 +755,7 @@ function main() {
   const privAfter = privileges();
   privilegeDiff(privBefore, privAfter);
   postableAfterLock();
+  postingSmoke('after');
 
   // A second apply: the preflight still matches (no column changed), the grants are idempotent.
   const again = apply('candidate.sql');

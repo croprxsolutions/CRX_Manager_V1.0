@@ -460,6 +460,55 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
   eq(sql("DELETE FROM customers WHERE name LIKE '[E2E]%'").trim(), "", "no marker: [E2E] cleanup delete still allowed");
   eq(sql("INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'").trim(), "",
     "no marker: [E2E] insert then [E2E] delete allowed");
+  // Rollback-only smoke batches (2026-10-25): PostgreSQL must undo the whole
+  // batch, so RPCs, fixtures and audit-log writes inside it are allowed with no
+  // marker; anything that could skip, swallow or split the rollback is not.
+  const rb = (body) => `DO $smoke$ BEGIN ${body} RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $smoke$;`;
+  for (const [label, query] of [
+    ["DO block ending in the smoke raise", rb("PERFORM save_customer('{}'::jsonb); PERFORM set_config('request.jwt.claims', '{}', true);")],
+    ["BEGIN ... ROLLBACK wrapper", "BEGIN; SELECT save_customer('{}'::jsonb); UPDATE invoices SET status = 'voided' WHERE id = 1; ROLLBACK;"],
+    ["leading BEGIN, several DO blocks", `BEGIN; DO $a$ BEGIN PERFORM save_customer('{}'); END $a$; ${rb("DELETE FROM invoices WHERE id = 1;")}`],
+    ["pg_temp helper then the DO block", `CREATE OR REPLACE FUNCTION pg_temp.h() RETURNS int LANGUAGE plpgsql AS $f$ BEGIN RETURN 1; END $f$; ${rb("PERFORM pg_temp.h();")}`],
+    ["audit-log write inside the rollback", rb("INSERT INTO public.financial_audit_log (operation_type) VALUES ('x');")],
+    ["nested trigger function with RETURN NEW", rb("EXECUTE $q$ CREATE FUNCTION pg_temp.t() RETURNS trigger LANGUAGE plpgsql AS $t$ BEGIN RETURN NEW; END $t$ $q$;")],
+    ["temp table ON COMMIT DROP", rb("CREATE TEMP TABLE x (a int) ON COMMIT DROP; PERFORM save_customer('{}');")],
+  ]) {
+    eq(sql(query).trim(), "", `rollback-only smoke allowed: ${label}`);
+  }
+  // The payload is a real DELETE, which the guard refuses inside a DO body unless
+  // the batch is rollback-only. (PERFORM fn() inside a DO body is not detected as
+  // an RPC call at all; that pre-existing gap is tracked separately.)
+  const del = "DELETE FROM invoices WHERE id = 1;";
+  for (const [label, query] of [
+    ["conditional raise", `DO $$ BEGIN ${del} IF false THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END IF; END $$;`],
+    ["RETURN before the raise", rb(`${del} RETURN;`)],
+    ["RETURN inside IF", rb(`${del} IF true THEN RETURN; END IF;`)],
+    ["raise swallowed by an outer handler", `DO $$ BEGIN ${del} RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; EXCEPTION WHEN OTHERS THEN NULL; END $$;`],
+    ["COMMIT inside the DO block", rb(`${del} COMMIT;`)],
+    ["CALL of a procedure", rb(`CALL some_proc(); ${del}`)],
+    ["write before the DO block, no BEGIN", `SELECT save_customer('{}'); ${rb("")}`],
+    ["COMMIT mid-batch", "BEGIN; SELECT save_customer('{}'); COMMIT; BEGIN; SELECT 1; ROLLBACK;"],
+    ["END (commit) mid-batch", `BEGIN; SELECT save_customer('{}'); END; ${rb("")}`],
+    ["dblink inside a wrapper", "BEGIN; SELECT dblink_exec('x', 'delete from invoices'); ROLLBACK;"],
+    ["raise only in a string", "SELECT 'RAISE EXCEPTION ''SMOKE_PASS_ROLLBACK''; END'; SELECT save_customer('{}');"],
+    ["raise only in a comment", `DO $$ BEGIN ${del} -- RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END\nEND $$;`],
+    ["quote inside a nested body hides a RETURN", rb(`EXECUTE $f$ it's $f$; RETURN; ${del} PERFORM 'x';`)],
+    ["$tag$ inside a string hides a RETURN", rb(`PERFORM 'a$x$'; RETURN; ${del} PERFORM 'b$x$';`)],
+    ["TRUNCATE inside a wrapper", "BEGIN; TRUNCATE customers; ROLLBACK;"],
+    ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
+  ]) {
+    ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);
+  }
+  // Every live-runnable smoke chain in the repo classifies as rollback-only.
+  const smokeDir = path.join(__dirname, "..", "..", "scripts", "smoke");
+  const smokeSpecs = JSON.parse(fs.readFileSync(path.join(smokeDir, "smoke-specs.json"), "utf8")).specs;
+  let smokeCount = 0;
+  for (const [key, spec] of Object.entries(smokeSpecs)) {
+    if (spec.container_only || spec.psql_only) continue;
+    smokeCount++;
+    eq(classifySql(fs.readFileSync(path.join(smokeDir, spec.chain), "utf8")).block, false, `live smoke chain runs through the guard: ${key}`);
+  }
+  ok(smokeCount > 50, `smoke chain sweep covered ${smokeCount} chains`);
   fs.rmSync(proj, { recursive: true, force: true });
 }
 // codex-push-guard: a non-push command → silent passthrough (plain git push of a

@@ -233,6 +233,92 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
   return out;
 }
 
+// ── Rollback-only smoke batches (2026-10-25) ─────────────────────────────────
+// The post-apply live smoke chains (scripts/smoke/, run through execute_sql)
+// call RPCs, set_config and write fixtures, and prove nothing persists by ending
+// in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Until #1084 they passed only because
+// any REAL-DATA-OK marker switched every rule off. isVerifiedRollbackBatch()
+// returns true only when PostgreSQL itself must undo the whole batch:
+//   A. BEGIN first, ROLLBACK last, and no other transaction-control statement; or
+//   B. an optional leading BEGIN, then the LAST statement is a DO block whose body
+//      ends with an unconditional RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK…'; END —
+//      no RETURN, COMMIT, ROLLBACK or CALL statement that could skip or split it,
+//      and no outer EXCEPTION handler (the tail rule leaves no room for one).
+//      Without a leading BEGIN, earlier statements may only create pg_temp
+//      functions or temp tables, so nothing before the DO block writes on its own.
+// Anything that can act outside the transaction (dblink, pg_background, http
+// calls) disqualifies the batch, wherever it appears. Comments never count.
+//
+// Top-level statements of comment-free SQL, each with its dollar-quoted spans.
+// String literals and dollar quotes are walked in ONE pass, so a quote inside a
+// dollar body or a $tag$ inside a string cannot hide text from the checks.
+// Returns null for an unterminated literal or dollar quote (not verifiable).
+function topLevelStatements(c) {
+  const stmts = [];
+  let cur = { text: "", spans: [] };
+  let i = 0;
+  while (i < c.length) {
+    const ch = c[i];
+    const esc = (ch === "e" || ch === "E") && c[i + 1] === "'" && !/[A-Za-z0-9_$]/.test(c[i - 1] || "");
+    if (ch === "'" || esc) {
+      let j = i + (esc ? 2 : 1);
+      let closed = false;
+      while (j < c.length) {
+        if (esc && c[j] === "\\") { j += 2; continue; }
+        if (c[j] === "'" && c[j + 1] === "'") { j += 2; continue; }
+        if (c[j] === "'") { j++; closed = true; break; }
+        j++;
+      }
+      if (!closed) return null;
+      cur.text += "''"; i = j; continue;
+    }
+    if (ch === "$") {
+      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(c.slice(i, i + 66));
+      if (tag) {
+        const close = c.indexOf(tag[0], i + tag[0].length);
+        if (close === -1) return null;
+        cur.spans.push(c.slice(i + tag[0].length, close));
+        cur.text += " $$ "; i = close + tag[0].length; continue;
+      }
+    }
+    if (ch === ";") { stmts.push(cur); cur = { text: "", spans: [] }; i++; continue; }
+    cur.text += ch; i++;
+  }
+  stmts.push(cur);
+  return stmts.map((s) => ({ text: s.text.trim(), spans: s.spans })).filter((s) => s.text);
+}
+const TX_CONTROL_RE = /^(?:begin|start\s+transaction|commit|end|rollback|abort|savepoint|release|prepare\s+transaction|set\s+transaction)\b/i;
+const TX_BEGIN_RE = /^(?:begin(?:\s+(?:transaction|work))?|start\s+transaction)$/i;
+const TX_ROLLBACK_RE = /^(?:rollback|abort)(?:\s+(?:transaction|work))?$/i;
+const DO_STMT_RE = /^do\s*(?:language\s+[a-z_]+\s*)?\$\$\s*(?:language\s+[a-z_]+)?$/i;
+const TEMP_SETUP_RE = /^create\s+(?:(?:or\s+replace\s+)?function\s+pg_temp\.|(?:temp|temporary)\s+table\s)/i;
+const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|rollback|call)\b/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+)\s*\(/i;
+const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
+
+export function isVerifiedRollbackBatch(query) {
+  const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
+  if (OUT_OF_TX_RE.test(c)) return false;
+  const st = topLevelStatements(c);
+  if (!st || st.length === 0) return false;
+  const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);
+  if (st.length >= 2 && TX_BEGIN_RE.test(st[0].text) && TX_ROLLBACK_RE.test(st[st.length - 1].text) &&
+      tx.length === 2 && tx[0] === 0 && tx[1] === st.length - 1) return true;
+  const lead = TX_BEGIN_RE.test(st[0].text) ? 1 : 0;
+  if (tx.some((i) => !(lead && i === 0))) return false;
+  const last = st[st.length - 1];
+  if (!DO_STMT_RE.test(last.text) || last.spans.length !== 1) return false;
+  const body = last.spans[0];
+  if (!SMOKE_TAIL_RE.test(body)) return false;
+  // Nested dollar bodies (trigger or helper functions built inside the block)
+  // cannot end the DO block or commit, so their RETURNs do not count; string
+  // literals are blanked. Both come from the same one-pass walk of the body.
+  const bodyStmts = topLevelStatements(body);
+  if (!bodyStmts || bodyStmts.some((s) => SKIPS_RAISE_RE.test(s.text))) return false;
+  if (!lead && !st.slice(lead, -1).every((s) => TEMP_SETUP_RE.test(s.text))) return false;
+  return true;
+}
+
 // ── SELECT-invoked function classification (Codex P1 round 4, PR #352) ───────
 // A mutating-verb blocklist can never converge (save_customer, close_accounting_
 // period, restore_quote_version all slipped it), so this is DEFAULT-DENY: any
@@ -673,10 +759,16 @@ function classifySqlInner(query, realDataOk) {
   // RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK' marker lives inside a DO body, and a
   // COMMIT anywhere (even inside a DO body) must keep disqualifying the batch.
   const t = stripDollarQuoted(q);
+  // A batch PostgreSQL must roll back entirely (isVerifiedRollbackBatch above)
+  // skips the data rules below — audit-log writes, RPC calls, inserts, updates,
+  // deletes, cancels — because none of it can persist. TRUNCATE and sequence
+  // changes are still refused: a sequence change survives a ROLLBACK.
+  const verifiedRollback = isVerifiedRollbackBatch(q);
 
   // 1. financial_audit_log is append-only, written only by triggers/RPCs — a Hard
-  //    Red Line. No [E2E] exemption and no REAL-DATA-OK override.
-  if (AUDIT_LOG_WRITE_RE.test(t)) {
+  //    Red Line. No [E2E] exemption and no REAL-DATA-OK override; a verified
+  //    rollback-only smoke batch is the one exception (nothing it writes persists).
+  if (!verifiedRollback && AUDIT_LOG_WRITE_RE.test(t)) {
     return {
       block: true,
       kind: "audit-log-write",
@@ -729,6 +821,7 @@ function classifySqlInner(query, realDataOk) {
       reason: "setval()/nextval() changes live sequence state (e.g. invoice numbering) even inside a SELECT. Read with currval()/last_value instead; a real sequence change belongs in a reviewed migration.",
     };
   }
+  if (verifiedRollback) return { block: false, kind: "rolled-back-smoke" };
   const rpc = findNonReadFunctionCall(t);
   if (rpc) {
     return {

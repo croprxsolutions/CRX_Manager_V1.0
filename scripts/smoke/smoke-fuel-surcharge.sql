@@ -21,8 +21,11 @@
 --
 -- The config writes here are inside the rolled-back transaction, so the persisted
 -- shipped default (OFF/blank) is NEVER changed by this test.
--- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'.
+-- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. The leading BEGIN puts both DO
+-- blocks in one explicit transaction, so the final raise undoes the first block
+-- too and the live-data guard can verify the batch as rollback-only.
 -- ============================================================================
+BEGIN;
 DO $smoke$
 DECLARE
   v_admin uuid;

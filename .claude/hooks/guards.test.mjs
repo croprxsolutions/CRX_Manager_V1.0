@@ -530,6 +530,8 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["CASE expression naming begin, no label", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["qualified keyword with spaces around the dot (Codex App)", `DO $$ BEGIN ${del} PERFORM t . case FROM (VALUES (1)) AS t("case"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["schema named begin", `DO $$ BEGIN ${del} PERFORM begin.f(); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["identifier with a $ that looks like a keyword (Codex App)", `DO $$ BEGIN ${del} PERFORM case$x FROM (VALUES (1)) AS t("case$x"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["identifier ending in $x$ hides a RETURN", rb(`PERFORM a$x$; RETURN; ${del} PERFORM b$x$;`)],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

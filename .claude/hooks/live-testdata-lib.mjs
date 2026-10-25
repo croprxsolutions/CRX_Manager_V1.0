@@ -137,7 +137,9 @@ function stripDollarQuotedCore(sql, keepBody) {
       }
       out += src.slice(i, j); i = j; continue;
     }
-    if (ch === "$") {
+    // As in PostgreSQL's lexer, a `$` right after an identifier character
+    // continues the identifier (`a$x$`); it never opens a dollar quote.
+    if (ch === "$" && !/[A-Za-z0-9_$]/.test(src[i - 1] || "")) {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i, i + 66));
       if (tag) {
         const open = tag[0];
@@ -201,7 +203,7 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
       while (j < n && src[j] !== '"') j++;
       out += src.slice(i, j + 1); i = j + 1; continue;
     }
-    if (ch === "$") {
+    if (ch === "$" && !/[A-Za-z0-9_$]/.test(src[i - 1] || "")) {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i, i + 66));
       if (tag) {
         const open = tag[0];
@@ -283,7 +285,7 @@ function topLevelStatements(c) {
       if (close === -1) return null;
       cur.text += ' "" '; i = close + 1; continue;
     }
-    if (ch === "$") {
+    if (ch === "$" && !/[A-Za-z0-9_$]/.test(c[i - 1] || "")) {
       const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(c.slice(i, i + 66));
       if (tag) {
         const close = c.indexOf(tag[0], i + tag[0].length);
@@ -341,7 +343,8 @@ function outerBlockHasHandler(stmts) {
   const KEYWORDS = new Set(["begin", "case", "end", "exception"]);
   for (const s of stmts) {
     const lower = s.text.toLowerCase();
-    const toks = [...lower.matchAll(/[a-z_][a-z0-9_]*/g)].map((m) => {
+    // Whole PostgreSQL identifiers: `case$x` or `end2` is a name, not a keyword.
+    const toks = [...lower.matchAll(/[a-z_\u0080-￿][a-z0-9_$\u0080-￿]*/g)].map((m) => {
       const before = lower.slice(0, m.index).trimEnd();
       const after = lower.slice(m.index + m[0].length).trimStart();
       return { w: m[0], dotted: before.endsWith(".") || after.startsWith(".") };

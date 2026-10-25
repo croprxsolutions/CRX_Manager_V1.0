@@ -296,6 +296,28 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+)\s*\(/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
+// The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
+// EXCEPTION 'SMOKE_PASS_ROLLBACK'; END` ends the same way, but its raise runs
+// only when something else failed (security review, 2026-10-25). So the
+// OUTERMOST block may carry no EXCEPTION section at all. BEGIN and CASE open a
+// level, a bare END or END CASE closes one, END IF / END LOOP close neither.
+// A miscount can only find a handler that is not there, which refuses.
+function outerBlockHasHandler(text) {
+  const words = text.toLowerCase().match(/[a-z_][a-z0-9_]*/g) || [];
+  const stack = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w === "begin" || w === "case") stack.push(w);
+    else if (w === "end") {
+      const next = words[i + 1];
+      if (next === "if" || next === "loop") { i++; continue; }
+      stack.pop();
+      if (next === "case") i++;
+    } else if (w === "exception" && words[i - 1] !== "raise" && stack.length <= 1) return true;
+  }
+  return false;
+}
+
 export function isVerifiedRollbackBatch(query) {
   const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
   if (OUT_OF_TX_RE.test(c)) return false;
@@ -315,6 +337,9 @@ export function isVerifiedRollbackBatch(query) {
   // literals are blanked. Both come from the same one-pass walk of the body.
   const bodyStmts = topLevelStatements(body);
   if (!bodyStmts || bodyStmts.some((s) => SKIPS_RAISE_RE.test(s.text))) return false;
+  const bodyText = bodyStmts.map((s) => s.text).join(" ; ");
+  // A label on the outermost block lets `EXIT <label>` jump past the raise.
+  if (/^\s*<</.test(bodyText) || outerBlockHasHandler(bodyText)) return false;
   if (!lead && !st.slice(lead, -1).every((s) => TEMP_SETUP_RE.test(s.text))) return false;
   return true;
 }

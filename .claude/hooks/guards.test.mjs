@@ -464,6 +464,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
   // batch, so RPCs, fixtures and audit-log writes inside it are allowed with no
   // marker; anything that could skip, swallow or split the rollback is not.
   const rb = (body) => `DO $smoke$ BEGIN ${body} RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $smoke$;`;
+  const del = "DELETE FROM invoices WHERE id = 1;";
   for (const [label, query] of [
     ["DO block ending in the smoke raise", rb("PERFORM save_customer('{}'::jsonb); PERFORM set_config('request.jwt.claims', '{}', true);")],
     ["BEGIN ... ROLLBACK wrapper", "BEGIN; SELECT save_customer('{}'::jsonb); UPDATE invoices SET status = 'voided' WHERE id = 1; ROLLBACK;"],
@@ -472,18 +473,21 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["audit-log write inside the rollback", rb("INSERT INTO public.financial_audit_log (operation_type) VALUES ('x');")],
     ["nested trigger function with RETURN NEW", rb("EXECUTE $q$ CREATE FUNCTION pg_temp.t() RETURNS trigger LANGUAGE plpgsql AS $t$ BEGIN RETURN NEW; END $t$ $q$;")],
     ["temp table ON COMMIT DROP", rb("CREATE TEMP TABLE x (a int) ON COMMIT DROP; PERFORM save_customer('{}');")],
+    ["inner block with its own handler", rb(`BEGIN ${del} EXCEPTION WHEN OTHERS THEN NULL; END; IF true THEN NULL; END IF;`)],
   ]) {
     eq(sql(query).trim(), "", `rollback-only smoke allowed: ${label}`);
   }
   // The payload is a real DELETE, which the guard refuses inside a DO body unless
   // the batch is rollback-only. (PERFORM fn() inside a DO body is not detected as
   // an RPC call at all; that pre-existing gap is tracked separately.)
-  const del = "DELETE FROM invoices WHERE id = 1;";
   for (const [label, query] of [
     ["conditional raise", `DO $$ BEGIN ${del} IF false THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END IF; END $$;`],
     ["RETURN before the raise", rb(`${del} RETURN;`)],
     ["RETURN inside IF", rb(`${del} IF true THEN RETURN; END IF;`)],
     ["raise swallowed by an outer handler", `DO $$ BEGIN ${del} RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; EXCEPTION WHEN OTHERS THEN NULL; END $$;`],
+    ["raise only inside the outer handler (security review)", `DO $$ BEGIN ${del} EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["raise only inside the outer handler, after a CASE", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN 1 END; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["labeled outer block skipped with EXIT", `DO $$ <<b>> BEGIN ${del} EXIT b; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["COMMIT inside the DO block", rb(`${del} COMMIT;`)],
     ["CALL of a procedure", rb(`CALL some_proc(); ${del}`)],
     ["write before the DO block, no BEGIN", `SELECT save_customer('{}'); ${rb("")}`],

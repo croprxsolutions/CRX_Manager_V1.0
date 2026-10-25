@@ -168,17 +168,19 @@ BEGIN
   END IF;
   -- "Held" must mean held on EVERY non-cost column (table-wide before this file, column by column
   -- after it): a role narrowed to a few columns outside a migration would otherwise get the rest back
-  -- from the grants below. Generated columns are skipped (this file leaves jobs.remaining_acres out of
-  -- the write lists); products' INSERT/UPDATE are not re-granted here, so they need only be held.
+  -- from the grants below. Generated columns are checked for SELECT/REFERENCES (this file re-grants them)
+  -- and skipped for INSERT/UPDATE (this file leaves jobs.remaining_acres out of the write lists);
+  -- products' INSERT/UPDATE are not re-granted here, so they need only be held.
   SELECT string_agg(format('%s %s %s.%s', r.rol, p.priv, c.relname, a.attname), '; ' ORDER BY r.rol, p.priv, c.relname, a.attname)
     INTO v_bad
     FROM unnest(ARRAY['products', 'quotes', 'quote_items', 'quote_versions', 'orders', 'order_items', 'invoices',
                       'invoice_items', 'jobs', 'job_chemicals', 'blend_ticket_products', 'commissions']) AS t(tbl)
     JOIN pg_class c ON c.oid = ('public.' || t.tbl)::regclass
-    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = ''
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
     CROSS JOIN (VALUES ('authenticated'), ('anon')) AS r(rol)
     CROSS JOIN (VALUES ('SELECT'), ('REFERENCES'), ('INSERT'), ('UPDATE')) AS p(priv)
-   WHERE CASE
+   WHERE (a.attgenerated = '' OR p.priv IN ('SELECT', 'REFERENCES'))
+     AND CASE
            WHEN r.rol = 'anon' THEN p.priv = 'SELECT' AND t.tbl NOT IN ('quote_items', 'quote_versions')
            WHEN p.priv = 'SELECT' THEN true
            WHEN p.priv = 'REFERENCES' THEN t.tbl <> 'quote_versions'

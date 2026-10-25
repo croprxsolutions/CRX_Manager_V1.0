@@ -62,7 +62,8 @@ PR #980). Still open: sales reps, drivers and applicators who query the database
 columns (product cost; quote, order and invoice line cost), and reps can infer cost by trial-and-error quote
 prices. The supporting `invoices_postable` view is live (PR #1057, ledger `20261023223853`); the final column
 lock is written as `20261022101000_cost_columns_admin_only` (not yet applied) and waits on Mason's approval. Once
-applied, no API role, admins included, can read or write a cost, profit or margin column on `products`, `quotes`,
+applied, neither signed-in users (`authenticated`, admins included) nor signed-out visitors (`anon`) can read or
+write a cost, profit or margin column directly (the server-only `service_role` key is unchanged) on `products`, `quotes`,
 `quote_items`, `quote_versions`, `orders`, `order_items`, `invoices`, `invoice_items`, `jobs`, `job_chemicals`,
 `blend_ticket_products` or `commissions`; admins read cost through `get_admin_cost_fields`. Two residuals stay
 accepted by Mason (2026-10-21): commission amount and rate together imply profit, and below-cost refusals let a

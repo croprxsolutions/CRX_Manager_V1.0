@@ -629,6 +629,9 @@ function preflightRefusesDrift() {
       /COST_LOCK_PREFLIGHT: a role holds a privilege on only some non-cost columns[^\n]*authenticated SELECT invoices\.application_date/],
     ['REVOKE UPDATE ON public.jobs FROM authenticated; GRANT UPDATE (notes) ON public.jobs TO authenticated;',
       /COST_LOCK_PREFLIGHT: a role holds a privilege on only some non-cost columns[^\n]*authenticated UPDATE jobs\.additional_info/],
+    // A generated column narrowed away: the lock's SELECT list re-grants it, so it must refuse instead.
+    [`REVOKE SELECT ON public.invoices FROM authenticated; DO $b$ BEGIN EXECUTE format('GRANT SELECT (%s) ON public.invoices TO authenticated', (SELECT string_agg(quote_ident(attname), ', ') FROM pg_attribute WHERE attrelid = 'public.invoices'::regclass AND attnum > 0 AND NOT attisdropped AND attname <> 'balance_cents')); END $b$;`,
+      /COST_LOCK_PREFLIGHT: a role holds a privilege on only some non-cost columns[^\n]*authenticated SELECT invoices\.balance_cents/],
     // A PostgREST computed field (whole-row argument) the lock would break for every role.
     ["CREATE FUNCTION public.zz_prover_rowfn(p public.invoices) RETURNS int LANGUAGE sql STABLE AS 'SELECT 1'; GRANT EXECUTE ON FUNCTION public.zz_prover_rowfn(public.invoices) TO authenticated;",
       /COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row[^\n]*zz_prover_rowfn\(invoices\)/],

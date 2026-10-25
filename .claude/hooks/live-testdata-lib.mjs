@@ -77,6 +77,12 @@ const DELETE_ANY_RE = new RegExp(`\\bdelete\\s+from\\s+${QUAL}(${tableAlt(BUSINE
 // COMMIT mid-transaction), so unlike a stored function body it must stay visible
 // to the classifier. Matches "DO $tag$" and "DO LANGUAGE plpgsql $tag$".
 const DO_PREFIX_RE = /\bdo(?:\s+language\s+[a-z_][a-z0-9_]*)?\s*$/i;
+// When true, the walkers also treat a backslash inside a PLAIN '…' literal as
+// an escape, as PostgreSQL does with standard_conforming_strings off. A batch
+// can switch that setting off before a DO body is parsed, so
+// isVerifiedRollbackBatch() requires the verdict to hold under BOTH readings
+// (Codex App, #1092). Always false outside that check.
+let plainBackslashEscapes = false;
 // A character that can continue a PostgreSQL identifier (non-ASCII included).
 const IDENT_CHAR_RE = /[A-Za-z0-9_$\u0080-￿]/;
 // A dollar-quote opener, with PostgreSQL's tag rules: non-ASCII letters are
@@ -127,7 +133,7 @@ function stripDollarQuotedCore(sql, keepBody) {
     if (ch === "'" || escapeString) {
       let j = i + (escapeString ? 2 : 1);
       while (j < n) {
-        if (escapeString && src[j] === "\\") { j += Math.min(2, n - j); continue; }
+        if ((escapeString || plainBackslashEscapes) && src[j] === "\\") { j += Math.min(2, n - j); continue; }
         if (src[j] === "'" && src[j + 1] === "'") { j += 2; continue; }
         if (src[j] === "'") { j++; break; }
         j++;
@@ -203,7 +209,7 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
     if (ch === "'" || escapeString) {
       let j = i + (escapeString ? 2 : 1);
       while (j < n) {
-        if (escapeString && src[j] === "\\") { j += Math.min(2, n - j); continue; }
+        if ((escapeString || plainBackslashEscapes) && src[j] === "\\") { j += Math.min(2, n - j); continue; }
         if (src[j] === "'" && src[j + 1] === "'") { j += 2; continue; }
         if (src[j] === "'") { j++; break; }
         j++;
@@ -282,7 +288,7 @@ function topLevelStatements(c) {
       let j = i + (esc ? 2 : 1);
       let closed = false;
       while (j < c.length) {
-        if (esc && c[j] === "\\") { j += 2; continue; }
+        if ((esc || plainBackslashEscapes) && c[j] === "\\") { j += 2; continue; }
         if (c[j] === "'" && c[j + 1] === "'") { j += 2; continue; }
         if (c[j] === "'") { j++; closed = true; break; }
         j++;
@@ -327,7 +333,7 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // The function-call half of OUT_OF_TX_RE, also refused outside a rollback-only
 // batch: none of these is a read, and no rollback undoes them.
 export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]*?\b(?:to|from)\s+(?:program\b|[eE]?'|\$)|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -400,9 +406,24 @@ export function callNormalizedSql(query) {
   return stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true }).replace(/"/g, "");
 }
 
+// A COPY statement whose target is not STDOUT/STDIN (a server file or
+// program). Statements are split on every `;`; a split inside a literal only
+// makes a piece look like a server COPY, which refuses.
+export function hasServerCopy(sql) {
+  const code = stripCommentsQuoteAware(String(sql || ""), { intoDollarBodies: true });
+  return code.split(";").some((s) => /(?:^|\b(?:begin|then|else|loop))\s*copy\b/i.test(s) &&
+    !/\b(?:to\s+stdout|from\s+stdin)\b/i.test(s));
+}
+
 export function isVerifiedRollbackBatch(query) {
+  if (!verifyRollbackOnce(query)) return false;
+  plainBackslashEscapes = true;
+  try { return verifyRollbackOnce(query); } finally { plainBackslashEscapes = false; }
+}
+
+function verifyRollbackOnce(query) {
   const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
-  if (OUT_OF_TX_RE.test(callNormalizedSql(query))) return false;
+  if (OUT_OF_TX_RE.test(callNormalizedSql(query)) || hasServerCopy(query)) return false;
   // A literal continued on the next line ('a'<newline>'b') inherits an E''
   // prefix in PostgreSQL, which the walkers here do not model (Codex App,
   // #1092). No live smoke chain uses one, so such a batch is simply refused.
@@ -919,9 +940,10 @@ function classifySqlInner(query, realDataOk) {
   // 2b. COPY to or from a server program or file reaches outside the database,
   //     and no rollback undoes it (Luna, 2026-10-25). Plain COPY … FROM STDIN /
   //     TO STDOUT is not matched.
-  // No length window: a COPY statement of any size is checked, and a
-  // dollar-quoted file name counts as a file (Codex App, #1092).
-  if (/\bcopy\b[\s\S]*?\b(?:to|from)\s+(?:program\b|[eE]?'|\$)/i.test(stripCommentsQuoteAware(t))) {
+  // Allow-list, not a file-name pattern: a COPY is allowed only TO STDOUT or
+  // FROM STDIN; every other target (a file in any literal form, a program) is
+  // refused (Codex App, #1092: quoted, E'', dollar-quoted, overlong forms).
+  if (hasServerCopy(t)) {
     return {
       block: true,
       kind: "copy-program-or-file",

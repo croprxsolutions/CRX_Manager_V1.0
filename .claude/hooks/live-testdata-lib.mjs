@@ -48,7 +48,9 @@ const AUDIT_LOG_WRITE_RE = new RegExp(`\\b(?:insert\\s+into|update|delete\\s+fro
 // tables are legitimate scratch space for analysis and stay allowed.
 const DDL_STMT_RE = /(?:^|;)\s*(?:create(?!\s+(?:temp|temporary)\b)(?:\s+or\s+replace)?|alter|drop)\s+\S+/im;
 const GRANT_REVOKE_RE = /(?:^|;)\s*(?:grant|revoke)\b/im;
-const TRUNCATE_RE = /(?:^|;)\s*truncate\b/im;
+// Also inside a DO body, where a statement can follow BEGIN/THEN/ELSE/LOOP
+// (Luna, 2026-10-25: `DO $$ BEGIN TRUNCATE customers; … $$` slipped through).
+const TRUNCATE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*truncate\b/im;
 
 // Money-ish column assignment (column name on the LEFT of `=`) on a financial table.
 const FIN_UPDATE_RE = new RegExp(`\\bupdate\\s+${QUAL}(${tableAlt(FINANCIAL_TABLES)})"?\\b`, "i");
@@ -245,7 +247,8 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
 //      no RETURN, COMMIT, ROLLBACK or CALL statement that could skip or split it,
 //      and no outer EXCEPTION handler (the tail rule leaves no room for one).
 //      Without a leading BEGIN, earlier statements may only create pg_temp
-//      functions or temp tables, so nothing before the DO block writes on its own.
+//      functions or temp tables, or be DO blocks free of transaction control:
+//      one query string is one implicit transaction, undone by the final raise.
 // Anything that can act outside the transaction (dblink, pg_background, http
 // calls) disqualifies the batch, wherever it appears. Comments never count.
 //
@@ -306,7 +309,7 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // reach through dynamic SQL built from pieces (Luna, 2026-10-25). On 2026-10-25
 // the live database had none of dblink, pg_background, http, pg_net or
 // postgres_fdw installed.
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_lock(?:_shared)?|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]{0,400}?\bto\s+(?:program\b|')/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]{0,400}?\b(?:to|from)\s+(?:program\b|')/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -363,7 +366,14 @@ export function isVerifiedRollbackBatch(query) {
   if (!bodyStmts || bodyStmts.some((s) => SKIPS_RAISE_RE.test(s.text))) return false;
   // A label on the outermost block lets `EXIT <label>` jump past the raise.
   if (/^\s*<</.test(bodyStmts[0]?.text || "") || outerBlockHasHandler(bodyStmts)) return false;
-  if (!lead && !st.slice(lead, -1).every((s) => TEMP_SETUP_RE.test(s.text))) return false;
+  // Earlier statements without a leading BEGIN: temp setup, or other DO blocks
+  // free of transaction control. PostgreSQL runs a multi-statement query string
+  // as ONE implicit transaction (simple Query protocol), so the final raise
+  // undoes them too. A leading BEGIN is not needed for that, and leaves the
+  // connection in an aborted transaction after the raise (Luna, 2026-10-25).
+  const doBlockWithoutTxControl = (s) => DO_STMT_RE.test(s.text) && s.spans.length === 1 &&
+    (topLevelStatements(s.spans[0]) || [{ text: "commit" }]).every((x) => !SKIPS_RAISE_RE.test(x.text));
+  if (!lead && !st.slice(0, -1).every((s) => TEMP_SETUP_RE.test(s.text) || doBlockWithoutTxControl(s))) return false;
   return true;
 }
 
@@ -830,6 +840,17 @@ function classifySqlInner(query, realDataOk) {
       block: true,
       kind: "truncate",
       reason: "TRUNCATE wipes a live table and is never done via raw SQL here. If data really must be cleared, that is Mason's explicit call via the migration path.",
+    };
+  }
+
+  // 2b. COPY to or from a server program or file reaches outside the database,
+  //     and no rollback undoes it (Luna, 2026-10-25). Plain COPY … FROM STDIN /
+  //     TO STDOUT is not matched.
+  if (/\bcopy\b[\s\S]{0,400}?\b(?:to|from)\s+(?:program\b|')/i.test(stripCommentsQuoteAware(t))) {
+    return {
+      block: true,
+      kind: "copy-program-or-file",
+      reason: "COPY to or from a server program or file acts outside the database and is never undone by a rollback. Use COPY … FROM STDIN / TO STDOUT, or ask Mason.",
     };
   }
 

@@ -512,6 +512,13 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["extension installed, then reached by dynamic SQL", `BEGIN; CREATE EXTENSION dblink; ${rb(`EXECUTE 'SELECT dblink_' || 'exec(1)'; ${del}`)}`],
     ["session advisory lock survives the rollback", "BEGIN; SELECT pg_advisory_lock(42); ROLLBACK;"],
     ["another backend terminated", "BEGIN; SELECT pg_terminate_backend(123); ROLLBACK;"],
+    // Luna round 2 on #1092.
+    ["TRUNCATE inside a DO body", rb("TRUNCATE customers;")],
+    ["session advisory locks released", "BEGIN; SELECT pg_advisory_unlock_all(); ROLLBACK;"],
+    ["non-transactional logical message", "BEGIN; SELECT pg_logical_emit_message(false, 'x', 'y'); ROLLBACK;"],
+    ["COPY FROM PROGRAM", "BEGIN; CREATE TEMP TABLE x(a text); COPY x FROM PROGRAM 'touch /tmp/m'; ROLLBACK;"],
+    ["earlier DO block with a COMMIT, no BEGIN", `DO $a$ BEGIN ${del} COMMIT; END $a$; ${rb("")}`],
+    ["earlier plain write, no BEGIN", `${del} ${rb("")}`],
     ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
   ]) {
     ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);

@@ -38,7 +38,9 @@ actions through and guards that blocked harmless ones. This change does the firs
   UserPromptSubmit hooks as the bare body, opening with the harness's `[Subagent hand-back]` frame line
   and without the preamble and tags the stripping keyed on. Four audit reports latched a hold (and fired
   the ship reminder) in a session where Mason never said stop. Replaying those four real reports: all
-  four latched before, none after; a typed "stop" still latches.
+  four latched before, none after; a typed "stop" still latches. The match needs the harness's whole
+  frame line, exactly, then indented report lines, so a typed frame with "stop" after it on the same line
+  or the next one still latches (Luna and Sol).
 - `review-proof-guard.mjs` no longer denies Read, Grep or Glob on `.claude/session-state`; writes there
   are still denied.
 - Matchers: the migration gate runs only on `apply_migration` (it loaded a ~330 KB rule book on every

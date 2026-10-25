@@ -13,11 +13,13 @@ chose to keep as a follow-up (2026-10-25). Both are closed in `.claude/hooks/liv
 - **A tag somewhere in a delete or update no longer proves it touches fake rows.** Before,
   `DELETE FROM invoices WHERE id = 7 OR notes = '[E2E]'` passed. Now an UPDATE or DELETE
   (cancel/void included) counts as fake only when its own WHERE clause has, at the top level and
-  joined only by AND, `<column> = | LIKE | ILIKE '<text containing [E2E]>'`. Because the marker
+  joined only by AND, `<column> = | LIKE '<text containing [E2E]>'`. Because the marker
   test is ANDed in, the write can only touch rows that carry the marker. So
   `DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]'`, the example given for this gap, is
   safe and stays allowed: it removes invoice 7 only if invoice 7 is itself marked. Refused:
-  an OR or BETWEEN; NOT; a `USING`/`FROM` join; the marker inside a subquery
+  an OR or BETWEEN outside parentheses; NOT; ILIKE (it also matches a real `[e2e] …` row); a
+  backslash anywhere in the write (with `standard_conforming_strings` off, which a session can
+  set, a backslash can end a string early); a `USING`/`FROM` join; the marker inside a subquery
   (`id IN (SELECT 7 FROM customers WHERE name LIKE '[E2E]%')`); a tautology
   (`'[E2E]' = '[E2E]'`); and the marker only in the SET list (`SET notes = '[E2E]' WHERE id = 1`
   just labels a real row). An UPDATE/DELETE inside a DO block never counts as fake. Any name
@@ -33,8 +35,11 @@ chose to keep as a follow-up (2026-10-25). Both are closed in `.claude/hooks/liv
 - **Dollar quotes are read the way PostgreSQL reads them** (`dollarTagAt`, shared with the
   migration guards' stripping helpers). The old ASCII-only, 64-character tag pattern missed
   `$xé$…$xé$` and long tags, so `SELECT $xé$--$xé$; DELETE FROM invoices WHERE id = 7` had its
-  DELETE stripped away as a comment. Treating the `$x$` in `a$x$` as a quote opening could
-  swallow the SQL that followed. Both now classify correctly. (This flaw predates this change.)
+  DELETE stripped away as a comment. A tag glued to a letter or digit (`a$x$` is a name, `1$x$`
+  is a number then a quote) cannot be judged from one character, so the live guard now refuses
+  it outright (`ambiguous-dollar-quote`, raised by the automated security review). A string
+  literal holding such text is refused too; that false refusal is accepted. (This flaw predates
+  this change.)
 - **Speed:** a 340 KB literal packed with write words took 4 s to check and now takes 15 ms. A
   flood of unterminated writes is refused (`unclassifiable-writes`) instead of timing out.
 
@@ -53,16 +58,17 @@ inside a `DO` smoke block, and a CTE that deletes `[E2E]` rows.
 - Fake rows are inserted with `VALUES`, not `SELECT`.
 - Fake rows are updated or deleted with plain statements, not from inside a `DO` block.
 
-**Deliberately still refused (safe-direction false refusals, Luna round 2):** an OR anywhere
-after WHERE, including in `RETURNING` or a `CASE`; `LIKE … ESCAPE`; and a `DO` body written as a
-quoted string rather than `$$`.
+**Deliberately still refused (safe-direction false refusals, Luna rounds 2–3):** an OR outside
+parentheses anywhere after WHERE, including in `RETURNING` or a `CASE`; `LIKE … ESCAPE`; `E'…'`
+marker strings; and a `DO` body written as a quoted string rather than `$$`.
+(`INSERT INTO ONLY t`, which Luna round 3 raised, is not PostgreSQL syntax, so it runs nothing.)
 
 The refusal message explains each of these.
 
 **Accepted limits:** a marked INSERT can still attach a new row to a real parent. A write through
 an updatable view is not seen, because the view name is not on the table list (unchanged).
 
-**Proof:** `node .claude/hooks/guards.test.mjs` passes (467 assertions), and so does `npm run test:correction-guards`. Against origin/main's
+**Proof:** `node .claude/hooks/guards.test.mjs` passes (475 assertions), and so does `npm run test:correction-guards`. Against origin/main's
 classifier the new tests fail, and a 41-case probe showed the old guard allowing all 26 risky
 writes that the new one refuses. The hook-level tests run the real `live-testdata-guard.mjs`
 process and confirm that these are denied: the gap-1 example, a marked insert next to an unmarked

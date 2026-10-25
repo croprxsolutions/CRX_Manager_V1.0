@@ -47,7 +47,9 @@ const DML_VERB = `insert\\s+into|update(?:\\s+only)?|delete\\s+from(?:\\s+only)?
 // cancel/void; the same standard covers deletes from non-financial tables
 // (CodeRabbit, PR #352), and the AP/prepay/inventory tables joined the list in
 // Codex P1 2026-07-13.
-const WRITE_RE = new RegExp(`\\b(${DML_VERB})\\s+${QUAL}(${tableAlt(BUSINESS_TABLES)})"?\\b`, "gi");
+// `(?:"|\b)`, not `"?\b`: after a quoted name the closing quote must be part of
+// the match, or the INSERT head check below sees a stray `"` (Luna round 3).
+const WRITE_RE = new RegExp(`\\b(${DML_VERB})\\s+${QUAL}(${tableAlt(BUSINESS_TABLES)})(?:"|\\b)`, "gi");
 const CANCEL_VOID_SET_RE = /\bset\b[\s\S]*?status\s*=\s*'(?:cancelled|voided)'/i;
 
 // Any hand-written touch of the append-only audit log — [E2E] does NOT exempt this.
@@ -676,6 +678,18 @@ function classifySqlInner(query, realDataOk) {
   // The rolled-back-smoke structure below still reads the ORIGINAL text: the
   // RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK' marker lives inside a DO body, and a
   // COMMIT anywhere (even inside a DO body) must keep disqualifying the batch.
+  // A dollar-quote tag glued to a letter or digit (`a$x$`, `1$x$`) is read one
+  // way after a name and another after a number; either wrong guess can hide SQL
+  // as a string or a comment, so the ambiguous spelling is refused outright
+  // (automated security review, 2026-10-25).
+  if (/[A-Za-z0-9_$\u0080-￿]\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/.test(q)) {
+    return {
+      block: true,
+      kind: "ambiguous-dollar-quote",
+      reason: "This SQL has a dollar quote ($tag$ or $$) written right after a letter or digit, which can be read as part of a name or as a string. Put a space before the dollar quote.",
+    };
+  }
+
   const t = stripDollarQuoted(q);
 
   // 1. financial_audit_log is append-only, written only by triggers/RPCs — a Hard
@@ -830,7 +844,7 @@ function classifySqlInner(query, realDataOk) {
 //     overwrite a real row); INSERT … SELECT does not show its rows, so it is
 //     never exempt;
 //   - an UPDATE or DELETE has, at the top level of its own WHERE clause, a
-//     conjunct `<column> = | LIKE | ILIKE '<text containing [E2E]>'`, joined to
+//     conjunct `<column> = | LIKE '<text containing [E2E]>'`, joined to
 //     the rest only by AND, with no OR, no USING/FROM join and nothing nested.
 //     ANDing that conjunct narrows the write to rows that carry the marker, so
 //     `DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]'` touches invoice 7
@@ -847,7 +861,8 @@ function classifySqlInner(query, realDataOk) {
 const E2E_TARGET_HINT = "To work on fake data, an INSERT … VALUES must have an '[E2E]…' string value in every row, and an UPDATE or DELETE needs `AND <column> LIKE '[E2E]%'` (or `= '[E2E] …'`) at the top level of its own WHERE clause, outside any DO block (where a name may be a variable); a marker in a comment, another statement, the SET list or a subquery does not count.";
 
 const MARKER_IDENT = `(?:"[^"]+"|[a-z_][a-z0-9_$]*)`;
-const MARKER_PREDICATE_RE = new RegExp(`^(${MARKER_IDENT})(?:\\s*\\.\\s*(${MARKER_IDENT}))?\\s*(?:=|like|ilike)\\s*'((?:[^']|'')*)'$`, "i");
+// `=` and LIKE only: ILIKE would also match a real row named "[e2e] …" (Luna round 3).
+const MARKER_PREDICATE_RE = new RegExp(`^(${MARKER_IDENT})(?:\\s*\\.\\s*(${MARKER_IDENT}))?\\s*(?:=|like)\\s*'((?:[^']|'')*)'$`, "i");
 // Bare words that parse as values, not columns, so they can never name a marked row.
 const VALUE_KEYWORDS = new Set(["true", "false", "null", "user", "current_user", "session_user", "current_role",
   "system_user", "current_catalog", "current_schema", "current_date", "current_time", "current_timestamp",
@@ -953,6 +968,10 @@ function targetsFakeRows(verb, text, masked, inLiteral, headLen) {
   // A comment or dollar quote left at code level means the text could not be
   // cleaned, so code and data cannot be told apart.
   if (/--|\/\*|\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/.test(masked)) return false;
+  // With standard_conforming_strings off (settable per session, even in an earlier
+  // call) a backslash escapes a quote in an ordinary string, so where a literal
+  // ends cannot be known from the text (Luna round 3).
+  if (text.includes("\\")) return false;
   const flat = topLevel(masked);
   if (verb === "insert") {
     // Every row of a plain VALUES list must carry the marker: one marked row

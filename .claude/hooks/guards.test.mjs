@@ -293,13 +293,14 @@ eq(classifySql("UPDATE invoices SET status = 'voided' WHERE id = 5").kind, "fina
 eq(classifySql("DELETE FROM invoices WHERE id = 5").kind, "financial-delete", "financial delete still classified specifically");
 
 // ── [E2E] judged per write, from its own WHERE (2026-10-25, PR #1084 follow-up) ──
-// An UPDATE/DELETE is fake only when a top-level AND-ed `<column> =|LIKE|ILIKE
+// An UPDATE/DELETE is fake only when a top-level AND-ed `<column> =|LIKE
 // '…[E2E]…'` narrows it to marked rows; an INSERT only when its own text carries
 // an '[E2E]' string value.
 for (const sql of [
   "DELETE FROM customers WHERE name LIKE '[E2E]%'",
   "DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]'",
-  "DELETE FROM customers c WHERE c.name ILIKE '[E2E]%' AND (c.id = 1 OR c.id = 2) RETURNING c.id",
+  "DELETE FROM customers c WHERE c.name LIKE '[E2E]%' AND (c.id = 1 OR c.id = 2) RETURNING c.id",
+  "INSERT INTO \"public\".\"customers\" (name) VALUES ('[E2E] quoted')",
   "DELETE FROM ONLY customers WHERE \"name\" LIKE '[E2E]%'",
   "UPDATE invoices SET status = 'voided', total_cents = 0 WHERE notes LIKE '[E2E]%'",
   "INSERT INTO customers (name) VALUES ('[E2E] a;b')",
@@ -307,7 +308,6 @@ for (const sql of [
   "WITH d AS (DELETE FROM customers WHERE name LIKE '[E2E]%' RETURNING id) SELECT count(*) FROM d",
   "DO $$ DECLARE v uuid; BEGIN INSERT INTO customers (name) VALUES ('[E2E] X') RETURNING id INTO v; " +
     "RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
-  "DELETE FROM invoices WHERE notes = '[E2E] a$x$b'",
 ]) ok(!classifySql(sql).block, `[E2E]-targeted write allowed: ${sql.slice(0, 70)}`);
 // Inside a DO body any name may be a PL/pgSQL variable (`v_note = '[E2E]'` is always
 // true; a block label or a session-wide variable_conflict = use_variable can even
@@ -325,8 +325,16 @@ for (const sql of [
 eq(classifySql("SELECT $xé$--$xé$; DELETE FROM invoices WHERE id = 7").kind, "financial-delete", "a non-ASCII dollar tag is a string, not a comment");
 eq(classifySql(`SELECT $${"t".repeat(80)}$--$${"t".repeat(80)}$; DELETE FROM invoices WHERE id = 7`).kind, "financial-delete",
   "a dollar tag longer than 64 characters is a string, not a comment");
-eq(classifySql("SELECT 1 AS a$x$; DELETE FROM invoices WHERE id = 7; SELECT 1 AS b$x$").kind, "financial-delete",
-  "`a$x$` is an identifier and opens no dollar quote");
+// A tag glued to a letter or digit is ambiguous (`a$x$` is a name, `1$x$` a number
+// then a quote), so it is refused before any stripping (automated security review).
+for (const sql of [
+  "SELECT 1 AS a$x$; DELETE FROM invoices WHERE id = 7; SELECT 1 AS b$x$",
+  "SELECT 1$x$--$x$; DELETE FROM invoices WHERE id = 7",
+  "DO$$ BEGIN DELETE FROM customers WHERE name LIKE '[E2E]%'; END $$",
+  // Accepted false refusal: the check runs before quotes are read, so it also hits a literal.
+  "DELETE FROM invoices WHERE notes = '[E2E] a$x$b'",
+]) eq(classifySql(sql).kind, "ambiguous-dollar-quote", `glued dollar quote refused: ${sql.slice(0, 50)}`);
+ok(!classifySql("SELECT my$count, x$auth FROM t").block, "a `$` inside a name with no closing `$` is fine");
 for (const sql of [
   "COPY customers (name) FROM '/tmp/real.csv' WITH (FORMAT csv)",
   "COPY public.invoices FROM PROGRAM 'cat /tmp/x'",
@@ -366,6 +374,11 @@ for (const [sql, kind] of [
   ["INSERT INTO customers (name) VALUES ('[E2E] x') UNION ALL VALUES ('Real')", "real-insert"],
   ["INSERT INTO customers DEFAULT VALUES", "real-insert"],
   ["DELETE FROM customers WHERE name LIKE '[E2E]%' AND \"returning\" = TRUE OR id = 7", "real-delete"],
+  // Luna round 3: ILIKE also matches a real "[e2e] …" row; a backslash may end a
+  // literal early when standard_conforming_strings is off.
+  ["DELETE FROM customers WHERE name ILIKE '[E2E]%'", "real-delete"],
+  ["DELETE FROM customers WHERE name = '[E2E]\\' AND id = ' OR true", "real-delete"],
+  ["INSERT INTO customers (name) VALUES ('[E2E]\\'), ('Real')", "real-insert"],
   ["SELECT 1; DELETE FROM customers WHERE name = 'x'''; SELECT '[E2E]'", "real-delete"],
   ["DELETE FROM ONLY financial_audit_log WHERE id = 1", "audit-log-write"],
   ["INSERT INTO customers (name) VALUES ('Real') RETURNING '[E2E]'", "real-insert"],
@@ -426,7 +439,10 @@ eq(classifySql("CREATE OR REPLACE FUNCTION public.f() RETURNS void LANGUAGE sql 
 eq(classifySql("DO $$ BEGIN INSERT INTO financial_audit_log (a) VALUES (1); END $$;").kind, "audit-log-write", "audit-log insert inside a DO body still blocked");
 ok(!classifySql("DO $$ BEGIN PERFORM public.record_vendor_payment('00000000-0000-0000-0000-000000000000'); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;").block, "DO-block smoke calling a money RPC still allowed");
 // A $$ inside a plain string literal must not open a quote span that swallows real SQL.
-eq(classifySql("SELECT 'a$$b'; INSERT INTO financial_audit_log (a) VALUES (1); SELECT 'c$$d';").kind, "audit-log-write", "$$ inside string literals cannot hide a real audit-log write");
+// (Since 2026-10-25 a `$$` glued to a letter is refused before any stripping, so
+// only the refusal is asserted; the spaced form below still reaches the audit rule.)
+ok(classifySql("SELECT 'a$$b'; INSERT INTO financial_audit_log (a) VALUES (1); SELECT 'c$$d';").block, "$$ inside string literals cannot hide a real audit-log write");
+eq(classifySql("SELECT 'a $$ b'; INSERT INTO financial_audit_log (a) VALUES (1); SELECT 'c $$ d';").kind, "audit-log-write", "a spaced $$ inside string literals cannot hide a real audit-log write");
 // COMMIT inside a DO body can really commit — it must still disqualify a "rolled-back" batch.
 ok(classifySql("BEGIN; CREATE TABLE t (id int); DO $$ BEGIN PERFORM 1; COMMIT; END $$; ROLLBACK;").block, "COMMIT inside a DO body still disqualifies the smoke wrapper");
 

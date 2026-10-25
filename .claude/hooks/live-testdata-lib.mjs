@@ -333,32 +333,45 @@ const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*en
 function outerBlockHasHandler(stmts) {
   const stack = [];
   const OPENERS = new Set(["begin", "then", "else", "loop", "declare"]);
+  // FAIL CLOSED on any keyword used as a name: patching one spelling at a time
+  // did not converge (Codex App found `t.begin`, `THEN begin`, `t . case`).
+  // BEGIN/CASE/END/EXCEPTION next to a dot (spaces allowed), BEGIN anywhere but
+  // a block-opening position, or END mid-statement without an open CASE make
+  // the structure ambiguous, and an ambiguous body is refused.
+  const KEYWORDS = new Set(["begin", "case", "end", "exception"]);
   for (const s of stmts) {
-    const toks = [...s.text.toLowerCase().matchAll(/[a-z_][a-z0-9_]*/g)].map((m) => ({
-      w: m[0], dotted: m.index > 0 && s.text[m.index - 1] === ".",
-    }));
+    const lower = s.text.toLowerCase();
+    const toks = [...lower.matchAll(/[a-z_][a-z0-9_]*/g)].map((m) => {
+      const before = lower.slice(0, m.index).trimEnd();
+      const after = lower.slice(m.index + m[0].length).trimStart();
+      return { w: m[0], dotted: before.endsWith(".") || after.startsWith(".") };
+    });
     const words = toks.map((t) => t.w);
-    const structural = (i) => !toks[i].dotted && (i === 0 || OPENERS.has(words[i - 1]));
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if (toks[i].dotted) continue;
+      if (!KEYWORDS.has(w)) continue;
+      if (toks[i].dotted) return true;
       const top = stack[stack.length - 1];
       // Every CASE opens a level and the next END closes it (CASE expression or
-      // END CASE). Inside one, `begin` can only be a name (Codex App: `CASE WHEN
-      // true THEN begin …`), so it never opens a block there.
+      // END CASE).
       if (w === "case") { stack.push("case"); continue; }
       if (w === "end") {
         const next = words[i + 1];
         if (top === "case") { stack.pop(); if (next === "case") i++; continue; }
-        if (i !== 0) continue;
+        if (i !== 0) return true;
         if (next === "if" || next === "loop") { i++; continue; }
         if (stack.length === 0) return true;
         stack.pop();
         continue;
       }
-      if (top === "case") continue;
-      if (w === "begin" && structural(i)) stack.push("begin");
-      else if (w === "exception" && (i === 0 || words[i - 1] === "begin") && stack.length <= 1) return true;
+      if (w === "begin") {
+        if (top === "case" || !(i === 0 || OPENERS.has(words[i - 1]))) return true;
+        stack.push("begin");
+        continue;
+      }
+      // exception: a section keyword only at a statement start or right after
+      // BEGIN; elsewhere it is RAISE EXCEPTION or a name, which is harmless.
+      if ((i === 0 || words[i - 1] === "begin") && top !== "case" && stack.length <= 1) return true;
     }
   }
   return stack.length !== 0;

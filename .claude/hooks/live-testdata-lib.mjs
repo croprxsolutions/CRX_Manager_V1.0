@@ -376,6 +376,13 @@ export function isVerifiedRollbackBatch(query) {
   // literals are blanked. Both come from the same one-pass walk of the body.
   const bodyStmts = topLevelStatements(body);
   if (!bodyStmts || bodyStmts.some((s) => SKIPS_RAISE_RE.test(s.text))) return false;
+  // The raw tail match above can be fooled by literal contents, e.g.
+  // `PERFORM $m$raise exception 'SMOKE_PASS_ROLLBACK'$m$; END` (Codex App,
+  // #1092). In the tokenized body the last two statements must really be a
+  // RAISE EXCEPTION with a single-quoted message and the closing END.
+  const n = bodyStmts.length;
+  if (n < 2 || !/^end$/i.test(bodyStmts[n - 1].text) ||
+      !/^(?:[\s\S]*\bbegin\s+)?raise\s+exception\s+''(?:\s*,[\s\S]*|\s+using\s[\s\S]*)?$/i.test(bodyStmts[n - 2].text)) return false;
   // A label on the outermost block lets `EXIT <label>` jump past the raise.
   if (/^\s*<</.test(bodyStmts[0]?.text || "") || outerBlockHasHandler(bodyStmts)) return false;
   // Earlier statements without a leading BEGIN: temp setup, or other DO blocks

@@ -340,9 +340,17 @@ function outerBlockHasHandler(stmts) {
   return stack.length !== 0;
 }
 
+// Function-call text as PostgreSQL resolves it: comments removed everywhere
+// (`setval/**/(`) and double quotes dropped (`pg_catalog."setval"(`), so a
+// quoted or commented name cannot slip past a name check (Codex App, #1092).
+// Dropping quotes inside a string literal can only add matches, which refuses.
+export function callNormalizedSql(query) {
+  return stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true }).replace(/"/g, "");
+}
+
 export function isVerifiedRollbackBatch(query) {
   const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
-  if (OUT_OF_TX_RE.test(c)) return false;
+  if (OUT_OF_TX_RE.test(callNormalizedSql(query))) return false;
   const st = topLevelStatements(c);
   if (!st || st.length === 0) return false;
   const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);
@@ -882,7 +890,7 @@ function classifySqlInner(query, realDataOk) {
   //     "void_invoice" and destroy_customer slipped one). A real RPC call goes
   //     through the app. A sequence change is never undone by a ROLLBACK.
   //     currval/lastval remain allowed (true reads).
-  if (/\b(?:setval|nextval)\s*\(/i.test(t)) {
+  if (/\b(?:setval|nextval)\s*\(/i.test(callNormalizedSql(t))) {
     return {
       block: true,
       kind: "sequence-mutation",

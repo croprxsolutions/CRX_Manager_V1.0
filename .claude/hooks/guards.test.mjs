@@ -519,6 +519,11 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["COPY FROM PROGRAM", "BEGIN; CREATE TEMP TABLE x(a text); COPY x FROM PROGRAM 'touch /tmp/m'; ROLLBACK;"],
     ["earlier DO block with a COMMIT, no BEGIN", `DO $a$ BEGIN ${del} COMMIT; END $a$; ${rb("")}`],
     ["earlier plain write, no BEGIN", `${del} ${rb("")}`],
+    // Codex App on #1092: quoted or commented function names.
+    ["quoted setval inside a wrapper", "BEGIN; SELECT pg_catalog.\"setval\"('public.invoice_number_seq', 1); ROLLBACK;"],
+    ["setval with a comment before the bracket", "BEGIN; SELECT setval/**/('public.invoice_number_seq', 1); ROLLBACK;"],
+    ["quoted pg_terminate_backend", "BEGIN; SELECT \"pg_terminate_backend\"(123); ROLLBACK;"],
+    ["quoted nextval inside a smoke DO block", rb("PERFORM \"nextval\"('invoice_number_seq');")],
     ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
   ]) {
     ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);

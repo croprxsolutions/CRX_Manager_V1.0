@@ -1,0 +1,46 @@
+## 2026-10-25 — Live-data guard: the `[E2E]` fake-data tag is judged per write, from its own WHERE
+
+Follow-up to PR #1084, which shipped with two `[E2E]` gaps that Luna had rated BLOCKER and Mason
+chose to keep as a follow-up (2026-10-25). Both are closed in `.claude/hooks/live-testdata-lib.mjs`.
+
+- **One tag no longer exempts a whole batch of inserts/updates.** Before, `[E2E]` anywhere in the
+  SQL, a comment included, let every insert and update through, so
+  `UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]` changed a real invoice. Now each
+  write is judged by itself, with comments removed (DO-block bodies included). An INSERT must
+  carry an `'[E2E]…'` string value in its own text, and an `INSERT … ON CONFLICT DO UPDATE`
+  never counts, because it can overwrite a real row.
+- **A tag somewhere in a delete or update no longer proves it touches fake rows.** Before,
+  `DELETE FROM invoices WHERE id = 7 OR notes = '[E2E]'` passed. Now an UPDATE or DELETE
+  (cancel/void included) counts as fake only when its own WHERE clause has, at the top level and
+  joined only by AND, `<column> = | LIKE | ILIKE '<text containing [E2E]>'`. Because the marker
+  test is ANDed in, the write can only touch rows that carry the marker. So
+  `DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]'`, the example given for this gap, is
+  safe and stays allowed: it removes invoice 7 only if invoice 7 is itself marked. Refused:
+  an OR; NOT; a `USING`/`FROM` join; the marker inside a subquery
+  (`id IN (SELECT 7 FROM customers WHERE name LIKE '[E2E]%')`); a tautology
+  (`'[E2E]' = '[E2E]'`); the marker only in the SET list (`SET notes = '[E2E]' WHERE id = 1`
+  just labels a real row); and a write inside a string literal (dynamic SQL).
+- `UPDATE ONLY` / `DELETE FROM ONLY` were invisible to the guard and to the audit-log rule. Both
+  are now caught.
+
+The old test asserting that `UPDATE customers … WHERE id = 1 -- [E2E]` is allowed now asserts
+the opposite. Its premise was the gap itself: a comment says nothing about which rows change.
+The same goes for `UPDATE vendor_bills SET notes = '[E2E] test' WHERE id = 1`.
+
+**Normal fake-data work still passes:** `DELETE FROM customers WHERE name LIKE '[E2E]%'`, an
+`[E2E]` insert followed by a delete of the same row, `[E2E]` inserts and marked updates inside a
+`DO` smoke block, and a CTE that deletes `[E2E]` rows. **New requirement:** updating an `[E2E]`
+row by id needs `AND name LIKE '[E2E]%'` (or similar) beside the id. Child rows (order items,
+invoice items) must carry their own marker or be removed with their marked parent. A text check
+cannot see where a subquery or a foreign key leads, so it refuses rather than guesses. The
+refusal message explains this.
+
+**Accepted limits:** a marked INSERT can still attach a new row to a real parent. Code built at
+run time (`EXECUTE format(…)`) is refused as a delete or update only when its text spells the write out.
+
+**Proof:** `node .claude/hooks/guards.test.mjs` passes (430 assertions). Against
+origin/main's classifier the new tests fail, and a 41-case probe showed the old guard allowing
+all 26 risky writes that the new one refuses. The hook-level tests run the real
+`live-testdata-guard.mjs` process and confirm the gap-1 example, a marked insert next to an
+unmarked update, and an OR-ed delete are denied, while the cleanup delete and insert-then-delete
+are allowed.

@@ -266,13 +266,18 @@ eq(classifySql("UPDATE invoices SET notes = 'call back' WHERE total_cents = 500"
 // ── live-testdata UPDATE gap (FIX 5, 2026-07-13) ─────────────────────────
 ok(classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1").block, "real customer UPDATE without [E2E] blocked");
 eq(classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1").kind, "real-update", "kind reported for generic business-table UPDATE");
-ok(!classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1 -- [E2E]").block, "[E2E]-marked UPDATE allowed");
+// 2026-10-25: this comment form used to be allowed on purpose. A comment says
+// nothing about which rows the UPDATE touches, so customer 1 here is real.
+eq(classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1 -- [E2E]").kind, "real-update", "[E2E] in a comment does not exempt an UPDATE");
+ok(!classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1 AND name LIKE '[E2E]%'").block, "UPDATE narrowed to [E2E] rows allowed");
 ok(!classifySql("UPDATE some_log_table SET x = 1 WHERE id = 1").block, "UPDATE on a non-business table allowed");
 // Codex P1 2026-07-13: AP/prepay/inventory tables were missing from the lists.
 ok(classifySql("UPDATE vendor_bills SET notes = 'x' WHERE id = 1").block, "raw UPDATE of vendor_bills (AP side) blocked");
 ok(classifySql("UPDATE prepay_credits SET memo = 'x' WHERE id = 1").block, "raw UPDATE of prepay_credits blocked");
 ok(classifySql("UPDATE inventory_transactions SET notes = 'x' WHERE id = 1").block, "raw UPDATE of inventory_transactions blocked");
-ok(!classifySql("UPDATE vendor_bills SET notes = '[E2E] test' WHERE id = 1").block, "[E2E]-marked vendor_bills UPDATE stays allowed");
+// 2026-10-25: writing the marker INTO a real row only labels it; the WHERE decides the row.
+eq(classifySql("UPDATE vendor_bills SET notes = '[E2E] test' WHERE id = 1").kind, "real-update", "[E2E] in the SET list does not exempt an UPDATE");
+ok(!classifySql("UPDATE vendor_bills SET notes = 'x' WHERE notes LIKE '[E2E]%'").block, "vendor_bills UPDATE of [E2E] rows allowed");
 ok(classifySql("DELETE FROM vendor_payments WHERE id = 1").block, "DELETE from vendor_payments (now financial) blocked");
 // Codex P1 round 3: fully quoted schema qualification must not evade the classifier.
 ok(classifySql('UPDATE "public"."customers" SET phone = \'555\' WHERE id = 1').block, 'UPDATE "public"."customers" (quoted qualification) blocked');
@@ -286,6 +291,50 @@ ok(!classifySql("SELECT * FROM customers WHERE id = 1").block, "SELECT still all
 // More specific classifications still win over the generic catch-all:
 eq(classifySql("UPDATE invoices SET status = 'voided' WHERE id = 5").kind, "financial-cancel", "cancel/void still classified specifically, not as generic real-update");
 eq(classifySql("DELETE FROM invoices WHERE id = 5").kind, "financial-delete", "financial delete still classified specifically");
+
+// ── [E2E] judged per write, from its own WHERE (2026-10-25, PR #1084 follow-up) ──
+// An UPDATE/DELETE is fake only when a top-level AND-ed `<column> =|LIKE|ILIKE
+// '…[E2E]…'` narrows it to marked rows; an INSERT only when its own text carries
+// an '[E2E]' string value.
+for (const sql of [
+  "DELETE FROM customers WHERE name LIKE '[E2E]%'",
+  "DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]'",
+  "DELETE FROM customers c WHERE c.name ILIKE '[E2E]%' AND (c.id = 1 OR c.id = 2) RETURNING c.id",
+  "DELETE FROM ONLY customers WHERE \"name\" LIKE '[E2E]%'",
+  "UPDATE invoices SET status = 'voided', total_cents = 0 WHERE notes LIKE '[E2E]%'",
+  "INSERT INTO customers (name) VALUES ('[E2E] a;b')",
+  "INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'",
+  "WITH d AS (DELETE FROM customers WHERE name LIKE '[E2E]%' RETURNING id) SELECT count(*) FROM d",
+  "DO $$ DECLARE v uuid; BEGIN INSERT INTO customers (name) VALUES ('[E2E] X') RETURNING id INTO v; " +
+    "UPDATE customers SET phone = '1' WHERE id = v AND name LIKE '[E2E]%'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
+]) ok(!classifySql(sql).block, `[E2E]-targeted write allowed: ${sql.slice(0, 70)}`);
+for (const [sql, kind] of [
+  ["UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]", "financial-amount-update"],
+  ["INSERT INTO customers (name) VALUES ('Real') /* [E2E] */", "real-insert"],
+  ["INSERT INTO customers (name) VALUES ('[E2E] a'); INSERT INTO customers (name) VALUES ('Real')", "real-insert"],
+  ["INSERT INTO customers (id, name) VALUES (5, '[E2E] x') ON CONFLICT (id) DO UPDATE SET name = excluded.name", "real-insert"],
+  ["UPDATE customers SET name = '[E2E] relabelled' WHERE id = 3", "real-update"],
+  ["UPDATE ONLY customers SET phone = '1' WHERE id = 1", "real-update"],
+  ["UPDATE customers SET phone = '1' FROM orders o WHERE customers.id = 7 AND o.notes LIKE '[E2E]%'", "real-update"],
+  ["UPDATE invoices SET status = 'cancelled', notes = '[E2E]' WHERE id = 3", "financial-cancel"],
+  ["DELETE FROM invoices WHERE id = 7 OR notes = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE notes NOT LIKE '[E2E]%'", "financial-delete"],
+  ["DELETE FROM invoices WHERE NOT notes LIKE '[E2E]%'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]' IS NOT TRUE", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND '[E2E]' = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND user = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND (notes = '[E2E]')", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]' || ''", "financial-delete"],
+  ["DELETE FROM invoices WHERE id BETWEEN 1 AND notes = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id IN (SELECT 7 FROM customers WHERE name LIKE '[E2E]%')", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND EXISTS (SELECT 1 FROM customers WHERE name LIKE '[E2E]%')", "financial-delete"],
+  ["DELETE FROM invoices USING customers c WHERE invoices.id = 7 AND c.name LIKE '[E2E]%'", "financial-delete"],
+  ["WITH d AS (DELETE FROM invoices WHERE id = 7 RETURNING 1) SELECT * FROM customers WHERE name LIKE '[E2E]%'", "financial-delete"],
+  ["DO $$ BEGIN DELETE FROM invoices WHERE id = 7 -- AND notes LIKE '[E2E]%'\n; END $$", "financial-delete"],
+  ["DO $$ BEGIN EXECUTE 'DELETE FROM invoices WHERE notes LIKE ''[E2E]%'''; END $$", "financial-delete"],
+  ["SELECT 1; DELETE FROM customers WHERE name = 'x'''; SELECT '[E2E]'", "real-delete"],
+  ["DELETE FROM ONLY financial_audit_log WHERE id = 1", "audit-log-write"],
+]) eq(classifySql(sql).kind, kind, `not [E2E]-targeted, refused as ${kind}: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
 
 // ── dollar-quoted machine content (2026-07-11) ───────────────────────────
 // Function bodies re-emitted by a BEGIN;...;ROLLBACK; migration smoke are
@@ -454,8 +503,13 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     "DELETE FROM invoices WHERE id = 1 /* [E2E] */",
     "DELETE FROM customers WHERE name = '[E2E] X'; DELETE FROM customers WHERE id = 2",
     "UPDATE customers SET name = '[E2E] Y' WHERE id = 1; UPDATE orders SET status = 'cancelled' WHERE id = 3",
+    // 2026-10-25: inserts/updates are judged per write too, and a delete needs the
+    // marker in a predicate that narrows it to marked rows.
+    "UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]",
+    "INSERT INTO customers (name) VALUES ('[E2E] A'); UPDATE customers SET phone = '1' WHERE id = 2",
+    "DELETE FROM invoices WHERE id = 7 OR notes = '[E2E]'",
   ]) {
-    ok(sql(query).includes("deny"), `no marker: [E2E] in a comment or another statement does not exempt a delete/cancel (${query.slice(0, 50)})`);
+    ok(sql(query).includes("deny"), `no marker: [E2E] in a comment or another statement does not exempt a write (${query.slice(0, 50)})`);
   }
   eq(sql("DELETE FROM customers WHERE name LIKE '[E2E]%'").trim(), "", "no marker: [E2E] cleanup delete still allowed");
   eq(sql("INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'").trim(), "",

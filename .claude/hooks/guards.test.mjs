@@ -542,6 +542,8 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     // Standard reading: one string "\'; RETURN; PERFORM ". With
     // standard_conforming_strings off: '\'' is a string, then RETURN runs.
     ["standard_conforming_strings off, then backslash quotes hide a RETURN (Codex App)", `DO $a$ BEGIN PERFORM set_config('standard_conforming_strings', 'off', false); END $a$; DO $$ BEGIN ${del} PERFORM '\\''; RETURN; PERFORM '\\''; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["'to stdout' only inside the copied query's literal (Codex App)", rb(`${del} COPY (SELECT 'to stdout') TO PROGRAM 'touch /tmp/smoke.txt';`)],
+    ["\"to stdout\" only as a quoted identifier", rb(`${del} COPY (SELECT 1 AS "to stdout") TO PROGRAM 'touch /tmp/smoke.txt';`)],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

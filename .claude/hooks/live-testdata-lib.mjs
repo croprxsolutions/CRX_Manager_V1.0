@@ -407,11 +407,23 @@ export function callNormalizedSql(query) {
 }
 
 // A COPY statement whose target is not STDOUT/STDIN (a server file or
-// program). Statements are split on every `;`; a split inside a literal only
-// makes a piece look like a server COPY, which refuses.
+// program). Judged on statement text with string literals, quoted identifiers
+// and dollar bodies blanked (recursing into every dollar body), so a literal
+// such as 'to stdout' inside the copied query cannot stand in for the real
+// destination (Codex App, #1092). Anything unparseable refuses.
+function allStatementTexts(sql, out = []) {
+  const st = topLevelStatements(sql);
+  if (!st) return null;
+  for (const s of st) {
+    out.push(s.text);
+    for (const body of s.spans) if (!allStatementTexts(body, out)) return null;
+  }
+  return out;
+}
 export function hasServerCopy(sql) {
-  const code = stripCommentsQuoteAware(String(sql || ""), { intoDollarBodies: true });
-  return code.split(";").some((s) => /(?:^|\b(?:begin|then|else|loop))\s*copy\b/i.test(s) &&
+  const texts = allStatementTexts(stripCommentsQuoteAware(String(sql || ""), { intoDollarBodies: true }));
+  if (!texts) return /\bcopy\b/i.test(String(sql || ""));
+  return texts.some((s) => /(?:^|\b(?:begin|then|else|loop))\s*copy\b/i.test(s) &&
     !/\b(?:to\s+stdout|from\s+stdin)\b/i.test(s));
 }
 

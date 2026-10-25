@@ -1586,7 +1586,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     // A failed line read must stop the print or email: otherwise the customer gets a PDF
     // with no lines under the stored total. A read that returns no lines for an invoice with a
     // non-zero total is the same failure. Print and Email toast this through runCriticalAction.
-    const noLinesUnderTotal = (enrichedItems?.length ?? 0) === 0 && (invoice.total_amount_cents ?? 0) !== 0;
+    const printedTotalCents = invoice.total_amount_cents ?? items.reduce((s, i) => s + i.extended_cents, 0);
+    const noLinesUnderTotal = (enrichedItems?.length ?? 0) === 0 && printedTotalCents !== 0;
     if (itemsError || !enrichedItems || noLinesUnderTotal) {
       throw new Error('Could not load the invoice lines, so no PDF was made. Please try again.');
     }
@@ -1644,7 +1645,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         amount_cents: s.amount_cents,
       })) : undefined,
       items: groupReturnCreditDisplayItems(invoice.invoice_type, enrichedItems.map(mapInvoicePdfItem)),
-      total_amount_cents: invoice.total_amount_cents ?? items.reduce((s, i) => s + i.extended_cents, 0),
+      total_amount_cents: printedTotalCents,
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),
       paid_amount_cents: invoice.paid_amount_cents ?? 0,
       prepay_applied_cents: invoice.prepay_applied_cents ?? 0,

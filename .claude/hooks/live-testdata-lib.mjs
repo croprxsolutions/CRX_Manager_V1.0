@@ -85,6 +85,18 @@ function stripTrailingComments(s) {
   return t;
 }
 
+// The dollar-quote opening at src[i], or null. Matches PostgreSQL's scanner
+// (2026-10-25, Luna): a tag may hold any non-ASCII character and has no length
+// cap, and a `$` that continues an identifier (`a$x$` is one name) opens
+// nothing. The old ASCII-only, 66-character form missed `$xé$`, so a `--`
+// inside such a string was stripped as a comment along with the real SQL after it.
+const DOLLAR_TAG_RE = /\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/y;
+function dollarTagAt(src, i) {
+  if (/[A-Za-z0-9_$\u0080-￿]/.test(src[i - 1] || "")) return null;
+  DOLLAR_TAG_RE.lastIndex = i;
+  return DOLLAR_TAG_RE.exec(src);
+}
+
 // Strip dollar-quoted string bodies ($function$...$function$, $$...$$, any
 // $tag$...$tag$ pair) so classification sees only top-level hand-written SQL —
 // an INSERT INTO financial_audit_log inside a CREATE OR REPLACE FUNCTION body
@@ -127,7 +139,7 @@ function stripDollarQuotedCore(sql, keepBody) {
       out += src.slice(i, j); i = j; continue;
     }
     if (ch === "$") {
-      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i, i + 66));
+      const tag = dollarTagAt(src, i);
       if (tag) {
         const open = tag[0];
         const close = src.indexOf(open, i + open.length);
@@ -191,7 +203,7 @@ export function stripCommentsQuoteAware(sql, { intoDollarBodies = false } = {}) 
       out += src.slice(i, j + 1); i = j + 1; continue;
     }
     if (ch === "$") {
-      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i, i + 66));
+      const tag = dollarTagAt(src, i);
       if (tag) {
         const open = tag[0];
         const close = src.indexOf(open, i + open.length);
@@ -832,13 +844,10 @@ function classifySqlInner(query, realDataOk) {
 // A regex classifier cannot see what a subquery or a foreign key reaches, so
 // whatever it cannot prove is refused: clearing [E2E] child rows needs a marker
 // on the child row itself, or a delete of the marked parent.
-const E2E_TARGET_HINT = "To work on fake data, an INSERT … VALUES must have an '[E2E]…' string value in every row, and an UPDATE or DELETE needs `AND <column> LIKE '[E2E]%'` (or `= '[E2E] …'`) at the top level of its own WHERE clause (inside a DO block, qualify the column with the table or alias: `c.name LIKE '[E2E]%'`); a marker in a comment, another statement, the SET list or a subquery does not count.";
+const E2E_TARGET_HINT = "To work on fake data, an INSERT … VALUES must have an '[E2E]…' string value in every row, and an UPDATE or DELETE needs `AND <column> LIKE '[E2E]%'` (or `= '[E2E] …'`) at the top level of its own WHERE clause, outside any DO block (where a name may be a variable); a marker in a comment, another statement, the SET list or a subquery does not count.";
 
 const MARKER_IDENT = `(?:"[^"]+"|[a-z_][a-z0-9_$]*)`;
 const MARKER_PREDICATE_RE = new RegExp(`^(${MARKER_IDENT})(?:\\s*\\.\\s*(${MARKER_IDENT}))?\\s*(?:=|like|ilike)\\s*'((?:[^']|'')*)'$`, "i");
-// The alias after `UPDATE t` / `DELETE FROM t`, when the next word is not a clause keyword.
-const ALIAS_RE = new RegExp(`^\\s+(?:as\\s+)?(${MARKER_IDENT})`, "i");
-const NOT_ALIAS = new Set(["set", "where", "using", "returning"]);
 // Bare words that parse as values, not columns, so they can never name a marked row.
 const VALUE_KEYWORDS = new Set(["true", "false", "null", "user", "current_user", "session_user", "current_role",
   "system_user", "current_catalog", "current_schema", "current_date", "current_time", "current_timestamp",
@@ -860,7 +869,7 @@ function maskQuotes(code) {
   while (i < n) {
     const ch = code[i];
     if (ch === "$" && i >= dollarEnd) {
-      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(code.slice(i, i + 66));
+      const tag = dollarTagAt(code, i);
       if (tag) {
         const close = code.indexOf(tag[0], i + tag[0].length);
         dollarEnd = close === -1 ? n : close + tag[0].length;
@@ -917,17 +926,9 @@ function writeEnd(masked, start) {
   return masked.length;
 }
 
-// Unquoted identifiers fold to lower case; quoted ones keep their case.
-const identName = (ident) => (ident.startsWith('"') ? ident.slice(1, -1) : ident.toLowerCase());
-
-// `qualifier` is set inside a DO body, where a bare name such as `v_note` may be
-// a PL/pgSQL variable, not a column (`… AND v_note = '[E2E]'` is then always
-// true). There the column must be qualified with the table's name or alias.
-function isMarkerPredicate(conjunct, qualifier) {
+function isMarkerPredicate(conjunct) {
   const m = MARKER_PREDICATE_RE.exec(conjunct.trim());
-  if (!m || !m[3].includes("[E2E]")) return false;
-  if (!m[2]) return !qualifier && !VALUE_KEYWORDS.has(m[1].toLowerCase());
-  return !qualifier || identName(m[1]) === qualifier;
+  return !!m && m[3].includes("[E2E]") && (!!m[2] || !VALUE_KEYWORDS.has(m[1].toLowerCase()));
 }
 
 // One VALUES row, text[s..e) inside its parentheses: true when one of its
@@ -948,10 +949,10 @@ function rowCarriesMarker(text, masked, s, e) {
 }
 
 // `headLen` is the length of the `INSERT INTO t` / `UPDATE t` / `DELETE FROM t` head.
-function targetsFakeRows(verb, text, masked, inLiteral, qualifier, headLen) {
+function targetsFakeRows(verb, text, masked, inLiteral, headLen) {
   // A comment or dollar quote left at code level means the text could not be
   // cleaned, so code and data cannot be told apart.
-  if (/--|\/\*|\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.test(masked)) return false;
+  if (/--|\/\*|\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/.test(masked)) return false;
   const flat = topLevel(masked);
   if (verb === "insert") {
     // Every row of a plain VALUES list must carry the marker: one marked row
@@ -992,10 +993,10 @@ function targetsFakeRows(verb, text, masked, inLiteral, qualifier, headLen) {
   const body = flat.slice(bodyStart, bodyEnd);
   let from = bodyStart;
   for (const and of body.matchAll(/\band\b/gi)) {
-    if (isMarkerPredicate(text.slice(from, bodyStart + and.index), qualifier)) return true;
+    if (isMarkerPredicate(text.slice(from, bodyStart + and.index))) return true;
     from = bodyStart + and.index + 3;
   }
-  return isMarkerPredicate(text.slice(from, bodyEnd), qualifier);
+  return isMarkerPredicate(text.slice(from, bodyEnd));
 }
 
 // Every write on a live business table in `code`, each with its own text and
@@ -1025,13 +1026,28 @@ function findWrites(code) {
       };
     }
   }
-  // `#variable_conflict use_variable` (or the session setting) lets a variable
-  // win over a same-named qualified column, so no DO-body write is provable.
-  const variableConflict = /variable_conflict/i.test(code);
-  const writes = [];
+  // COPY … FROM loads rows (from a server file, or a shell command with
+  // FROM PROGRAM) without any INSERT; COPY (query) TO only reads.
   // Real statements end at their own `;` or `)`, so their extents barely overlap;
   // only malformed text (writes with no terminator) makes them pile up.
   let budget = 8 * code.length + 100000;
+  const tooTangled = {
+    block: true,
+    kind: "unclassifiable-writes",
+    reason: "This SQL holds so many overlapping, unterminated writes to live business tables that the guard cannot check them in time, so it is refused. End each statement with `;`.",
+  };
+  for (const m of masked.matchAll(/\bcopy\b/gi)) {
+    const end = writeEnd(masked, m.index);
+    if ((budget -= end - m.index) < 0) return tooTangled;
+    if (/\bfrom\b/i.test(topLevel(masked.slice(m.index, end)))) {
+      return {
+        block: true,
+        kind: "copy-from",
+        reason: "COPY … FROM loads rows into a live table (or runs a program with FROM PROGRAM) and is never done through execute_sql, even with REAL-DATA-OK. Write [E2E] rows with INSERT … VALUES.",
+      };
+    }
+  }
+  const writes = [];
   for (const m of code.matchAll(WRITE_RE)) {
     const start = m.index;
     const verb = m[1].toLowerCase().match(/^(insert|update|delete|merge)/)[1];
@@ -1041,21 +1057,15 @@ function findWrites(code) {
       continue;
     }
     const end = writeEnd(masked, start);
-    if ((budget -= end - start) < 0) {
-      return {
-        block: true,
-        kind: "unclassifiable-writes",
-        reason: "This SQL holds so many overlapping, unterminated writes to live business tables that the guard cannot check them in time, so it is refused. End each statement with `;`.",
-      };
-    }
+    if ((budget -= end - start) < 0) return tooTangled;
     const text = code.slice(start, end);
-    let qualifier = null;
-    if (inDollar[start]) {
-      const alias = ALIAS_RE.exec(code.slice(start + m[0].length, start + m[0].length + 200));
-      qualifier = alias && !NOT_ALIAS.has(alias[1].toLowerCase()) ? identName(alias[1]) : table;
-    }
-    const fake = !(qualifier && variableConflict) &&
-      targetsFakeRows(verb, text, masked.slice(start, end), inLiteral.subarray(start, end), qualifier, m[0].length);
+    // Inside a DO body any name in a WHERE may be a PL/pgSQL variable, not a
+    // column: `AND v_note = '[E2E]'` is always true, and a block label or a
+    // session-wide `plpgsql.variable_conflict = use_variable` can even capture a
+    // qualified `c.name`. So a DO-body UPDATE/DELETE is never provably fake (its
+    // VALUES literals still are, so marked inserts in smoke blocks pass).
+    const fake = !(inDollar[start] && verb !== "insert") &&
+      targetsFakeRows(verb, text, masked.slice(start, end), inLiteral.subarray(start, end), m[0].length);
     writes.push({ verb, table, text, fake, dynamic: false });
   }
   return { block: false, writes };

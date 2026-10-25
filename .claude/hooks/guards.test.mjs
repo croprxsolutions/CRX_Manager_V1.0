@@ -306,17 +306,33 @@ for (const sql of [
   "INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'",
   "WITH d AS (DELETE FROM customers WHERE name LIKE '[E2E]%' RETURNING id) SELECT count(*) FROM d",
   "DO $$ DECLARE v uuid; BEGIN INSERT INTO customers (name) VALUES ('[E2E] X') RETURNING id INTO v; " +
-    "UPDATE customers SET phone = '1' WHERE id = v AND customers.name LIKE '[E2E]%'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
-  "DO $$ BEGIN DELETE FROM customers AS c WHERE c.name LIKE '[E2E]%'; END $$",
+    "RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
+  "DELETE FROM invoices WHERE notes = '[E2E] a$x$b'",
 ]) ok(!classifySql(sql).block, `[E2E]-targeted write allowed: ${sql.slice(0, 70)}`);
-// Inside a DO body a bare name may be a PL/pgSQL variable, so `v_note = '[E2E]'`
-// says nothing about the row: the column must be qualified with the table or alias.
+// Inside a DO body any name may be a PL/pgSQL variable (`v_note = '[E2E]'` is always
+// true; a block label or a session-wide variable_conflict = use_variable can even
+// capture `c.name`), so a DO-body UPDATE/DELETE is never exempt (Luna round 2).
 for (const sql of [
   "DO $$ DECLARE v_note text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND v_note = '[E2E]'; END $$",
   "DO $$ BEGIN UPDATE customers SET phone = '1' WHERE id = 7 AND name LIKE '[E2E]%'; END $$",
-  "DO $$ BEGIN DELETE FROM customers c WHERE c.id = 7 AND customers.name LIKE '[E2E]%'; END $$",
-  "DO $$ #variable_conflict use_variable\n<<customers>> DECLARE name text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND customers.name = '[E2E]'; END $$",
-]) ok(classifySql(sql).block, `DO-body write without a provable column refused: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
+  "DO $$ <<c>> DECLARE name text := '[E2E]'; BEGIN DELETE FROM customers AS c WHERE c.id = 7 AND c.name = '[E2E]'; END $$",
+  // A non-ASCII dollar tag is still a DO body (PostgreSQL allows it).
+  "DO $xé$ DECLARE v_note text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND v_note = '[E2E]'; END $xé$;",
+]) ok(classifySql(sql).block, `DO-body update/delete refused: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
+// The dollar-quote scanner matches PostgreSQL's: a non-ASCII or long tag opens a
+// string (so the `--` inside it is data, not a comment hiding the DELETE after it),
+// and `a$x$` is one identifier, not a quote opening that swallows what follows.
+eq(classifySql("SELECT $xé$--$xé$; DELETE FROM invoices WHERE id = 7").kind, "financial-delete", "a non-ASCII dollar tag is a string, not a comment");
+eq(classifySql(`SELECT $${"t".repeat(80)}$--$${"t".repeat(80)}$; DELETE FROM invoices WHERE id = 7`).kind, "financial-delete",
+  "a dollar tag longer than 64 characters is a string, not a comment");
+eq(classifySql("SELECT 1 AS a$x$; DELETE FROM invoices WHERE id = 7; SELECT 1 AS b$x$").kind, "financial-delete",
+  "`a$x$` is an identifier and opens no dollar quote");
+for (const sql of [
+  "COPY customers (name) FROM '/tmp/real.csv' WITH (FORMAT csv)",
+  "COPY public.invoices FROM PROGRAM 'cat /tmp/x'",
+]) eq(classifySql(sql).kind, "copy-from", `COPY … FROM refused: ${sql.slice(0, 50)}`);
+ok(!classifySql("COPY customers TO STDOUT").block, "COPY … TO is a read");
+ok(classifySql("COPY (SELECT id FROM customers) TO STDOUT").kind !== "copy-from", "a FROM inside COPY's (query) is not COPY … FROM");
 for (const [sql, kind] of [
   ["UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]", "financial-amount-update"],
   ["INSERT INTO customers (name) VALUES ('Real') /* [E2E] */", "real-insert"],
@@ -334,7 +350,7 @@ for (const [sql, kind] of [
   ["DELETE FROM invoices WHERE id = 7 AND user = '[E2E]'", "financial-delete"],
   ["DELETE FROM invoices WHERE id = 7 AND (notes = '[E2E]')", "financial-delete"],
   ["DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]' || ''", "financial-delete"],
-  ["DELETE FROM invoices WHERE id BETWEEN 1 AND notes = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id BETWEEN 1 AND 10 AND notes = '[E2E]'", "financial-delete"],
   ["DELETE FROM invoices WHERE id IN (SELECT 7 FROM customers WHERE name LIKE '[E2E]%')", "financial-delete"],
   ["DELETE FROM invoices WHERE id = 7 AND EXISTS (SELECT 1 FROM customers WHERE name LIKE '[E2E]%')", "financial-delete"],
   ["DELETE FROM invoices USING customers c WHERE invoices.id = 7 AND c.name LIKE '[E2E]%'", "financial-delete"],

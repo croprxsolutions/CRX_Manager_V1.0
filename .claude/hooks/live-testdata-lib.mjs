@@ -394,6 +394,10 @@ export function callNormalizedSql(query) {
 export function isVerifiedRollbackBatch(query) {
   const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
   if (OUT_OF_TX_RE.test(callNormalizedSql(query))) return false;
+  // A literal continued on the next line ('a'<newline>'b') inherits an E''
+  // prefix in PostgreSQL, which the walkers here do not model (Codex App,
+  // #1092). No live smoke chain uses one, so such a batch is simply refused.
+  if (/'[ \t]*(?:\r?\n[ \t]*)+'/.test(c)) return false;
   const st = topLevelStatements(c);
   if (!st || st.length === 0) return false;
   const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);

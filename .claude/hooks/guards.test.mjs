@@ -537,6 +537,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["non-ASCII dollar-quote tag hides a RETURN (Codex App)", `DO $$ BEGIN ${del} PERFORM $é$'$é$; RETURN; PERFORM $é$'$é$; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["dollar-quote tag longer than 66 characters hides a RETURN (Codex App)", (() => { const t = `$${"a".repeat(80)}$`; return `DO $$ BEGIN ${del} PERFORM ${t}'${t}; RETURN; PERFORM ${t}'${t}; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`; })()],
     ["COPY FROM PROGRAM after 5000 characters of column list (Codex App)", `BEGIN; COPY customers (${Array.from({ length: 600 }, (_, k) => `c${k}`).join(", ")}) FROM PROGRAM 'touch /tmp/m'; ROLLBACK;`],
+    ["COPY TO a dollar-quoted file name (Codex App)", rb(`${del} COPY (SELECT 1) TO $f$/tmp/smoke.txt$f$;`)],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

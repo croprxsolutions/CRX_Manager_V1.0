@@ -327,7 +327,7 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // The function-call half of OUT_OF_TX_RE, also refused outside a rollback-only
 // batch: none of these is a read, and no rollback undoes them.
 export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]*?\b(?:to|from)\s+(?:program\b|[eE]?')|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]*?\b(?:to|from)\s+(?:program\b|[eE]?'|\$)|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -919,8 +919,9 @@ function classifySqlInner(query, realDataOk) {
   // 2b. COPY to or from a server program or file reaches outside the database,
   //     and no rollback undoes it (Luna, 2026-10-25). Plain COPY … FROM STDIN /
   //     TO STDOUT is not matched.
-  // No length window: a COPY statement of any size is checked (Codex App, #1092).
-  if (/\bcopy\b[\s\S]*?\b(?:to|from)\s+(?:program\b|[eE]?')/i.test(stripCommentsQuoteAware(t))) {
+  // No length window: a COPY statement of any size is checked, and a
+  // dollar-quoted file name counts as a file (Codex App, #1092).
+  if (/\bcopy\b[\s\S]*?\b(?:to|from)\s+(?:program\b|[eE]?'|\$)/i.test(stripCommentsQuoteAware(t))) {
     return {
       block: true,
       kind: "copy-program-or-file",

@@ -3491,6 +3491,26 @@ try {
         false,
         "an absolute path INSIDE the repository is an ordinary edit",
       );
+      // The allowed folder is the checkout the guard lives in, never the event's own working directory:
+      // a session started in an unrelated folder must not widen it (Sol, PR #1083).
+      assert.equal(
+        evaluateProductionAction({ toolName: "apply_patch", repoDir: linkRoot, patchRoot: linkRoot, eventCwd: outsideRoot, toolInput: { command: nativePatch("*** Add File: x.ts", "+a") } }).blocked,
+        true,
+        "an event working directory in an unrelated folder does not become an allowed root",
+      );
+      assert.equal(
+        evaluateProductionAction({ toolName: "apply_patch", repoDir: outsideRoot, patchRoot: linkRoot, eventCwd: linkRoot, toolInput: { command: nativePatch("*** Add File: src/fine.ts", "+a") } }).blocked,
+        false,
+        "the explicit patch root, not repoDir, decides what is inside",
+      );
+      const outsideEntrypoint = spawnSync(process.execPath, [guardPath], {
+        input: JSON.stringify({ tool_name: "apply_patch", cwd: outsideRoot, tool_input: { command: nativePatch("*** Add File: x.ts", "+a") } }),
+        encoding: "utf8",
+        timeout: GUARD_SPAWN_TIMEOUT_MS,
+        cwd: outsideRoot,
+      });
+      assert.equal(JSON.parse(outsideEntrypoint.stdout || "{}").hookSpecificOutput?.permissionDecision, "deny", "the real entry point run from an unrelated folder refuses a native patch there");
+      assert.match(String(JSON.parse(outsideEntrypoint.stdout || "{}").hookSpecificOutput?.permissionDecisionReason || ""), /outside the repository/, "and says why");
       // (A backslash UNC path is a plain relative filename on non-Windows hosts.)
       for (const unc of ["//server/share/file.ts", "//?/C:/x/file.ts", ...(process.platform === "win32" ? ["\\\\server\\share\\file.ts"] : [])]) {
         assert.equal(

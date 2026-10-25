@@ -1457,17 +1457,13 @@ export function pathIsInside(child, root) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-// The nearest ancestor (or the directory itself) that holds a `.git` entry, or
-// "" when there is none within 64 levels. A worktree's `.git` is a file.
-export function gitRootAbove(dir) {
-  let current = path.resolve(dir);
-  for (let depth = 0; depth < 64; depth += 1) {
-    if (existsSync(path.join(current, ".git"))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) return "";
-    current = parent;
-  }
-  return "";
+// The checkout this guard belongs to: the folder two levels above
+// `.codex/hooks/`. The hook command runs the copy inside the session's own
+// checkout (`$(git rev-parse --show-toplevel)/.codex/hooks/…`), so this is the
+// repository a native patch may edit. It is NOT taken from the event's working
+// directory, which would let a session started in an unrelated folder widen it.
+export function guardCheckoutRoot() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 // Where a patch destination really lands once symlinks and junctions on its
@@ -1511,6 +1507,9 @@ export function evaluateProductionAction({
   eventCwd = "",
   branch = "",
   repoDir = process.cwd(),
+  // The one folder a native patch may edit; main() passes the checkout this
+  // guard file lives in. A direct caller that omits it gets `repoDir`.
+  patchRoot = "",
   nowMs = Date.now(),
   runGit = defaultRunGit,
   runGh = defaultRunGh,
@@ -1582,7 +1581,7 @@ export function evaluateProductionAction({
   // The spelled path is not where the write lands when it passes through a
   // symlink or junction (`src/notes.ts` linked to a guard file). Only this
   // route follows links, because only this route's destinations are all known.
-  const patchRoots = nativePatch ? [baseRepoDir, eventRepoDir, gitRootAbove(eventRepoDir)].filter(Boolean) : [];
+  const patchRoots = nativePatch ? [patchRoot ? path.resolve(patchRoot) : baseRepoDir] : [];
   const patchRootsReal = patchRoots.map((root) => {
     try { return realpathSync.native(root); } catch { return root; }
   });
@@ -2165,6 +2164,7 @@ async function main() {
     toolInput: payload.tool_input ?? payload.toolInput ?? {},
     eventCwd: payload.cwd ?? "",
     repoDir: process.env.CODEX_PROJECT_DIR || process.cwd(),
+    patchRoot: guardCheckoutRoot(),
     hardGateDeadlineMs: hookDeadlineMs(CODEX_HOOK_TIMEOUT_MS, CODEX_HOOK_RESERVE_MS),
     findCodeRabbitSkip: (pullRequest, budget) => findCodeRabbitSkip({
       dirs: skipStateDirs([payload.cwd, process.env.CODEX_PROJECT_DIR, process.cwd()], undefined, budget),

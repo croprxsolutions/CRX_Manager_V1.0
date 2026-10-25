@@ -546,6 +546,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["\"to stdout\" only as a quoted identifier", rb(`${del} COPY (SELECT 1 AS "to stdout") TO PROGRAM 'touch /tmp/smoke.txt';`)],
     ["source table named stdin is not COPY's own FROM STDIN (Codex App)", rb(`CREATE TEMP TABLE stdin(x int); ${del} COPY (SELECT * FROM stdin) TO PROGRAM 'touch /tmp/smoke.txt';`)],
     ["replication-origin advance (Codex App)", "BEGIN; SELECT pg_replication_origin_advance('subscription_origin', '0/FFFFFFFF'); ROLLBACK;"],
+    ["Unicode-escaped setval name (Codex App)", rb(`DELETE FROM customers WHERE false; PERFORM pg_catalog.U&"set\\0076al"('public.invoice_number_seq', 1);`)],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
     ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],

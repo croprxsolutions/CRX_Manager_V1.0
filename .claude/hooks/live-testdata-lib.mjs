@@ -969,6 +969,17 @@ function classifySqlInner(query, realDataOk) {
     };
   }
 
+  // 2b2. A Unicode-escaped identifier (U&"set\0076al" is setval) can spell any
+  //      name past the checks below, so it is refused outright (Codex App,
+  //      #1092). U&'…' string literals are unaffected; a live smoke chain uses one.
+  if (/(?<![A-Za-z0-9_$\u0080-￿])u&"/i.test(stripCommentsQuoteAware(t, { intoDollarBodies: true }))) {
+    return {
+      block: true,
+      kind: "unicode-escaped-identifier",
+      reason: "This uses a Unicode-escaped identifier (U&\"…\"), which can spell a function or table name the guard cannot read. Write the name plainly.",
+    };
+  }
+
   // 2c. Calls whose effect no rollback undoes (remote calls, session locks,
   //     signalling backends, statistics resets, server file I/O) are refused
   //     everywhere, not only inside a rollback-only batch (Luna, 2026-10-25).

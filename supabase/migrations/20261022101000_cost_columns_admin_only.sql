@@ -94,6 +94,9 @@ BEGIN
     RAISE EXCEPTION 'COST_LOCK_NOT_IN_TRANSACTION: apply this file as one transaction (scripts/apply-migration-file.mjs, or psql -1 -v ON_ERROR_STOP=1)';
   END IF;
   IF to_regclass('public.invoices_postable') IS NULL
+     -- The screens read the version from it as authenticated (live 2026-10-25: SELECT for authenticated, none for anon).
+     OR NOT has_table_privilege('authenticated', 'public.invoices_postable', 'SELECT')
+     OR has_table_privilege('anon', 'public.invoices_postable', 'SELECT')
      OR NOT EXISTS (SELECT 1 FROM pg_class c, unnest(c.reloptions) o
                      WHERE c.oid = 'public.invoices_postable'::regclass AND o IN ('security_invoker=true', 'security_invoker=on'))
      OR (SELECT string_agg(attname, ',' ORDER BY attname) FROM pg_attribute
@@ -221,6 +224,39 @@ BEGIN
                               'public.commissions'::regclass));
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: these API-executable functions take or return a whole locked row and would fail or leak once cost is revoked; move them to an id-based form first: %', v_bad;
+  END IF;
+
+  -- Column grants cannot close a SECURITY DEFINER function that reads cost and hands it back. Each such
+  -- function an API role can execute was read live on 2026-10-25: it is admin-only, blanks cost for
+  -- non-admins, or returns none. Refuse on one that is not on that reviewed list (read it first).
+  SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_bad
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+   WHERE p.prosecdef AND p.prokind = 'f'
+     AND (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))
+     AND p.prosrc ~* '(current_cost|total_cost|unit_cost|cost_cents|cost_per|cost_at|profit|margin|snapshot_data|cogs)'
+     AND regexp_replace(p.oid::regprocedure::text, '^public[.]', '') NOT IN (
+       'admin_get_application_service_costs(uuid)', 'admin_save_application_service(uuid,text,bigint,bigint,boolean,integer,uuid,text)',
+       'admin_set_application_service_cost(uuid,bigint,text)', 'approve_supplier_price_import(uuid,uuid[],uuid,text)',
+       'bulk_import_order(text,uuid,text,numeric,numeric,numeric,numeric,date,jsonb,text,text)', 'consolidate_draft_invoices(uuid,uuid,text)',
+       'correct_supplier_price_observation(uuid,text,text,uuid,text)', 'create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)',
+       'create_job_from_quote_section(uuid,uuid,uuid,text)', 'create_pricing_workbook_export(uuid[],uuid,text)',
+       'create_quote_from_template(uuid,uuid,uuid,text)', 'create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)',
+       'dashboard_summary()', 'financial_dashboard_summary()', 'get_admin_cost_fields(text,uuid[])', 'get_bottom_line_pnl(date,date)',
+       'get_customer_year_end_summary(uuid,integer)', 'get_detailed_statement_data(uuid,date,text)', 'get_field_profitability(text)',
+       'get_gross_sales_report(date,date,text)', 'get_inventory_cost_report()', 'get_inventory_position()', 'get_monthly_summary(date,date)',
+       'get_product_cost_basis_workspace(uuid)', 'get_product_price_history(uuid)', 'get_profitability_report(text,date,date)',
+       'get_quote_versions(uuid)', 'get_sales_detail_report(date,date,uuid,uuid[],uuid,text,integer)',
+       'get_sales_summary_report(text,date,date,uuid,uuid[],uuid,text,integer)', 'get_season_comparison(integer,integer)',
+       'get_supplier_market_evidence(uuid[])', 'get_supplier_price_import(uuid)', 'get_supplier_quote_sheet(uuid)',
+       'load_recipe_into_job(uuid,uuid,text)', 'manual_inventory_add(uuid,text,numeric,text,uuid,text,numeric,text,numeric,numeric)',
+       'match_quick_receive_items(jsonb,text)', 'preview_product_cost_basis_changes(text,uuid,jsonb,uuid,text)',
+       'rollover_quote_to_season(uuid,integer,uuid,text)', 'save_purchase_order(uuid,jsonb,jsonb,uuid,text)',
+       'save_quote(uuid,jsonb,jsonb,uuid,text)', 'set_purchase_order_item_costs(uuid,jsonb,text,uuid,text)',
+       'stage_supplier_price_import(uuid,date,text,text,text,text,text,jsonb,uuid,text)', 'transfer_invoice_to_job(uuid,uuid,text)',
+       'trg_recalc_order_totals()', 'update_vendor_bill(uuid,bigint,bigint,date,date,text,text,boolean,text)');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'COST_LOCK_PREFLIGHT: API-executable SECURITY DEFINER functions read cost and were not reviewed for returning it (read them, then add them here): %', v_bad;
   END IF;
 
   -- No view or materialized view may read a cost column (a definer view would keep exposing it; an

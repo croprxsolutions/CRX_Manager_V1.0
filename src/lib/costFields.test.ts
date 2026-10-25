@@ -216,6 +216,11 @@ function ungrantedNewColumns(sql: string): string[] {
       const column = add[1].toLowerCase();
       if (['constraint', 'primary', 'unique', 'foreign', 'check', 'exclude'].includes(column)) continue;
       if ((COST_COLUMNS[table as CostTable] as readonly string[] | undefined)?.includes(column)) continue;
+      // A new field that reads like cost must be decided on: listed in COST_COLUMNS (admin-only), or renamed.
+      if (/cost|profit|margin|cogs/.test(column)) {
+        missing.push(`${table}.${column}: looks like a cost field; add it to COST_COLUMNS or rename it`);
+        continue;
+      }
       for (const [privilege, role] of requiredGrants(table)) {
         // Each privilege needs its own list: `GRANT SELECT, REFERENCES (cols)` scopes only REFERENCES.
         const grant = new RegExp(`GRANT\\s+(?:[A-Z]+\\s*,\\s*)*${privilege}\\s*\\(([^)]*)\\)\\s*ON\\s+(?:TABLE\\s+)?(?:public\\.)?"?${table}"?\\s+TO\\s+[^;]*\\b${role}\\b`, 'gi');
@@ -256,6 +261,9 @@ describe('new columns on the column-carved cost tables ship with their grants', 
     expect(ungrantedNewColumns('ALTER TABLE public.invoices ADD COLUMN zz_new text;\nGRANT UPDATE (zz_new) ON public.invoices TO authenticated;')).toEqual(ALL_READS('invoices', 'zz_new'));
     // A new cost field stays ungranted on purpose; a constraint is not a column; other tables are out of scope.
     expect(ungrantedNewColumns('ALTER TABLE public.invoices ADD COLUMN total_cost_cents bigint;')).toEqual([]);
+    // An unlisted cost-like field is refused even when it is granted: it would be readable by reps.
+    expect(ungrantedNewColumns('ALTER TABLE public.products ADD COLUMN replacement_cost_cents bigint;\nGRANT SELECT (replacement_cost_cents) ON public.products TO authenticated, anon;'))
+      .toEqual(['products.replacement_cost_cents: looks like a cost field; add it to COST_COLUMNS or rename it']);
     expect(ungrantedNewColumns('ALTER TABLE public.invoices ADD CONSTRAINT zz_ck CHECK (true);')).toEqual([]);
     expect(ungrantedNewColumns('ALTER TABLE public.customers ADD COLUMN zz_new text;')).toEqual([]);
   });

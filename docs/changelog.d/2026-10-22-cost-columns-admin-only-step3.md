@@ -49,4 +49,8 @@ posting versions now reads the view's function, and two test fixtures read admin
 whole-row check now also refuses a signed-in-executable function that RETURNS a locked row (or has one as an
 OUT/TABLE column, or takes or returns an array of them): a definer one would keep handing out cost. Live has
 none besides the old `invoice_post_version`, which this file drops first. The proof runs the posting-version
-rollback smoke before and after the lock.
+rollback smoke before and after the lock. Luna rounds 3 and 4 added three more refusals: a partly narrowed read
+of a generated column; the `invoices_postable` view not readable by signed-in users (or readable by signed-out
+ones); and any signed-in-executable SECURITY DEFINER function that reads cost but is not one of the 45 reviewed
+live on 2026-10-25, so the review above is re-checked at apply time rather than trusted. The new-column test
+guard also refuses a new column named like cost, profit or margin that is not listed as a cost field.

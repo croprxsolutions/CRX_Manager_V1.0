@@ -1605,6 +1605,14 @@ export function evaluateProductionAction({
     if (!patchRootsReal.some((root) => pathIsInside(landed, root))) {
       return denied(`CODEX PRODUCTION GATE: the patch destination ${destination} resolves through a link to ${landed}, outside the repository, so it is refused. A native patch may only edit files in this repository.`);
     }
+    // The review state directory holds the proofs AND Mason's CodeRabbit waivers
+    // (coderabbit-skip-*.json), whose filenames no basename list covers. A path
+    // spelled outside it that lands inside it is a link into it: refused. (A path
+    // spelled inside it is judged by review-proof-guard, which keeps its single
+    // acknowledgment-file exception.) Codex App P1, PR #1083.
+    if (reviewStateDirectoryMentioned(landed) && !reviewStateDirectoryMentioned(spelled)) {
+      return denied(`CODEX PRODUCTION GATE: the patch destination ${destination} resolves through a link into the wrapper-owned review state directory (${landed}), which holds the review proofs and Mason's waivers; it cannot be changed through a patch.`);
+    }
     // The gate-deciding files beyond the short protected list (.husky, workflows,
     // every other hook, the proof/validator scripts): a path-field writer aimed
     // at one is refused, spelled or reached through a link (Sol, PR #1083).

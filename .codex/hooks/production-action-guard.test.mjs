@@ -3463,8 +3463,9 @@ try {
       symlinkSync(outsideRoot, path.join(linkRoot, "src", "escape"), "junction");
       const outsideCases = [
         ["an absolute path elsewhere on the machine", path.join(outsideRoot, "stolen.txt")],
-        ["a home-directory style absolute path", "C:/Users/someone/.ssh/authorized_keys"],
-        ["a POSIX absolute path", "/etc/cron.d/job"],
+        // `C:/…` is an absolute path only on Windows; elsewhere it is a relative name inside the repository.
+        ...(process.platform === "win32" ? [["a home-directory style absolute path", "C:/Users/someone/.ssh/authorized_keys"]] : []),
+        ["a rooted absolute path", "/etc/cron.d/job"],
         ["a link inside the repo that leads out", "src/escape/new-file.ts"],
         ["a sibling folder sharing the repo name prefix", `${linkRoot.replaceAll("\\", "/")}-sibling/file.ts`],
       ];
@@ -3490,7 +3491,8 @@ try {
         false,
         "an absolute path INSIDE the repository is an ordinary edit",
       );
-      for (const unc of ["//server/share/file.ts", "\\\\server\\share\\file.ts", "//?/C:/x/file.ts"]) {
+      // (A backslash UNC path is a plain relative filename on non-Windows hosts.)
+      for (const unc of ["//server/share/file.ts", "//?/C:/x/file.ts", ...(process.platform === "win32" ? ["\\\\server\\share\\file.ts"] : [])]) {
         assert.equal(
           evaluateProductionAction({ toolName: "apply_patch", toolInput: { command: nativePatch(`*** Add File: ${unc}`, "+a") } }).blocked,
           true,
@@ -3503,6 +3505,9 @@ try {
     const linkCases = [
       ["file inside a linked directory", "src/linked-dir/production-action-guard.mjs", true],
       ["a file reached through a link to .husky", "src/linked-husky/pre-push", true],
+      // A waiver file's name matches no protected basename, so only the directory rule stops it (Codex App P1).
+      ["a CodeRabbit waiver created through a link to the state directory", "docs/linked-state/coderabbit-skip-abc-pr1.json", true],
+      ["any other new file inside the state directory through a link", "docs/linked-state/anything.txt", true],
       ["new file inside a linked proof directory", "docs/linked-state/claude-review-push.json", true],
       ["a junction whose target does not resolve", "src/dangling-dir/new-file.ts", true],
       ["a dot-dot after a linked directory", "src/linked-dir/../hooks/production-action-guard.mjs", true],

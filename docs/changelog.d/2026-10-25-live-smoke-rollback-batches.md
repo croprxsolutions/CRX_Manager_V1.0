@@ -28,7 +28,12 @@ test, which exempted DDL, accepted `BEGIN; <DDL>; END; … ROLLBACK;`, and END i
 now uses the same verified check. RPC calls inside a DO body (`PERFORM save_x()`, `v := save_x()`) or a
 `CALL proc()` were never scanned, because the scanner required the word SELECT; outside a verified
 rollback batch they are now refused. TRUNCATE inside a DO body is refused (it was only caught at the
-start of a statement), and COPY to or from a server program or file is refused everywhere. Real live
+start of a statement, and now also in a literal `EXECUTE 'TRUNCATE …'`), and COPY to or from a server
+program or file (including `E'…'` names) is refused everywhere. Calls whose effect no rollback undoes
+(remote calls, session locks, signalling backends, statistics resets, server file I/O) are refused
+everywhere too, and function names are checked with comments and double quotes removed, so
+`pg_catalog."setval"(` or `setval/**/(` cannot slip past (Codex App). Temp functions in a native or
+untrusted language (C, internal, plpython…) disqualify a batch. Real live
 writes outside such a batch are otherwise unchanged.
 
 **Proof.** All 69 live-runnable smoke chains classify as allowed (before: 65 refused), with or without a
@@ -37,9 +42,10 @@ outer block left with EXIT, early RETURN, COMMIT/END mid-batch, CALL, dblink, a 
 block, a raise only in a string or comment, quote and `$tag$` tricks, END or COMMIT AND CHAIN before
 ROLLBACK, a variable or quoted identifier named raise/end, CREATE EXTENSION plus dynamic SQL, session
 advisory locks) are refused, and RPC calls via PERFORM, assignment or CALL are refused outside such a
-batch. Guard suite: 552 assertions.
+batch. Guard suite: 568 assertions.
 
-**Residual risk, accepted.** A text check cannot follow dynamic SQL. A batch that assembles a built-in
+**Residual risk, accepted.** "Rolled back" means every table write is undone; two things are not. A
+sequence advanced inside a called RPC keeps its gap (see above). And a text check cannot follow dynamic SQL. A batch that assembles a built-in
 non-transactional call from string pieces (for example `EXECUTE 'SELECT pg_advisory_' || 'lock(42)'`)
 gets past it; the worst outcomes found are a lock held until the connection closes or a signalled
 backend, never a persisted data write. Refusing all assembled EXECUTEs would block 20+ existing smoke

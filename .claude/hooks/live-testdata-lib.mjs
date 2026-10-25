@@ -50,7 +50,8 @@ const DDL_STMT_RE = /(?:^|;)\s*(?:create(?!\s+(?:temp|temporary)\b)(?:\s+or\s+re
 const GRANT_REVOKE_RE = /(?:^|;)\s*(?:grant|revoke)\b/im;
 // Also inside a DO body, where a statement can follow BEGIN/THEN/ELSE/LOOP
 // (Luna, 2026-10-25: `DO $$ BEGIN TRUNCATE customers; … $$` slipped through).
-const TRUNCATE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*truncate\b/im;
+// A literal EXECUTE 'TRUNCATE …' (or EXECUTE format('TRUNCATE …')) counts too.
+const TRUNCATE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*truncate\b|\bexecute\s+(?:format\s*\(\s*)?[eE]?'\s*truncate\b/im;
 
 // Money-ish column assignment (column name on the LEFT of `=`) on a financial table.
 const FIN_UPDATE_RE = new RegExp(`\\bupdate\\s+${QUAL}(${tableAlt(FINANCIAL_TABLES)})"?\\b`, "i");
@@ -309,7 +310,10 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // reach through dynamic SQL built from pieces (Luna, 2026-10-25). On 2026-10-25
 // the live database had none of dblink, pg_background, http, pg_net or
 // postgres_fdw installed.
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]{0,400}?\b(?:to|from)\s+(?:program\b|')/i;
+// The function-call half of OUT_OF_TX_RE, also refused outside a rollback-only
+// batch: none of these is a read, and no rollback undoes them.
+export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\bcopy\b[\s\S]{0,4000}?\b(?:to|from)\s+(?:program\b|[eE]?')|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -854,11 +858,23 @@ function classifySqlInner(query, realDataOk) {
   // 2b. COPY to or from a server program or file reaches outside the database,
   //     and no rollback undoes it (Luna, 2026-10-25). Plain COPY … FROM STDIN /
   //     TO STDOUT is not matched.
-  if (/\bcopy\b[\s\S]{0,400}?\b(?:to|from)\s+(?:program\b|')/i.test(stripCommentsQuoteAware(t))) {
+  if (/\bcopy\b[\s\S]{0,4000}?\b(?:to|from)\s+(?:program\b|[eE]?')/i.test(stripCommentsQuoteAware(t))) {
     return {
       block: true,
       kind: "copy-program-or-file",
       reason: "COPY to or from a server program or file acts outside the database and is never undone by a rollback. Use COPY … FROM STDIN / TO STDOUT, or ask Mason.",
+    };
+  }
+
+  // 2c. Calls whose effect no rollback undoes (remote calls, session locks,
+  //     signalling backends, statistics resets, server file I/O) are refused
+  //     everywhere, not only inside a rollback-only batch (Luna, 2026-10-25).
+  const nonTx = NON_TX_CALL_RE.exec(callNormalizedSql(t));
+  if (nonTx) {
+    return {
+      block: true,
+      kind: "non-transactional-call",
+      reason: `This calls "${nonTx[0].replace(/\s*\($/, "")}()", whose effect lives outside the transaction (no rollback undoes it) and is not a read. Ask Mason before running it on the live database.`,
     };
   }
 

@@ -524,6 +524,11 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["setval with a comment before the bracket", "BEGIN; SELECT setval/**/('public.invoice_number_seq', 1); ROLLBACK;"],
     ["quoted pg_terminate_backend", "BEGIN; SELECT \"pg_terminate_backend\"(123); ROLLBACK;"],
     ["quoted nextval inside a smoke DO block", rb("PERFORM \"nextval\"('invoice_number_seq');")],
+    // Luna round 3 on #1092.
+    ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
+    ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],
+    ["native-language temp function", `CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE c AS 'x', 'y'; ${rb("PERFORM pg_temp.f();")}`],
+    ["statistics reset inside a wrapper", "BEGIN; SELECT pg_stat_reset(); ROLLBACK;"],
     ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
   ]) {
     ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);

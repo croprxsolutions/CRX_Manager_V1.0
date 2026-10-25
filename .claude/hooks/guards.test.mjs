@@ -548,6 +548,10 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["replication-origin advance (Codex App)", "BEGIN; SELECT pg_replication_origin_advance('subscription_origin', '0/FFFFFFFF'); ROLLBACK;"],
     ["Unicode-escaped setval name (Codex App)", rb(`DELETE FROM customers WHERE false; PERFORM pg_catalog.U&"set\\0076al"('public.invoice_number_seq', 1);`)],
     ["setval inside a supplied pg_temp function (Codex App)", "BEGIN; CREATE FUNCTION pg_temp.reset_seq() RETURNS bigint LANGUAGE sql AS $f$ SELECT setval('public.invoice_number_seq', 1) $f$; SELECT pg_temp.reset_seq(); ROLLBACK;"],
+    ["U&\" setval inside a supplied pg_temp function (Codex App)", "BEGIN; CREATE FUNCTION pg_temp.reset_seq() RETURNS bigint LANGUAGE sql AS $f$ SELECT pg_catalog.U&\"set\\0076al\"('public.invoice_number_seq', 1) $f$; SELECT pg_temp.reset_seq(); ROLLBACK;"],
+    ["E'' function body spelling setval", String.raw`BEGIN; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS E'SELECT set\x76al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
+    ["U&'' function body spelling setval", String.raw`BEGIN; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS U&'SELECT set\0076al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
+    ["plain function body with a backslash escape", String.raw`BEGIN; SET standard_conforming_strings = off; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS 'SELECT set\166al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
     ["consuming logical-slot read (Codex App)", "BEGIN; SELECT * FROM pg_logical_slot_get_changes('existing_slot', NULL, NULL); ROLLBACK;"],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],

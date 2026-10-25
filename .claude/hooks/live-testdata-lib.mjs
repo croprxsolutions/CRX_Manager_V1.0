@@ -448,6 +448,11 @@ function verifyRollbackOnce(query) {
   // prefix in PostgreSQL, which the walkers here do not model (Codex App,
   // #1092). No live smoke chain uses one, so such a batch is simply refused.
   if (/'[ \t]*(?:\r?\n[ \t]*)+'/.test(c)) return false;
+  // A function body written as an escape string (E'…', U&'…', or a plain
+  // literal with a backslash, which escapes when standard_conforming_strings
+  // is off) can spell setval or any name the checks read past (Codex App,
+  // #1092). Smoke chains use dollar-quoted bodies, so such a batch is refused.
+  if (/\bas\s*(?:(?:e|u&)'|'(?:[^']|'')*\\)/i.test(c)) return false;
   const st = topLevelStatements(c);
   if (!st || st.length === 0) return false;
   const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);
@@ -974,7 +979,8 @@ function classifySqlInner(query, realDataOk) {
   // 2b2. A Unicode-escaped identifier (U&"set\0076al" is setval) can spell any
   //      name past the checks below, so it is refused outright (Codex App,
   //      #1092). U&'…' string literals are unaffected; a live smoke chain uses one.
-  if (/(?<![A-Za-z0-9_$\u0080-￿])u&"/i.test(stripCommentsQuoteAware(t, { intoDollarBodies: true }))) {
+  //      Reads the ORIGINAL text, so a supplied function body is checked too.
+  if (/(?<![A-Za-z0-9_$\u0080-￿])u&"/i.test(stripCommentsQuoteAware(q, { intoDollarBodies: true }))) {
     return {
       block: true,
       kind: "unicode-escaped-identifier",

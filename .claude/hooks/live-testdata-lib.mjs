@@ -332,8 +332,8 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // postgres_fdw installed.
 // The function-call half of OUT_OF_TX_RE, also refused outside a rollback-only
 // batch: none of these is a read, and no rollback undoes them.
-export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
+export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -423,8 +423,14 @@ function allStatementTexts(sql, out = []) {
 export function hasServerCopy(sql) {
   const texts = allStatementTexts(stripCommentsQuoteAware(String(sql || ""), { intoDollarBodies: true }));
   if (!texts) return /\bcopy\b/i.test(String(sql || ""));
-  return texts.some((s) => /(?:^|\b(?:begin|then|else|loop))\s*copy\b/i.test(s) &&
-    !/\b(?:to\s+stdout|from\s+stdin)\b/i.test(s));
+  return texts.some((s) => {
+    if (!/(?:^|\b(?:begin|then|else|loop))\s*copy\b/i.test(s)) return false;
+    // Judge the direction at the statement's outer depth: a source query such
+    // as `(SELECT * FROM stdin)` is not COPY's own FROM STDIN (Codex App).
+    let outer = s, prev;
+    do { prev = outer; outer = outer.replace(/\([^()]*\)/g, " "); } while (outer !== prev);
+    return /[()]/.test(outer) || !/\b(?:to\s+stdout|from\s+stdin)\b/i.test(outer);
+  });
 }
 
 export function isVerifiedRollbackBatch(query) {

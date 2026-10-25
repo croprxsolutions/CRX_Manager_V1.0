@@ -1449,6 +1449,27 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
 // rules); the test suite imports them through here.
 export { nativePatchEnvelope, parseNativePatch };
 
+// Is `child` the same as, or below, `root`? Lexical, with the host's case rules
+// (Windows paths are case-insensitive).
+export function pathIsInside(child, root) {
+  const fold = (value) => (process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value));
+  const relative = path.relative(fold(root), fold(child));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+// The nearest ancestor (or the directory itself) that holds a `.git` entry, or
+// "" when there is none within 64 levels. A worktree's `.git` is a file.
+export function gitRootAbove(dir) {
+  let current = path.resolve(dir);
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (existsSync(path.join(current, ".git"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return "";
+    current = parent;
+  }
+  return "";
+}
+
 // Where a patch destination really lands once symlinks and junctions on its
 // existing part are followed, or `null` when that cannot be determined (a link
 // that does not resolve, an unreadable directory) so the caller refuses. The
@@ -1561,13 +1582,28 @@ export function evaluateProductionAction({
   // The spelled path is not where the write lands when it passes through a
   // symlink or junction (`src/notes.ts` linked to a guard file). Only this
   // route follows links, because only this route's destinations are all known.
+  const patchRoots = nativePatch ? [baseRepoDir, eventRepoDir, gitRootAbove(eventRepoDir)].filter(Boolean) : [];
+  const patchRootsReal = patchRoots.map((root) => {
+    try { return realpathSync.native(root); } catch { return root; }
+  });
   for (const destination of nativePatch?.paths ?? []) {
+    // A patch edits this repository. A destination outside it (an absolute path
+    // elsewhere on the machine, a workdir that points at another folder) is
+    // refused before any filesystem lookup, so nothing outside is ever touched.
+    const spelled = path.resolve(actionRepoDir, destination);
+    if (!patchRoots.some((root) => pathIsInside(spelled, root))) {
+      return denied(`CODEX PRODUCTION GATE: the patch destination ${destination} is outside the repository (${patchRoots[0] ?? "unknown"}), so it is refused. A native patch may only edit files in this repository.`);
+    }
     // The caps above bound the work; this is the backstop: a hook killed at its
     // time limit allows the action, so past the deadline the answer is no.
     if (clock() >= hardGateDeadlineMs) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
     const landed = realPathThroughLinks(destination, actionRepoDir, hardGateDeadlineMs, clock);
     if (landed === null) {
       return denied(`CODEX PRODUCTION GATE: the patch destination ${destination} could not be resolved to the file it would really write (a link that does not resolve, or an unreadable directory), so it is refused (fail closed).`);
+    }
+    // A link inside the repository that leads out of it moves the write outside too.
+    if (!patchRootsReal.some((root) => pathIsInside(landed, root))) {
+      return denied(`CODEX PRODUCTION GATE: the patch destination ${destination} resolves through a link to ${landed}, outside the repository, so it is refused. A native patch may only edit files in this repository.`);
     }
     // The gate-deciding files beyond the short protected list (.husky, workflows,
     // every other hook, the proof/validator scripts): a path-field writer aimed

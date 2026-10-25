@@ -933,6 +933,8 @@ export function parseNativePatch(text) {
       const odd = nativePatchPathProblem(filePath);
       if (odd) return { ok: false, reason: `line ${i + 1}: ${odd}` };
       paths.push(filePath);
+      // Stops at the cap instead of parsing on: the work is bounded by the cap, not by the input.
+      if (paths.length > NATIVE_PATCH_MAX_PATHS) return { ok: false, reason: `the patch touches more than ${NATIVE_PATCH_MAX_PATHS} paths; split it` };
       kind = header[1];
       bodyLines = 0;
       sawMoveWindow = kind === "Update";
@@ -946,6 +948,7 @@ export function parseNativePatch(text) {
       const odd = nativePatchPathProblem(target);
       if (odd) return { ok: false, reason: `line ${i + 1}: ${odd}` };
       paths.push(target);
+      if (paths.length > NATIVE_PATCH_MAX_PATHS) return { ok: false, reason: `the patch touches more than ${NATIVE_PATCH_MAX_PATHS} paths; split it` };
       sawMoveWindow = false;
       continue;
     }

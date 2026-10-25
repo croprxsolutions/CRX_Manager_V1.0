@@ -3457,6 +3457,49 @@ try {
     symlinkSync(path.join(linkRoot, ".claude", "session-state"), path.join(linkRoot, "docs", "linked-state"), "junction");
     symlinkSync(path.join(linkRoot, ".codex", "hooks", "not-created-yet"), path.join(linkRoot, "src", "dangling-dir"), "junction");
     linkSync(path.join(linkRoot, ".codex", "hooks", "production-action-guard.mjs"), path.join(linkRoot, "src", "guard-hardlink.mjs"));
+    // A patch edits THIS repository: a destination (or a link) that leads outside it is refused.
+    const outsideRoot = mkdtempSync(path.join(tmpdir(), "crx-native-patch-outside-"));
+    try {
+      symlinkSync(outsideRoot, path.join(linkRoot, "src", "escape"), "junction");
+      const outsideCases = [
+        ["an absolute path elsewhere on the machine", path.join(outsideRoot, "stolen.txt")],
+        ["a home-directory style absolute path", "C:/Users/someone/.ssh/authorized_keys"],
+        ["a POSIX absolute path", "/etc/cron.d/job"],
+        ["a link inside the repo that leads out", "src/escape/new-file.ts"],
+        ["a sibling folder sharing the repo name prefix", `${linkRoot.replaceAll("\\", "/")}-sibling/file.ts`],
+      ];
+      for (const [label, destination] of outsideCases) {
+        assert.equal(
+          evaluateProductionAction({
+            toolName: "apply_patch",
+            repoDir: linkRoot,
+            eventCwd: linkRoot,
+            toolInput: { command: nativePatch(`*** Add File: ${destination}`, "+a") },
+          }).blocked,
+          true,
+          `native patch outside the repository (${label}) is denied`,
+        );
+      }
+      assert.equal(
+        evaluateProductionAction({ toolName: "apply_patch", repoDir: linkRoot, eventCwd: linkRoot, toolInput: { command: nativePatch("*** Add File: x.ts", "+a"), workdir: outsideRoot } }).blocked,
+        true,
+        "a workdir that points outside the repository is denied",
+      );
+      assert.equal(
+        evaluateProductionAction({ toolName: "apply_patch", repoDir: linkRoot, eventCwd: linkRoot, toolInput: { command: nativePatch(`*** Add File: ${linkRoot.replaceAll("\\", "/")}/src/inside-by-absolute-path.ts`, "+a") } }).blocked,
+        false,
+        "an absolute path INSIDE the repository is an ordinary edit",
+      );
+      for (const unc of ["//server/share/file.ts", "\\\\server\\share\\file.ts", "//?/C:/x/file.ts"]) {
+        assert.equal(
+          evaluateProductionAction({ toolName: "apply_patch", toolInput: { command: nativePatch(`*** Add File: ${unc}`, "+a") } }).blocked,
+          true,
+          `a network or extended-length path is refused: ${unc}`,
+        );
+      }
+    } finally {
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
     const linkCases = [
       ["file inside a linked directory", "src/linked-dir/production-action-guard.mjs", true],
       ["a file reached through a link to .husky", "src/linked-husky/pre-push", true],

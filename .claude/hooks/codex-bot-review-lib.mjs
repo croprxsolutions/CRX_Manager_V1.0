@@ -630,8 +630,9 @@ export function readCodeRabbitRequirement(runGh, { owner, name, number, deadline
 //
 // So a later head still counts as reviewed when every one of these holds; any
 // failure means one new `@coderabbitai full review`, as before:
-//   - the PR's commits from the head are: merges of main (none touching a PR file),
-//     then a linear chain of fix commits, then R, the newest commit CodeRabbit
+//   - the PR's commits from the head are: merges that leave the PR's own changes
+//     as they were at the last fix (so they brought in only the base), then a
+//     linear chain of fix commits, then R, the newest commit CodeRabbit
 //     marked "Review completed" (proved by parent SHAs, and the compare must list
 //     exactly that chain);
 //   - CodeRabbit's review of R posted K >= 1 inline findings, exactly K were read,
@@ -720,9 +721,10 @@ export function coderabbitFindingSeverity(body) {
 }
 
 // "**Actionable comments posted: K**" from a full review's body, or null.
+// Exactly one count line, or null (Luna round 1 on #1125).
 export function coderabbitReviewFindingCount(body) {
-  const match = String(body || "").match(/^\*\*Actionable comments posted: (\d+)\*\*\s*$/m);
-  return match ? Number(match[1]) : null;
+  const matches = [...String(body || "").matchAll(/^\*\*Actionable comments posted: (\d+)\*\*\s*$/gm)];
+  return matches.length === 1 ? Number(matches[0][1]) : null;
 }
 
 // Items in the review summary that have no thread and no reliable per-item
@@ -851,7 +853,9 @@ export function evaluateFollowUpDiff(compare, { chain, findingPaths = [], struct
     if (!filename || !Number.isInteger(additions) || !Number.isInteger(deletions)) {
       return { kind: "unreadable", why: "a changed file in the fixes could not be read", files: [] };
     }
-    if (isFollowUpExcludedPath(filename) && !isFollowUpTestPath(filename)) {
+    // Hard-excluded paths stay excluded even for test files there (agent tooling,
+    // CI); scripts/smoke/ chains are the one exception (Luna round 1 on #1125).
+    if (isFollowUpExcludedPath(filename) && !/^scripts\/smoke\//.test(lowerPath(filename))) {
       return notCovered(`the fixes change ${filename}, which always gets a fresh review`);
     }
     if (file?.previous_filename || !["modified", "added"].includes(status)) {
@@ -890,27 +894,35 @@ export function evaluateFollowUpDiff(compare, { chain, findingPaths = [], struct
   return { kind: "ok", why: "", files };
 }
 
-// Merges of main after the fixes may not touch any of the PR's own files.
-export function evaluateTipMerges(compare, prPaths) {
-  if (!compare || !Array.isArray(compare.files)) {
-    return { kind: "unreadable", why: "GitHub's comparison of the fixes and the head could not be read" };
-  }
-  if (compare.status !== "ahead" || compare.behind_by !== 0) {
-    return { kind: "not-covered", why: "the head does not build on the fix commits" };
-  }
-  if (compare.files.length >= COMPARE_FILE_CAP) {
-    return { kind: "not-covered", why: "the merges of main after the fixes change too many files to check" };
-  }
-  const own = new Set(prPaths.map(lowerPath));
-  for (const file of compare.files) {
-    const paths = [file?.filename, file?.previous_filename].filter(Boolean);
-    // Main's edits to a shared plain document the PR also edits change no code.
-    if (String(file?.status || "") === "modified" && paths.length === 1 && isFollowUpPlainDocPath(paths[0])) continue;
-    for (const path of paths) {
-      if (own.has(lowerPath(path))) {
-        return { kind: "not-covered", why: `a merge after the fixes changed ${path}, one of the PR's own files` };
-      }
+// Merges after the fixes may not change the PR's own changes: GitHub's three-dot
+// compare against the base (every file's status, blob and rename source) must be
+// the same at the last fix and at the head, the proof the merge walk above uses.
+// That holds only when the merges brought in nothing but the base, so a merge of
+// any other branch is refused too (Luna round 1 on #1125). The one exception is a
+// plain docs/**/*.md ledger both sides edit (shared KNOWN_ISSUES.md and the like).
+export function evaluateTipMerges(atFix, atHead) {
+  const index = (files) => {
+    if (!Array.isArray(files) || files.length >= COMPARE_FILE_CAP) return null;
+    const map = new Map();
+    for (const file of files) {
+      const filename = String(file?.filename || "");
+      if (!filename) return null;
+      map.set(filename, `${String(file?.status || "")}:${String(file?.sha || "")}:${String(file?.previous_filename || "")}`);
     }
+    return map;
+  };
+  const before = index(atFix);
+  const after = index(atHead);
+  if (!before || !after) {
+    return { kind: "not-covered", why: "the PR's own changes at the last fix and at the head could not be compared in full" };
+  }
+  for (const filename of new Set([...before.keys(), ...after.keys()])) {
+    if (before.get(filename) === after.get(filename)) continue;
+    const sharedDoc = isFollowUpPlainDocPath(filename)
+      && String(before.get(filename) || "").startsWith("modified:") && String(after.get(filename) || "").startsWith("modified:")
+      && before.get(filename).endsWith(":") && after.get(filename).endsWith(":");
+    if (sharedDoc) continue;
+    return { kind: "not-covered", why: `a merge after the fixes changed the PR's own changes (${filename})` };
   }
   return { kind: "ok", why: "" };
 }
@@ -968,12 +980,29 @@ export function evaluateFollowUpReview(pullRequestNode, reviewedOid) {
   const unreadable = (why) => ({ kind: "unreadable", why, findings: [] });
   const notCovered = (why) => ({ kind: "not-covered", why, findings: [] });
   const reviews = pullRequestNode?.reviews;
-  if (!Array.isArray(reviews?.nodes) || !Number.isInteger(reviews.totalCount) || reviews.totalCount > reviews.nodes.length) {
-    return unreadable("CodeRabbit's reviews could not all be read");
+  if (!Array.isArray(reviews?.nodes) || !Number.isInteger(reviews.totalCount)) {
+    return unreadable("CodeRabbit's reviews could not be read");
   }
-  const full = reviews.nodes.filter((review) => isCodeRabbitLogin(review?.author?.login)
-    && String(review?.commit?.oid || "").toLowerCase() === reviewedOid
-    && coderabbitReviewFindingCount(review?.body) !== null);
+  // One read returns 100; a PR with more is refused outright rather than retried
+  // forever (Luna round 1 on #1125).
+  if (reviews.totalCount > reviews.nodes.length) return notCovered("CodeRabbit has posted more than 100 reviews on this PR");
+  const atReviewed = reviews.nodes.filter((review) => isCodeRabbitLogin(review?.author?.login)
+    && String(review?.commit?.oid || "").toLowerCase() === reviewedOid);
+  const full = atReviewed.filter((review) => coderabbitReviewFindingCount(review?.body) !== null);
+  // Every OTHER CodeRabbit review of that commit must be a plain thread reply: a
+  // comment state, no finding count, and no new (non-reply) comment of its own,
+  // so a second review there cannot hide a Major finding (Luna round 1 on #1125).
+  for (const review of atReviewed) {
+    if (full.includes(review)) continue;
+    if (String(review?.state || "").toUpperCase() !== "COMMENTED") return notCovered(`another CodeRabbit review of that commit is ${review?.state}`);
+    if (!Array.isArray(review?.comments?.nodes) || !Number.isInteger(review.comments.totalCount)) {
+      return unreadable("another CodeRabbit review of that commit could not be read");
+    }
+    if (review.comments.totalCount > review.comments.nodes.length
+      || review.comments.nodes.some((comment) => !comment?.replyTo && isCodeRabbitLogin(comment?.author?.login))) {
+      return notCovered("another CodeRabbit review of that commit posted findings of its own");
+    }
+  }
   if (full.length === 0) return notCovered("CodeRabbit posted no findings in its review of that commit, so no code may change after it");
   if (full.length > 1) return notCovered("CodeRabbit posted more than one full review of that commit");
   const [review] = full;
@@ -983,9 +1012,10 @@ export function evaluateFollowUpReview(pullRequestNode, reviewedOid) {
   const problem = coderabbitReviewBodyProblem(review.body);
   if (problem) return notCovered(problem);
   const comments = review.comments;
-  if (!Array.isArray(comments?.nodes) || !Number.isInteger(comments.totalCount) || comments.totalCount > comments.nodes.length) {
-    return unreadable("CodeRabbit's review comments could not all be read");
+  if (!Array.isArray(comments?.nodes) || !Number.isInteger(comments.totalCount)) {
+    return unreadable("CodeRabbit's review comments could not be read");
   }
+  if (comments.totalCount > comments.nodes.length) return notCovered("CodeRabbit's review has more than 100 comments");
   const top = comments.nodes.filter((comment) => !comment?.replyTo && isCodeRabbitLogin(comment?.author?.login));
   if (top.length !== expected) {
     return notCovered(`CodeRabbit's review says it posted ${expected} findings but ${top.length} were found`);
@@ -1003,13 +1033,11 @@ export function evaluateFollowUpReview(pullRequestNode, reviewedOid) {
   if (!Array.isArray(issueComments?.nodes) || !Number.isInteger(issueComments.totalCount)) {
     return unreadable("the PR's comments could not be read");
   }
+  // Only a complete comment list proves there is exactly one summary comment.
+  if (issueComments.totalCount > issueComments.nodes.length) return notCovered("the PR has more than 100 comments");
   const walkthroughs = issueComments.nodes.filter((comment) => isCodeRabbitLogin(comment?.author?.login)
     && String(comment?.body || "").includes("<!-- pre_merge_checks_walkthrough_start -->"));
-  if (walkthroughs.length !== 1) {
-    return unreadable(issueComments.totalCount > issueComments.nodes.length
-      ? "the PR has more comments than one read returns, and CodeRabbit's summary comment was not among them"
-      : "CodeRabbit's summary comment could not be identified");
-  }
+  if (walkthroughs.length !== 1) return unreadable("CodeRabbit's summary comment could not be identified");
   const checks = coderabbitPreMergeChecks(walkthroughs[0].body, reviewedOid);
   if (checks.kind !== "ok") return { ...checks, findings: [] };
   return { kind: "ok", why: "", findings };
@@ -1035,7 +1063,11 @@ export function readMinorFollowUp(call, { owner, name, number, pullRequest, verd
   const draft = evaluateFollowUpDiff(fixes, { chain: chain.chain, structuralOnly: true });
   if (draft.kind !== "ok") return step(draft);
   if (tipMerges.length > 0) {
-    const tip = evaluateTipMerges(JSON.parse(call(compareArgs(fixOid, verdict.headOid))), prPaths);
+    const base = String(pullRequest?.baseRefOid || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{40}$/.test(base)) return unreadable("the PR's base commit could not be read");
+    const atFix = JSON.parse(call(coderabbitCompareArgs(owner, name, base, fixOid)));
+    const atHead = JSON.parse(call(coderabbitCompareArgs(owner, name, base, verdict.headOid)));
+    const tip = evaluateTipMerges(atFix, atHead);
     if (tip.kind !== "ok") return step(tip);
   }
   const oids = [reviewedOid, fixOid, verdict.headOid];

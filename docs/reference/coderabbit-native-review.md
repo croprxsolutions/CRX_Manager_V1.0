@@ -77,8 +77,9 @@
 >      posted at least one, and its summary lists no outside-diff, duplicate or nitpick items;
 >    - its pre-merge checks for that commit all passed (the PR title and description checks may
 >      fail: they judge the PR's text, not its code);
->    - the fixes were pushed **before** any merge of main (fix first, then merge main), and a later
->      merge of main changes none of the PR's own files except plain `docs/**/*.md` ledgers;
+>    - the fixes were pushed **before** any merge of main (fix first, then merge main), and the PR's
+>      own changes against the base are the same at the last fix and at the head, so a later merge
+>      brought in nothing but main (plain `docs/**/*.md` ledgers both sides edit excepted);
 >    - the fixes touch only files that hold a finding (edits, at most 60 changed lines in total),
 >      test files including `scripts/smoke/` chains (at most 150 changed and 20 deleted lines),
 >      and one new `docs/changelog.d/` entry (at most 40 lines); nothing under `supabase/`, CI,
@@ -122,7 +123,8 @@
 > `change_assessment_commit` marker, and checks each fixed file's type and mode at the reviewed
 > commit, the last fix and the head. It answers in three ways: covered; not covered (the refusal
 > names the failed condition: request one new full review); or unreadable (a read failed or was cut
-> short: retry, and never spend a new review on it). It adds two or three GitHub reads (about 4
+> short: retry, and never spend a new review on it). A PR past one read's 100 reviews, review
+> comments or PR comments is "not covered" rather than retried forever. It adds two to four GitHub reads (about 5
 > seconds measured on real PRs), so the advisory budgets rose from 12 to 15 seconds in the Claude
 > merge gate and from 5 to 7 in the Codex gate. Like every gate here it stops mistakes, not an
 > agent deliberately working around it with Mason's authority.

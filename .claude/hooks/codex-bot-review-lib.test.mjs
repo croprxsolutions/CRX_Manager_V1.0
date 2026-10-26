@@ -800,11 +800,15 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     // A broken copy may change which trees the follow-up read asks for; answer
     // it with the recorded read (a tree it lacks reads as "not a plain file").
     const followUpAnswer = fixture.calls.find((call) => isFollowUpRead(call.args))?.out;
+    const head = JSON.parse(fixture.calls[0].out).data.repository.pullRequest.headRefOid;
     return (args) => {
       const out = isFollowUpRead(args) ? followUpAnswer : answers.get(JSON.stringify(args));
       if (out === undefined) throw new Error(`fixture has no answer for gh ${args.slice(0, 2).join(" ")}`);
+      // "fixes" is the R...F compare; "tipFix"/"tipHead" are the PR's own changes
+      // against the base at the last fix and at the head.
+      const url = String(args[1]);
       const kind = isFollowUpRead(args) ? "followUp"
-        : String(args[1]).includes("/compare/") ? (fixture.calls.findIndex((call) => String(call.args[1]).includes("/compare/")) === fixture.calls.findIndex((call) => JSON.stringify(call.args) === JSON.stringify(args)) ? "fixes" : "tip")
+        : url.includes("/compare/") ? (Array.isArray(JSON.parse(out)) ? (url.endsWith(`...${head}`) ? "tipHead" : "tipFix") : "fixes")
         : args[1] === "graphql" ? "requirement" : "files";
       if (kind === "files") return edit(kind, out) ?? out;
       const value = JSON.parse(out);
@@ -850,8 +854,23 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     ["missing", "outside-diff comments in the review summary", "followUp", (v) => { fullReview(v).body += "\n> **⚠️ Outside diff range comments (1)**"; }],
     ["missing", "a nitpick section in the review summary", "followUp", (v) => { fullReview(v).body += "\n<summary>🧹 Nitpick comments (2)</summary>"; }],
     ["missing", "two full reviews of the same commit", "followUp", (v) => { const reviews = v.data.repository.pullRequest.reviews; reviews.nodes.push(structuredClone(fullReview(v))); reviews.totalCount += 1; }],
-    ["unreadable", "a review comment page cut short", "followUp", (v) => { fullReview(v).comments.totalCount = 101; }],
-    ["unreadable", "a review list cut short", "followUp", (v) => { v.data.repository.pullRequest.reviews.totalCount = 101; }],
+    ["missing", "a review with more than 100 comments", "followUp", (v) => { fullReview(v).comments.totalCount = 101; }],
+    ["missing", "more than 100 CodeRabbit reviews", "followUp", (v) => { v.data.repository.pullRequest.reviews.totalCount = 101; }],
+    ["missing", "more than 100 PR comments", "followUp", (v) => { v.data.repository.pullRequest.comments.totalCount = 101; }],
+    ["missing", "another review of R with a finding of its own", "followUp", (v) => {
+      const reviews = v.data.repository.pullRequest.reviews;
+      const other = structuredClone(fullReview(v));
+      other.body = "";
+      other.comments.nodes = [{ ...finding(v), body: finding(v).body.replace("🟡 Minor", "🟠 Major") }];
+      reviews.nodes.push(other);
+      reviews.totalCount += 1;
+    }],
+    ["missing", "another review of R requesting changes", "followUp", (v) => {
+      const reviews = v.data.repository.pullRequest.reviews;
+      reviews.nodes.push({ ...structuredClone(fullReview(v)), body: "", state: "CHANGES_REQUESTED", comments: { totalCount: 0, nodes: [] } });
+      reviews.totalCount += 1;
+    }],
+    ["missing", "a review with two finding-count lines", "followUp", (v) => { fullReview(v).body += "\n**Actionable comments posted: 1**\n"; }],
     ["unreadable", "a summary describing another commit", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(R, "f".repeat(40)); }],
     ["unreadable", "no summary comment", "followUp", (v) => { walkthrough(v).body = ""; }],
     ["unreadable", "a pre-merge table missing a row", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/\n\|[^\n]*New Table Without Rls[^\n]*/, ""); }],
@@ -869,7 +888,9 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     ["missing", "21 deleted test lines", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").deletions = 21; }],
     ["missing", "a changelog entry over 40 lines", "fixes", (v) => { v.files.push({ filename: "docs/changelog.d/2026-10-26-x.md", status: "added", additions: 41, deletions: 0, patch: "+x" }); }],
     ["missing", "a compare listing a commit outside the chain", "fixes", (v) => { v.commits[0].sha = "e".repeat(40); }],
-    ["missing", "a merge after the fixes that changed a PR code file", "tip", (v) => { v.files.push({ filename: "src/components/ui/RecordSearchPicker.tsx", status: "modified" }); }],
+    ["missing", "a merge after the fixes that changed a PR code file", "tipHead", (v) => { v.find((f) => f.filename === "src/components/ui/RecordSearchPicker.tsx").sha = "9".repeat(40); }],
+    ["missing", "a merge of another branch that adds a file", "tipHead", (v) => { v.push({ filename: "src/lib/sneaky.ts", status: "added", sha: "8".repeat(40) }); }],
+    ["missing", "a fix to a test file in agent tooling", "fixes", (v) => { v.files.push({ ...fileIn(v, "CustomerSearchPicker.test.tsx"), filename: ".claude/hooks/pr-merge-guard.test.mjs" }); }],
     ["unreadable", "commit parents without their SHAs", "requirement", (v) => { for (const node of v.data.repository.pullRequest.commits.nodes) delete node.commit.parents.nodes; }],
   ];
   // Each break must be refused for ITS reason, not a side effect of the edit.
@@ -882,8 +903,14 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     "outside-diff comments in the review summary": /outside the changed lines/,
     "a nitpick section in the review summary": /nitpick/,
     "two full reviews of the same commit": /more than one full review/,
-    "a review comment page cut short": /review comments could not all be read/,
-    "a review list cut short": /reviews could not all be read/,
+    "a review with more than 100 comments": /more than 100 comments/,
+    "more than 100 CodeRabbit reviews": /more than 100 reviews/,
+    "more than 100 PR comments": /PR has more than 100 comments/,
+    "another review of R with a finding of its own": /another CodeRabbit review of that commit posted findings/,
+    "another review of R requesting changes": /another CodeRabbit review of that commit is CHANGES_REQUESTED/,
+    "a review with two finding-count lines": /another CodeRabbit review of that commit posted findings|posted no findings/,
+    "a merge of another branch that adds a file": /changed the PR's own changes \(src\/lib\/sneaky\.ts\)/,
+    "a fix to a test file in agent tooling": /pr-merge-guard\.test\.mjs, which always gets a fresh review/,
     "a summary describing another commit": /describes fffffffff, not the reviewed commit/,
     "no summary comment": /summary comment could not be identified/,
     "a pre-merge table missing a row": /lists 8 checks but its summary counts 9/,
@@ -901,7 +928,7 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     "21 deleted test lines": /delete 21 test lines/,
     "a changelog entry over 40 lines": /changelog entry is over 40 lines/,
     "a compare listing a commit outside the chain": /exactly the fix commits/,
-    "a merge after the fixes that changed a PR code file": /merge after the fixes changed src\/components\/ui\/RecordSearchPicker\.tsx/,
+    "a merge after the fixes that changed a PR code file": /changed the PR's own changes \(src\/components\/ui\/RecordSearchPicker\.tsx\)/,
     "commit parents without their SHAs": /parents could not be read/,
   };
   eq(Object.keys(reasons).sort(), cases.map(([, label]) => label).sort(), "every broken case names its expected reason");
@@ -918,7 +945,11 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
       // Its directory's tree at F and the head (third directory in the read).
       if (k === "followUp") for (const key of ["t1_2", "t2_2"]) v.data.repository[key] = { entries: [{ name: "2026-10-26-x.md", type: "blob", mode: 0o100644 }] };
     }],
-    ["a merge after the fixes that changed a shared doc", "tip", (v) => { v.files.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified" }); }],
+    ["a merge after the fixes that changed a shared doc", "any", (v, k) => {
+      // Main and the PR both edited the same ledger: its blob differs, nothing else does.
+      if (k === "tipFix") v.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified", sha: "6".repeat(40) });
+      if (k === "tipHead") v.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified", sha: "7".repeat(40) });
+    }],
   ];
   for (const [label, kind, change] of stays) {
     eq(readFixture(1017, (k, value) => { if (kind === "any" || k === kind) change(value, k); }).via, "minor-follow-up", `#1017 with ${label} stays covered`);

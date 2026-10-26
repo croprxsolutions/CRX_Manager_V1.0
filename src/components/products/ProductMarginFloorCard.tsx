@@ -35,7 +35,8 @@ function floorLabel(floor: number | null): string {
 
 /**
  * The product's net-margin floor (To-Do 0.2). Admin-only: the page renders it for admins only, and
- * the database refuses everyone else. The price sheet warns on any tier under it (To-Do 0.1).
+ * the database refuses everyone else. The price sheet does not read floors yet: its low-margin warning is
+ * To-Do 0.1, and the card's text says so until then.
  */
 export default function ProductMarginFloorCard({ productId, tierMargins, userId, onDirtyChange }: ProductMarginFloorCardProps) {
   const { toast } = useToast();
@@ -151,9 +152,10 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId,
       {loadState === 'loaded' && (
         <div className="space-y-3">
           <p className="text-xs text-gray-600">
-            The lowest net margin (profit % of price) this product should sell at. The price sheet warns on any tier
-            below it. Leave it blank for no floor: that product skips only the low-margin warning. The floor saves on
-            its own with Save floor, not with Save Changes.
+            The lowest net margin (profit % of price) this product should sell at. Tiers below it are flagged here and
+            on the Products list. The price sheet does not check floors yet, so a below-floor price can still be
+            applied there without a warning. Leave it blank for no floor. The floor saves on its own with Save floor,
+            not with Save Changes.
           </p>
           {underTiers.length > 0 && (
             <div className="flex items-start gap-2 p-2 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-900" role="status">

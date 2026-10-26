@@ -6,3 +6,7 @@ never rounds up to its floor ("14.99% net · under 15% floor"). The rule lives i
 `formatNetMarginPercent` (`src/lib/marginFloors.ts`), with unit and page tests for the boundary.
 Sol's final review found the same rounding on the product page's Margin Floor card warning ("Tier 2
 is at 15.00% — under the 15% floor"); the card now uses the same helper and has its own test.
+
+Sol (HIGH) on the next head: the card told admins "The price sheet warns on any tier below it", but
+the price sheet's low-margin warning is To-Do 0.1 and not built yet. The card now says tiers are
+flagged on the product page and Products list only, and that the price sheet does not check floors yet.

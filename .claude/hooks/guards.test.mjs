@@ -266,13 +266,18 @@ eq(classifySql("UPDATE invoices SET notes = 'call back' WHERE total_cents = 500"
 // ── live-testdata UPDATE gap (FIX 5, 2026-07-13) ─────────────────────────
 ok(classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1").block, "real customer UPDATE without [E2E] blocked");
 eq(classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1").kind, "real-update", "kind reported for generic business-table UPDATE");
-ok(!classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1 -- [E2E]").block, "[E2E]-marked UPDATE allowed");
+// 2026-10-25: this comment form used to be allowed on purpose. A comment says
+// nothing about which rows the UPDATE touches, so customer 1 here is real.
+eq(classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1 -- [E2E]").kind, "real-update", "[E2E] in a comment does not exempt an UPDATE");
+ok(!classifySql("UPDATE customers SET phone = '555-0100' WHERE id = 1 AND name LIKE '[E2E]%'").block, "UPDATE narrowed to [E2E] rows allowed");
 ok(!classifySql("UPDATE some_log_table SET x = 1 WHERE id = 1").block, "UPDATE on a non-business table allowed");
 // Codex P1 2026-07-13: AP/prepay/inventory tables were missing from the lists.
 ok(classifySql("UPDATE vendor_bills SET notes = 'x' WHERE id = 1").block, "raw UPDATE of vendor_bills (AP side) blocked");
 ok(classifySql("UPDATE prepay_credits SET memo = 'x' WHERE id = 1").block, "raw UPDATE of prepay_credits blocked");
 ok(classifySql("UPDATE inventory_transactions SET notes = 'x' WHERE id = 1").block, "raw UPDATE of inventory_transactions blocked");
-ok(!classifySql("UPDATE vendor_bills SET notes = '[E2E] test' WHERE id = 1").block, "[E2E]-marked vendor_bills UPDATE stays allowed");
+// 2026-10-25: writing the marker INTO a real row only labels it; the WHERE decides the row.
+eq(classifySql("UPDATE vendor_bills SET notes = '[E2E] test' WHERE id = 1").kind, "real-update", "[E2E] in the SET list does not exempt an UPDATE");
+ok(!classifySql("UPDATE vendor_bills SET notes = 'x' WHERE notes LIKE '[E2E]%'").block, "vendor_bills UPDATE of [E2E] rows allowed");
 ok(classifySql("DELETE FROM vendor_payments WHERE id = 1").block, "DELETE from vendor_payments (now financial) blocked");
 // Codex P1 round 3: fully quoted schema qualification must not evade the classifier.
 ok(classifySql('UPDATE "public"."customers" SET phone = \'555\' WHERE id = 1').block, 'UPDATE "public"."customers" (quoted qualification) blocked');
@@ -286,6 +291,141 @@ ok(!classifySql("SELECT * FROM customers WHERE id = 1").block, "SELECT still all
 // More specific classifications still win over the generic catch-all:
 eq(classifySql("UPDATE invoices SET status = 'voided' WHERE id = 5").kind, "financial-cancel", "cancel/void still classified specifically, not as generic real-update");
 eq(classifySql("DELETE FROM invoices WHERE id = 5").kind, "financial-delete", "financial delete still classified specifically");
+
+// ── [E2E] judged per write, from its own WHERE (2026-10-25, PR #1084 follow-up) ──
+// An UPDATE/DELETE is fake only when a top-level AND-ed `<column> =|LIKE
+// '…[E2E]…'` narrows it to marked rows; an INSERT only when its own text carries
+// an '[E2E]' string value.
+for (const sql of [
+  "DELETE FROM customers WHERE name LIKE '[E2E]%'",
+  "DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]'",
+  "DELETE FROM customers c WHERE c.name LIKE '[E2E]%' AND (c.id = 1 OR c.id = 2) RETURNING c.id",
+  "INSERT INTO \"public\".\"customers\" (name) VALUES ('[E2E] quoted')",
+  "DELETE FROM ONLY customers WHERE \"name\" LIKE '[E2E]%'",
+  "UPDATE invoices SET status = 'voided', total_cents = 0 WHERE notes LIKE '[E2E]%'",
+  "INSERT INTO customers (name) VALUES ('[E2E] a;b')",
+  "INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'",
+  "WITH d AS (DELETE FROM customers WHERE name LIKE '[E2E]%' RETURNING id) SELECT count(*) FROM d",
+  "DO $$ DECLARE v uuid; BEGIN INSERT INTO customers (name) VALUES ('[E2E] X') RETURNING id INTO v; " +
+    "RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;",
+]) ok(!classifySql(sql).block, `[E2E]-targeted write allowed: ${sql.slice(0, 70)}`);
+// Inside a DO body any name may be a PL/pgSQL variable (`v_note = '[E2E]'` is always
+// true; a block label or a session-wide variable_conflict = use_variable can even
+// capture `c.name`), so a DO-body UPDATE/DELETE is never exempt (Luna round 2).
+for (const sql of [
+  "DO $$ DECLARE v_note text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND v_note = '[E2E]'; END $$",
+  "DO $$ BEGIN UPDATE customers SET phone = '1' WHERE id = 7 AND name LIKE '[E2E]%'; END $$",
+  "DO $$ <<c>> DECLARE name text := '[E2E]'; BEGIN DELETE FROM customers AS c WHERE c.id = 7 AND c.name = '[E2E]'; END $$",
+  // A non-ASCII dollar tag is still a DO body (PostgreSQL allows it).
+  "DO $xé$ DECLARE v_note text := '[E2E]'; BEGIN DELETE FROM customers WHERE id = 7 AND v_note = '[E2E]'; END $xé$;",
+]) ok(classifySql(sql).block, `DO-body update/delete refused: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
+// The dollar-quote scanner matches PostgreSQL's: a non-ASCII or long tag opens a
+// string (so the `--` inside it is data, not a comment hiding the DELETE after it),
+// and `a$x$` is one identifier, not a quote opening that swallows what follows.
+eq(classifySql("SELECT $xé$--$xé$; DELETE FROM invoices WHERE id = 7").kind, "financial-delete", "a non-ASCII dollar tag is a string, not a comment");
+eq(classifySql(`SELECT $${"t".repeat(80)}$--$${"t".repeat(80)}$; DELETE FROM invoices WHERE id = 7`).kind, "financial-delete",
+  "a dollar tag longer than 64 characters is a string, not a comment");
+// A tag glued to a letter or digit is ambiguous (`a$x$` is a name, `1$x$` a number
+// then a quote), so it is refused before any stripping (automated security review).
+for (const sql of [
+  "SELECT 1 AS a$x$; DELETE FROM invoices WHERE id = 7; SELECT 1 AS b$x$",
+  "SELECT 1$x$--$x$; DELETE FROM invoices WHERE id = 7",
+  "DO$$ BEGIN DELETE FROM customers WHERE name LIKE '[E2E]%'; END $$",
+  // Accepted false refusal: the check runs before quotes are read, so it also hits a literal.
+  "DELETE FROM invoices WHERE notes = '[E2E] a$x$b'",
+]) eq(classifySql(sql).kind, "ambiguous-dollar-quote", `glued dollar quote refused: ${sql.slice(0, 50)}`);
+ok(!classifySql("SELECT my$count, x$auth FROM t").block, "a `$` inside a name with no closing `$` is fine");
+for (const sql of [
+  "COPY customers (name) FROM '/tmp/real.csv' WITH (FORMAT csv)",
+  "COPY public.invoices FROM PROGRAM 'cat /tmp/x'",
+  // A server file or program source is refused first by #1092's copy-program-or-file rule.
+]) ok(["copy-from", "copy-program-or-file"].includes(classifySql(sql).kind), `COPY … FROM refused: ${sql.slice(0, 50)}`);
+eq(classifySql("COPY customers (name) FROM STDIN").kind, "copy-from", "COPY … FROM STDIN still writes and is refused");
+ok(!classifySql("COPY customers TO STDOUT").block, "COPY … TO is a read");
+ok(classifySql("COPY (SELECT id FROM customers) TO STDOUT").kind !== "copy-from", "a FROM inside COPY's (query) is not COPY … FROM");
+for (const [sql, kind] of [
+  ["UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]", "financial-amount-update"],
+  ["INSERT INTO customers (name) VALUES ('Real') /* [E2E] */", "real-insert"],
+  ["INSERT INTO customers (name) VALUES ('[E2E] a'); INSERT INTO customers (name) VALUES ('Real')", "real-insert"],
+  ["INSERT INTO customers (id, name) VALUES (5, '[E2E] x') ON CONFLICT (id) DO UPDATE SET name = excluded.name", "real-insert"],
+  ["UPDATE customers SET name = '[E2E] relabelled' WHERE id = 3", "real-update"],
+  ["UPDATE ONLY customers SET phone = '1' WHERE id = 1", "real-update"],
+  ["UPDATE customers SET phone = '1' FROM orders o WHERE customers.id = 7 AND o.notes LIKE '[E2E]%'", "real-update"],
+  ["UPDATE invoices SET status = 'cancelled', notes = '[E2E]' WHERE id = 3", "financial-cancel"],
+  ["DELETE FROM invoices WHERE id = 7 OR notes = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE notes NOT LIKE '[E2E]%'", "financial-delete"],
+  ["DELETE FROM invoices WHERE NOT notes LIKE '[E2E]%'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]' IS NOT TRUE", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND '[E2E]' = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND user = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND (notes = '[E2E]')", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND notes = '[E2E]' || ''", "financial-delete"],
+  ["DELETE FROM invoices WHERE id BETWEEN 1 AND 10 AND notes = '[E2E]'", "financial-delete"],
+  ["DELETE FROM invoices WHERE id IN (SELECT 7 FROM customers WHERE name LIKE '[E2E]%')", "financial-delete"],
+  ["DELETE FROM invoices WHERE id = 7 AND EXISTS (SELECT 1 FROM customers WHERE name LIKE '[E2E]%')", "financial-delete"],
+  ["DELETE FROM invoices USING customers c WHERE invoices.id = 7 AND c.name LIKE '[E2E]%'", "financial-delete"],
+  ["WITH d AS (DELETE FROM invoices WHERE id = 7 RETURNING 1) SELECT * FROM customers WHERE name LIKE '[E2E]%'", "financial-delete"],
+  ["DO $$ BEGIN DELETE FROM invoices WHERE id = 7 -- AND notes LIKE '[E2E]%'\n; END $$", "financial-delete"],
+  ["DO $$ BEGIN EXECUTE 'DELETE FROM invoices WHERE notes LIKE ''[E2E]%'''; END $$", "dynamic-sql"],
+  // Luna round 1: SQL assembled at run time, MERGE, Unicode-escaped names, mixed VALUES rows.
+  ["DO $$ BEGIN EXECUTE 'UPDATE ' || 'customers SET phone = ''555-0100'' WHERE id = 1'; END $$;", "dynamic-sql"],
+  ["MERGE INTO customers AS c USING (VALUES (1, 'Real')) AS s(id, name) ON c.id = s.id WHEN MATCHED THEN UPDATE SET name = s.name", "real-merge"],
+  // #1092's earlier rule (comments removed, dollar bodies included) refuses it first.
+  ["UPDATE U&\"custome\\0072s\" SET phone = '555-0100' WHERE id = 1", "unicode-escaped-identifier"],
+  ["INSERT INTO customers (name) VALUES ('[E2E] test'), ('Real Customer')", "real-insert"],
+  ["INSERT INTO customers (name) VALUES (CASE WHEN false THEN '[E2E]' END)", "real-insert"],
+  ["INSERT INTO customers (name) VALUES ('[E2E] x') UNION ALL VALUES ('Real')", "real-insert"],
+  ["INSERT INTO customers DEFAULT VALUES", "real-insert"],
+  ["DELETE FROM customers WHERE name LIKE '[E2E]%' AND \"returning\" = TRUE OR id = 7", "real-delete"],
+  // Luna round 3: ILIKE also matches a real "[e2e] …" row; a backslash may end a
+  // literal early when standard_conforming_strings is off.
+  ["DELETE FROM customers WHERE name ILIKE '[E2E]%'", "real-delete"],
+  ["DELETE FROM customers WHERE name = '[E2E]\\' AND id = ' OR true", "real-delete"],
+  ["INSERT INTO customers (name) VALUES ('[E2E]\\'), ('Real')", "real-insert"],
+  ["SELECT 1; DELETE FROM customers WHERE name = 'x'''; SELECT '[E2E]'", "real-delete"],
+  ["DELETE FROM ONLY financial_audit_log WHERE id = 1", "audit-log-write"],
+  ["INSERT INTO customers (name) VALUES ('Real') RETURNING '[E2E]'", "real-insert"],
+  ["DO $$ BEGIN EXECUTE 'UPDATE customers SET phone = ''1'' WHERE name LIKE ''[E2E]%'''; END $$", "dynamic-sql"],
+  ["SELECT 'UPDATE customers SET phone = ''1'' WHERE id = 1'", "dynamic-sql-write"],
+  ["SELECT proname FROM pg_proc WHERE prosrc ILIKE '%insert into invoices%'", "dynamic-sql-write"],
+]) eq(classifySql(sql).kind, kind, `not [E2E]-targeted, refused as ${kind}: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
+ok(!classifySql("SELECT proname FROM pg_proc WHERE prosrc ILIKE '%insert%invoices%'").block, "a catalog search with the words split is a read");
+// Codex App on #1093: with standard_conforming_strings off, `'\'` ends early, so the
+// `--` and `/*` below are code and the write runs. Either reading refusing refuses.
+for (const sql of [
+  "SET standard_conforming_strings = off; DO $$ BEGIN PERFORM '\\'; --'; UPDATE customers SET phone = '555' WHERE id = 1; END; $$;",
+  "SET standard_conforming_strings = off; SELECT '\\'; --'; DELETE FROM invoices WHERE id = 7;",
+  "SET standard_conforming_strings = off; SELECT '\\' /*'; INSERT INTO customers (name) VALUES ('Real'); SELECT '*/';",
+]) ok(classifySql(sql).block, `a write hidden under the backslash reading is refused: ${sql.slice(40, 100)}`);
+ok(!classifySql("SELECT 'C:\\temp\\x' AS path").block, "a read with backslashes in a string stays allowed");
+// INSERT … SELECT does not show its rows. (Its column list also reads as a call
+// to the older RPC rule, so only the refusal is asserted, not which rule fired.)
+for (const sql of [
+  "INSERT INTO customers (name) SELECT 'Real' UNION ALL VALUES ('[E2E] x')",
+  "INSERT INTO customers (name) VALUES ('[E2E] x') UNION ALL SELECT 'Real'",
+  "INSERT INTO customers SELECT * FROM customers WHERE name LIKE '[E2E]%'",
+]) ok(classifySql(sql).block, `INSERT … SELECT is not provably fake: ${sql.slice(0, 60)}`);
+eq(classifySql("INSERT INTO customers SELECT * FROM customers WHERE name LIKE '[E2E]%'").kind, "real-insert",
+  "INSERT … SELECT without a column list is refused as a real insert");
+eq(classifySql("SELECT 'UPDATE customers SET phone = ''1'' WHERE id = 1'", { realDataOk: true }).kind,
+  "dynamic-sql-write", "REAL-DATA-OK does not relax a write spelled inside a string literal");
+eq(classifySql("DO $$ BEGIN EXECUTE 'UPDATE customers SET phone = ''1'' WHERE id = 1'; END $$", { realDataOk: true }).kind,
+  "dynamic-sql", "REAL-DATA-OK does not relax EXECUTE in a DO block");
+eq(classifySql("MERGE INTO customers c USING customers s ON false WHEN NOT MATCHED THEN INSERT (name) VALUES ('[E2E] x')", { realDataOk: true }).kind,
+  "real-merge", "MERGE is refused even for [E2E] rows and with REAL-DATA-OK");
+for (const sql of [
+  "INSERT INTO customers (name, phone) VALUES ('[E2E] a', '1'), ('[E2E] b', '2') RETURNING id",
+  "INSERT INTO customers AS c (name) OVERRIDING USER VALUE VALUES ('[E2E] a') ON CONFLICT DO NOTHING",
+  "INSERT INTO customers (phone, name) VALUES (lower('X'), '[E2E] it''s')",
+]) ok(!classifySql(sql).block, `every VALUES row marked: allowed (${sql.slice(0, 60)})`);
+eq(classifySql("update customers ".repeat(20000)).kind, "unclassifiable-writes", "a flood of unterminated writes is refused, not timed out");
+{
+  // Linear, not quadratic: a literal packed with write keywords took 4 s before the dynamic-write rule.
+  const t0 = Date.now();
+  classifySql("SELECT '" + "update customers ".repeat(20000) + "'");
+  classifySql("delete from customers ".repeat(80000));
+  ok(Date.now() - t0 < 3000, `write-keyword floods classify quickly (${Date.now() - t0} ms)`);
+}
 
 // ── dollar-quoted machine content (2026-07-11) ───────────────────────────
 // Function bodies re-emitted by a BEGIN;...;ROLLBACK; migration smoke are
@@ -310,7 +450,10 @@ eq(classifySql("CREATE OR REPLACE FUNCTION public.f() RETURNS void LANGUAGE sql 
 eq(classifySql("DO $$ BEGIN INSERT INTO financial_audit_log (a) VALUES (1); END $$;").kind, "audit-log-write", "audit-log insert inside a DO body still blocked");
 ok(!classifySql("DO $$ BEGIN PERFORM public.record_vendor_payment('00000000-0000-0000-0000-000000000000'); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;").block, "DO-block smoke calling a money RPC still allowed");
 // A $$ inside a plain string literal must not open a quote span that swallows real SQL.
-eq(classifySql("SELECT 'a$$b'; INSERT INTO financial_audit_log (a) VALUES (1); SELECT 'c$$d';").kind, "audit-log-write", "$$ inside string literals cannot hide a real audit-log write");
+// (Since 2026-10-25 a `$$` glued to a letter is refused before any stripping, so
+// only the refusal is asserted; the spaced form below still reaches the audit rule.)
+ok(classifySql("SELECT 'a$$b'; INSERT INTO financial_audit_log (a) VALUES (1); SELECT 'c$$d';").block, "$$ inside string literals cannot hide a real audit-log write");
+eq(classifySql("SELECT 'a $$ b'; INSERT INTO financial_audit_log (a) VALUES (1); SELECT 'c $$ d';").kind, "audit-log-write", "a spaced $$ inside string literals cannot hide a real audit-log write");
 // COMMIT inside a DO body can really commit — it must still disqualify a "rolled-back" batch.
 ok(classifySql("BEGIN; CREATE TABLE t (id int); DO $$ BEGIN PERFORM 1; COMMIT; END $$; ROLLBACK;").block, "COMMIT inside a DO body still disqualifies the smoke wrapper");
 
@@ -454,12 +597,211 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     "DELETE FROM invoices WHERE id = 1 /* [E2E] */",
     "DELETE FROM customers WHERE name = '[E2E] X'; DELETE FROM customers WHERE id = 2",
     "UPDATE customers SET name = '[E2E] Y' WHERE id = 1; UPDATE orders SET status = 'cancelled' WHERE id = 3",
+    // 2026-10-25: inserts/updates are judged per write too, and a delete needs the
+    // marker in a predicate that narrows it to marked rows.
+    "UPDATE invoices SET total_cents = 1 WHERE id = 7; -- [E2E]",
+    "INSERT INTO customers (name) VALUES ('[E2E] A'); UPDATE customers SET phone = '1' WHERE id = 2",
+    "DELETE FROM invoices WHERE id = 7 OR notes = '[E2E]'",
   ]) {
-    ok(sql(query).includes("deny"), `no marker: [E2E] in a comment or another statement does not exempt a delete/cancel (${query.slice(0, 50)})`);
+    ok(sql(query).includes("deny"), `no marker: [E2E] in a comment or another statement does not exempt a write (${query.slice(0, 50)})`);
   }
   eq(sql("DELETE FROM customers WHERE name LIKE '[E2E]%'").trim(), "", "no marker: [E2E] cleanup delete still allowed");
   eq(sql("INSERT INTO customers (name) VALUES ('[E2E] Z'); DELETE FROM customers WHERE name = '[E2E] Z'").trim(), "",
     "no marker: [E2E] insert then [E2E] delete allowed");
+  // Rollback-only smoke batches (2026-10-25): PostgreSQL must undo the whole
+  // batch, so RPCs, fixtures and audit-log writes inside it are allowed with no
+  // marker; anything that could skip, swallow or split the rollback is not.
+  const rb = (body) => `DO $smoke$ BEGIN ${body} RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $smoke$;`;
+  const del = "DELETE FROM invoices WHERE id = 1;";
+  for (const [label, query] of [
+    ["DO block ending in the smoke raise", rb("PERFORM save_customer('{}'::jsonb); PERFORM set_config('request.jwt.claims', '{}', true);")],
+    ["BEGIN ... ROLLBACK wrapper", "BEGIN; SELECT save_customer('{}'::jsonb); UPDATE invoices SET status = 'voided' WHERE id = 1; ROLLBACK;"],
+    ["leading BEGIN, several DO blocks", `BEGIN; DO $a$ BEGIN PERFORM save_customer('{}'); END $a$; ${rb("DELETE FROM invoices WHERE id = 1;")}`],
+    ["pg_temp helper then the DO block", `CREATE OR REPLACE FUNCTION pg_temp.h() RETURNS int LANGUAGE plpgsql AS $f$ BEGIN RETURN 1; END $f$; ${rb("PERFORM pg_temp.h();")}`],
+    ["audit-log write inside the rollback", rb("INSERT INTO public.financial_audit_log (operation_type) VALUES ('x');")],
+    ["nested trigger function with RETURN NEW", rb("EXECUTE $q$ CREATE FUNCTION pg_temp.t() RETURNS trigger LANGUAGE plpgsql AS $t$ BEGIN RETURN NEW; END $t$ $q$;")],
+    ["temp table ON COMMIT DROP", rb("CREATE TEMP TABLE x (a int) ON COMMIT DROP; PERFORM save_customer('{}');")],
+    ["inner block with its own handler", rb(`BEGIN ${del} EXCEPTION WHEN OTHERS THEN NULL; END; IF true THEN NULL; END IF;`)],
+    // Sol on #1092: EXECUTE must run text the guard can read. Literal forms the chains use:
+    ["EXECUTE of a plain literal, INTO and USING", `DO $smoke$ DECLARE v int; BEGIN ${del} EXECUTE 'SET LOCAL ROLE authenticated'; EXECUTE 'SELECT 1' INTO STRICT v; EXECUTE 'SELECT $1' INTO v USING 2; EXECUTE 'RESET ROLE'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $smoke$;`],
+    ["'EXECUTE' as a privilege-name string", rb(`${del} IF has_function_privilege('anon', 'public.f()', 'EXECUTE') THEN NULL; END IF;`)],
+    ["CREATE TRIGGER … EXECUTE FUNCTION in executed text", rb(`${del} EXECUTE 'CREATE TRIGGER t BEFORE INSERT ON public.activity_feed FOR EACH ROW EXECUTE FUNCTION public.f()';`)],
+    ["EXECUTE of a dollar-quoted pg_temp function", rb(`${del} EXECUTE $sql$ CREATE FUNCTION pg_temp.g() RETURNS int LANGUAGE sql AS $b$ SELECT 1 $b$ $sql$;`)],
+    // Real CASE forms still count once output aliases stop pairing across statements (Codex App, ad4206786).
+    ["CASE statement, nested CASE expressions, CASE after THEN", rb(`${del} CASE 1 WHEN 1 THEN PERFORM CASE WHEN true THEN CASE WHEN false THEN 1 ELSE 2 END END; ELSE NULL; END CASE; IF true THEN CASE WHEN true THEN NULL; END CASE; END IF;`)],
+  ]) {
+    eq(sql(query).trim(), "", `rollback-only smoke allowed: ${label}`);
+  }
+  // The payload is a real DELETE, which the guard refuses inside a DO body unless
+  // the batch is rollback-only. (PERFORM fn() inside a DO body is not detected as
+  // an RPC call at all; that pre-existing gap is tracked separately.)
+  for (const [label, query] of [
+    ["conditional raise", `DO $$ BEGIN ${del} IF false THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END IF; END $$;`],
+    ["RETURN before the raise", rb(`${del} RETURN;`)],
+    ["RETURN inside IF", rb(`${del} IF true THEN RETURN; END IF;`)],
+    ["raise swallowed by an outer handler", `DO $$ BEGIN ${del} RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; EXCEPTION WHEN OTHERS THEN NULL; END $$;`],
+    ["raise only inside the outer handler (security review)", `DO $$ BEGIN ${del} EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["raise only inside the outer handler, after a CASE", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN 1 END; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["labeled outer block skipped with EXIT", `DO $$ <<b>> BEGIN ${del} EXIT b; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["COMMIT inside the DO block", rb(`${del} COMMIT;`)],
+    ["CALL of a procedure", rb(`CALL some_proc(); ${del}`)],
+    ["write before the DO block, no BEGIN", `SELECT save_customer('{}'); ${rb("")}`],
+    ["COMMIT mid-batch", "BEGIN; SELECT save_customer('{}'); COMMIT; BEGIN; SELECT 1; ROLLBACK;"],
+    ["END (commit) mid-batch", `BEGIN; SELECT save_customer('{}'); END; ${rb("")}`],
+    ["dblink inside a wrapper", "BEGIN; SELECT dblink_exec('x', 'delete from invoices'); ROLLBACK;"],
+    ["raise only in a string", "SELECT 'RAISE EXCEPTION ''SMOKE_PASS_ROLLBACK''; END'; SELECT save_customer('{}');"],
+    ["raise only in a comment", `DO $$ BEGIN ${del} -- RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END\nEND $$;`],
+    ["quote inside a nested body hides a RETURN", rb(`EXECUTE $f$ it's $f$; RETURN; ${del} PERFORM 'x';`)],
+    ["$tag$ inside a string hides a RETURN", rb(`PERFORM 'a$x$'; RETURN; ${del} PERFORM 'b$x$';`)],
+    ["TRUNCATE inside a wrapper", "BEGIN; TRUNCATE customers; ROLLBACK;"],
+    // From the #1093 session (2026-10-25): END is COMMIT, as are COMMIT AND CHAIN and a second BEGIN's split.
+    ["END (commit) before the final ROLLBACK", "BEGIN; DROP TABLE invoices; END; ROLLBACK;"],
+    ["END before ROLLBACK around a delete", `BEGIN; ${del} END; ROLLBACK;`],
+    ["COMMIT AND CHAIN inside a wrapper", `BEGIN; ${del} COMMIT AND CHAIN; ROLLBACK;`],
+    ["second BEGIN inside a wrapper", `BEGIN; ${del} BEGIN; ROLLBACK;`],
+    // Security review (2026-10-25): a variable named raise or a quoted "end" must not hide an outer handler.
+    ["variable named raise hides the outer handler", `DO $$ DECLARE raise int; BEGIN ${del} PERFORM raise; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["quoted \"end\" shifts the block count", `DO $$ BEGIN ${del} PERFORM "end"; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    // Luna round 1 on #1092.
+    ["quoted \"raise\" before the outer handler", `DO $$ BEGIN ${del} PERFORM t."raise" FROM (VALUES (1)) AS t("raise"); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["extension installed, then reached by dynamic SQL", `BEGIN; CREATE EXTENSION dblink; ${rb(`EXECUTE 'SELECT dblink_' || 'exec(1)'; ${del}`)}`],
+    ["session advisory lock survives the rollback", "BEGIN; SELECT pg_advisory_lock(42); ROLLBACK;"],
+    ["another backend terminated", "BEGIN; SELECT pg_terminate_backend(123); ROLLBACK;"],
+    // Luna round 2 on #1092.
+    ["TRUNCATE inside a DO body", rb("TRUNCATE customers;")],
+    ["session advisory locks released", "BEGIN; SELECT pg_advisory_unlock_all(); ROLLBACK;"],
+    ["non-transactional logical message", "BEGIN; SELECT pg_logical_emit_message(false, 'x', 'y'); ROLLBACK;"],
+    ["COPY FROM PROGRAM", "BEGIN; CREATE TEMP TABLE x(a text); COPY x FROM PROGRAM 'touch /tmp/m'; ROLLBACK;"],
+    ["earlier DO block with a COMMIT, no BEGIN", `DO $a$ BEGIN ${del} COMMIT; END $a$; ${rb("")}`],
+    ["earlier plain write, no BEGIN", `${del} ${rb("")}`],
+    // Codex App on #1092: quoted or commented function names.
+    ["quoted setval inside a wrapper", "BEGIN; SELECT pg_catalog.\"setval\"('public.invoice_number_seq', 1); ROLLBACK;"],
+    ["setval with a comment before the bracket", "BEGIN; SELECT setval/**/('public.invoice_number_seq', 1); ROLLBACK;"],
+    ["quoted pg_terminate_backend", "BEGIN; SELECT \"pg_terminate_backend\"(123); ROLLBACK;"],
+    ["quoted nextval inside a smoke DO block", rb("PERFORM \"nextval\"('invoice_number_seq');")],
+    ["smoke raise only inside a dollar-quoted string (Codex App)", `DO $do$ BEGIN ${del} PERFORM $msg$raise exception 'SMOKE_PASS_ROLLBACK'$msg$; END $do$;`],
+    ["qualified columns named begin/end hide the outer handler (Codex App)", `DO $$ BEGIN ${del} PERFORM t.begin FROM (VALUES (1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN PERFORM t.end FROM (VALUES (1)) AS t("end"); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["CASE expression naming begin plus a labeled block (Codex App)", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN <<b>> BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["CASE expression naming begin, no label", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["output aliases case/end hiding an outer handler (Codex App, ad4206786)", `DO $$ BEGIN DELETE FROM customers; PERFORM 1 AS case; EXCEPTION WHEN OTHERS THEN PERFORM 1 AS end; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["bare output labels case/end hiding an outer handler", `DO $$ BEGIN ${del} PERFORM 1 case; EXCEPTION WHEN OTHERS THEN PERFORM 1 end; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["alias case closed by a later END CASE", `DO $$ BEGIN ${del} PERFORM 1 AS case; EXCEPTION WHEN OTHERS THEN NULL; END CASE; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["qualified keyword with spaces around the dot (Codex App)",`DO $$ BEGIN ${del} PERFORM t . case FROM (VALUES (1)) AS t("case"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["schema named begin", `DO $$ BEGIN ${del} PERFORM begin.f(); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["identifier with a $ that looks like a keyword (Codex App)", `DO $$ BEGIN ${del} PERFORM case$x FROM (VALUES (1)) AS t("case$x"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["identifier ending in $x$ hides a RETURN", rb(`PERFORM a$x$; RETURN; ${del} PERFORM b$x$;`)],
+    ["non-ASCII identifier ending in $x$ hides a RETURN (Codex App)", `DO $$ DECLARE "é$x$" integer := 1; BEGIN ${del} PERFORM é$x$; RETURN; PERFORM é$x$; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["E'' string continued on the next line hides a RETURN (Codex App)", `DO $$ BEGIN ${del} PERFORM E'a'\n'\\''; RETURN; PERFORM E'a'\n'\\''; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["non-ASCII dollar-quote tag hides a RETURN (Codex App)", `DO $$ BEGIN ${del} PERFORM $é$'$é$; RETURN; PERFORM $é$'$é$; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["dollar-quote tag longer than 66 characters hides a RETURN (Codex App)", (() => { const t = `$${"a".repeat(80)}$`; return `DO $$ BEGIN ${del} PERFORM ${t}'${t}; RETURN; PERFORM ${t}'${t}; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`; })()],
+    ["COPY FROM PROGRAM after 5000 characters of column list (Codex App)", `BEGIN; COPY customers (${Array.from({ length: 600 }, (_, k) => `c${k}`).join(", ")}) FROM PROGRAM 'touch /tmp/m'; ROLLBACK;`],
+    ["COPY TO a dollar-quoted file name (Codex App)", rb(`${del} COPY (SELECT 1) TO $f$/tmp/smoke.txt$f$;`)],
+    ["COPY TO a U&'' file name (allow-list)", rb(`${del} COPY (SELECT 1) TO U&'/tmp/smoke.txt';`)],
+    // Standard reading: one string "\'; RETURN; PERFORM ". With
+    // standard_conforming_strings off: '\'' is a string, then RETURN runs.
+    ["standard_conforming_strings off, then backslash quotes hide a RETURN (Codex App)", `DO $a$ BEGIN PERFORM set_config('standard_conforming_strings', 'off', false); END $a$; DO $$ BEGIN ${del} PERFORM '\\''; RETURN; PERFORM '\\''; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["'to stdout' only inside the copied query's literal (Codex App)", rb(`${del} COPY (SELECT 'to stdout') TO PROGRAM 'touch /tmp/smoke.txt';`)],
+    ["\"to stdout\" only as a quoted identifier", rb(`${del} COPY (SELECT 1 AS "to stdout") TO PROGRAM 'touch /tmp/smoke.txt';`)],
+    ["source table named stdin is not COPY's own FROM STDIN (Codex App)", rb(`CREATE TEMP TABLE stdin(x int); ${del} COPY (SELECT * FROM stdin) TO PROGRAM 'touch /tmp/smoke.txt';`)],
+    ["replication-origin advance (Codex App)", "BEGIN; SELECT pg_replication_origin_advance('subscription_origin', '0/FFFFFFFF'); ROLLBACK;"],
+    ["Unicode-escaped setval name (Codex App)", rb(`DELETE FROM customers WHERE false; PERFORM pg_catalog.U&"set\\0076al"('public.invoice_number_seq', 1);`)],
+    ["setval inside a supplied pg_temp function (Codex App)", "BEGIN; CREATE FUNCTION pg_temp.reset_seq() RETURNS bigint LANGUAGE sql AS $f$ SELECT setval('public.invoice_number_seq', 1) $f$; SELECT pg_temp.reset_seq(); ROLLBACK;"],
+    ["U&\" setval inside a supplied pg_temp function (Codex App)", "BEGIN; CREATE FUNCTION pg_temp.reset_seq() RETURNS bigint LANGUAGE sql AS $f$ SELECT pg_catalog.U&\"set\\0076al\"('public.invoice_number_seq', 1) $f$; SELECT pg_temp.reset_seq(); ROLLBACK;"],
+    ["E'' function body spelling setval", String.raw`BEGIN; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS E'SELECT set\x76al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
+    ["U&'' function body spelling setval", String.raw`BEGIN; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS U&'SELECT set\0076al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
+    ["plain function body with a backslash escape", String.raw`BEGIN; SET standard_conforming_strings = off; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS 'SELECT set\166al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
+    ["commented setval in a single-quoted function body (Codex App)", "BEGIN; CREATE FUNCTION pg_temp.reset_seq() RETURNS bigint LANGUAGE sql AS 'SELECT setval/**/(''public.invoice_number_seq'', 1)'; SELECT pg_temp.reset_seq(); ROLLBACK;"],
+    ["single-quoted DO body (Codex App)", "BEGIN; DELETE FROM customers WHERE false; DO 'BEGIN PERFORM setval/**/(''public.invoice_number_seq'', 1); END'; ROLLBACK;"],
+    ["single-quoted DO LANGUAGE body", "BEGIN; DELETE FROM customers WHERE false; DO LANGUAGE plpgsql 'BEGIN PERFORM setval/**/(''public.invoice_number_seq'', 1); END'; ROLLBACK;"],
+    ["consuming logical-slot read (Codex App)", "BEGIN; SELECT * FROM pg_logical_slot_get_changes('existing_slot', NULL, NULL); ROLLBACK;"],
+    // Luna round 3 on #1092.
+    ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],
+    ["COPY FROM an E'' file name", "COPY customers FROM E'/tmp/customers.csv';"],
+    ["native-language temp function", `CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE c AS 'x', 'y'; ${rb("PERFORM pg_temp.f();")}`],
+    ["statistics reset inside a wrapper", "BEGIN; SELECT pg_stat_reset(); ROLLBACK;"],
+    ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
+    // Sol on #1092 (BLOCKERS on c52cc3ce5): SQL assembled at run time hides any name.
+    ["setval assembled with || (Sol)", "BEGIN; DELETE FROM invoices; DO $$ BEGIN EXECUTE 'SELECT set' || 'val(''public.invoice_number_seq'', 1)'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;"],
+    ["EXECUTE format('%s')", rb(`${del} EXECUTE format('SELECT %s(''public.invoice_number_seq'', 1)', 'setval');`)],
+    ["EXECUTE of an unconstrained variable", `DO $$ DECLARE v text := 'SELECT set' || 'val(1)'; BEGIN ${del} EXECUTE v; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["EXECUTE E'' with a hex escape", rb(String.raw`${del} EXECUTE E'SELECT set\x76al(''public.invoice_number_seq'', 1)';`)],
+    ["EXECUTE of a literal holding a comment", rb(`${del} EXECUTE 'SELECT setval/**/(''public.invoice_number_seq'', 1)';`)],
+    ["EXECUTE of a literal holding --", rb(`${del} EXECUTE 'SELECT 1 --';`)],
+    ["EXECUTE ( … )", rb(`${del} EXECUTE ('SELECT set' || 'val(1)');`)],
+    ["nested DO inside executed text assembles setval", rb(`${del} EXECUTE 'DO $x$ BEGIN EXECUTE ''SELECT set'' || ''val(1)''; END $x$';`)],
+    ["pg_temp function body assembles setval", "BEGIN; DELETE FROM invoices; CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'SELECT set' || 'val(1)'; END $f$; SELECT pg_temp.f(); ROLLBACK;"],
+    ["pg_temp function runs its text parameter", "BEGIN; DELETE FROM invoices; CREATE FUNCTION pg_temp.f(v_sql text) RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE v_sql; END $f$; SELECT pg_temp.f('SELECT set' || 'val(1)'); ROLLBACK;"],
+    ["query_to_xml runs assembled text", `BEGIN; ${del} SELECT query_to_xml('SELECT set' || 'val(1)', true, false, ''); ROLLBACK;`],
+    ["ts_stat runs assembled text", `BEGIN; ${del} SELECT * FROM ts_stat('SELECT set' || 'val(1)'); ROLLBACK;`],
+    ["loop variable reassigned", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1'] LOOP v_sql := 'SELECT set' || 'val(1)'; EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["loop variable filled by SELECT INTO", `DO $$ DECLARE v_sql text; BEGIN ${del} SELECT 'SELECT set' || 'val(1)' INTO v_sql; EXECUTE v_sql; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["list element assembled with ||", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT set' || 'val(1)'] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["list element format('%I')", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY[format('SELECT %I(1)', 'setval')] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["list element format('DO %L')", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY[format('DO %L', 'BEGIN NULL; END')] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["loop variable shadowed in an inner block", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1'] LOOP DECLARE v_sql text := 'x'; BEGIN EXECUTE v_sql; END; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["constant list appended to", `DO $$ DECLARE v_list text[] := ARRAY['SELECT 1']; v_sql text; BEGIN ${del} v_list := v_list || ('SELECT set' || 'val(1)'); FOREACH v_sql IN ARRAY v_list LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["variable named function run with USING", `DO $$ DECLARE function text := 'SELECT set' || 'val(1)'; BEGIN ${del} EXECUTE function USING (1); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["format() shadowed by a function the batch creates", `BEGIN; CREATE FUNCTION public.format(text, text) RETURNS text LANGUAGE sql AS $f$ SELECT 'SELECT set' || 'val(1)' $f$; SET LOCAL search_path = public, pg_catalog; ${rb(`${del}`).replace("BEGIN ", "DECLARE v_sql text; BEGIN FOREACH v_sql IN ARRAY ARRAY[format('SELECT 1', 'x')] LOOP EXECUTE v_sql; END LOOP; ")}`],
+    // Luna round 2 on the dynamic-SQL fix.
+    ["COPY TO PROGRAM inside an executed literal", `BEGIN; ${del} DO $$ BEGIN EXECUTE 'COPY (SELECT 1) TO PROGRAM ''touch /tmp/x'''; END $$; ROLLBACK;`],
+    ["plperl temp function builds SQL without EXECUTE", `BEGIN; ${del} CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE plperl AS $p$ my $fn = "pg_advisory_" . "lock"; spi_exec_query("SELECT $fn(42)"); $p$; SELECT pg_temp.f(); ROLLBACK;`],
+    ["quoted language name", `BEGIN; ${del} CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE "plperl" AS $p$ return; $p$; ROLLBACK;`],
+    ["backend memory-context dump", `BEGIN; ${del} SELECT pg_log_backend_memory_contexts(pg_backend_pid()); ROLLBACK;`],
+    ["log rotation", `BEGIN; ${del} SELECT pg_rotate_logfile(); ROLLBACK;`],
+    // Sol on 5f2e2ccb0: a rollback neither unreads a returned server file nor restores a deleted one.
+    ["server-file read (Sol)", `BEGIN; ${del} SELECT pg_read_file('/etc/passwd'); ROLLBACK;`],
+    ["server-file delete (Sol)", `BEGIN; ${del} SELECT pg_file_unlink('/tmp/example'); ROLLBACK;`],
+    ["binary server-file read", rb(`${del} PERFORM pg_read_binary_file('/tmp/x');`)],
+    ["server directory listing", `BEGIN; ${del} SELECT pg_ls_dir('.'); ROLLBACK;`],
+    ["server file metadata", `BEGIN; ${del} SELECT pg_stat_file('postgresql.conf'); ROLLBACK;`],
+    ["CHECKPOINT", `BEGIN; ${del} CHECKPOINT; ROLLBACK;`],
+    ["http extension call", `BEGIN; ${del} SELECT http(('GET', 'https://example.com', NULL, NULL, NULL)::http_request); ROLLBACK;`],
+    ["standby snapshot WAL record (Luna round 3)", `BEGIN; ${del} SELECT pg_log_standby_snapshot(); ROLLBACK;`],
+    ["operator backed by setval (Codex App, d5ab5782d)", "BEGIN; CREATE OPERATOR public.=== (LEFTARG = regclass, RIGHTARG = bigint, FUNCTION = pg_catalog.setval); SELECT 'public.invoice_number_seq'::regclass OPERATOR(public.===) 1::bigint; ROLLBACK;"],
+    ["operator built in a DO body", rb(`${del} CREATE OPERATOR pg_temp.=== (LEFTARG = regclass, RIGHTARG = bigint, PROCEDURE = setval);`)],
+    ["operator built in an executed literal", rb(`${del} EXECUTE $q$CREATE OR REPLACE OPERATOR === (LEFTARG = regclass, RIGHTARG = bigint, FUNCTION = setval)$q$;`)],
+    ["aggregate with a final function", `BEGIN; CREATE AGGREGATE pg_temp.a(regclass) (SFUNC = pg_catalog.int8inc_any, STYPE = regclass, FINALFUNC = nextval); ROLLBACK;`],
+    ["range type with a canonical function", `BEGIN; CREATE TYPE pg_temp.r AS RANGE (SUBTYPE = int8, CANONICAL = f); ROLLBACK;`],
+    ["alter operator restrict function", `BEGIN; ALTER OPERATOR === (regclass, bigint) SET (RESTRICT = f); ROLLBACK;`],
+    ["conversion with a function", `BEGIN; CREATE DEFAULT CONVERSION c FOR 'UTF8' TO 'LATIN1' FROM f; ROLLBACK;`],
+    ["text search parser", `BEGIN; CREATE TEXT SEARCH PARSER p (START = f, GETTOKEN = f, END = f, LEXTYPES = f); ROLLBACK;`],
+    ["dollar quotes nested 4096 deep inside an executed literal (Luna round 3)", rb(`${del} EXECUTE 'SELECT ${Array.from({ length: 4096 }, (_, k) => `$t${k}$`).join("")}x${Array.from({ length: 4096 }, (_, k) => `$t${4095 - k}$`).join("")}';`)],
+    ["LOAD a library", `BEGIN; ${del} LOAD '$libdir/auto_explain'; ROLLBACK;`],
+    ["PREPARE outlives the rollback", `BEGIN; ${del} PREPARE p AS DELETE FROM invoices; ROLLBACK;`],
+    ["PREPARE inside an executed literal", rb(`${del} EXECUTE 'PREPARE p AS DELETE FROM invoices';`)],
+    ["dollar quotes nested past the cap (Luna)", rb(`${del} PERFORM ${Array.from({ length: 20 }, (_, k) => `$t${k}$`).join("")}x${Array.from({ length: 20 }, (_, k) => `$t${19 - k}$`).join("")};`)],
+    // Coordinator, 2026-10-25: close the class, so even a variable over a fixed list is refused.
+    ["EXECUTE of a loop variable over fixed literals", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1', 'SELECT 2'] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["assignment hidden behind a variable named raise", `DO $$ DECLARE raise boolean := true; v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1'] LOOP IF raise THEN v_sql := 'x'; END IF; EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+  ]) {
+    ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);
+  }
+  // RPC calls hidden in a DO body or a CALL were never scanned (the scanner keyed
+  // on SELECT); outside a rollback-only batch they are now refused.
+  for (const [label, query] of [
+    ["PERFORM in a DO block", "DO $$ BEGIN PERFORM save_customer('{}'); END $$;"],
+    ["assignment in a DO block", "DO $$ DECLARE v int; BEGIN v := save_customer('{}'); END $$;"],
+    ["CALL of a procedure", "CALL some_proc();"],
+  ]) {
+    ok(sql(query).includes("deny"), `RPC call outside a rollback-only batch denied: ${label}`);
+  }
+  eq(sql("DO $$ BEGIN RAISE NOTICE '%', now(); END $$;").trim(), "", "a read-only DO block using builtins is still allowed");
+  // Every live-runnable smoke chain in the repo classifies as rollback-only, except
+  // three that EXECUTE a variable (a loop over format() text). Dynamic SQL hides
+  // names from the checks (Sol, #1092), so they stay refused until rewritten to
+  // EXECUTE '<literal>' USING ….
+  const smokeDir = path.join(__dirname, "..", "..", "scripts", "smoke");
+  const smokeSpecs = JSON.parse(fs.readFileSync(path.join(smokeDir, "smoke-specs.json"), "utf8")).specs;
+  const dynamicSqlChains = new Set(["save_quote_customer_row_version", "cost_margin_admin_only_rpc_leaks", "money_replay_binding_batch1"]);
+  let smokeCount = 0;
+  for (const [key, spec] of Object.entries(smokeSpecs)) {
+    if (spec.container_only || spec.psql_only) continue;
+    const verdict = classifySql(fs.readFileSync(path.join(smokeDir, spec.chain), "utf8")).block;
+    if (dynamicSqlChains.has(key)) { eq(verdict, true, `dynamic-SQL chain stays refused: ${key}`); continue; }
+    smokeCount++;
+    eq(verdict, false, `live smoke chain runs through the guard: ${key}`);
+  }
+  ok(smokeCount >= 66, `smoke chain sweep covered ${smokeCount} chains (66 on 2026-10-25)`);
   fs.rmSync(proj, { recursive: true, force: true });
 }
 // codex-push-guard: a non-push command → silent passthrough (plain git push of a

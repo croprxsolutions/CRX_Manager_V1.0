@@ -4300,9 +4300,12 @@ const GLUED_RUNTIME_RE = /[A-Za-z0-9][$`]|[)}`][A-Za-z0-9]|\$\w+\$|[)}`][$`]/;
 // Like the other refusals here this is a speed bump, not a boundary.
 export function runtimeProgramRefused(command, gated) {
   if (!programAssembledAtRuntime(command)) return false;
-  // Single-quoted text is literal, so it is dropped; double quotes are removed, so
-  // `"$G""$H"` glues pieces just as `$G$H` does (Luna, 2026-10-26).
-  const expandable = String(command || "").replace(/'[^']*'/g, " ").replace(/"/g, "");
+  // Single-quoted text is literal: its letters stay (`'g'$H` still glues, Codex App
+  // on #1128) but a `$` or backtick inside it does not expand (`'literal$USER'`).
+  // Double quotes are removed, so `"$G""$H"` glues just as `$G$H` does (Luna).
+  const expandable = String(command || "")
+    .replace(/'([^']*)'/g, (_, literal) => literal.replace(/[$`]/g, "x"))
+    .replace(/"/g, "");
   return Boolean(gated) || GLUED_RUNTIME_RE.test(expandable);
 }
 

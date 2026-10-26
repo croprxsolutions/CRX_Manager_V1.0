@@ -196,6 +196,7 @@ for (const command of [
   "X=h; P=g${X}; $P pr list",
   'G=g; H=h; M1=mer; M2=ge; "$G""$H" pr "$M1""$M2" 1',
   "$(printf g)`printf h;` pr $(printf m)`printf erge;` 951 --squash",
+  "H=h; R=erge; 'g'$H pr 'm'$R 951 --squash",
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code is refused only when it can also start a program or reach the network.

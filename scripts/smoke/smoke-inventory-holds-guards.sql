@@ -32,7 +32,7 @@ DECLARE
 BEGIN
   SELECT p.id INTO v_admin FROM public.profiles p WHERE p.role = 'admin' AND p.is_active ORDER BY p.created_at LIMIT 1;
   IF v_admin IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: no active admin profile to run as';
+    RAISE EXCEPTION 'SMOKE_FAIL: no active admin profile to sign in with';
   END IF;
 
   -- Fixtures, as the owner: a retired product with an open PO line, and a plain active product.

@@ -183,6 +183,7 @@ for (const command of [
   '"$NODE" scripts/report.mjs --check',
   'CODEX=$(ls -t /c/bin/*/codex.exe | head -1); "$CODEX" --version',
   'P=python; $P -I scratch/stats.py',
+  `NODE=node; "$NODE" scripts/report.mjs 'literal$USER'`,
 ]) ok(!runtimeProgramRefused(command, couldReachGatedAction([command])), `whole-variable program allowed: ${command}`);
 for (const command of [
   "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
@@ -194,7 +195,6 @@ for (const command of [
   "P=g$(echo h); $P pr m$(echo e)rge 1",
   "X=h; P=g${X}; $P pr list",
   'G=g; H=h; M1=mer; M2=ge; "$G""$H" pr "$M1""$M2" 1',
-  "G=g; H=h; M1=mer; M2=ge; '$G'$H pr $M1'$M2' 1",
   "$(printf g)`printf h;` pr $(printf m)`printf erge;` 951 --squash",
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
@@ -204,6 +204,7 @@ for (const command of [
   `node -e "const s=\`gh pr list\`; console.log(s.length)"`,
   `node -e "const f = function(){ return /merge/.test('x') }; console.log(f())"`,
   `node -e "const execute=x=>x; console.log(/merge/.test('x'))"`,
+  `node -e "const execution=/merge/.test('x'); console.log('git',execution)"`,
   `node -e "console.log(/gh|git|push|merge/.test(process.argv[1]))" x`,
   `gh pr view 5 --json title | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const x=[];x.push(d);console.log(x)})"`,
 ]) ok(!inlineCodeReachesGatedAction(command), `harmless inline code allowed: ${command}`);
@@ -220,6 +221,7 @@ for (const command of [
   `php -r 'pcntl_exec("/usr/bin/gh", ["pr","merge","1"]);'`,
   "perl -e 'qx(gh pr merge 951)'",
   "ruby -e '%x(gh pr merge 951)'",
+  "ruby -e '%x!gh pr --repo owner/repo merge 951 --admin!'",
   `node -e "const {Octokit}=require('@octokit/rest'); new Octokit({auth:process.env.GH_TOKEN}).rest.pulls.merge({owner:'o',repo:'r',pull_number:951})"`,
 ]) ok(inlineCodeReachesGatedAction(command), `inline code that can act still refused: ${command}`);
 

@@ -552,6 +552,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["E'' function body spelling setval", String.raw`BEGIN; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS E'SELECT set\x76al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
     ["U&'' function body spelling setval", String.raw`BEGIN; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS U&'SELECT set\0076al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
     ["plain function body with a backslash escape", String.raw`BEGIN; SET standard_conforming_strings = off; CREATE FUNCTION pg_temp.r() RETURNS bigint LANGUAGE sql AS 'SELECT set\166al(''public.invoice_number_seq'', 1)'; SELECT pg_temp.r(); ROLLBACK;`],
+    ["commented setval in a single-quoted function body (Codex App)", "BEGIN; CREATE FUNCTION pg_temp.reset_seq() RETURNS bigint LANGUAGE sql AS 'SELECT setval/**/(''public.invoice_number_seq'', 1)'; SELECT pg_temp.reset_seq(); ROLLBACK;"],
     ["consuming logical-slot read (Codex App)", "BEGIN; SELECT * FROM pg_logical_slot_get_changes('existing_slot', NULL, NULL); ROLLBACK;"],
     // Luna round 3 on #1092.
     ["EXECUTE 'TRUNCATE …' in a DO block", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE customers'; END $$;"],

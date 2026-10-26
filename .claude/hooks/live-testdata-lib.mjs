@@ -448,11 +448,11 @@ function verifyRollbackOnce(query) {
   // prefix in PostgreSQL, which the walkers here do not model (Codex App,
   // #1092). No live smoke chain uses one, so such a batch is simply refused.
   if (/'[ \t]*(?:\r?\n[ \t]*)+'/.test(c)) return false;
-  // A function body written as an escape string (E'…', U&'…', or a plain
-  // literal with a backslash, which escapes when standard_conforming_strings
-  // is off) can spell setval or any name the checks read past (Codex App,
-  // #1092). Smoke chains use dollar-quoted bodies, so such a batch is refused.
-  if (/\bas\s*(?:(?:e|u&)'|'(?:[^']|'')*\\)/i.test(c)) return false;
+  // A function body written as a quoted string (plain, E'…' or U&'…') hides its
+  // code from the name checks: escapes and comments inside a literal can spell
+  // setval/**/( or any name (Codex App, #1092). Smoke chains use dollar-quoted
+  // bodies, so a batch with any string-literal body is refused.
+  if (/\bas\s*(?:e|u&)?'/i.test(c)) return false;
   const st = topLevelStatements(c);
   if (!st || st.length === 0) return false;
   const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);

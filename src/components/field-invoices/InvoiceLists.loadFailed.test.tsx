@@ -12,8 +12,8 @@ type Mode = 'error' | 'nodata' | 'notlist';
 
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, unknown[]>,
-  // Table name -> how its reads fail.
-  failing: new Map<string, 'error' | 'nodata' | 'notlist'>(),
+  // Table name -> how its reads fail ('throws' rejects instead of answering).
+  failing: new Map<string, 'error' | 'nodata' | 'notlist' | 'throws'>(),
   toast: vi.fn(),
 }));
 
@@ -29,9 +29,13 @@ function replyFor(table: string): { data: unknown; error: unknown; count: number
 // A query that ignores its filters and answers with the table's rows (or its failure).
 function query(table: string): Record<string, unknown> {
   const reply = replyFor(table);
+  const throws = H.failing.get(table) === 'throws';
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve(reply);
+      if (prop === 'then') {
+        return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          (throws ? reject(new Error('socket hang up')) : resolve(reply));
+      }
       if (prop === 'maybeSingle' || prop === 'single') return () => Promise.resolve({ data: null, error: null });
       return () => q;
     },
@@ -112,6 +116,14 @@ describe('Field Invoices panels', () => {
       tryAgain();
       expect((await screen.findAllByText('FA-0001')).length).toBeGreaterThan(0);
       expect(screen.queryByText(failedTitle)).not.toBeInTheDocument();
+    });
+  }
+
+  for (const [name, panel, failedTitle] of panels) {
+    it(`${name}: a read that throws says could not be loaded, not a skeleton for good`, async () => {
+      H.failing.set('invoices', 'throws');
+      renderIn(panel());
+      expect(await screen.findByText(failedTitle)).toBeInTheDocument();
     });
   }
 

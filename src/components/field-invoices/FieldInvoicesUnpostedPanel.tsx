@@ -140,7 +140,9 @@ export default function FieldInvoicesUnpostedPanel() {
       .order('id')
       .order('id', { referencedTable: 'field_app_locations' })
       .order('id', { referencedTable: 'invoice_items' })
-      .range(from, to)));
+      .range(from, to)))
+      // A read that throws fails the same way, never leaving the skeleton up for good.
+      .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
     if (seq !== fetchSeq.current) return;
 
     if (error || !data) {

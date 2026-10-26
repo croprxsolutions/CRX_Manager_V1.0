@@ -189,16 +189,19 @@ export default function Invoices() {
         .filter(Boolean) as string[]
     )];
     const salesmanMap: Record<string, string> = {};
-    // A failed label lookup keeps the list but must not fail silently.
+    // A failed label lookup keeps the list but must not fail silently. One that throws
+    // counts as failed too, so it can never leave the list on its skeleton.
     let labelLookupError: { message: string } | null = null;
+    const lookup = <T,>(read: Promise<{ data: T[] | null; error: { message: string } | null }>) =>
+      read.catch((err: unknown) => ({ data: null, error: { message: err instanceof Error ? err.message : String(err) } }));
     if (salesmanIds.length > 0) {
       // pageWithList: a page with no list is a failed lookup (named below), not "no names".
-      const { data: salesmen, error: salesmenError } = await fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => pageWithList(supabase
+      const { data: salesmen, error: salesmenError } = await lookup(fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => pageWithList(supabase
         .from('profile_public_view')
         .select('id, full_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
-        .range(from, to)));
+        .range(from, to))));
       if (salesmenError) labelLookupError = salesmenError;
       ((salesmen || []) as { id: string; full_name: string }[]).forEach((s) => { salesmanMap[s.id] = s.full_name; });
     }
@@ -209,12 +212,12 @@ export default function Invoices() {
     )];
     const orderMap: Record<string, string> = {};
     if (orderIds.length > 0) {
-      const { data: ords, error: ordersLookupError } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => pageWithList(supabase
+      const { data: ords, error: ordersLookupError } = await lookup(fetchAllRowsForIds(orderIds, (idChunk, from, to) => pageWithList(supabase
         .from('orders')
         .select('id, order_number', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
-        .range(from, to)));
+        .range(from, to))));
       if (ordersLookupError) labelLookupError ??= ordersLookupError;
       ((ords || []) as { id: string; order_number: string }[]).forEach((o) => { orderMap[o.id] = o.order_number; });
     }

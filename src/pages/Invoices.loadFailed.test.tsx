@@ -12,7 +12,8 @@ type Mode = 'error' | 'nodata' | 'notlist';
 
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, unknown[]>,
-  failing: new Map<string, 'error' | 'nodata' | 'notlist'>(),
+  // Table name -> how its reads fail ('throws' rejects instead of answering).
+  failing: new Map<string, 'error' | 'nodata' | 'notlist' | 'throws'>(),
   rpc: vi.fn(),
   toast: vi.fn(),
 }));
@@ -29,9 +30,13 @@ function replyFor(table: string): { data: unknown; error: unknown; count: number
 // A query that ignores its filters and answers with the table's rows (or its failure).
 function query(table: string): Record<string, unknown> {
   const reply = replyFor(table);
+  const throws = H.failing.get(table) === 'throws';
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve(reply);
+      if (prop === 'then') {
+        return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          (throws ? reject(new Error('socket hang up')) : resolve(reply));
+      }
       return () => q;
     },
   });
@@ -94,6 +99,15 @@ describe('Invoices list', () => {
       expect(screen.getAllByText('$100.00').length).toBeGreaterThan(0);
     },
   );
+
+  it.each(['profile_public_view', 'orders'])('a %s label lookup that throws keeps the list and says the labels failed', async (table) => {
+    H.tables.invoices = [{ ...posted, salesman_id: 'rep-1', order_id: 'ord-1' }];
+    H.failing.set(table, 'throws');
+    open();
+    expect(await screen.findByText('CS-1001')).toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('error', 'Some salesperson or order labels could not be loaded.');
+    expect(screen.queryByText(FAILED)).not.toBeInTheDocument();
+  });
 
   it('a refresh that fails after a void drops the older rows and their bulk actions', async () => {
     open();

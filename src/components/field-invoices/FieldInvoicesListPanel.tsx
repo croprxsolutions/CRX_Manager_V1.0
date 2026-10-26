@@ -152,7 +152,9 @@ export default function FieldInvoicesListPanel() {
       .or(openOrInSeasonFilter('created_at'))
       .order('created_at', { ascending: false })
       .order('id')
-      .range(from, to)));
+      .range(from, to)))
+      // A read that throws fails the same way, never leaving the skeleton up for good.
+      .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
     if (seq !== fetchSeq.current) return;
 
     if (error || !data) {

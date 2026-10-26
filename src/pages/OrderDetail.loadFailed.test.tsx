@@ -5,8 +5,9 @@
  * failed order read must not say "Order not found".
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 type Mode = 'error' | 'nodata' | 'notlist';
 
@@ -157,6 +158,37 @@ describe('Order Detail', () => {
     expect(await screen.findByText(FAILED)).toBeInTheDocument();
     expect(screen.queryByText('Order not found')).not.toBeInTheDocument();
   });
+
+  it('moving from a real order to a missing one says "Order not found", not the previous order', async () => {
+    let go: (to: string) => void = () => {};
+    function Probe() {
+      const navigate = useNavigate();
+      useEffect(() => { go = navigate; }, [navigate]);
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={['/orders/ord-1']}>
+        <Routes>
+          <Route path="/orders/:id" element={<OrderDetail />} />
+        </Routes>
+        <Probe />
+      </MemoryRouter>,
+    );
+    expect((await screen.findAllByText('ORD-0042')).length).toBeGreaterThan(0);
+    H.tables.orders = [];
+    act(() => { go('/orders/missing'); });
+    expect(await screen.findByText('Order not found')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-0042')).not.toBeInTheDocument();
+  });
+
+  it.each(['order_item_field_allocations', 'fields', 'field_billing_defaults'])(
+    'a %s read with no list reports the field split details as not loaded',
+    async (table) => {
+      H.failing.set(table, 'nodata');
+      open();
+      await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load field split details. Please refresh.'));
+    },
+  );
 
   it('a missing order still says "Order not found"', async () => {
     H.tables.orders = [];

@@ -20,7 +20,7 @@ import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
-import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { notifyOrderStatusChange } from '../lib/notificationTriggers';
 import { supabase, checkMutationResult, sanitizeError, assertRpcResult, hasRpcCode, RpcErrorCodes, describePostInvoiceBlock } from '../lib/db';
 import { Sentry } from '../lib/sentry';
@@ -339,29 +339,30 @@ export default function OrderDetail() {
         // from (with their owner splits), and a customer-id → name map for the live preview.
         // Every read below is paged: one request stops at the server's row cap, which
         // would drop fields, owner splits or names from the split editor (Goal 4 M36).
-        const { data: allocData, error: allocError } = await fetchAllRows((from, to) => supabase
+        // pageWithList: a page with no list sets allocLoadFailed instead of reading as "no splits".
+        const { data: allocData, error: allocError } = await fetchAllRows((from, to) => pageWithList(supabase
           .from('order_item_field_allocations')
           .select('id, order_item_id, field_id, acres, created_at, order_items!inner(order_id)', { count: 'exact' })
           .eq('order_items.order_id', id!)
           .order('id')
-          .range(from, to));
+          .range(from, to)));
         if (isStale()) return;
         setAllocations(((allocData || []) as unknown as (OrderItemFieldAllocation & { order_items?: unknown })[])
           .map(({ order_items: _oi, ...a }) => a as OrderItemFieldAllocation));
 
         const [fieldsRes, fbdRes] = await Promise.all([
-          fetchAllRows<{ id: string; field_name: string; total_acres: number | null; customer_id: string }>((from, to) => supabase
+          fetchAllRows<{ id: string; field_name: string; total_acres: number | null; customer_id: string }>((from, to) => pageWithList(supabase
             .from('fields')
             .select('id, field_name, total_acres, customer_id', { count: 'exact' })
             .eq('is_active', true)
             .order('field_name')
             .order('id')
-            .range(from, to)),
-          fetchAllRows<{ id: string; field_id: string; customer_id: string; split_pct: number }>((from, to) => supabase
+            .range(from, to))),
+          fetchAllRows<{ id: string; field_id: string; customer_id: string; split_pct: number }>((from, to) => pageWithList(supabase
             .from('field_billing_defaults')
             .select('id, field_id, customer_id, split_pct', { count: 'exact' })
             .order('id')
-            .range(from, to)),
+            .range(from, to))),
         ]);
         if (isStale()) return;
         // Names for just the customers the preview can show (this order's customer + field owners).
@@ -373,12 +374,12 @@ export default function OrderDetail() {
           ...(fbdRes.data || []).map((r) => r.customer_id),
         ].filter(Boolean))];
         // Sent in chunks, so a long id list never overflows the request URL either.
-        const custRes = await fetchAllRowsForIds(nameIds, (idChunk, from, to) => supabase
+        const custRes = await fetchAllRowsForIds(nameIds, (idChunk, from, to) => pageWithList(supabase
           .from('customers')
           .select('id, farm_name', { count: 'exact' })
           .in('id', idChunk)
           .order('id')
-          .range(from, to));
+          .range(from, to)));
         if (isStale()) return;
         const allocLoadErrors = [allocError, fieldsRes.error, fbdRes.error, custRes.error].filter((e) => e != null);
         for (const err of allocLoadErrors) {
@@ -395,6 +396,10 @@ export default function OrderDetail() {
         const names: Record<string, string> = {};
         for (const c of (custRes.data || []) as { id: string; farm_name: string }[]) names[c.id] = c.farm_name;
         setCustNames(names);
+      } else {
+        // A read that found no order (not a failed one) says "Order not found", never the
+        // previous order this page was showing.
+        setOrder(null);
       }
       if (isStale()) return;
       setLoadFailed(false);

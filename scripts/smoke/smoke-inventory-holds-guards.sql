@@ -55,8 +55,9 @@ BEGIN
   IF v_row IS NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (a) the retired product with an open PO line is missing from get_inventory_position';
   END IF;
-  IF (v_row ->> 'quantity_on_order')::numeric <> 10 OR (v_row ->> 'net_position')::numeric <> 10
-     OR (v_row ->> 'is_low_stock')::boolean
+  IF (v_row ->> 'quantity_on_order')::numeric IS DISTINCT FROM 10
+     OR (v_row ->> 'net_position')::numeric IS DISTINCT FROM 10
+     OR (v_row ->> 'is_low_stock')::boolean IS DISTINCT FROM false
      OR v_row ? 'is_active' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (a) wrong retired-product row: %', v_row;
   END IF;
@@ -125,8 +126,11 @@ BEGIN
   END IF;
   IF (SELECT count(*) FROM public.integrity_alerts a JOIN public.inventory_holds h ON h.id = a.entity_id
        WHERE a.resolved_at IS NULL AND h.product_id = v_plain
-         AND a.alert_type IN ('stuck_job_hold', 'orphan_quote_hold')) <> 2 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (c) the two alerts are not recorded against the planted holds';
+         AND a.alert_type = 'stuck_job_hold' AND h.hold_type = 'job') <> 1
+     OR (SELECT count(*) FROM public.integrity_alerts a JOIN public.inventory_holds h ON h.id = a.entity_id
+       WHERE a.resolved_at IS NULL AND h.product_id = v_plain
+         AND a.alert_type = 'orphan_quote_hold' AND h.hold_type = 'crop_program') <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) each alert is not recorded against the planted hold of its own type';
   END IF;
 
   -- (d) A product with a hold cannot be deleted (its holds are not wiped).

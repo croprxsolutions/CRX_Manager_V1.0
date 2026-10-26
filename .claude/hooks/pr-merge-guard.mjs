@@ -35,7 +35,7 @@ import {
   commandFedToInterpreter,
   commandFedToInterpreterDenial,
   couldReachGatedAction,
-  programAssembledAtRuntime,
+  runtimeProgramRefused,
   nestedProgramNameGlued,
   inlineCodeReachesGatedAction,
   ghCommandUnreadableDenial,
@@ -157,7 +157,7 @@ if (GITHUB_MERGE_TOOL.test(toolName)) {
   // fail-closed refusals (2026-10-18; see couldReachGatedAction).
   const gated = couldReachGatedAction(scannedCommands);
   if (gated && nested.computed) deny(nestedComputedDenial("PR MERGE GATE"));
-  if (programAssembledAtRuntime(toolInput.command)) deny(nestedComputedDenial("PR MERGE GATE"));
+  if (runtimeProgramRefused(toolInput.command, gated)) deny(nestedComputedDenial("PR MERGE GATE"));
   // A COMPUTED nested command is read too: `bash -c '$(printf g)h pr …'` assembles
   // its program name inside the nested text (Codex connector, PR #956). Only when
   // computed, because the grouping split also turns `$((i+1))` into fragments.

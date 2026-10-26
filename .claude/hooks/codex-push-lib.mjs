@@ -4285,6 +4285,23 @@ export function programAssembledAtRuntime(command) {
   return programBuiltAtRuntime(text, /[$`]/);
 }
 
+// Letters glued to a run-time piece (`$(printf g)h`, `m$(echo e)rge`, `g${X}t`,
+// `` `printf g`h ``) or two pieces side by side (`$a$b`) spell a word the scan
+// cannot read. A whole reference on its own (`"$NODE" x.mjs`) does not.
+const GLUED_RUNTIME_RE = /[A-Za-z0-9][$`]|[)}`][A-Za-z0-9]|\$\w+\$|[)}]\$/;
+
+// Should a run-time-built program name be refused? (Mason, 2026-10-26, "looser
+// guards".) Running a program from a whole variable — `"$CODEX" --version`,
+// `"$NODE" scripts/x.mjs` — was refused on every command and was the single
+// biggest false block. It is now refused only when the command could reach a
+// gated action (`gated`, from couldReachGatedAction) or when some word in it is
+// glued together from run-time pieces, which is how a merge or push is hidden.
+// Like the other refusals here this is a speed bump, not a boundary.
+export function runtimeProgramRefused(command, gated) {
+  if (!programAssembledAtRuntime(command)) return false;
+  return Boolean(gated) || GLUED_RUNTIME_RE.test(String(command || ""));
+}
+
 // A NESTED command's program name glued from a substitution or variable AND
 // literal letters (`$(printf g)h`, `g$(printf i)t`, `` `printf g`h ``, `g${X}t`):
 // a shell inside `bash -c '…'` assembles it, and the outer scan never reads it
@@ -4330,6 +4347,16 @@ const INLINE_CODE_CLUSTER_RE = /^-[A-Za-z0-9]*?[epcrE]([\s\S]*)$/;
 // connector, PR #956). Every word after `eval` in the window is judged, and
 // `eval` may follow the runtime's own options (`deno --quiet eval`; Luna).
 const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
+// Inline code is refused only when it can also start a program or reach the
+// network (Mason, 2026-10-26, "looser guards"): `arr.push(x)` or a regex naming
+// `merge` is ordinary data handling, and refusing it was a steady false block.
+// Perl, Ruby and PHP run a shell command from backticks; in JavaScript a
+// backtick is just a template string, so it does not count there.
+const INLINE_CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|shell_exec|passthru|proc_open|open3|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\beval\b|\bfunction\s*\(|\$\(/i;
+const BACKTICK_RUNS_SHELL = new Set(["perl", "ruby", "php"]);
+function inlineCodeCanAct(program, code) {
+  return INLINE_CAPABILITY_RE.test(code) || (BACKTICK_RUNS_SHELL.has(program) && code.includes("`"));
+}
 export function inlineCodeReachesGatedAction(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
     const words = splitShellArgv(segment);
@@ -4348,7 +4375,7 @@ export function inlineCodeReachesGatedAction(command) {
           evalSubcommand = true;
           continue;
         }
-        if (evalSubcommand && couldReachGatedAction([word])) return true;
+        if (evalSubcommand && couldReachGatedAction([word]) && inlineCodeCanAct(program, word)) return true;
         // `--eval=…`, a separate `--eval …`, or a short cluster whose code is
         // attached (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3) or
         // is the next word (`node -pe "…"`).
@@ -4358,7 +4385,8 @@ export function inlineCodeReachesGatedAction(command) {
           : INLINE_CODE_FLAG_RE.test(word) ? [words[at + 1]]
           : cluster ? [cluster[1], words[at + 1]]
           : [];
-        if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]))) return true;
+        if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]) &&
+          inlineCodeCanAct(program, String(code)))) return true;
         // No early stop at the first bare word: a detached option value
         // (`node --require fs -e "…"`) looks like a script argument, so the whole
         // window is scanned (Codex connector, PR #956 third pass).

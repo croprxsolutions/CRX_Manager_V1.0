@@ -456,6 +456,12 @@ separately, the permission change.
    `gh … | node -e "…"` still passes. **Residual, stated:** a merge hidden inside code that a runtime
    executes (char codes, joins, decoding — three review rounds each found a new spelling) cannot be
    closed by reading command text. These checks raise the cost; they are not a boundary.
+   **Loosened 2026-10-26 (Mason, "looser guards"; evidence `docs/changelog.d/2026-10-26-looser-merge-gate.md`):**
+   a program run from one whole variable (`"$NODE" x.mjs`, `"$CODEX" --version`) is refused only when
+   the command could reach a gated action or glues a word from run-time pieces (`$a$b`,
+   `$(printf g)h`, `g${X}t`) — `runtimeProgramRefused`. Inline code is refused only when it can also
+   start a program or reach the network (`child_process`, `exec`, `system(`, `fetch`, a URL; backticks
+   in Perl, Ruby and PHP), so `a.push(x)` or a regex naming `merge` passes.
 2. **Hold latch:** outward actions deny, local work warns. See its row above.
 3. **Review proof guard:** the rule that denied any command naming any `.claude` path next to a
    destructive word (34 sessions) now counts `.claude` only as a whole target (`.claude`, `.claude/`,

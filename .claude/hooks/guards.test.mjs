@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold, holdDecision } from "./hold-latch-lib.mjs";
 import { classifySql } from "./live-testdata-lib.mjs";
-import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid, programAssembledAtRuntime } from "./codex-push-lib.mjs";
+import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid, programAssembledAtRuntime, runtimeProgramRefused, couldReachGatedAction, inlineCodeReachesGatedAction } from "./codex-push-lib.mjs";
 import { DENY_TOOLNAME_RE } from "./autopilot-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -176,6 +176,40 @@ for (const command of [
   'bash -c "$CMD"',
   "i=$(($i+1)); git status",
 ]) ok(!programAssembledAtRuntime(command), `ordinary shape not refused: ${command}`);
+
+// ── looser guards (Mason, 2026-10-26): a whole-variable program is refused only
+// when the command could reach a gated action or glues a word from run-time pieces
+for (const command of [
+  '"$NODE" scripts/report.mjs --check',
+  'CODEX=$(ls -t /c/bin/*/codex.exe | head -1); "$CODEX" --version',
+  'P=python; $P -I scratch/stats.py',
+]) ok(!runtimeProgramRefused(command, couldReachGatedAction([command])), `whole-variable program allowed: ${command}`);
+for (const command of [
+  "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
+  "a=gi; b=t; c=pu; d=sh; $a$b $c$d origin HEAD:main",
+  "export P=gh && $P pr merge 1",
+  "$p = 'gh'; & $p pr merge 1",
+  "$(printf g)h pr m$(printf er)ge 951 --squash",
+  "`printf g`h pr m`printf er`ge 951 --squash",
+  "P=g$(echo h); $P pr m$(echo e)rge 1",
+  "X=h; P=g${X}; $P pr list",
+]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
+
+// Inline code is refused only when it can also start a program or reach the network.
+for (const command of [
+  `node -e "const a=[]; a.push(1); console.log(/merge|push/.test('x'))"`,
+  `node -e "const s=\`gh pr list\`; console.log(s.length)"`,
+  `gh pr view 5 --json title | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const x=[];x.push(d);console.log(x)})"`,
+]) ok(!inlineCodeReachesGatedAction(command), `harmless inline code allowed: ${command}`);
+for (const command of [
+  `node -e "require('child_process').execSync('gh pr merge 1')"`,
+  `node -e "require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgMQ==','base64').toString())"`,
+  `python -c "import os; os.system('gh pr merge 1')"`,
+  `perl -e 'print \`gh pr merge 1\`'`,
+  `ruby -e '\`git push origin HEAD:main\`'`,
+  `node -e "fetch('https://api.github.com/repos/o/r/pulls/1/merge',{method:'PUT'})"`,
+  `deno eval "new Deno.Command('gh',{args:['pr','merge','1']}).outputSync()"`,
+]) ok(inlineCodeReachesGatedAction(command), `inline code that can act still refused: ${command}`);
 
 // ── live-testdata ────────────────────────────────────────────────────────
 ok(classifySql("INSERT INTO customers (name) VALUES ('Acme Farm')").block, "real customer insert blocked");

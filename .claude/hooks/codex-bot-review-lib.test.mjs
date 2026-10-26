@@ -17,8 +17,13 @@ import {
   CODERABBIT_REQUIRED_LABEL,
   codexBotFindingsDenial,
   coderabbitCompletedCommit,
+  coderabbitFindingSeverity,
   coderabbitRequirementArgs,
+  coderabbitRequirementUnreadableDenial,
   coderabbitReviewMissingDenial,
+  FOLLOWUP_REQUIRED_CHECKS,
+  isFollowUpExcludedPath,
+  isFollowUpTestPath,
   evaluateCodeRabbitRequirement,
   isMoneyPath,
   prOwnChangesUnchanged,
@@ -779,5 +784,175 @@ ok(coderabbitRequirementArgs("o", "r", 5).includes("number=5")
 ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it changes money", HEAD))
   && /pr comment 7/.test(coderabbitReviewMissingDenial("X", "7", "w", HEAD)),
   "the denial tells the agent the exact one request to post");
+
+// ── One CodeRabbit review per PR: minor follow-ups (Mason, 2026-10-26) ───────
+// Real GitHub answers recorded 2026-10-26 (trimmed to what the parser reads:
+// fixtures/coderabbit-followup/). Each is replayed through the same
+// readCodeRabbitRequirement the merge gates, the landing gate and the Sol
+// pre-flight call; then copies are broken one condition at a time.
+{
+  const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "coderabbit-followup");
+  const loadFixture = (number) => JSON.parse(readFileSync(path.join(fixtureDir, `pr${number}.json`), "utf8"));
+  const isFollowUpRead = (args) => args[1] === "graphql" && args.some((arg) => String(arg).includes('reviews(first:100, author:"coderabbitai[bot]")'));
+  // Replays calls by their exact arguments; `edit(kind, value)` may change a parsed answer.
+  const replay = (fixture, edit = () => {}) => {
+    const answers = new Map(fixture.calls.map((call) => [JSON.stringify(call.args), call.out]));
+    // A broken copy may change which trees the follow-up read asks for; answer
+    // it with the recorded read (a tree it lacks reads as "not a plain file").
+    const followUpAnswer = fixture.calls.find((call) => isFollowUpRead(call.args))?.out;
+    return (args) => {
+      const out = isFollowUpRead(args) ? followUpAnswer : answers.get(JSON.stringify(args));
+      if (out === undefined) throw new Error(`fixture has no answer for gh ${args.slice(0, 2).join(" ")}`);
+      const kind = isFollowUpRead(args) ? "followUp"
+        : String(args[1]).includes("/compare/") ? (fixture.calls.findIndex((call) => String(call.args[1]).includes("/compare/")) === fixture.calls.findIndex((call) => JSON.stringify(call.args) === JSON.stringify(args)) ? "fixes" : "tip")
+        : args[1] === "graphql" ? "requirement" : "files";
+      if (kind === "files") return edit(kind, out) ?? out;
+      const value = JSON.parse(out);
+      edit(kind, value);
+      return JSON.stringify(value);
+    };
+  };
+  const readFixture = (number, edit) => {
+    const fixture = loadFixture(number);
+    return readCodeRabbitRequirement(replay(fixture, edit), { owner: "masonwells1", name: "CRX_Manager_V1.0", number });
+  };
+
+  // The recorded outcomes.
+  for (const number of [1017, 1099, 1101, 1065, 1086]) {
+    const fixture = loadFixture(number);
+    const verdict = readFixture(number);
+    eq([verdict.status, verdict.via || ""], [fixture.expect.status, fixture.expect.via], `PR #${number} replays to its recorded outcome`);
+  }
+  const covered = readFixture(1017);
+  eq(covered.followUp.reviewedOid, "faa0f2fa31ec15b34ebabeccf07e5abafde2fa31", "#1017: R is the commit CodeRabbit marked Review completed");
+  eq(covered.followUp.findings.map((f) => [f.path, f.severity]), [["src/components/ui/RecordSearchPicker.tsx", "minor"]],
+    "#1017: its one finding is read with CodeRabbit's own Minor label");
+  eq(covered.followUp.files.map((f) => [f.filename, f.category]).sort(),
+    [["src/components/customers/CustomerSearchPicker.test.tsx", "test"], ["src/components/ui/RecordSearchPicker.tsx", "finding"]],
+    "#1017: the fix touched the finding's file and a test");
+  ok(/rated its finding .* major/.test(readFixture(1099).why), "#1099: a Major finding needs a new review");
+  eq(readFixture(1101).followUp.files.map((f) => f.category), ["finding"], "#1101: a trivial finding in a smoke test is covered");
+  ok(/merge commit sits between/.test(readFixture(1065).why), "#1065: main merged before the fixes needs a new review");
+  ok(/holds none of CodeRabbit's findings/.test(readFixture(1086).why), "#1086: a fix in a file with no finding needs a new review");
+
+  // Break one condition at a time on #1017 (covered as recorded).
+  const R = "faa0f2fa31ec15b34ebabeccf07e5abafde2fa31";
+  const fullReview = (value) => value.data.repository.pullRequest.reviews.nodes.find((r) => r.commit.oid === R && r.body);
+  const finding = (value) => fullReview(value).comments.nodes.find((c) => !c.replyTo);
+  const walkthrough = (value) => value.data.repository.pullRequest.comments.nodes.find((c) => c.body.includes("pre_merge_checks_walkthrough_start"));
+  const fileIn = (value, name) => value.files.find((f) => f.filename.endsWith(name));
+  const cases = [
+    ["missing", "a Major label", "followUp", (v) => { finding(v).body = finding(v).body.replace("🟡 Minor", "🟠 Major"); }],
+    ["missing", "an unrecognised severity header", "followUp", (v) => { finding(v).body = "**Please fix.**"; }],
+    ["missing", "a Minor label with the wrong colour", "followUp", (v) => { finding(v).body = finding(v).body.replace("🟡 Minor", "🔵 Minor"); }],
+    ["missing", "a review that claims more findings than were read", "followUp", (v) => { fullReview(v).body = fullReview(v).body.replace("Actionable comments posted: 1", "Actionable comments posted: 2"); }],
+    ["missing", "a review with zero findings", "followUp", (v) => { fullReview(v).body = fullReview(v).body.replace("Actionable comments posted: 1", "Actionable comments posted: 0"); }],
+    ["missing", "outside-diff comments in the review summary", "followUp", (v) => { fullReview(v).body += "\n> **⚠️ Outside diff range comments (1)**"; }],
+    ["missing", "a nitpick section in the review summary", "followUp", (v) => { fullReview(v).body += "\n<summary>🧹 Nitpick comments (2)</summary>"; }],
+    ["missing", "two full reviews of the same commit", "followUp", (v) => { const reviews = v.data.repository.pullRequest.reviews; reviews.nodes.push(structuredClone(fullReview(v))); reviews.totalCount += 1; }],
+    ["unreadable", "a review comment page cut short", "followUp", (v) => { fullReview(v).comments.totalCount = 101; }],
+    ["unreadable", "a review list cut short", "followUp", (v) => { v.data.repository.pullRequest.reviews.totalCount = 101; }],
+    ["unreadable", "a summary describing another commit", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(R, "f".repeat(40)); }],
+    ["unreadable", "no summary comment", "followUp", (v) => { walkthrough(v).body = ""; }],
+    ["unreadable", "a pre-merge table missing a row", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/\n\|[^\n]*New Table Without Rls[^\n]*/, ""); }],
+    ["missing", "a custom pre-merge check in warning", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/(\|\s*Money Not Exact Whole Cents\s*\|\s*)!\[Passed\]/, "$1![Warning]"); }],
+    ["unreadable", "GitHub errors with the follow-up read", "followUp", (v) => { v.errors = [{ message: "partial" }]; }],
+    ["missing", "a finding file that became executable", "followUp", (v) => { for (const key of ["t2_0", "t2_1"]) for (const entry of v.data.repository[key]?.entries || []) if (entry.name === "RecordSearchPicker.tsx") entry.mode = 0o100755; }],
+    ["missing", "a new test file that already existed at R", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").status = "added"; }],
+    ["missing", "a fix in a file with no finding", "fixes", (v) => { v.files.push({ ...fileIn(v, "RecordSearchPicker.tsx"), filename: "src/lib/invoiceMath.ts" }); }],
+    ["missing", "a fix under supabase/", "fixes", (v) => { v.files.push({ ...fileIn(v, "RecordSearchPicker.tsx"), filename: "supabase/migrations/20261026000000_x.sql" }); }],
+    ["missing", "a fix to agent tooling", "fixes", (v) => { v.files.push({ ...fileIn(v, "RecordSearchPicker.tsx"), filename: "scripts/write-codex-push-proof.mjs" }); }],
+    ["missing", "a renamed file", "fixes", (v) => { fileIn(v, "RecordSearchPicker.tsx").previous_filename = "src/components/ui/Old.tsx"; }],
+    ["missing", "a file with no text diff", "fixes", (v) => { delete fileIn(v, "RecordSearchPicker.tsx").patch; }],
+    ["missing", "61 changed lines in a finding file", "fixes", (v) => { fileIn(v, "RecordSearchPicker.tsx").additions = 61; }],
+    ["missing", "151 changed test lines", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").additions = 151; }],
+    ["missing", "21 deleted test lines", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").deletions = 21; }],
+    ["missing", "a changelog entry over 40 lines", "fixes", (v) => { v.files.push({ filename: "docs/changelog.d/2026-10-26-x.md", status: "added", additions: 41, deletions: 0, patch: "+x" }); }],
+    ["missing", "a compare listing a commit outside the chain", "fixes", (v) => { v.commits[0].sha = "e".repeat(40); }],
+    ["missing", "a merge after the fixes that changed a PR code file", "tip", (v) => { v.files.push({ filename: "src/components/ui/RecordSearchPicker.tsx", status: "modified" }); }],
+    ["unreadable", "commit parents without their SHAs", "requirement", (v) => { for (const node of v.data.repository.pullRequest.commits.nodes) delete node.commit.parents.nodes; }],
+  ];
+  // Each break must be refused for ITS reason, not a side effect of the edit.
+  const reasons = {
+    "a Major label": /rated its finding .* major/,
+    "an unrecognised severity header": /no readable severity/,
+    "a Minor label with the wrong colour": /no readable severity/,
+    "a review that claims more findings than were read": /says it posted 2 findings but 1/,
+    "a review with zero findings": /posted no findings/,
+    "outside-diff comments in the review summary": /outside the changed lines/,
+    "a nitpick section in the review summary": /nitpick/,
+    "two full reviews of the same commit": /more than one full review/,
+    "a review comment page cut short": /review comments could not all be read/,
+    "a review list cut short": /reviews could not all be read/,
+    "a summary describing another commit": /describes fffffffff, not the reviewed commit/,
+    "no summary comment": /summary comment could not be identified/,
+    "a pre-merge table missing a row": /lists 8 checks but its summary counts 9/,
+    "a custom pre-merge check in warning": /"money not exact whole cents" pre-merge check reads warning/,
+    "GitHub errors with the follow-up read": /GitHub returned errors/,
+    "a finding file that became executable": /RecordSearchPicker\.tsx is not a plain file/,
+    "a new test file that already existed at R": /already existed at the reviewed commit/,
+    "a fix in a file with no finding": /invoiceMath\.ts, which holds none/,
+    "a fix under supabase/": /supabase\/migrations\/20261026000000_x\.sql, which always gets a fresh review/,
+    "a fix to agent tooling": /write-codex-push-proof\.mjs, which always gets a fresh review/,
+    "a renamed file": /only edits, new tests/,
+    "a file with no text diff": /has no text diff/,
+    "61 changed lines in a finding file": /61 lines in finding files \(limit 60\)/,
+    "151 changed test lines": /151 test lines \(limit 150\)/,
+    "21 deleted test lines": /delete 21 test lines/,
+    "a changelog entry over 40 lines": /changelog entry is over 40 lines/,
+    "a compare listing a commit outside the chain": /exactly the fix commits/,
+    "a merge after the fixes that changed a PR code file": /merge after the fixes changed src\/components\/ui\/RecordSearchPicker\.tsx/,
+    "commit parents without their SHAs": /parents could not be read/,
+  };
+  eq(Object.keys(reasons).sort(), cases.map(([, label]) => label).sort(), "every broken case names its expected reason");
+  for (const [status, label, kind, change] of cases) {
+    const verdict = readFixture(1017, (k, value) => { if (k === kind) change(value); });
+    eq(verdict.status, status, `#1017 broken by ${label} -> ${status}`);
+    ok(reasons[label].test(verdict.why), `#1017 broken by ${label} is refused for that reason (got: ${verdict.why})`);
+  }
+  // Allowed variations stay covered.
+  const stays = [
+    ["a Title-check warning (PR text, not code)", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/(\|\s*Title check\s*\|\s*)!\[Passed\]/, "$1![Warning]"); }],
+    ["one new changelog entry", "any", (v, k) => {
+      if (k === "fixes") v.files.push({ filename: "docs/changelog.d/2026-10-26-x.md", status: "added", additions: 12, deletions: 0, patch: "+x" });
+      // Its directory's tree at F and the head (third directory in the read).
+      if (k === "followUp") for (const key of ["t1_2", "t2_2"]) v.data.repository[key] = { entries: [{ name: "2026-10-26-x.md", type: "blob", mode: 0o100644 }] };
+    }],
+    ["a merge after the fixes that changed a shared doc", "tip", (v) => { v.files.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified" }); }],
+  ];
+  for (const [label, kind, change] of stays) {
+    eq(readFixture(1017, (k, value) => { if (kind === "any" || k === kind) change(value, k); }).via, "minor-follow-up", `#1017 with ${label} stays covered`);
+  }
+  {
+    const fixture = loadFixture(1017);
+    let threw = false;
+    try {
+      readCodeRabbitRequirement(replay(fixture), { owner: "masonwells1", name: "CRX_Manager_V1.0", number: 1017, deadlineMs: 10_000, callTimeoutMs: 5_000, now: (() => { let t = 0; return () => (t += 2_000); })() });
+    } catch { threw = true; }
+    ok(threw, "a follow-up read that would outlive the hook budget throws (callers refuse; never 'not covered')");
+  }
+
+  // Header parsing, both formats.
+  const pic = (icon, word) => `<!-- coderabbit-ai-generated:v1 -->\n\n**<picture><img src="https://x/review-comment-icons-v1/${icon}-16.svg" alt=""></picture> ${word}** · **Functional Correctness** · **Quick win**\n\nBody mentions 🟠 Major in passing.`;
+  eq(coderabbitFindingSeverity(pic("amber", "Minor")), "minor", "pictured Minor");
+  eq(coderabbitFindingSeverity(pic("neutral", "Trivial")), "trivial", "pictured Trivial");
+  eq(coderabbitFindingSeverity(pic("major", "Major")), "major", "pictured Major");
+  eq(coderabbitFindingSeverity(pic("major", "Minor")), null, "a Minor word with another icon is unrecognised");
+  eq(coderabbitFindingSeverity("**🎯 Functional Correctness** | **🔵 Trivial**"), "trivial", "older table-style Trivial");
+  eq(coderabbitFindingSeverity("**🎯 Functional Correctness** | **🟡 Minor** | **🟠 Major**"), null, "two severities in one header are unrecognised");
+  eq(coderabbitFindingSeverity("Some text\n**🟡 Minor**"), null, "only the first line counts");
+  ok(isFollowUpExcludedPath("supabase/functions/send-email/index.ts") && isFollowUpExcludedPath(".github/workflows/ci.yml")
+    && isFollowUpExcludedPath("package-lock.json") && isFollowUpExcludedPath("vite.config.ts") && isFollowUpExcludedPath("AGENTS.md")
+    && !isFollowUpExcludedPath("src/lib/invoiceMath.ts"), "control files are excluded; app code is not");
+  ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && !isFollowUpTestPath("scripts/smoke/smoke-specs.json")
+    && !isFollowUpTestPath("scripts/write-codex-push-proof.mjs"), "only smoke chains count as tests under scripts/");
+  // The required pre-merge checks are exactly the custom checks in .coderabbit.yaml.
+  const yaml = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".coderabbit.yaml"), "utf8");
+  const customNames = [...yaml.slice(yaml.indexOf("custom_checks:")).matchAll(/^\s+- name: (.+)$/gm)].map((m) => m[1].trim().toLowerCase());
+  eq([...FOLLOWUP_REQUIRED_CHECKS].sort(), customNames.sort(), "FOLLOWUP_REQUIRED_CHECKS matches .coderabbit.yaml's custom checks");
+  ok(/do NOT post a new @coderabbitai request/.test(coderabbitRequirementUnreadableDenial("X", "7", "a read was cut short"))
+    && /a read was cut short/.test(coderabbitRequirementUnreadableDenial("X", "7", "a read was cut short")),
+    "the unreadable denial names the failed read and forbids spending a review on it");
+}
 
 console.log(`codex-bot-review-lib: ${pass} assertions passed`);

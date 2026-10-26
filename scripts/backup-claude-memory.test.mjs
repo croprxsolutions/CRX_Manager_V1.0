@@ -1429,6 +1429,20 @@ try {
       eq(readFileSync(path.join(out4, "archive__swapped.md"), "utf8"), "archived\n", "the checked read copies the note's bytes");
     }
 
+    // Codex App (#1098): staging into the archive's location while it does NOT exist yet would
+    // write snapshot files where the next run reads archived notes from. Refuse it too.
+    {
+      const p5 = fresh("archive-absent-overlap");
+      const mem5 = path.join(p5, "memory");
+      mkdirSync(mem5);
+      writeFileSync(path.join(mem5, INDEX_FILE), "# idx\n");
+      const absentArchive = path.join(p5, "memory-archive");
+      eq(quiet(() => stage(absentArchive, mem5)), 1, "staging into a not-yet-created archive folder is refused");
+      eq(quiet(() => stage(path.join(absentArchive, "snap"), mem5)), 1, "staging inside a not-yet-created archive folder is refused");
+      ok(!existsSync(absentArchive), "the refused runs did not create the archive folder");
+      eq(quiet(() => stage(path.join(root, "staged-absent-ok"), mem5)), 0, "staging elsewhere with no archive still succeeds");
+    }
+
     // Only a source literally named `memory` has an archive.
     const other = fresh("archive-other");
     const notMemory = path.join(other, "notes");

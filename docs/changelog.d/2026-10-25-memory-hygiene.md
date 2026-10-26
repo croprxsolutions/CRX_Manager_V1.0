@@ -8,7 +8,8 @@
   silently drop out (and so be pruned from the backup) REFUSES the run: an archive that is not a
   real directory or cannot be read, an archived note that is a link, or a missing archive while
   the previous snapshot holds `archive__` notes (an empty archive folder is the explicit way to
-  drop them). Staging into or around the archive is refused, and a live note named `archive__*`
+  drop them). Staging into or around the archive is refused, including where the archive will
+  be created when it does not exist yet (Codex GitHub App finding on #1098), and a live note named `archive__*`
   refuses the run. The backup command doc says so.
 - `docs/reference/gotchas.md`: two new sections of rules that had lived only in one machine's
   agent memory, where sessions found them by luck — "Agent workflow traps" (12: explicit

@@ -146,9 +146,12 @@ const mdFiles = (dir) =>
 // Only "does not exist" (ENOENT) means "no archive yet".
 export const ARCHIVE_DIR = "memory-archive";
 export const ARCHIVE_PREFIX = "archive__";
+// Returns `dir` (the archive, only when it EXISTS — the missing-archive prune check keys on
+// it) and `plannedDir` (where the archive lives or will live — the destination overlap check
+// keys on it, so staging into a not-yet-created archive is refused too; Codex App, #1098).
 function archiveSources(source) {
   const resolved = path.resolve(source);
-  if (path.basename(resolved) !== "memory") return { dir: null, entries: [] };
+  if (path.basename(resolved) !== "memory") return { dir: null, plannedDir: null, entries: [] };
   const dir = path.join(path.dirname(resolved), ARCHIVE_DIR);
   const refuse = (why) => ({
     error:
@@ -160,7 +163,7 @@ function archiveSources(source) {
   try {
     info = linkStat(dir);
   } catch (err) {
-    if (err?.code === "ENOENT") return { dir: null, entries: [] }; // no archive yet — normal
+    if (err?.code === "ENOENT") return { dir: null, plannedDir: dir, entries: [] }; // no archive yet — normal
     return refuse(`the memory archive could not be read (${err?.code || "error"}).`);
   }
   if (!info.isDirectory()) return refuse(`${dir} exists but is not a plain directory (a link or a file).`);
@@ -177,7 +180,7 @@ function archiveSources(source) {
     }
   }
   if (notRegular.length > 0) return refuse(`archived note(s) are not regular files (links?): ${notRegular.join(", ")}.`);
-  return { dir, entries: listed.sort().map((file) => ({ name: `${ARCHIVE_PREFIX}${file}`, from: path.join(dir, file) })) };
+  return { dir, plannedDir: dir, entries: listed.sort().map((file) => ({ name: `${ARCHIVE_PREFIX}${file}`, from: path.join(dir, file) })) };
 }
 
 // Read one note through a single file handle and prove the handle is the same regular file
@@ -883,7 +886,7 @@ function stage(outDir, sourceArg) {
     return 1;
   }
 
-  const destination = assertSafeDestination(outDir, source, allNames, archive.dir);
+  const destination = assertSafeDestination(outDir, source, allNames, archive.plannedDir);
   if (typeof destination === "string") {
     console.error(destination);
     return 1;

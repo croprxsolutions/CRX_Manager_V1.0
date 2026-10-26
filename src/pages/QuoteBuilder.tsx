@@ -1531,21 +1531,29 @@ export default function QuoteBuilder() {
     return saved.price;
   }, [priceLocked]);
 
+  // The price and cost a line is figured at: a manual price, else its locked sent price, else
+  // today's tier price; and its quote-time cost, else today's cost.
+  const lineBasisFor = useCallback((item: LocalItem, product: Product, tierPrice: number) => {
+    // The saved row this line continues, by the test savedLineIdFor applies when saving. A line
+    // saved as another product since the load is a new row to the server.
+    const keepsSavedRow = savedLineIdsRef.current.get(item._key)?.productId === product.id;
+    return {
+      pricePerUnit: item.price_override ?? lockedPriceFor(item, product.id) ?? tierPrice,
+      // The recorded cost holds only while the line still names its saved row for this product:
+      // a line saved as another product since the load is stamped by the server at today's cost.
+      cost: item.quoted_cost?.productId === product.id && keepsSavedRow
+        ? item.quoted_cost.cost
+        : (product.current_cost || 0),
+    };
+  }, [lockedPriceFor]);
+
   const recalcItem = useCallback(
     (item: LocalItem, tierNum: number): LocalItem => {
       const product = item.product || products.find((p) => p.id === item.product_id);
       if (!product) return item;
 
       const tierPrice = getTierPrice(product, tierNum);
-      // The saved row this line continues, by the test savedLineIdFor applies when saving. A line
-      // saved as another product since the load is a new row to the server.
-      const keepsSavedRow = savedLineIdsRef.current.get(item._key)?.productId === product.id;
-      const pricePerUnit = item.price_override ?? lockedPriceFor(item, product.id) ?? tierPrice;
-      // The recorded cost holds only while the line still names its saved row for this product:
-      // a line saved as another product since the load is stamped by the server at today's cost.
-      const cost = item.quoted_cost?.productId === product.id && keepsSavedRow
-        ? item.quoted_cost.cost
-        : (product.current_cost || 0);
+      const { pricePerUnit, cost } = lineBasisFor(item, product, tierPrice);
       // Fall back to unit_size if inventory_unit is not set on the product
       const inventoryUnitFactorOz = getConversionFactor(product.inventory_unit || product.unit_size);
 
@@ -1610,7 +1618,7 @@ export default function QuoteBuilder() {
         net_margin: Math.round(netMargin * 100 * 100) / 100,
       };
     },
-    [products, getTierPrice, getConversionFactor, lockedPriceFor]
+    [products, getTierPrice, getConversionFactor, lineBasisFor]
   );
 
   // Clearing a section's field drops the acres that field filled in this session, and keeps acres

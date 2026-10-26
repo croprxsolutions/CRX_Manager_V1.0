@@ -33,7 +33,7 @@ export function sentItemsOf(version: QuoteVersion | null): SentItem[] {
 }
 
 /** Versions written since 20261026060000 name every line; older ones are matched by product. */
-export function sentItemsCarryLineIds(sentItems: SentItem[]): boolean {
+function sentItemsCarryLineIds(sentItems: SentItem[]): boolean {
   return sentItems.length > 0 && sentItems.every((item) => Boolean(item.quote_item_id));
 }
 

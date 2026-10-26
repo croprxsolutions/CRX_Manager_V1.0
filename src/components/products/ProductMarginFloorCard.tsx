@@ -157,9 +157,11 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
               </span>
             </div>
           )}
+          {/* Locked while a save and its reload run, so nothing typed meanwhile is replaced. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               id="product-margin-floor"
+              disabled={saving}
               label="Floor (net margin %)"
               // Text, not number: a number box reports text it cannot read as "", which would clear the floor.
               type="text"
@@ -171,6 +173,7 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
             <Input
               id="product-margin-floor-reason"
               label="Reason (optional)"
+              disabled={saving}
               value={reason}
               maxLength={500}
               onChange={(e) => setReason(e.target.value)}

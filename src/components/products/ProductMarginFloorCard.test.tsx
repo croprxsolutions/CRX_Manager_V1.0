@@ -152,6 +152,21 @@ describe('ProductMarginFloorCard', () => {
     expect(mocks.toast).not.toHaveBeenCalled();
   });
 
+  it('locks the floor and reason while a save runs, so nothing typed meanwhile is lost', async () => {
+    let finishSave: (value: unknown) => void = () => {};
+    mocks.setMarginFloors.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+    render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);
+    fireEvent.change(await screen.findByLabelText('Floor (net margin %)'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /save floor/i }));
+    await waitFor(() => expect(screen.getByLabelText('Floor (net margin %)')).toBeDisabled());
+    expect(screen.getByLabelText('Reason (optional)')).toBeDisabled();
+    mocks.fetchMarginFloor.mockResolvedValue(0.2);
+    finishSave({ success: true, status: 'saved', changed_count: 1, unchanged_count: 0 });
+    await waitFor(() => expect(screen.getByLabelText('Floor (net margin %)')).not.toBeDisabled());
+    expect(screen.getByLabelText('Floor (net margin %)')).toHaveValue('20');
+    expect(screen.getByLabelText('Reason (optional)')).not.toBeDisabled();
+  });
+
   it('says so when the floor cannot be loaded, and offers a retry', async () => {
     mocks.fetchMarginFloor.mockRejectedValueOnce(new Error('offline'));
     render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);

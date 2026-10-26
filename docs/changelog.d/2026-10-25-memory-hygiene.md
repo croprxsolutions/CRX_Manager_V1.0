@@ -28,8 +28,8 @@
   `dev`/`ino`, since NTFS ids exceed 2^53) must match the link check, so a note swapped for a link
   between the check and the read refuses the run instead of pulling in the link's target. The
   reserved `archive__` prefix is matched case-blind (Windows names are).
-- Proof: new test cases in `scripts/backup-claude-memory.test.mjs` (269 assertions pass; each
+- Proof: new test cases in `scripts/backup-claude-memory.test.mjs` (273 assertions pass; each
   new refusal was mutation-checked — switching it off makes a case fail); a real stage of the
-  live memory folder staged 863 files (358 archived notes) and `--verify` passed. Luna rounds 1–3
+  live memory folder staged 863 files (327 archived notes) and `--verify` passed. Luna rounds 1–3
   found nine issues (archived notes that could be pruned or mis-staged, the read race, the
   case-blind prefix, two doc points); all are fixed here.

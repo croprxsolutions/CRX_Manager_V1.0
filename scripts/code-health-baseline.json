@@ -1,0 +1,1084 @@
+{
+  "size": {
+    "src/components/blendtickets/BulkTicketUpload.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/blendtickets/ManualTicketCreate.tsx": {
+      "complexity": 3,
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/components/customers/BulkCustomerImport.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/components/customers/CustomerContacts.tsx": {
+      "complexity": 1
+    },
+    "src/components/customers/CustomerDocuments.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/customers/CustomerPrepCard.tsx": {
+      "complexity": 1
+    },
+    "src/components/customers/LogInteractionModal.tsx": {
+      "complexity": 1
+    },
+    "src/components/dashboard/DailyBrief.tsx": {
+      "complexity": 1
+    },
+    "src/components/deliveries/QuickDeliveryModal.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/components/dispatch/DispatchWizard.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/components/field-app/CustomerSharesTable.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/field-app/FieldAppChemicalEntry.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 2
+    },
+    "src/components/field-app/SelectLocationsModal.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/field-invoices/CustomerInvoiceSummaryPanel.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/field-invoices/FieldInvoicesListPanel.tsx": {
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/components/field-invoices/FieldInvoicesPostedPanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/field-invoices/FieldInvoicesUnpostedPanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/field-invoices/UnbilledApplicationsPanel.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/fields/BulkFieldImport.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-depth": 7,
+      "max-lines": 1
+    },
+    "src/components/integrity/IntegrityCleanupPanel.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 1,
+      "max-depth": 2,
+      "max-lines": 1
+    },
+    "src/components/inventory/BatchAdjustModal.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2
+    },
+    "src/components/invoices/FinanceChargePreviewModal.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/jobs/AppliedRecordsManager.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/jobs/GroundCrewsManager.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/jobs/JobAttachments.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/jobs/JobBatchesManager.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/jobs/JobFieldPickerModal.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/jobs/JobMassEditModal.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/components/jobs/LoaderWorksheetsPanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/components/layout/Sidebar.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/components/LotsEditorModal.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/components/map/DrawControl.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/orders/BulkOrderImport.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/components/prepay/PrepaymentManagerPanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/prepay/PrepayWorkspacePanel.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/products/BulkProductImport.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/products/PricingChangePreviewModal.tsx": {
+      "complexity": 1
+    },
+    "src/components/products/ProductBrandsSection.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/products/ProductPriceHistory.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/components/purchase-orders/BulkPOImport.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/components/quotes/BulkQuoteImport.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 4,
+      "max-depth": 1,
+      "max-lines": 1
+    },
+    "src/components/receiving/QuickReceivePanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 4,
+      "max-depth": 1,
+      "max-lines": 1
+    },
+    "src/components/receiving/ReceivingHubPanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2
+    },
+    "src/components/receiving/ReceivingLogPanel.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/components/reports/LogbookReport.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/team/CommentsSection.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/team/NoteCard.tsx": {
+      "complexity": 1
+    },
+    "src/components/team/NotificationsPanel.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/team/TagsManager.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/team/TeamBoardFilters.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/ui/BelowCostApprovalModal.tsx": {
+      "complexity": 1
+    },
+    "src/components/ui/CommandPalette.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/ui/EditableDataTable.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/components/ui/OfflineBanner.tsx": {
+      "complexity": 1
+    },
+    "src/components/ui/RecordSearchPicker.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/components/ui/TransactionThread.tsx": {
+      "complexity": 1
+    },
+    "src/hooks/useUncertainMutationIntent.ts": {
+      "complexity": 6,
+      "max-params": 1,
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/lib/activityLogger.ts": {
+      "max-params": 1
+    },
+    "src/lib/applicatorSheetPdf.ts": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/lib/blendMathValidator.ts": {
+      "complexity": 1
+    },
+    "src/lib/chemCalculator.ts": {
+      "complexity": 1
+    },
+    "src/lib/chemicalApplicationReportFetch.ts": {
+      "complexity": 1
+    },
+    "src/lib/cropProgramHelpers.ts": {
+      "complexity": 1
+    },
+    "src/lib/documentOCR.ts": {
+      "complexity": 1
+    },
+    "src/lib/epaDataQualityReport.ts": {
+      "max-params": 1
+    },
+    "src/lib/epaLookupClient.ts": {
+      "complexity": 1
+    },
+    "src/lib/errorSanitizer.ts": {
+      "complexity": 1
+    },
+    "src/lib/fieldInvoiceList.ts": {
+      "complexity": 1
+    },
+    "src/lib/invoicePdf.ts": {
+      "complexity": 6,
+      "max-lines-per-function": 3,
+      "max-lines": 1,
+      "max-params": 3
+    },
+    "src/lib/jobListPrint.ts": {
+      "complexity": 1
+    },
+    "src/lib/jobMapImages.ts": {
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/lib/loaderWorksheet.ts": {
+      "complexity": 1
+    },
+    "src/lib/loaderWorksheetFetch.ts": {
+      "complexity": 1
+    },
+    "src/lib/loaderWorksheetPdf.ts": {
+      "complexity": 1
+    },
+    "src/lib/masterMixSummaryData.ts": {
+      "complexity": 1
+    },
+    "src/lib/masterMixSummaryPdf.ts": {
+      "max-params": 1
+    },
+    "src/lib/notificationTriggers.ts": {
+      "max-params": 1,
+      "max-depth": 2
+    },
+    "src/lib/offlineSync.ts": {
+      "complexity": 2
+    },
+    "src/lib/productPricingWorkbook.ts": {
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/lib/projectedUseReportData.ts": {
+      "complexity": 1
+    },
+    "src/lib/projectedUseReportFetch.ts": {
+      "complexity": 1
+    },
+    "src/lib/quoteVersionAdapter.ts": {
+      "complexity": 1
+    },
+    "src/lib/recipeHelpers.ts": {
+      "complexity": 1
+    },
+    "src/lib/reconciliation.ts": {
+      "complexity": 2,
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/lib/sqlSourceLexer.ts": {
+      "complexity": 1
+    },
+    "src/lib/statementPdf.ts": {
+      "max-params": 6,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/lib/xlsxArchiveSafety.ts": {
+      "max-params": 1,
+      "complexity": 1
+    },
+    "src/lib/yearEndSummaryPdf.ts": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/pages/AccountsPayable.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/ApplicationRecords.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/ApplicationServiceDetail.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/ApplicationServices.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/ARaging.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/BlendRecipes.tsx": {
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/pages/BlendTicketDetail.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 3,
+      "max-depth": 2,
+      "max-lines": 1
+    },
+    "src/pages/BlendTickets.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/BrandVsGeneric.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/pages/CallLists.tsx": {
+      "complexity": 2,
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/pages/CommissionPayments.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 4,
+      "max-lines": 1
+    },
+    "src/pages/Compliance.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/CropPrograms.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/CustomerDetail.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 4,
+      "max-lines": 1
+    },
+    "src/pages/Customers.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/CustomerTransactionReview.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/CycleCounts.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/Dashboard.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/Deliveries.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 4,
+      "max-lines": 1
+    },
+    "src/pages/DeliveryDetail.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 8,
+      "max-depth": 1,
+      "max-lines": 1
+    },
+    "src/pages/DeliveryRemainders.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/DispatchBoard.tsx": {
+      "max-lines-per-function": 3,
+      "complexity": 4,
+      "max-depth": 6,
+      "max-lines": 1
+    },
+    "src/pages/FieldApplicationInvoice.tsx": {
+      "max-lines-per-function": 3,
+      "complexity": 6,
+      "max-lines": 1
+    },
+    "src/pages/FieldAppSplitInvoiceEditor.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/pages/FieldDashboard.tsx": {
+      "max-lines-per-function": 2,
+      "max-lines": 1
+    },
+    "src/pages/Fields.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/pages/FieldSetup.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 3,
+      "max-depth": 6,
+      "max-lines": 1
+    },
+    "src/pages/FieldStop.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 4,
+      "max-lines": 1
+    },
+    "src/pages/FieldView.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/FinancialDashboard.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/GettingStarted.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/InventoryPage.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/pages/InvoiceDetail.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 8,
+      "max-lines": 1,
+      "max-depth": 1
+    },
+    "src/pages/Invoices.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/JobDetail.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 13,
+      "max-lines": 1,
+      "max-depth": 1
+    },
+    "src/pages/Jobs.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/pages/LabelDataQuality.tsx": {
+      "complexity": 2,
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/pages/LabelReview.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/MonthEndClose.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/NewDelivery.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/NewOrder.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 4,
+      "max-lines": 1
+    },
+    "src/pages/NewPurchaseOrder.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/pages/NewVendorBill.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1
+    },
+    "src/pages/OfficeCockpit.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/OfflineWorkReview.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/OrderDetail.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/pages/Orders.tsx": {
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/pages/PaymentAllocation.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/PaymentHistory.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/ProductDetail.tsx": {
+      "max-params": 1,
+      "max-lines-per-function": 1,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/pages/Products.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-depth": 4,
+      "max-lines": 1
+    },
+    "src/pages/PurchaseOrderDetail.tsx": {
+      "max-lines-per-function": 2,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/PurchaseOrders.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/QuoteBuilder.tsx": {
+      "max-lines-per-function": 4,
+      "complexity": 10,
+      "max-lines": 1,
+      "max-depth": 3
+    },
+    "src/pages/Quotes.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/Rebates.tsx": {
+      "max-lines-per-function": 1,
+      "max-lines": 1
+    },
+    "src/pages/Reports.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/Returns.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/SalesReports.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/SettingsPage.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-depth": 2,
+      "max-lines": 1
+    },
+    "src/pages/SupplierPricing.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 2,
+      "max-lines": 1
+    },
+    "src/pages/TeamBoard.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/ToShip.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 1,
+      "max-lines": 1
+    },
+    "src/pages/VehicleDetail.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/Vehicles.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/VendorBillDetail.tsx": {
+      "max-lines-per-function": 1,
+      "complexity": 3,
+      "max-lines": 1
+    },
+    "src/pages/VendorBills.tsx": {
+      "max-lines-per-function": 1
+    },
+    "src/pages/Vendors.tsx": {
+      "max-lines-per-function": 1
+    }
+  },
+  "unused": {
+    "src/components/dispatch/DispatchWizard.tsx": [
+      "type:WizardApplicator",
+      "type:WizardCrew"
+    ],
+    "src/components/field-app/customerSplit.ts": [
+      "type:SplitReconciliation"
+    ],
+    "src/components/field-app/invoiceAppliedCarryover.ts": [
+      "export:APPLICATOR_PLACEHOLDERS",
+      "type:NameMap"
+    ],
+    "src/components/fields/FieldCustomerAssignment.tsx": [
+      "type:FieldCustomerAssignmentProps"
+    ],
+    "src/components/inventory/BatchAdjustModal.tsx": [
+      "export:batchRowIdempotencyKey",
+      "export:classifyAdjustmentError",
+      "type:RowOutcome"
+    ],
+    "src/components/inventory/InventoryPositionMobileCards.tsx": [
+      "type:MobileInventoryPosition"
+    ],
+    "src/components/jobs/appliedRecords.ts": [
+      "type:AppliedCrewRow",
+      "type:AppliedFieldRow",
+      "type:AppliedRecordPatch",
+      "type:AppliedRecordValidation",
+      "type:PersistedWeatherSet",
+      "type:RemainingAcresView",
+      "type:WeatherSetPatch"
+    ],
+    "src/components/jobs/AppliedRecordsManager.tsx": [
+      "type:AppliedJobField"
+    ],
+    "src/components/jobs/jobListColumns.ts": [
+      "export:SHARED_INVOICE_COLUMN_IDS",
+      "type:JobColumnDef"
+    ],
+    "src/components/jobs/JobMassEditModal.tsx": [
+      "type:MassEditJob"
+    ],
+    "src/components/jobs/JobSearchPicker.tsx": [
+      "export:JOB_SEARCH_SELECT"
+    ],
+    "src/components/map/CRXMap.tsx": [
+      "type:CRXMapProps"
+    ],
+    "src/components/map/DrawingHud.tsx": [
+      "type:DrawingHudProps"
+    ],
+    "src/components/orders/OrderSearchPicker.tsx": [
+      "export:ORDER_SEARCH_SELECT"
+    ],
+    "src/components/products/bulkProductImportSafety.ts": [
+      "export:PRODUCT_IMPORT_STRING_FIELDS"
+    ],
+    "src/components/products/ProductOptionPresentation.tsx": [
+      "export:productPackageLabel",
+      "type:ProductReturnPolicy"
+    ],
+    "src/components/products/ProductSearchPicker.tsx": [
+      "export:PRODUCT_SEARCH_SELECT"
+    ],
+    "src/components/reports/ReportShell.tsx": [
+      "type:ReportShellProps"
+    ],
+    "src/components/returns/ReturnDetailItems.tsx": [
+      "type:ReturnDetailItemPresentation"
+    ],
+    "src/components/ui/Badge.tsx": [
+      "type:BadgeProps"
+    ],
+    "src/components/ui/PageHeader.tsx": [
+      "type:PageHeaderProps"
+    ],
+    "src/components/ui/RecordSearchPicker.tsx": [
+      "export:RECORD_SEARCH_LIMIT",
+      "export:RECORD_SEARCH_TIMEOUT_MS",
+      "type:RecordSearchPickerProps"
+    ],
+    "src/components/ui/SearchableSelect.tsx": [
+      "type:SearchableSelectOption",
+      "type:SearchableSelectProps"
+    ],
+    "src/components/ui/Tabs.tsx": [
+      "type:TabsProps"
+    ],
+    "src/components/ui/TransactionThread.tsx": [
+      "type:TransactionThreadProps"
+    ],
+    "src/hooks/useFitBounds.ts": [
+      "type:Bounds"
+    ],
+    "src/hooks/usePrivatePhoto.ts": [
+      "type:PrivatePhoto"
+    ],
+    "src/hooks/useUncertainMutationIntent.ts": [
+      "type:DurableMutationIntentOptions",
+      "type:MutationFailureDisposition"
+    ],
+    "src/lib/activityLogger.ts": [
+      "type:LogActivityParams"
+    ],
+    "src/lib/applicatorPrintOptions.ts": [
+      "export:parseApplicatorPrintOptions"
+    ],
+    "src/lib/applicatorSheetPdf.ts": [
+      "type:ApplicatorSheetPdfOptions"
+    ],
+    "src/lib/applicatorSheetPrintData.ts": [
+      "export:previousApplicationSummary"
+    ],
+    "src/lib/belowCostApproval.ts": [
+      "type:BelowCostApprovalError"
+    ],
+    "src/lib/billedCustomersResolver.ts": [
+      "type:ResolvedBilledCustomers"
+    ],
+    "src/lib/bulkPOImportRetry.ts": [
+      "type:BulkPOIntentDocument",
+      "type:BulkPOIntentItem"
+    ],
+    "src/lib/chemCalculator.ts": [
+      "type:AppliedConversion",
+      "type:ChemAutofillUnits",
+      "type:ChemUnitBlankSides"
+    ],
+    "src/lib/chemicalSummaryReportData.ts": [
+      "type:ChemicalSummaryCsvRow"
+    ],
+    "src/lib/chemicalSummaryReportFetch.ts": [
+      "type:ChemicalSummaryFetchResult"
+    ],
+    "src/lib/commissionSplitConcurrency.ts": [
+      "type:CommissionSplitKey"
+    ],
+    "src/lib/companyInfo.ts": [
+      "export:COMPANY_TAGLINE"
+    ],
+    "src/lib/criticalAction.ts": [
+      "type:CriticalActionOptions"
+    ],
+    "src/lib/cropProgramHelpers.ts": [
+      "export:normalizeProgramRateUnit"
+    ],
+    "src/lib/csbLookup.ts": [
+      "type:CsbLookupResult"
+    ],
+    "src/lib/customerInvoiceSummary.ts": [
+      "export:SUMMARY_UNPOSTED_STATUSES"
+    ],
+    "src/lib/customerNameSearch.ts": [
+      "export:CUSTOMER_NAME_MATCH_LIMIT"
+    ],
+    "src/lib/db.ts": [
+      "type:RpcErrorCode"
+    ],
+    "src/lib/deliveryCompletionEmail.ts": [
+      "type:CompletionEmailItem",
+      "type:DeliveryCompletionEmailParams"
+    ],
+    "src/lib/deliveryEvidence.ts": [
+      "export:RECEIPT_LOOKUP_TIMEOUT_MS",
+      "type:FailedCompletionOutcome"
+    ],
+    "src/lib/deliveryInvoiceCoverage.ts": [
+      "type:InvoiceBillingCoverage"
+    ],
+    "src/lib/deliverySplitBilling.ts": [
+      "type:OrderSplitBillingSignal"
+    ],
+    "src/lib/dispatchDisplay.ts": [
+      "type:DispatchBadge",
+      "type:FieldViewCardGroups"
+    ],
+    "src/lib/dispatchWizard.ts": [
+      "type:DispatchAssignmentPayload",
+      "type:DispatchSummaryGroup"
+    ],
+    "src/lib/documentOCR.ts": [
+      "type:OCRResult"
+    ],
+    "src/lib/emailService.ts": [
+      "type:SendEmailResult"
+    ],
+    "src/lib/epaDataQualityReport.ts": [
+      "export:namesClearlyDifferent"
+    ],
+    "src/lib/epaLookupClient.ts": [
+      "export:epaFunctionErrorMessage",
+      "export:isEpaLookupResult"
+    ],
+    "src/lib/fieldAppNewInvoiceAddress.ts": [
+      "export:CREATED_INVOICE_PARAM"
+    ],
+    "src/lib/fieldAppWeather.ts": [
+      "type:WeatherRpcParams"
+    ],
+    "src/lib/fieldGeometry.ts": [
+      "type:AcreDivergence"
+    ],
+    "src/lib/fieldInvoiceList.ts": [
+      "type:FieldInvoiceTotals",
+      "type:MonthBatch"
+    ],
+    "src/lib/fieldObstacles.ts": [
+      "export:isFieldObstaclePoint",
+      "type:FieldObstacleFeatureProperties"
+    ],
+    "src/lib/idempotency.ts": [
+      "type:IdempotencyBindingRejection",
+      "type:LegacyIntentSnapshot"
+    ],
+    "src/lib/inventoryPositionLookup.ts": [
+      "type:ProductInventoryPosition"
+    ],
+    "src/lib/inventoryShortage.ts": [
+      "type:AggregatedProductNeed",
+      "type:DeliveryProductLine",
+      "type:ProductLineNeed"
+    ],
+    "src/lib/invoiceBatchPosting.ts": [
+      "type:BatchPostInvoice"
+    ],
+    "src/lib/invoicePdf.ts": [
+      "export:isFuelSurchargeLine"
+    ],
+    "src/lib/invoiceSeasonWindow.ts": [
+      "export:OPEN_INVOICE_STATUSES",
+      "export:UNKNOWN_SEASON_LABEL"
+    ],
+    "src/lib/invoiceSendDisposition.ts": [
+      "type:InvoiceSendDisposition"
+    ],
+    "src/lib/invoiceSummaryPdf.ts": [
+      "export:generateCustomerInvoiceSummaryPdf",
+      "type:CustomerInvoiceSummaryPdfData"
+    ],
+    "src/lib/jobListPrint.ts": [
+      "type:JobListPrintData"
+    ],
+    "src/lib/labelGuardrails.ts": [
+      "type:PhiHarvestResult",
+      "type:PhiHarvestStatus",
+      "type:RateComparison",
+      "type:RateComparisonStatus"
+    ],
+    "src/lib/licenseStatus.ts": [
+      "export:EXPIRING_SOON_DAYS",
+      "type:LicenseLike",
+      "type:LicenseStatus",
+      "type:LicenseStatusKind"
+    ],
+    "src/lib/loaderVesselOptions.ts": [
+      "type:LoaderVessel"
+    ],
+    "src/lib/loaderWorksheet.ts": [
+      "export:MANUAL_LOAD_CAPACITY_TOLERANCE"
+    ],
+    "src/lib/loaderWorksheetPdf.ts": [
+      "type:LoaderWorksheetPdfLoadColumn"
+    ],
+    "src/lib/loaderWorksheets.ts": [
+      "type:CondensedLoaderLoadGroup"
+    ],
+    "src/lib/lotRpc.ts": [
+      "type:ExistingLotRow"
+    ],
+    "src/lib/masterMixSummaryFetch.ts": [
+      "type:MasterMixFetchResult"
+    ],
+    "src/lib/offlineQueue.ts": [
+      "export:prepareQueuedAction"
+    ],
+    "src/lib/offlineReceipts.ts": [
+      "export:getOfflineReceiptStatus",
+      "type:OfflineReceiptDisposition"
+    ],
+    "src/lib/pagePermissions.ts": [
+      "type:PagePermission"
+    ],
+    "src/lib/paperTicket.ts": [
+      "export:completedAtForDeliveredOn"
+    ],
+    "src/lib/plssLookup.ts": [
+      "type:PlssLookupPoint"
+    ],
+    "src/lib/productBrands.ts": [
+      "export:PRODUCT_BRAND_COLUMNS"
+    ],
+    "src/lib/productIdentityResolver.ts": [
+      "export:normalizeProductIdentity",
+      "type:ProductIdentityCandidate",
+      "type:ProductIdentityResolution"
+    ],
+    "src/lib/productPricing.ts": [
+      "export:costBasisRows",
+      "type:AppliedCostBasisRow",
+      "type:AppliedPricingRow",
+      "type:ApplyPricingChangeSetInput",
+      "type:ApplyPricingResult",
+      "type:CostBasisPreviewMetadata",
+      "type:CreatePricingWorkbookExportInput",
+      "type:PreviewPricingChangesInput",
+      "type:ProductCostBasisSource"
+    ],
+    "src/lib/productPricingWorkbook.ts": [
+      "type:PricingWorkbookHeader"
+    ],
+    "src/lib/projectedUseReportData.ts": [
+      "type:ProjectedUseCsvRow"
+    ],
+    "src/lib/projectedUseReportFetch.ts": [
+      "type:ProjectedUseFetchResult"
+    ],
+    "src/lib/proofNotification.ts": [
+      "type:ProofEmailInput",
+      "type:ProofRenderInput"
+    ],
+    "src/lib/purchaseOrderEditPayload.ts": [
+      "type:PurchaseOrderEditableLine"
+    ],
+    "src/lib/quoteLifecycleRpc.ts": [
+      "type:ConvertQuoteToOrderResult",
+      "type:CreateQuoteVersionResult",
+      "type:RestoreQuoteVersionResult"
+    ],
+    "src/lib/quoteVersionAdapter.ts": [
+      "type:QuoteVersionHistoryEntry",
+      "type:QuoteVersionList"
+    ],
+    "src/lib/recentPages.ts": [
+      "type:RecentItem",
+      "type:RecordPageVisitOptions"
+    ],
+    "src/lib/recipeHelpers.ts": [
+      "type:RecipeItemPayload"
+    ],
+    "src/lib/reconciliation.ts": [
+      "export:FINANCIAL_INVOICE_STATUSES",
+      "type:Discrepancy"
+    ],
+    "src/lib/recordVersionConcurrency.ts": [
+      "type:DirectMutationRowVersionResult"
+    ],
+    "src/lib/rupCompliance.ts": [
+      "type:RUPRegisterDisposition"
+    ],
+    "src/lib/sqlSourceLexer.ts": [
+      "export:dollarTagAt",
+      "type:Ident",
+      "type:Lexed",
+      "type:Span"
+    ],
+    "src/lib/supplierPricing.ts": [
+      "type:StageSupplierPriceImportInput",
+      "type:SupplierObservationCorrection",
+      "type:UpsertSupplierLinkInput"
+    ],
+    "src/lib/supplierPricingWorkbook.ts": [
+      "export:MAX_SUPPLIER_QUOTE_ROWS",
+      "export:MAX_SUPPLIER_QUOTE_UNCOMPRESSED_BYTES",
+      "export:SUPPLIER_QUOTE_MIME",
+      "type:ParsedSupplierQuoteWorkbook"
+    ],
+    "src/lib/xlsxArchiveSafety.ts": [
+      "type:XlsxArchiveSafetyLimits"
+    ],
+    "src/test-utils/supabaseChain.ts": [
+      "type:QueryChain"
+    ],
+    "src/types/index.ts": [
+      "type:AccountingPeriod",
+      "type:ActionQueueCategory",
+      "type:AllocationSet",
+      "type:BackupRun",
+      "type:BackupSnapshot",
+      "type:CommissionPayment",
+      "type:CommissionPaymentItem",
+      "type:CreditMemoApplication",
+      "type:EmailLog",
+      "type:EmailType",
+      "type:ExternalIdentity",
+      "type:FieldAppBillingLine",
+      "type:FieldAppBillingLineKind",
+      "type:FieldAppBillingSet",
+      "type:FinanceCharge",
+      "type:FinancialAuditLog",
+      "type:IntegrityAlert",
+      "type:IntegrityAlertType",
+      "type:InteractionTranscript",
+      "type:InvoiceLineShare",
+      "type:InvoiceLineShareSnapshot",
+      "type:JobLocationDispatch",
+      "type:JobProductDraw",
+      "type:JobTagAssignment",
+      "type:LegacyVendorResolution",
+      "type:OfflineActionRpcErrorCode",
+      "type:OverlappingField",
+      "type:PrepayApplication",
+      "type:PrepayCredit",
+      "type:PricingChangeSetPreviewRowRecord",
+      "type:PricingChangeSetRecord",
+      "type:PricingChangeSetRowRecord",
+      "type:PricingChangeSetSource",
+      "type:PricingChangeSetStatus",
+      "type:PricingMode",
+      "type:PricingPreviewRowStatus",
+      "type:PricingWorkbookExportRecord",
+      "type:PricingWorkbookExportRowRecord",
+      "type:PricingWorkbookExportStatus",
+      "type:ProcessOfflineActionArgs",
+      "type:ProductCostBasisChangeRow",
+      "type:ProductSupplierLink",
+      "type:ProfilePublic",
+      "type:QuoteProductDraw",
+      "type:ReceivingPhoto",
+      "type:RecordingConsentStatus",
+      "type:ResolveOfflineActionArgs",
+      "type:SetFieldBoundaryResult",
+      "type:SetFieldOverrideAcresResult",
+      "type:SplitBasePriceSource",
+      "type:SupplierLinkStatus",
+      "type:SupplierPriceImport",
+      "type:SupplierPriceImportRow",
+      "type:SupplierPriceImportStatus",
+      "type:SupplierPriceObservation",
+      "type:TeamNoteComment",
+      "type:UserListSettings",
+      "type:VendorAlias",
+      "type:Warehouse",
+      "type:WatchdogFlagDismissal",
+      "type:WriteOff"
+    ]
+  }
+}

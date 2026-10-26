@@ -336,8 +336,8 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // included (Codex App, #1092: a pg_temp helper that calls setval).
 // Server administration calls (log rotation, WAL switches, restore points,
 // backend memory dumps) also act outside the transaction (Luna round 2, #1092).
-export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+)\s*\(/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+|setval|nextval)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
+export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_log_standby_snapshot|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+)\s*\(/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_log_standby_snapshot|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+|setval|nextval)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -415,12 +415,15 @@ export function callNormalizedSql(query) {
 // and dollar bodies blanked (recursing into every dollar body), so a literal
 // such as 'to stdout' inside the copied query cannot stand in for the real
 // destination (Codex App, #1092). Anything unparseable refuses.
-function allStatementTexts(sql, out = []) {
+// Nesting past 32 levels is not verifiable (null), so deep input cannot
+// overflow the stack (Luna round 3, #1092).
+function allStatementTexts(sql, out = [], depth = 0) {
+  if (depth > 32) return null;
   const st = topLevelStatements(sql);
   if (!st) return null;
   for (const s of st) {
     out.push(s.text);
-    for (const body of s.spans) if (!allStatementTexts(body, out)) return null;
+    for (const body of s.spans) if (!allStatementTexts(body, out, depth + 1)) return null;
   }
   return out;
 }

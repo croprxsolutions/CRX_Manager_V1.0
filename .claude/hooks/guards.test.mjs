@@ -595,6 +595,8 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["quoted language name", `BEGIN; ${del} CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE "plperl" AS $p$ return; $p$; ROLLBACK;`],
     ["backend memory-context dump", `BEGIN; ${del} SELECT pg_log_backend_memory_contexts(pg_backend_pid()); ROLLBACK;`],
     ["log rotation", `BEGIN; ${del} SELECT pg_rotate_logfile(); ROLLBACK;`],
+    ["standby snapshot WAL record (Luna round 3)", `BEGIN; ${del} SELECT pg_log_standby_snapshot(); ROLLBACK;`],
+    ["dollar quotes nested 4096 deep inside an executed literal (Luna round 3)", rb(`${del} EXECUTE 'SELECT ${Array.from({ length: 4096 }, (_, k) => `$t${k}$`).join("")}x${Array.from({ length: 4096 }, (_, k) => `$t${4095 - k}$`).join("")}';`)],
     ["LOAD a library", `BEGIN; ${del} LOAD '$libdir/auto_explain'; ROLLBACK;`],
     ["PREPARE outlives the rollback", `BEGIN; ${del} PREPARE p AS DELETE FROM invoices; ROLLBACK;`],
     ["PREPARE inside an executed literal", rb(`${del} EXECUTE 'PREPARE p AS DELETE FROM invoices';`)],

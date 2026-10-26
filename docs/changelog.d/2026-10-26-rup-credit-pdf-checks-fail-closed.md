@@ -16,12 +16,20 @@
 - **Invoice PDF from a list or the field editor** (`buildInvoicePdfDataFromRow`): a failed customer,
   shares, billing or applied-acres read printed the PDF with the address, split shares, terms,
   notes or diluent total silently blank. It now stops with "Could not load the invoice details
-  (customer, shares or billing), so no PDF was made. Please try again."
+  (customer, shares, billing or field acres), so no PDF was made. Please try again." A dropped
+  request gives the same message instead of a raw network error.
+- **Print on Invoice Detail** took the address from the customer picker list (500 active
+  customers, its read error ignored), so a customer missing from it printed a blank address. It
+  now reads the billed customer by id and refuses the PDF when that read fails.
+- **Print Selected on the Invoices list** logged a failed customer read and printed a blank
+  address, and ignored a failed shares read. Both now refuse the batch with the same message.
+- The credit-limit check also treats an amount that is not a number as unverified, and the Split
+  Billing post check stops when the group read answers no members.
 - New Order, Quote Builder and New Delivery show the could-not-run message as their RUP warning and
   no longer log a failed check as an "RUP products … without valid license" activity.
 - Proof: new checks in `rupCompliance.test.ts`, `useGuardrails.paging.test.ts`,
-  `buildInvoicePdfDataFromRow.test.ts`, `splitGroupPostChecks.test.ts` and `InvoiceDetail.test.tsx`
-  fail when each fix is undone. Invoice Detail Post (RUP and credit limit), the Split Billing
+  `buildInvoicePdfDataFromRow.test.ts`, `splitGroupPostChecks.test.ts`, `InvoiceDetail.test.tsx`
+  and `Invoices.batchPrint.test.tsx` fail when each fix is undone. Invoice Detail Post (RUP and credit limit), the Split Billing
   editor's Post and the Field Invoices Print were each checked in the dev app, working and failing
   (error, no data, not a list, dropped connection), against a local fake Supabase server.
 - Not changed here: the after-save credit-limit toast on Quote Builder and Job Detail

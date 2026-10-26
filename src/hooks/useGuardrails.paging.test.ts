@@ -124,6 +124,10 @@ describe('credit-limit check fails closed on every failed read', () => {
     });
   }
 
+  it('an amount that is not a number is unverified, never a pass', async () => {
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: Number.NaN })).toEqual({ status: 'unverified' });
+  });
+
   it('a customer with no limit set still passes', async () => {
     H.tables.customers = [{ id: 'c1', farm_name: 'Big Farm', credit_limit_cents: null }];
     expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'ok' });

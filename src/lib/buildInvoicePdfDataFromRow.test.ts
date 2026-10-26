@@ -255,13 +255,12 @@ describe('buildInvoicePdfDataFromRow — customer / shares / billing / acres rea
       it(`refuses the PDF when the ${table} read ${mode === 'nodata' ? 'returns nothing' : mode}`, async () => {
         installFromMock({ invoice_items: [ONE_LINE], fail: { [table]: mode } });
         const built = buildInvoicePdfDataFromRow(listRow());
-        if (mode === 'throws') await expect(built).rejects.toThrow('Failed to fetch');
-        else await expect(built).rejects.toBeInstanceOf(InvoiceDetailsUnavailableError);
+        await expect(built).rejects.toBeInstanceOf(InvoiceDetailsUnavailableError);
       });
     }
   }
 
-  for (const mode of ['error', 'nodata', 'notlist'] as const) {
+  for (const mode of ['error', 'nodata', 'notlist', 'throws'] as const) {
     it(`refuses the PDF when the applied-acres read ${mode === 'nodata' ? 'returns nothing' : mode}`, async () => {
       installFromMock({ invoice_items: [ONE_LINE], invoices: { diluent_rate_gpa: 15, total_acres: null }, fail: { field_app_locations: mode } });
       await expect(buildInvoicePdfDataFromRow(listRow())).rejects.toBeInstanceOf(InvoiceDetailsUnavailableError);

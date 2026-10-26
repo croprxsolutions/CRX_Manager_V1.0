@@ -70,6 +70,11 @@ describe('checkSplitGroupBeforePost', () => {
     });
   }
 
+  it('stops when the group read answers no members, since nothing would be checked', async () => {
+    H.group = [];
+    expect(await checkSplitGroupBeforePost('grp-1')).toEqual({ ok: false, message: GROUP_CHECKS_FAILED_MESSAGE });
+  });
+
   it('stops when one member\'s RUP check could not run', async () => {
     H.rup.mockResolvedValueOnce(rupResult({})).mockResolvedValueOnce(rupResult({ checkFailed: true }));
     expect(await checkSplitGroupBeforePost('grp-1')).toEqual({ ok: false, message: RUP_POST_CHECK_FAILED_MESSAGE });

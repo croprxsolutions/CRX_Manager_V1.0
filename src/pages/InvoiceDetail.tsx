@@ -22,7 +22,7 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyM
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
 import type { Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -1627,7 +1627,18 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const printedTotalCents = invoice.total_amount_cents ?? items.reduce((s, i) => s + i.extended_cents, 0);
     assertInvoiceLinesLoaded(itemsError, enrichedItems, printedTotalCents);
 
-    const cust = customers.find(c => c.id === invoice.customer_id);
+    // The billed customer's address, read by id: the picker list ignores its read error, leaves out
+    // inactive customers and stops at 500, so a customer missing from it printed a blank address.
+    let cust: Pick<Customer, 'billing_address' | 'city' | 'state' | 'zip' | 'account_number' | 'payment_terms'> | null = null;
+    if (invoice.customer_id) {
+      const { data: custRow, error: custError } = await supabase
+        .from('customers')
+        .select('billing_address, city, state, zip, account_number, payment_terms')
+        .eq('id', invoice.customer_id)
+        .maybeSingle();
+      if (custError || !custRow) throw new InvoiceDetailsUnavailableError();
+      cust = custRow;
+    }
 
     // ChemMan Gap-Closeout #2: wire the persisted diluent / carrier-water RATE
     // (gal/acre) into the PDF for a POSTED field-application invoice opened here

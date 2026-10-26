@@ -62,7 +62,8 @@ export async function checkSplitGroupBeforePost(invoiceGroupId: string | null): 
       .eq('invoice_group_id', invoiceGroupId)
       .is('deleted_at', null)
       .not('invoice_group_id', 'is', null);
-    if (grpError || !Array.isArray(grp)) return { ok: false, message: GROUP_CHECKS_FAILED_MESSAGE };
+    // A loaded group always has members, so an empty answer means nothing was checked.
+    if (grpError || !Array.isArray(grp) || grp.length === 0) return { ok: false, message: GROUP_CHECKS_FAILED_MESSAGE };
     const rupParts: string[] = [];
     const creditParts: string[] = [];
     for (const inv of grp as GroupMember[]) {

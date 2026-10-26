@@ -27,6 +27,7 @@ import {
   buildBatchInvoicePdfData,
   generateBatchInvoicePdf,
   groupReturnCreditDisplayItems,
+  InvoiceDetailsUnavailableError,
   mapInvoicePdfItem,
   type InvoicePdfData,
 } from '../lib/invoicePdf';
@@ -434,10 +435,10 @@ export default function Invoices() {
             .from('customers')
             .select('billing_address, city, state, zip, account_number, payment_terms')
             .eq('id', inv.customer_id)
-            .single();
-          if (custError) {
-            Sentry.captureException(new Error(`Customer ${inv.customer_id} not found for invoice ${inv.invoice_number}`), { level: 'warning', extra: { context: 'Using defaults for batch statement generation' } });
-          }
+            .maybeSingle();
+          // A failed or missing customer read refuses the PDF: printing on would send the
+          // customer an invoice with a blank address block (To-Do 10.5 follow-up).
+          if (custError || !cust) throw new InvoiceDetailsUnavailableError();
 
           // Fetch items with product details
           const { data: items, error: itemsError } = await supabase
@@ -449,10 +450,12 @@ export default function Invoices() {
           assertInvoiceLinesLoaded(itemsError, items, inv.total_amount_cents || 0);
 
           // Fetch shares
-          const { data: shares } = await supabase
+          const { data: shares, error: sharesError } = await supabase
             .from('invoice_shares')
             .select('*, customer:customers!invoice_shares_customer_id_fkey(farm_name)')
             .eq('invoice_id', inv.id);
+          // A split invoice printed without its shares would hide who owes what.
+          if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
 
           const pdfData: InvoicePdfData = {
             invoice_number: inv.invoice_number,

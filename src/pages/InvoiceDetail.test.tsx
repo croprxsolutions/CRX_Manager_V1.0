@@ -115,7 +115,9 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
-vi.mock('../lib/invoicePdf', () => ({
+// The real line and detail guards; only PDF output and the acres read are stubbed.
+vi.mock('../lib/invoicePdf', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/invoicePdf')>()),
   downloadInvoicePdf: vi.fn(),
   generateInvoicePdf: vi.fn(),
   deriveFieldAppAppliedAcres: vi.fn(),
@@ -148,7 +150,10 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
   },
 }));
 vi.mock('../components/invoices/WriteOffModal', () => ({ default: () => null }));
-vi.mock('../components/invoices/InvoicePrintDialog', () => ({ default: () => null }));
+// Open, it offers one button that prints with default options, so Print can be driven end to end.
+vi.mock('../components/invoices/InvoicePrintDialog', () => ({
+  default: ({ open, onPrint }: { open: boolean; onPrint: (options: Record<string, never>) => void }) => (open ? <button type="button" onClick={() => onPrint({})}>Print with defaults</button> : null),
+}));
 
 import InvoiceDetail from './InvoiceDetail';
 
@@ -1775,6 +1780,36 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('license check could not be run, so nothing was posted')));
     expect(screen.queryByRole('button', { name: 'Post Invoice' })).not.toBeInTheDocument();
+  });
+
+  // To-Do 10.5 follow-up: Print took the address from the customer picker list (500 active
+  // customers, read error ignored), so a customer missing from it printed a blank address.
+  async function printWithCustomerRead(answer: () => Record<string, unknown>) {
+    const base = mockFrom.getMockImplementation()!;
+    let loaded = false;
+    mockFrom.mockImplementation((table: string) => (table === 'customers' && loaded ? answer() : base(table)));
+    await openLoaded();
+    loaded = true;
+    fireEvent.click(screen.getByRole('button', { name: /^Print$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
+  }
+
+  for (const [mode, answer] of Object.entries({
+    error: () => buildChain({ data: null, error: { message: 'connection reset' } }),
+    nodata: () => buildChain({ data: null, error: null }),
+  })) {
+    it(`refuses to print when the customer address read ${mode === 'nodata' ? 'returns nothing' : mode}`, async () => {
+      const { downloadInvoicePdf } = await import('../lib/invoicePdf');
+      await printWithCustomerRead(answer);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Could not load the invoice details')));
+      expect(downloadInvoicePdf).not.toHaveBeenCalled();
+    });
+  }
+
+  it('prints the address read for the billed customer', async () => {
+    const { downloadInvoicePdf } = await import('../lib/invoicePdf');
+    await printWithCustomerRead(() => buildChain({ data: { billing_address: '9 Barn Rd', city: 'Town', state: 'IL', zip: '62000', account_number: 'A-9', payment_terms: 'Net 30' }, error: null }));
+    await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({ customer_address: '9 Barn Rd', customer_city: 'Town' })));
   });
 
   it('still opens the confirm when the RUP check reads cleanly', async () => {

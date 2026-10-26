@@ -22,6 +22,8 @@ export const CREDIT_LIMIT_UNVERIFIED_MESSAGE =
  * the old code read a failed customer read as "no limit set" and passed.
  */
 export async function evaluateCreditLimit({ customerId, newAmountCents }: CreditLimitParams): Promise<CreditLimitResult> {
+  // An amount that is not a number cannot be compared to the limit, so it is never a pass.
+  if (!Number.isFinite(newAmountCents)) return { status: 'unverified' };
   if (!customerId || newAmountCents <= 0) return { status: 'ok' };
 
   try {
@@ -35,7 +37,8 @@ export async function evaluateCreditLimit({ customerId, newAmountCents }: Credit
     // No row is a failed read, not "no limit set".
     if (!customer) throw new Error('The customer read returned no row.');
 
-    if (!customer.credit_limit_cents) return { status: 'ok' }; // No limit set
+    // No limit set: Customer Detail saves a blank limit as 0, so 0 means none too.
+    if (!customer.credit_limit_cents) return { status: 'ok' };
 
     // Get current unpaid invoice balance
     // Every open invoice, page by page: one request stopped at the server's

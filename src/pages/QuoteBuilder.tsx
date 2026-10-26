@@ -43,7 +43,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, RpcErrorCodes } from '../lib/db';
+import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import {
   convertQuoteToOrderWithRowVersion,
   createQuoteVersionWithRowVersion,
@@ -137,6 +137,11 @@ interface LocalItem {
   // prices the line from it instead of today's product cost; a new line or a line switched to
   // another product takes today's cost, as the server stamps it. Absent for non-admins.
   quoted_cost?: { productId: string; cost: number };
+  // The price this saved line holds, and its product. Once the quote has been sent, save_quote
+  // keeps it on every save (20261025200000), so the page keeps it too, unless the line has a
+  // manual price or use_todays_price asks for today's tier price.
+  saved_price?: { productId: string; price: number };
+  use_todays_price?: boolean;
   suggested_rate: string | null;
   actual_rate: number | null;
   rate_unit: string | null;
@@ -218,6 +223,12 @@ function makeEmptyItem(): LocalItem {
     calc_mode: 'rate_acres',
     price_unit: null,
   };
+}
+
+// The sent-price lock's refusal (QUOTE_RESEND_REQUIRED) carries a plain-English instruction.
+function resendRequiredMessage(err: unknown): string {
+  return rpcCodeDetail(err, RpcErrorCodes.QUOTE_RESEND_REQUIRED)
+    || 'This quote changed after it was last sent. Send it to the customer again, or rewind it to the version last sent, then try again.';
 }
 
 function hasUserEnteredItemValues(item: LocalItem): boolean {
@@ -521,6 +532,31 @@ export default function QuoteBuilder() {
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersion[]>([]);
   const [unreadableQuoteVersions, setUnreadableQuoteVersions] = useState<UnreadableQuoteVersion[]>([]);
   const savedVersionCount = quoteVersions.length + unreadableQuoteVersions.length;
+  // A quote with a sent version keeps its prices (save_quote, 20261025200000). The version last
+  // sent to the customer is the price authority that Convert, Partial Order and Schedule Job check.
+  const priceLocked = savedVersionCount > 0;
+  const lastSentVersion = useMemo(
+    () => quoteVersions.reduce<QuoteVersion | null>(
+      (latest, v) => (latest == null || v.version_number > latest.version_number ? v : latest), null),
+    [quoteVersions],
+  );
+  // The prices each product was sent at in that version, in whole cents.
+  const sentPriceCentsByProduct = useMemo(() => {
+    const byProduct = new Map<string, number[]>();
+    lastSentVersion?.snapshot_data.sections.forEach((sec) => sec.items.forEach((sent) => {
+      byProduct.set(sent.product_id, [...(byProduct.get(sent.product_id) ?? []), Math.round(sent.price_per_unit * 100)]);
+    }));
+    return byProduct;
+  }, [lastSentVersion]);
+  // What the screen can see of the database's re-send rule (_assert_quote_prices_as_sent), which
+  // stays the authority: a changed customer, or a line whose price that product was not sent at.
+  const unsentChange = useMemo((): 'customer' | 'prices' | null => {
+    if (!lastSentVersion) return null;
+    if (customerId && lastSentVersion.snapshot_data.quote.customer_id !== customerId) return 'customer';
+    const lineChanged = sections.some((sec) => sec.items.some((item) => item.product_id
+      && !(sentPriceCentsByProduct.get(item.product_id) ?? []).includes(Math.round(item.price_per_unit * 100))));
+    return lineChanged ? 'prices' : null;
+  }, [lastSentVersion, customerId, sections, sentPriceCentsByProduct]);
   // One newest-first list, not readable-then-unreadable: see orderedQuoteVersionHistory. The two
   // state arrays stay separate because everything else (restore, compare, the Sentry report) may
   // only ever see the readable ones.
@@ -532,6 +568,7 @@ export default function QuoteBuilder() {
   const [compareMode, setCompareMode] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
+  const [confirmRewindOpen, setConfirmRewindOpen] = useState(false);
   const [revising, setRevising] = useState(false);
   // Quote lifecycle terminal actions (sell-side roadmap #5 — unstick lifecycle):
   // decline/cancel set a terminal status (triggers release holds); un-accept/
@@ -1172,6 +1209,7 @@ export default function QuoteBuilder() {
             quoted_cost: item.current_cost != null
               ? { productId: item.product_id, cost: item.current_cost }
               : undefined,
+            saved_price: { productId: item.product_id, price: item.price_per_unit },
             suggested_rate: item.suggested_rate,
             actual_rate: item.actual_rate,
             rate_unit: item.rate_unit,
@@ -1492,13 +1530,19 @@ export default function QuoteBuilder() {
       if (!product) return item;
 
       const tierPrice = getTierPrice(product, tierNum);
-      // Use override price if set, otherwise fall back to tier price
-      const pricePerUnit = item.price_override != null ? item.price_override : tierPrice;
-      // The recorded cost holds only while the line still names its saved row for this product,
-      // the same test savedLineIdFor applies when saving: a line saved as another product since
-      // the load is priced (and stamped by the server) at today's cost.
-      const cost = item.quoted_cost?.productId === product.id
-        && savedLineIdsRef.current.get(item._key)?.productId === product.id
+      // The saved row this line continues, by the test savedLineIdFor applies when saving. A line
+      // saved as another product since the load is a new row to the server.
+      const keepsSavedRow = savedLineIdsRef.current.get(item._key)?.productId === product.id;
+      // A sent quote keeps a saved line's price (the server lock): only a manual price or
+      // "use today's price" changes it. A draft that was never sent follows the tier price.
+      const lockedPrice = priceLocked && !item.use_todays_price && keepsSavedRow
+        && item.saved_price?.productId === product.id
+        ? item.saved_price.price
+        : null;
+      const pricePerUnit = item.price_override ?? lockedPrice ?? tierPrice;
+      // The recorded cost holds only while the line still names its saved row for this product:
+      // a line saved as another product since the load is stamped by the server at today's cost.
+      const cost = item.quoted_cost?.productId === product.id && keepsSavedRow
         ? item.quoted_cost.cost
         : (product.current_cost || 0);
       // Fall back to unit_size if inventory_unit is not set on the product
@@ -1565,7 +1609,7 @@ export default function QuoteBuilder() {
         net_margin: Math.round(netMargin * 100 * 100) / 100,
       };
     },
-    [products, getTierPrice, getConversionFactor]
+    [products, getTierPrice, getConversionFactor, priceLocked]
   );
 
   // Clearing a section's field drops the acres that field filled in this session, and keeps acres
@@ -1655,11 +1699,30 @@ export default function QuoteBuilder() {
     return () => { cancelled = true; };
   }, [unresolvedFieldKey, customerIdRef, clearSectionFieldRef, toast]);
 
+  // A tier change re-prices the tier-priced lines and keeps manual (negotiated) prices (pricing
+  // plan, section 7 finding 3); on a sent quote the saved prices stay as well.
   const recalcAllForTier = (tierNum: number) => {
     setSections((prev) =>
       prev.map((sec) => ({
         ...sec,
-        items: sec.items.map((item) => recalcItem({ ...item, price_override: null }, tierNum)),
+        items: sec.items.map((item) => recalcItem(item, tierNum)),
+      }))
+    );
+  };
+
+  // "Update to today's prices" for the whole quote (Mason, 2026-10-14): every line, manual prices
+  // included, takes today's tier price. A price change means the quote must be sent again.
+  const applyTodaysPricesToAllLines = () => {
+    if (!referenceDataReady) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return;
+    }
+    setSections((prev) =>
+      prev.map((sec) => ({
+        ...sec,
+        items: sec.items.map((item) => (item.product_id
+          ? recalcItem({ ...item, price_override: null, use_todays_price: true }, tier)
+          : item)),
       }))
     );
   };
@@ -2094,6 +2157,8 @@ export default function QuoteBuilder() {
             notes: item.notes || null,
             price_per_unit: item.price_per_unit,
             price_override: item.price_override ?? null,
+            // On a sent quote the server keeps the line's saved price unless this asks for today's.
+            use_todays_price: item.use_todays_price === true,
             current_cost: item.current_cost,
             suggested_rate: item.suggested_rate,
             actual_rate: item.actual_rate,
@@ -3045,7 +3110,7 @@ export default function QuoteBuilder() {
     reportUntrustworthyQuoteVersions(unreadable, quoteId);
   }, [quoteId]);
 
-  const handleRestoreVersion = async (versionId: string) => {
+  const handleRestoreVersion = async (versionId: string, versionNumber?: number) => {
     if (!quoteId || !profile) return;
     if (quoteVersionRecoveryRequiredRef.current) {
       staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
@@ -3106,7 +3171,7 @@ export default function QuoteBuilder() {
     }
     if (!data) return;
     resetRestoreVersionAttempt();
-    toast('success', `Restored from V${selectedVersion?.version_number || '?'}`);
+    toast('success', `Restored from V${versionNumber ?? selectedVersion?.version_number ?? '?'}`);
     setConfirmRestore(null);
     setSelectedVersion(null);
     // The restore rewrote every line, so the held line ids no longer name them.
@@ -3163,7 +3228,7 @@ export default function QuoteBuilder() {
       })();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'schedule_job_from_quote' } });
-      toast('error', sanitizeError(err));
+      toast('error', hasRpcCode(err, RpcErrorCodes.QUOTE_RESEND_REQUIRED) ? resendRequiredMessage(err) : sanitizeError(err));
     }
     setSchedulingJobSectionKey(null);
   };
@@ -3346,6 +3411,8 @@ export default function QuoteBuilder() {
         toast('error', errMsg);
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_PRODUCT_INVALID)) {
         toast('error', 'A draw line has an invalid product reference. Refresh the booking and try again.');
+      } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
+        toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKED_PRICE_REQUIRED)) {
         // Server message names the product and says what to fix — surface as-is.
         toast('error', errMsg);
@@ -3622,6 +3689,8 @@ export default function QuoteBuilder() {
         toast('warning', 'This booking has partial draw-downs — use "Partial Order" to draw the remaining balance instead of converting.');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
         toast('error', 'This booking is closed — only sent or revised quotes can be converted.');
+      } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
+        toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.COST_BASIS_REQUIRED)) {
         // A line saved before quote-time costs were recorded has none. Convert no longer
         // re-saves the quote, so it is no longer stamped on the way (KI-12).
@@ -4040,6 +4109,49 @@ export default function QuoteBuilder() {
       {isEditing && currentStatus === 'sent' && !canEdit && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 text-sm flex items-center justify-between">
           <span>This quote has been sent. Click <strong>Revise Quote</strong> to make changes, then re-send.</span>
+        </div>
+      )}
+
+      {isEditing && currentStatus === 'revised' && priceLocked && lastSentVersion && (
+        <div
+          role="status"
+          className={`rounded-lg border p-3 text-sm flex flex-wrap items-center justify-between gap-2 ${
+            unsentChange ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-blue-50 border-blue-200 text-blue-800'
+          }`}
+        >
+          <span>
+            {unsentChange === 'customer'
+              ? `The customer changed after V${lastSentVersion.version_number} was sent. `
+              : unsentChange === 'prices'
+                ? `Prices or lines changed after V${lastSentVersion.version_number} was sent. `
+                : `Prices stay as sent in V${lastSentVersion.version_number} unless you change them. `}
+            {unsentChange
+              ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
+              : 'Quantity and note changes need no re-send.'}
+          </span>
+          <span className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              showChevron={false}
+              onClick={applyTodaysPricesToAllLines}
+              disabled={!canEdit || formLocked}
+            >
+              Use today&apos;s prices
+            </Button>
+            {unsentChange && (
+              <Button
+                variant="secondary"
+                size="sm"
+                showChevron={false}
+                icon={<RotateCcw className="w-3.5 h-3.5" />}
+                onClick={() => setConfirmRewindOpen(true)}
+                disabled={formLocked}
+              >
+                Rewind to V{lastSentVersion.version_number}
+              </Button>
+            )}
+          </span>
         </div>
       )}
 
@@ -4707,6 +4819,26 @@ export default function QuoteBuilder() {
                         const prod =
                           item.product ||
                           products.find((p) => p.id === item.product_id);
+                        // The price lock as the screen sees it (the server applies the exact
+                        // saved-row rule): a saved line of a sent quote keeps its saved price.
+                        const lockedPrice = priceLocked && !item.use_todays_price
+                          && item.saved_price && item.saved_price.productId === item.product_id
+                          ? item.saved_price.price
+                          : null;
+                        const todayPrice = prod ? getTierPrice(prod, tier) : null;
+                        const todayPriceOffer = priceLocked && canEdit && !item.use_todays_price
+                          && todayPrice != null
+                          && Math.round(todayPrice * 100) !== Math.round(item.price_per_unit * 100)
+                          ? todayPrice
+                          : null;
+                        const sentCents = item.product_id ? sentPriceCentsByProduct.get(item.product_id) : undefined;
+                        let sentHint: string | null = null;
+                        if (priceLocked && lastSentVersion && item.product_id) {
+                          if (!sentCents) sentHint = `New since V${lastSentVersion.version_number}`;
+                          else if (!sentCents.includes(Math.round(item.price_per_unit * 100))) {
+                            sentHint = `Sent at ${formatCents(sentCents[0])}`;
+                          }
+                        }
                         return (
                           <tr
                             key={item._key}
@@ -4755,8 +4887,11 @@ export default function QuoteBuilder() {
                                   value={item.price_per_unit || ''}
                                   onChange={(e) => {
                                     const val = e.target.value ? parseFloat(e.target.value) : 0;
-                                    const tierPrice = prod ? getTierPrice(prod, tier) : 0;
-                                    const isOverride = Math.abs(val - tierPrice) > 0.001;
+                                    // A manual price is one that differs from what the line
+                                    // would otherwise take: its saved price on a sent quote,
+                                    // else today's tier price.
+                                    const basePrice = lockedPrice ?? (prod ? getTierPrice(prod, tier) : 0);
+                                    const isOverride = Math.abs(val - basePrice) > 0.001;
                                     updateItem(sec._key, item._key, {
                                       price_override: isOverride ? val : null,
                                       price_per_unit: val,
@@ -4780,13 +4915,34 @@ export default function QuoteBuilder() {
                                         price_override: null,
                                       })
                                     }
-                                    title={`Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
+                                    title={lockedPrice != null
+                                      ? `Reset to the saved price: ${fmt(lockedPrice)}`
+                                      : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
+                                    aria-label="Reset the manual price"
                                     className="p-0.5 rounded text-amber-500 hover:text-amber-700 hover:bg-amber-100 transition-colors"
                                   >
                                     <RotateCcw className="w-3 h-3" />
                                   </button>
                                 )}
                               </div>
+                              {!customerView && (sentHint || todayPriceOffer != null) && (
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs">
+                                  {sentHint && <span className="text-amber-700">{sentHint}</span>}
+                                  {todayPriceOffer != null && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateItem(sec._key, item._key, {
+                                        price_override: null,
+                                        use_todays_price: true,
+                                      })}
+                                      disabled={formLocked}
+                                      className="text-crx-green hover:underline disabled:opacity-50"
+                                    >
+                                      Use today {fmt(todayPriceOffer)}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                               <select
                                 value={item.price_unit || ''}
                                 onChange={(e) =>
@@ -5400,6 +5556,22 @@ export default function QuoteBuilder() {
         }}
         onReload={reloadAfterStaleSave}
       />
+
+      {lastSentVersion && (
+        <ConfirmModal
+          open={confirmRewindOpen}
+          onClose={() => setConfirmRewindOpen(false)}
+          onConfirm={async () => {
+            setConfirmRewindOpen(false);
+            await handleRestoreVersion(lastSentVersion.id, lastSentVersion.version_number);
+          }}
+          title={`Rewind to V${lastSentVersion.version_number}`}
+          message={`Put this quote back to V${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
+          confirmLabel={`Rewind to V${lastSentVersion.version_number}`}
+          variant="info"
+          icon={RotateCcw}
+        />
+      )}
 
       <ConfirmModal
         open={confirmBookAsOrderOpen}

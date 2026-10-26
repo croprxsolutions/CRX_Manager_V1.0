@@ -9,8 +9,8 @@
 --   3. P repriced to cost 7.00 (tier 1 = 8.75)
 --   4. Convert straight from 'sent': one order, quote accepted, the order line at the
 --      sent 7.50 (no save ran, so nothing re-priced it)
---   5. contrast, the old screen path: save as 'accepted' first re-priced the line to
---      8.75 before the order existed (the gap pricing slice 2 closes in the database)
+--   5. the old screen path, save as 'accepted' first, no longer re-prices either: since
+--      20261025200000 a sent quote keeps its line prices on every save (it re-priced to 8.75 before)
 --   6. P repriced to cost 8.00, above the sent 7.50: Convert of a third sent quote is
 --      refused without a reason (BELOW_COST_REASON_REQUIRED), then converts with an
 --      admin's reason, keeps 7.50 and records the below-cost approval
@@ -156,7 +156,7 @@ BEGIN
   END IF;
 
   -- --------------------------------------------------------------------
-  -- 5. Contrast, the old screen path: save as accepted first
+  -- 5. The old screen path, save as accepted first, keeps the sent price too (the lock)
   -- --------------------------------------------------------------------
   SELECT row_version INTO v_version FROM quotes WHERE id = v_quote_b;
   v_res := save_quote(v_quote_b, jsonb_build_object(
@@ -167,8 +167,8 @@ BEGIN
       to_jsonb((SELECT id FROM quote_items WHERE quote_id = v_quote_b)::text)),
     v_admin, 'smk-c1s-save-b-accept-' || v_suffix);
   SELECT price_per_unit INTO v_contrast_price FROM quote_items WHERE quote_id = v_quote_b;
-  IF v_contrast_price IS DISTINCT FROM 8.75 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (5) expected the old accepted save to re-price to 8.75, got %', v_contrast_price;
+  IF v_contrast_price IS DISTINCT FROM 7.50 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (5) an accepted save re-priced the sent quote to %', v_contrast_price;
   END IF;
 
   -- --------------------------------------------------------------------
@@ -217,7 +217,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (6) no below-cost approval was recorded';
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK one-step convert kept %; old accepted save re-priced to %; below-cost convert kept % with % approval row(s)',
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK one-step convert kept %; accepted save kept %; below-cost convert kept % with % approval row(s)',
     v_order_price, v_contrast_price, v_below_price, v_approvals;
 END
 $smoke$;

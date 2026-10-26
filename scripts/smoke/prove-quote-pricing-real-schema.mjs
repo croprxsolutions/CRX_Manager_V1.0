@@ -3,13 +3,24 @@
  * Real-schema proof for the quote pricing work (pricing plan slices 1, 2 and 5; To-Do 1.2, 1.3, 0.5).
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
- * PostgreSQL 17 container, replays every ordered post-baseline migration (the same skips as the other
- * real-schema provers), seeds one active admin, then runs each rolled-back chain below as ONE
- * statement. A chain passes only when it ends in its own SMOKE_PASS_ROLLBACK error.
- *   1. smoke-convert-sent-quote-in-one-step.sql: Convert straight from a sent quote creates exactly
- *      one order at the sent price and marks the quote accepted in the same call (KI-12); the old
- *      screen's save-as-accepted-first re-priced the line; a cost rise above the sent price needs an
- *      admin's reason and is recorded as a below-cost approval.
+ * PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate
+ * 20261025200000_quote_sent_price_lock (the same skips as the other real-schema provers), seeds an
+ * admin, two sales reps, a driver, a product with a cost and a sent quote, then runs each rolled-back
+ * chain as ONE statement (a chain passes only when it ends in its own SMOKE_PASS_ROLLBACK error):
+ *   - smoke-convert-sent-quote-in-one-step.sql: Convert straight from a sent quote creates exactly
+ *     one order at the sent price and marks the quote accepted in the same call (KI-12); an accepted
+ *     save keeps the sent price (the lock); a cost rise above the sent price needs an admin's reason
+ *     and is recorded as a below-cost approval.
+ *   - smoke-quote-sent-price-lock.sql: the lock itself (To-Do 1.2), every case in its header.
+ * Steps:
+ *   1. BEFORE: both chains fail at their first lock step (the accepted save re-prices; V1 records no
+ *      line id), and every regression chain below is recorded.
+ *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the candidate stops at its preflight.
+ *   3. MUTATIONS: the candidate with one safeguard removed (and its postflight dropped so the chain,
+ *      not the postflight, has to notice) is applied inside a transaction that never commits; the
+ *      lock chain fails at that safeguard's own step.
+ *   4. The candidate applies and prints POSTFLIGHT_OK; a second apply is refused by its preflight.
+ *   5. AFTER: both chains pass, and every regression chain ends exactly as it did BEFORE.
  *
  * Run: node scripts/smoke/prove-quote-pricing-real-schema.mjs   (needs Docker)
  * Prints QUOTE_PRICING_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -28,7 +39,60 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
-const CHAINS = ['smoke-convert-sent-quote-in-one-step.sql'];
+const CANDIDATE = path.join(MIGRATIONS, '20261025200000_quote_sent_price_lock.sql');
+const CHAINS = {
+  'smoke-convert-sent-quote-in-one-step.sql': 'SMOKE_FAIL: (5) an accepted save re-priced the sent quote',
+  'smoke-quote-sent-price-lock.sql': 'SMOKE_FAIL: (V1) snapshot lacks the line id',
+};
+// Existing chains over the functions the candidate re-emits: each must end the same way after it.
+const REGRESSION = [
+  'smoke-save-quote-repeated-product-line-ids.sql',
+  'smoke-quote-version-restore-trust.sql',
+  'smoke-quote-version-write-boundary.sql',
+  'smoke-draw-down-quote-intent-binding.sql',
+  'smoke-save-quote-drawn-guard.sql',
+  'smoke-job_from_quote_activity_feed_fix.sql',
+  'smoke-save-quote-customer-row-version.sql',
+  'smoke-revert-quote-escape-hatch.sql',
+  'smoke-quotes-rep-own-name.sql',
+];
+// Each safeguard removed in turn, and the lock chain step that must notice.
+const MUTATIONS = [
+  ['convert gate', `  IF NOT EXISTS (SELECT 1 FROM public.orders WHERE quote_id = p_quote_id) THEN
+    PERFORM public._assert_quote_prices_as_sent(p_quote_id);
+  END IF;
+`, '', 'SMOKE_FAIL: (B) Convert of an un-re-sent price change was ALLOWED'],
+  ['draw gate', `  PERFORM public._assert_quote_prices_as_sent(p_quote_id);
+
+  PERFORM public._begin_below_cost_money_write(`, '  PERFORM public._begin_below_cost_money_write(',
+    'SMOKE_FAIL: (B) Partial Order of an un-re-sent price change was ALLOWED'],
+  ['accepted-save gate', `  IF v_status = 'accepted' THEN
+    PERFORM public._assert_quote_prices_as_sent(v_quote_id);
+  END IF;
+`, '', 'SMOKE_FAIL: (B) accepting an un-re-sent price change was ALLOWED'],
+  ['job gate', `  -- planned draft that was never sent may still be scheduled at its own prices (Mason, 2026-10-14).
+  PERFORM public._assert_quote_prices_as_sent(p_quote_id);`, '  -- planned draft that was never sent may still be scheduled at its own prices (Mason, 2026-10-14).',
+    'SMOKE_FAIL: (G) scheduling a job from an un-re-sent price change was ALLOWED'],
+  ['price carry', '(v_carry_prices->>(qi.id::text))::numeric, ', '', 'SMOKE_FAIL: (A) revision re-priced'],
+  ['expiry kept on edit', 'expires_at = CASE WHEN v_price_locked THEN expires_at\n      ELSE', 'expires_at = CASE WHEN false THEN expires_at\n      ELSE',
+    'SMOKE_FAIL: (A) revision re-priced to 7.50 or moved the expiry'],
+  ['snapshot line id', "                'quote_item_id', qi.id,\n", '', 'SMOKE_FAIL: (V1) snapshot lacks the line id'],
+  ['restore keeps the line id', "          THEN (v_item->>'quote_item_id')::uuid\n", "          THEN gen_random_uuid()\n",
+    'SMOKE_FAIL: (C) rewind did not restore the sent line'],
+  ['customer check', "  IF (v_snapshot->'quote'->>'customer_id') IS DISTINCT FROM v_customer_id::text THEN", '  IF false THEN',
+    'SMOKE_FAIL: (E) Convert after a customer change was ALLOWED'],
+  ['id-less pairing', `       OR EXISTS (SELECT 1 FROM quote_items WHERE quote_id = p_quote_id GROUP BY product_id HAVING count(*) > 1)
+       OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_sent_items) AS i(item)
+                  GROUP BY i.item->>'product_id' HAVING count(*) > 1) THEN`, ' THEN',
+    'SMOKE_FAIL: (I) an id-less version with a repeated product converted'],
+  ['untrusted version', '  IF v_trusted_at IS NULL THEN', '  IF false THEN', 'SMOKE_FAIL: (J) an untrusted version converted'],
+];
+const USERS = {
+  ADMIN: '7c500000-0000-4000-8000-0000000000a1',
+  REP: '7c500000-0000-4000-8000-0000000000b1',
+  OTHER_REP: '7c500000-0000-4000-8000-0000000000b2',
+  DRIVER: '7c500000-0000-4000-8000-0000000000d1',
+};
 // Live but not replayable here (storage.objects policies, storage.buckets settings); none touches quotes.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -51,7 +115,6 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
   + '  )::uuid\n';
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
-const ADMIN = '7c500000-0000-4000-8000-0000000000a1';
 
 function docker(args, options = {}) {
   const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
@@ -111,7 +174,14 @@ function plan() {
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
     assert.ok(!QUOTE_TOUCH.test(lf(file)), `${name} now touches quotes; replay it or re-think the skip`);
   }
-  return all;
+  const at = all.indexOf(CANDIDATE);
+  assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
+  // A later file that re-emits one of the candidate's functions would undo it.
+  for (const file of all.slice(at + 1)) {
+    assert.ok(!/_save_quote_below_cost_impl_20260810|_create_quote_version_owner_impl|_restore_quote_version_owner_impl|_convert_quote_to_order_below_cost_impl_20260810|_draw_down_quote_intent_impl_20260819|create_job_from_quote_section/.test(lf(file)),
+      `${path.basename(file)} sorts after the candidate and touches a function it re-emits; re-think this proof`);
+  }
+  return all.slice(0, at);
 }
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
@@ -147,24 +217,115 @@ function buildContainer() {
 }
 function seed() {
   // handle_new_user takes the role and name from the metadata only for a direct postgres session.
-  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
-    VALUES ('${ADMIN}', 'quote-pricing-admin@example.invalid', '{"full_name":"[PROVER] Quote Pricing Admin","role":"admin"}'::jsonb);`);
-  assert.equal(scalar(`SELECT role || ',' || is_active FROM public.profiles WHERE id = '${ADMIN}';`), 'admin,true', 'the seeded admin is not an active admin');
+  const users = [[USERS.ADMIN, 'admin', 'Admin', 9], [USERS.REP, 'sales_rep', 'Rep', 8],
+    [USERS.OTHER_REP, 'sales_rep', 'Other Rep', 7], [USERS.DRIVER, 'driver', 'Driver', 6]];
+  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+    ${users.map(([u, role, label]) => `('${u}', 'quote-pricing-${u.slice(-2)}@example.invalid', '{"full_name":"[PROVER] Quote Pricing ${label}","role":"${role}"}'::jsonb)`).join(',\n    ')};
+    ${users.map(([u, , , minutes]) => `UPDATE public.profiles SET created_at = now() - interval '${minutes} minutes' WHERE id = '${u}';`).join('\n    ')}`);
+  assert.equal(scalar(`SELECT string_agg(role || ',' || is_active, ';' ORDER BY created_at) FROM public.profiles;`),
+    'admin,true;sales_rep,true;sales_rep,true;driver,true', 'the seeded profiles are not the expected active users');
+  // A product with a cost and a sent quote of it, for the chains that look for existing data.
+  psql(`BEGIN;
+    SELECT set_config('request.jwt.claims', json_build_object('sub', '${USERS.ADMIN}', 'role', 'authenticated')::text, true);
+    SELECT set_config('request.jwt.claim.sub', '${USERS.ADMIN}', true);
+    INSERT INTO public.customers (farm_name, is_active) VALUES ('[PROVER] Quote Pricing Farm', true);
+    ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
+    INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, tier1_margin, product_form, is_active)
+      VALUES ('[PROVER] Quote Pricing Chem', 'gal', 5.00, 6.25, 20, 'liquid', true);
+    ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
+    DO $seed$
+    DECLARE v_res jsonb;
+    BEGIN
+      v_res := public.save_quote(NULL, jsonb_build_object(
+          'quote_number', 'PROVER-QP-1', 'status', 'draft', 'tier', 1, 'commission_split', '{"splits": []}'::jsonb,
+          'customer_id', (SELECT id FROM public.customers WHERE farm_name = '[PROVER] Quote Pricing Farm')),
+        jsonb_build_array(jsonb_build_object('section_name', 'S1', 'sort_order', 0, 'items', jsonb_build_array(
+          jsonb_build_object('product_id', (SELECT id FROM public.products WHERE product_name = '[PROVER] Quote Pricing Chem'),
+            'sort_order', 0, 'calc_mode', 'units_direct', 'total_units_needed', 2, 'unit_size', 'gal')))),
+        '${USERS.ADMIN}', 'prover-qp-seed-save');
+      PERFORM public.create_quote_version((v_res->>'quote_id')::uuid, '${USERS.ADMIN}', 'presented',
+        'prover-qp-seed-present', (v_res->>'row_version')::bigint);
+    END
+    $seed$;
+    COMMIT;`);
+  assert.equal(scalar("SELECT status FROM public.quotes WHERE quote_number = 'PROVER-QP-1';"), 'sent', 'the seeded quote is not sent');
 }
-function runChain(file) {
-  const name = `chain-${file}`;
-  stageText(name, lf(path.join(SMOKE, file)));
+
+// One rolled-back chain, optionally after the (possibly mutated) candidate inside the same
+// never-committed transaction. Returns the first error line psql printed.
+function runChain(file, prefix = '') {
+  const name = `chain-${path.basename(file)}`;
+  stageText(name, `${prefix}${lf(path.join(SMOKE, file))}`);
   const r = docker([...psqlArgs(), '-f', `/tmp/${name}`], { allowFailure: true });
   const output = `${r.stdout}\n${r.stderr}`;
-  const pass = output.match(/SMOKE_PASS_ROLLBACK[^\n]*/);
-  assert.ok(pass, `${file} did not pass:\n${output.trim()}`);
-  console.log(`[prover] PASS ${file}: ${pass[0]}`);
+  return output.split(/\r?\n/).find((line) => /ERROR:/.test(line)) ?? `NO ERROR (exit ${r.status}):\n${output.trim()}`;
+}
+// Comparable outcome of a regression chain: PASS, or its error with ids and random suffixes masked.
+function outcome(line) {
+  if (line.includes('SMOKE_PASS_ROLLBACK')) return 'PASS';
+  return line.replace(/^psql:[^:]+:\d+: /, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
+    .replace(/\b[0-9a-f]{8}\b/g, '<suffix>');
+}
+function withoutPostflight(text) {
+  const at = text.indexOf('DO $postflight$');
+  assert.ok(at > 0, 'the candidate has no postflight block');
+  return text.slice(0, at);
 }
 
 try {
   buildContainer();
   seed();
-  for (const chain of CHAINS) runChain(chain);
+  const candidate = lf(CANDIDATE);
+
+  // 1. BEFORE: both new chains fail at their first lock step; record every regression chain.
+  for (const [chain, expected] of Object.entries(CHAINS)) {
+    const line = runChain(chain);
+    assert.ok(line.includes(expected), `BEFORE: ${chain} should fail with "${expected}", got: ${line}`);
+    console.log(`[prover] BEFORE ${chain}: fails as expected (${expected})`);
+  }
+  const before = new Map(REGRESSION.map((chain) => [chain, outcome(runChain(chain))]));
+  for (const [chain, result] of before) console.log(`[prover] BEFORE ${chain}: ${result}`);
+
+  // 2. AUTOCOMMIT: statement by statement, the preflight stops the file before any change.
+  stageText('candidate.sql', candidate);
+  const auto = docker([...psqlArgs(), '-f', '/tmp/candidate.sql'], { allowFailure: true });
+  assert.match(`${auto.stdout}\n${auto.stderr}`, /QUOTE_SENT_PRICE_LOCK_NOT_IN_TRANSACTION/, 'autocommit run was not refused');
+  assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname = '_assert_quote_prices_as_sent';"), '0', 'autocommit run changed the database');
+  console.log('[prover] AUTOCOMMIT: refused at the preflight, nothing changed');
+
+  // 3. MUTATIONS: each safeguard removed, inside a transaction that never commits.
+  const mutationBase = withoutPostflight(candidate);
+  for (const [label, find, replace, expected] of MUTATIONS) {
+    assert.equal(mutationBase.split(find).length - 1, 1, `mutation "${label}": anchor not found exactly once`);
+    const mutated = mutationBase.replace(find, () => replace);
+    const line = runChain('smoke-quote-sent-price-lock.sql', `BEGIN;\n${mutated}\n`);
+    assert.ok(line.includes(expected), `mutation "${label}" was not caught by its step (${expected}); got: ${line}`);
+    console.log(`[prover] MUTATION ${label}: caught (${expected})`);
+  }
+  assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname = '_assert_quote_prices_as_sent';"), '0', 'a mutation run committed');
+
+  // 4. The candidate applies; a second apply is refused by its own preflight.
+  const applied = apply('candidate.sql');
+  assert.equal(applied.status, 0, `the candidate failed to apply:\n${applied.output}`);
+  assert.match(applied.output, /POSTFLIGHT_OK quote sent-price lock installed/, 'no POSTFLIGHT_OK');
+  const again = apply('candidate.sql');
+  assert.notEqual(again.status, 0, 'a second apply succeeded');
+  assert.match(again.output, /PREFLIGHT_/, `a second apply failed outside the preflight:\n${again.output}`);
+  console.log('[prover] APPLY: POSTFLIGHT_OK; re-apply refused by the preflight');
+
+  // 5. AFTER: both chains pass, every regression chain ends exactly as before.
+  for (const chain of Object.keys(CHAINS)) {
+    const line = runChain(chain);
+    assert.ok(line.includes('SMOKE_PASS_ROLLBACK'), `AFTER: ${chain} did not pass: ${line}`);
+    console.log(`[prover] AFTER ${chain}: ${line.replace(/^.*ERROR:\s*/, '')}`);
+  }
+  for (const chain of REGRESSION) {
+    const result = outcome(runChain(chain));
+    assert.equal(result, before.get(chain), `AFTER: ${chain} changed from "${before.get(chain)}" to "${result}"`);
+    console.log(`[prover] AFTER ${chain}: unchanged (${result})`);
+  }
+  assert.ok([...before.values()].filter((r) => r === 'PASS').length >= 6, 'too few regression chains ran to a pass');
   console.log('QUOTE_PRICING_PROOF_PASS');
 } finally {
   if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true });

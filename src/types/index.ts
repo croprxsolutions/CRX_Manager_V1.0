@@ -822,6 +822,9 @@ export interface QuoteVersion {
       section_header_notes: string | null;
       needed_by_date: string | null;
       items: Array<{
+        // Recorded since 20261025200000; absent on older versions.
+        quote_item_id?: string | null;
+        price_override?: number | null;
         product_id: string;
         product_name: string;
         sku: string | null;

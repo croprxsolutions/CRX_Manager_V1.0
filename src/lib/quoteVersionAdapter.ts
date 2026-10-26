@@ -57,7 +57,10 @@ function isQuoteSnapshotItem(value: unknown): value is QuoteVersion['snapshot_da
     && isFiniteNumber(value.total_price)
     && isNullableFiniteNumber(value.net_margin)
     && isNullableString(value.calc_mode)
-    && isNullableString(value.price_unit);
+    && isNullableString(value.price_unit)
+    // Recorded since 20261025200000; older versions do not carry them.
+    && (value.quote_item_id === undefined || isNullableString(value.quote_item_id))
+    && (value.price_override === undefined || isNullableFiniteNumber(value.price_override));
 }
 
 function isQuoteSnapshotQuote(value: unknown): value is QuoteVersion['snapshot_data']['quote'] {

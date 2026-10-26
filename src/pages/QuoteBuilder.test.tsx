@@ -184,7 +184,11 @@ vi.mock('../lib/db', async () => {
       CUSTOMER_STALE_WRITE: 'CUSTOMER_STALE_WRITE', COMMISSION_SPLIT_CONFLICT: 'COMMISSION_SPLIT_CONFLICT',
       IDEMPOTENCY_PAYLOAD_CONFLICT: 'IDEMPOTENCY_PAYLOAD_CONFLICT',
       QUOTE_VERSION_LEGACY_UNTRUSTED: 'QUOTE_VERSION_LEGACY_UNTRUSTED',
+      QUOTE_RESEND_REQUIRED: 'QUOTE_RESEND_REQUIRED',
     },
+    rpcCodeDetail: (error: { message?: string }, code: string) => (
+      hasRpcCode(error, code) ? (error.message ?? '').slice(code.length + 1).trim() : null
+    ),
     rpcAuthErrorMessage: (error: { message?: string }) => (
       hasRpcCode(error, 'AUTH_REQUIRED') || hasRpcCode(error, 'ACTOR_MISMATCH')
         ? 'Your sign-in could not be verified. Refresh the page and try again.'
@@ -2797,6 +2801,103 @@ describe('QuoteBuilder', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
     expect(quoteUpdates).toEqual([]);
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining('/orders/'));
+  });
+
+  describe('sent-price lock (To-Do 1.2)', () => {
+    // A revised quote whose V1 was sent at 10.00; the catalog tier 1 price is 12.00 today.
+    function configureLockedQuote() {
+      const fixture = makeQuoteFixture('sent', 7);
+      const quote = { ...fixture.quote, status: 'revised', created_at: new Date().toISOString() };
+      const product = { ...fixture.product, tier1_price: 12 };
+      const item = { ...fixture.item, product };
+      const sentVersion = {
+        id: 'version-1',
+        quote_id: quote.id,
+        version_number: 1,
+        sent_by: 'user-1',
+        sent_at: '2026-10-25T15:00:00.000Z',
+        sent_method: 'presented',
+        snapshot_data: {
+          quote: {
+            quote_number: quote.quote_number, customer_id: 'customer-1', tier: 1, status: 'sent',
+            total_price: 20, total_cost: 12, total_profit: 8, total_margin_pct: 40, valid_days: 30,
+            expires_at: null, header_notes: null, footer_notes: null, is_planned: false, commission_split: null,
+          },
+          sections: [{
+            section_name: 'Products', sort_order: 0, section_notes: null, section_header_notes: null,
+            needed_by_date: null,
+            items: [{
+              quote_item_id: 'item-1', price_override: null, product_id: 'product-1', product_name: 'Product',
+              sku: null, sort_order: 0, notes: null, price_per_unit: 10, current_cost: 6, suggested_rate: null,
+              actual_rate: null, rate_unit: null, oz_per_acre: null, price_per_acre: null, acres: null,
+              total_units_needed: 2, unit_size: 'gal', profit: 8, total_price: 20, net_margin: 40,
+              calc_mode: 'units_direct', price_unit: null,
+            }],
+          }],
+        },
+        pdf_url: null,
+        notes: null,
+        restore_trusted_at: '2026-10-25T15:00:00.000Z',
+      };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [item]
+              : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+                : table === 'products' ? [product]
+                  : table === 'quote_versions' ? [sentVersion]
+                    : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { quote_id: quote.id, row_version: 8, item_ids: { } }, error: null }
+        : { data: null, error: null }));
+      return { quote };
+    }
+    const savedLine = () => (mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
+      p_sections: Array<{ items: Array<{ id: string | null; price_per_unit: number; price_override: number | null; use_todays_price: boolean }> }>;
+    }).p_sections[0].items[0];
+
+    it('keeps the sent price through an edit after the catalog price rose', async () => {
+      const { quote } = configureLockedQuote();
+      renderQuoteBuilder(quote.id);
+      expect(await screen.findByText(/Prices stay as sent in V1/)).toBeInTheDocument();
+      const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+      await waitFor(() => expect(units).toBeEnabled());
+      fireEvent.change(units, { target: { value: '3' } });
+      expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(10);
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, price_override: null, use_todays_price: false });
+    });
+
+    it('takes today\'s price on one line only when asked, and says the quote must be sent again', async () => {
+      const { quote } = configureLockedQuote();
+      renderQuoteBuilder(quote.id);
+      fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
+
+      expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(12);
+      expect(screen.getByText('Sent at $10.00')).toBeInTheDocument();
+      expect(screen.getByText(/Prices or lines changed after V1 was sent/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, price_override: null, use_todays_price: true });
+    });
+
+    it('rewinds to the version last sent in one confirmed step', async () => {
+      const { quote } = configureLockedQuote();
+      renderQuoteBuilder(quote.id);
+      fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Rewind to V1' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Rewind to V1' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Rewind to V1' }));
+
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith(
+        'restore_quote_version',
+        expect.objectContaining({ p_quote_id: quote.id, p_version_id: 'version-1' }),
+      ));
+    });
   });
 
   it('saves an edited revised quote as revised, then converts it with the new token', async () => {

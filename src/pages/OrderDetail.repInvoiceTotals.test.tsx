@@ -103,6 +103,7 @@ describe('OrderDetail AR strip for non-admins', () => {
     expect(screen.queryByText('Total Invoiced')).not.toBeInTheDocument();
     expect(screen.queryByText('Amount Paid')).not.toBeInTheDocument();
     expect(screen.queryByText('Balance Due')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Record Payment/ })).toBeInTheDocument();
   });
 
   it('a rep who can see some invoices gets the totals plus a partial-view note', async () => {

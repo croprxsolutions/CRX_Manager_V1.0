@@ -4311,11 +4311,10 @@ export function runtimeProgramRefused(command, gated) {
   return Boolean(gated) || GLUED_RUNTIME_RE.test(expandable) || runtimeArgumentsFollowRuntimeProgram(command);
 }
 
-// A program run from a variable whose next few words are variables too
-// (`"$A" "$B" "$C" 951 --admin`) can be a whole merge hidden in values set earlier
-// (Sol on #1128; Mason, 2026-10-26: "close it narrowly"). `"$NODE" x.mjs` and
-// `"$CODEX" exec … -C "$WORK"` keep passing: their next words are literal.
-const RUNTIME_FOLLOWERS_CHECKED = 3;
+// A program run from a variable with any variable among its arguments
+// (`"$A" "$B" "$C" 951 --admin`, or the action pushed later by options) can be a
+// whole merge hidden in values set earlier (Sol on #1128; Mason, 2026-10-26:
+// "close it narrowly"). `"$NODE" x.mjs` and `"$CODEX" --version` keep passing.
 const isRuntimeWord = (word) => !String(word).startsWith("'") && /[$`]/.test(String(word));
 function runtimeArgumentsFollowRuntimeProgram(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
@@ -4323,7 +4322,7 @@ function runtimeArgumentsFollowRuntimeProgram(command) {
     let start = 0;
     while (start < words.length && /^[A-Za-z_]\w*=/.test(String(words[start]))) start += 1;
     if (start >= words.length || !isRuntimeWord(words[start])) continue;
-    if (words.slice(start + 1, start + 1 + RUNTIME_FOLLOWERS_CHECKED).some(isRuntimeWord)) return true;
+    if (words.slice(start + 1).some(isRuntimeWord)) return true;
   }
   return false;
 }
@@ -4387,8 +4386,10 @@ const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|
 // marker above (Luna round 2). The word `push` or `merge` on its own is data.
 const INLINE_ACTION_RE = /\bpr\b[^;\n]{0,120}?\bmerge\b|\bpulls\b[^;\n]{0,80}?\bmerge\b|mergepullrequest|\bpulls\/[^\s'"]*\/merge\b|\bgit['"\s,]+push\b|\bpush['"\s,]+origin\b|head:main\b/i;
 const BACKTICK_RUNS_SHELL = new Set(["perl", "ruby", "php"]);
+// Code that assembles words from pieces (`'child_'+'process'`, char codes,
+// decoding) can spell any capability, so it counts too (Sol on #1128).
 function inlineCodeCanAct(program, code) {
-  return INLINE_ACTION_RE.test(code) || INLINE_CAPABILITY_RE.test(code) ||
+  return INLINE_ACTION_RE.test(code) || INLINE_CAPABILITY_RE.test(code) || OBFUSCATION_RE.test(code) ||
     (BACKTICK_RUNS_SHELL.has(program) && code.includes("`"));
 }
 export function inlineCodeReachesGatedAction(command) {

@@ -459,7 +459,7 @@ separately, the permission change.
    **Loosened 2026-10-26 (Mason, "looser guards"; evidence `docs/changelog.d/2026-10-26-looser-merge-gate.md`):**
    a program run from one whole variable (`"$NODE" x.mjs`, `"$CODEX" --version`) is refused only when
    the command could reach a gated action, glues a word from run-time pieces (`$a$b`,
-   `$(printf g)h`, `g${X}t`), or has a variable among its next three words (`"$A" "$B" "$C" 951`)
+   `$(printf g)h`, `g${X}t`), or has a variable among its arguments (`"$A" "$B" "$C" 951`)
    — `runtimeProgramRefused`. Inline code is refused only when it can also
    start a program or reach the network (`child_process`, `exec`, `system(`, `fetch`, a URL; backticks
    in Perl, Ruby and PHP), so `a.push(x)` or a regex naming `merge` passes.

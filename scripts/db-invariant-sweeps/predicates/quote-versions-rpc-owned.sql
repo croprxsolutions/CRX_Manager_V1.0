@@ -15,8 +15,11 @@
 --     anon/authenticated — six, which is the full write-capable set minus
 --     MAINTAIN, deliberately kept and explained at the migration's REVOKE.
 --     (TRUNCATE matters independently — RLS policies do not apply to it at all);
---   * SELECT and qversions_select preserved, because version history must keep
---     rendering and this predicate must not pass by having broken reads;
+--   * reads and qversions_select preserved, because version history must keep
+--     rendering and this predicate must not pass by having broken reads. Since
+--     20261022101000 (cost columns admin-only) that read is column-level: every
+--     column except snapshot_data, which reaches the browser only through the
+--     SECURITY DEFINER get_quote_versions(uuid);
 --   * the owner-side writer _create_quote_version_owner_impl stays a
 --     search_path-pinned SECURITY DEFINER owned by an RLS-bypassing role and
 --     stays uncallable by anon/authenticated — it is the ONLY routine in the
@@ -89,9 +92,14 @@ SELECT 'quote_versions:column-mutation-privilege' AS violation_key,
 
 UNION ALL
 
+-- 20261022101000 replaced the table-wide SELECT with a column-level grant on
+-- every column except snapshot_data, so the read path is checked with
+-- has_any_column_privilege; has_table_privilege is false there by design. The
+-- snapshot itself is read through get_quote_versions(uuid), so losing that
+-- routine breaks version history just as surely as losing the column grant.
 SELECT 'quote_versions:read-path-regressed' AS violation_key,
-       'authenticated lost SELECT or qversions_select was removed — the write boundary must not be satisfied by breaking version history' AS reason
- WHERE NOT has_table_privilege('authenticated', 'public.quote_versions', 'SELECT')
+       'authenticated lost its column-level read of quote_versions, qversions_select was removed, or get_quote_versions(uuid) is missing or not authenticated-callable — the write boundary must not be satisfied by breaking version history' AS reason
+ WHERE NOT has_any_column_privilege('authenticated', 'public.quote_versions', 'SELECT')
     OR NOT EXISTS (
       SELECT 1
         FROM pg_policy p
@@ -99,6 +107,21 @@ SELECT 'quote_versions:read-path-regressed' AS violation_key,
          AND p.polname = 'qversions_select'
          AND p.polcmd = 'r'
     )
+    OR CASE
+         WHEN to_regprocedure('public.get_quote_versions(uuid)') IS NULL THEN true
+         ELSE NOT has_function_privilege('authenticated', 'public.get_quote_versions(uuid)', 'EXECUTE')
+       END
+
+UNION ALL
+
+-- The other half of 20261022101000: snapshot_data carries the sent quote's cost
+-- lines, so neither browser role may read it directly. has_column_privilege is
+-- also true when a role holds table-wide SELECT, so a later blanket
+-- re-grant of the table reports here too.
+SELECT 'quote_versions:snapshot-data-readable' AS violation_key,
+       'anon/authenticated can read public.quote_versions.snapshot_data directly — it carries cost and must be reached only through get_quote_versions(uuid) (20261022101000)' AS reason
+ WHERE has_column_privilege('authenticated', 'public.quote_versions', 'snapshot_data', 'SELECT')
+    OR has_column_privilege('anon', 'public.quote_versions', 'snapshot_data', 'SELECT')
 
 UNION ALL
 

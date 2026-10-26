@@ -653,6 +653,9 @@ describe('quote_versions write boundary — standing predicate', () => {
       'quote_versions:external-mutation-policy',
       'quote_versions:browser-mutation-privilege',
       'quote_versions:read-path-regressed',
+      // 20261022101000 made snapshot_data admin-only; the browser reads it
+      // only through get_quote_versions(uuid).
+      'quote_versions:snapshot-data-readable',
       'quote_versions:rls-disabled',
       'quote_versions:force-rls-enabled',
       'quote_versions:column-mutation-privilege',
@@ -1091,10 +1094,27 @@ describe('quote_versions write boundary — standing predicate', () => {
   });
 
   it('cannot be satisfied by breaking version history instead', () => {
+    // Column-level since 20261022101000: the table-wide SELECT was replaced by a
+    // grant on every column except snapshot_data, so a table-level check would
+    // fire on the intended state.
     expect(predicate).toContain(
+      "NOT has_any_column_privilege('authenticated', 'public.quote_versions', 'SELECT')",
+    );
+    expect(predicate).not.toContain(
       "NOT has_table_privilege('authenticated', 'public.quote_versions', 'SELECT')",
     );
     expect(predicate).toContain("p.polname = 'qversions_select'");
+    expect(predicate).toContain(
+      "NOT has_function_privilege('authenticated', 'public.get_quote_versions(uuid)', 'EXECUTE')",
+    );
+  });
+
+  it('keeps snapshot_data unreadable to both browser roles', () => {
+    for (const role of ['authenticated', 'anon']) {
+      expect(predicate).toContain(
+        `has_column_privilege('${role}', 'public.quote_versions', 'snapshot_data', 'SELECT')`,
+      );
+    }
   });
 
   it('is a read-only SELECT, as the sweep runner requires', () => {

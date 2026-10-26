@@ -185,7 +185,7 @@ export function buildInvoiceEmailPayload(input: InvoiceEmailInput): SendEmailPar
 // function repeats these checks; here they give the honest message before
 // anything is built or sent.
 
-export const PO_EMAIL_STATUSES = ['submitted', 'partially_received'] as const;
+const PO_EMAIL_STATUSES = ['submitted', 'partially_received'] as const;
 
 export interface PurchaseOrderEmailCheckInput {
   status: string;

@@ -1516,7 +1516,9 @@ export default function ProductDetail() {
           )}
 
           {/* Below Save Changes: the floor saves on its own, with its own button. */}
-          {isAdmin && !isNew && id && profile && (
+          {/* Only once this product has loaded: until then persistedProduct is still the last
+              product, whose tier margins would be judged against this product's floor. */}
+          {isAdmin && !isNew && id && profile && persistedProduct?.id === id && (
             // Keyed by product: moving to another product starts a fresh card, so nothing from the
             // last product's floor, history or in-flight save carries over.
             <ProductMarginFloorCard

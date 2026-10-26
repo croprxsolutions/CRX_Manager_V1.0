@@ -120,6 +120,16 @@ describe('Products list margin floors', () => {
     expect(mocks.setMarginFloors).not.toHaveBeenCalled();
   });
 
+  it('says the list could not be reloaded when the floors fail to reload after a save', async () => {
+    const input = await openFloorEditor();
+    mocks.fetchMarginFloors.mockRejectedValueOnce(new Error('offline'));
+    fireEvent.change(input, { target: { value: '16' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
+      'warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.'));
+    expect(mocks.toast).not.toHaveBeenCalledWith('success', expect.stringMatching(/Updated/));
+  });
+
   it('keeps the catalog when floors fail to load, with the floor column read-only', async () => {
     mocks.fetchMarginFloors.mockRejectedValue(new Error('offline'));
     render(<Products />);

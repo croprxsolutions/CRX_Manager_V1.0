@@ -202,7 +202,9 @@ export default function Products() {
     setCategories(cats.sort());
     setVendors(vends.sort());
     setLoading(false);
-    return true;
+    // The rows are installed either way, but a silent reload's caller must still say the floors
+    // are missing (its own warning), so a failed floor read is not reported as a clean reload.
+    return !floorsFailed;
   }, [isAdmin, toast]);
 
   useEffect(() => {

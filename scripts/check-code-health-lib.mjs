@@ -12,6 +12,24 @@ export const SIZE_RULES = {
   'max-nested-callbacks': ['error', 4],
 };
 
+export const SOURCE_GLOB = 'src/**/*.{js,jsx,ts,tsx}';
+
+// Options for `new ESLint(...)`. The repo config only registers TypeScript files, so without the
+// files/JSX entry ESLint skips `.jsx` modules. An inline `eslint-disable` must not hide a size or
+// complexity violation from the ratchet.
+export function sizeLintOptions(cwd) {
+  return {
+    cwd,
+    overrideConfig: {
+      files: [SOURCE_GLOB],
+      languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
+      rules: SIZE_RULES,
+    },
+    ruleFilter: ({ ruleId }) => ruleId in SIZE_RULES,
+    allowInlineConfig: false,
+  };
+}
+
 // Tests may be long and repetitive, and the two type catalogs are one long list by design.
 const SKIPPED_FILE = /\.test\.[jt]sx?$|^src\/tests\/|^src\/types\/(?:supabase|index)\.ts$/;
 
@@ -109,6 +127,9 @@ export function summarizeSizeResults(root, results, parseSource) {
     let spans;
     for (const message of result.messages) {
       if (message.fatal) throw new Error(`${file}: ESLint could not parse the file: ${message.message}`);
+      // A rule-less notice such as "File ignored because no matching configuration was supplied"
+      // means the file was never measured.
+      if (!message.ruleId) throw new Error(`${file}: ESLint did not measure the file: ${message.message}`);
       if (!(message.ruleId in SIZE_RULES)) continue;
       spans ??= functionSpans(parseSource(result.filePath));
       const key = findingKey(message, spans);

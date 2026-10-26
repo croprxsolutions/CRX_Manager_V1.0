@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { Linter } from 'eslint';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ESLint, Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
 import {
   findImprovements,
   findRegressions,
   isCheckedSourceFile,
+  sizeLintOptions,
   summarizeSizeResults,
   summarizeUnusedResults,
 } from './check-code-health-lib.mjs';
@@ -109,6 +112,30 @@ assert.deepEqual(
     },
   },
   'shorthand, getter, and class methods keep their own identity with real ESLint positions',
+);
+
+// Codex App P2 on #1117 (third round): the repo's ESLint config only registers TypeScript, so a
+// `.jsx` module went unmeasured. Lint through the real repo config with the ratchet's options.
+const REPO = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
+const PROBE = 'export function probe(a, b, c, d, e, f) { return <i>{a + b + c + d + e + f}</i>; }\n';
+const repoLint = new ESLint(sizeLintOptions(REPO));
+for (const ext of ['jsx', 'tsx', 'js', 'ts']) {
+  const code = ext.endsWith('x') ? PROBE : 'export function probe(a, b, c, d, e, f) { return a + b + c + d + e + f; }\n';
+  const filePath = path.join(REPO, 'src', `__ratchet_probe__.${ext}`);
+  const [result] = await repoLint.lintText(code, { filePath });
+  assert.deepEqual(
+    summarizeSizeResults(REPO, [result], () => tseslint.parser.parseForESLint(code, { jsx: true, loc: true, range: true }).ast),
+    { [`src/__ratchet_probe__.${ext}`]: { 'max-params probe': 1 } },
+    `a .${ext} module is measured through the repo ESLint config`,
+  );
+}
+assert.throws(
+  () => summarizeSizeResults(ROOT, [{
+    filePath: 'C:\\repo\\src\\a.jsx',
+    messages: [{ ruleId: null, message: 'File ignored because no matching configuration was supplied.' }],
+  }], parse(BIG)),
+  /did not measure/,
+  'a file ESLint skipped fails closed instead of passing unmeasured',
 );
 
 assert.throws(

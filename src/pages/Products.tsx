@@ -525,10 +525,10 @@ export default function Products() {
     const reloaded = await fetchProducts(false);
     if (!reloaded) {
       // Show what was saved rather than the old floors, so nobody re-enters them.
-      const saved = new Map(marginFloors);
+      const changedIds = new Set(floorChanges.map((change) => change.productId));
+      const saved = new Map([...marginFloors].filter(([productId]) => !changedIds.has(productId)));
       for (const change of floorChanges) {
-        if (change.marginFloorPercent === null) saved.delete(change.productId);
-        else saved.set(change.productId, change.marginFloorPercent / 100);
+        if (change.marginFloorPercent !== null) saved.set(change.productId, change.marginFloorPercent / 100);
       }
       setMarginFloorsByProduct(saved);
       setProducts((rows) => rows.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(saved.get(p.id)) })));

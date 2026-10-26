@@ -317,45 +317,7 @@ export default function CustomerInvoiceSummaryPanel() {
               <SummarySection title="Chemical Sales" rows={summary.chemicalRows} subtotal={summary.chemicalSubtotal} />
               <SummarySection title="Field Application" rows={summary.fieldRows} subtotal={summary.fieldSubtotal} />
 
-              {/* Combined total */}
-              <Card>
-                <div className="flex flex-col items-end gap-1 text-sm">
-                  <div className="flex justify-between w-full max-w-xs">
-                    <span className="text-secondary">Combined Total ({summary.combinedTotal.count})</span>
-                    <span className="font-mono">{fmt(summary.combinedTotal.totalAmountCents)}</span>
-                  </div>
-                  {summary.combinedTotal.paidAmountCents > 0 && (
-                    <div className="flex justify-between w-full max-w-xs">
-                      <span className="text-secondary">Payments</span>
-                      <span className="font-mono text-crx-green">-{fmt(summary.combinedTotal.paidAmountCents)}</span>
-                    </div>
-                  )}
-                  {summary.combinedTotal.prepayAppliedCents > 0 && (
-                    <div className="flex justify-between w-full max-w-xs">
-                      <span className="text-secondary">Prepay Applied</span>
-                      <span className="font-mono text-crx-green">-{fmt(summary.combinedTotal.prepayAppliedCents)}</span>
-                    </div>
-                  )}
-                  {summary.combinedTotal.writeOffCents > 0 && (
-                    <div className="flex justify-between w-full max-w-xs">
-                      <span className="text-secondary">Write-off</span>
-                      <span className="font-mono text-crx-green">-{fmt(summary.combinedTotal.writeOffCents)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between w-full max-w-xs border-t border-gray-200 pt-1 mt-1">
-                    <span className="font-semibold text-nav-dark">Combined Balance</span>
-                    <span className={`font-mono font-semibold ${summary.combinedTotal.balanceCents > 0 ? 'text-red-600' : 'text-crx-green'}`}>
-                      {fmt(summary.combinedTotal.balanceCents)}
-                    </span>
-                  </div>
-                  {summary.combinedTotal.discountEarnedCents > 0 && (
-                    <div className="flex justify-between w-full max-w-xs">
-                      <span className="text-xs text-secondary">Discount Earned (if paid early)</span>
-                      <span className="font-mono text-xs text-secondary">{fmt(summary.combinedTotal.discountEarnedCents)}</span>
-                    </div>
-                  )}
-                </div>
-              </Card>
+              <CombinedTotalCard total={summary.combinedTotal} />
 
               <div className="flex justify-end">
                 <Button
@@ -372,6 +334,50 @@ export default function CustomerInvoiceSummaryPanel() {
         </>
       )}
     </div>
+  );
+}
+
+// ── Combined total card ─────────────────────────────────────────────────────
+function CombinedTotalCard({ total }: { total: SummaryTotals }) {
+  return (
+    <Card>
+      <div className="flex flex-col items-end gap-1 text-sm">
+        <div className="flex justify-between w-full max-w-xs">
+          <span className="text-secondary">Combined Total ({total.count})</span>
+          <span className="font-mono">{fmt(total.totalAmountCents)}</span>
+        </div>
+        {total.paidAmountCents > 0 && (
+          <div className="flex justify-between w-full max-w-xs">
+            <span className="text-secondary">Payments</span>
+            <span className="font-mono text-crx-green">-{fmt(total.paidAmountCents)}</span>
+          </div>
+        )}
+        {total.prepayAppliedCents > 0 && (
+          <div className="flex justify-between w-full max-w-xs">
+            <span className="text-secondary">Prepay Applied</span>
+            <span className="font-mono text-crx-green">-{fmt(total.prepayAppliedCents)}</span>
+          </div>
+        )}
+        {total.writeOffCents > 0 && (
+          <div className="flex justify-between w-full max-w-xs">
+            <span className="text-secondary">Write-off</span>
+            <span className="font-mono text-crx-green">-{fmt(total.writeOffCents)}</span>
+          </div>
+        )}
+        <div className="flex justify-between w-full max-w-xs border-t border-gray-200 pt-1 mt-1">
+          <span className="font-semibold text-nav-dark">Combined Balance</span>
+          <span className={`font-mono font-semibold ${total.balanceCents > 0 ? 'text-red-600' : 'text-crx-green'}`}>
+            {fmt(total.balanceCents)}
+          </span>
+        </div>
+        {total.discountEarnedCents > 0 && (
+          <div className="flex justify-between w-full max-w-xs">
+            <span className="text-xs text-secondary">Discount Earned (if paid early)</span>
+            <span className="font-mono text-xs text-secondary">{fmt(total.discountEarnedCents)}</span>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

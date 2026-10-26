@@ -24,6 +24,8 @@ interface ProductMarginFloorCardProps {
   tierMargins: [number | null | undefined, number | null | undefined, number | null | undefined];
   /** The signed-in admin's profile id. */
   userId: string;
+  /** Told whether the floor has an unsaved edit, so the page can warn before it is left. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 function floorLabel(floor: number | null): string {
@@ -34,7 +36,7 @@ function floorLabel(floor: number | null): string {
  * The product's net-margin floor (To-Do 0.2). Admin-only: the page renders it for admins only, and
  * the database refuses everyone else. The price sheet warns on any tier under it (To-Do 0.1).
  */
-export default function ProductMarginFloorCard({ productId, tierMargins, userId }: ProductMarginFloorCardProps) {
+export default function ProductMarginFloorCard({ productId, tierMargins, userId, onDirtyChange }: ProductMarginFloorCardProps) {
   const { toast } = useToast();
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('set_product_margin_floors', userId);
   const [floor, setFloor] = useState<number | null>(null);
@@ -128,6 +130,10 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
     }
   })();
   const dirty = loadState === 'loaded' && draftValue !== formatMarginFloorPercent(floor);
+  // A saved floor reloads into the draft, so dirty clears itself after a save. A card that goes away
+  // (another product, or the page closing) leaves nothing unsaved behind it.
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => { onDirtyChange?.(false); }, [onDirtyChange]);
 
   return (
     <Card>

@@ -102,6 +102,30 @@ describe('ProductMarginFloorCard', () => {
     expect(mocks.setMarginFloors.mock.calls[2][0].idempotencyKey).not.toBe(mocks.setMarginFloors.mock.calls[0][0].idempotencyKey);
   });
 
+  it('tells the page about an unsaved floor edit, and that it is gone after a save or unmount', async () => {
+    const onDirtyChange = vi.fn();
+    mocks.setMarginFloors.mockResolvedValue({ success: true, status: 'saved', changed_count: 1, unchanged_count: 0 });
+    const { unmount } = render(
+      <ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" onDirtyChange={onDirtyChange} />,
+    );
+    const input = await screen.findByLabelText('Floor (net margin %)');
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.change(input, { target: { value: '16' } });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    // The save reloads 16% into the box, so nothing is unsaved any more.
+    mocks.fetchMarginFloor.mockResolvedValue(0.16);
+    fireEvent.click(screen.getByRole('button', { name: /save floor/i }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Margin floor set to 16%.'));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.change(input, { target: { value: '17' } });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
   it('treats the same value written differently as unchanged', async () => {
     render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);
     fireEvent.change(await screen.findByLabelText('Floor (net margin %)'), { target: { value: '15.00' } });

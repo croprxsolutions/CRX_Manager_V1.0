@@ -14,5 +14,7 @@ Fixes found in review of the margin floor change, before it went live:
 - The Products list's edit table (`EditableDataTable`) locks every cell and Cancel while a save
   runs, so an edit typed during a slow save of floors or prices is no longer silently dropped when
   the save closes edit mode (Codex App).
+- The product page's "unsaved changes" warning now also covers an unsaved margin floor edit, so
+  leaving the page or refreshing with only the floor changed asks first (Codex App).
 - Proof: `node scripts/smoke/prove-product-margin-floors-real-schema.mjs` re-run, PASS; the smoke
   chain passes in that database on a fresh product and on one with earlier cleared history.

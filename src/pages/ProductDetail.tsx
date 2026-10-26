@@ -263,7 +263,9 @@ export default function ProductDetail() {
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // The margin floor card saves on its own, so its unsaved edit is tracked apart from the form.
+  const [marginFloorDirty, setMarginFloorDirty] = useState(false);
+  const blocker = useUnsavedChanges(isDirty || marginFloorDirty);
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
     const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
@@ -1522,6 +1524,7 @@ export default function ProductDetail() {
               productId={id}
               tierMargins={[persistedProduct?.tier1_margin, persistedProduct?.tier2_margin, persistedProduct?.tier3_margin]}
               userId={profile.id}
+              onDirtyChange={setMarginFloorDirty}
             />
           )}
           </fieldset>

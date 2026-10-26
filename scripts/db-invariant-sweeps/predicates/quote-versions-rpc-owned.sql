@@ -104,8 +104,10 @@ UNION ALL
 -- The policy's row condition is pinned by digest of pg_get_expr(polqual): a
 -- USING (true) would widen reads to every signed-in user and a USING (false)
 -- would empty history, and neither changes the policy's name or command.
--- Role membership, not an exact role match, decides whether a policy applies,
--- so a policy aimed at a role authenticated belongs to still counts.
+-- Inherited privileges of a role, not an exact role match, decide whether a
+-- policy applies (row security uses has_privs_of_role), so a policy aimed at a
+-- role authenticated inherits from still counts; 'USAGE' is that test, where
+-- 'MEMBER' would also accept a NOINHERIT membership that never applies.
 SELECT 'quote_versions:read-path-regressed' AS violation_key,
        'authenticated lost its column-level read of a version-history column, qversions_select was removed, changed its row condition or no longer applies to authenticated, or get_quote_versions(uuid) is missing or not authenticated-callable — the write boundary must not be satisfied by breaking version history; an intended policy change must update the condition digest here (expected 466a3791a1874c9cba20ac690f330c7b)' AS reason
  WHERE NOT has_any_column_privilege('authenticated', 'public.quote_versions', 'SELECT')
@@ -133,7 +135,7 @@ SELECT 'quote_versions:read-path-regressed' AS violation_key,
          -- 0 in polroles means PUBLIC, which includes authenticated.
          AND EXISTS (
            SELECT 1 FROM unnest(p.polroles) AS pr(role_oid)
-            WHERE pr.role_oid = 0 OR pg_has_role('authenticated', pr.role_oid, 'MEMBER')
+            WHERE pr.role_oid = 0 OR pg_has_role('authenticated', pr.role_oid, 'USAGE')
          )
          AND md5(pg_get_expr(p.polqual, p.polrelid)) = '466a3791a1874c9cba20ac690f330c7b'
     )
@@ -141,6 +143,23 @@ SELECT 'quote_versions:read-path-regressed' AS violation_key,
          WHEN to_regprocedure('public.get_quote_versions(uuid)') IS NULL THEN true
          ELSE NOT has_function_privilege('authenticated', 'public.get_quote_versions(uuid)', 'EXECUTE')
        END
+
+UNION ALL
+
+-- Pinning qversions_select's condition means little if a second SELECT policy
+-- sits beside it: permissive policies are OR-ed, so one with USING (true)
+-- widens reads to every signed-in user; restrictive ones are AND-ed, so one
+-- with USING (false) empties history. FOR ALL policies are already reported by
+-- the external-mutation-policy branch above.
+SELECT 'quote_versions:extra-select-policy' AS violation_key,
+       'public.quote_versions has a SELECT policy other than qversions_select — permissive ones widen who can read version history, restrictive ones can empty it; review it against the pinned qversions_select condition' AS reason
+ WHERE EXISTS (
+   SELECT 1
+     FROM pg_policy p
+    WHERE p.polrelid = 'public.quote_versions'::regclass
+      AND p.polcmd = 'r'
+      AND p.polname <> 'qversions_select'
+ )
 
 UNION ALL
 
@@ -163,6 +182,11 @@ SELECT 'get_quote_versions:contract-pinned' AS violation_key,
       AND pg_get_userbyid(p.proowner) = 'postgres'
       AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']
       AND md5(replace(p.prosrc, chr(13), '')) = '8f0592c4877da51eb5b9074b775ed0cc'
+      -- The browser calls it by the argument NAME (p_quote_id) and reads the
+      -- returned columns by name, so a rename breaks history with the body
+      -- digest unchanged.
+      AND p.proargnames IS NOT DISTINCT FROM ARRAY['p_quote_id', 'id', 'quote_id', 'version_number',
+            'sent_by', 'sent_at', 'sent_method', 'snapshot_data', 'pdf_url', 'notes', 'restore_trusted_at']
  )
 
 UNION ALL

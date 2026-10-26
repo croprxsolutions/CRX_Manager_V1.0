@@ -658,6 +658,7 @@ describe('quote_versions write boundary — standing predicate', () => {
       'quote_versions:snapshot-data-readable',
       'quote_versions:anon-read',
       'get_quote_versions:contract-pinned',
+      'quote_versions:extra-select-policy',
       'quote_versions:rls-disabled',
       'quote_versions:force-rls-enabled',
       'quote_versions:column-mutation-privilege',
@@ -1118,7 +1119,12 @@ describe('quote_versions write boundary — standing predicate', () => {
     expect(predicate).toMatch(
       /unnest\(ARRAY\['id', 'quote_id', 'version_number', 'sent_by', 'sent_at',\s+'sent_method', 'pdf_url', 'notes', 'restore_trusted_at'\]\) AS c\(name\)/,
     );
-    expect(predicate).toContain("pg_has_role('authenticated', pr.role_oid, 'MEMBER')");
+    // USAGE follows inherited privileges, which is what decides whether a policy applies.
+    expect(predicate).toContain("pg_has_role('authenticated', pr.role_oid, 'USAGE')");
+    expect(predicate).not.toContain("pg_has_role('authenticated', pr.role_oid, 'MEMBER')");
+    expect(predicate).toMatch(/p\.polcmd = 'r'\s+AND p\.polpermissive/);
+    expect(predicate).toContain("'quote_versions:extra-select-policy'");
+    expect(predicate).toContain("AND p.polname <> 'qversions_select'");
     expect(predicate).toContain(
       "md5(pg_get_expr(p.polqual, p.polrelid)) = '466a3791a1874c9cba20ac690f330c7b'",
     );
@@ -1133,6 +1139,8 @@ describe('quote_versions write boundary — standing predicate', () => {
     expect(predicate).toContain("pg_get_userbyid(p.proowner) = 'postgres'");
     expect(predicate).toContain("ARRAY['search_path=public, pg_temp']");
     expect(predicate).toMatch(/to_regprocedure\('public\.get_quote_versions\(uuid\)'\)\s+AND p\.prosecdef/);
+    // QuoteBuilder calls it as rpc('get_quote_versions', { p_quote_id }).
+    expect(predicate).toMatch(/p\.proargnames IS NOT DISTINCT FROM ARRAY\['p_quote_id', 'id', 'quote_id'/);
   });
 
   it('keeps snapshot_data unreadable to both browser roles', () => {

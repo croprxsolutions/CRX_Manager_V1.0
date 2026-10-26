@@ -184,6 +184,7 @@ for (const command of [
   'CODEX=$(ls -t /c/bin/*/codex.exe | head -1); "$CODEX" --version',
   'P=python; $P -I scratch/stats.py',
   `NODE=node; "$NODE" scripts/report.mjs 'literal$USER'`,
+  '"$CODEX" exec --skip-git-repo-check --ephemeral --sandbox read-only -C "$WORK" -o "$WORK/out.txt"',
 ]) ok(!runtimeProgramRefused(command, couldReachGatedAction([command])), `whole-variable program allowed: ${command}`);
 for (const command of [
   "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
@@ -198,6 +199,9 @@ for (const command of [
   "$(printf g)`printf h;` pr $(printf m)`printf erge;` 951 --squash",
   "H=h; R=erge; 'g'$H pr 'm'$R 951 --squash",
   'A=g; M=mer; "$A"h pr "$M"ge 951 --squash',
+  '"$A" "$B" "$C" 951 --admin',
+  '$A pr $C 951 --admin',
+  '"$GH" pr "$ACTION" 951',
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code is refused only when it can also start a program or reach the network.
@@ -228,6 +232,7 @@ for (const command of [
   "ruby -e 'system \"gh\", *ARGV' pr merge 951 --squash",
   "perl -e 'system \"gh\", @ARGV' pr merge 951 --squash",
   "perl -e 'open my $p, \"|-\", \"gh\", @ARGV; close $p' pr merge 951 --squash",
+  `node -e "new (require('@octokit/rest').Octokit)().rest.pulls[ /* note */ 'merge' ]({owner:'o',repo:'r',pull_number:951})"`,
   `node -e "const {Octokit}=require('@octokit/rest'); new Octokit({auth:process.env.GH_TOKEN}).rest.pulls.merge({owner:'o',repo:'r',pull_number:951})"`,
 ]) ok(inlineCodeReachesGatedAction(command), `inline code that can act still refused: ${command}`);
 

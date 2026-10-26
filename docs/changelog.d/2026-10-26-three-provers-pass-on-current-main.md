@@ -17,7 +17,9 @@ anything on current main, because newer migrations and smoke edits landed after 
 
 - Batch 1 and cost/margin: replay up to the candidate, then refuse any later file that (re)defines,
   alters, drops (including `DROP FUNCTION IF EXISTS`) or re-grants a covered function
-  (`FUNCTION <name>`, as in `prove-post-binds-reviewed-invoice-version-real-schema.mjs`). Batch 1 now
+  (`FUNCTION <name>`, as in `prove-post-binds-reviewed-invoice-version-real-schema.mjs`), or grants
+  or revokes on `ALL FUNCTIONS IN SCHEMA`; SQL comments are stripped first so none can split a
+  match. Batch 1 now
   covers the nine wrappers, their nine impls, the fingerprint/binder/guard helpers and
   `check_idempotency_intent`, and adds a new step 7: after every earlier step, it replays all 29 later
   migrations on top of the candidate and checks, on that current-main database, that the rebuilt

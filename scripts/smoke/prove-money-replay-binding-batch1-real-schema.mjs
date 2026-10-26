@@ -83,6 +83,13 @@ const COVERED_FUNCTIONS = [
   'check_idempotency_intent',
 ];
 const TOUCHED = new RegExp(`(FUNCTION|ROUTINE|PROCEDURE)\\s+(IF\\s+EXISTS\\s+)?("?public"?\\s*\\.\\s*)?"?(${COVERED_FUNCTIONS.join('|')})\\b`, 'i');
+// A schema-wide grant or revoke reaches every covered function without naming one.
+const SCHEMA_WIDE = /ALL\s+(FUNCTIONS|ROUTINES|PROCEDURES)\s+IN\s+SCHEMA/i;
+// Comments are stripped first, so one between two SQL words cannot hide a match.
+function touches(file) {
+  const sql = lf(file).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  return SCHEMA_WIDE.test(sql) || TOUCHED.test(sql.replace(/EXECUTE\s+(FUNCTION|PROCEDURE)/gi, 'EXECUTE'));
+}
 // Later replay-binding batches (2, 3a, 3b) rebuild the commit-time guard trigger with a longer
 // covered list; step 7 replays them and checks the nine are still guarded.
 
@@ -151,7 +158,7 @@ function plan() {
   const before = all.slice(0, at);
   const later = all.slice(at + 1);
   for (const file of later) {
-    assert.ok(!TOUCHED.test(lf(file).replace(/EXECUTE\s+(FUNCTION|PROCEDURE)/gi, 'EXECUTE')), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
+    assert.ok(!touches(file), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
   }
   const touched = new RegExp(WRAPPED.join('|'));
   for (const name of PARKED) {
@@ -168,6 +175,7 @@ function replayLater(later) {
   for (const [i, file] of later.entries()) {
     const base = path.basename(file);
     for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    if (LEDGER_ONLY.has(base)) continue;
     if (PARKED.has(base)) { ledger(path.basename(file, '.sql')); continue; }
     const name = `later-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`later replay failed at ${base}:\n${r.output}`);

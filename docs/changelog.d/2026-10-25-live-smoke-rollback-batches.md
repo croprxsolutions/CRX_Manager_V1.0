@@ -60,7 +60,12 @@ rather than one spelling (the coordinator's call, 2026-10-25). Three chains run 
 COPY-to-program check too; `LOAD`, `PREPARE` (a prepared statement outlives the rollback in the session)
 and function bodies in any language but `sql`/`plpgsql` (plperl's `spi_exec_query` runs SQL without
 EXECUTE) disqualify a batch; and server-admin calls (`pg_log_backend_memory_contexts`, log rotation,
-restore points, WAL switch, promote, backup and WAL-replay controls) are refused everywhere.
+restore points, WAL switch, promote, backup and WAL-replay controls) are refused everywhere. Sol's second
+review (5f2e2ccb0) found `BEGIN; SELECT pg_read_file(…); ROLLBACK;` and `pg_file_unlink` accepted as rolled
+back: a rollback neither unreads a returned file nor restores a deleted one. Server-file functions are now
+matched as a family (`pg_read_*`, `pg_file_*`, `pg_ls_*`, `pg_stat_file`, `pg_logdir_ls`,
+`pg_current_logfile`), with every `pg_log_*` and `http`/`http_*` call, and refused everywhere; `CHECKPOINT`
+disqualifies a batch.
 
 **Residual risk, accepted.** "Rolled back" means every table write is undone. The guard reads only the
 submitted text, never the bodies of functions already in the database, so whatever a called RPC or

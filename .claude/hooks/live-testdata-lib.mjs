@@ -335,9 +335,13 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // setval/nextval because it reads the full text, supplied function bodies
 // included (Codex App, #1092: a pg_temp helper that calls setval).
 // Server administration calls (log rotation, WAL switches, restore points,
-// backend memory dumps) also act outside the transaction (Luna round 2, #1092).
-export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_log_standby_snapshot|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+)\s*\(/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_log_standby_snapshot|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+|setval|nextval)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
+// backend memory dumps and other pg_log_* writes) also act outside the
+// transaction (Luna round 2, #1092), and server files are matched as a family,
+// read or write: a rollback neither unreads a returned file nor restores a
+// deleted one (Sol, #1092: pg_read_file, pg_file_unlink). Any http extension
+// call (http(), http_*) counts as a remote call.
+export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http|http_\w+|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_\w+|pg_read_\w+|pg_ls_\w+|pg_stat_file|pg_logdir_ls|pg_current_logfile\w*|pg_log_\w+|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+)\s*\(/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http|http_\w+|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_\w+|pg_read_\w+|pg_ls_\w+|pg_stat_file|pg_logdir_ls|pg_current_logfile\w*|pg_log_\w+|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+|setval|nextval)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -542,7 +546,7 @@ const QUERY_TEXT_CALL_RE = /\b(?:query_to_xml\w*|ts_stat|ts_rewrite)\s*\(/i;
 // the session, where a later plain EXECUTE could run it); and a function body in
 // any language but sql or plpgsql, which can build and run SQL without EXECUTE
 // (plperl's spi_exec_query) (Luna round 2, #1092).
-const SESSION_STATEMENT_RE = /(?:^|\b(?:begin|then|else|loop))\s*(?:load|prepare(?!\s+transaction\b))\b/i;
+const SESSION_STATEMENT_RE = /(?:^|\b(?:begin|then|else|loop))\s*(?:load|checkpoint|prepare(?!\s+transaction\b))\b/i;
 const OTHER_LANGUAGE_RE = /\blanguage\s+(?!(?:sql|plpgsql)\b)/i;
 function leavesSessionOrServerEffect(sql) {
   const texts = allStatementTexts(sql);

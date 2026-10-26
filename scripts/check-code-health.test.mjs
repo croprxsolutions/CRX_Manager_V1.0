@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
 import {
   findImprovements,
@@ -83,6 +84,33 @@ assert.deepEqual(
   ['src/pages/H.tsx: max-depth newHandler — 1 found, baseline allows 0'],
   'fixing one deep block does not make room for a different new one',
 );
+// Codex App P2 on #1117 (second round): ESLint reports methods at their name, before the
+// function node starts. Real ESLint positions must still land on the method, not its parent.
+const METHODS = [
+  'export function App() {',
+  '  const api = { save(a) { return a ? 1 : 2; }, get total() { return x ? 1 : 2; } };',
+  '  class Store { load(b) { return b ? 1 : 2; } static make(c) { return c ? 1 : 2; } }',
+  '  return [api, Store];',
+  '}',
+].join('\n');
+const linted = new Linter({ configType: 'flat' }).verify(METHODS, {
+  files: ['**/*.ts'],
+  languageOptions: { parser: tseslint.parser },
+  rules: { complexity: ['error', 1] },
+}, 'Methods.ts');
+assert.deepEqual(
+  summarizeSizeResults(ROOT, [{ filePath: 'C:\\repo\\src\\Methods.ts', messages: linted }], parse(METHODS)),
+  {
+    'src/Methods.ts': {
+      'complexity App > load': 1,
+      'complexity App > make': 1,
+      'complexity App > save': 1,
+      'complexity App > total': 1,
+    },
+  },
+  'shorthand, getter, and class methods keep their own identity with real ESLint positions',
+);
+
 assert.throws(
   () => summarizeSizeResults(ROOT, [{ filePath: 'C:\\repo\\src\\a.ts', messages: [{ fatal: true, message: 'bad' }] }], parse(BIG)),
   /could not parse/,

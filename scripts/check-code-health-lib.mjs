@@ -62,7 +62,12 @@ export function functionSpans(ast) {
     let ownChain = chain;
     if (FUNCTION_TYPES.has(node.type)) {
       ownChain = [...chain, functionName(node, ancestors)];
-      spans.push({ start: node.loc.start, end: node.loc.end, chain: ownChain.join(' > ') });
+      // ESLint reports a method (`save() {}`, class methods, getters) at its name, which sits
+      // on the parent node before the function itself starts.
+      const parent = ancestors.at(-1);
+      const isMethod = ['Property', 'MethodDefinition'].includes(parent?.type) && parent.value === node;
+      const start = isMethod ? parent.loc.start : node.loc.start;
+      spans.push({ start, end: node.loc.end, chain: ownChain.join(' > ') });
     }
     for (const [field, value] of Object.entries(node)) {
       if (field === 'parent' || field === 'loc' || field === 'range') continue;

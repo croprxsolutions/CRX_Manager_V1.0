@@ -388,7 +388,7 @@
     "src/pages/ARaging.tsx": {
       "max-lines-per-function ARaging": 1,
       "complexity ARaging": 1,
-      "complexity ARaging > handleSendARReminders": 1,
+      "complexity ARaging > handleSendARReminders > action": 1,
       "max-lines": 1
     },
     "src/pages/BlendRecipes.tsx": {
@@ -466,9 +466,9 @@
       "max-lines-per-function Deliveries": 1,
       "complexity Deliveries": 1,
       "complexity Deliveries > fetchDeliveries": 1,
-      "complexity Deliveries > runCompleteConfirm": 1,
+      "complexity Deliveries > runCompleteConfirm > action": 1,
       "max-lines": 1,
-      "complexity Deliveries > handlePrintLoadSheet": 1
+      "complexity Deliveries > handlePrintLoadSheet > action": 1
     },
     "src/pages/DeliveryDetail.tsx": {
       "max-lines-per-function DeliveryDetail": 1,
@@ -578,7 +578,7 @@
       "max-lines": 1,
       "complexity InvoiceDetail > addProduct": 1,
       "max-depth InvoiceDetail > addProduct": 1,
-      "complexity InvoiceDetail > handleSave": 1,
+      "complexity InvoiceDetail > handleSave > action": 1,
       "complexity InvoiceDetail > buildInvoicePdfData": 1,
       "complexity InvoiceDetail > map": 1
     },
@@ -641,7 +641,7 @@
       "max-lines-per-function NewOrder": 1,
       "complexity NewOrder": 1,
       "complexity NewOrder > fetchData": 1,
-      "complexity NewOrder > submitOrder": 1,
+      "complexity NewOrder > submitOrder > action": 1,
       "max-lines": 1,
       "complexity NewOrder > map": 1
     },
@@ -667,7 +667,7 @@
       "max-lines-per-function OrderDetail": 1,
       "complexity OrderDetail": 1,
       "complexity OrderDetail > fetchOrder": 1,
-      "complexity OrderDetail > executeStatusChange": 1,
+      "complexity OrderDetail > executeStatusChange > action": 1,
       "max-lines": 1
     },
     "src/pages/Orders.tsx": {
@@ -701,7 +701,7 @@
       "max-lines-per-function PurchaseOrderDetail": 1,
       "complexity PurchaseOrderDetail": 1,
       "max-lines-per-function PurchaseOrderDetail > handleReceive": 1,
-      "complexity PurchaseOrderDetail > handleReceive": 1,
+      "complexity PurchaseOrderDetail > handleReceive > action": 1,
       "max-lines": 1
     },
     "src/pages/PurchaseOrders.tsx": {

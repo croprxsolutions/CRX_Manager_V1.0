@@ -13,18 +13,26 @@ import { buildInMemoryQuery, SERVER_ROW_CAP } from '../test-utils/inMemoryQuery'
 
 type Row = Record<string, unknown>;
 
+type FailMode = 'error' | 'nodata' | 'notlist' | 'throws';
+
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
-  // Tables whose reads fail.
-  failing: new Set<string>(),
+  // Tables whose reads fail, and how.
+  failing: new Map<string, FailMode>(),
 }));
 
-// A query whose every method chains and whose answer is a read error.
-function failingQuery(): Record<string, unknown> {
+// A query whose every method chains and whose answer is a failed read of the given kind.
+function failingQuery(mode: FailMode): Record<string, unknown> {
+  const answers: Record<Exclude<FailMode, 'throws'>, unknown> = {
+    error: { data: null, error: { message: 'connection reset' }, count: null },
+    nodata: { data: null, error: null, count: null },
+    notlist: { data: { id: 'x' }, error: null, count: 1 },
+  };
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
       if (prop === 'then') {
-        return (resolve: (v: unknown) => unknown) => resolve({ data: null, error: { message: 'connection reset' }, count: null });
+        return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          (mode === 'throws' ? reject(new Error('Failed to fetch')) : resolve(answers[mode]));
       }
       return () => q;
     },
@@ -34,12 +42,16 @@ function failingQuery(): Record<string, unknown> {
 
 vi.mock('../lib/db', () => ({
   supabase: {
-    from: (table: string) => (H.failing.has(table) ? failingQuery() : buildInMemoryQuery(H.tables[table] ?? [])),
+    from: (table: string) => {
+      const mode = H.failing.get(table);
+      return mode ? failingQuery(mode) : buildInMemoryQuery(H.tables[table] ?? []);
+    },
   },
 }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 
 import { useCreditLimitCheck } from './useGuardrails';
+import { evaluateCreditLimit } from '../lib/creditLimitGuard';
 
 const TOTAL = SERVER_ROW_CAP + 5;
 const pad = (i: number) => String(i).padStart(4, '0');
@@ -55,7 +67,7 @@ beforeEach(() => {
       { id: 'paid', customer_id: 'c1', status: 'paid', balance_cents: 999_999 },
     ],
   };
-  H.failing = new Set();
+  H.failing = new Map();
 });
 
 describe('credit-limit check past the 1,000-row server cap (L17)', () => {
@@ -80,11 +92,40 @@ describe('credit-limit check past the 1,000-row server cap (L17)', () => {
   });
 
   it('a failed invoices read fails closed with the could-not-verify warning, never a pass', async () => {
-    H.failing.add('invoices');
+    H.failing.set('invoices', 'error');
     const { result } = renderHook(() => useCreditLimitCheck());
     let passed: boolean | undefined;
     await act(async () => { passed = await result.current.check({ customerId: 'c1', newAmountCents: 100 }); });
     expect(passed).toBe(false);
     expect(result.current.warning?.id).toBe('credit-limit-error');
+  });
+});
+
+// To-Do 10.5 follow-up: a failed customer read came back as "no credit limit set" and
+// passed, so an over-limit order or post went through during an outage.
+describe('credit-limit check fails closed on every failed read', () => {
+  const MODES: FailMode[] = ['error', 'nodata', 'notlist', 'throws'];
+
+  for (const mode of MODES) {
+    // The customer read is a single row, so it has no list to check.
+    if (mode !== 'notlist') it(`a customers read that ${mode === 'nodata' ? 'returns no row' : mode} is unverified, never a pass`, async () => {
+      H.failing.set('customers', mode);
+      expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });
+      const { result } = renderHook(() => useCreditLimitCheck());
+      let passed: boolean | undefined;
+      await act(async () => { passed = await result.current.check({ customerId: 'c1', newAmountCents: 100 }); });
+      expect(passed).toBe(false);
+      expect(result.current.warning?.id).toBe('credit-limit-error');
+    });
+
+    it(`an invoices read that ${mode} is unverified, never a zero balance`, async () => {
+      H.failing.set('invoices', mode);
+      expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });
+    });
+  }
+
+  it('a customer with no limit set still passes', async () => {
+    H.tables.customers = [{ id: 'c1', farm_name: 'Big Farm', credit_limit_cents: null }];
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'ok' });
   });
 });

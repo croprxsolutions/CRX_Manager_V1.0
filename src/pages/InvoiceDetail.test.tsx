@@ -1720,4 +1720,66 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('was changed after this screen loaded it')));
     await waitFor(() => expect(invoiceReads).toBeGreaterThan(readsBefore));
   });
+
+  // To-Do 10.5 follow-up: a RUP check that could not read its data used to fall through to
+  // the plain confirm, so a restricted-use sale could be posted with no license check at all.
+  const RUP_FAILURES: Record<string, () => Record<string, unknown>> = {
+    error: () => buildChain({ data: null, error: { message: 'connection reset' } }),
+    nodata: () => buildChain({ data: null, error: null }),
+    notlist: () => buildChain({ data: { id: 'p-1' }, error: null }),
+    throws: () => buildDeferredChain().chain,
+  };
+  for (const [mode, failing] of Object.entries(RUP_FAILURES)) {
+    it(`stops before the confirm when the RUP products read ${mode === 'nodata' ? 'returns nothing' : mode}`, async () => {
+      const base = mockFrom.getMockImplementation()!;
+      mockFrom.mockImplementation((table: string) => {
+        if (table !== 'products') return base(table);
+        if (mode !== 'throws') return failing();
+        const { chain, reject } = buildDeferredChain();
+        reject(new Error('Failed to fetch'));
+        return chain;
+      });
+      await openLoaded();
+      fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('license check could not be run, so nothing was posted')));
+      expect(screen.queryByRole('button', { name: 'Post Invoice' })).not.toBeInTheDocument();
+      expect(mockRpc).not.toHaveBeenCalledWith('post_invoice', expect.anything());
+    });
+  }
+
+  it('stops a grouped invoice before the confirm when its sibling read fails', async () => {
+    const base = mockFrom.getMockImplementation()!;
+    const grouped = { ...savedInvoice, invoice_group_id: 'grp-1' };
+    let loaded = false;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'invoices') return base(table);
+      // Once the page has loaded, the post check's sibling read is the next invoices read: it fails.
+      if (loaded) return buildChain({ data: null, error: { message: 'connection reset' } });
+      // A read by id answers the invoice row; the group-members read answers its one member;
+      // any other list read (siblings by order) answers none.
+      let filter = '';
+      const chain: Record<string, unknown> = new Proxy({}, {
+        get(_t, prop) {
+          if (prop === 'then') {
+            const members = [{ id: 'inv-123', invoice_number: 'INV-0200', invoice_post_version: 'v1:loaded' }];
+            const data = filter === 'id' ? grouped : filter === 'invoice_group_id' ? members : [];
+            return (resolve: (v: unknown) => unknown) => resolve({ data, error: null });
+          }
+          return (col: unknown) => { if (prop === 'eq' && !filter) filter = String(col); return chain; };
+        },
+      });
+      return chain;
+    });
+    await openLoaded();
+    loaded = true;
+    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('license check could not be run, so nothing was posted')));
+    expect(screen.queryByRole('button', { name: 'Post Invoice' })).not.toBeInTheDocument();
+  });
+
+  it('still opens the confirm when the RUP check reads cleanly', async () => {
+    await openLoaded();
+    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    expect(await screen.findByRole('button', { name: 'Post Invoice' })).toBeInTheDocument();
+  });
 });

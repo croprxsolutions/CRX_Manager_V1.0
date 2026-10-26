@@ -32,7 +32,7 @@ import { logActivity } from '../lib/activityLogger';
 import { runCriticalAction } from '../lib/criticalAction';
 import { retryGenericInvoiceCutover } from '../lib/genericInvoiceCutoverRetry';
 import { Sentry } from '../lib/sentry';
-import { checkRUPCompliance, rupRegisterDisposition } from '../lib/rupCompliance';
+import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import WriteOffModal from '../components/invoices/WriteOffModal';
@@ -371,8 +371,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     postIdem.resetKey();
     let warning: string | null = null;
-    // The RUP check must NEVER block posting — any failure falls through to the
-    // plain confirm (warn+confirm by design, not a gate).
+    // A RUP finding is a warning on the confirm, not a gate. A check that could not run
+    // is different: it stops here with RUP_POST_CHECK_FAILED_MESSAGE, so an unchecked
+    // RUP sale never reaches the confirm looking clean.
+    const stopUnchecked = () => toast('error', RUP_POST_CHECK_FAILED_MESSAGE);
     try {
       if (invoice?.invoice_group_id) {
         // Posting a grouped invoice posts EVERY sibling atomically via
@@ -382,27 +384,33 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         // (customer, products) and aggregate. Still advisory, never a gate.
         // The siblings are read with their versions: if any changed (or the membership did) since
         // this screen loaded, the post would be refused, so reload now and show what would post.
-        const { data: grp } = await supabase
+        const { data: grp, error: grpError } = await supabase
           .from(INVOICES_POSTABLE)
           .select(`id, invoice_number, customer_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id)`)
           .eq('invoice_group_id', invoice.invoice_group_id)
           .is('deleted_at', null);
-        if (grp) {
-          const current = Object.fromEntries(grp.map((m) => [m.id, m.invoice_post_version]));
-          const loaded = saved.groupVersions;
-          const same = Object.keys(current).length === Object.keys(loaded).length
-            && Object.entries(current).every(([memberId, version]) => loaded[memberId] === version);
-          if (!same) {
-            toast('error', 'This split group was changed somewhere else since you opened it. It has been reloaded — check it, then post again.');
-            fetchInvoice(id!);
-            return;
-          }
+        if (grpError || !Array.isArray(grp)) {
+          stopUnchecked();
+          return;
+        }
+        const current = Object.fromEntries(grp.map((m) => [m.id, m.invoice_post_version]));
+        const loaded = saved.groupVersions;
+        const same = Object.keys(current).length === Object.keys(loaded).length
+          && Object.entries(current).every(([memberId, version]) => loaded[memberId] === version);
+        if (!same) {
+          toast('error', 'This split group was changed somewhere else since you opened it. It has been reloaded — check it, then post again.');
+          fetchInvoice(id!);
+          return;
         }
         const parts: string[] = [];
-        for (const inv of (grp || []) as Array<{ invoice_number: string; customer_id: string | null; invoice_items: { product_id: string | null }[] | null }>) {
+        for (const inv of grp as Array<{ invoice_number: string; customer_id: string | null; invoice_items: { product_id: string | null }[] | null }>) {
           const pids = (inv.invoice_items || []).map((x) => x.product_id).filter((p): p is string => Boolean(p));
           if (!inv.customer_id || pids.length === 0) continue;
           const res = await checkRUPCompliance(inv.customer_id, pids);
+          if (res.checkFailed) {
+            stopUnchecked();
+            return;
+          }
           if (res.hasRUPProducts && !res.hasValidLicense) {
             const disp = rupRegisterDisposition(res);
             parts.push(`${inv.invoice_number}: ${res.rupProductNames.join(', ')} — ${res.missingLicense ? 'NO applicator license' : 'EXPIRED license'} (${disp.label})`);
@@ -416,6 +424,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         const productIds = saved.productIds;
         if (saved.customerId && productIds.length > 0) {
           const res = await checkRUPCompliance(saved.customerId, productIds);
+          if (res.checkFailed) {
+            stopUnchecked();
+            return;
+          }
           if (res.hasRUPProducts && !res.hasValidLicense) {
             // #6: align the warning's stated disposition with what the DB actually
             // records — missing license = NON-COMPLIANT, expired = WARNING (flagged).
@@ -426,6 +438,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       }
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'rup_post_check' } });
+      stopUnchecked();
+      return;
     }
     setRupPostWarning(warning);
     setShowPostConfirm(true);

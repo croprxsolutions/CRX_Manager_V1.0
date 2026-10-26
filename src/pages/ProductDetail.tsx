@@ -1515,7 +1515,10 @@ export default function ProductDetail() {
 
           {/* Below Save Changes: the floor saves on its own, with its own button. */}
           {isAdmin && !isNew && id && profile && (
+            // Keyed by product: moving to another product starts a fresh card, so nothing from the
+            // last product's floor, history or in-flight save carries over.
             <ProductMarginFloorCard
+              key={id}
               productId={id}
               tierMargins={[persistedProduct?.tier1_margin, persistedProduct?.tier2_margin, persistedProduct?.tier3_margin]}
               userId={profile.id}

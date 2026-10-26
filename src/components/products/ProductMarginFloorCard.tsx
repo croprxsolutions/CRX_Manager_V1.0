@@ -44,23 +44,27 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Only the newest load for the product on screen may install values: the page can switch
-  // products while a load or a save is in flight.
+  // The page keys this card by product, so a new product gets a new card. A load or save still in
+  // flight when this card goes away must not report into the next product's page.
+  const activeRef = useRef(true);
+  useEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; };
+  }, []);
+  // Only the newest load may install values.
   const loadSeqRef = useRef(0);
-  const productIdRef = useRef(productId);
-  productIdRef.current = productId;
   const load = useCallback(async (): Promise<boolean> => {
     const seq = ++loadSeqRef.current;
     try {
       const [current, changes] = await Promise.all([fetchMarginFloor(productId), fetchMarginFloorHistory(productId)]);
-      if (seq !== loadSeqRef.current || productIdRef.current !== productId) return false;
+      if (seq !== loadSeqRef.current || !activeRef.current) return false;
       setFloor(current);
       setHistory(changes);
       setDraft(formatMarginFloorPercent(current));
       setLoadState('loaded');
       return true;
     } catch (err) {
-      if (seq !== loadSeqRef.current || productIdRef.current !== productId) return false;
+      if (seq !== loadSeqRef.current || !activeRef.current) return false;
       Sentry.captureException(err, { extra: { context: 'load_product_margin_floor', productId } });
       setLoadState('failed');
       return false;
@@ -69,10 +73,6 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
 
   useEffect(() => {
     setLoadState('loading');
-    setFloor(null);
-    setHistory([]);
-    setDraft('');
-    setReason('');
     void load();
   }, [load]);
 
@@ -95,8 +95,8 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
         idempotencyKey: getKeyFor(scope),
       });
       resetKeyFor(scope);
-      // The page moved to another product while this save ran: say nothing about it here.
-      if (productIdRef.current !== productId) return;
+      // The page moved to another product while this save ran: say nothing about it there.
+      if (!activeRef.current) return;
       setReason('');
       const reloaded = await load();
       if (!reloaded) {
@@ -108,7 +108,7 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
       }
     } catch (err) {
       if (!isMarginFloorRefusal(err)) Sentry.captureException(err, { extra: { context: 'set_product_margin_floor', productId } });
-      toast('error', marginFloorErrorMessage(err));
+      if (activeRef.current) toast('error', marginFloorErrorMessage(err));
     } finally {
       setSaving(false);
     }

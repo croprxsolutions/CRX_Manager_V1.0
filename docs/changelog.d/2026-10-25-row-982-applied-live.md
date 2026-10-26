@@ -6,3 +6,5 @@
   execute `load_recipe_into_job`; the function body is unchanged.
 - New top live capture: 1062 ledger rows / 1055 distinct names, high-water `20261023100000`.
 - Row 982 now gives cost lock B's real stamp (`20261022101000`), not `20261022091000`.
+- `.claude/schema-registry.json`: `migrations_high_water` moves to `20261026030708`, and the migration is added to the
+  applied list.

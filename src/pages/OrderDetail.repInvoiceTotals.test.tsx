@@ -7,9 +7,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockFrom, mockRole } = vi.hoisted(() => ({
+const { mockFrom, mockRole, mockToast } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRole: { current: 'admin' as string },
+  // One stable toast: fetchOrder depends on it, so a new function per render
+  // would re-run the load effect on every render.
+  mockToast: vi.fn(),
 }));
 
 function buildChain(result: { data: unknown; error: unknown }): Record<string, unknown> {
@@ -46,7 +49,7 @@ vi.mock('../contexts/AuthContext', () => ({
   }),
 }));
 
-vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
 }));

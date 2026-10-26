@@ -32,11 +32,11 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Status | Count |
 |---|---|
 | Open or partly open entries (KI-01 to KI-52 and KI-72 to KI-78; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 48 |
-| Accepted by Mason (KI-60 to KI-71) | 12 |
+| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED during this rewrite, with proof (bottom of file) | 6 |
 
 Highest-priority open items, in order: KI-01 (field data readable by any signed-in user), KI-02 (cost and
-margin still readable at the table level), KI-10 (about 69 functions still replay a saved answer on the retry
+margin: the table-level lock is live since 2026-10-25; the server-function audit is still owed), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone), KI-04 (tools with no permission rule run without a prompt), KI-18 (UTC/browser-clock season can
 suppress the pre-harvest safety warning).
 
@@ -54,27 +54,28 @@ PR #1065 draft, not merged), B (tables), C (the job route). Parts B and C have n
 applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 
-### KI-02 — Product cost and margin are still readable through table columns
-**HIGH · PARTIAL · security/money · Mason (step 3 apply approval)**
+### KI-02 — Product cost and margin: server functions not yet fully audited
+**MED · PARTIAL · security/money · follow-up audit unassigned**
 Mason decided cost and margin are admin-only. Screens and report functions were changed (migrations
 `20261019010000`, `20261019230000`) and purchase-order cost is locked (`20261021140000`, `20261021141000`,
-PR #980). Still open: sales reps, drivers and applicators who query the database directly can read the raw cost
-columns (product cost; quote, order and invoice line cost), and reps can infer cost by trial-and-error quote
-prices. The supporting `invoices_postable` view is live (PR #1057, ledger `20261023223853`); the final column
-lock is written as `20261022101000_cost_columns_admin_only` (not yet applied) and waits on Mason's approval. Once
-applied, neither signed-in users (`authenticated`, admins included) nor signed-out visitors (`anon`) can read or
-write a cost, profit or margin column directly (the server-only `service_role` key is unchanged) on `products`, `quotes`,
-`quote_items`, `quote_versions`, `orders`, `order_items`, `invoices`, `invoice_items`, `jobs`, `job_chemicals`,
-`blend_ticket_products` or `commissions`; admins read cost through `get_admin_cost_fields`. Two residuals stay
-accepted by Mason (2026-10-21): commission amount and rate together imply profit, and below-cost refusals let a
-rep narrow a cost by trial and error. Includes the older sub-items "reps can recover application-service cost" and "retire the old
-`admin_set_application_service_cost` function" (no caller left in `src/`; no DROP migration exists).
-Follow-up (Mason, 2026-10-25, kept out of the column lock): column grants cannot limit owner-rights (SECURITY
+PR #980). **The column lock is live:** `20261022101000_cost_columns_admin_only` (PR #1089, applied 2026-10-25
+22:34 UTC on Mason's in-chat approval, ledger `20261025223447`). Neither signed-in users (`authenticated`, admins
+included) nor signed-out visitors (`anon`) can read or write a cost, profit or margin column directly on
+`products`, `quotes`, `quote_items`, `quote_versions`, `orders`, `order_items`, `invoices`, `invoice_items`, `jobs`,
+`job_chemicals`, `blend_ticket_products` or `commissions` (read live after the apply: 0 of 30 such columns readable
+by either role; the server-only `service_role` key is unchanged); admins read cost through `get_admin_cost_fields`.
+Two residuals stay accepted by Mason (2026-10-21): commission amount and rate together imply profit, and below-cost
+refusals let a rep narrow a cost by trial and error. Includes the older sub-items "reps can recover
+application-service cost" and "retire the old `admin_set_application_service_cost` function" (no caller left in
+`src/`; no DROP migration exists).
+Still open (Mason, 2026-10-25, kept out of the column lock): column grants cannot limit owner-rights (SECURITY
 DEFINER) functions. The 45 signed-in-executable ones whose body names a cost field were read live on 2026-10-25,
 but 22 more that reach cost only through inner helper functions (`create_quote_version`, `save_invoice`,
-`price_order`, `save_job` and others) are not yet traced, and nothing re-checks function bodies after a later
-change. Owed: audit those 22 call chains, and add a standing DB invariant sweep that flags any signed-in-executable
-function returning cost, profit or margin to a non-admin.
+`price_order`, `save_job` and others) are not yet traced, nor are definer functions that serialize a whole row to
+JSON (`to_jsonb`/`row_to_json`), and nothing re-checks function bodies after a later change. Owed: audit those call
+chains, and add a standing DB invariant sweep that flags any signed-in-executable function returning cost, profit or
+margin to a non-admin. The same follow-up makes the cost-lock proof script record each ledger-only migration once
+(CodeRabbit, PR #1089).
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**
@@ -184,6 +185,9 @@ the server report `get_profitability_report` (cost at time of sale) has no calle
   by that much. The PRICE is no longer rounded (2026-10-23: left blank unless exact). Cost is not billed. LOW-MED.
 - Split-acre shares are rounded to 2 decimals, so totals can differ from the field's acres by cents. UNVERIFIED
   (current body of `derive_customer_shares_from_fields` not located).
+- Quote Builder's line math (`recalcItem`, `catalogPricePerAcre` in `src/lib/quoteCalc.ts`) multiplies and rounds
+  in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
+  changes rounding on every quote line, so it needs its own money PR. LOW.
 
 ### KI-17 — Blend-ticket linkage picks one order line per product
 **MED · PARTIAL · money · automatic matching unassigned**
@@ -426,6 +430,8 @@ server-side ruleset is the boundary).
 | KI-69 | Return-credit behaviours staff will see (late return credits stay in the current season; a funding invoice can't be deleted until the credit is voided) | Mason policy 2026-08-26 |
 | KI-70 | Proof-file self-attestation; migration-source provenance closes the quiet path only; shell string-reconstruction bypasses; worktree awareness is a session-start snapshot; `npm --prefix/--workspace` escapes the script-body guard; Edge Functions and ~130 legacy reads exempt from check lint rules | Accepted residuals under the "honest mistakes, not malicious agent" model |
 | KI-71 | Renaming/deactivating a profile named in a commission split fails closed; PWA needs two reloads after a deploy; ExcelJS tests slow on a cold cache; JobDetail save test must re-click | Deliberate / expected behaviour |
+| KI-79 | A saved quote line forgets whether its acres were typed or filled in from the section's field (`save_quote` stores the acres, not the source; Quote Builder's `acres_source` lives only in the browser). Totals stay correct. After reopening, switching a section's field leaves those lines' acres as they were and shows "This section's saved lines keep their acres. Check them against the new field." Options weighed 2026-10-23: (1) keep as is, no cost; (2) store a typed/field flag on `quote_items`: a migration plus changes to `save_quote` (a money RPC) and every quote-copy path (duplicate, versions, rollover, template), which fall back to today's warning if they drop it; (3) save each line's field link and have the server recompute acres: a large `save_quote` rewrite, highest risk | Mason chose option 1, keep as is (2026-10-23, #1060 follow-up); revisit if reps report wrong acres after switching fields |
+| KI-80 | A job line priced from a product's tier price is not re-checked when that tier price is later removed or the customer's tier changes; it is re-checked (`job_chemicals_price_required`, #1060) only when the line is next edited | Mason declined the re-check (2026-10-23, #1060 follow-up): rare case |
 
 ---
 
@@ -460,8 +466,8 @@ Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals
 (MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
 posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in
 `20261022090000` (PR #1057, applied live 2026-10-23):** the version is a computed field, `invoice_postable_version`, on
-the `invoices_postable` view (every column but `total_cost_cents`), the seven screens read it there, and the cost lock then drops the
-`invoices` overload.
+the `invoices_postable` view (every column but `total_cost_cents`), the seven screens read it there, and the cost lock
+(`20261022101000`, applied live 2026-10-25) dropped the `invoices` overload.
 
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 **HIGH on money paths · OPEN · money**

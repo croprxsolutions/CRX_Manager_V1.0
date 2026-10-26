@@ -127,6 +127,8 @@ export default function Products() {
   const marginFloorIdem = useIdempotencyKey('set_product_margin_floors', profile?.id || '');
   const [marginFloors, setMarginFloorsByProduct] = useState<Map<string, number>>(new Map());
   const [marginFloorsLoadFailed, setMarginFloorsLoadFailed] = useState(false);
+  // Products whose floor this page just saved, so it is known even while the floors failed to load.
+  const [marginFloorsKnownFromSave, setMarginFloorsKnownFromSave] = useState<Set<string>>(new Set());
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
   const isAdmin = role === 'admin';
@@ -193,6 +195,7 @@ export default function Products() {
     // the stored value (clearing a floor included).
     setProducts(prods.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(floors.get(p.id)) })));
     setMarginFloorsByProduct(floors);
+    setMarginFloorsKnownFromSave(new Set());
     setMarginFloorsLoadFailed(floorsFailed);
     if (floorsFailed && reportError) toast('warning', 'Margin floors could not be loaded. Floor warnings are hidden until you refresh.');
     setLoadError(false);
@@ -526,14 +529,27 @@ export default function Products() {
     marginFloorIdem.resetKeyFor(scope);
     const reloaded = await fetchProducts(false);
     if (!reloaded) {
-      // Show what was saved rather than the old floors, so nobody re-enters them.
+      // Show what was saved rather than the old floors, so nobody re-enters them. Only the saved
+      // products change: the rest keep whatever the failed reload left (the earlier floors if the
+      // products failed, none if the floors failed, where they show "?" and stay read-only).
       const changedIds = new Set(floorChanges.map((change) => change.productId));
-      const saved = new Map([...marginFloors].filter(([productId]) => !changedIds.has(productId)));
-      for (const change of floorChanges) {
-        if (change.marginFloorPercent !== null) saved.set(change.productId, change.marginFloorPercent / 100);
-      }
-      setMarginFloorsByProduct(saved);
-      setProducts((rows) => rows.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(saved.get(p.id)) })));
+      const savedPercent = new Map(floorChanges.map((change) => [change.productId, change.marginFloorPercent]));
+      const savedFloor = (productId: string) => {
+        const percent = savedPercent.get(productId);
+        return percent == null ? undefined : percent / 100;
+      };
+      setMarginFloorsByProduct((current) => {
+        const next = new Map([...current].filter(([productId]) => !changedIds.has(productId)));
+        for (const productId of changedIds) {
+          const floor = savedFloor(productId);
+          if (floor !== undefined) next.set(productId, floor);
+        }
+        return next;
+      });
+      setMarginFloorsKnownFromSave(changedIds);
+      setProducts((rows) => rows.map((p) => (changedIds.has(p.id)
+        ? { ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(savedFloor(p.id)) }
+        : p)));
       toast('warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.');
     } else if (result.changed_count === 0) {
       toast('info', 'The margin floors are unchanged.');
@@ -822,7 +838,9 @@ export default function Products() {
               );
             },
             render: (row: Product) => {
-              if (marginFloorsLoadFailed) return <span className="text-xs text-amber-700" title="Margin floors could not be loaded">?</span>;
+              if (marginFloorsLoadFailed && !marginFloorsKnownFromSave.has(row.id)) {
+                return <span className="text-xs text-amber-700" title="Margin floors could not be loaded">?</span>;
+              }
               const floor = marginFloors.get(row.id);
               return (
                 <span className="font-mono text-sm">{floor != null ? `${formatMarginFloorPercent(floor)}%` : '-'}</span>

@@ -20,5 +20,8 @@ Fixes found in review of the margin floor change, before it went live:
   be reloaded instead of reporting success; the product page shows the floor card only once that
   product has loaded, so a previous product's margins are never judged against this floor
   (CodeRabbit).
+- When that floor reload fails, the floor just saved is still shown on its product, while the
+  others show "?" and the column stays read-only; when the whole list fails to reload instead,
+  the other products keep their floors and the column stays editable (CodeRabbit).
 - Proof: `node scripts/smoke/prove-product-margin-floors-real-schema.mjs` re-run, PASS; the smoke
   chain passes in that database on a fresh product and on one with earlier cleared history.

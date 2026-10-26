@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   products: [] as Array<Record<string, unknown>>,
+  productsError: null as Error | null,
   toast: vi.fn(),
   fetchMarginFloors: vi.fn(),
   setMarginFloors: vi.fn(),
@@ -27,6 +28,13 @@ const product = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
+const otherProduct = {
+  ...product,
+  id: '22222222-2222-4222-8222-222222222222',
+  product_name: 'Other Product',
+  sku: 'FLOOR-002',
+};
+
 function chainable(resolveWith: unknown) {
   const builder: Record<string, unknown> = {};
   for (const method of ['select', 'eq', 'is', 'in', 'or', 'order', 'limit', 'range', 'update']) {
@@ -39,7 +47,11 @@ function chainable(resolveWith: unknown) {
 }
 
 vi.mock('../lib/db', () => ({
-  supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },
+  supabase: {
+    from: vi.fn(() => chainable(mocks.productsError
+      ? { data: null, error: mocks.productsError }
+      : { data: mocks.products, error: null })),
+  },
   sanitizeError: (error: unknown) => (error instanceof Error ? error.message : String(error)),
   checkMutationResult: vi.fn(),
 }));
@@ -80,6 +92,7 @@ describe('Products list margin floors', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.products.splice(0, mocks.products.length, product);
+    mocks.productsError = null;
     mocks.fetchMarginFloors.mockResolvedValue(new Map([[product.id, 0.15]]));
     mocks.setMarginFloors.mockResolvedValue({ success: true, status: 'saved', changed_count: 1, unchanged_count: 0 });
   });
@@ -128,6 +141,39 @@ describe('Products list margin floors', () => {
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
       'warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.'));
     expect(mocks.toast).not.toHaveBeenCalledWith('success', expect.stringMatching(/Updated/));
+  });
+
+  it('shows the floor it just saved when the floors fail to reload, others as unknown and read-only', async () => {
+    mocks.products.push(otherProduct);
+    mocks.fetchMarginFloors.mockResolvedValue(new Map([[product.id, 0.15], [otherProduct.id, 0.2]]));
+    const input = await openFloorEditor();
+    mocks.fetchMarginFloors.mockRejectedValueOnce(new Error('offline'));
+    fireEvent.change(input, { target: { value: '16' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
+      'warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.'));
+    expect(await screen.findByText('16%')).toBeInTheDocument();
+    expect(screen.queryByText('20%')).not.toBeInTheDocument();
+    expect(screen.getAllByTitle('Margin floors could not be loaded')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(screen.queryByLabelText('Margin floor percent for Floor Product')).not.toBeInTheDocument();
+  });
+
+  it('keeps the other floors and the editor when the products fail to reload after a save', async () => {
+    mocks.products.push(otherProduct);
+    mocks.fetchMarginFloors.mockResolvedValue(new Map([[product.id, 0.15], [otherProduct.id, 0.2]]));
+    const input = await openFloorEditor();
+    mocks.productsError = new Error('offline');
+    fireEvent.change(input, { target: { value: '16' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
+      'warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.'));
+    expect(await screen.findByText('16%')).toBeInTheDocument();
+    expect(screen.getByText('20%')).toBeInTheDocument();
+    expect(screen.queryByTitle('Margin floors could not be loaded')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect((screen.getByLabelText('Margin floor percent for Floor Product') as HTMLInputElement).value).toBe('16');
+    expect((screen.getByLabelText('Margin floor percent for Other Product') as HTMLInputElement).value).toBe('20');
   });
 
   it('keeps the catalog when floors fail to load, with the floor column read-only', async () => {

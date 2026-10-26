@@ -13,8 +13,9 @@
 --      trigger stamps it on every new product line, whichever function writes it:
 --        order line   -> the tier of the quote it came from (the line's quote, else the order's),
 --                        else the order customer's assigned tier at that moment;
---        invoice line -> its order line's stamped tier (or that line's quote/customer tier when the
---                        order line predates this file), else the invoice customer's assigned tier.
+--        invoice line -> billed from an order line: that line's stamped tier, else (an order line
+--                        from before this file) its quote's tier, else unknown -- never today's
+--                        customer tier; not from an order line: the invoice customer's tier.
 --      A value the writer sends is kept. Charge lines (no product) and return credits stay NULL.
 --      The invoice editor's save re-inserts lines without their order link and restores it with an
 --      UPDATE, so the trigger also fires on UPDATE OF order_item_id and then re-takes the order
@@ -79,6 +80,7 @@
 --   DROP TRIGGER trg_stamp_price_tier_at_sale ON public.invoice_items;
 --   DROP FUNCTION public._stamp_price_tier_at_sale_20261026();
 --   DROP FUNCTION public._order_line_price_tier_20261026(uuid, uuid);
+--   DROP FUNCTION public._invoice_line_order_tier_20261026(uuid);
 --   ALTER TABLE public.order_items DROP COLUMN price_tier_at_sale;
 --   ALTER TABLE public.invoice_items DROP COLUMN price_tier_at_sale;
 
@@ -117,7 +119,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM pg_proc p
                  WHERE p.pronamespace = 'public'::regnamespace
                    AND p.proname IN ('get_last_charged_prices', '_stamp_price_tier_at_sale_20261026',
-                                     '_order_line_price_tier_20261026'))
+                                     '_order_line_price_tier_20261026', '_invoice_line_order_tier_20261026'))
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_stamp_price_tier_at_sale') THEN
     RAISE EXCEPTION 'LAST_CHARGED_PREFLIGHT: an object this migration creates already exists';
   END IF;
@@ -172,6 +174,29 @@ $function$;
 ALTER FUNCTION public._order_line_price_tier_20261026(uuid, uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._order_line_price_tier_20261026(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
+-- The tier an invoice line billed from an order line was sold at: the order line's stamp, else (an
+-- order line written before this file) its quote's tier. Never the customer's current tier: that
+-- would guess a past sale's tier from today's customer, so an unquoted older line stays unknown.
+CREATE FUNCTION public._invoice_line_order_tier_20261026(p_order_item_id uuid)
+RETURNS smallint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+  SELECT COALESCE(
+    oi.price_tier_at_sale,
+    (SELECT q.tier FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id
+      WHERE qi.id = oi.quote_item_id),
+    (SELECT q.tier FROM public.orders o JOIN public.quotes q ON q.id = o.quote_id
+      WHERE o.id = oi.order_id)
+  )::smallint
+  FROM public.order_items oi
+  WHERE oi.id = p_order_item_id;
+$function$;
+ALTER FUNCTION public._invoice_line_order_tier_20261026(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._invoice_line_order_tier_20261026(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
 -- SECURITY DEFINER so the lookups see the quote and customer whatever the writer's own read access.
 CREATE FUNCTION public._stamp_price_tier_at_sale_20261026()
 RETURNS trigger
@@ -186,9 +211,7 @@ BEGIN
   IF TG_OP = 'UPDATE' THEN
     IF NEW.order_item_id IS NOT NULL AND NEW.order_item_id IS DISTINCT FROM OLD.order_item_id
        AND NEW.product_id IS NOT NULL AND NEW.return_credit_source_item_id IS NULL THEN
-      SELECT COALESCE(oi.price_tier_at_sale, public._order_line_price_tier_20261026(oi.order_id, oi.quote_item_id))
-        INTO NEW.price_tier_at_sale
-        FROM public.order_items oi WHERE oi.id = NEW.order_item_id;
+      NEW.price_tier_at_sale := public._invoice_line_order_tier_20261026(NEW.order_item_id);
     END IF;
     RETURN NEW;
   END IF;
@@ -201,11 +224,10 @@ BEGIN
     NEW.price_tier_at_sale := public._order_line_price_tier_20261026(NEW.order_id, NEW.quote_item_id);
   ELSIF NEW.return_credit_source_item_id IS NULL THEN
     IF NEW.order_item_id IS NOT NULL THEN
-      SELECT COALESCE(oi.price_tier_at_sale, public._order_line_price_tier_20261026(oi.order_id, oi.quote_item_id))
-        INTO NEW.price_tier_at_sale
-        FROM public.order_items oi WHERE oi.id = NEW.order_item_id;
-    END IF;
-    IF NEW.price_tier_at_sale IS NULL THEN
+      -- Billed from an order line: the order line's tier, never today's customer tier (an order
+      -- line from before this file with no quote stays unknown).
+      NEW.price_tier_at_sale := public._invoice_line_order_tier_20261026(NEW.order_item_id);
+    ELSE
       SELECT c.assigned_tier::smallint INTO NEW.price_tier_at_sale
         FROM public.invoices i JOIN public.customers c ON c.id = i.customer_id
        WHERE i.id = NEW.invoice_id;
@@ -344,6 +366,9 @@ BEGIN
            FROM public.invoice_items bi
            JOIN public.invoices b ON b.id = bi.invoice_id
           WHERE bi.order_item_id = oi.id
+            -- This customer's own invoice: a split-payer invoice billed to someone else is not
+            -- this customer's charge, so it must not hide their order line either.
+            AND b.customer_id = p_customer_id
             AND b.status IN ('posted', 'paid', 'overdue')
             AND b.invoice_type IN ('chemical_sale', 'field_application')
             AND b.deleted_at IS NULL
@@ -399,7 +424,8 @@ BEGIN
   END IF;
   FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
     IF has_function_privilege(r, 'public._stamp_price_tier_at_sale_20261026()', 'EXECUTE')
-       OR has_function_privilege(r, 'public._order_line_price_tier_20261026(uuid,uuid)', 'EXECUTE') THEN
+       OR has_function_privilege(r, 'public._order_line_price_tier_20261026(uuid,uuid)', 'EXECUTE')
+       OR has_function_privilege(r, 'public._invoice_line_order_tier_20261026(uuid)', 'EXECUTE') THEN
       RAISE EXCEPTION 'LAST_CHARGED_VERIFY: a helper is executable by %', r;
     END IF;
   END LOOP;

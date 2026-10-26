@@ -56,7 +56,7 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(FUNCTION\s+(public\.)?"?(get_last_charged_prices|_stamp_price_tier_at_sale_20261026|_order_line_price_tier_20261026|require_admin_or_sales_rep)\b|price_tier_at_sale)/i;
+const TOUCHED = /(FUNCTION\s+(public\.)?"?(get_last_charged_prices|_stamp_price_tier_at_sale_20261026|_order_line_price_tier_20261026|_invoice_line_order_tier_20261026|require_admin_or_sales_rep|_split_invoice_content_claim)\b|price_tier_at_sale)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -412,6 +412,12 @@ const SCENARIOS = [
     ['the charge carries the unit size it was sold in', U.ADMIN, UNIT(CA, P.P1), MISSING_FN, 'ok|2.5 gal'],
     ['a later $0 invoice line and $0 order line are not charges', U.ADMIN, LAST(CA, arr([P.P2, P.P6])), MISSING_FN, 'ok|P2:2000:-:2026-02-01:invoice;P6:5100:3:2026-07-01:invoice'],
   ] },
+  { name: '1d. a split payer\'s invoice is not this customer\'s charge', afterFixture: `${STAMP}
+    INSERT INTO public.invoice_items (invoice_id, product_id, description, unit_price_cents, quantity, extended_cents, order_item_id, cost_cents)
+      VALUES ('${iid('ib')}', '${P.P1}', '[PROVER] P1 billed to Farm B', 4100, 1, 4100, '${lid('l2')}', 0);`, steps: [
+    // Step names go into SQL string literals: no apostrophes.
+    ['Farm A keeps its order line when an invoice to Farm B bills it', U.ADMIN, LAST(CA, arr([P.P1])), MISSING_FN, 'ok|P1:4100:2:2026-04-01:order'],
+  ] },
   { name: '2. who', afterFixture: STAMP, steps: [
     ['sales rep reads it across reps', U.REP, LAST(CA, ALL), MISSING_FN, `ok|${EXPECTED_A}`],
     ['rep cannot read those invoice lines directly', U.REP, '(SELECT count(*) FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id WHERE i.customer_id = \'' + CA + '\')', 'ok|0', 'same'],
@@ -435,7 +441,8 @@ const SCENARIOS = [
     ['Farm A moves to tier 3', 'owner', { stmt: `UPDATE public.customers SET assigned_tier = 3 WHERE id = '${CA}'; v := 'moved';` }, 'ok|moved', 'same'],
     ['stamped order lines keep their tier', 'owner', TIER('order_items', `id IN ('${lid('n1')}', '${lid('n2')}', '${lid('n3')}')`), NO_COLUMN, 'ok|1,1,2'],
     ['invoice line for an order line takes its tier (2)', 'owner', NEW_IL('n4', 'i3', 'P2', 'n3'), /^23503\|.*invoice_items_order_item_id_fkey/, 'ok|2'], // before: line n3 was never written
-    ['invoice line for an older, unstamped order line derives it (customer now 3)', 'owner', NEW_IL('n5', 'ie', 'P3', 'l5'), NO_COLUMN, 'ok|3'],
+    // l5 predates the column and has no quote: its tier at sale is unknown, never today's tier (3).
+    ['invoice line for an older, unquoted order line stays unknown', 'owner', NEW_IL('n5', 'ie', 'P3', 'l5'), NO_COLUMN, 'ok|-'],
     ['invoice line with no order line takes the invoice customer tier (3)', 'owner', NEW_IL('n6', 'i3', 'P6'), NO_COLUMN, 'ok|3'],
     ['a tier the writer sends is kept', 'owner', NEW_IL('n7', 'i3', 'P6', null, 1), NO_COLUMN, 'ok|1'],
     ['an out-of-range tier is refused', 'owner', NEW_IL('n8', 'i3', 'P6', null, 4), NO_COLUMN, /^23514\|.*invoice_items_price_tier_at_sale_range/],
@@ -482,9 +489,9 @@ function grants() {
       has_function_privilege('anon', p.oid, 'EXECUTE'), has_function_privilege('authenticated', p.oid, 'EXECUTE'),
       has_function_privilege('service_role', p.oid, 'EXECUTE'), p.prosecdef, array_to_string(p.proconfig, ';')
     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
-     AND p.proname IN ('get_last_charged_prices', '_stamp_price_tier_at_sale_20261026', '_order_line_price_tier_20261026')
+     AND p.proname IN ('get_last_charged_prices', '_stamp_price_tier_at_sale_20261026', '_order_line_price_tier_20261026', '_invoice_line_order_tier_20261026')
     ORDER BY 1;` }).stdout.trim().split(/\r?\n/).map((l) => l.split('|'));
-  assert.deepEqual(fns.map((r) => r[0]).sort(), ['_order_line_price_tier_20261026(uuid,uuid)', '_stamp_price_tier_at_sale_20261026()', 'get_last_charged_prices(uuid,uuid[])']);
+  assert.deepEqual(fns.map((r) => r[0]).sort(), ['_invoice_line_order_tier_20261026(uuid)', '_order_line_price_tier_20261026(uuid,uuid)', '_stamp_price_tier_at_sale_20261026()', 'get_last_charged_prices(uuid,uuid[])']);
   for (const [sig, anon, auth, svc, secdef, cfg] of fns) {
     if (sig.startsWith('get_')) {
       assert.deepEqual([anon, auth, svc, secdef], ['f', 't', 'f', 't'], `${sig}: only authenticated may execute, as definer`);

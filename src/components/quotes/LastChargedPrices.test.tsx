@@ -42,6 +42,19 @@ describe('LastChargedPrices', () => {
     expect(screen.getAllByRole('row')).toHaveLength(3); // header + two products
   });
 
+  it('shows Loading, not "Never charged", for a product added after the last load', async () => {
+    mocks.fetchLastChargedPrices.mockResolvedValueOnce(new Map());
+    let resolveSecond!: (value: Map<string, unknown>) => void;
+    mocks.fetchLastChargedPrices.mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
+    const { rerender } = render(<LastChargedPrices customerId="c1" lines={[lines[1]]} />);
+    expect(await screen.findByText('Never charged to this customer')).toBeInTheDocument();
+    rerender(<LastChargedPrices customerId="c1" lines={lines} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading last charged prices');
+    expect(screen.queryByText('Never charged to this customer')).not.toBeInTheDocument();
+    resolveSecond(new Map());
+    expect(await screen.findAllByText('Never charged to this customer')).toHaveLength(2);
+  });
+
   it('shows nothing until a customer and a product are picked', () => {
     const { container, rerender } = render(<LastChargedPrices customerId="" lines={lines} />);
     expect(container).toBeEmptyDOMElement();

@@ -12,10 +12,12 @@ export interface LastChargedLine {
   productName: string;
 }
 
+// A result remembers the product list it was loaded for, so a changed list shows "Loading" at once
+// instead of the old result (where a newly added product would read "Never charged" for a moment).
 type LoadState =
   | { status: 'loading' }
-  | { status: 'failed' }
-  | { status: 'loaded'; byProduct: Map<string, LastChargedPrice> };
+  | { status: 'failed'; productKey: string }
+  | { status: 'loaded'; productKey: string; byProduct: Map<string, LastChargedPrice> };
 
 /**
  * "What did we charge this customer before?" (To-Do 0.3): for each product on the quote, the last
@@ -32,7 +34,10 @@ export default function LastChargedPrices({ customerId, lines }: { customerId: s
     return [...seen.values()];
   }, [lines]);
   const productKey = products.map((p) => p.productId).join(',');
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [loadState, setState] = useState<LoadState>({ status: 'loading' });
+  const state: LoadState = loadState.status !== 'loading' && loadState.productKey !== productKey
+    ? { status: 'loading' }
+    : loadState;
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
@@ -41,13 +46,13 @@ export default function LastChargedPrices({ customerId, lines }: { customerId: s
     let cancelled = false;
     setState({ status: 'loading' });
     fetchLastChargedPrices(customerId, productKey.split(','))
-      .then((byProduct) => { if (!cancelled) setState({ status: 'loaded', byProduct }); })
+      .then((byProduct) => { if (!cancelled) setState({ status: 'loaded', productKey, byProduct }); })
       .catch((error: unknown) => {
         if (cancelled) return;
         Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
           extra: { context: 'get_last_charged_prices' },
         });
-        setState({ status: 'failed' });
+        setState({ status: 'failed', productKey });
       });
     return () => { cancelled = true; };
   }, [customerId, productKey, attempt]);
@@ -59,8 +64,9 @@ export default function LastChargedPrices({ customerId, lines }: { customerId: s
       <CardHeader title="Last" accent="Charged" />
       <p className="text-xs text-secondary mb-3 flex items-center gap-1">
         <History className="w-3.5 h-3.5" aria-hidden="true" />
-        The last price this customer was charged for each product, from posted invoices and confirmed
-        orders. For reference only; it does not change this quote.
+        The last price this customer was charged for each product: from posted, paid or overdue
+        invoices, or from confirmed or delivered orders not yet invoiced. For reference only; it does
+        not change this quote.
       </p>
       {state.status === 'loading' && (
         <p className="text-sm text-secondary" role="status">Loading last charged prices…</p>

@@ -9,6 +9,7 @@ import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import BulkProductImport from '../components/products/BulkProductImport';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
+import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
@@ -25,13 +26,17 @@ import PageHeader from '../components/ui/PageHeader';
 import type { Product } from '../types';
 import {
   applyProductPricingChangeSet,
+  approvePricingChangeSet,
   createPricingWorkbookExport,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
   previewProductPricingChanges,
+  sha256Hex,
+  type PricingAcknowledgement,
   type PricingMode,
   type PricingPreviewInputRow,
   type PricingPreviewResult,
+  type PricingSourceFile,
 } from '../lib/productPricing';
 import {
   MAX_PRICING_WORKBOOK_FILE_BYTES,
@@ -116,12 +121,18 @@ export default function Products() {
   const [showSensitive, setShowSensitive] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [pricingPreview, setPricingPreview] = useState<PricingPreviewResult | null>(null);
+  // The uploaded price sheet a workbook preview came from; its approval must name it.
+  const [pricingSourceFile, setPricingSourceFile] = useState<PricingSourceFile | null>(null);
+  // Inline price edits waiting for their source and reason before the preview.
+  const [pendingInlineRows, setPendingInlineRows] = useState<PricingPreviewInputRow[] | null>(null);
+  const [previewingInline, setPreviewingInline] = useState(false);
   const [applyingPricing, setApplyingPricing] = useState(false);
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
+  const approvePricingIdem = useIdempotencyKey('approve_pricing_change_set', profile?.id || '');
   const applyPricingIdem = useIdempotencyKey('apply_product_pricing_change_set', profile?.id || '');
   const exportPricingIdem = useIdempotencyKey('create_pricing_workbook_export', profile?.id || '');
   const marginFloorIdem = useIdempotencyKey('set_product_margin_floors', profile?.id || '');
@@ -608,7 +619,6 @@ export default function Products() {
             row_version: original.pricing_version!,
             pricing_mode: mode,
             new_cost: newCost,
-            change_reason: 'Products inline pricing edit',
           };
           if (mode === 'margin_driven') {
             for (const tier of [1, 2, 3] as const) {
@@ -633,14 +643,8 @@ export default function Products() {
           pricingRows.push(row);
         }
 
-        const preview = await previewProductPricingChanges({
-          source: 'products_inline',
-          rows: pricingRows,
-          performedBy: profile.id,
-          idempotencyKey: previewPricingIdem.getKey(),
-        });
-        previewPricingIdem.resetKey();
-        setPricingPreview(preview);
+        // Ask where the new numbers came from and why; the preview runs from that prompt.
+        setPendingInlineRows(pricingRows);
         return false;
       }
 
@@ -668,9 +672,31 @@ export default function Products() {
     }
   };
 
-  const handleExportPricingWorkbook = async () => {
+  const previewInlinePricing = async ({ source, reason }: PricingSourceReason) => {
+    if (!profile || !pendingInlineRows) return;
+    setPreviewingInline(true);
+    try {
+      const preview = await previewProductPricingChanges({
+        source: 'products_inline',
+        rows: pendingInlineRows.map((row) => ({ ...row, change_reason: reason, price_source: source })),
+        performedBy: profile.id,
+        idempotencyKey: previewPricingIdem.getKey(),
+      });
+      previewPricingIdem.resetKey();
+      setPendingInlineRows(null);
+      setPricingSourceFile(null);
+      setPricingPreview(preview);
+    } catch (error) {
+      toast('error', sanitizeError(error));
+    } finally {
+      setPreviewingInline(false);
+    }
+  };
+
+  // fullSheet: every active product, whatever the filters or selection (To-Do 0.1).
+  const handleExportPricingWorkbook = async (fullSheet: boolean) => {
     if (!profile) return;
-    const productIds = (selectedRows.length > 0 ? selectedRows : filtered)
+    const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : filtered)
       .filter((product) => product.is_active)
       .map((product) => product.id);
     if (productIds.length === 0) {
@@ -724,6 +750,7 @@ export default function Products() {
     setWorkbookBusy(true);
     try {
       const parsed = await parseProductPricingWorkbookWithSupplierEvidence(await file.arrayBuffer());
+      const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
       const preview = await previewProductPricingChanges({
         source: 'pricing_worksheet',
         exportId: parsed.exportId,
@@ -732,6 +759,7 @@ export default function Products() {
         idempotencyKey: previewPricingIdem.getKey(),
       });
       previewPricingIdem.resetKey();
+      setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
       toast('error', sanitizeError(error));
@@ -741,10 +769,20 @@ export default function Products() {
     }
   };
 
-  const handleApplyPricing = async () => {
+  const handleApplyPricing = async (acknowledgements: PricingAcknowledgement[]) => {
     if (!pricingPreview || !profile) return;
     setApplyingPricing(true);
     try {
+      // The database applies only an approved preview: every warning acknowledged, the file named.
+      await approvePricingChangeSet({
+        changeSetId: pricingPreview.change_set_id,
+        requestFingerprint: pricingPreview.request_fingerprint,
+        acknowledgements,
+        sourceFile: pricingPreview.source === 'pricing_worksheet' ? pricingSourceFile : null,
+        performedBy: profile.id,
+        idempotencyKey: approvePricingIdem.getKey(),
+      });
+      approvePricingIdem.resetKey();
       const result = await applyProductPricingChangeSet({
         changeSetId: pricingPreview.change_set_id,
         requestFingerprint: pricingPreview.request_fingerprint,
@@ -753,6 +791,7 @@ export default function Products() {
       });
       applyPricingIdem.resetKey();
       setPricingPreview(null);
+      setPricingSourceFile(null);
       setTableRevision((revision) => revision + 1);
       const reloaded = await fetchProducts(false);
       if (reloaded) {
@@ -998,9 +1037,20 @@ export default function Products() {
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}
-                onClick={handleExportPricingWorkbook}
+                onClick={() => void handleExportPricingWorkbook(true)}
+                loading={workbookBusy}
+                disabled={loadError || products.length === 0}
+                title="Every active product, ignoring filters and selection"
+              >
+                Full price sheet
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<FileSpreadsheet className="w-4 h-4" />}
+                onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
                 disabled={loadError || filtered.length === 0}
+                title="The selected products, or every active product the filters show"
               >
                 Pricing .xlsx
               </Button>
@@ -1128,9 +1178,20 @@ export default function Products() {
         title="Review Product Pricing"
         onClose={() => {
           setPricingPreview(null);
+          setPricingSourceFile(null);
+          approvePricingIdem.resetKey();
           applyPricingIdem.resetKey();
         }}
-        onApprove={() => void handleApplyPricing()}
+        onApprove={(acknowledgements) => void handleApplyPricing(acknowledgements)}
+      />
+
+      <PricingSourceReasonModal
+        key={pendingInlineRows ? 'open' : 'closed'}
+        open={pendingInlineRows !== null}
+        busy={previewingInline}
+        productCount={pendingInlineRows?.length ?? 0}
+        onCancel={() => setPendingInlineRows(null)}
+        onSubmit={(value) => void previewInlinePricing(value)}
       />
 
       <BulkDeleteConfirmModal

@@ -377,7 +377,7 @@ export default function InventoryPage() {
       .order('created_at', { ascending: false });
     if (requestId !== holdsRequestId.current) return;
 
-    if (error || !data) {
+    if (error || !Array.isArray(data)) {
       Sentry.captureException(error ?? new Error('inventory holds read returned no list'), { tags: { source: 'fetch', page: 'inventory' } });
       toast('error', 'Failed to load inventory holds.');
       setHolds([]);
@@ -895,7 +895,7 @@ export default function InventoryPage() {
     type ReceivablePoRow = { id: string; quantity_ordered: number; quantity_received: number; unit_size: string | null; product_id: string; purchase_order_id: string; purchase_orders: { po_number: string; status: string } };
     const rows = error ? null : ((data || []) as unknown as ReceivablePoRow[]);
     // No list at all is a failed read, not "no open purchase orders".
-    const loadError: unknown = error ?? (data ? null : new Error('receivable purchase orders read returned no list'));
+    const loadError: unknown = error ?? (Array.isArray(data) ? null : new Error('receivable purchase orders read returned no list'));
 
     if (loadError) {
       // Supabase RETURNS this error (doesn't throw) — surface it instead of

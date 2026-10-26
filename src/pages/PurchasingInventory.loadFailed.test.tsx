@@ -15,7 +15,7 @@ const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   functions: {} as Record<string, unknown>,
   // Table or function name -> how its reads fail.
-  failing: new Map<string, 'error' | 'nodata'>(),
+  failing: new Map<string, 'error' | 'nodata' | 'notlist'>(),
   // Every RPC name called, in order.
   rpcCalls: [] as string[],
   toast: vi.fn(),
@@ -42,6 +42,7 @@ function replyFor(name: string, rows: unknown): { data: unknown; error: unknown;
   const mode = H.failing.get(name);
   if (mode === 'error') return { data: null, error: { message: 'connection reset' }, count: null };
   if (mode === 'nodata') return { data: null, error: null, count: null };
+  if (mode === 'notlist') return { data: { unexpected: true }, error: null, count: null };
   return { data: rows, error: null, count: Array.isArray(rows) ? rows.length : null };
 }
 
@@ -260,7 +261,7 @@ describe('Inventory', () => {
     expect(screen.getAllByText('Total on Floor').length).toBeGreaterThan(0);
   });
 
-  it.each(['error', 'nodata'] as const)('a %s open-PO read in the receive dialog is not "No open purchase orders found", and Try again lists them', async (mode) => {
+  it.each(['error', 'nodata', 'notlist'] as const)('a %s open-PO read in the receive dialog is not "No open purchase orders found", and Try again lists them', async (mode) => {
     H.functions.get_inventory_position = [position];
     H.failing.set('purchase_order_items', mode);
     at('/inventory', <InventoryPage />);
@@ -276,7 +277,7 @@ describe('Inventory', () => {
     expect(screen.getAllByText(/PO-1001/).length).toBeGreaterThan(0);
   });
 
-  it.each(['error', 'nodata'] as const)('a %s holds read says so instead of hiding the holds', async (mode) => {
+  it.each(['error', 'nodata', 'notlist'] as const)('a %s holds read says so instead of hiding the holds', async (mode) => {
     H.functions.get_inventory_position = [position];
     H.failing.set('inventory_holds', mode);
     at('/inventory', <InventoryPage />);
@@ -362,5 +363,20 @@ describe('Cycle Counts', () => {
     tryAgain();
     expect(await screen.findByText('Widget 2.5 GL')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Complete & Apply Adjustments/ })).toBeInTheDocument();
+  });
+
+  it('a line refresh that fails at completion shows the retry state, not stale lines with Complete & Apply', async () => {
+    H.tables.cycle_counts = [count];
+    H.tables.cycle_count_items = [{ id: 'cci1', cycle_count_id: 'cc1', product_id: 'p1', expected_qty: 40, counted_qty: 40, variance: 0, variance_pct: 0, is_counted: true, product: { product_name: 'Widget 2.5 GL' } }];
+    at('/cycle-counts', <CycleCounts />);
+    fireEvent.click(await screen.findByText('CC-0007'));
+    expect(await screen.findByText('Widget 2.5 GL')).toBeInTheDocument();
+
+    H.failing.set('cycle_count_items', 'nodata');
+    fireEvent.click(screen.getByRole('button', { name: /Complete & Apply Adjustments/ }));
+    expect(await screen.findByText("This count's lines could not be loaded")).toBeInTheDocument();
+    expect(screen.queryByText('Widget 2.5 GL')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Complete & Apply Adjustments/ })).not.toBeInTheDocument();
+    expect(H.rpcCalls).not.toContain('complete_cycle_count');
   });
 });

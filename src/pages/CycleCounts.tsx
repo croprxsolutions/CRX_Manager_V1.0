@@ -445,6 +445,10 @@ export default function CycleCounts() {
     if (error) {
       Sentry.captureException(error);
       toast('error', 'Failed to refresh count items before completion');
+      // The lines on screen can no longer be trusted: show the retry state, not
+      // stale lines with Complete & Apply still offered.
+      setCountItems([]);
+      setItemsFailed(true);
       return null;
     }
     const rows = ((data || []) as CountItemDbRow[]).map((item) => ({

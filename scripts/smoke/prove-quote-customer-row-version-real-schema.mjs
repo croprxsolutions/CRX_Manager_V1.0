@@ -6,6 +6,9 @@
  * candidate and its missing-default drift check, then replays every later
  * migration on main and executes the candidate's rollback-only smoke matrices
  * there (they assert today's rules, e.g. 20261013220000's REP_CANNOT_REASSIGN).
+ * So the matrices prove the row-version guards as they stand on current main;
+ * the candidate's own bodies (pre-fix overwrite, canonical contract, mutation
+ * self-tests) are proven by prove-quote-customer-row-version-concurrency.mjs.
  * It always removes its network-disabled container. It never reads a DB URL.
  */
 import assert from 'node:assert/strict';
@@ -50,7 +53,10 @@ const legacyLifecycleSmokeFiles = [
   // Since #885 it also asserts the CRX-LIFE-001 refusal from 20261006200000
   // (a field_application split through the order pipeline), fail-first: it
   // raises SMOKE_FAIL on any catalog older than that migration, and this
-  // legacy catalog stops at 20260730235031. Its own replay-based proof is
+  // legacy catalog stops at 20260730235031. It does not pass on the current-main
+  // catalog either: it completes a delivery by direct UPDATE, which
+  // 20261022075000 refuses (COMPLETION_EVIDENCE_REQUIRED). Until that chain is
+  // repaired, its replay-based proof is
   // scripts/smoke/prove-order-invoice-type-gate-real-schema.mjs.
   path.join(ROOT, 'scripts', 'smoke', 'smoke-draw-ledger-reversal.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-forbid-restore-cancelled-order.sql'),
@@ -168,8 +174,9 @@ function replayLater(later) {
   let replayed = 0;
   for (const [index, file] of later.entries()) {
     const base = path.basename(file);
-    if (PARKED.has(base)) continue;
     for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    // Recorded in the ledger, as live has them, but not replayed.
+    if (PARKED.has(base)) { ledger(path.basename(file, '.sql')); continue; }
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     const name = `later-${index}.sql`;

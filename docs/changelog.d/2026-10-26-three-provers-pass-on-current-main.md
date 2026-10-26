@@ -16,17 +16,25 @@ anything on current main, because newer migrations and smoke edits landed after 
 **Fix (the pattern the working provers already use).**
 
 - Batch 1 and cost/margin: replay up to the candidate, then refuse any later file that (re)defines,
-  alters, drops or re-grants a covered function (`FUNCTION <name>`, as in
-  `prove-post-binds-reviewed-invoice-version-real-schema.mjs`). Batch 1 now covers the nine wrappers,
-  their nine impls, the fingerprint/binder/guard helpers and `check_idempotency_intent`, and adds a new
-  check: a later file that rebuilds the `require_bound_replay_receipt_20261015` trigger (batches 2, 3a,
-  3b) must still list all nine batch-1 operations.
+  alters, drops (including `DROP FUNCTION IF EXISTS`) or re-grants a covered function
+  (`FUNCTION <name>`, as in `prove-post-binds-reviewed-invoice-version-real-schema.mjs`). Batch 1 now
+  covers the nine wrappers, their nine impls, the fingerprint/binder/guard helpers and
+  `check_idempotency_intent`, and adds a new step 7: after every earlier step, it replays all 29 later
+  migrations on top of the candidate and checks, on that current-main database, that the rebuilt
+  `require_bound_replay_receipt_20261015` trigger (batches 2, 3a, 3b) still covers all nine batch-1
+  operations and still refuses an unbound receipt for each one.
 - Row version: unchanged up to the candidate (legacy smokes, candidate apply, missing-default drift
-  check; the default is then restored and verified). `smoke-backfill-refuse-split-billing.sql` leaves
-  the legacy list with a note, like `smoke-restore-version-drawn-guard.sql` before it; its replay-based
-  proof is `prove-order-invoice-type-gate-real-schema.mjs`. The prover then replays every later
-  migration on main (LF text, ledger rows, live `auth.uid()`, live storage shape, the same parked and
-  ledger-only files as the other provers) and runs the candidate's three smoke matrices there.
+  check; the default is then restored and verified). The prover then replays every later migration on
+  main (LF text, ledger rows including the parked files, live `auth.uid()`, live storage shape, the same
+  parked and ledger-only files as the other provers) and runs the candidate's three smoke matrices
+  there, so they prove the row-version guards as they stand today. The candidate's own bodies stay
+  proven by `prove-quote-customer-row-version-concurrency.mjs` (passes on main:
+  `ROW_VERSION_DISPOSABLE_PROOF_PASS pre_fix_overwrite=confirmed ...`).
+- `smoke-backfill-refuse-split-billing.sql` leaves the legacy list with a note, like
+  `smoke-restore-version-drawn-guard.sql` before it. It is fail-first against 20261006200000, so it
+  cannot pass on the July catalog, and it does not pass on current main either: it completes a
+  delivery by direct `UPDATE`, which 20261022075000 refuses (`COMPLETION_EVIDENCE_REQUIRED`). That
+  chain needs its own repair (follow-up).
 
 No smoke chain, migration or app code changed.
 

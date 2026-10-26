@@ -58,8 +58,10 @@ export async function fetchMarginFloor(productId: string): Promise<number | null
   return data ? Number(data.margin_floor) : null;
 }
 
-/** A product's floor history, newest first. */
-export async function fetchMarginFloorHistory(productId: string, limit = 10): Promise<ProductMarginFloorChange[]> {
+export type MarginFloorHistoryEntry = ProductMarginFloorChange & { changed_by_name: string | null };
+
+/** A product's floor history, newest first, with who made each change. */
+export async function fetchMarginFloorHistory(productId: string, limit = 10): Promise<MarginFloorHistoryEntry[]> {
   const { data, error } = await supabase
     .from('product_margin_floor_changes')
     .select('id, product_id, old_margin_floor, new_margin_floor, reason, changed_by, created_at')
@@ -68,7 +70,17 @@ export async function fetchMarginFloorHistory(productId: string, limit = 10): Pr
     .order('id', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as ProductMarginFloorChange[];
+  const changes = (data ?? []) as ProductMarginFloorChange[];
+  // Names come from the public profile view; a failed lookup only leaves the names out.
+  const ids = [...new Set(changes.map((c) => c.changed_by).filter((id): id is string => !!id))];
+  const nameById = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: people } = await supabase.from('profile_public_view').select('id, full_name').in('id', ids);
+    for (const person of (people ?? []) as Array<{ id: string; full_name: string | null }>) {
+      if (person.full_name) nameById.set(person.id, person.full_name);
+    }
+  }
+  return changes.map((c) => ({ ...c, changed_by_name: c.changed_by ? nameById.get(c.changed_by) ?? null : null }));
 }
 
 export interface MarginFloorChange {

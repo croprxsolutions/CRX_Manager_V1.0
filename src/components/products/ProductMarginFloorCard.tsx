@@ -16,7 +16,7 @@ import {
   setMarginFloors,
 } from '../../lib/marginFloors';
 import { Sentry } from '../../lib/sentry';
-import type { ProductMarginFloorChange } from '../../types';
+import type { MarginFloorHistoryEntry } from '../../lib/marginFloors';
 
 interface ProductMarginFloorCardProps {
   productId: string;
@@ -38,7 +38,7 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
   const { toast } = useToast();
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('set_product_margin_floors', userId);
   const [floor, setFloor] = useState<number | null>(null);
-  const [history, setHistory] = useState<ProductMarginFloorChange[]>([]);
+  const [history, setHistory] = useState<MarginFloorHistoryEntry[]>([]);
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [draft, setDraft] = useState('');
   const [reason, setReason] = useState('');
@@ -171,6 +171,7 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
                   <li key={change.id}>
                     {new Date(change.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}:{' '}
                     {floorLabel(change.old_margin_floor)} → {floorLabel(change.new_margin_floor)}
+                    {change.changed_by_name ? ` by ${change.changed_by_name}` : ''}
                     {change.reason ? ` (${change.reason})` : ''}
                   </li>
                 ))}

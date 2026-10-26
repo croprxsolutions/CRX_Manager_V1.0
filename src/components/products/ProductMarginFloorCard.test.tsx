@@ -23,7 +23,7 @@ import ProductMarginFloorCard from './ProductMarginFloorCard';
 
 const change = {
   id: 'h1', product_id: 'p1', old_margin_floor: null, new_margin_floor: 0.15, reason: 'Program minimum',
-  changed_by: 'u1', created_at: '2026-10-25T18:00:00Z',
+  changed_by: 'u1', created_at: '2026-10-25T18:00:00Z', changed_by_name: 'Mason Wells',
 };
 
 describe('ProductMarginFloorCard', () => {
@@ -38,7 +38,7 @@ describe('ProductMarginFloorCard', () => {
     expect(await screen.findByLabelText('Floor (net margin %)')).toHaveValue('15');
     expect(screen.getByRole('status')).toHaveTextContent('Tier 2 is at 10.00% — under the 15% floor.');
     expect(screen.getByRole('status')).not.toHaveTextContent('Tier 1');
-    expect(screen.getByText(/none → 15% \(Program minimum\)/)).toBeInTheDocument();
+    expect(screen.getByText(/none → 15% by Mason Wells \(Program minimum\)/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save floor/i })).toBeDisabled();
   });
 

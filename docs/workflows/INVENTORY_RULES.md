@@ -228,6 +228,9 @@ The normal path is `draft` → `submitted` → `fully_received`, passing through
 - The `send-email` edge function's `purchase_order` type repeats every check server-side, before its
   write-ahead log and again just before the provider call (`supabase/functions/_shared/purchaseOrderEmailGate.ts`):
   admin only, no `customer_id`, `resource_type='purchase_order'`, recipient equal to that vendor's email.
+  The app builds the PDF, so it also sends `purchase_order_lines` (each line's id, quantity and unit cost as
+  printed), and the send is refused unless those are exactly the PO's lines at that moment: a vendor never
+  gets a PDF with an out-of-date price.
   Sends are logged in `email_log` with `email_type = 'purchase_order'` and a NULL `customer_id`.
 
 ### Source files

@@ -33,6 +33,7 @@ describe('buildPurchaseOrderEmailPayload', () => {
     attachmentBase64: 'QUJD',
     attachmentFilename: 'Purchase-Order-PO-2026-0040.pdf',
     idempotencyKey: 'key-1',
+    lines: [{ id: 'l-1', quantity_ordered: 3, unit_cost: 19.99 }],
   };
 
   it('addresses the vendor as a purchase_order send with no customer', () => {
@@ -45,6 +46,7 @@ describe('buildPurchaseOrderEmailPayload', () => {
       resource_id: 'po-1',
       idempotency_key: 'key-1',
       attachments: [{ filename: 'Purchase-Order-PO-2026-0040.pdf', content: 'QUJD' }],
+      purchase_order_lines: [{ id: 'l-1', quantity_ordered: 3, unit_cost: 19.99 }],
     });
     expect(payload.customer_id).toBeUndefined();
     expect(payload.html).toContain('Spinner &lt;Ag&gt;');

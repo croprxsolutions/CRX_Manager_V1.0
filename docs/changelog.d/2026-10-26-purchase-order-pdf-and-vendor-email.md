@@ -20,8 +20,9 @@ Both are admin-only because a PO shows purchase cost, which is admin-only (Mason
 **Server side.** `send-email` gains the `purchase_order` type, allowed for admins only (sales reps keep the
 10 customer types). It needs no `customer_id`; instead it needs `resource_type='purchase_order'`, and the
 recipient must equal the email of the one active vendor named on the PO. The PO must be submitted or partly
-received with every line cost confirmed. These checks run before the write-ahead log and again just before
-the provider call (`supabase/functions/_shared/purchaseOrderEmailGate.ts`). Migration
+received with every line cost confirmed, and the lines the app says the attached PDF prints (id, quantity,
+unit cost) must be exactly the PO's lines, so an out-of-date PDF is refused. These checks run before the
+write-ahead log and again just before the provider call (`supabase/functions/_shared/purchaseOrderEmailGate.ts`). Migration
 `20261026090000_email_type_purchase_order.sql` adds the `purchase_order` value to `email_type` so the send
 is logged in `email_log`.
 

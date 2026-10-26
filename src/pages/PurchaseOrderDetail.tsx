@@ -67,15 +67,23 @@ const conditionVariant = (c: string): 'success' | 'error' | 'warning' | 'default
 const conditionLabel = (c: string) =>
   c.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
 
-/* ─── Per-item receive state ─── */
-/** What a vendor PO PDF says about each line, so a changed PO is a new email, not a replay. */
-function purchaseOrderLinesFingerprint(lines: readonly PurchaseOrderItem[]): string {
-  return lines
-    .map((line) => `${line.id}:${line.quantity_ordered}:${line.unit_cost ?? ''}:${line.cost_needs_review ? 1 : 0}`)
-    .sort()
-    .join(',');
+/**
+ * Everything a vendor PO PDF prints, so a changed PO is a new email (not a replay of the
+ * old one) and an admin never confirms one version and sends another.
+ */
+function purchaseOrderPdfFingerprint(header: PurchaseOrder | null, lines: readonly PurchaseOrderItem[]): string {
+  return JSON.stringify([
+    header && [header.vendor, header.status, header.submitted_date, header.expected_delivery_date, header.notes],
+    lines
+      .map((line) => [line.id, line.product_id, line.quantity_ordered, line.unit_cost ?? null, !!line.cost_needs_review, line.unit_size, line.notes])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  ]);
 }
 
+/** Vendor names match ignoring case and runs of spaces (the send-email gate does the same). */
+const normalizeVendorName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/* ─── Per-item receive state ─── */
 interface ReceiveItemState {
   qty: string;
   condition: ReceivingCondition;
@@ -132,7 +140,7 @@ export default function PurchaseOrderDetail() {
   const setCostsIdem = useIdempotencyKey('set_purchase_order_item_costs', profile?.id || '');
   const [poPdfBusy, setPoPdfBusy] = useState(false);
   // The vendor and PDF data an admin is about to confirm emailing.
-  const [emailPO, setEmailPO] = useState<{ vendorEmail: string; data: PdfPurchaseOrderData } | null>(null);
+  const [emailPO, setEmailPO] = useState<{ vendorEmail: string; data: PdfPurchaseOrderData; lines: PurchaseOrderItem[] } | null>(null);
   const [emailingPO, setEmailingPO] = useState(false);
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [items, setItems] = useState<PurchaseOrderItem[]>([]);
@@ -142,7 +150,7 @@ export default function PurchaseOrderDetail() {
   const emailPOIdem = useIdempotencyKey(
     'email_purchase_order',
     `${profile?.id || ''}:${id || ''}`,
-    purchaseOrderLinesFingerprint(items),
+    purchaseOrderPdfFingerprint(po, items),
   );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -969,54 +977,59 @@ export default function PurchaseOrderDetail() {
       .select('id, name, contact_name, phone, email, address, default_payment_terms, default_payment_terms_days, notes, created_at, updated_at, deleted_at')
       .is('deleted_at', null);
     if (error) throw error;
-    const wanted = vendorName.trim().toLowerCase();
-    const matches = ((data || []) as Vendor[]).filter((v) => v.name.trim().toLowerCase() === wanted);
+    const wanted = normalizeVendorName(vendorName);
+    const matches = ((data || []) as Vendor[]).filter((v) => normalizeVendorName(v.name) === wanted);
     if (matches.length > 1) throw new Error(`More than one vendor is named "${vendorName}"`);
     return matches[0] ?? null;
   };
 
-  // The PDF is built from a fresh read of the lines, never from what this page loaded
-  // earlier: another admin may have corrected a cost since.
-  const loadPOLinesForPdf = async (poId: string): Promise<PurchaseOrderItem[]> => {
-    const { data, error } = await supabase
-      .from('purchase_order_items')
-      .select(`${PURCHASE_ORDER_ITEM_COLUMNS}, product:products(${PRODUCT_COLUMNS}, product_family:product_families(name))`)
-      .eq('purchase_order_id', poId);
-    if (error) throw error;
-    if (!Array.isArray(data)) throw new Error('purchase order lines read returned no list');
-    return withAdminCosts('purchase_order_items', data as unknown as PurchaseOrderItem[], true);
-  };
-
-  const buildPOPdfData = (vendor: Vendor | null, lines: PurchaseOrderItem[]): PdfPurchaseOrderData | null => {
-    if (!po) return null;
+  // The PDF is built from a fresh read of the PO and its lines, never from what this page
+  // loaded earlier: another admin may have corrected a cost or a date since.
+  const loadPOForPdf = async (poId: string): Promise<{ header: PurchaseOrder; lines: PurchaseOrderItem[] }> => {
+    const [{ data: header, error: headerError }, { data: lines, error: linesError }] = await Promise.all([
+      supabase.from('purchase_orders').select(PURCHASE_ORDER_COLUMNS).eq('id', poId).maybeSingle(),
+      supabase
+        .from('purchase_order_items')
+        .select(`${PURCHASE_ORDER_ITEM_COLUMNS}, product:products(${PRODUCT_COLUMNS}, product_family:product_families(name))`)
+        .eq('purchase_order_id', poId),
+    ]);
+    if (headerError) throw headerError;
+    if (!header) throw new Error('This purchase order no longer exists');
+    if (linesError) throw linesError;
+    if (!Array.isArray(lines)) throw new Error('purchase order lines read returned no list');
     return {
-      po_number: po.po_number,
-      status: po.status,
-      submitted_date: po.submitted_date,
-      expected_delivery_date: po.expected_delivery_date,
-      notes: po.notes,
-      vendor: vendor
-        ? { name: vendor.name, contact_name: vendor.contact_name, phone: vendor.phone, email: vendor.email, address: vendor.address }
-        : { name: po.vendor },
-      lines: lines.map((item) => ({
-        product_name: item.product?.product_name || item.product_name || 'Unknown',
-        epa_registration: item.product?.epa_registration,
-        unit_size: item.unit_size,
-        quantity_ordered: item.quantity_ordered,
-        unit_cost: item.unit_cost ?? null,
-        cost_needs_review: item.cost_needs_review,
-        notes: item.notes,
-      })),
+      header: header as unknown as PurchaseOrder,
+      lines: await withAdminCosts('purchase_order_items', lines as unknown as PurchaseOrderItem[], true),
     };
   };
+
+  const buildPOPdfData = (header: PurchaseOrder, vendor: Vendor | null, lines: PurchaseOrderItem[]): PdfPurchaseOrderData => ({
+    po_number: header.po_number,
+    status: header.status,
+    submitted_date: header.submitted_date,
+    expected_delivery_date: header.expected_delivery_date,
+    notes: header.notes,
+    vendor: vendor
+      ? { name: vendor.name, contact_name: vendor.contact_name, phone: vendor.phone, email: vendor.email, address: vendor.address }
+      : { name: header.vendor },
+    lines: lines.map((item) => ({
+      product_name: item.product?.product_name || item.product_name || 'Unknown',
+      epa_registration: item.product?.epa_registration,
+      unit_size: item.unit_size,
+      quantity_ordered: item.quantity_ordered,
+      unit_cost: item.unit_cost ?? null,
+      cost_needs_review: item.cost_needs_review,
+      notes: item.notes,
+    })),
+  });
 
   const handleDownloadPOPdf = async () => {
     if (!po || !isAdmin) return;
     setPoPdfBusy(true);
     try {
-      const [vendor, lines] = await Promise.all([loadPOVendor(po.vendor), loadPOLinesForPdf(po.id)]);
-      const data = buildPOPdfData(vendor, lines);
-      if (!data) return;
+      const { header, lines } = await loadPOForPdf(po.id);
+      const vendor = await loadPOVendor(header.vendor);
+      const data = buildPOPdfData(header, vendor, lines);
       const { downloadPurchaseOrderPdf } = await import('../lib/purchaseOrderPdf');
       await downloadPurchaseOrderPdf(data);
       toast('success', 'Purchase order PDF downloaded');
@@ -1032,20 +1045,20 @@ export default function PurchaseOrderDetail() {
     if (!po || !isAdmin) return;
     setPoPdfBusy(true);
     try {
-      const [vendor, lines] = await Promise.all([loadPOVendor(po.vendor), loadPOLinesForPdf(po.id)]);
-      const blocker = purchaseOrderEmailBlocker({ status: po.status, vendorEmail: vendor?.email, lines });
+      const { header, lines } = await loadPOForPdf(po.id);
+      const vendor = await loadPOVendor(header.vendor);
+      const blocker = purchaseOrderEmailBlocker({ status: header.status, vendorEmail: vendor?.email, lines });
       if (blocker) {
         toast('warning', blocker);
         return;
       }
-      // The retry key belongs to the lines on screen; if they changed, show the change first.
-      if (purchaseOrderLinesFingerprint(lines) !== purchaseOrderLinesFingerprint(items)) {
+      // The retry key belongs to the PO on screen; if it changed, show the change first.
+      if (purchaseOrderPdfFingerprint(header, lines) !== purchaseOrderPdfFingerprint(po, items)) {
         toast('warning', 'This purchase order changed since the page loaded. Reload the page, check it, then email it.');
         return;
       }
-      const data = buildPOPdfData(vendor, lines);
-      if (!data || !vendor?.email) return;
-      setEmailPO({ vendorEmail: vendor.email.trim(), data });
+      if (!vendor?.email) return;
+      setEmailPO({ vendorEmail: vendor.email.trim(), data: buildPOPdfData(header, vendor, lines), lines });
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_purchase_order_vendor' } });
       toast('error', `Could not load the vendor: ${sanitizeError(err)}`);
@@ -1071,6 +1084,12 @@ export default function PurchaseOrderDetail() {
         attachmentBase64: pdfToBase64(doc),
         attachmentFilename: purchaseOrderPdfFilename(po.po_number),
         idempotencyKey: emailPOIdem.getKey(),
+        // The server refuses the send unless these are still the PO's lines.
+        lines: emailPO.lines.map((line) => ({
+          id: line.id,
+          quantity_ordered: line.quantity_ordered,
+          unit_cost: line.unit_cost ?? 0,
+        })),
       }));
       // Confirmed success only: a failed or lost send keeps the key, so a retry replays it.
       emailPOIdem.resetKey();
@@ -1493,7 +1512,7 @@ export default function PurchaseOrderDetail() {
               Submit PO
             </Button>
           )}
-          {isAdmin && items.length > 0 && (
+          {isAdmin && (
             <>
               <Button
                 variant="secondary"

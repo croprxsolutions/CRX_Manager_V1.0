@@ -3,7 +3,12 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.5
 import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
-import { decidePurchaseOrderEmail, type PoGateResult } from "../_shared/purchaseOrderEmailGate.ts";
+import {
+  decidePurchaseOrderEmail,
+  parsePurchaseOrderSnapshot,
+  type PoGateResult,
+  type PoGateSnapshotLine,
+} from "../_shared/purchaseOrderEmailGate.ts";
 
 // =============================================================================
 // CRX send-email — Sprint F #1 lockdown
@@ -97,6 +102,7 @@ async function checkPurchaseOrderEmail(
   adminClient: SupabaseClient,
   purchaseOrderId: string,
   to: string,
+  snapshot: PoGateSnapshotLine[],
 ): Promise<PoGateResult> {
   const { data: order, error: orderErr } = await adminClient
     .from("purchase_orders")
@@ -104,11 +110,11 @@ async function checkPurchaseOrderEmail(
     .eq("id", purchaseOrderId)
     .maybeSingle();
   if (orderErr) return { ok: false, status: 503, error: `Purchase order lookup failed: ${orderErr.message}` };
-  if (!order) return decidePurchaseOrderEmail(null, [], [], to);
+  if (!order) return decidePurchaseOrderEmail(null, [], [], to, snapshot);
 
   const { data: lines, error: linesErr } = await adminClient
     .from("purchase_order_items")
-    .select("unit_cost, cost_needs_review")
+    .select("id, quantity_ordered, unit_cost, cost_needs_review")
     .eq("purchase_order_id", purchaseOrderId);
   if (linesErr || !Array.isArray(lines)) {
     return { ok: false, status: 503, error: `Purchase order lines lookup failed: ${linesErr?.message ?? "no list"}` };
@@ -122,7 +128,7 @@ async function checkPurchaseOrderEmail(
     return { ok: false, status: 503, error: `Vendor lookup failed: ${vendorsErr?.message ?? "no list"}` };
   }
 
-  return decidePurchaseOrderEmail(order, lines, vendors, to);
+  return decidePurchaseOrderEmail(order, lines, vendors, to, snapshot);
 }
 
 Deno.serve(async (req: Request) => {
@@ -175,13 +181,19 @@ Deno.serve(async (req: Request) => {
       resource_id,
       idempotency_key,
       attachments,
+      purchase_order_lines,
     } = body;
 
     if (!to || !subject || !html || !email_type) {
       return jsonResponse({ error: "to, subject, html, and email_type are required" }, 400);
     }
     const isPurchaseOrderEmail = email_type === PURCHASE_ORDER_EMAIL_TYPE;
+    // The lines the attached PDF printed; the gate refuses unless they are the PO's lines today.
+    const poSnapshot: PoGateSnapshotLine[] = isPurchaseOrderEmail ? parsePurchaseOrderSnapshot(purchase_order_lines) ?? [] : [];
     if (isPurchaseOrderEmail) {
+      if (poSnapshot.length === 0) {
+        return jsonResponse({ error: "Purchase order emails require purchase_order_lines (the lines the PDF shows)" }, 400);
+      }
       // A vendor email is about a PO, never a customer.
       if (customer_id) {
         return jsonResponse({ error: "Purchase order emails must not carry a customer_id" }, 400);
@@ -214,7 +226,7 @@ Deno.serve(async (req: Request) => {
     // 5a. Vendor email match for a purchase order (To-Do 0.15). The recipient,
     // the PO's status and every line's cost are all checked server-side.
     if (isPurchaseOrderEmail) {
-      const poGate = await checkPurchaseOrderEmail(adminClient, resource_id, to);
+      const poGate = await checkPurchaseOrderEmail(adminClient, resource_id, to, poSnapshot);
       if (!poGate.ok) {
         return jsonResponse({ error: poGate.error }, poGate.status);
       }
@@ -745,7 +757,7 @@ Deno.serve(async (req: Request) => {
     // Same last-moment recheck for a purchase order: it may have been cancelled,
     // or its vendor email changed, while the steps above ran.
     if (isPurchaseOrderEmail) {
-      const finalPoGate = await checkPurchaseOrderEmail(adminClient, resource_id, to);
+      const finalPoGate = await checkPurchaseOrderEmail(adminClient, resource_id, to, poSnapshot);
       if (!finalPoGate.ok) {
         const poRefusal = `${finalPoGate.error}; email send refused`;
         const poLogResult = await adminClient

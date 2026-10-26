@@ -163,6 +163,7 @@ describe('PurchaseOrderDetail purchase order PDF and vendor email', () => {
       resource_id: 'po-1',
       idempotency_key: 'idem:email_purchase_order',
       attachments: [{ filename: 'Purchase-Order-PO-2026-0040.pdf', content: 'UERG' }],
+      purchase_order_lines: [{ id: 'line-1', quantity_ordered: 3, unit_cost: 19.99 }],
     });
     expect(mocks.sendEmail.mock.calls[0][0].customer_id).toBeUndefined();
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Purchase order emailed to orders@spinner.example'));

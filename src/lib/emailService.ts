@@ -38,6 +38,9 @@ export interface SendEmailParams {
   resource_id?: string;
   idempotency_key?: string;
   attachments?: Array<{ filename: string; content: string }>; // base64
+  /** 'purchase_order' only: the lines the attached PDF prints. The server refuses the send
+   *  unless they still match the PO's lines, so a vendor never gets an out-of-date price. */
+  purchase_order_lines?: Array<{ id: string; quantity_ordered: number; unit_cost: number }>;
 }
 
 export interface SendEmailResult {
@@ -195,6 +198,8 @@ export interface PurchaseOrderEmailInput {
   attachmentFilename: string;
   /** The screen's retained idempotency key, so a retry after a lost response replays one send. */
   idempotencyKey: string;
+  /** The lines the PDF prints (dollar unit costs, as stored). */
+  lines: Array<{ id: string; quantity_ordered: number; unit_cost: number }>;
 }
 
 function escapeHtml(text: string): string {
@@ -231,6 +236,7 @@ export function buildPurchaseOrderEmailPayload(input: PurchaseOrderEmailInput): 
     resource_id: input.purchaseOrderId,
     idempotency_key: input.idempotencyKey,
     attachments: [{ filename: input.attachmentFilename, content: input.attachmentBase64 }],
+    purchase_order_lines: input.lines.map(({ id, quantity_ordered, unit_cost }) => ({ id, quantity_ordered, unit_cost })),
   };
 }
 

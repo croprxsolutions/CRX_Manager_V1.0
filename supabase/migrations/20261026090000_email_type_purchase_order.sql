@@ -1,8 +1,10 @@
 -- 20261026090000_email_type_purchase_order.sql
--- To-Do 0.15 (2026-10-26): a purchase order can be emailed to its vendor as a PDF.
+-- To-Do 0.15 (2026-10-26): a copy of a purchase order can be emailed as a PDF to
+-- the company ordering address (never to a vendor; Mason places orders through
+-- each supplier's portal).
 -- ---------------------------------------------------------------------------
 -- The send-email edge function writes every send to public.email_log, whose
--- email_type column is the public.email_type ENUM. A vendor purchase-order send
+-- email_type column is the public.email_type ENUM. A purchase-order copy send
 -- needs its own value so the audit log classifies it honestly (customer_id stays
 -- NULL on these rows; the column is already nullable).
 --

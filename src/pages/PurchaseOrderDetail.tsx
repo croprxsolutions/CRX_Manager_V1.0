@@ -1098,6 +1098,10 @@ export default function PurchaseOrderDetail() {
           lines: lines.map((line) => ({
             id: line.id,
             product_id: line.product_id,
+            product_name: line.product?.product_name || line.product_name || 'Unknown',
+            epa_registration: line.product?.epa_registration ?? null,
+            unit_size: line.unit_size,
+            notes: line.notes,
             quantity_ordered: line.quantity_ordered,
             unit_cost: line.unit_cost ?? 0,
           })),

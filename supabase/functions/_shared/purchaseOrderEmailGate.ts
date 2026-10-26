@@ -31,6 +31,22 @@ export interface PoGateLine {
   quantity_ordered: number | string;
   unit_cost: number | string | null;
   cost_needs_review: boolean | null;
+  unit_size: string | null;
+  notes: string | null;
+  product_name: string | null;
+  product: { product_name: string | null; epa_registration: string | null } | null;
+}
+
+/** One line as the attached PDF printed it. */
+export interface PoGateSnapshotLine {
+  id: string;
+  product_id: string;
+  product_name: string;
+  epa_registration: string | null;
+  unit_size: string | null;
+  notes: string | null;
+  quantity_ordered: number;
+  unit_cost: number;
 }
 
 /** What the attached PDF printed, sent by the app alongside the PDF. */
@@ -38,7 +54,7 @@ export interface PoGateSnapshot {
   vendor: string | null;
   expected_delivery_date: string | null;
   notes: string | null;
-  lines: { id: string; product_id: string; quantity_ordered: number; unit_cost: number }[];
+  lines: PoGateSnapshotLine[];
 }
 
 export type PoGateResult = { ok: true } | { ok: false; status: number; error: string };
@@ -54,11 +70,13 @@ export function parsePurchaseOrderSnapshot(value: unknown): PoGateSnapshot | nul
   const parsed: PoGateSnapshot["lines"] = [];
   for (const entry of lines) {
     if (!entry || typeof entry !== "object") return null;
-    const { id, product_id, quantity_ordered, unit_cost } = entry as Record<string, unknown>;
-    if (typeof id !== "string" || typeof product_id !== "string") return null;
+    const { id, product_id, product_name, epa_registration, unit_size, notes: lineNotes, quantity_ordered, unit_cost } =
+      entry as Record<string, unknown>;
+    if (typeof id !== "string" || typeof product_id !== "string" || typeof product_name !== "string") return null;
+    if (!nullableString(epa_registration) || !nullableString(unit_size) || !nullableString(lineNotes)) return null;
     if (typeof quantity_ordered !== "number" || typeof unit_cost !== "number") return null;
     if (!Number.isFinite(quantity_ordered) || !Number.isFinite(unit_cost)) return null;
-    parsed.push({ id, product_id, quantity_ordered, unit_cost });
+    parsed.push({ id, product_id, product_name, epa_registration, unit_size, notes: lineNotes, quantity_ordered, unit_cost });
   }
   return { vendor, expected_delivery_date, notes, lines: parsed };
 }
@@ -75,8 +93,14 @@ function snapshotMatches(order: PoGateOrder, lines: readonly PoGateLine[], snaps
   if (byId.size !== snapshot.lines.length) return false;
   return lines.every((line) => {
     const printed = byId.get(line.id);
+    // The PDF names a line by its product's name, else the line's stored name.
+    const productName = line.product?.product_name || line.product_name || "Unknown";
     return printed !== undefined &&
       line.product_id === printed.product_id &&
+      productName === printed.product_name &&
+      (line.product?.epa_registration ?? null) === printed.epa_registration &&
+      line.unit_size === printed.unit_size &&
+      line.notes === printed.notes &&
       Number(line.quantity_ordered) === printed.quantity_ordered &&
       Number(line.unit_cost) === printed.unit_cost;
   });
@@ -85,11 +109,14 @@ function snapshotMatches(order: PoGateOrder, lines: readonly PoGateLine[], snaps
 /**
  * Decides whether this PO copy may be sent to `requestedTo`. The recipient is never
  * trusted: it must be the company ordering address. The attached PDF is built by
- * the app, so the app also sends what it printed (vendor, requested date, notes and
- * each line's product, quantity and cost), and the send is refused unless that is
- * the PO today: an order is never placed from a copy with yesterday's details. The
- * check runs twice, the second time just before the provider call; a change in the
- * milliseconds between that read and the send is not covered (no lock spans them).
+ * the app, so the app also sends what it printed (vendor name, requested date, notes
+ * and each line's product, name, EPA number, unit size, note, quantity and cost),
+ * and the send is refused unless that is the PO today: an order is never placed
+ * from a copy with yesterday's details. Not covered, by design: the attachment bytes
+ * themselves (the server trusts the admin's app to render the snapshot, as for every
+ * emailed PDF here; only an admin can send, and only to the ordering inbox), the
+ * vendor record's contact block (orders go through the portal, not that address),
+ * and a change in the milliseconds between the final read and the send.
  */
 export function decidePurchaseOrderEmail(
   order: PoGateOrder | null,

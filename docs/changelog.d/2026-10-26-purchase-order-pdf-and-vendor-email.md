@@ -34,6 +34,12 @@ is logged in `email_log`.
 **Not live until:** Mason approves deploying the `send-email` edge function (until then an Email PO Copy
 attempt gets "Unknown email_type: purchase_order").
 
+**Also recorded (docs only, no data change in this PR).** To-Do 0.14: the old stock holds are cleared.
+On 2026-10-26 at 10:19 AM Central Mason had planned draft quote Q-2026-1994 cancelled in the app, and the
+existing `trg_release_holds_on_quote_status` trigger released its 9 crop-program holds (about 1,234 units);
+checked live read-only: 0 of its holds and 0 holds system-wide are active. To-Do 6.9: Mason decided to
+leave the 5 completed deliveries on deleted orders as they are, and to fix the 14 March orders later (15.2).
+
 **Proof.**
 - PDF generated from the real lines of PO-2026-0024 and opened page by page: 12 lines, total $143,134.69
   (equal to the sum of its line totals and to the PO page); a 48-line test PO with a long vendor name,

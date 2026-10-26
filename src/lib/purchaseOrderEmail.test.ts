@@ -24,7 +24,7 @@ describe('buildPurchaseOrderEmailPayload', () => {
     vendor: 'Spinner Ag',
     expected_delivery_date: '2026-11-03',
     notes: null,
-    lines: [{ id: 'l-1', product_id: 'p-1', quantity_ordered: 3, unit_cost: 19.99 }],
+    lines: [{ id: 'l-1', product_id: 'p-1', product_name: 'Atrazine 4L', epa_registration: null, unit_size: 'gal', notes: null, quantity_ordered: 3, unit_cost: 19.99 }],
   };
   const input = {
     vendorName: 'Spinner <Ag>',

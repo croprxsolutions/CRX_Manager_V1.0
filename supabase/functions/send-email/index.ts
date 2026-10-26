@@ -6,6 +6,7 @@ import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
   decidePurchaseOrderEmail,
   parsePurchaseOrderSnapshot,
+  type PoGateLine,
   type PoGateResult,
   type PoGateSnapshot,
 } from "../_shared/purchaseOrderEmailGate.ts";
@@ -116,13 +117,15 @@ async function checkPurchaseOrderEmail(
 
   const { data: lines, error: linesErr } = await adminClient
     .from("purchase_order_items")
-    .select("id, product_id, quantity_ordered, unit_cost, cost_needs_review")
+    .select("id, product_id, quantity_ordered, unit_cost, cost_needs_review, unit_size, notes, product_name, product:products(product_name, epa_registration)")
     .eq("purchase_order_id", purchaseOrderId);
   if (linesErr || !Array.isArray(lines)) {
     return { ok: false, status: 503, error: `Purchase order lines lookup failed: ${linesErr?.message ?? "no list"}` };
   }
 
-  return decidePurchaseOrderEmail(order, lines, to, snapshot);
+  // `product` is a many-to-one embed, so PostgREST returns one object (or null); the
+  // untyped client infers an array, hence the cast.
+  return decidePurchaseOrderEmail(order, lines as unknown as PoGateLine[], to, snapshot);
 }
 
 Deno.serve(async (req: Request) => {

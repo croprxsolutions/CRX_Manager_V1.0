@@ -159,7 +159,16 @@ describe('PurchaseOrderDetail purchase order PDF and emailed copy', () => {
         vendor: 'Spinner Ag',
         expected_delivery_date: null,
         notes: null,
-        lines: [{ id: 'line-1', product_id: 'product-1', quantity_ordered: 3, unit_cost: 19.99 }],
+        lines: [{
+          id: 'line-1',
+          product_id: 'product-1',
+          product_name: 'Atrazine 4L',
+          epa_registration: '100-497',
+          unit_size: 'gal',
+          notes: null,
+          quantity_ordered: 3,
+          unit_cost: 19.99,
+        }],
       },
     });
     expect(payload.customer_id).toBeUndefined();

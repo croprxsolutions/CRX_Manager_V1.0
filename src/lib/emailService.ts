@@ -28,7 +28,16 @@ export interface PurchaseOrderEmailSnapshot {
   vendor: string | null;
   expected_delivery_date: string | null;
   notes: string | null;
-  lines: Array<{ id: string; product_id: string; quantity_ordered: number; unit_cost: number }>;
+  lines: Array<{
+    id: string;
+    product_id: string;
+    product_name: string;
+    epa_registration: string | null;
+    unit_size: string | null;
+    notes: string | null;
+    quantity_ordered: number;
+    unit_cost: number;
+  }>;
 }
 
 interface SendEmailBase {

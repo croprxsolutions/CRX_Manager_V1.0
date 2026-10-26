@@ -4,6 +4,7 @@
  * in place of an editable invoice whose Save would write an empty (or another invoice's) line
  * list over the real one, or a split review whose Post would bill lines nobody saw.
  */
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
@@ -13,16 +14,22 @@ type Row = Record<string, unknown>;
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   functions: {} as Record<string, unknown>,
-  // Table or function name -> how its reads fail.
-  failing: new Map<string, 'error' | 'nodata' | 'notlist'>(),
+  // Table or function name -> how its reads fail. 'held' answers with the rows of the moment it
+  // was asked, but only once the test calls release().
+  failing: new Map<string, 'error' | 'nodata' | 'notlist' | 'held'>(),
+  held: [] as Array<() => void>,
   toast: vi.fn(),
 }));
 
+const release = () => { const waiting = H.held; H.held = []; waiting.forEach((answer) => answer()); };
+
 // A query that ignores its filters and answers with the given rows (or a failure).
-function fixedQuery(reply: { data: unknown; error: unknown; count: number | null }): Record<string, unknown> {
+function fixedQuery(reply: { data: unknown; error: unknown; count: number | null }, held = false): Record<string, unknown> {
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve(reply);
+      if (prop === 'then') {
+        return (resolve: (v: unknown) => unknown) => { if (held) H.held.push(() => resolve(reply)); else resolve(reply); };
+      }
       if (prop === 'maybeSingle' || prop === 'single') {
         return () => Promise.resolve({
           data: Array.isArray(reply.data) ? (reply.data[0] ?? null) : reply.data,
@@ -39,6 +46,7 @@ function fixedQuery(reply: { data: unknown; error: unknown; count: number | null
 
 function replyFor(name: string, rows: unknown): { data: unknown; error: unknown; count: number | null } {
   const mode = H.failing.get(name);
+  if (mode === 'held') return { data: rows, error: null, count: Array.isArray(rows) ? rows.length : null };
   if (mode === 'error') return { data: null, error: { message: 'connection reset', code: 'XX000' }, count: null };
   if (mode === 'nodata') return { data: null, error: null, count: null };
   if (mode === 'notlist') return { data: { unexpected: true }, error: null, count: null };
@@ -48,7 +56,7 @@ function replyFor(name: string, rows: unknown): { data: unknown; error: unknown;
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const client = {
-    from: (table: string) => fixedQuery(replyFor(table, H.tables[table] ?? [])),
+    from: (table: string) => fixedQuery(replyFor(table, H.tables[table] ?? []), H.failing.get(table) === 'held'),
     rpc: (name: string) => fixedQuery(replyFor(name, H.functions[name] ?? [])),
   };
   return { ...actual, supabase: client, supabaseUntyped: client };
@@ -85,8 +93,12 @@ const noSave = () => expect(screen.queryByRole('button', { name: /^Save$/ })).no
 let go: NavigateFunction;
 let path = '';
 function RouterProbe() {
-  go = useNavigate();
-  path = useLocation().pathname;
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    go = navigate;
+    path = pathname;
+  }, [navigate, pathname]);
   return null;
 }
 const at = (url: string, routes: React.ReactNode) => render(
@@ -99,6 +111,7 @@ const at = (url: string, routes: React.ReactNode) => render(
 beforeEach(() => {
   vi.clearAllMocks();
   H.failing = new Map();
+  H.held = [];
   H.tables = {};
   H.functions = {};
 });
@@ -164,6 +177,35 @@ describe('Invoice Detail', () => {
     H.failing.set('customers', 'error');
     open();
     expect(await screen.findByText(FAILED)).toBeInTheDocument();
+  });
+
+  it('a customer-terms read with no row fails the load', async () => {
+    loaded({ ...invoice, payment_terms: null, due_date: '2026-10-31' });
+    H.failing.set('customers', 'nodata');
+    open();
+    expect(await screen.findByText(FAILED)).toBeInTheDocument();
+  });
+
+  it("an older load of the same invoice that answers late never replaces the newer one's lines", async () => {
+    loaded();
+    H.failing.set('invoice_items', 'held');
+    open();
+    // Leave and come back while the first load's line read is still out.
+    await waitFor(() => expect(H.held.length).toBe(1));
+    act(() => { go('/invoices/inv2'); });
+    act(() => { go('/invoices/inv1'); });
+    H.failing.delete('invoice_items');
+    H.tables.invoice_items = [{ ...line, id: 'ii2', description: 'Gadget 1 GL', product: { product_name: 'Gadget 1 GL' } }];
+    // The newest load finishes first, showing the new lines.
+    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument();
+    expect(screen.queryAllByText('Gadget 1 GL').length + screen.queryAllByDisplayValue('Gadget 1 GL').length).toBeGreaterThan(0);
+    // Then the first load's line read answers, with the lines of the moment it was asked.
+    expect(H.held.length).toBe(1);
+    await act(async () => { release(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(screen.queryAllByText('Gadget 1 GL').length + screen.queryAllByDisplayValue('Gadget 1 GL').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Widget 2.5 GL')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('Widget 2.5 GL')).not.toBeInTheDocument();
   });
 
   it('a split-group read with no list says could not be loaded', async () => {
@@ -255,6 +297,21 @@ describe('Field Application Invoice', () => {
     open();
     expect(await screen.findByText(FAILED)).toBeInTheDocument();
     expect(path).toBe('/invoices/field-app/fa1');
+  });
+
+  it('a source-job read with no row says could not be loaded', async () => {
+    loaded({ ...invoice, job_id: 'j1' });
+    H.tables.jobs = [];
+    open();
+    expect(await screen.findByText(FAILED)).toBeInTheDocument();
+  });
+
+  it('a label read that leaves out a line\'s product says could not be loaded, not "no label max"', async () => {
+    loaded();
+    H.tables.products = [];
+    open();
+    expect(await screen.findByText(FAILED)).toBeInTheDocument();
+    noSave();
   });
 
   it('a failed header read says could not be loaded and stays on the invoice', async () => {

@@ -953,6 +953,11 @@ export default function FieldAppSplitInvoiceEditor() {
     );
   }
 
+  // A reopened set is still loading, or this mounted editor still holds the previous saved set's
+  // results (it is not remounted between /split-billing/:id addresses, and those are cleared only
+  // once the reopen effect runs): show neither its review card nor its Post.
+  const reopenBusy = isReopen && (reopenLoading || billingSetId !== routeSetId);
+
   const resultsByCustomer = resultInvoices.map((inv) => ({
     invoice: inv,
     lines: resultShares.filter((s) => s.invoice_id === inv.id),
@@ -983,7 +988,7 @@ export default function FieldAppSplitInvoiceEditor() {
             variant="primary"
             icon={<Send className="w-4 h-4" />}
             showChevron={false}
-            disabled={!invoiceGroupId || posted || dirtyAfterSave || saving || posting}
+            disabled={!invoiceGroupId || reopenBusy || posted || dirtyAfterSave || saving || posting}
             loading={posting}
             onClick={openPostConfirm}
             title={dirtyAfterSave ? 'You have unsaved changes — re-save the draft before posting.' : undefined}
@@ -999,13 +1004,13 @@ export default function FieldAppSplitInvoiceEditor() {
         </div>
       )}
 
-      {isReopen && reopenLoading && (
+      {reopenBusy && (
         <div className="flex items-center justify-center py-10">
           <div className="w-6 h-6 border-4 border-crx-green border-t-transparent rounded-full animate-spin" />
         </div>
       )}
 
-      {isReopen && !reopenLoading && (
+      {isReopen && !reopenBusy && (
         <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-800">
           {posted
             ? 'This split invoice group is posted and read-only.'
@@ -1365,7 +1370,7 @@ export default function FieldAppSplitInvoiceEditor() {
       </>)}
 
       {/* Authoritative results after save */}
-      {resultInvoices.length > 0 && (
+      {!reopenBusy && resultInvoices.length > 0 && (
         <Card>
           <CardHeader title="Split Result (server-computed)" accent={posted ? 'Posted' : 'Draft'} />
           <div className="space-y-4">

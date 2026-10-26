@@ -1165,6 +1165,7 @@ export default function FieldApplicationInvoice() {
       if (!isCurrentLoad()) return;
       // An unread job would quietly date the PHI check and the post notice from the invoice.
       if (jobError) throw jobError;
+      if (!jobRow) throw new Error('The source job read returned no row');
       setJobNumber((jobRow as { job_number?: string } | null)?.job_number ?? null);
       // #41: source job status gates the post-notification action (completed/invoiced).
       setJobStatus(((jobRow as { status?: string } | null)?.status as JobStatus | undefined) ?? null);
@@ -1360,6 +1361,9 @@ export default function FieldApplicationInvoice() {
       if (!isCurrentLoad()) return;
       if (prodError) throw prodError;
       if (!Array.isArray(prodRows)) throw new Error('The product label read returned no list');
+      // Every staff member reads every product, so a missing one is a bad read: its line would
+      // look like it has no label maximum.
+      if (prodRows.length < productIds.length) throw new Error('The product label read left out a product');
       for (const p of prodRows as Array<{ id: string; max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null }>) {
         labelByProduct.set(p.id, {
           max_label_rate: p.max_label_rate,
@@ -1472,12 +1476,14 @@ export default function FieldApplicationInvoice() {
   // of the editor (To-Do 10.5), including a reload after Save, Post, Unpost or Void. It never
   // throws, so a failed reload is not reported as a failed save.
   const fetchInvoice = useCallback(async () => {
-    const started = { id: invoiceLoadRef.current.id, route: invoiceLoadRef.current.route };
+    // loadInvoice bumps the request counter before its first await, so this reads its own request.
+    const load = loadInvoice();
+    const started = { ...invoiceLoadRef.current };
     try {
-      await loadInvoice();
+      await load;
     } catch (err) {
       const current = invoiceLoadRef.current;
-      if (!id || current.id !== started.id || current.route !== started.route) return;
+      if (!id || current.id !== started.id || current.route !== started.route || current.request !== started.request) return;
       Sentry.captureException(err instanceof Error ? err : new Error(sanitizeError(err)), { tags: { context: 'field_app_invoice_load' } });
       postVersionsRef.current = {};
       setLoadedInvoice(null);

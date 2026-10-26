@@ -199,6 +199,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const printingRef = useRef(false);
   // Latest invoice id the route is showing — older in-flight fetches bail (stale guard).
   const activeInvoiceIdRef = useRef<string | undefined>(undefined);
+  // Bumped by every invoice load; only the newest may publish.
+  const invoiceLoadSeqRef = useRef(0);
   const productSearchRequestRef = useRef(0);
   // Add Product's by-id tier lookup: a single flight, bound to the invoice and customer it was
   // asked for. The ref holds the in-flight lookup's token (0 = none); switching invoices clears it.
@@ -447,10 +449,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Throws when a read the editor depends on fails or answers with no list; fetchInvoice below
   // turns that into the failed state.
-  const loadInvoice = useCallback(async (invoiceId: string) => {
+  const loadInvoice = useCallback(async (invoiceId: string, request: number) => {
     // Stale-fetch guard: on rapid invoice-to-invoice navigation an older
-    // in-flight fetch must not render the previous invoice's amounts.
-    const isStale = () => activeInvoiceIdRef.current !== invoiceId;
+    // in-flight fetch must not render the previous invoice's amounts, and an older
+    // load of the same invoice (A -> B -> A, or a reload after Save) must not
+    // replace a newer one.
+    const isStale = () => activeInvoiceIdRef.current !== invoiceId || invoiceLoadSeqRef.current !== request;
     setLoading(true);
     // No baseline and nothing to post while (re)loading; the end of this load sets both.
     setSavedEditSnapshot(null);
@@ -568,6 +572,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         .maybeSingle();
       // Unread terms would show a terms-stamped due date as a custom date, which Save then keeps.
       if (termsError) throw termsError;
+      if (!customerTerms) throw new Error('The customer terms read returned no row');
       customerPaymentTerms = (customerTerms as { payment_terms?: string | null } | null)?.payment_terms?.trim() || '';
       if (isStale()) return;
     }
@@ -791,11 +796,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // of the editor, instead of "Invoice not found", an endless spinner, or a form whose Save could
   // write over the real invoice (To-Do 10.5).
   const fetchInvoice = useCallback(async (invoiceId: string) => {
+    const request = ++invoiceLoadSeqRef.current;
+    setLoading(true);
     setLoadFailedId(null);
     try {
-      await loadInvoice(invoiceId);
+      await loadInvoice(invoiceId, request);
     } catch (err) {
-      if (activeInvoiceIdRef.current !== invoiceId) return;
+      if (activeInvoiceIdRef.current !== invoiceId || invoiceLoadSeqRef.current !== request) return;
       Sentry.captureException(err instanceof Error ? err : new Error(sanitizeError(err)), { tags: { source: 'read', action: 'load_invoice' } });
       savedPostRef.current = null;
       setLoadFailedId(invoiceId);

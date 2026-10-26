@@ -1,7 +1,10 @@
 # Known Issues — what is open today
 
-**Last verified: 2026-10-25 (America/Chicago)** against `main` at `c65b7b351` (code, migration files, merged
-PRs). The 2026-10-23 rewrite had no database access. The 2026-10-25 pass re-read live, read-only, at 10:52 PM
+**Last verified: 2026-10-26 (America/Chicago)**: the 2026-10-26 pass (PR B, To-Do 0.15) re-read the live
+migration ledger read-only at 10:05 AM Central (1063 rows / 1056 names, `max(version)` `20261026142537` =
+`20261025090000`, row 983, applied; row 984 `20261026090000` not yet applied) and the `email_type` enum and
+`vendors` emails (10 values; 0 of 13 vendors with an email) for the KI-72 PO-email note. Earlier: 2026-10-25
+against `main` at `c65b7b351` (code, migration files, merged PRs). The 2026-10-23 rewrite had no database access. The 2026-10-25 pass re-read live, read-only, at 10:52 PM
 Central: the migration ledger from `20261022000000` on (so the applied-live claims for `20261022090000`,
 `20261022101000` and `20261023090000` in KI-01, KI-02, KI-73 and KI-74 are confirmed), the KI-07 grant and
 search-path items, and the `invoice_postable_version` overload. Every other "applied live" statement below is
@@ -477,6 +480,10 @@ CRX-LIFE-001, reps creating a `field_application` invoice through the order
 pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record). Two proof gates remain: the 29th
 live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
 Mason's REAL-DATA-OK.
+
+Purchase order to vendor (To-Do 0.15, migration `20261026090000`, row 984): the PDF download works once merged,
+but **Email Vendor stays off until Mason approves deploying the `send-email` edge function** (the live function
+answers "Unknown email_type: purchase_order"), and no vendor has an email address yet (Mason's data, Vendors page).
 
 ### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**

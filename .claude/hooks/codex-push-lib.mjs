@@ -4372,26 +4372,6 @@ const INLINE_CODE_CLUSTER_RE = /^-[A-Za-z0-9]*?[epcrE]([\s\S]*)$/;
 // connector, PR #956). Every word after `eval` in the window is judged, and
 // `eval` may follow the runtime's own options (`deno --quiet eval`; Luna).
 const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
-// Inline code is refused only when it can also start a program or reach the
-// network (Mason, 2026-10-26, "looser guards"): `arr.push(x)` or a regex naming
-// `merge` is ordinary data handling, and refusing it was a steady false block.
-// Perl, Ruby and PHP run a shell command from backticks; in JavaScript a
-// backtick is just a template string, so it does not count there.
-// `$\`` is Bun's and zx's shell tag; `new Function` builds code like eval does.
-// Perl `qx(…)` and Ruby `%x(…)` run a shell command too.
-const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\b|\bopen\b[^;]*(?:\|-|-\||["']\s*\||\|\s*["'])|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|\breadpipe\b|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
-// Code that names the merge or push ACTION itself (`pr merge`, `['pr','merge']`,
-// Octokit's `pulls.merge`, a `/pulls/1/merge` path, `git push`, `HEAD:main`) is
-// refused however it would run it — a client library reaches GitHub without any
-// marker above (Luna round 2). The word `push` or `merge` on its own is data.
-const INLINE_ACTION_RE = /\bpr\b[^;\n]{0,120}?\bmerge\b|\bpulls\b[^;\n]{0,80}?\bmerge\b|mergepullrequest|\bpulls\/[^\s'"]*\/merge\b|\bgit['"\s,]+push\b|\bpush['"\s,]+origin\b|head:main\b/i;
-const BACKTICK_RUNS_SHELL = new Set(["perl", "ruby", "php"]);
-// Code that assembles words from pieces (`'child_'+'process'`, char codes,
-// decoding) can spell any capability, so it counts too (Sol on #1128).
-function inlineCodeCanAct(program, code) {
-  return INLINE_ACTION_RE.test(code) || INLINE_CAPABILITY_RE.test(code) || OBFUSCATION_RE.test(code) ||
-    (BACKTICK_RUNS_SHELL.has(program) && code.includes("`"));
-}
 export function inlineCodeReachesGatedAction(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
     const words = splitShellArgv(segment);
@@ -4410,7 +4390,7 @@ export function inlineCodeReachesGatedAction(command) {
           evalSubcommand = true;
           continue;
         }
-        if (evalSubcommand && couldReachGatedAction([word]) && inlineCodeCanAct(program, word)) return true;
+        if (evalSubcommand && couldReachGatedAction([word])) return true;
         // `--eval=…`, a separate `--eval …`, or a short cluster whose code is
         // attached (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3) or
         // is the next word (`node -pe "…"`).
@@ -4420,11 +4400,7 @@ export function inlineCodeReachesGatedAction(command) {
           : INLINE_CODE_FLAG_RE.test(word) ? [words[at + 1]]
           : cluster ? [cluster[1], words[at + 1]]
           : [];
-        // Also refused: gated code whose merge or push action sits in the same command's
-        // arguments (`perl -e 'print readpipe "gh @ARGV"' pr merge 951`), however the
-        // code runs it — this ends the per-API list chase (Codex App on #1128).
-        if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]) &&
-          (inlineCodeCanAct(program, String(code)) || INLINE_ACTION_RE.test(segment)))) return true;
+        if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]))) return true;
         // No early stop at the first bare word: a detached option value
         // (`node --require fs -e "…"`) looks like a script argument, so the whole
         // window is scanned (Codex connector, PR #956 third pass).

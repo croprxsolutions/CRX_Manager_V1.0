@@ -460,9 +460,8 @@ separately, the permission change.
    a program run from one whole variable (`"$NODE" x.mjs`, `"$CODEX" --version`) is refused only when
    the command could reach a gated action, glues a word from run-time pieces (`$a$b`,
    `$(printf g)h`, `g${X}t`), or has a variable among its arguments (`"$A" "$B" "$C" 951`)
-   — `runtimeProgramRefused`. Inline code is refused only when it can also
-   start a program or reach the network (`child_process`, `exec`, `system(`, `fetch`, a URL; backticks
-   in Perl, Ruby and PHP), so `a.push(x)` or a regex naming `merge` passes.
+   — `runtimeProgramRefused`. Inline code (`node -e`, `python -c`, …) is unchanged: a loosening was
+   tried and dropped after Sol found a new process-launching API in each of three reviews.
 2. **Hold latch:** outward actions deny, local work warns. See its row above.
 3. **Review proof guard:** the rule that denied any command naming any `.claude` path next to a
    destructive word (34 sessions) now counts `.claude` only as a whole target (`.claude`, `.claude/`,

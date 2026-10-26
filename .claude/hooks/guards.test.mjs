@@ -205,17 +205,8 @@ for (const command of [
   '"$GH" --repo o/r --hostname github.com pr "$ACTION" 951 --admin',
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
-// Inline code is refused only when it can also start a program or reach the network.
-for (const command of [
-  `node -e "const a=[]; a.push(1); console.log(/merge|push/.test('x'))"`,
-  `node -e "const s=\`gh pr list\`; console.log(s.length)"`,
-  `node -e "const f = function(){ return /merge/.test('x') }; console.log(f())"`,
-  `node -e "const execute=x=>x; console.log(/merge/.test('x'))"`,
-  `node -e "const execution=/merge/.test('x'); console.log('git',execution)"`,
-  `perl -e 'open(my $f, "<", "gh-notes.txt") or die; print <$f>'`,
-  `node -e "console.log(/gh|git|push|merge/.test(process.argv[1]))" x`,
-  `gh pr view 5 --json title | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const x=[];x.push(d);console.log(x)})"`,
-]) ok(!inlineCodeReachesGatedAction(command), `harmless inline code allowed: ${command}`);
+// Inline code that shows a gated word stays refused (the loosening was dropped,
+// Mason 2026-10-26, after Sol kept finding new launch APIs); these must stay blocked.
 for (const command of [
   `node -e "require('child_process').execSync('gh pr merge 1')"`,
   `node -e "require('child_process').execSync(Buffer.from('Z2ggcHIgbWVyZ2UgMQ==','base64').toString())"`,

@@ -30,3 +30,14 @@ customer"; price history itself stays admin-only.
     does not, the same-date tie, another customer, every role, the tier stamp on each path, grants,
     preflight drift and a role-gate mutation, and it runs the live smoke chain once.
   - The live self-undoing chain `smoke-get-last-charged-prices.sql` runs after the apply.
+- **Review rounds (Codex Luna, 3 rounds):**
+  - Fixed: an invoice line billed from an older, unquoted order line keeps "Tier unknown" instead of
+    the customer's current tier; a split payer's invoice does not hide this customer's order line;
+    the database replaces any tier a writer sends; a newly added product shows "Loading", not
+    "Never charged"; the card's wording lists every kind of record that counts; a comment on why
+    charge lines and application fees drop out.
+  - Not changed, with reason: the checked-in function snapshot lists the new functions before they
+    are live. That is the house convention, because this PR cannot merge until its migration is
+    applied (the merge gates require it), and the queued-exception bridge must not be committed.
+    A round 3 "HIGH" (the proof cannot seed an application fee with a product) was refuted: the
+    CHECK it cites covers charge lines only, and the proof seeds that line and passes.

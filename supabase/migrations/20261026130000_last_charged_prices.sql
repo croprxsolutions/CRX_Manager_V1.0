@@ -327,9 +327,10 @@ BEGIN
     SELECT DISTINCT w.product_id FROM unnest(p_product_ids) AS w(product_id) WHERE w.product_id IS NOT NULL
   ),
   charges AS (
-    -- Product lines only: charge lines and application fees carry no product (a CHECK on
-    -- invoice_items), so the product filter leaves them out. A $0 line is a no-charge line
-    -- (split billing keeps them), not a price we charged.
+    -- Product lines only: charge lines carry no product (invoice_items_charge_line_shape_chk), so
+    -- the product filter leaves them out; an application fee may name a product, so it is left out
+    -- by is_application_fee. A $0 line is a no-charge line (split billing keeps them), not a price
+    -- we charged.
     SELECT ii.product_id, ii.unit_price_cents, ii.price_tier_at_sale AS price_tier, ii.unit_size,
            i.invoice_date AS charged_on, 'invoice'::text AS source, 0 AS source_rank,
            ii.created_at, ii.sort_order, ii.id

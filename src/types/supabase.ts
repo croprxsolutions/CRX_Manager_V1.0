@@ -4905,7 +4905,6 @@ export type Database = {
           invoice_date: string
           invoice_group_id: string | null
           invoice_number: string
-          invoice_post_version: string | null
           invoice_type: string
           is_quick_delivery: boolean | null
           job_id: string | null
@@ -11573,6 +11572,7 @@ export type Database = {
         }
         Returns: Json
       }
+      _can_see_field: { Args: { p_field_id: string }; Returns: boolean }
       _cancel_order_idem_impl_20260721: {
         Args: {
           p_idempotency_key?: string
@@ -14252,10 +14252,6 @@ export type Database = {
           p_idempotency_key?: string
         }
         Returns: undefined
-      }
-      invoice_post_version: {
-        Args: { "": Database["public"]["Tables"]["invoices"]["Row"] }
-        Returns: string
       }
       invoice_postable_version: {
         Args: { "": Database["public"]["Views"]["invoices_postable"]["Row"] }

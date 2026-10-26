@@ -74,3 +74,10 @@ writes that the new one refuses. The hook-level tests run the real `live-testdat
 process and confirm that these are denied: the gap-1 example, a marked insert next to an unmarked
 update, and an OR-ed delete. The same tests confirm the cleanup delete and insert-then-delete are
 allowed.
+
+**Merged after #1092 (rollback-only smoke batches).** A batch that #1092 proves PostgreSQL must undo
+entirely is judged first, so a smoke chain that runs one literal `EXECUTE` inside its final DO block
+still passes; everywhere else `EXECUTE` in a DO block stays refused as dynamic SQL. Both branches had
+added the same dollar-quote and `U&"…"` checks, so #1092's earlier versions now answer first
+(`copy-program-or-file`, `unicode-escaped-identifier`), and `COPY … FROM STDIN` is still refused as
+`copy-from`. 66 of the 69 live smoke chains still pass.

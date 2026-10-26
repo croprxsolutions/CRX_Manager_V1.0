@@ -27,12 +27,14 @@ DECLARE
   v_replay jsonb;
   v_floors_before bigint;
   v_history_before bigint;
+  v_prior_history uuid[];
   v_history text;
 BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1;
   SELECT id INTO v_wrong FROM public.profiles WHERE role IN ('driver', 'applicator', 'sales_rep') AND is_active
    ORDER BY CASE role WHEN 'driver' THEN 0 WHEN 'applicator' THEN 1 ELSE 2 END, created_at LIMIT 1;
-  -- A product with no floor yet, so the chain starts from "no floor".
+  -- A product with no floor now, so the chain starts from "no floor". It may have had a floor that was
+  -- cleared: that history stays, so only the rows this run adds are checked below.
   SELECT p.id INTO v_product FROM public.products p
    WHERE p.is_active AND NOT EXISTS (SELECT 1 FROM public.product_margin_floors f WHERE f.product_id = p.id)
    ORDER BY p.created_at, p.id LIMIT 1;
@@ -43,6 +45,8 @@ BEGIN
   v_items := jsonb_build_array(jsonb_build_object('product_id', v_product, 'margin_floor_percent', 12.5));
   SELECT count(*) INTO v_floors_before FROM public.product_margin_floors;
   SELECT count(*) INTO v_history_before FROM public.product_margin_floor_changes;
+  SELECT COALESCE(array_agg(id), '{}') INTO v_prior_history
+    FROM public.product_margin_floor_changes WHERE product_id = v_product;
 
   -- P1 no-auth
   PERFORM set_config('request.jwt.claims', '', true);
@@ -100,7 +104,8 @@ BEGIN
   -- Exact replay: same result, no second history row, receipt bound to the admin.
   v_replay := public.set_product_margin_floors(v_items, 'smoke ' || v_suffix, v_admin, v_key);
   IF v_replay IS DISTINCT FROM v_result
-     OR (SELECT count(*) FROM public.product_margin_floor_changes WHERE product_id = v_product) <> 1 THEN
+     OR (SELECT count(*) FROM public.product_margin_floor_changes
+          WHERE product_id = v_product AND id <> ALL (v_prior_history)) <> 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL replay: % vs %', v_replay, v_result;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.idempotency_keys
@@ -138,7 +143,7 @@ BEGIN
   SELECT string_agg(COALESCE(old_margin_floor::text, '-') || '>' || COALESCE(new_margin_floor::text, '-')
                     || ':' || COALESCE(reason, '-') || ':' || (changed_by = v_admin)::text, ',' ORDER BY created_at, id)
     INTO v_history
-    FROM public.product_margin_floor_changes WHERE product_id = v_product;
+    FROM public.product_margin_floor_changes WHERE product_id = v_product AND id <> ALL (v_prior_history);
   IF v_history IS DISTINCT FROM format('->0.125:smoke %s:true,0.125>0.143:-:true,0.143>-:cleared:true', v_suffix) THEN
     RAISE EXCEPTION 'SMOKE_FAIL history: %', v_history;
   END IF;

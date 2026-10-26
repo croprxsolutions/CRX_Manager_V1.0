@@ -9,4 +9,7 @@ Fixes found in review of the margin floor change, before it went live:
 - The product page's Margin Floor card no longer shows one product's floor on another product when
   a save or load finishes after the page has moved on; it resets when the product changes.
 - Typing `15.00` against a saved 15% floor no longer counts as a change.
-- Proof: `node scripts/smoke/prove-product-margin-floors-real-schema.mjs` re-run, PASS.
+- The live smoke chain (`smoke-set-product-margin-floors.sql`) now checks only the history rows it
+  adds itself, so a product whose floor was set and later cleared no longer fails it (Codex App).
+- Proof: `node scripts/smoke/prove-product-margin-floors-real-schema.mjs` re-run, PASS; the smoke
+  chain passes in that database on a fresh product and on one with earlier cleared history.

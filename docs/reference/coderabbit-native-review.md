@@ -79,7 +79,8 @@
 >      fail: they judge the PR's text, not its code);
 >    - the fixes were pushed **before** any merge of main (fix first, then merge main), and the PR's
 >      own changes against the base are the same at the last fix and at the head, so a later merge
->      brought in nothing but main (plain `docs/**/*.md` ledgers both sides edit excepted);
+>      brought in nothing but main (the shared status ledgers both sides edit excepted:
+>      `KNOWN_ISSUES.md`, `TO_DO_LIST.md`, `CURRENT_STATE.md`, `migration-history.md`, `docs/CHANGELOG.md`);
 >    - the fixes touch only files that hold a finding (edits, at most 60 changed lines in total),
 >      test files including `scripts/smoke/` chains (at most 150 changed and 20 deleted lines),
 >      and one new `docs/changelog.d/` entry (at most 40 lines); nothing under `supabase/`, CI,

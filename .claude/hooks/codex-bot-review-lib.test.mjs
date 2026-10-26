@@ -827,7 +827,26 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     const verdict = readFixture(number);
     eq([verdict.status, verdict.via || ""], [fixture.expect.status, fixture.expect.via], `PR #${number} replays to its recorded outcome`);
   }
-  const covered = readFixture(1017);
+  // As recorded, #1017 is refused: a merge of main after its fixes also changed
+  // docs/workflows/UI_PATTERNS.md, which the PR edits and which is guidance, not a
+  // shared status ledger (Luna round 2). With that one main edit taken out, it is the
+  // covered base every broken copy below starts from.
+  ok(/changed the PR's own changes \(docs\/workflows\/UI_PATTERNS\.md\)/.test(readFixture(1017).why),
+    "#1017 as recorded: a main edit to a shared guidance doc refuses");
+  const withoutMainDocEdit = () => {
+    let atFix = "";
+    return (k, v) => {
+      const entry = Array.isArray(v) ? v.find((f) => f.filename === "docs/workflows/UI_PATTERNS.md") : null;
+      if (k === "tipFix" && entry) atFix = entry.sha;
+      if (k === "tipHead" && entry && atFix) entry.sha = atFix;
+    };
+  };
+  const readCovered = (edit = () => {}) => {
+    const align = withoutMainDocEdit();
+    return readFixture(1017, (k, v) => { align(k, v); edit(k, v); });
+  };
+  const covered = readCovered();
+  eq(covered.via, "minor-follow-up", "#1017 without that main doc edit is covered");
   eq(covered.followUp.reviewedOid, "faa0f2fa31ec15b34ebabeccf07e5abafde2fa31", "#1017: R is the commit CodeRabbit marked Review completed");
   eq(covered.followUp.findings.map((f) => [f.path, f.severity]), [["src/components/ui/RecordSearchPicker.tsx", "minor"]],
     "#1017: its one finding is read with CodeRabbit's own Minor label");
@@ -871,6 +890,16 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
       reviews.totalCount += 1;
     }],
     ["missing", "a review with two finding-count lines", "followUp", (v) => { fullReview(v).body += "\n**Actionable comments posted: 1**\n"; }],
+    ["missing", "another review of R with only a written finding", "followUp", (v) => {
+      const reviews = v.data.repository.pullRequest.reviews;
+      reviews.nodes.push({ ...structuredClone(fullReview(v)), body: "This change double-bills an invoice.", comments: { totalCount: 0, nodes: [] } });
+      reviews.totalCount += 1;
+    }],
+    ["missing", "a merge after the fixes that changed a shared policy document", "any", (v, k) => {
+      if (k === "tipFix") v.push({ filename: "docs/reference/coderabbit-native-review.md", status: "modified", sha: "6".repeat(40) });
+      if (k === "tipHead") v.push({ filename: "docs/reference/coderabbit-native-review.md", status: "modified", sha: "7".repeat(40) });
+    }],
+    ["missing", "a base compare entry with no blob", "any", (v, k) => { if (k === "tipFix" || k === "tipHead") delete v[0].sha; }],
     ["unreadable", "a summary describing another commit", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(R, "f".repeat(40)); }],
     ["unreadable", "no summary comment", "followUp", (v) => { walkthrough(v).body = ""; }],
     ["unreadable", "a pre-merge table missing a row", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/\n\|[^\n]*New Table Without Rls[^\n]*/, ""); }],
@@ -908,9 +937,13 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     "more than 100 PR comments": /PR has more than 100 comments/,
     "another review of R with a finding of its own": /another CodeRabbit review of that commit posted findings/,
     "another review of R requesting changes": /another CodeRabbit review of that commit is CHANGES_REQUESTED/,
-    "a review with two finding-count lines": /another CodeRabbit review of that commit posted findings|posted no findings/,
+    // Its count is not trusted, so it is no full review; as "another" review it has text.
+    "a review with two finding-count lines": /another CodeRabbit review of that commit has text of its own/,
     "a merge of another branch that adds a file": /changed the PR's own changes \(src\/lib\/sneaky\.ts\)/,
     "a fix to a test file in agent tooling": /pr-merge-guard\.test\.mjs, which always gets a fresh review/,
+    "another review of R with only a written finding": /another CodeRabbit review of that commit has text of its own/,
+    "a merge after the fixes that changed a shared policy document": /changed the PR's own changes \(docs\/reference\/coderabbit-native-review\.md\)/,
+    "a base compare entry with no blob": /could not be compared in full/,
     "a summary describing another commit": /describes fffffffff, not the reviewed commit/,
     "no summary comment": /summary comment could not be identified/,
     "a pre-merge table missing a row": /lists 8 checks but its summary counts 9/,
@@ -933,7 +966,7 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
   };
   eq(Object.keys(reasons).sort(), cases.map(([, label]) => label).sort(), "every broken case names its expected reason");
   for (const [status, label, kind, change] of cases) {
-    const verdict = readFixture(1017, (k, value) => { if (k === kind) change(value); });
+    const verdict = readCovered((k, value) => { if (kind === "any" || k === kind) change(value, k); });
     eq(verdict.status, status, `#1017 broken by ${label} -> ${status}`);
     ok(reasons[label].test(verdict.why), `#1017 broken by ${label} is refused for that reason (got: ${verdict.why})`);
   }
@@ -952,7 +985,7 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     }],
   ];
   for (const [label, kind, change] of stays) {
-    eq(readFixture(1017, (k, value) => { if (kind === "any" || k === kind) change(value, k); }).via, "minor-follow-up", `#1017 with ${label} stays covered`);
+    eq(readCovered((k, value) => { if (kind === "any" || k === kind) change(value, k); }).via, "minor-follow-up", `#1017 with ${label} stays covered`);
   }
   {
     const fixture = loadFixture(1017);
@@ -974,6 +1007,7 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
   eq(coderabbitFindingSeverity("Some text\n**🟡 Minor**"), null, "only the first line counts");
   ok(isFollowUpExcludedPath("supabase/functions/send-email/index.ts") && isFollowUpExcludedPath(".github/workflows/ci.yml")
     && isFollowUpExcludedPath("package-lock.json") && isFollowUpExcludedPath("vite.config.ts") && isFollowUpExcludedPath("AGENTS.md")
+    && isFollowUpExcludedPath("src/AGENTS.md") && isFollowUpExcludedPath("src/pages/CLAUDE.md")
     && !isFollowUpExcludedPath("src/lib/invoiceMath.ts"), "control files are excluded; app code is not");
   ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && !isFollowUpTestPath("scripts/smoke/smoke-specs.json")
     && !isFollowUpTestPath("scripts/write-codex-push-proof.mjs"), "only smoke chains count as tests under scripts/");

@@ -670,7 +670,7 @@ export const FOLLOWUP_REQUIRED_CHECKS = Object.freeze([
 ]);
 const FOLLOWUP_EXCLUDED_PATHS = [
   /^supabase\//, /^\.github\//, /^\.claude\//, /^\.codex\//, /^\.agents\//, /^\.husky\//, /^scripts\//,
-  /^eslint-local-rules\//, /^\.coderabbit\.ya?ml$/, /^agents\.md$/, /^claude\.md$/,
+  /^eslint-local-rules\//, /^\.coderabbit\.ya?ml$/, /(?:^|\/)(?:agents|claude)\.md$/, /(?:^|\/)\.cursorrules$/,
   /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|deno\.lock|vercel\.json)$/,
   /(?:^|\/)tsconfig[^/]*\.json$/, /(?:^|\/)[^/]*\.config\.[^/]+$/, /(?:^|\/)\.git[^/]*$/, /(?:^|\/)\.env/,
 ];
@@ -686,10 +686,18 @@ export function isFollowUpTestPath(path) {
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(p) || /^tests\//.test(p) || /\/__tests__\//.test(p)
     || /^scripts\/smoke\/[^/]+\.(?:sql|mjs)$/.test(p);
 }
-// Plain documentation under docs/ (not executed). A merge of main may change it
-// even when the PR edits the same file (shared ledgers such as KNOWN_ISSUES.md).
+// The shared status ledgers almost every PR edits. A merge of main may change one
+// even when the PR edits it too; policy and reference documents get no such
+// exception (Luna round 2 on #1125).
+export const FOLLOWUP_SHARED_LEDGERS = Object.freeze([
+  "docs/manual/known_issues.md",
+  "docs/manual/to_do_list.md",
+  "docs/manual/current_state.md",
+  "docs/reference/migration-history.md",
+  "docs/changelog.md",
+]);
 export function isFollowUpPlainDocPath(path) {
-  return /^docs\/.+\.md$/.test(lowerPath(path));
+  return FOLLOWUP_SHARED_LEDGERS.includes(lowerPath(path));
 }
 export function isFollowUpChangelogPath(path) {
   return /^docs\/changelog\.d\/[^/]+\.md$/.test(lowerPath(path));
@@ -906,8 +914,11 @@ export function evaluateTipMerges(atFix, atHead) {
     const map = new Map();
     for (const file of files) {
       const filename = String(file?.filename || "");
-      if (!filename) return null;
-      map.set(filename, `${String(file?.status || "")}:${String(file?.sha || "")}:${String(file?.previous_filename || "")}`);
+      const status = String(file?.status || "");
+      const sha = String(file?.sha || "");
+      // Every entry must carry its status and blob, or equal maps prove nothing (Luna round 2 on #1125).
+      if (!filename || !status || !/^[0-9a-f]{40}$/i.test(sha)) return null;
+      map.set(filename, `${status}:${sha}:${String(file?.previous_filename || "")}`);
     }
     return map;
   };
@@ -995,6 +1006,11 @@ export function evaluateFollowUpReview(pullRequestNode, reviewedOid) {
   for (const review of atReviewed) {
     if (full.includes(review)) continue;
     if (String(review?.state || "").toUpperCase() !== "COMMENTED") return notCovered(`another CodeRabbit review of that commit is ${review?.state}`);
+    // A thread reply's review object has an empty body; any text could hold a
+    // finding with no severity label (Luna round 2 on #1125).
+    if (String(review?.body || "").replace(/<!--[\s\S]*?-->/g, "").trim()) {
+      return notCovered("another CodeRabbit review of that commit has text of its own");
+    }
     if (!Array.isArray(review?.comments?.nodes) || !Number.isInteger(review.comments.totalCount)) {
       return unreadable("another CodeRabbit review of that commit could not be read");
     }

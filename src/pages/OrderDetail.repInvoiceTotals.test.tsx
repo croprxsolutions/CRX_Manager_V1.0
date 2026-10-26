@@ -93,13 +93,13 @@ describe('OrderDetail AR strip for non-admins', () => {
     renderWith('admin', [paidInvoice]);
     expect(await screen.findByText('Total Invoiced')).toBeInTheDocument();
     expect(screen.getAllByText('$500.00').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/kept by the office/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't view any invoices/)).not.toBeInTheDocument();
     expect(screen.queryByText(/include only the invoices you created/)).not.toBeInTheDocument();
   });
 
   it('a rep who can see no invoices gets an office note instead of $0.00 tiles', async () => {
     renderWith('sales_rep', []);
-    expect(await screen.findByText(/Invoice and payment totals for this order are kept by the office/)).toBeInTheDocument();
+    expect(await screen.findByText(/You can't view any invoices for this order. Ask the office whether it has been billed or paid./)).toBeInTheDocument();
     expect(screen.queryByText('Total Invoiced')).not.toBeInTheDocument();
     expect(screen.queryByText('Amount Paid')).not.toBeInTheDocument();
     expect(screen.queryByText('Balance Due')).not.toBeInTheDocument();
@@ -109,6 +109,6 @@ describe('OrderDetail AR strip for non-admins', () => {
     renderWith('sales_rep', [paidInvoice]);
     expect(await screen.findByText('Total Invoiced')).toBeInTheDocument();
     expect(screen.getByText(/include only the invoices you created or are the salesman on/)).toBeInTheDocument();
-    expect(screen.queryByText(/kept by the office/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't view any invoices/)).not.toBeInTheDocument();
   });
 });

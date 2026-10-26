@@ -1616,7 +1616,7 @@ export default function OrderDetail() {
             even when the order is billed and paid — never show a bare $0.00. */}
         {!isAdmin && invoices.length === 0 ? (
           <p className="text-sm text-secondary mt-4 pt-4 border-t border-gray-100">
-            Invoice and payment totals for this order are kept by the office.
+            You can&apos;t view any invoices for this order. Ask the office whether it has been billed or paid.
           </p>
         ) : (<>
         {!isAdmin && (

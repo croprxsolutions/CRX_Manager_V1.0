@@ -18,7 +18,7 @@ export interface TransactionThreadProps {
   deliveries?: ThreadEntity[];
   invoices?: ThreadEntity[];
   // Non-admins only see invoices they created or are the salesman on (invoices RLS),
-  // so an empty list may mean "hidden", not "none" — say so instead of "No invoices".
+  // so an empty list may mean "hidden" or "none" — the label must be true for both.
   invoicesMayBeHidden?: boolean;
   currentEntity: 'quote' | 'order' | 'delivery' | 'invoice';
   currentEntityId?: string;
@@ -225,7 +225,7 @@ export default function TransactionThread({
       ) : (
         <span className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm ${missingClass}`}>
           <Receipt className="w-4 h-4" />
-          {invoicesMayBeHidden ? 'Invoices: see office' : 'No invoices'}
+          {invoicesMayBeHidden ? 'No invoices you can view' : 'No invoices'}
         </span>
       )}
     </div>

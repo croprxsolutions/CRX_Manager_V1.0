@@ -48,7 +48,7 @@ describe('TransactionThread', () => {
     expect(screen.getByText('No quote')).toBeInTheDocument();
   });
 
-  it('says invoices are with the office, not "No invoices", when they may be hidden', () => {
+  it('says "No invoices you can view", not "No invoices", when they may be hidden', () => {
     renderThread({
       orderId: 'o1',
       orderNumber: 'O-200',
@@ -56,7 +56,7 @@ describe('TransactionThread', () => {
       invoicesMayBeHidden: true,
       currentEntity: 'order',
     });
-    expect(screen.getByText('Invoices: see office')).toBeInTheDocument();
+    expect(screen.getByText('No invoices you can view')).toBeInTheDocument();
     expect(screen.queryByText('No invoices')).not.toBeInTheDocument();
   });
 

@@ -13,7 +13,7 @@ export const SIZE_RULES = {
 };
 
 // Tests may be long and repetitive, and the two type catalogs are one long list by design.
-const SKIPPED_FILE = /\.test\.tsx?$|^src\/tests\/|^src\/types\/(?:supabase|index)\.ts$/;
+const SKIPPED_FILE = /\.test\.[jt]sx?$|^src\/tests\/|^src\/types\/(?:supabase|index)\.ts$/;
 
 export function relativePath(root, file) {
   const normalizedRoot = root.replace(/\\/g, '/').replace(/\/$/, '');
@@ -24,7 +24,14 @@ export function isCheckedSourceFile(relative) {
   return relative.startsWith('src/') && !SKIPPED_FILE.test(relative);
 }
 
-// ESLint results -> { file: { rule: count } }
+// Keyed by rule AND the function ESLint names ("complexity Function 'QuoteBuilder'"), so fixing
+// one grandfathered function cannot make room for a different new one in the same file.
+export function findingKey(message) {
+  const subject = message.message?.match(/^(.+?) has /)?.[1];
+  return subject ? `${message.ruleId} ${subject}` : message.ruleId;
+}
+
+// ESLint results -> { file: { findingKey: count } }
 export function summarizeSizeResults(root, results) {
   const size = {};
   for (const result of results) {
@@ -33,8 +40,9 @@ export function summarizeSizeResults(root, results) {
     for (const message of result.messages) {
       if (message.fatal) throw new Error(`${file}: ESLint could not parse the file: ${message.message}`);
       if (!(message.ruleId in SIZE_RULES)) continue;
+      const key = findingKey(message);
       size[file] ??= {};
-      size[file][message.ruleId] = (size[file][message.ruleId] || 0) + 1;
+      size[file][key] = (size[file][key] || 0) + 1;
     }
   }
   return sortKeys(size);
@@ -74,10 +82,10 @@ function sortKeys(object) {
 // Anything in current that the baseline does not already allow is a regression.
 export function findRegressions(baseline, current) {
   const regressions = [];
-  for (const [file, rules] of Object.entries(current.size)) {
-    for (const [rule, count] of Object.entries(rules)) {
-      const allowed = baseline.size?.[file]?.[rule] || 0;
-      if (count > allowed) regressions.push(`${file}: ${rule} — ${count} found, baseline allows ${allowed}`);
+  for (const [file, findings] of Object.entries(current.size)) {
+    for (const [key, count] of Object.entries(findings)) {
+      const allowed = baseline.size?.[file]?.[key] || 0;
+      if (count > allowed) regressions.push(`${file}: ${key} — ${count} found, baseline allows ${allowed}`);
     }
   }
   for (const [file, items] of Object.entries(current.unused)) {
@@ -92,10 +100,10 @@ export function findRegressions(baseline, current) {
 // Baseline entries the code no longer has: the baseline can shrink by that much.
 export function findImprovements(baseline, current) {
   const improvements = [];
-  for (const [file, rules] of Object.entries(baseline.size || {})) {
-    for (const [rule, allowed] of Object.entries(rules)) {
-      const count = current.size[file]?.[rule] || 0;
-      if (count < allowed) improvements.push(`${file}: ${rule} ${allowed} -> ${count}`);
+  for (const [file, findings] of Object.entries(baseline.size || {})) {
+    for (const [key, allowed] of Object.entries(findings)) {
+      const count = current.size[file]?.[key] || 0;
+      if (count < allowed) improvements.push(`${file}: ${key} ${allowed} -> ${count}`);
     }
   }
   for (const [file, items] of Object.entries(baseline.unused || {})) {

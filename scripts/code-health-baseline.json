@@ -1,648 +1,752 @@
 {
   "size": {
     "src/components/blendtickets/BulkTicketUpload.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'BulkTicketUpload'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/components/blendtickets/ManualTicketCreate.tsx": {
-      "complexity": 3,
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "complexity Function 'readPersistedUncertainManualTicket'": 1,
+      "max-lines-per-function Function 'ManualTicketCreate'": 1,
+      "complexity Arrow function": 1,
+      "complexity Async function 'handleSave'": 1,
+      "max-lines File": 1
     },
     "src/components/customers/BulkCustomerImport.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'BulkCustomerImport'": 1,
+      "complexity Function 'BulkCustomerImport'": 1
     },
     "src/components/customers/CustomerContacts.tsx": {
-      "complexity": 1
+      "complexity Async arrow function": 1
     },
     "src/components/customers/CustomerDocuments.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CustomerDocuments'": 1
     },
     "src/components/customers/CustomerPrepCard.tsx": {
-      "complexity": 1
+      "complexity Function 'CustomerPrepCard'": 1
     },
     "src/components/customers/LogInteractionModal.tsx": {
-      "complexity": 1
+      "complexity Async arrow function": 1
     },
     "src/components/dashboard/DailyBrief.tsx": {
-      "complexity": 1
+      "complexity Function 'DailyBrief'": 1
     },
     "src/components/deliveries/QuickDeliveryModal.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'QuickDeliveryModal'": 1,
+      "complexity Function 'QuickDeliveryModal'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/components/dispatch/DispatchWizard.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'DispatchWizard'": 1,
+      "complexity Function 'DispatchWizard'": 1
     },
     "src/components/field-app/CustomerSharesTable.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CustomerSharesTable'": 1
     },
     "src/components/field-app/FieldAppChemicalEntry.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 2
+      "max-lines-per-function Function 'FieldAppChemicalEntry'": 1,
+      "complexity Function 'FieldAppChemicalEntry'": 1,
+      "max-lines-per-function Arrow function": 1,
+      "complexity Arrow function": 1
     },
     "src/components/field-app/SelectLocationsModal.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'SelectLocationsModal'": 1
     },
     "src/components/field-invoices/CustomerInvoiceSummaryPanel.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CustomerInvoiceSummaryPanel'": 1
     },
     "src/components/field-invoices/FieldInvoicesListPanel.tsx": {
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldInvoicesListPanel'": 1,
+      "max-lines File": 1
     },
     "src/components/field-invoices/FieldInvoicesPostedPanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldInvoicesPostedPanel'": 1,
+      "complexity Function 'FieldInvoicesPostedPanel'": 1,
+      "max-lines File": 1
     },
     "src/components/field-invoices/FieldInvoicesUnpostedPanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldInvoicesUnpostedPanel'": 1,
+      "complexity Function 'FieldInvoicesUnpostedPanel'": 1,
+      "max-lines File": 1
     },
     "src/components/field-invoices/UnbilledApplicationsPanel.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'UnbilledApplicationsPanel'": 1
     },
     "src/components/fields/BulkFieldImport.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
+      "max-lines-per-function Function 'BulkFieldImport'": 1,
+      "complexity Function 'BulkFieldImport'": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 7,
-      "max-lines": 1
+      "max-lines File": 1
     },
     "src/components/integrity/IntegrityCleanupPanel.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 1,
+      "max-lines-per-function Function 'IntegrityCleanupPanel'": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 2,
-      "max-lines": 1
+      "max-lines File": 1
     },
     "src/components/inventory/BatchAdjustModal.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2
+      "max-lines-per-function Function 'BatchAdjustModal'": 1,
+      "complexity Function 'BatchAdjustModal'": 1,
+      "complexity Async arrow function": 1
     },
     "src/components/invoices/FinanceChargePreviewModal.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'FinanceChargePreviewModal'": 1
     },
     "src/components/jobs/AppliedRecordsManager.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'AppliedRecordsManager'": 1,
+      "complexity Function 'AppliedRecordsManager'": 1,
+      "max-lines File": 1
     },
     "src/components/jobs/GroundCrewsManager.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'GroundCrewsManager'": 1
     },
     "src/components/jobs/JobAttachments.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'JobAttachments'": 1
     },
     "src/components/jobs/JobBatchesManager.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'JobBatchesManager'": 1
     },
     "src/components/jobs/JobFieldPickerModal.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'JobFieldPickerModal'": 1
     },
     "src/components/jobs/JobMassEditModal.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'JobMassEditModal'": 1,
+      "complexity Function 'JobMassEditModal'": 1
     },
     "src/components/jobs/LoaderWorksheetsPanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'LoaderWorksheetsPanel'": 1,
+      "complexity Function 'LoaderWorksheetsPanel'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/components/layout/Sidebar.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'Sidebar'": 1,
+      "complexity Function 'Sidebar'": 1,
+      "complexity Arrow function": 1,
+      "max-lines File": 1
     },
     "src/components/LotsEditorModal.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'LotsEditorModal'": 1,
+      "complexity Async arrow function": 1
     },
     "src/components/map/DrawControl.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'DrawControl'": 1
     },
     "src/components/orders/BulkOrderImport.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'BulkOrderImport'": 1,
+      "complexity Arrow function": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/components/prepay/PrepaymentManagerPanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'PrepaymentManagerPanel'": 1,
+      "complexity Function 'PrepaymentManagerPanel'": 1,
+      "max-lines File": 1
     },
     "src/components/prepay/PrepayWorkspacePanel.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'PrepayWorkspacePanel'": 1
     },
     "src/components/products/BulkProductImport.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'BulkProductImport'": 1
     },
     "src/components/products/PricingChangePreviewModal.tsx": {
-      "complexity": 1
+      "complexity Function 'PricingChangePreviewModal'": 1
     },
     "src/components/products/ProductBrandsSection.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'ProductBrandsSection'": 1,
+      "complexity Function 'ProductBrandsSection'": 1,
+      "max-lines File": 1
     },
     "src/components/products/ProductPriceHistory.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'ProductPriceHistory'": 1,
+      "complexity Function 'ProductPriceHistory'": 1
     },
     "src/components/purchase-orders/BulkPOImport.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 3,
-      "max-lines": 1
+      "max-lines-per-function Function 'BulkPOImport'": 1,
+      "complexity Function 'BulkPOImport'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1,
+      "max-lines-per-function Arrow function": 1,
+      "complexity Arrow function": 1
     },
     "src/components/quotes/BulkQuoteImport.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 4,
+      "max-lines-per-function Function 'BulkQuoteImport'": 1,
+      "complexity Function 'BulkQuoteImport'": 1,
+      "complexity Arrow function": 2,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 1,
-      "max-lines": 1
+      "max-lines File": 1
     },
     "src/components/receiving/QuickReceivePanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 4,
+      "max-lines-per-function Function 'QuickReceivePanel'": 1,
+      "complexity Function 'QuickReceivePanel'": 1,
+      "complexity Async arrow function": 2,
       "max-depth": 1,
-      "max-lines": 1
+      "max-lines File": 1,
+      "complexity Arrow function": 1
     },
     "src/components/receiving/ReceivingHubPanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2
+      "max-lines-per-function Function 'ReceivingHubPanel'": 1,
+      "complexity Function 'ReceivingHubPanel'": 1,
+      "complexity Async arrow function": 1
     },
     "src/components/receiving/ReceivingLogPanel.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'ReceivingLogPanel'": 1,
+      "complexity Function 'ReceivingLogPanel'": 1,
+      "max-lines File": 1
     },
     "src/components/reports/LogbookReport.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'LogbookReport'": 1
     },
     "src/components/team/CommentsSection.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CommentsSection'": 1
     },
     "src/components/team/NoteCard.tsx": {
-      "complexity": 1
+      "complexity Function 'NoteCard'": 1
     },
     "src/components/team/NotificationsPanel.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'NotificationsPanel'": 1
     },
     "src/components/team/TagsManager.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'TagsManager'": 1
     },
     "src/components/team/TeamBoardFilters.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'TeamBoardFilters'": 1
     },
     "src/components/ui/BelowCostApprovalModal.tsx": {
-      "complexity": 1
+      "complexity Function 'BelowCostApprovalModal'": 1
     },
     "src/components/ui/CommandPalette.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CommandPalette'": 1
     },
     "src/components/ui/EditableDataTable.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'EditableDataTable'": 1
     },
     "src/components/ui/OfflineBanner.tsx": {
-      "complexity": 1
+      "complexity Function 'OfflineBanner'": 1
     },
     "src/components/ui/RecordSearchPicker.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'RecordSearchPicker'": 1,
+      "complexity Function 'RecordSearchPicker'": 1
     },
     "src/components/ui/TransactionThread.tsx": {
-      "complexity": 1
+      "complexity Function 'TransactionThread'": 1
     },
     "src/hooks/useUncertainMutationIntent.ts": {
-      "complexity": 6,
-      "max-params": 1,
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "complexity Function 'isValidRecord'": 1,
+      "complexity Function 'migrateLegacySessionRecord'": 1,
+      "max-params Async function 'coordinateDurableRecord'": 1,
+      "complexity Arrow function": 2,
+      "max-lines-per-function Function 'useUncertainMutationIntent'": 1,
+      "complexity Function 'useUncertainMutationIntent'": 1,
+      "max-lines File": 1,
+      "complexity Async arrow function": 1
     },
     "src/lib/activityLogger.ts": {
-      "max-params": 1
+      "max-params Async function 'createNotification'": 1
     },
     "src/lib/applicatorSheetPdf.ts": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'drawSheet'": 1,
+      "complexity Function 'drawSheet'": 1
     },
     "src/lib/blendMathValidator.ts": {
-      "complexity": 1
+      "complexity Function 'validateBlendMath'": 1
     },
     "src/lib/chemCalculator.ts": {
-      "complexity": 1
+      "complexity Function 'chemLineBillingHazard'": 1
     },
     "src/lib/chemicalApplicationReportFetch.ts": {
-      "complexity": 1
+      "complexity Async function 'fetchChemicalApplicationReportData'": 1
     },
     "src/lib/cropProgramHelpers.ts": {
-      "complexity": 1
+      "complexity Function 'programItemToChemRowSeed'": 1
     },
     "src/lib/documentOCR.ts": {
-      "complexity": 1
+      "complexity Async function 'processDocumentWithOCR'": 1
     },
     "src/lib/epaDataQualityReport.ts": {
-      "max-params": 1
+      "max-params Function 'finding'": 1
     },
     "src/lib/epaLookupClient.ts": {
-      "complexity": 1
+      "complexity Function 'isEpaLookupResult'": 1
     },
     "src/lib/errorSanitizer.ts": {
-      "complexity": 1
+      "complexity Function 'sanitizeError'": 1
     },
     "src/lib/fieldInvoiceList.ts": {
-      "complexity": 1
+      "complexity Function 'mapFieldInvoiceRow'": 1
     },
     "src/lib/invoicePdf.ts": {
-      "complexity": 6,
-      "max-lines-per-function": 3,
-      "max-lines": 1,
-      "max-params": 3
+      "complexity Function 'mapInvoicePdfItem'": 1,
+      "complexity Async function 'buildInvoicePdfDataFromRow'": 1,
+      "max-lines-per-function Async function 'generateInvoicePdf'": 1,
+      "complexity Async function 'generateInvoicePdf'": 1,
+      "max-lines-per-function Async function 'generateLegacyInvoicePdf'": 1,
+      "complexity Async function 'generateLegacyInvoicePdf'": 1,
+      "max-lines File": 1,
+      "max-lines-per-function Function 'drawFieldApplicationLayout'": 1,
+      "max-params Function 'drawFieldApplicationLayout'": 1,
+      "complexity Function 'drawFieldApplicationLayout'": 1,
+      "complexity Arrow function": 1,
+      "max-params Function 'drawChemicalSaleLayout'": 1,
+      "max-params Function 'drawMiscChargeLayout'": 1
     },
     "src/lib/jobListPrint.ts": {
-      "complexity": 1
+      "complexity Function 'jobPrintCellValue'": 1
     },
     "src/lib/jobMapImages.ts": {
-      "complexity": 2,
-      "max-lines": 1
+      "complexity Function 'parseGeometry'": 1,
+      "complexity Async function 'fetchJobMapImages'": 1,
+      "max-lines File": 1
     },
     "src/lib/loaderWorksheet.ts": {
-      "complexity": 1
+      "complexity Function 'computeLoaderWorksheet'": 1
     },
     "src/lib/loaderWorksheetFetch.ts": {
-      "complexity": 1
+      "complexity Function 'mapRowToPdfData'": 1
     },
     "src/lib/loaderWorksheetPdf.ts": {
-      "complexity": 1
+      "complexity Function 'drawLoaderWorksheet'": 1
     },
     "src/lib/masterMixSummaryData.ts": {
-      "complexity": 1
+      "complexity Function 'buildLoadGroups'": 1
     },
     "src/lib/masterMixSummaryPdf.ts": {
-      "max-params": 1
+      "max-params Function 'drawLoadGroup'": 1
     },
     "src/lib/notificationTriggers.ts": {
-      "max-params": 1,
+      "max-params Async function 'notifyDeliveryCompleted'": 1,
       "max-depth": 2
     },
     "src/lib/offlineSync.ts": {
-      "complexity": 2
+      "complexity Async function 'processPendingActions'": 1,
+      "complexity Async function 'executeAction'": 1
     },
     "src/lib/productPricingWorkbook.ts": {
-      "complexity": 2,
-      "max-lines": 1
+      "complexity Async function 'validatePricingWorkbookArchive'": 1,
+      "complexity Function 'workbookRow'": 1,
+      "max-lines File": 1
     },
     "src/lib/projectedUseReportData.ts": {
-      "complexity": 1
+      "complexity Function 'buildProjectedUseReportData'": 1
     },
     "src/lib/projectedUseReportFetch.ts": {
-      "complexity": 1
+      "complexity Async function 'fetchProjectedUseData'": 1
     },
     "src/lib/quoteVersionAdapter.ts": {
-      "complexity": 1
+      "complexity Function 'isQuoteSnapshotItem'": 1
     },
     "src/lib/recipeHelpers.ts": {
-      "complexity": 1
+      "complexity Function 'recipeItemToChemRowSeed'": 1
     },
     "src/lib/reconciliation.ts": {
-      "complexity": 2,
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "complexity Function 'checkDeliveryInvoiceQuantityParity'": 1,
+      "max-lines-per-function Async function 'runReconciliationChecks'": 1,
+      "complexity Async function 'runReconciliationChecks'": 1,
+      "max-lines File": 1
     },
     "src/lib/sqlSourceLexer.ts": {
-      "complexity": 1
+      "complexity Function 'lexSql'": 1
     },
     "src/lib/statementPdf.ts": {
-      "max-params": 6,
-      "complexity": 1,
-      "max-lines": 1
+      "max-params Function 'drawSummaryTransactions'": 1,
+      "max-params Function 'drawDetailedTransactions'": 1,
+      "complexity Function 'drawDetailedTransactions'": 1,
+      "max-params Function 'drawFieldApplicationItems'": 1,
+      "max-params Function 'drawChemicalSaleItems'": 1,
+      "max-params Function 'drawMiscItems'": 1,
+      "max-params Function 'drawRemittanceStub'": 1,
+      "max-lines File": 1
     },
     "src/lib/xlsxArchiveSafety.ts": {
-      "max-params": 1,
-      "complexity": 1
+      "max-params Async function 'measureExpandedEntry'": 1,
+      "complexity Async function 'validateXlsxArchiveSafety'": 1
     },
     "src/lib/yearEndSummaryPdf.ts": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Async function 'generateYearEndSummaryPdf'": 1,
+      "complexity Async function 'generateYearEndSummaryPdf'": 1
     },
     "src/pages/AccountsPayable.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'AccountsPayable'": 1
     },
     "src/pages/ApplicationRecords.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'ApplicationRecords'": 1
     },
     "src/pages/ApplicationServiceDetail.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'ApplicationServiceDetail'": 1
     },
     "src/pages/ApplicationServices.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'ApplicationServices'": 1
     },
     "src/pages/ARaging.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'ARaging'": 1,
+      "complexity Function 'ARaging'": 1,
+      "complexity Async method 'action'": 1,
+      "max-lines File": 1
     },
     "src/pages/BlendRecipes.tsx": {
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'BlendRecipes'": 1,
+      "max-lines File": 1
     },
     "src/pages/BlendTicketDetail.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 3,
+      "max-lines-per-function Function 'BlendTicketDetail'": 1,
+      "complexity Function 'BlendTicketDetail'": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 2,
-      "max-lines": 1
+      "max-lines File": 1,
+      "complexity Arrow function": 1
     },
     "src/pages/BlendTickets.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'BlendTickets'": 1,
+      "complexity Function 'BlendTickets'": 1,
+      "max-lines File": 1
     },
     "src/pages/BrandVsGeneric.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'BrandVsGeneric'": 1,
+      "complexity Function 'BrandVsGeneric'": 1
     },
     "src/pages/CallLists.tsx": {
-      "complexity": 2,
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "complexity Function 'whyNowText'": 1,
+      "max-lines-per-function Function 'CallLists'": 1,
+      "complexity Function 'CallLists'": 1,
+      "max-lines File": 1
     },
     "src/pages/CommissionPayments.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 4,
-      "max-lines": 1
+      "max-lines-per-function Function 'CommissionPayments'": 1,
+      "complexity Function 'CommissionPayments'": 1,
+      "complexity Async arrow function": 3,
+      "max-lines File": 1
     },
     "src/pages/Compliance.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'Compliance'": 1,
+      "complexity Function 'Compliance'": 1,
+      "max-lines File": 1
     },
     "src/pages/CropPrograms.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CropPrograms'": 1
     },
     "src/pages/CustomerDetail.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 4,
-      "max-lines": 1
+      "max-lines-per-function Function 'CustomerDetail'": 1,
+      "complexity Function 'CustomerDetail'": 1,
+      "complexity Async arrow function": 3,
+      "max-lines-per-function Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/Customers.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'Customers'": 1,
+      "complexity Function 'Customers'": 1,
+      "max-lines File": 1
     },
     "src/pages/CustomerTransactionReview.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'CustomerTransactionReview'": 1
     },
     "src/pages/CycleCounts.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'CycleCounts'": 1,
+      "complexity Function 'CycleCounts'": 1,
+      "max-lines File": 1
     },
     "src/pages/Dashboard.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'Dashboard'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/Deliveries.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 4,
-      "max-lines": 1
+      "max-lines-per-function Function 'Deliveries'": 1,
+      "complexity Function 'Deliveries'": 1,
+      "complexity Async arrow function": 1,
+      "complexity Async method 'action'": 2,
+      "max-lines File": 1
     },
     "src/pages/DeliveryDetail.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 8,
+      "max-lines-per-function Function 'DeliveryDetail'": 1,
+      "complexity Function 'DeliveryDetail'": 1,
+      "complexity Async arrow function": 6,
       "max-depth": 1,
-      "max-lines": 1
+      "max-lines File": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Function 'CompletionProofCards'": 1
     },
     "src/pages/DeliveryRemainders.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'DeliveryRemainders'": 1
     },
     "src/pages/DispatchBoard.tsx": {
-      "max-lines-per-function": 3,
-      "complexity": 4,
+      "max-lines-per-function Function 'DispatchBoard'": 1,
+      "complexity Function 'DispatchBoard'": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 6,
-      "max-lines": 1
+      "max-lines File": 1,
+      "complexity Arrow function": 2,
+      "max-lines-per-function Function 'DispatchedList'": 1
     },
     "src/pages/FieldApplicationInvoice.tsx": {
-      "max-lines-per-function": 3,
-      "complexity": 6,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldApplicationInvoice'": 1,
+      "complexity Function 'FieldApplicationInvoice'": 1,
+      "max-lines-per-function Async arrow function": 2,
+      "complexity Async arrow function": 3,
+      "max-lines File": 1,
+      "complexity Arrow function": 2
     },
     "src/pages/FieldAppSplitInvoiceEditor.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 3,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldAppSplitInvoiceEditor'": 1,
+      "complexity Function 'FieldAppSplitInvoiceEditor'": 1,
+      "complexity Function 'validateForSave'": 1,
+      "max-lines File": 1,
+      "max-lines-per-function Arrow function": 1,
+      "complexity Arrow function": 1
     },
     "src/pages/FieldDashboard.tsx": {
-      "max-lines-per-function": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldDashboard'": 1,
+      "max-lines File": 1,
+      "max-lines-per-function Function 'CropHistoryTab'": 1
     },
     "src/pages/Fields.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'Fields'": 1,
+      "complexity Function 'Fields'": 1
     },
     "src/pages/FieldSetup.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 3,
+      "max-lines-per-function Function 'FieldSetupPage'": 1,
+      "complexity Function 'FieldSetupPage'": 1,
+      "complexity Async arrow function": 2,
       "max-depth": 6,
-      "max-lines": 1
+      "max-lines File": 1
     },
     "src/pages/FieldStop.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 4,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldStop'": 1,
+      "complexity Function 'FieldStop'": 1,
+      "complexity Async arrow function": 3,
+      "max-lines File": 1
     },
     "src/pages/FieldView.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'FieldView'": 1,
+      "max-lines-per-function Function 'renderCard'": 1,
+      "complexity Function 'renderCard'": 1,
+      "max-lines File": 1
     },
     "src/pages/FinancialDashboard.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'FinancialDashboard'": 1,
+      "complexity Function 'FinancialDashboard'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/GettingStarted.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'GettingStarted'": 1,
+      "complexity Function 'GettingStarted'": 1,
+      "max-lines File": 1
     },
     "src/pages/InventoryPage.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 3,
-      "max-lines": 1
+      "max-lines-per-function Function 'InventoryPage'": 1,
+      "complexity Function 'InventoryPage'": 1,
+      "complexity Async arrow function": 2,
+      "max-lines File": 1
     },
     "src/pages/InvoiceDetail.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 8,
-      "max-lines": 1,
-      "max-depth": 1
+      "max-lines-per-function Function 'InvoiceDetail'": 1,
+      "complexity Function 'InvoiceDetail'": 1,
+      "complexity Async arrow function": 4,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Arrow function": 2,
+      "max-lines File": 1,
+      "max-depth": 1,
+      "complexity Async method 'action'": 1
     },
     "src/pages/Invoices.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'Invoices'": 1,
+      "complexity Function 'Invoices'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/JobDetail.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 13,
-      "max-lines": 1,
+      "max-lines-per-function Function 'JobDetail'": 1,
+      "complexity Function 'JobDetail'": 1,
+      "complexity Async arrow function": 9,
+      "max-lines File": 1,
+      "complexity Arrow function": 3,
+      "max-lines-per-function Async arrow function": 1,
       "max-depth": 1
     },
     "src/pages/Jobs.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 3,
-      "max-lines": 1
+      "max-lines-per-function Function 'Jobs'": 1,
+      "complexity Function 'Jobs'": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async arrow function": 1,
+      "complexity Arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/LabelDataQuality.tsx": {
-      "complexity": 2,
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "complexity Arrow function": 1,
+      "max-lines-per-function Function 'LabelDataQuality'": 1,
+      "complexity Function 'LabelDataQuality'": 1,
+      "max-lines File": 1
     },
     "src/pages/LabelReview.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'LabelReview'": 1,
+      "complexity Function 'LabelReview'": 1,
+      "max-lines File": 1
     },
     "src/pages/MonthEndClose.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'MonthEndClose'": 1,
+      "complexity Function 'MonthEndClose'": 1,
+      "max-lines File": 1
     },
     "src/pages/NewDelivery.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'NewDelivery'": 1,
+      "complexity Function 'NewDelivery'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/NewOrder.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 4,
-      "max-lines": 1
+      "max-lines-per-function Function 'NewOrder'": 1,
+      "complexity Function 'NewOrder'": 1,
+      "complexity Async arrow function": 1,
+      "complexity Async method 'action'": 1,
+      "max-lines File": 1,
+      "complexity Arrow function": 1
     },
     "src/pages/NewPurchaseOrder.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'NewPurchaseOrder'": 1,
+      "complexity Function 'NewPurchaseOrder'": 1
     },
     "src/pages/NewVendorBill.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1
+      "max-lines-per-function Function 'NewVendorBill'": 1,
+      "complexity Async arrow function": 1
     },
     "src/pages/OfficeCockpit.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'OfficeCockpit'": 1,
+      "complexity Function 'OfficeCockpit'": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/OfflineWorkReview.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'OfflineWorkReview'": 1
     },
     "src/pages/OrderDetail.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 3,
-      "max-lines": 1
+      "max-lines-per-function Function 'OrderDetail'": 1,
+      "complexity Function 'OrderDetail'": 1,
+      "complexity Async arrow function": 1,
+      "complexity Async method 'action'": 1,
+      "max-lines File": 1
     },
     "src/pages/Orders.tsx": {
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'Orders'": 1,
+      "max-lines File": 1
     },
     "src/pages/PaymentAllocation.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'PaymentAllocation'": 1,
+      "complexity Function 'PaymentAllocation'": 1,
+      "max-lines File": 1
     },
     "src/pages/PaymentHistory.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'PaymentHistory'": 1
     },
     "src/pages/ProductDetail.tsx": {
-      "max-params": 1,
-      "max-lines-per-function": 1,
-      "complexity": 3,
-      "max-lines": 1
+      "max-params Function 'pricingPreviewRow'": 1,
+      "max-lines-per-function Function 'ProductDetail'": 1,
+      "complexity Function 'ProductDetail'": 1,
+      "complexity Async arrow function": 2,
+      "max-lines File": 1
     },
     "src/pages/Products.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
+      "max-lines-per-function Function 'Products'": 1,
+      "complexity Function 'Products'": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 4,
-      "max-lines": 1
+      "max-lines File": 1
     },
     "src/pages/PurchaseOrderDetail.tsx": {
-      "max-lines-per-function": 2,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'PurchaseOrderDetail'": 1,
+      "complexity Function 'PurchaseOrderDetail'": 1,
+      "max-lines-per-function Async arrow function": 1,
+      "complexity Async method 'action'": 1,
+      "max-lines File": 1
     },
     "src/pages/PurchaseOrders.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'PurchaseOrders'": 1,
+      "complexity Function 'PurchaseOrders'": 1,
+      "max-lines File": 1
     },
     "src/pages/QuoteBuilder.tsx": {
-      "max-lines-per-function": 4,
-      "complexity": 10,
-      "max-lines": 1,
-      "max-depth": 3
+      "max-lines-per-function Function 'QuoteBuilder'": 1,
+      "complexity Function 'QuoteBuilder'": 1,
+      "max-lines File": 1,
+      "complexity Async arrow function": 6,
+      "max-lines-per-function Async arrow function": 1,
+      "max-depth": 3,
+      "complexity Arrow function": 3,
+      "max-lines-per-function Arrow function": 2
     },
     "src/pages/Quotes.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'Quotes'": 1,
+      "complexity Function 'Quotes'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/Rebates.tsx": {
-      "max-lines-per-function": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'Rebates'": 1,
+      "max-lines File": 1
     },
     "src/pages/Reports.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'Reports'": 1,
+      "complexity Function 'Reports'": 1,
+      "max-lines File": 1,
+      "complexity Async arrow function": 1
     },
     "src/pages/Returns.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'Returns'": 1,
+      "complexity Function 'Returns'": 1,
+      "max-lines File": 1
     },
     "src/pages/SalesReports.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'SalesReports'": 1,
+      "complexity Function 'SalesReports'": 1,
+      "max-lines File": 1
     },
     "src/pages/SettingsPage.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
+      "max-lines-per-function Function 'SettingsPage'": 1,
+      "complexity Function 'SettingsPage'": 1,
+      "complexity Async arrow function": 1,
       "max-depth": 2,
-      "max-lines": 1
+      "max-lines File": 1
     },
     "src/pages/SupplierPricing.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 2,
-      "max-lines": 1
+      "max-lines-per-function Function 'SupplierPricing'": 1,
+      "complexity Function 'SupplierPricing'": 1,
+      "complexity Async arrow function": 1,
+      "max-lines File": 1
     },
     "src/pages/TeamBoard.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'TeamBoard'": 1,
+      "complexity Function 'TeamBoard'": 1,
+      "max-lines File": 1
     },
     "src/pages/ToShip.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 1,
-      "max-lines": 1
+      "max-lines-per-function Function 'ToShip'": 1,
+      "complexity Function 'ToShip'": 1,
+      "max-lines File": 1
     },
     "src/pages/VehicleDetail.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'VehicleDetail'": 1
     },
     "src/pages/Vehicles.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'Vehicles'": 1
     },
     "src/pages/VendorBillDetail.tsx": {
-      "max-lines-per-function": 1,
-      "complexity": 3,
-      "max-lines": 1
+      "max-lines-per-function Function 'VendorBillDetail'": 1,
+      "complexity Function 'VendorBillDetail'": 1,
+      "complexity Async arrow function": 2,
+      "max-lines File": 1
     },
     "src/pages/VendorBills.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'VendorBills'": 1
     },
     "src/pages/Vendors.tsx": {
-      "max-lines-per-function": 1
+      "max-lines-per-function Function 'Vendors'": 1
     }
   },
   "unused": {

@@ -33,7 +33,22 @@ async function measureSize() {
     // An inline `eslint-disable` must not hide a size or complexity violation from the ratchet.
     allowInlineConfig: false,
   });
-  return summarizeSizeResults(ROOT, await eslint.lintFiles(['src/**/*.{ts,tsx}']));
+  return summarizeSizeResults(ROOT, await eslint.lintFiles(['src/**/*.{js,jsx,ts,tsx}']));
+}
+
+// A change could raise its own baseline to admit new debt, so the baseline here must allow
+// nothing the base branch's copy does not. CI sets CODE_HEALTH_BASE to the PR's base branch.
+function baselineGrowth(baseline) {
+  const base = process.env.CODE_HEALTH_BASE || 'origin/main';
+  const git = (...args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (git('rev-parse', '--verify', '--quiet', `${base}^{commit}`).status !== 0) {
+    throw new Error(`Cannot find ${base} to compare the baseline against; fetch it first.`);
+  }
+  const basePath = `${base}:scripts/code-health-baseline.json`;
+  if (git('cat-file', '-e', basePath).status !== 0) return []; // the base predates the baseline
+  const shown = git('show', basePath);
+  if (shown.status !== 0) throw new Error(`Could not read ${basePath}: ${shown.stderr}`);
+  return findRegressions(JSON.parse(shown.stdout), baseline);
 }
 
 function measureUnused() {
@@ -71,6 +86,14 @@ if (!existsSync(BASELINE)) {
 }
 
 const baseline = JSON.parse(readFileSync(BASELINE, 'utf8'));
+const growth = baselineGrowth(baseline);
+if (growth.length) {
+  console.error('FAIL - scripts/code-health-baseline.json allows debt its base-branch copy does not:');
+  for (const line of growth) console.error(`  ${line}`);
+  console.error('\nThe baseline may only shrink. Fix the code instead, or merge the latest main if a');
+  console.error('cleanup there already shrank it.');
+  process.exit(1);
+}
 const regressions = findRegressions(baseline, current);
 const improvements = findImprovements(baseline, current);
 

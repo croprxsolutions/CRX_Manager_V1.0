@@ -821,6 +821,8 @@ export interface QuoteVersion {
       section_notes: string | null;
       section_header_notes: string | null;
       needed_by_date: string | null;
+      // Recorded since 20261025200000; absent on older versions.
+      field_id?: string | null;
       items: Array<{
         // Recorded since 20261025200000; absent on older versions.
         quote_item_id?: string | null;

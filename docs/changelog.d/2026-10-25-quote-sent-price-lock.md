@@ -11,23 +11,36 @@ send and accept reached the order.
   a line is not a sent line for the same product at the same price. A quote never sent passes (a draft keeps
   its own prices). A last version from before the protected send workflow is refused. Versions written before
   this change carry no line ids; for them lines pair one to one by product and fail closed.
-- `save_quote`: once a quote has been sent, a saved line keeps its price on every save; only a manual price or
-  the line's new `use_todays_price` flag changes it, and a new line takes today's price. Editing a sent quote
-  keeps its expiry. A save that accepts the quote must pass the check.
+- `save_quote`: once a quote has been sent, a line the save names by its saved id keeps its stored price on
+  every save; only a manual price or the line's new `use_todays_price` flag changes it. A new line, or one
+  matched only by product, takes today's price (and the check then asks for a re-send). Editing a sent quote
+  keeps its expiry. Turning a quote into `accepted` must pass the check (a quote already accepted can still be
+  saved). The reply now carries `item_prices` (client key to stored price), so the screen holds what the
+  database holds.
 - Every send (`create_quote_version`) records each line's id and manual price and each section's field, and
   sets the expiry to the Chicago business date plus the quote's valid days.
-- Rewind (`restore_quote_version`) puts a version's lines back under their own ids with their manual prices and
-  section fields, so a rewound quote matches the version as sent.
+- Rewind (`restore_quote_version`) puts back the version's customer and tier, its lines under their own ids
+  with their manual prices, and each section's field when it still belongs to the customer, so a rewound quote
+  matches the version as sent.
 - Convert to Order, Partial Order (`draw_down_quote`) and Schedule Job (`create_job_from_quote_section`) run the
-  check before writing anything. If cost has risen above a locked price, Convert keeps the price and still
-  needs an admin's below-cost approval with a reason (unchanged; proven).
+  check before writing anything. Convert skips it only where it returns an existing order (an accepted quote
+  with an order, or a drawn booking), so a quote reopened after its order was cancelled is checked again. If
+  cost has risen above a locked price, Convert keeps the price and still needs an admin's below-cost approval
+  with a reason (unchanged; proven).
 
 **Quote screen (`src/pages/QuoteBuilder.tsx`):** a sent quote's saved lines keep their price through edits, tier
 and customer changes. Each line offers "Use today $X" when today's price differs, and the revised-quote banner
 offers "Use today's prices" for the whole quote. A line whose price was not sent shows "Sent at $X" or "New
 since V1", the banner says a re-send is needed, and "Rewind to V1" restores the version last sent in one
-confirmed step. Refusals show the server's plain-English instruction. A tier or customer change no longer
-erases manual (negotiated) prices on any quote (plan section 7, finding 3).
+confirmed step. After each save the screen keeps each line at the price the database stored, and a "use
+today's price" choice applies once. The "changed since sent" warning matches lines by id, as the database
+does (`src/lib/quotePriceLock.ts`). Refusals show the server's plain-English instruction, on the quote and on
+the Quotes list. A tier or customer change no longer erases manual (negotiated) prices on any quote (plan
+section 7, finding 3).
+
+**Rollout impact (live read 2026-10-25):** no quote is sent or revised today. Q-2026-2059 (accepted with no
+order, last version from before the protected send workflow) would need a re-send before it could be
+converted; what to do with it stays Mason's call (KI-12).
 
 **Not covered (follow-ups):** the blend-ticket invoice and field-application invoice paths read a quote line's
 current price directly (`create_invoice_from_blend_ticket`, `_save_field_app_invoice_impl_20260714`,

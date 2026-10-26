@@ -2851,7 +2851,9 @@ describe('QuoteBuilder', () => {
       }));
       mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
         ? { data: { quote_id: quote.id, row_version: 8, item_ids: { } }, error: null }
-        : { data: null, error: null }));
+        : name === 'restore_quote_version'
+          ? { data: { status: 'restored', restored_from_version: 1, quote_id: quote.id, row_version: 8 }, error: null }
+          : { data: null, error: null }));
       return { quote };
     }
     const savedLine = () => (mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
@@ -2885,6 +2887,31 @@ describe('QuoteBuilder', () => {
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, price_override: null, use_todays_price: true });
     });
 
+    it('keeps the price the database stored at the last save, not the one loaded', async () => {
+      const { quote } = configureLockedQuote();
+      mockRpc.mockImplementation((name: string, args?: unknown) => {
+        if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+        const line = (args as { p_sections: Array<{ items: Array<{ client_key: string; price_per_unit: number }> }> })
+          .p_sections[0].items[0];
+        return Promise.resolve({ data: {
+          quote_id: quote.id, row_version: 8,
+          item_ids: { [line.client_key]: 'item-1' },
+          item_prices: { [line.client_key]: line.price_per_unit },
+        }, error: null });
+      });
+      renderQuoteBuilder(quote.id);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      fireEvent.change(price, { target: { value: '11' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ })).toBeEnabled());
+
+      // Clearing the manual price returns the line to what the database now holds (11), not 10.
+      fireEvent.click(screen.getByRole('button', { name: 'Reset the manual price' }));
+      expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(11);
+    });
+
     it('rewinds to the version last sent in one confirmed step', async () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);
@@ -2897,6 +2924,7 @@ describe('QuoteBuilder', () => {
         'restore_quote_version',
         expect.objectContaining({ p_quote_id: quote.id, p_version_id: 'version-1' }),
       ));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Restored from V1'));
     });
   });
 

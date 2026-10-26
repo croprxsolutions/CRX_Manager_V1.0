@@ -17,21 +17,26 @@
 --      before this file carry no line ids; for them lines pair one to one by product and any
 --      added, removed or repeated product needs a re-send (fails closed).
 --   2. _save_quote_below_cost_impl_20260810 (behind save_quote): once a quote has a sent
---      version, an existing line keeps its stored price on every save; only a manual price
---      (price_override) or the line's new use_todays_price flag changes it, and a new line takes
---      today's tier price. Which prior line a row continues is decided by the unchanged id rules
---      (an echoed id with the same product, else the existing one-per-product fallback). Editing
---      a sent quote keeps its expires_at. A save that sets status 'accepted' must pass (1).
+--      version, a line the payload names by its saved id (same product) keeps its stored price
+--      on every save; only a manual price (price_override) or the line's new use_todays_price
+--      flag changes it. A new line, or a line matched only by the existing one-per-product
+--      fallback, keeps that fallback's cost but takes today's tier price, so the quote screen
+--      (which names every saved line) and the server agree; (1) then asks for a re-send if the
+--      price moved. Editing a sent quote keeps its expires_at. The transition into 'accepted'
+--      must pass (1); a quote already accepted can still be saved. The reply adds item_prices
+--      (client_key -> stored price_per_unit; prices only, no cost).
 --   3. _create_quote_version_owner_impl (behind create_quote_version, every send): each
 --      snapshot line records quote_item_id and price_override, each section its field_id; every
 --      send sets expires_at to the Chicago business date plus valid_days.
---   4. _restore_quote_version_owner_impl (behind restore_quote_version, the rewind): a version
---      that recorded line ids restores each line under its own id with its own manual price, and
---      each section's field when that field still exists, so a rewound quote matches the version
---      as sent and converts without a re-send.
+--   4. _restore_quote_version_owner_impl (behind restore_quote_version, the rewind): restores the
+--      version's customer (when it still exists) and tier, each line under its own id with its
+--      own manual price, and each section's field when that field still belongs to the quote's
+--      customer, so a rewound quote matches the version as sent and converts without a re-send.
 --   5. The routes from a sent quote to something billable call (1) before writing anything:
---      _convert_quote_to_order_below_cost_impl_20260810 (convert_quote_to_order; skipped when
---      the quote already has an order, the replay/recovery path that returns it),
+--      _convert_quote_to_order_below_cost_impl_20260810 (convert_quote_to_order; skipped only
+--      where the owner implementation returns an existing order or refuses: an accepted quote
+--      with an order, or a booking with draws; a quote reopened after its order was cancelled or
+--      voided is checked again),
 --      _draw_down_quote_intent_impl_20260819 (draw_down_quote) and
 --      create_job_from_quote_section. The order, draw and job then copy the current quote line
 --      prices, which (1) has just proven equal to the sent ones.
@@ -671,9 +676,13 @@ BEGIN
       -- SNAPSHOT<<< settle this row's id once, so the same value can be both
       -- written and reported back to the caller under its client key.
       v_new_item_id := COALESCE(v_reuse_item_id, gen_random_uuid());
-      -- PRICE LOCK: the line this row continues keeps its stored price unless the caller asks
-      -- for today's price on it. The id rules above already decide which prior line that is.
+      -- PRICE LOCK: a line the caller names by its saved id (same product) keeps its stored
+      -- price unless the caller asks for today's price on it. A line matched only by the
+      -- one-per-product fallback keeps its cost but takes today's price, so the screen (which
+      -- names every saved line) and the server agree; the sent-price check then asks for a
+      -- re-send if that price differs from the one sent.
       IF v_price_locked AND v_reuse_item_id IS NOT NULL
+         AND v_reuse_item_id::text = v_payload_item_id
          AND COALESCE((v_item->>'use_todays_price')::boolean, false) = false THEN
         v_carry_prices := v_carry_prices
           || jsonb_build_object(v_new_item_id::text, v_prior_item_costs->(v_reuse_item_id::text)->'pp');
@@ -913,8 +922,10 @@ BEGIN
     updated_at = now()
   WHERE id = v_quote_id;
 
-  -- PRICE LOCK: a quote is accepted only at the prices, lines and customer last sent.
-  IF v_status = 'accepted' THEN
+  -- PRICE LOCK: a quote becomes accepted only at the prices, lines and customer last sent.
+  -- Only the transition is checked, so a quote accepted earlier (whose last version may predate
+  -- line ids) can still be saved.
+  IF v_status = 'accepted' AND v_old_status IS DISTINCT FROM 'accepted' THEN
     PERFORM public._assert_quote_prices_as_sent(v_quote_id);
   END IF;
 
@@ -949,6 +960,13 @@ BEGIN
     -- rather than leaving a retrying client id-less. (Codex round 28.)
     'item_ids', v_item_ids,
     -- >>>SNAPSHOT
+    -- PRICE LOCK (20261025200000): client_key -> the price_per_unit this save stored, so the
+    -- quote screen keeps each saved line at the price the database holds. Prices only; no cost.
+    'item_prices', (
+      SELECT COALESCE(jsonb_object_agg(e.key, qi.price_per_unit), '{}'::jsonb)
+      FROM jsonb_each_text(v_item_ids) AS e(key, value)
+      JOIN quote_items qi ON qi.id = e.value::uuid
+    ),
     'server_totals', jsonb_build_object(
       'total_price', (SELECT total_price FROM quotes WHERE id = v_quote_id),
       'total_cost', (SELECT total_cost FROM quotes WHERE id = v_quote_id),
@@ -1249,6 +1267,12 @@ BEGIN
     total_cost = ROUND((v_snapshot->'quote'->>'total_cost')::numeric, 2),
     total_profit = ROUND((v_snapshot->'quote'->>'total_profit')::numeric, 2),
     total_margin_pct = (v_snapshot->'quote'->>'total_margin_pct')::numeric,
+    -- PRICE LOCK (20261025200000): a rewind also puts back the version's customer (when that
+    -- customer still exists) and tier, so a rewound quote matches the version as sent.
+    customer_id = COALESCE(
+      (SELECT c.id FROM customers c WHERE c.id = NULLIF(v_snapshot->'quote'->>'customer_id', '')::uuid),
+      customer_id),
+    tier = COALESCE(NULLIF(v_snapshot->'quote'->>'tier', '')::integer, tier),
     status = 'revised',
     updated_at = now()
   WHERE id = p_quote_id;
@@ -1272,8 +1296,10 @@ BEGIN
       v_section->>'section_header_notes',
       (v_section->>'needed_by_date')::date,
       -- PRICE LOCK (20261025200000): a rewind keeps the section's field when the version
-      -- recorded it and the field still exists.
-      (SELECT f.id FROM fields f WHERE f.id = NULLIF(v_section->>'field_id', '')::uuid)
+      -- recorded it and the field still exists for the quote's (restored) customer.
+      (SELECT f.id FROM fields f
+        WHERE f.id = NULLIF(v_section->>'field_id', '')::uuid
+          AND f.customer_id = (SELECT q.customer_id FROM quotes q WHERE q.id = p_quote_id))
     )
     RETURNING id INTO v_section_id;
 
@@ -1494,10 +1520,16 @@ BEGIN
     RAISE EXCEPTION 'QUOTE_STALE_WRITE';
   END IF;
 
-  -- PRICE LOCK (20261025200000): a quote with no order yet converts only at the prices, lines
-  -- and customer it was last sent with. A quote that already has an order is a replay/recovery
-  -- and returns that order, as before.
-  IF NOT EXISTS (SELECT 1 FROM public.orders WHERE quote_id = p_quote_id) THEN
+  -- PRICE LOCK (20261025200000): a conversion that creates an order does so only at the prices,
+  -- lines and customer last sent. The check is skipped only where the owner implementation
+  -- returns an existing order or refuses (an accepted quote that has an order, or a booking with
+  -- draws), so a quote reopened after its order was cancelled or voided is checked again.
+  IF NOT (
+    EXISTS (SELECT 1 FROM public.quote_product_draws WHERE quote_id = p_quote_id AND quantity_drawn > 0)
+    OR EXISTS (SELECT 1 FROM public.job_product_draws WHERE quote_id = p_quote_id AND quantity_drawn > 0)
+    OR ((SELECT q.status FROM public.quotes q WHERE q.id = p_quote_id) = 'accepted'
+        AND EXISTS (SELECT 1 FROM public.orders WHERE quote_id = p_quote_id))
+  ) THEN
     PERFORM public._assert_quote_prices_as_sent(p_quote_id);
   END IF;
 

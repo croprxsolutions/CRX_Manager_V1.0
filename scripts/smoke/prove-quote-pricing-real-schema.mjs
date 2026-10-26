@@ -58,22 +58,41 @@ const REGRESSION = [
 ];
 // Each safeguard removed in turn, and the lock chain step that must notice.
 const MUTATIONS = [
-  ['convert gate', `  IF NOT EXISTS (SELECT 1 FROM public.orders WHERE quote_id = p_quote_id) THEN
+  ['convert gate', `  ) THEN
     PERFORM public._assert_quote_prices_as_sent(p_quote_id);
   END IF;
-`, '', 'SMOKE_FAIL: (B) Convert of an un-re-sent price change was ALLOWED'],
+
+  v_result := public._convert_quote_to_order_owner_impl(`, `  ) THEN
+    NULL;
+  END IF;
+
+  v_result := public._convert_quote_to_order_owner_impl(`,
+    'SMOKE_FAIL: (B) Convert of an un-re-sent price change was ALLOWED'],
+  ['convert skip only for a returned order', `  IF NOT (
+    EXISTS (SELECT 1 FROM public.quote_product_draws WHERE quote_id = p_quote_id AND quantity_drawn > 0)
+    OR EXISTS (SELECT 1 FROM public.job_product_draws WHERE quote_id = p_quote_id AND quantity_drawn > 0)
+    OR ((SELECT q.status FROM public.quotes q WHERE q.id = p_quote_id) = 'accepted'
+        AND EXISTS (SELECT 1 FROM public.orders WHERE quote_id = p_quote_id))
+  ) THEN`, '  IF NOT EXISTS (SELECT 1 FROM public.orders WHERE quote_id = p_quote_id) THEN',
+    'SMOKE_FAIL: (O) a reopened quote converted an un-re-sent price'],
+  ['price carry only for a named line', '         AND v_reuse_item_id::text = v_payload_item_id\n', '',
+    "SMOKE_FAIL: (N) an id-less line did not take today's price"],
+  ['rewind restores the customer', `    customer_id = COALESCE(
+      (SELECT c.id FROM customers c WHERE c.id = NULLIF(v_snapshot->'quote'->>'customer_id', '')::uuid),
+      customer_id),
+`, '', 'SMOKE_FAIL: (E) rewind did not restore the sent customer'],
   ['draw gate', `  PERFORM public._assert_quote_prices_as_sent(p_quote_id);
 
   PERFORM public._begin_below_cost_money_write(`, '  PERFORM public._begin_below_cost_money_write(',
     'SMOKE_FAIL: (B) Partial Order of an un-re-sent price change was ALLOWED'],
-  ['accepted-save gate', `  IF v_status = 'accepted' THEN
+  ['accepted-save gate', `  IF v_status = 'accepted' AND v_old_status IS DISTINCT FROM 'accepted' THEN
     PERFORM public._assert_quote_prices_as_sent(v_quote_id);
   END IF;
 `, '', 'SMOKE_FAIL: (B) accepting an un-re-sent price change was ALLOWED'],
   ['job gate', `  -- planned draft that was never sent may still be scheduled at its own prices (Mason, 2026-10-14).
   PERFORM public._assert_quote_prices_as_sent(p_quote_id);`, '  -- planned draft that was never sent may still be scheduled at its own prices (Mason, 2026-10-14).',
     'SMOKE_FAIL: (G) scheduling a job from an un-re-sent price change was ALLOWED'],
-  ['price carry', '(v_carry_prices->>(qi.id::text))::numeric, ', '', 'SMOKE_FAIL: (A) revision re-priced'],
+  ['price carry', '(v_carry_prices->>(qi.id::text))::numeric, ', '', 'SMOKE_FAIL: (A) save reply did not report the stored price: {"_k1": 8.75}'],
   ['expiry kept on edit', 'expires_at = CASE WHEN v_price_locked THEN expires_at\n      ELSE', 'expires_at = CASE WHEN false THEN expires_at\n      ELSE',
     'SMOKE_FAIL: (A) revision re-priced to 7.50 or moved the expiry'],
   ['snapshot line id', "                'quote_item_id', qi.id,\n", '', 'SMOKE_FAIL: (V1) snapshot lacks the line id'],

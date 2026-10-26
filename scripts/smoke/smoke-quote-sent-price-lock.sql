@@ -3,13 +3,17 @@
 -- ----------------------------------------------------------------------------
 -- Migration 20261025200000_quote_sent_price_lock. Products P and Q at cost 6.00 (tier 1 7.50).
 -- Quotes are presented (sent, V1) at 7.50, then P is repriced to cost 7.00 (tier 1 8.75):
---   A  quantity-only revision keeps 7.50 and the expiry; Convert bills 7.50 (no re-send)
+--   A  quantity-only revision keeps 7.50 and the expiry (the save reply reports the stored price);
+--      Convert bills 7.50 (no re-send)
 --   K  a same-status save of a sent quote (Mark Presented again) keeps 7.50; V2 records 7.50
 --   B  "use today's price" on the line -> 8.75; Convert, Partial Order and an accepted save are
 --      refused QUOTE_RESEND_REQUIRED; after the re-send (V2, new expiry) Convert bills 8.75
 --   C  a manual price 9.00 is refused; rewind to V1 restores the same line id at 7.50 and
 --      Convert bills 7.50
---   D  a line added in the revision, E a changed customer: Convert refused
+--   D  a line added in the revision, E a changed customer: Convert refused; rewinding E to V1
+--      restores its customer and it converts at 7.50
+--   N  a line saved without its id takes today's price (cost kept) and Convert is refused
+--   O  a quote reopened after its order was cancelled is checked again: a manual price is refused
 --   M  an unchanged sent booking draws down at 7.50
 --   G  a planned booking revised with today's price cannot schedule a job; F a planned draft
 --      never sent still schedules at its own price (Mason, 2026-10-14)
@@ -93,7 +97,7 @@ BEGIN
   -- --------------------------------------------------------------------
   -- Every quote saved and presented (V1) at 7.50; F and L stay drafts; F, G planned.
   -- --------------------------------------------------------------------
-  FOREACH v_letter IN ARRAY ARRAY['A','B','C','D','E','F','G','H','I','J','K','L','M']
+  FOREACH v_letter IN ARRAY ARRAY['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O']
   LOOP
     v_res := save_quote(NULL, jsonb_build_object(
         'quote_number', '[SMOKE] LOCK-' || v_letter || '-' || v_suffix, 'customer_id', v_c1,
@@ -141,13 +145,17 @@ BEGIN
   v_id := (v_quotes->>'A')::uuid;
   UPDATE quotes SET expires_at = v_today + 3 WHERE id = v_id;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
-  PERFORM save_quote(v_id, jsonb_build_object(
+  v_res := save_quote(v_id, jsonb_build_object(
       'quote_number', '[SMOKE] LOCK-A-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv,
       'expires_at', (v_today + 60)::text),
     jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'A')),
       '{0,items,0,total_units_needed}', '12'::jsonb),
     v_admin, 'smk-lock-save-A2-' || v_suffix);
+  -- The reply reports the stored price per line, so the screen holds what the database holds.
+  IF (v_res->'item_prices'->>'_k1')::numeric IS DISTINCT FROM 7.50 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (A) save reply did not report the stored price: %', v_res->'item_prices';
+  END IF;
   SELECT price_per_unit INTO v_price FROM quote_items WHERE quote_id = v_id;
   SELECT expires_at INTO v_expiry FROM quotes WHERE id = v_id;
   IF v_price IS DISTINCT FROM 7.50 OR v_expiry IS DISTINCT FROM v_today + 3 THEN
@@ -309,6 +317,72 @@ BEGIN
     IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF v_err NOT LIKE 'QUOTE_RESEND_REQUIRED: the customer changed%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (E) convert: %', v_err; END IF;
   END;
+  -- Rewinding to V1 puts the customer back, and the quote converts at the sent price.
+  PERFORM restore_quote_version(v_id, (v_versions->>'E')::uuid, v_admin, 'smk-lock-rewind-E-' || v_suffix, v_rv, NULL);
+  IF (SELECT customer_id FROM quotes WHERE id = v_id) IS DISTINCT FROM v_c1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (E) rewind did not restore the sent customer';
+  END IF;
+  SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  v_res := convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-E2-' || v_suffix, v_rv, NULL);
+  IF (SELECT price_per_unit FROM order_items WHERE order_id = (v_res->>'order_id')::uuid) IS DISTINCT FROM 7.50 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (E) rewound quote did not convert at 7.50';
+  END IF;
+
+  -- --------------------------------------------------------------------
+  -- N: a line saved without its id (matched only by product) takes today's price, so the
+  -- screen and server agree; Convert then asks for a re-send
+  -- --------------------------------------------------------------------
+  v_id := (v_quotes->>'N')::uuid;
+  SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  PERFORM save_quote(v_id, jsonb_build_object(
+      'quote_number', '[SMOKE] LOCK-N-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
+      'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
+    v_sections, v_admin, 'smk-lock-save-N2-' || v_suffix);
+  IF (SELECT price_per_unit FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 8.75
+     OR (SELECT cost_at_quote_cents FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 600 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (N) an id-less line did not take today''s price with its kept cost: %',
+      (SELECT price_per_unit::text || '@' || cost_at_quote_cents::text FROM quote_items WHERE quote_id = v_id);
+  END IF;
+  SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  BEGIN
+    PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-N-' || v_suffix, v_rv, NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: (N) Convert after an id-less re-price was ALLOWED';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'QUOTE_RESEND_REQUIRED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (N) convert: %', v_err; END IF;
+  END;
+
+  -- --------------------------------------------------------------------
+  -- O: a quote reopened after its order was cancelled is checked again at Convert
+  -- --------------------------------------------------------------------
+  v_id := (v_quotes->>'O')::uuid;
+  SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  v_res := convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-O1-' || v_suffix, v_rv, NULL);
+  -- What cancelling the order and an admin's revert_quote_status leave behind: a cancelled
+  -- order, the quote back at 'sent' and its drawn quantity zeroed (20261016140000).
+  UPDATE orders SET status = 'cancelled' WHERE id = (v_res->>'order_id')::uuid;
+  PERFORM set_config('app.admin_override', 'true', true);
+  UPDATE quotes SET status = 'sent' WHERE id = v_id;
+  PERFORM set_config('app.admin_override', 'false', true);
+  UPDATE quote_product_draws SET quantity_drawn = 0, updated_at = now()
+   WHERE quote_id = v_id AND quantity_drawn <> 0;
+  SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  PERFORM save_quote(v_id, jsonb_build_object(
+      'quote_number', '[SMOKE] LOCK-O-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
+      'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
+    jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'O')),
+      '{0,items,0,price_override}', '9'::jsonb),
+    v_admin, 'smk-lock-save-O2-' || v_suffix);
+  SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  BEGIN
+    PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-O2-' || v_suffix, v_rv, NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: (O) a reopened quote converted an un-re-sent price';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'QUOTE_RESEND_REQUIRED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (O) convert: %', v_err; END IF;
+  END;
 
   -- --------------------------------------------------------------------
   -- M: an unchanged sent booking draws down at the sent 7.50
@@ -409,6 +483,6 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (L) a never-sent draft did not follow the catalog: %', v_price;
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK sent-price lock: A,K keep 7.50; B re-sent at 8.75; C rewound to 7.50; D,E,G,I,J refused; M drew 7.50; F scheduled its draft price; H paired by product; L follows the catalog';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK sent-price lock: A,K keep 7.50; B re-sent at 8.75; C rewound to 7.50; D,E,G,I,J,N,O refused; E rewound with its customer; M drew 7.50; F scheduled its draft price; H paired by product; L follows the catalog';
 END
 $smoke$;

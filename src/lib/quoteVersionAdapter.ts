@@ -91,6 +91,7 @@ function parseQuoteSnapshotSection(
     || !isNullableString(value.section_notes)
     || (value.section_header_notes !== undefined && !isNullableString(value.section_header_notes))
     || (value.needed_by_date !== undefined && !isNullableString(value.needed_by_date))
+    || (value.field_id !== undefined && !isNullableString(value.field_id))
     || !value.items.every(isQuoteSnapshotItem)
   ) {
     return null;
@@ -102,6 +103,8 @@ function parseQuoteSnapshotSection(
     section_notes: value.section_notes,
     section_header_notes: value.section_header_notes ?? null,
     needed_by_date: value.needed_by_date ?? null,
+    // Recorded since 20261025200000; absent on older versions.
+    ...(value.field_id !== undefined ? { field_id: value.field_id } : {}),
     items: value.items,
   };
 }

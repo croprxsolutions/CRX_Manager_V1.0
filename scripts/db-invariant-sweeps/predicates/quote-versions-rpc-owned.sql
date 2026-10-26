@@ -194,11 +194,48 @@ UNION ALL
 -- The other half of 20261022101000: snapshot_data carries the sent quote's cost
 -- lines, so neither browser role may read it directly. has_column_privilege is
 -- also true when a role holds table-wide SELECT, so a later blanket
--- re-grant of the table reports here too.
+-- re-grant of the table reports here too. The column is resolved through
+-- pg_attribute, like the history columns above, so a rename or drop reports
+-- here (every snapshot check in this file was written against that name)
+-- instead of making the whole predicate ERROR.
 SELECT 'quote_versions:snapshot-data-readable' AS violation_key,
-       'anon/authenticated can read public.quote_versions.snapshot_data directly — it carries cost and must be reached only through get_quote_versions(uuid) (20261022101000)' AS reason
- WHERE has_column_privilege('authenticated', 'public.quote_versions', 'snapshot_data', 'SELECT')
-    OR has_column_privilege('anon', 'public.quote_versions', 'snapshot_data', 'SELECT')
+       'anon/authenticated can read public.quote_versions.snapshot_data directly, or the column no longer exists under that name — it carries cost and must be reached only through get_quote_versions(uuid) (20261022101000)' AS reason
+ WHERE NOT EXISTS (
+         SELECT 1 FROM pg_attribute a
+          WHERE a.attrelid = 'public.quote_versions'::regclass
+            AND a.attname = 'snapshot_data'
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+       )
+    OR EXISTS (
+         SELECT 1 FROM pg_attribute a
+          WHERE a.attrelid = 'public.quote_versions'::regclass
+            AND a.attname = 'snapshot_data'
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+            AND (has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')
+              OR has_column_privilege('anon', a.attrelid, a.attnum, 'SELECT'))
+       )
+
+UNION ALL
+
+-- The nine history columns are the WHOLE of authenticated's read, not a
+-- minimum. A column added later is born ungranted, so reading it takes a
+-- deliberate grant; if that column carries cost (a landed_cost, say), this is
+-- the branch that notices. An intended new readable column must be added to
+-- this list and to the read-path list above in the same change.
+SELECT 'quote_versions:unexpected-readable-column' AS violation_key,
+       'authenticated can read a public.quote_versions column outside the nine reviewed version-history columns — check it carries no cost before adding it to this predicate''s list' AS reason
+ WHERE EXISTS (
+   SELECT 1
+     FROM pg_attribute a
+    WHERE a.attrelid = 'public.quote_versions'::regclass
+      AND a.attnum > 0
+      AND NOT a.attisdropped
+      AND a.attname <> ALL (ARRAY['id', 'quote_id', 'version_number', 'sent_by', 'sent_at',
+                                  'sent_method', 'pdf_url', 'notes', 'restore_trusted_at'])
+      AND has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')
+ )
 
 UNION ALL
 

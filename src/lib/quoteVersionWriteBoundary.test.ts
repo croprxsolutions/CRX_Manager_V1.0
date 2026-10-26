@@ -659,6 +659,7 @@ describe('quote_versions write boundary — standing predicate', () => {
       'quote_versions:anon-read',
       'get_quote_versions:contract-pinned',
       'quote_versions:extra-select-policy',
+      'quote_versions:unexpected-readable-column',
       'quote_versions:rls-disabled',
       'quote_versions:force-rls-enabled',
       'quote_versions:column-mutation-privilege',
@@ -1144,11 +1145,22 @@ describe('quote_versions write boundary — standing predicate', () => {
   });
 
   it('keeps snapshot_data unreadable to both browser roles', () => {
+    // Resolved through pg_attribute, so a renamed or dropped column reports
+    // instead of making has_column_privilege raise.
+    expect(predicate).toContain("AND a.attname = 'snapshot_data'");
     for (const role of ['authenticated', 'anon']) {
-      expect(predicate).toContain(
+      expect(predicate).toContain(`has_column_privilege('${role}', a.attrelid, a.attnum, 'SELECT')`);
+      expect(predicate).not.toContain(
         `has_column_privilege('${role}', 'public.quote_versions', 'snapshot_data', 'SELECT')`,
       );
     }
+  });
+
+  it('treats the nine history columns as the whole of the signed-in read', () => {
+    expect(predicate).toContain("'quote_versions:unexpected-readable-column'");
+    expect(predicate).toMatch(
+      /a\.attname <> ALL \(ARRAY\['id', 'quote_id', 'version_number', 'sent_by', 'sent_at',\s+'sent_method', 'pdf_url', 'notes', 'restore_trusted_at'\]\)/,
+    );
   });
 
   it('keeps version history signed-in only', () => {

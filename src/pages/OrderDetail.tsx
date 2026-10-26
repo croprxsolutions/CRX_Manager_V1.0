@@ -302,11 +302,14 @@ export default function OrderDetail() {
         )];
         const deliveryDriverMap: Record<string, string> = {};
         if (deliveryDriverIds.length > 0) {
-          const { data: driverData } = await supabase
+          // Driver names are display only: a lookup that fails or throws leaves them blank
+          // rather than failing the whole order.
+          const { data: driverData } = await Promise.resolve(supabase
             .from('profile_public_view')
             .select('id, full_name')
-            .in('id', deliveryDriverIds);
-          (driverData || []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) deliveryDriverMap[p.id] = p.full_name ?? ''; });
+            .in('id', deliveryDriverIds))
+            .catch(() => ({ data: null }));
+          (Array.isArray(driverData) ? driverData : []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) deliveryDriverMap[p.id] = p.full_name ?? ''; });
         }
         if (isStale()) return;
         setDeliveries(

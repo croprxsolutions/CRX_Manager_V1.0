@@ -13,7 +13,8 @@ type Mode = 'error' | 'nodata' | 'notlist';
 
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, unknown>,
-  failing: new Map<string, 'error' | 'nodata' | 'notlist'>(),
+  // 'throws' rejects instead of answering.
+  failing: new Map<string, 'error' | 'nodata' | 'notlist' | 'throws'>(),
   // One stable toast: fetchOrder depends on it, so a new function per render
   // would re-run the load effect on every render.
   toast: vi.fn(),
@@ -31,7 +32,10 @@ function reply(table: string): { data: unknown; error: unknown } {
 function query(table: string): Record<string, unknown> {
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve(reply(table));
+      if (prop === 'then') {
+        return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          (H.failing.get(table) === 'throws' ? reject(new Error('socket hang up')) : resolve(reply(table)));
+      }
       if (prop === 'maybeSingle' || prop === 'single') {
         return () => {
           const r = reply(table);
@@ -157,6 +161,17 @@ describe('Order Detail', () => {
     open();
     expect(await screen.findByText(FAILED)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
+  });
+
+  it.each(['throws', 'notlist'] as const)('a driver-name lookup that %s leaves the order on screen (names are display only)', async (mode) => {
+    H.tables.deliveries = [{ id: 'd1', order_id: 'ord-1', delivery_number: 'DEL-0042', status: 'scheduled', scheduled_date: '2026-10-02', assigned_driver: 'drv-1' }];
+    H.failing.set('profile_public_view', mode);
+    open();
+    // A scheduled delivery hides Create Invoice by design, so the order's own number and its
+    // delivery are what show it loaded.
+    expect((await screen.findAllByText('DEL-0042')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('ORD-0042').length).toBeGreaterThan(0);
+    expect(screen.queryByText(FAILED)).not.toBeInTheDocument();
   });
 
   it('a failed order read says could not be loaded, not "Order not found"', async () => {

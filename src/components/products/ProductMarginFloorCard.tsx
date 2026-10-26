@@ -1,0 +1,184 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Save } from 'lucide-react';
+import Button from '../ui/Button';
+import Card, { CardHeader } from '../ui/Card';
+import Input from '../ui/Input';
+import { useToast } from '../ui/Toast';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import {
+  fetchMarginFloor,
+  fetchMarginFloorHistory,
+  formatMarginFloorPercent,
+  isMarginFloorRefusal,
+  isUnderMarginFloor,
+  marginFloorErrorMessage,
+  parseMarginFloorPercent,
+  setMarginFloors,
+} from '../../lib/marginFloors';
+import { Sentry } from '../../lib/sentry';
+import type { ProductMarginFloorChange } from '../../types';
+
+interface ProductMarginFloorCardProps {
+  productId: string;
+  /** The saved net margins (ratios) of tiers 1-3, to show which are under the floor. */
+  tierMargins: [number | null | undefined, number | null | undefined, number | null | undefined];
+  /** The signed-in admin's profile id. */
+  userId: string;
+}
+
+function floorLabel(floor: number | null): string {
+  return floor == null ? 'none' : `${formatMarginFloorPercent(floor)}%`;
+}
+
+/**
+ * The product's net-margin floor (To-Do 0.2). Admin-only: the page renders it for admins only, and
+ * the database refuses everyone else. The price sheet warns on any tier under it (To-Do 0.1).
+ */
+export default function ProductMarginFloorCard({ productId, tierMargins, userId }: ProductMarginFloorCardProps) {
+  const { toast } = useToast();
+  const { getKeyFor, resetKeyFor } = useIdempotencyKey('set_product_margin_floors', userId);
+  const [floor, setFloor] = useState<number | null>(null);
+  const [history, setHistory] = useState<ProductMarginFloorChange[]>([]);
+  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const [draft, setDraft] = useState('');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Only the newest load may install values: the page can switch products while one is in flight.
+  const loadSeqRef = useRef(0);
+  const load = useCallback(async (): Promise<boolean> => {
+    const seq = ++loadSeqRef.current;
+    try {
+      const [current, changes] = await Promise.all([fetchMarginFloor(productId), fetchMarginFloorHistory(productId)]);
+      if (seq !== loadSeqRef.current) return false;
+      setFloor(current);
+      setHistory(changes);
+      setDraft(formatMarginFloorPercent(current));
+      setLoadState('loaded');
+      return true;
+    } catch (err) {
+      if (seq !== loadSeqRef.current) return false;
+      Sentry.captureException(err, { extra: { context: 'load_product_margin_floor', productId } });
+      setLoadState('failed');
+      return false;
+    }
+  }, [productId]);
+
+  useEffect(() => {
+    setLoadState('loading');
+    void load();
+  }, [load]);
+
+  const handleSave = async () => {
+    let percent: number | null;
+    try {
+      percent = parseMarginFloorPercent(draft);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Enter a valid margin floor.');
+      return;
+    }
+    // One key per exact request: a retry of the same save replays; a changed one is a new save.
+    const scope = JSON.stringify([productId, percent, reason.trim()]);
+    setSaving(true);
+    try {
+      const result = await setMarginFloors({
+        changes: [{ productId, marginFloorPercent: percent }],
+        reason,
+        performedBy: userId,
+        idempotencyKey: getKeyFor(scope),
+      });
+      resetKeyFor(scope);
+      setReason('');
+      const reloaded = await load();
+      if (!reloaded) {
+        toast('warning', 'The floor was saved, but it could not be reloaded. Refresh this page.');
+      } else if (result.changed_count === 0) {
+        toast('info', 'The margin floor is unchanged.');
+      } else {
+        toast('success', percent === null ? 'Margin floor cleared.' : `Margin floor set to ${formatMarginFloorPercent(percent / 100)}%.`);
+      }
+    } catch (err) {
+      if (!isMarginFloorRefusal(err)) Sentry.captureException(err, { extra: { context: 'set_product_margin_floor', productId } });
+      toast('error', marginFloorErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const underTiers = tierMargins
+    .map((margin, i) => ({ tier: i + 1, margin }))
+    .filter(({ margin }) => isUnderMarginFloor(margin, floor));
+  const dirty = loadState === 'loaded' && draft.trim() !== formatMarginFloorPercent(floor);
+
+  return (
+    <Card>
+      <CardHeader title="Margin" accent="Floor" />
+      {loadState === 'loading' && <p className="text-sm text-secondary">Loading the margin floor…</p>}
+      {loadState === 'failed' && (
+        <div className="space-y-2">
+          <p className="text-sm text-red-700" role="alert">The margin floor could not be loaded.</p>
+          <Button variant="secondary" size="sm" showChevron={false} onClick={() => { setLoadState('loading'); void load(); }}>
+            Try again
+          </Button>
+        </div>
+      )}
+      {loadState === 'loaded' && (
+        <div className="space-y-3">
+          <p className="text-xs text-gray-600">
+            The lowest net margin (profit % of price) this product should sell at. The price sheet warns on any tier
+            below it. Leave it blank for no floor: that product skips only the low-margin warning. The floor saves on
+            its own with Save floor, not with Save Changes.
+          </p>
+          {underTiers.length > 0 && (
+            <div className="flex items-start gap-2 p-2 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-900" role="status">
+              <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>
+                {underTiers.map(({ tier, margin }) => `Tier ${tier} is at ${((margin as number) * 100).toFixed(2)}%`).join('; ')}
+                {` — under the ${floorLabel(floor)} floor.`}
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              id="product-margin-floor"
+              label="Floor (net margin %)"
+              // Text, not number: a number box reports text it cannot read as "", which would clear the floor.
+              type="text"
+              inputMode="decimal"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="No floor"
+            />
+            <Input
+              id="product-margin-floor-reason"
+              label="Reason (optional)"
+              value={reason}
+              maxLength={500}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g., Supplier program minimum"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" icon={<Save className="w-3 h-3" />} showChevron={false} onClick={handleSave} loading={saving} disabled={!dirty}>
+              Save floor
+            </Button>
+          </div>
+          {history.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-secondary mb-1">Recent changes</h4>
+              <ul className="text-xs text-gray-600 space-y-1">
+                {history.map((change) => (
+                  <li key={change.id}>
+                    {new Date(change.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}:{' '}
+                    {floorLabel(change.old_margin_floor)} → {floorLabel(change.new_margin_floor)}
+                    {change.reason ? ` (${change.reason})` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}

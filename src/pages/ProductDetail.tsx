@@ -10,6 +10,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -1510,6 +1511,15 @@ export default function ProductDetail() {
                 {isNew ? 'Create Product' : 'Save Changes'}
               </Button>
             </div>
+          )}
+
+          {/* Below Save Changes: the floor saves on its own, with its own button. */}
+          {isAdmin && !isNew && id && profile && (
+            <ProductMarginFloorCard
+              productId={id}
+              tierMargins={[persistedProduct?.tier1_margin, persistedProduct?.tier2_margin, persistedProduct?.tier3_margin]}
+              userId={profile.id}
+            />
           )}
           </fieldset>
         </div>

@@ -43,6 +43,17 @@ import {
 } from '../lib/productPricingSupplierEvidenceWorkbook';
 import { getSupplierMarketEvidence } from '../lib/supplierPricing';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import {
+  fetchMarginFloors,
+  formatMarginFloorPercent,
+  isMarginFloorRefusal,
+  isUnderMarginFloor,
+  marginFloorErrorMessage,
+  parseMarginFloorPercent,
+  setMarginFloors,
+  type MarginFloorChange,
+  type SetMarginFloorsResult,
+} from '../lib/marginFloors';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 
 const INLINE_PRICING_FIELDS = new Set([
@@ -63,6 +74,10 @@ const INLINE_NONPRICING_FIELDS = new Set([
   'is_active',
 ]);
 
+// Floors live in product_margin_floors, not on the product: the list copies each one onto its row.
+const MARGIN_FLOOR_FIELD = 'margin_floor_percent';
+type ProductListRow = Product & { [MARGIN_FLOOR_FIELD]?: string };
+
 function inputDecimal(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
   return String(value).trim();
@@ -72,11 +87,22 @@ function storedMarginPercent(value: number | null | undefined): string | null {
   return value == null ? null : formatPricingMarginPercent(value);
 }
 
+/** A tier's net margin under its price; red with "under floor" when below the product's floor. */
+function NetMarginNote({ margin, floor }: { margin: number; floor: number | undefined }) {
+  const under = isUnderMarginFloor(margin, floor);
+  return (
+    <div className={`text-[11px] ${under ? 'font-semibold text-red-700' : 'text-gray-400'}`}>
+      {/* Two decimals when flagged, so 14.996% never reads as "15.0% · under 15% floor". */}
+      {(margin * 100).toFixed(under ? 2 : 1)}% net{under ? ` · under ${formatMarginFloorPercent(floor)}% floor` : ''}
+    </div>
+  );
+}
+
 export default function Products() {
   const { role, profile } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<ProductListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -98,6 +124,9 @@ export default function Products() {
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
   const applyPricingIdem = useIdempotencyKey('apply_product_pricing_change_set', profile?.id || '');
   const exportPricingIdem = useIdempotencyKey('create_pricing_workbook_export', profile?.id || '');
+  const marginFloorIdem = useIdempotencyKey('set_product_margin_floors', profile?.id || '');
+  const [marginFloors, setMarginFloorsByProduct] = useState<Map<string, number>>(new Map());
+  const [marginFloorsLoadFailed, setMarginFloorsLoadFailed] = useState(false);
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
   const isAdmin = role === 'admin';
@@ -148,8 +177,24 @@ export default function Products() {
       setLoading(false);
       return false;
     }
+    // Margin floors (admin-only) only add warnings: a failed read keeps the catalog and says so.
+    let floors = new Map<string, number>();
+    let floorsFailed = false;
+    if (isAdmin) {
+      try {
+        floors = await fetchMarginFloors();
+      } catch (floorError) {
+        Sentry.captureException(floorError, { extra: { context: 'load_product_margin_floors' } });
+        floorsFailed = true;
+      }
+    }
     if (seq !== loadSeqRef.current) return false;
-    setProducts(prods);
+    // The floor rides on each row as typed text, so the inline editor can tell a real edit from
+    // the stored value (clearing a floor included).
+    setProducts(prods.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(floors.get(p.id)) })));
+    setMarginFloorsByProduct(floors);
+    setMarginFloorsLoadFailed(floorsFailed);
+    if (floorsFailed && reportError) toast('warning', 'Margin floors could not be loaded. Floor warnings are hidden until you refresh.');
     setLoadError(false);
 
     const cats = [...new Set(prods.map((p) => p.category).filter(Boolean))] as string[];
@@ -447,13 +492,71 @@ export default function Products() {
     };
   };
 
+  const saveMarginFloors = async (changes: Map<string, Record<string, unknown>>): Promise<boolean> => {
+    if (!profile) throw new Error('Your user profile is not available. Refresh and try again.');
+    const floorChanges: MarginFloorChange[] = [];
+    for (const [productId, fields] of changes) {
+      if (!(MARGIN_FLOOR_FIELD in fields)) continue;
+      const original = products.find((product) => product.id === productId);
+      if (!original) throw new Error('A Product changed while you were editing. Refresh and try again.');
+      let percent: number | null;
+      try {
+        percent = parseMarginFloorPercent(String(fields[MARGIN_FLOOR_FIELD] ?? ''));
+      } catch (err) {
+        throw new Error(`${original.product_name}: ${err instanceof Error ? err.message : 'invalid margin floor'}`);
+      }
+      floorChanges.push({ productId, marginFloorPercent: percent });
+    }
+    // One key per exact request: a retry of the same save replays; a changed one is a new save.
+    const scope = JSON.stringify(floorChanges);
+    let result: SetMarginFloorsResult;
+    try {
+      result = await setMarginFloors({
+        changes: floorChanges,
+        reason: '',
+        performedBy: profile.id,
+        idempotencyKey: marginFloorIdem.getKeyFor(scope),
+      });
+    } catch (err) {
+      if (!isMarginFloorRefusal(err)) Sentry.captureException(err, { extra: { context: 'set_product_margin_floors_inline' } });
+      throw new Error(marginFloorErrorMessage(err));
+    }
+    marginFloorIdem.resetKeyFor(scope);
+    const reloaded = await fetchProducts(false);
+    if (!reloaded) {
+      // Show what was saved rather than the old floors, so nobody re-enters them.
+      const saved = new Map(marginFloors);
+      for (const change of floorChanges) {
+        if (change.marginFloorPercent === null) saved.delete(change.productId);
+        else saved.set(change.productId, change.marginFloorPercent / 100);
+      }
+      setMarginFloorsByProduct(saved);
+      setProducts((rows) => rows.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(saved.get(p.id)) })));
+      toast('warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.');
+    } else if (result.changed_count === 0) {
+      toast('info', 'The margin floors are unchanged.');
+    } else {
+      toast('success', `Updated ${result.changed_count} margin floor(s).`);
+    }
+    return true;
+  };
+
   const handleBulkSave = async (changes: Map<string, Record<string, unknown>>): Promise<void | boolean> => {
     try {
       let hasPricing = false;
       let hasNonpricing = false;
+      let hasFloor = false;
       for (const fields of changes.values()) {
         hasPricing ||= Object.keys(fields).some((key) => INLINE_PRICING_FIELDS.has(key));
         hasNonpricing ||= Object.keys(fields).some((key) => INLINE_NONPRICING_FIELDS.has(key));
+        hasFloor ||= MARGIN_FLOOR_FIELD in fields;
+      }
+
+      if (hasFloor && (hasPricing || hasNonpricing)) {
+        throw new Error('Save margin floors on their own. Cancel, change only the floors, then save again.');
+      }
+      if (hasFloor) {
+        return await saveMarginFloors(changes);
       }
 
       if (hasPricing && hasNonpricing) {
@@ -693,6 +796,37 @@ export default function Products() {
               </span>
             ),
           } satisfies EditableColumn<Product>,
+          {
+            key: MARGIN_FLOOR_FIELD,
+            header: 'Floor %',
+            // Read-only while the floors failed to load: an edit would be made against unknown values.
+            editable: !marginFloorsLoadFailed,
+            editRender: (row: Product, getCellValue: (colKey: string) => unknown, setCellValue: (colKey: string, value: unknown) => void) => {
+              const value = getCellValue(MARGIN_FLOOR_FIELD) ?? '';
+              return (
+                <div className="flex items-center gap-1">
+                  {/* Text, not number: a number box reports text it cannot read as "", which would clear the floor. */}
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    aria-label={`Margin floor percent for ${row.product_name}`}
+                    value={String(value)}
+                    placeholder="None"
+                    onChange={(e) => setCellValue(MARGIN_FLOOR_FIELD, e.target.value)}
+                    className="w-20 px-1 py-1 text-sm text-right font-mono border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30"
+                  />
+                  <span className="text-xs text-gray-400">%</span>
+                </div>
+              );
+            },
+            render: (row: Product) => {
+              if (marginFloorsLoadFailed) return <span className="text-xs text-amber-700" title="Margin floors could not be loaded">?</span>;
+              const floor = marginFloors.get(row.id);
+              return (
+                <span className="font-mono text-sm">{floor != null ? `${formatMarginFloorPercent(floor)}%` : '-'}</span>
+              );
+            },
+          } satisfies EditableColumn<Product>,
         ]
       : []),
     ...(isAdmin
@@ -721,7 +855,7 @@ export default function Products() {
             {row.tier1_price != null ? `$${Number(row.tier1_price).toFixed(2)}` : '-'}
           </span>
           {isAdmin && showSensitive && row.tier1_margin != null && (
-            <div className="text-[11px] text-gray-400">{(row.tier1_margin * 100).toFixed(1)}% net</div>
+            <NetMarginNote margin={row.tier1_margin} floor={marginFloors.get(row.id)} />
           )}
         </div>
       ),
@@ -738,7 +872,7 @@ export default function Products() {
             {row.tier2_price != null ? `$${Number(row.tier2_price).toFixed(2)}` : '-'}
           </span>
           {isAdmin && showSensitive && row.tier2_margin != null && (
-            <div className="text-[11px] text-gray-400">{(row.tier2_margin * 100).toFixed(1)}% net</div>
+            <NetMarginNote margin={row.tier2_margin} floor={marginFloors.get(row.id)} />
           )}
         </div>
       ),
@@ -755,7 +889,7 @@ export default function Products() {
             {row.tier3_price != null ? `$${Number(row.tier3_price).toFixed(2)}` : '-'}
           </span>
           {isAdmin && showSensitive && row.tier3_margin != null && (
-            <div className="text-[11px] text-gray-400">{(row.tier3_margin * 100).toFixed(1)}% net</div>
+            <NetMarginNote margin={row.tier3_margin} floor={marginFloors.get(row.id)} />
           )}
         </div>
       ),
@@ -887,7 +1021,7 @@ export default function Products() {
 
       <Card padding={false}>
         <div className="p-5">
-          <EditableDataTable<Product>
+          <EditableDataTable<ProductListRow>
             key={tableRevision}
             data={filtered}
             columns={columns}

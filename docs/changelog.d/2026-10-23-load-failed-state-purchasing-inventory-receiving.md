@@ -40,7 +40,7 @@
   "Unknown" or an empty filter, the PO edit dialog's product search, and silent row caps on the
   receiving log (500) and inbound purchase orders (500).
 - Proof: forced each failure against a local fake Supabase server in the dev app and watched the
-  failed state, then Try again showing the record. New tests
-  (`src/pages/PurchasingInventory.loadFailed.test.tsx`) fail on the old code: 28 of 30. The other
-  two pin behaviour that already worked: a ledger read error already showed an error, and a missing
-  or hidden purchase order still says "Purchase order not found".
+  failed state, then Try again showing the record. New tests in
+  `src/pages/PurchasingInventory.loadFailed.test.tsx` cover each screen; two of them pin behaviour
+  that already worked (a ledger read error already showed an error, and a missing or hidden
+  purchase order still says "Purchase order not found").

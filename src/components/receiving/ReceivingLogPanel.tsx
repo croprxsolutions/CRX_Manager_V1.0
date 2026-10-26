@@ -87,6 +87,10 @@ export default function ReceivingLogPanel() {
   const fetchSeq = useRef(0);
   const fetchData = useCallback(async () => {
     const seq = ++fetchSeq.current;
+    // The previous filter's rows are not this read's answer: hide them (and any
+    // selection built on them) until the read finishes.
+    setLoading(true);
+    setRecords([]);
     // Fetch summary
     try {
       const { data: sumData, error: sumError } = await supabase.rpc('get_receiving_summary');

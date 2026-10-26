@@ -15,18 +15,20 @@ const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   functions: {} as Record<string, unknown>,
   // Table or function name -> how its reads fail.
-  failing: new Map<string, 'error' | 'nodata' | 'notlist'>(),
+  failing: new Map<string, 'error' | 'nodata' | 'notlist' | 'pending'>(),
   // Every RPC name called, in order.
   rpcCalls: [] as string[],
   toast: vi.fn(),
 }));
 
 // A query that ignores its filters and answers with the given rows (or a failure).
-function fixedQuery(reply: { data: unknown; error: unknown; count: number | null }): Record<string, unknown> {
+function fixedQuery(reply: { data: unknown; error: unknown; count: number | null } | 'pending'): Record<string, unknown> {
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve(reply);
+      // 'pending' never answers: the screen stays mid-read.
+      if (prop === 'then') return (resolve: (v: unknown) => unknown) => { if (reply !== 'pending') resolve(reply); };
       if (prop === 'maybeSingle' || prop === 'single') {
+        if (reply === 'pending') return () => new Promise(() => {});
         return () => Promise.resolve({
           data: Array.isArray(reply.data) ? (reply.data[0] ?? null) : reply.data,
           error: reply.error,
@@ -38,8 +40,9 @@ function fixedQuery(reply: { data: unknown; error: unknown; count: number | null
   return q;
 }
 
-function replyFor(name: string, rows: unknown): { data: unknown; error: unknown; count: number | null } {
+function replyFor(name: string, rows: unknown): { data: unknown; error: unknown; count: number | null } | 'pending' {
   const mode = H.failing.get(name);
+  if (mode === 'pending') return 'pending';
   if (mode === 'error') return { data: null, error: { message: 'connection reset' }, count: null };
   if (mode === 'nodata') return { data: null, error: null, count: null };
   if (mode === 'notlist') return { data: { unexpected: true }, error: null, count: null };
@@ -217,6 +220,18 @@ describe('Receiving', () => {
     H.functions.get_receiving_log = [{ id: 'r1', purchase_order_id: 'po1', po_number: 'PO-1001', vendor: 'Acme Chem', product_name: 'Widget 2.5 GL', quantity_received: 5, condition: 'good', received_at: '2026-10-20T12:00:00Z' }];
     tryAgain();
     expect((await screen.findAllByText('PO-1001')).length).toBeGreaterThan(0);
+  });
+
+  it("a filter change hides the previous filter's rows while the new read runs", async () => {
+    H.functions.get_receiving_summary = { expected_today: 0, pending_receipt: 0, received_this_week: 0, received_ytd: 0, damaged_this_week: 0 };
+    H.functions.get_receiving_log = [{ id: 'r1', purchase_order_id: 'po1', po_number: 'PO-1001', vendor: 'Acme Chem', product_name: 'Widget 2.5 GL', quantity_received: 5, condition: 'good', received_at: '2026-10-20T12:00:00Z' }];
+    at('/receiving?tab=log', <ReceivingLogPanel />);
+    expect((await screen.findAllByText('PO-1001')).length).toBeGreaterThan(0);
+
+    H.failing.set('get_receiving_log', 'pending');
+    fireEvent.change(screen.getByLabelText('Filter by condition'), { target: { value: 'damaged' } });
+    await waitFor(() => expect(screen.queryByText('PO-1001')).not.toBeInTheDocument());
+    expect(screen.queryByText('No receiving records')).not.toBeInTheDocument();
   });
 
   it('a failed receiving-totals read says so instead of hiding the damaged-goods alert', async () => {

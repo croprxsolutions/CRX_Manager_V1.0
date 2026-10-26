@@ -451,8 +451,9 @@ function verifyRollbackOnce(query) {
   // A function body written as a quoted string (plain, E'…' or U&'…') hides its
   // code from the name checks: escapes and comments inside a literal can spell
   // setval/**/( or any name (Codex App, #1092). Smoke chains use dollar-quoted
-  // bodies, so a batch with any string-literal body is refused.
-  if (/\bas\s*(?:e|u&)?'/i.test(c)) return false;
+  // bodies, so a batch with any string-literal body is refused. The same holds
+  // for a DO block (`DO 'BEGIN … END'`, `DO LANGUAGE plpgsql E'…'`).
+  if (/\b(?:as|do(?:\s+language\s+['"]?\w+['"]?)?)\s*(?:e|u&)?'/i.test(c)) return false;
   const st = topLevelStatements(c);
   if (!st || st.length === 0) return false;
   const tx = st.map((s, i) => (TX_CONTROL_RE.test(s.text) ? i : -1)).filter((i) => i >= 0);

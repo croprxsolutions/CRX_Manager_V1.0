@@ -93,23 +93,49 @@ SELECT 'quote_versions:column-mutation-privilege' AS violation_key,
 UNION ALL
 
 -- 20261022101000 replaced the table-wide SELECT with a column-level grant on
--- every column except snapshot_data, so the read path is checked with
--- has_any_column_privilege; has_table_privilege is false there by design. The
--- snapshot itself is read through get_quote_versions(uuid), so losing that
--- routine breaks version history just as surely as losing the column grant.
+-- every column except snapshot_data, so the read path is checked column by
+-- column; has_table_privilege is false there by design. The nine columns are
+-- the migration's grant list. Each is resolved through pg_attribute rather
+-- than by name, so a dropped or renamed column reports here instead of making
+-- has_column_privilege raise and turning the whole predicate into an ERROR.
+-- The snapshot itself is read through get_quote_versions(uuid), so losing that
+-- routine, its EXECUTE, or its SECURITY DEFINER (an invoker could not read
+-- snapshot_data) breaks version history just as surely as losing a column.
 SELECT 'quote_versions:read-path-regressed' AS violation_key,
-       'authenticated lost its column-level read of quote_versions, qversions_select was removed, or get_quote_versions(uuid) is missing or not authenticated-callable — the write boundary must not be satisfied by breaking version history' AS reason
+       'authenticated lost its column-level read of a version-history column, qversions_select was removed or no longer applies to authenticated, or get_quote_versions(uuid) is missing, no longer SECURITY DEFINER, or not authenticated-callable — the write boundary must not be satisfied by breaking version history' AS reason
  WHERE NOT has_any_column_privilege('authenticated', 'public.quote_versions', 'SELECT')
+    OR EXISTS (
+      SELECT 1
+        FROM unnest(ARRAY['id', 'quote_id', 'version_number', 'sent_by', 'sent_at',
+                          'sent_method', 'pdf_url', 'notes', 'restore_trusted_at']) AS c(name)
+       WHERE NOT EXISTS (
+         SELECT 1
+           FROM pg_attribute a
+          WHERE a.attrelid = 'public.quote_versions'::regclass
+            AND a.attname = c.name
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+            AND has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')
+       )
+    )
     OR NOT EXISTS (
       SELECT 1
         FROM pg_policy p
        WHERE p.polrelid = 'public.quote_versions'::regclass
          AND p.polname = 'qversions_select'
          AND p.polcmd = 'r'
+         AND p.polpermissive
+         -- 0 in polroles means PUBLIC, which includes authenticated.
+         AND ('authenticated'::regrole::oid = ANY (p.polroles) OR 0::oid = ANY (p.polroles))
     )
     OR CASE
          WHEN to_regprocedure('public.get_quote_versions(uuid)') IS NULL THEN true
          ELSE NOT has_function_privilege('authenticated', 'public.get_quote_versions(uuid)', 'EXECUTE')
+           OR NOT EXISTS (
+             SELECT 1 FROM pg_proc p
+              WHERE p.oid = to_regprocedure('public.get_quote_versions(uuid)')
+                AND p.prosecdef
+           )
        END
 
 UNION ALL
@@ -122,6 +148,20 @@ SELECT 'quote_versions:snapshot-data-readable' AS violation_key,
        'anon/authenticated can read public.quote_versions.snapshot_data directly — it carries cost and must be reached only through get_quote_versions(uuid) (20261022101000)' AS reason
  WHERE has_column_privilege('authenticated', 'public.quote_versions', 'snapshot_data', 'SELECT')
     OR has_column_privilege('anon', 'public.quote_versions', 'snapshot_data', 'SELECT')
+
+UNION ALL
+
+-- anon held no read on quote_versions before 20261022101000 and was given none
+-- by it. Any column grant to anon, or anon being able to call the SECURITY
+-- DEFINER snapshot reader (a PUBLIC grant counts), exposes version history to
+-- signed-out callers while the snapshot_data check above stays clean.
+SELECT 'quote_versions:anon-read' AS violation_key,
+       'anon can read a column of public.quote_versions or call get_quote_versions(uuid) — version history, snapshot included, must stay signed-in only' AS reason
+ WHERE has_any_column_privilege('anon', 'public.quote_versions', 'SELECT')
+    OR CASE
+         WHEN to_regprocedure('public.get_quote_versions(uuid)') IS NULL THEN false
+         ELSE has_function_privilege('anon', 'public.get_quote_versions(uuid)', 'EXECUTE')
+       END
 
 UNION ALL
 

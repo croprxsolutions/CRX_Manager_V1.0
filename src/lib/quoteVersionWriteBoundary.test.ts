@@ -656,6 +656,7 @@ describe('quote_versions write boundary — standing predicate', () => {
       // 20261022101000 made snapshot_data admin-only; the browser reads it
       // only through get_quote_versions(uuid).
       'quote_versions:snapshot-data-readable',
+      'quote_versions:anon-read',
       'quote_versions:rls-disabled',
       'quote_versions:force-rls-enabled',
       'quote_versions:column-mutation-privilege',
@@ -1107,6 +1108,19 @@ describe('quote_versions write boundary — standing predicate', () => {
     expect(predicate).toContain(
       "NOT has_function_privilege('authenticated', 'public.get_quote_versions(uuid)', 'EXECUTE')",
     );
+    // Any one column would satisfy has_any_column_privilege, so each history
+    // column from the migration's grant list is checked on its own.
+    expect(predicate).toContain(
+      "has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')",
+    );
+    for (const column of [
+      'id', 'quote_id', 'version_number', 'sent_by', 'sent_at',
+      'sent_method', 'pdf_url', 'notes', 'restore_trusted_at',
+    ]) {
+      expect(predicate).toContain(`'${column}'`);
+    }
+    expect(predicate).toContain("'authenticated'::regrole::oid = ANY (p.polroles)");
+    expect(predicate).toMatch(/to_regprocedure\('public\.get_quote_versions\(uuid\)'\)\s+AND p\.prosecdef/);
   });
 
   it('keeps snapshot_data unreadable to both browser roles', () => {
@@ -1115,6 +1129,13 @@ describe('quote_versions write boundary — standing predicate', () => {
         `has_column_privilege('${role}', 'public.quote_versions', 'snapshot_data', 'SELECT')`,
       );
     }
+  });
+
+  it('keeps version history signed-in only', () => {
+    expect(predicate).toContain("has_any_column_privilege('anon', 'public.quote_versions', 'SELECT')");
+    expect(predicate).toContain(
+      "has_function_privilege('anon', 'public.get_quote_versions(uuid)', 'EXECUTE')",
+    );
   });
 
   it('is a read-only SELECT, as the sweep runner requires', () => {

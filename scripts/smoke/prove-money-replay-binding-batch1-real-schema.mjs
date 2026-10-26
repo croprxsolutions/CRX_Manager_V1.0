@@ -82,7 +82,7 @@ const COVERED_FUNCTIONS = [
   '_replay_fingerprint_20261015', '_bind_replay_receipt_20261015', '_require_bound_replay_receipt_20261015',
   'check_idempotency_intent',
 ];
-const TOUCHED = new RegExp(`FUNCTION\\s+(IF\\s+EXISTS\\s+)?(public\\.)?"?(${COVERED_FUNCTIONS.join('|')})\\b`, 'i');
+const TOUCHED = new RegExp(`(FUNCTION|ROUTINE|PROCEDURE)\\s+(IF\\s+EXISTS\\s+)?("?public"?\\s*\\.\\s*)?"?(${COVERED_FUNCTIONS.join('|')})\\b`, 'i');
 // Later replay-binding batches (2, 3a, 3b) rebuild the commit-time guard trigger with a longer
 // covered list; step 7 replays them and checks the nine are still guarded.
 
@@ -151,7 +151,7 @@ function plan() {
   const before = all.slice(0, at);
   const later = all.slice(at + 1);
   for (const file of later) {
-    assert.ok(!TOUCHED.test(lf(file).replace(/EXECUTE\s+FUNCTION/gi, 'EXECUTE')), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
+    assert.ok(!TOUCHED.test(lf(file).replace(/EXECUTE\s+(FUNCTION|PROCEDURE)/gi, 'EXECUTE')), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
   }
   const touched = new RegExp(WRAPPED.join('|'));
   for (const name of PARKED) {

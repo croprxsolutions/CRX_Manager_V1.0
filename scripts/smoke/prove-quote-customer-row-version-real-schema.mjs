@@ -3,12 +3,15 @@
  * Disposable PostgreSQL 17 proof for the quote/customer row-version migration.
  * It restores the supported baseline, replays every ledger-selected migration
  * through this candidate, runs the legacy lifecycle smokes, applies the
- * candidate and its missing-default drift check, then replays every later
- * migration on main and executes the candidate's rollback-only smoke matrices
- * there (they assert today's rules, e.g. 20261013220000's REP_CANNOT_REASSIGN).
- * So the matrices prove the row-version guards as they stand on current main;
- * the candidate's own bodies (pre-fix overwrite, canonical contract, mutation
- * self-tests) are proven by prove-quote-customer-row-version-concurrency.mjs.
+ * candidate and runs its rollback-only smoke matrices right after it, then the
+ * missing-default drift check. Then it replays every later migration on main
+ * and runs today's matrices there too.
+ *
+ * The smoke files have since been rewritten for later rules (e.g.
+ * 20261013220000's REP_CANNOT_REASSIGN, 20261006200000's CRX-LIFE-001
+ * refusal), so on the legacy catalog this prover runs each one exactly as it
+ * stood at CANDIDATE_ERA (the last commit at which this prover was maintained
+ * and passed), read from git history; the current files run on current main.
  * It always removes its network-disabled container. It never reads a DB URL.
  */
 import assert from 'node:assert/strict';
@@ -28,6 +31,10 @@ const smokeFiles = [
   path.join(ROOT, 'scripts', 'smoke', 'smoke-save-quote-drawn-guard.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-planned-holds-drawn-sync.sql'),
 ];
+// #450, 2026-08-24: the last commit that changed this prover. Smokes rewritten since then for later
+// migrations run on the legacy catalog in their form at this commit.
+const CANDIDATE_ERA = '56321c0d083e958d445854c3310878b916aa971a';
+const CANDIDATE_ERA_LEGACY_SMOKES = new Set(['smoke-backfill-refuse-split-billing.sql']);
 // Later migrations, replayed after the candidate the way the other real-schema provers replay them.
 // Live but not replayable here (storage.objects policies, storage.buckets settings).
 const PARKED = new Set([
@@ -49,15 +56,12 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + '  )::uuid\n';
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const legacyLifecycleSmokeFiles = [
-  // smoke-backfill-refuse-split-billing.sql is deliberately NOT in this list.
-  // Since #885 it also asserts the CRX-LIFE-001 refusal from 20261006200000
-  // (a field_application split through the order pipeline), fail-first: it
-  // raises SMOKE_FAIL on any catalog older than that migration, and this
-  // legacy catalog stops at 20260730235031. It does not pass on the current-main
-  // catalog either: it completes a delivery by direct UPDATE, which
-  // 20261022075000 refuses (COMPLETION_EVIDENCE_REQUIRED). Until that chain is
-  // repaired, its replay-based proof is
-  // scripts/smoke/prove-order-invoice-type-gate-real-schema.mjs.
+  // Runs as it stood at CANDIDATE_ERA. Since #885 the current file also asserts
+  // the CRX-LIFE-001 refusal from 20261006200000, fail-first, so it cannot pass
+  // on this legacy catalog; nor does it pass on current main (it completes a
+  // delivery by direct UPDATE, which 20261022075000 refuses), so it is not run
+  // there either until that chain is repaired.
+  path.join(ROOT, 'scripts', 'smoke', 'smoke-backfill-refuse-split-billing.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-draw-ledger-reversal.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-forbid-restore-cancelled-order.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-order-draw-lock.sql'),
@@ -214,11 +218,20 @@ function proveQuoteLifecycleAnchorMutationResistance(sql) {
     }
   }
 }
-function expectRollbackMarker(file) {
-  const result = psql(`\\i /tmp/${path.basename(file)}`, { allowFailure: true });
+function expectRollbackMarker(file, text, where) {
+  const name = `${where}-${path.basename(file)}`;
+  stageText(name, text);
+  const result = psql(`\\i /tmp/${name}`, { allowFailure: true });
   const output = `${result.stdout}\n${result.stderr}`;
-  assert.notEqual(result.status, 0, `${path.basename(file)} unexpectedly committed instead of rolling back`);
-  assert.match(output, /SMOKE_PASS_ROLLBACK/, `${path.basename(file)} did not execute to SMOKE_PASS_ROLLBACK:\n${output}`);
+  assert.notEqual(result.status, 0, `${path.basename(file)} unexpectedly committed instead of rolling back (${where})`);
+  assert.match(output, /SMOKE_PASS_ROLLBACK/, `${path.basename(file)} did not execute to SMOKE_PASS_ROLLBACK (${where}):\n${output}`);
+}
+// A smoke file exactly as it stood at CANDIDATE_ERA (needs the repository's git history).
+function candidateEraText(file) {
+  const relative = path.relative(ROOT, file).replaceAll('\\', '/');
+  const result = spawnSync('git', ['show', `${CANDIDATE_ERA}:${relative}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  assert.equal(result.status, 0, `cannot read ${relative} at ${CANDIDATE_ERA} (a shallow clone lacks it): ${result.stderr}`);
+  return result.stdout.replaceAll('\r\n', '\n');
 }
 
 try {
@@ -226,6 +239,8 @@ try {
   const quoteSmokeSql = readFileSync(smokeFiles[0], 'utf8');
   assertQuoteLifecycleCoverage(quoteSmokeSql);
   proveQuoteLifecycleAnchorMutationResistance(quoteSmokeSql);
+  const candidateEraSmokes = new Map(smokeFiles.map((file) => [file, candidateEraText(file)]));
+  assertQuoteLifecycleCoverage(candidateEraSmokes.get(smokeFiles[0]));
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   waitForDatabase();
   const artifacts = ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql'];
@@ -301,7 +316,7 @@ try {
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
   `);
   for (const file of legacyLifecycleSmokeFiles) {
-    copy(file, `legacy-${path.basename(file)}`);
+    stageText(`legacy-${path.basename(file)}`, CANDIDATE_ERA_LEGACY_SMOKES.has(path.basename(file)) ? candidateEraText(file) : lf(file));
     const legacyResult = psql(`\\i /tmp/legacy-${path.basename(file)}`, { allowFailure: true });
     const legacyOutput = `${legacyResult.stdout}\n${legacyResult.stderr}`;
     assert.notEqual(legacyResult.status, 0, `${path.basename(file)} unexpectedly committed on the legacy catalog`);
@@ -313,6 +328,8 @@ try {
   }
   stageText('candidate.sql', lf(candidate));
   apply('candidate.sql');
+  // The candidate in isolation: its matrices, as they stood at CANDIDATE_ERA, right after it.
+  for (const file of smokeFiles) expectRollbackMarker(file, candidateEraSmokes.get(file), 'candidate');
   psql('ALTER TABLE public.quotes ALTER COLUMN row_version DROP DEFAULT;');
   const missingDefault = psql(readFileSync(candidate, 'utf8'), { allowFailure: true });
   const missingDefaultOutput = `${missingDefault.stdout}\n${missingDefault.stderr}`;
@@ -325,11 +342,9 @@ try {
   ledger(path.basename(candidate, '.sql'));
   const replayedLater = replayLater(later);
   console.log(`[prover] replayed ${replayedLater} later migrations after the candidate (through ${path.basename(later.at(-1))}; skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
-  for (const file of smokeFiles) {
-    copy(file, path.basename(file));
-    expectRollbackMarker(file);
-  }
-  console.log(`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS baseline=20260727174805 post_baseline_replay=through_candidate_then_${replayedLater}_later smoke_matrices_on=${path.basename(later.at(-1), '.sql')} legacy_lifecycle_smokes=${legacyLifecycleSmokeFiles.length}/${legacyLifecycleSmokeFiles.length} smoke_backfill_split=NOT_RUN_HERE_SEE_TYPE_GATE_PROVER smoke_quote_customer=SMOKE_PASS_ROLLBACK quote_lifecycle=draft-sent-sent stale_before_lifecycle=QUOTE_STALE_WRITE smoke_drawn_guard=NOT_RUN_HERE_SEE_DRAW_TIER_PROVER smoke_planned_holds=SMOKE_PASS_ROLLBACK`);
+  // Today's matrices on current main.
+  for (const file of smokeFiles) expectRollbackMarker(file, lf(file), 'current');
+  console.log(`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS baseline=20260727174805 post_baseline_replay=through_candidate_then_${replayedLater}_later smoke_matrices=candidate_era_after_candidate+current_on_${path.basename(later.at(-1), '.sql')} legacy_lifecycle_smokes=${legacyLifecycleSmokeFiles.length}/${legacyLifecycleSmokeFiles.length} smoke_backfill_split=candidate_era_on_legacy smoke_quote_customer=SMOKE_PASS_ROLLBACK quote_lifecycle=draft-sent-sent stale_before_lifecycle=QUOTE_STALE_WRITE smoke_drawn_guard=NOT_RUN_HERE_SEE_DRAW_TIER_PROVER smoke_planned_holds=SMOKE_PASS_ROLLBACK`);
 } catch (error) {
   console.error(`ROW_VERSION_REAL_SCHEMA_RESTORE_FAIL ${error.stack ?? error.message}`);
   process.exitCode = 1;

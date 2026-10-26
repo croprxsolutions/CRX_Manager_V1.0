@@ -138,7 +138,7 @@ interface LocalItem {
   // prices the line from it instead of today's product cost; a new line or a line switched to
   // another product takes today's cost, as the server stamps it. Absent for non-admins.
   quoted_cost?: { productId: string; cost: number };
-  // "Use today's price" (20261025200000): once the quote has been sent, a saved line keeps its
+  // "Use today's price" (20261026060000): once the quote has been sent, a saved line keeps its
   // stored price (savedLineIdsRef) unless it has a manual price or this asks for today's price.
   use_todays_price?: boolean;
   suggested_rate: string | null;
@@ -525,7 +525,7 @@ export default function QuoteBuilder() {
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersion[]>([]);
   const [unreadableQuoteVersions, setUnreadableQuoteVersions] = useState<UnreadableQuoteVersion[]>([]);
   const savedVersionCount = quoteVersions.length + unreadableQuoteVersions.length;
-  // A quote with a sent version keeps its prices (save_quote, 20261025200000). The version last
+  // A quote with a sent version keeps its prices (save_quote, 20261026060000). The version last
   // sent to the customer is the price authority that Convert, Partial Order and Schedule Job check.
   // A sent or revised quote counts as locked even if its version list failed to load, so the
   // page never re-prices what the server keeps.
@@ -625,7 +625,7 @@ export default function QuoteBuilder() {
   // refused as QUOTE_ITEM_AMBIGUOUS_COST. A ref, not section state: installing the
   // ids a save returns must not mark the just-saved quote dirty.
   // `price` is the price_per_unit the database holds for that row (loaded, then each save's
-  // item_prices): a sent quote keeps it on later saves (20261025200000). `todayApplied` marks a
+  // item_prices): a sent quote keeps it on later saves (20261026060000). `todayApplied` marks a
   // "use today's price" choice the database already stored, so it is applied once, not again.
   const savedLineIdsRef = useRef(new Map<string, {
     id: string;
@@ -1518,7 +1518,7 @@ export default function QuoteBuilder() {
     []
   );
 
-  // The server lock (20261025200000) as the page applies it: once the quote has been sent, a line
+  // The server lock (20261026060000) as the page applies it: once the quote has been sent, a line
   // still naming its saved row (same product, as savedLineIdFor sends it) keeps the price the
   // database stored for that row, unless a "use today's price" choice is not yet saved. A draft
   // that was never sent follows the tier price. Reads a ref: call it from handlers and
@@ -2358,7 +2358,7 @@ export default function QuoteBuilder() {
       // map (a receipt cached before it existed) keeps the ids already held, which
       // still name this quote's lines.
       if (result.item_ids && typeof result.item_ids === 'object' && !Array.isArray(result.item_ids)) {
-        // Each saved row's stored price (item_prices, 20261025200000) becomes the price a sent
+        // Each saved row's stored price (item_prices, 20261026060000) becomes the price a sent
         // quote keeps. A reply without it (a receipt cached before it existed) keeps the price
         // the page sent, which the server computed the same way.
         const storedPrices = result.item_prices && typeof result.item_prices === 'object' && !Array.isArray(result.item_prices)

@@ -1,7 +1,7 @@
 # Known Issues — what is open today
 
-**Last verified: 2026-10-25 (America/Chicago)** for KI-12 and KI-81 only (live function bodies and quote rows
-read 2026-10-25, with migration `20261025200000`); every other entry as of 2026-10-23 against `main` at
+**Last verified: 2026-10-26 (America/Chicago)** for KI-12 and KI-81 only (live function bodies and quote rows
+read 2026-10-25 and re-read 2026-10-26 13:33 UTC, unchanged, with migration `20261026060000`); every other entry as of 2026-10-23 against `main` at
 `62ca3b640` (code, migration files, merged PRs). Live-database facts were NOT re-read for this rewrite (no database access in this pass): any "applied
 live" statement below is the older record's claim, and every such claim is marked as such.
 
@@ -253,7 +253,7 @@ could slip past a close. No month is closed live (older record's claim), so it i
 
 ### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
 **MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · unassigned**
-The sent-price lock (`20261025200000`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
+The sent-price lock (`20261026060000`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
 orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
 2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
 `_blend_quote_pick_valid_20261020`, or the first line of the job's quote section) and the field-application

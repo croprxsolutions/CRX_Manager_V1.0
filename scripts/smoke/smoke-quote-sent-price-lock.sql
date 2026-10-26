@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a sent quote keeps the prices the customer saw (To-Do 1.2)
 -- ----------------------------------------------------------------------------
--- Migration 20261025200000_quote_sent_price_lock. Products P and Q at cost 6.00 (tier 1 7.50).
+-- Migration 20261026060000_quote_sent_price_lock. Products P and Q at cost 6.00 (tier 1 7.50).
 -- Quotes are presented (sent, V1) at 7.50, then P is repriced to cost 7.00 (tier 1 8.75):
 --   A  quantity-only revision keeps 7.50 and the expiry (the save reply reports the stored price);
 --      Convert bills 7.50 (no re-send)

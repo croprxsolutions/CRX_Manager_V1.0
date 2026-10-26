@@ -307,7 +307,7 @@ DECLARE
   v_client_key text;
   v_item_ids jsonb := '{}'::jsonb;
   -- >>>SNAPSHOT
-  -- PRICE LOCK (20261025200000): a quote that has been sent (it has a quote_versions row) keeps
+  -- PRICE LOCK (20261026060000): a quote that has been sent (it has a quote_versions row) keeps
   -- each existing line's stored price on every save. Only a manual price (price_override) or the
   -- line's use_todays_price flag changes it; a new line takes today's tier price. A draft that was
   -- never sent follows the catalog as before (Mason, 2026-10-14).
@@ -960,7 +960,7 @@ BEGIN
     -- rather than leaving a retrying client id-less. (Codex round 28.)
     'item_ids', v_item_ids,
     -- >>>SNAPSHOT
-    -- PRICE LOCK (20261025200000): client_key -> the price_per_unit this save stored, so the
+    -- PRICE LOCK (20261026060000): client_key -> the price_per_unit this save stored, so the
     -- quote screen keeps each saved line at the price the database holds. Prices only; no cost.
     'item_prices', (
       SELECT COALESCE(jsonb_object_agg(e.key, qi.price_per_unit), '{}'::jsonb)
@@ -1018,7 +1018,7 @@ BEGIN
   SELECT COALESCE(MAX(version_number), 0) + 1 INTO v_version_number
   FROM quote_versions WHERE quote_id = p_quote_id;
 
-  -- PRICE LOCK (20261025200000): every send starts a new validity window (Chicago business
+  -- PRICE LOCK (20261026060000): every send starts a new validity window (Chicago business
   -- day); editing a sent quote no longer moves it (save_quote keeps it).
   v_quote.expires_at := (now() AT TIME ZONE 'America/Chicago')::date + COALESCE(v_quote.valid_days, 15);
 
@@ -1267,7 +1267,7 @@ BEGIN
     total_cost = ROUND((v_snapshot->'quote'->>'total_cost')::numeric, 2),
     total_profit = ROUND((v_snapshot->'quote'->>'total_profit')::numeric, 2),
     total_margin_pct = (v_snapshot->'quote'->>'total_margin_pct')::numeric,
-    -- PRICE LOCK (20261025200000): a rewind also puts back the version's customer (when that
+    -- PRICE LOCK (20261026060000): a rewind also puts back the version's customer (when that
     -- customer still exists) and tier, so a rewound quote matches the version as sent.
     customer_id = COALESCE(
       (SELECT c.id FROM customers c WHERE c.id = NULLIF(v_snapshot->'quote'->>'customer_id', '')::uuid),
@@ -1295,7 +1295,7 @@ BEGIN
       v_section->>'section_notes',
       v_section->>'section_header_notes',
       (v_section->>'needed_by_date')::date,
-      -- PRICE LOCK (20261025200000): a rewind keeps the section's field when the version
+      -- PRICE LOCK (20261026060000): a rewind keeps the section's field when the version
       -- recorded it and the field still exists for the quote's (restored) customer.
       (SELECT f.id FROM fields f
         WHERE f.id = NULLIF(v_section->>'field_id', '')::uuid
@@ -1309,7 +1309,7 @@ BEGIN
          OR (v_item->>'current_cost')::numeric <= 0 THEN
         RAISE EXCEPTION 'COST_BASIS_REQUIRED:%', v_item->>'product_id';
       END IF;
-      -- PRICE LOCK (20261025200000): a version that recorded its line ids restores each line
+      -- PRICE LOCK (20261026060000): a version that recorded its line ids restores each line
       -- under its own id with its own manual price, so the rewound quote still matches the
       -- version as sent. An id already in use (impossible after the delete above) gets a new one.
       INSERT INTO quote_items (
@@ -1520,7 +1520,7 @@ BEGIN
     RAISE EXCEPTION 'QUOTE_STALE_WRITE';
   END IF;
 
-  -- PRICE LOCK (20261025200000): a conversion that creates an order does so only at the prices,
+  -- PRICE LOCK (20261026060000): a conversion that creates an order does so only at the prices,
   -- lines and customer last sent. The check is skipped only where the owner implementation
   -- returns an existing order or refuses (an accepted quote that has an order, or a booking with
   -- draws), so a quote reopened after its order was cancelled or voided is checked again.
@@ -1585,7 +1585,7 @@ BEGIN
       'DRAW_DOWN_CUTOVER_IN_PROGRESS: a draw-down maintenance change is being applied right now, so this draw was not recorded. Nothing was changed. Please try again in a moment.';
   END IF;
 
-  -- PRICE LOCK (20261025200000): a booking is drawn only at the prices, lines and customer it
+  -- PRICE LOCK (20261026060000): a booking is drawn only at the prices, lines and customer it
   -- was last sent with (draw_down_quote holds the quote row lock).
   PERFORM public._assert_quote_prices_as_sent(p_quote_id);
 
@@ -1643,7 +1643,7 @@ BEGIN
     RAISE EXCEPTION 'Cannot schedule job from quote with status: %', v_quote.status;
   END IF;
 
-  -- PRICE LOCK (20261025200000): a job copies the section's prices into job_chemicals, so a
+  -- PRICE LOCK (20261026060000): a job copies the section's prices into job_chemicals, so a
   -- sent booking schedules only at the prices, lines and customer it was last sent with. A
   -- planned draft that was never sent may still be scheduled at its own prices (Mason, 2026-10-14).
   PERFORM public._assert_quote_prices_as_sent(p_quote_id);

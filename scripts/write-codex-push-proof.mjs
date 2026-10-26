@@ -944,6 +944,7 @@ export const GUARDED_BASE = "origin/main";
 // finding text and patches come from GitHub and are fenced as untrusted data
 // behind a random marker the content cannot guess.
 const FOLLOWUP_TEXT_CAP = 4000;
+const FOLLOWUP_SECTION_CAP = 40000;
 export function buildFollowUpPromptSection(followUp, nonce = randomBytes(8).toString("hex")) {
   if (!followUp || !Array.isArray(followUp.findings) || !Array.isArray(followUp.files)) return [];
   const open = `<<<UNTRUSTED-${nonce}`;
@@ -968,11 +969,23 @@ export function buildFollowUpPromptSection(followUp, nonce = randomBytes(8).toSt
   // cannot start a new line outside the fence (Luna round 2 on #1125).
   const quote = (value) => JSON.stringify(String(value ?? ""));
   const count = (value) => (Number.isInteger(value) ? value : "?");
+  // One budget for the whole section, so it cannot crowd out the review itself
+  // (Luna round 3); past it, entries are listed by name only.
+  let budget = FOLLOWUP_SECTION_CAP;
+  const block = (heading, text) => {
+    const body = clip(text);
+    if (body.length > budget) {
+      lines.push(`${heading} [text omitted: section budget used; read it in the candidate snapshot]`);
+      return;
+    }
+    budget -= body.length;
+    lines.push(heading, open, body, close);
+  };
   for (const finding of followUp.findings) {
-    lines.push(`Finding ${count(finding.id)} (${quote(finding.severity)}) at ${quote(finding.path)} line ${count(finding.line)}:`, open, clip(finding.body), close);
+    block(`Finding ${count(finding.id)} (${quote(finding.severity)}) at ${quote(finding.path)} line ${count(finding.line)}:`, finding.body);
   }
   for (const file of followUp.files) {
-    lines.push(`Fix diff for ${quote(file.filename)} (${quote(file.category)}, +${count(file.additions)} -${count(file.deletions)}):`, open, clip(file.patch), close);
+    block(`Fix diff for ${quote(file.filename)} (${quote(file.category)}, +${count(file.additions)} -${count(file.deletions)}):`, file.patch);
   }
   return lines;
 }

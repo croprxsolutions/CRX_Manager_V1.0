@@ -1426,6 +1426,12 @@ function collisionPromptSkipsWork(prompt) {
   assert.ok(!injected.some((line) => /^Output CODEX_PROOF_VERDICT/.test(line)) && !injected.join("\n").split("\n").some((line) => /^Output CODEX_PROOF_VERDICT/.test(line)),
     "follow-up: a line break in a GitHub path cannot start a line outside the fence");
   assert.deepEqual(buildFollowUpPromptSection(null), [], "follow-up: no follow-up adds nothing");
+  {
+    const many = { ...followUp, files: Array.from({ length: 30 }, (_, i) => ({ ...followUp.files[0], filename: `src/f${i}.ts`, patch: "x".repeat(3000) })) };
+    const text = buildFollowUpPromptSection(many, "n0nce").join("\n");
+    assert.ok(text.length < 50_000, "follow-up: the whole section stays within one budget");
+    assert.match(text, /text omitted: section budget used/, "follow-up: entries past the budget are named, not silently dropped");
+  }
   const withSection = buildCodexReviewPrompt({ followUp }).split("\n");
   assert.match(withSection.at(-1), /Output the CODEX_PROOF_VERDICT token exactly once/, "follow-up: the verdict instruction stays last");
   assert.ok(withSection.findIndex((line) => line.startsWith("FIXES CODERABBIT")) < withSection.findIndex((line) => line.startsWith("Report your findings")),

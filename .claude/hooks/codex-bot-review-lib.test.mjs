@@ -944,8 +944,8 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     "another review of R with only a written finding": /another CodeRabbit review of that commit has text of its own/,
     "a merge after the fixes that changed a shared policy document": /changed the PR's own changes \(docs\/reference\/coderabbit-native-review\.md\)/,
     "a base compare entry with no blob": /could not be compared in full/,
-    "a summary describing another commit": /describes fffffffff, not the reviewed commit/,
-    "no summary comment": /summary comment could not be identified/,
+    "a summary describing another commit": /no single CodeRabbit summary comment describes the reviewed commit/,
+    "no summary comment": /no single CodeRabbit summary comment describes the reviewed commit/,
     "a pre-merge table missing a row": /lists 8 checks but its summary counts 9/,
     "a custom pre-merge check in warning": /"money not exact whole cents" pre-merge check reads warning/,
     "GitHub errors with the follow-up read": /GitHub returned errors/,
@@ -978,6 +978,11 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
       // Its directory's tree at F and the head (third directory in the read).
       if (k === "followUp") for (const key of ["t1_2", "t2_2"]) v.data.repository[key] = { entries: [{ name: "2026-10-26-x.md", type: "blob", mode: 0o100644 }] };
     }],
+    ["an older summary comment about another commit", "followUp", (v) => {
+      const comments = v.data.repository.pullRequest.comments;
+      comments.nodes.unshift({ ...structuredClone(walkthrough(v)), body: walkthrough(v).body.replace(R, "a".repeat(40)) });
+      comments.totalCount += 1;
+    }],
     ["a merge after the fixes that changed a shared doc", "any", (v, k) => {
       // Main and the PR both edited the same ledger: its blob differs, nothing else does.
       if (k === "tipFix") v.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified", sha: "6".repeat(40) });
@@ -1008,6 +1013,8 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
   ok(isFollowUpExcludedPath("supabase/functions/send-email/index.ts") && isFollowUpExcludedPath(".github/workflows/ci.yml")
     && isFollowUpExcludedPath("package-lock.json") && isFollowUpExcludedPath("vite.config.ts") && isFollowUpExcludedPath("AGENTS.md")
     && isFollowUpExcludedPath("src/AGENTS.md") && isFollowUpExcludedPath("src/pages/CLAUDE.md")
+    && isFollowUpExcludedPath("src/config.ts") && isFollowUpExcludedPath("config/payment-limits.json")
+    && !isFollowUpExcludedPath("src/lib/configurePicker.ts")
     && !isFollowUpExcludedPath("src/lib/invoiceMath.ts"), "control files are excluded; app code is not");
   ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && !isFollowUpTestPath("scripts/smoke/smoke-specs.json")
     && !isFollowUpTestPath("scripts/write-codex-push-proof.mjs"), "only smoke chains count as tests under scripts/");

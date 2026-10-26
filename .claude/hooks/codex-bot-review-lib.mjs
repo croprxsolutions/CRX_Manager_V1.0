@@ -673,6 +673,8 @@ const FOLLOWUP_EXCLUDED_PATHS = [
   /^eslint-local-rules\//, /^\.coderabbit\.ya?ml$/, /(?:^|\/)(?:agents|claude)\.md$/, /(?:^|\/)\.cursorrules$/,
   /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|deno\.lock|vercel\.json)$/,
   /(?:^|\/)tsconfig[^/]*\.json$/, /(?:^|\/)[^/]*\.config\.[^/]+$/, /(?:^|\/)\.git[^/]*$/, /(?:^|\/)\.env/,
+  // Configuration by name anywhere: src/config.ts, config/payment-limits.json (Luna round 3).
+  /(?:^|\/)config(?:\/|\.[^/]+$)/, /(?:^|\/)[^/]*\.(?:ya?ml|toml|ini)$/,
 ];
 const lowerPath = (path) => String(path || "").replace(/\\/g, "/").trim().toLowerCase();
 export function isFollowUpExcludedPath(path) {
@@ -1051,9 +1053,11 @@ export function evaluateFollowUpReview(pullRequestNode, reviewedOid) {
   }
   // Only a complete comment list proves there is exactly one summary comment.
   if (issueComments.totalCount > issueComments.nodes.length) return notCovered("the PR has more than 100 comments");
+  // The summary comment that describes R; an older one about another commit is ignored (Luna round 3).
   const walkthroughs = issueComments.nodes.filter((comment) => isCodeRabbitLogin(comment?.author?.login)
-    && String(comment?.body || "").includes("<!-- pre_merge_checks_walkthrough_start -->"));
-  if (walkthroughs.length !== 1) return unreadable("CodeRabbit's summary comment could not be identified");
+    && String(comment?.body || "").includes("<!-- pre_merge_checks_walkthrough_start -->")
+    && String(comment?.body || "").toLowerCase().includes(`change_assessment_commit:"${reviewedOid}"`));
+  if (walkthroughs.length !== 1) return unreadable("no single CodeRabbit summary comment describes the reviewed commit");
   const checks = coderabbitPreMergeChecks(walkthroughs[0].body, reviewedOid);
   if (checks.kind !== "ok") return { ...checks, findings: [] };
   return { kind: "ok", why: "", findings };

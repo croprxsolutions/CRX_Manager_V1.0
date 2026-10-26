@@ -85,7 +85,12 @@
 >      test files including `scripts/smoke/` chains (at most 150 changed and 20 deleted lines),
 >      and one new `docs/changelog.d/` entry (at most 40 lines); nothing under `supabase/`, CI,
 >      agent tooling (`.claude/`, `.codex/`, `.agents/`, other `scripts/`), dependencies or
->      configuration; no rename, delete, binary or file-mode change.
+>      configuration (including any `config` file or folder and YAML/TOML/INI files); no rename,
+>      delete, binary or file-mode change; at most 20 files and 30 fix commits.
+>
+>    Accepted residual (Luna round 3 on #1125, deferred): the shared-ledger exception proves only
+>    that a later merge changed no code. It does not prove that a ledger edit came from main rather
+>    than another branch; ledgers are not executed and Sol still reviews the head.
 >
 >    The Sol review is then shown those fixes and the findings they answer, and judges whether each
 >    change does only that and whether it changes money, quantity, cost, inventory or idempotency

@@ -11,8 +11,8 @@ its dashboard showed 120 in 7 days, 93% on PRs reviewed more than once.
   types and modes checked, size and path limits). Three outcomes: covered, not covered (names
   the failed condition), unreadable (retry; never spend a review on it).
 - The merge gates and the migration landing gate get it through `readCodeRabbitRequirement()`;
-  the advisory budgets rose from 12 to 15 seconds (Claude) and 5 to 7 (Codex) for its two or
-  three extra reads (about 4 seconds measured).
+  the advisory budgets rose from 12 to 15 seconds (Claude) and 5 to 7 (Codex) for its two to
+  four extra reads (about 5 seconds measured).
 - `scripts/write-codex-push-proof.mjs`: Sol may run before CodeRabbit's first review, and when
   a head is covered this way the Sol prompt shows the fixes and the findings they answer.
 - Tests replay real GitHub answers for PRs #1017, #1099, #1101, #1065 and #1086

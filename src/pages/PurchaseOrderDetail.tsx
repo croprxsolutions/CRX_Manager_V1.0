@@ -331,7 +331,7 @@ export default function PurchaseOrderDetail() {
 
       let itemsData = (rawItemsData || []) as unknown as PurchaseOrderItem[];
       // No list at all is a failed read, not a PO with no lines.
-      let itemsError: unknown = itemsReadError ?? (rawItemsData ? null : new Error('purchase order lines read returned no list'));
+      let itemsError: unknown = itemsReadError ?? (Array.isArray(rawItemsData) ? null : new Error('purchase order lines read returned no list'));
       if (!itemsError) {
         try {
           itemsData = await withAdminCosts('purchase_order_items', itemsData, isAdmin);
@@ -383,7 +383,7 @@ export default function PurchaseOrderDetail() {
 
     if (!isCurrentFetch()) return;
 
-    if (error || !data) {
+    if (error || !Array.isArray(data)) {
       // Supabase RETURNS this error (doesn't throw) — surface it instead of
       // silently leaving the receiving history empty (Field Mode F6 class).
       // No list at all is the same failure, not "nothing received yet".

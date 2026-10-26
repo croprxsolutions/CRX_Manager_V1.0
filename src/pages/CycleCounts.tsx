@@ -164,7 +164,7 @@ export default function CycleCounts() {
       .order('created_at', { ascending: false });
     if (seq !== fetchCountsSeq.current) return;
 
-    if (error || !data) {
+    if (error || !Array.isArray(data)) {
       Sentry.captureException(error ?? new Error('cycle counts read returned no list'));
       toast('error', 'Failed to load cycle counts');
       setCounts([]);
@@ -212,7 +212,7 @@ export default function CycleCounts() {
       supabase.from('warehouses').select('name').eq('is_active', true),
     ]);
     // No warehouse list at all is a failed read, not "no locations".
-    if (invRes.error || whRes.error || !whRes.data) {
+    if (invRes.error || whRes.error || !Array.isArray(whRes.data)) {
       Sentry.captureException(invRes.error ?? whRes.error ?? new Error('warehouses read returned no list'), { tags: { source: 'fetch', action: 'load_cycle_count_locations' } });
       toast('error', 'Failed to load locations. Refresh before starting a count.');
       setWarehouses([]);

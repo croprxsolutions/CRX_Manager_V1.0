@@ -158,7 +158,7 @@ describe('Purchase Order detail', () => {
     expect(screen.queryByText('This purchase order could not be loaded')).not.toBeInTheDocument();
   });
 
-  it.each(['error', 'nodata'] as const)('a %s line read fails the page instead of a header over no lines', async (mode) => {
+  it.each(['error', 'nodata', 'notlist'] as const)('a %s line read fails the page instead of a header over no lines', async (mode) => {
     H.tables.purchase_orders = [po];
     H.failing.set('purchase_order_items', mode);
     detail();
@@ -166,7 +166,7 @@ describe('Purchase Order detail', () => {
     expect(screen.queryByRole('button', { name: /Receive Items/ })).not.toBeInTheDocument();
   });
 
-  it.each(['error', 'nodata'] as const)('a %s receiving-history read is not "No items have been received yet."', async (mode) => {
+  it.each(['error', 'nodata', 'notlist'] as const)('a %s receiving-history read is not "No items have been received yet."', async (mode) => {
     H.tables.purchase_orders = [po];
     H.tables.purchase_order_items = [poLine];
     H.failing.set('receiving_records', mode);
@@ -196,7 +196,7 @@ describe('New Purchase Order', () => {
 });
 
 describe('Receiving', () => {
-  it.each(['error', 'nodata'] as const)('a %s inbound-PO read on the hub is not "Nothing on order", and Try again shows them', async (mode) => {
+  it.each(['error', 'nodata', 'notlist'] as const)('a %s inbound-PO read on the hub is not "Nothing on order", and Try again shows them', async (mode) => {
     H.functions.get_inventory_position = [position];
     H.failing.set('purchase_orders', mode);
     at('/receiving', <ReceivingHubPanel />);
@@ -352,7 +352,7 @@ describe('Inventory', () => {
 describe('Cycle Counts', () => {
   const count = { id: 'cc1', count_number: 'CC-0007', warehouse: 'Main Warehouse', status: 'in_progress', started_at: '2026-10-20T12:00:00Z', created_at: '2026-10-20T12:00:00Z', item_revision: 1, items: [] };
 
-  it.each(['error', 'nodata'] as const)('a %s list read is not "No cycle counts yet", and Try again shows the counts', async (mode) => {
+  it.each(['error', 'nodata', 'notlist'] as const)('a %s list read is not "No cycle counts yet", and Try again shows the counts', async (mode) => {
     H.failing.set('cycle_counts', mode);
     at('/cycle-counts', <CycleCounts />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();

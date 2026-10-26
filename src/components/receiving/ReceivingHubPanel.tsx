@@ -123,7 +123,7 @@ export default function ReceivingHubPanel() {
         // error and render an empty board.)
         // No list at all is the same failure, not an empty board.
         if (poRes.error) throw poRes.error;
-        if (!poRes.data) throw new Error('inbound purchase orders read returned no list');
+        if (!Array.isArray(poRes.data)) throw new Error('inbound purchase orders read returned no list');
 
         // get_inventory_position is its own `= await supabase.rpc(...)` (not inside a
         // Promise.all) so the assert-rpc-result lint rule tracks the destructured `data`.

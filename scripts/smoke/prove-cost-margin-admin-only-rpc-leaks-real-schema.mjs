@@ -54,7 +54,10 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
-const TOUCHED = /get_gross_sales_report|get_inventory_cost_report|get_field_profitability|get_profitability_report|get_bottom_line_pnl|get_sales_detail_report|get_sales_summary_report|get_inventory_position|save_quote\(|_enforce_below_cost_line|dashboard_summary\(|_save_quote_below_cost_impl_20260810/;
+// A later or parked file that (re)defines, alters, drops or re-grants anything the candidate
+// replaces or relies on. Later files that only name these functions in their own preflight pins
+// change nothing here.
+const TOUCHED = /FUNCTION\s+(public\.)?"?(get_gross_sales_report|get_inventory_cost_report|get_field_profitability|get_profitability_report|get_bottom_line_pnl|get_sales_detail_report|get_sales_summary_report|get_inventory_position|save_quote|_enforce_below_cost_line|dashboard_summary|_save_quote_below_cost_impl_20260810)\b/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

@@ -2,11 +2,15 @@
 /**
  * Disposable PostgreSQL 17 proof for the quote/customer row-version migration.
  * It restores the supported baseline, replays every ledger-selected migration
- * through this candidate, executes both real rollback-only smoke matrices, and
- * always removes its network-disabled container. It never reads a DB URL.
+ * through this candidate, runs the legacy lifecycle smokes, applies the
+ * candidate and its missing-default drift check, then replays every later
+ * migration on main and executes the candidate's rollback-only smoke matrices
+ * there (they assert today's rules, e.g. 20261013220000's REP_CANNOT_REASSIGN).
+ * It always removes its network-disabled container. It never reads a DB URL.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,8 +25,33 @@ const smokeFiles = [
   path.join(ROOT, 'scripts', 'smoke', 'smoke-save-quote-drawn-guard.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-planned-holds-drawn-sync.sql'),
 ];
+// Later migrations, replayed after the candidate the way the other real-schema provers replay them.
+// Live but not replayable here (storage.objects policies, storage.buckets settings).
+const PARKED = new Set([
+  '20260914100700_customer_document_bytes_server_only.sql',
+  '20261015230000_staff_photo_storage_access.sql',
+  '20261016030000_staff_photo_buckets_private.sql',
+]);
+// PR #889's data migrations rewrite live rows this disposable database does not have; they are
+// recorded in the ledger (as live has them) instead of replayed.
+const LEDGER_ONLY = new Set([
+  '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
+  '20261007150200_release_reservations_of_deleted_spring_orders.sql',
+]);
+// The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
+// request.jwt.claims ->> 'sub'. Batch 2 (20261016140000) pins live's exact body.
+const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
+  + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
+  + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
+  + '  )::uuid\n';
+const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const legacyLifecycleSmokeFiles = [
-  path.join(ROOT, 'scripts', 'smoke', 'smoke-backfill-refuse-split-billing.sql'),
+  // smoke-backfill-refuse-split-billing.sql is deliberately NOT in this list.
+  // Since #885 it also asserts the CRX-LIFE-001 refusal from 20261006200000
+  // (a field_application split through the order pipeline), fail-first: it
+  // raises SMOKE_FAIL on any catalog older than that migration, and this
+  // legacy catalog stops at 20260730235031. Its own replay-based proof is
+  // scripts/smoke/prove-order-invoice-type-gate-real-schema.mjs.
   path.join(ROOT, 'scripts', 'smoke', 'smoke-draw-ledger-reversal.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-forbid-restore-cancelled-order.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-order-draw-lock.sql'),
@@ -89,7 +118,69 @@ function selectedMigrations() {
   const migrations = result.stdout.split(/\r?\n/).filter(Boolean).map((relative) => path.join(ROOT, relative));
   const candidateIndex = migrations.indexOf(candidate);
   assert.notEqual(candidateIndex, -1, 'candidate migration is not in the ledger-selected post-baseline replay');
-  return migrations.slice(0, candidateIndex + 1);
+  const later = migrations.slice(candidateIndex + 1);
+  for (const file of later) assert.ok(file.endsWith('.sql') && path.dirname(file) === path.join(ROOT, 'supabase', 'migrations'), `unexpected replay entry ${file}`);
+  for (const name of PARKED) assert.ok(later.some((f) => path.basename(f) === name), `${name} must be in the later replay (re-check the skip lists)`);
+  return { through: migrations.slice(0, candidateIndex + 1), later };
+}
+function scalar(sql) {
+  return docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '';
+}
+function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+function stageText(name, text) {
+  const staged = path.join(tmpdir(), `${NAME}-${name}`);
+  writeFileSync(staged, text, 'utf8');
+  try { copy(staged, name); } finally {
+    try { unlinkSync(staged); } catch (e) { if (e.code !== 'ENOENT') console.error(`could not remove ${staged}: ${e.message}`); }
+  }
+}
+// Record a migration in the ledger by NAME (later preflights look names up), versioned by its stamp.
+function ledger(stem) {
+  psql(`INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+    SELECT '${stem.slice(0, 14)}', '${stem}', ARRAY[]::text[]
+     WHERE NOT EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '${stem}')
+    ON CONFLICT (version) DO NOTHING;`);
+  assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${stem}';`), '1', `${stem} is not in the ledger`);
+}
+function installLiveAuthUid() {
+  psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
+  assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
+}
+// 20260817120000's preflight pins live's CRLF body of this function; the LF source differs.
+function restoreLiveCrLfCloseRemainder() {
+  const source = lf(path.join(ROOT, 'supabase', 'migrations', '20260721014858_20260721010000_govern_invoice_order_money_lifecycle.sql'));
+  const needle = 'CREATE FUNCTION public._close_undelivered_order_remainder_20260718(';
+  assert.equal(source.split(needle).length - 1, 1, 'close-remainder definition is ambiguous');
+  const start = source.indexOf(needle);
+  const tag = /\$([A-Za-z_]*)\$/.exec(source.slice(start));
+  const bodyStart = start + tag.index + tag[0].length;
+  const bodyEnd = source.indexOf(tag[0], bodyStart);
+  const body = source.slice(bodyStart, bodyEnd).replace(/\n/g, '\r\n');
+  assert.equal(body.length, 15910, 'close-remainder live CRLF body length drifted');
+  psql(`CREATE OR REPLACE FUNCTION public._close_undelivered_order_remainder_20260718(p_order_id uuid, p_actor uuid)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+    AS $live_crlf_close$${body}$live_crlf_close$;`);
+}
+function replayLater(later) {
+  // Users are seeded by now, so later postflights that impersonate one through
+  // request.jwt.claims (20260807215532's role lock) need live's auth.uid().
+  installLiveAuthUid();
+  let replayed = 0;
+  for (const [index, file] of later.entries()) {
+    const base = path.basename(file);
+    if (PARKED.has(base)) continue;
+    for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    if (LEDGER_ONLY.has(base)) continue;
+    if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
+    const name = `later-${index}.sql`;
+    stageText(name, lf(file));
+    const result = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', `/tmp/${name}`], { allowFailure: true });
+    if (result.status !== 0) throw new Error(`later replay failed at ${base}:\n${result.stdout}\n${result.stderr}`);
+    ledger(path.basename(file, '.sql'));
+    replayed += 1;
+  }
+  installLiveAuthUid();
+  return replayed;
 }
 function assertQuoteLifecycleCoverage(sql) {
   for (const anchor of quoteLifecycleAnchors) {
@@ -145,24 +236,30 @@ try {
       id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false,
       file_size_limit bigint, allowed_mime_types text[]
     );
+    -- metadata, the (bucket_id, name) key and postgres's read are live's shape, which
+    -- 20261022075000 (replayed after the candidate) checks in its preflight.
     CREATE TABLE IF NOT EXISTS storage.objects (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL,
-      name text NOT NULL, owner_id text
+      name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name)
     );
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
+    GRANT USAGE ON SCHEMA storage TO postgres;
+    GRANT ALL ON storage.objects, storage.buckets TO postgres;
   `, { user: 'supabase_admin' });
   apply('20260727174805_acl_lockdown.sql');
   apply('20260727174805_platform_overlay.sql', 'supabase_admin');
   apply('20260727174805_cron_jobs.sql');
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   apply('20260727174805_migration_history.sql');
-  const migrations = selectedMigrations();
-  assert.equal(migrations.at(-1), candidate, 'candidate must be the final ledger-selected migration');
+  const { through: migrations, later } = selectedMigrations();
+  assert.equal(migrations.at(-1), candidate, 'candidate must be the last migration of the through-candidate replay');
   for (const [index, migration] of migrations.slice(0, -1).entries()) {
+    // LF, as live's bodies are: later preflights hash them (a CRLF checkout would drift).
     const name = `migration-${index}.sql`;
-    copy(migration, name);
+    stageText(name, lf(migration));
     apply(name);
+    ledger(path.basename(migration, '.sql'));
   }
   psql(`
     ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
@@ -207,19 +304,25 @@ try {
       `${path.basename(file)} did not reach SMOKE_PASS_ROLLBACK on the legacy catalog:\n${legacyOutput}`,
     );
   }
-  copy(candidate, 'candidate.sql');
+  stageText('candidate.sql', lf(candidate));
   apply('candidate.sql');
-  for (const file of smokeFiles) {
-    copy(file, path.basename(file));
-    expectRollbackMarker(file);
-  }
   psql('ALTER TABLE public.quotes ALTER COLUMN row_version DROP DEFAULT;');
   const missingDefault = psql(readFileSync(candidate, 'utf8'), { allowFailure: true });
   const missingDefaultOutput = `${missingDefault.stdout}\n${missingDefault.stderr}`;
   assert.notEqual(missingDefault.status, 0, 'candidate migration accepted a pre-existing row_version without DEFAULT 1');
   assert.match(missingDefaultOutput, /ROW_VERSION_SCHEMA_DRIFT/, `missing-default drift did not fail with ROW_VERSION_SCHEMA_DRIFT:\n${missingDefaultOutput}`);
   assert.match(missingDefaultOutput, /quotes\.row_version/, `missing-default drift did not identify quotes.row_version:\n${missingDefaultOutput}`);
-  console.log('ROW_VERSION_REAL_SCHEMA_RESTORE_PASS baseline=20260727174805 post_baseline_replay=through_candidate legacy_lifecycle_smokes=6/6 smoke_quote_customer=SMOKE_PASS_ROLLBACK quote_lifecycle=draft-sent-sent stale_before_lifecycle=QUOTE_STALE_WRITE smoke_drawn_guard=NOT_RUN_HERE_SEE_DRAW_TIER_PROVER smoke_planned_holds=SMOKE_PASS_ROLLBACK');
+  // Put the candidate's own default back, so the later replay builds on the candidate as applied.
+  psql('ALTER TABLE public.quotes ALTER COLUMN row_version SET DEFAULT 1;');
+  assert.equal(scalar("SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'public.quotes'::regclass AND a.attname = 'row_version';"), '1', 'quotes.row_version default was not restored');
+  ledger(path.basename(candidate, '.sql'));
+  const replayedLater = replayLater(later);
+  console.log(`[prover] replayed ${replayedLater} later migrations after the candidate (through ${path.basename(later.at(-1))}; skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
+  for (const file of smokeFiles) {
+    copy(file, path.basename(file));
+    expectRollbackMarker(file);
+  }
+  console.log(`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS baseline=20260727174805 post_baseline_replay=through_candidate_then_${replayedLater}_later smoke_matrices_on=${path.basename(later.at(-1), '.sql')} legacy_lifecycle_smokes=${legacyLifecycleSmokeFiles.length}/${legacyLifecycleSmokeFiles.length} smoke_backfill_split=NOT_RUN_HERE_SEE_TYPE_GATE_PROVER smoke_quote_customer=SMOKE_PASS_ROLLBACK quote_lifecycle=draft-sent-sent stale_before_lifecycle=QUOTE_STALE_WRITE smoke_drawn_guard=NOT_RUN_HERE_SEE_DRAW_TIER_PROVER smoke_planned_holds=SMOKE_PASS_ROLLBACK`);
 } catch (error) {
   console.error(`ROW_VERSION_REAL_SCHEMA_RESTORE_FAIL ${error.stack ?? error.message}`);
   process.exitCode = 1;

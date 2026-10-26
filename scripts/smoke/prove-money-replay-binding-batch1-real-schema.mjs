@@ -71,6 +71,16 @@ const WRAPPED = [
   'void_payment', 'delete_prepay_credit', 'edit_prepay_credit', 'apply_write_off', 'reverse_write_off',
   'apply_prepay_to_invoice', 'create_prepay_check_splits', 'batch_apply_prepayments', 'batch_void_invoices',
 ];
+// A later file that (re)defines, alters, drops or re-grants anything the candidate creates or relies
+// on. A trigger's EXECUTE FUNCTION clause only calls the guard, so it is not counted here.
+const COVERED_FUNCTIONS = [
+  ...WRAPPED, ...WRAPPED.map((w) => `_${w}_replay_impl_20261015`),
+  '_replay_fingerprint_20261015', '_bind_replay_receipt_20261015', '_require_bound_replay_receipt_20261015',
+  'check_idempotency_intent',
+];
+const TOUCHED = new RegExp(`FUNCTION\\s+(public\\.)?"?(${COVERED_FUNCTIONS.join('|')})\\b`, 'i');
+// Later replay-binding batches rebuild the commit-time guard trigger with a longer covered list.
+const GUARD_TRIGGER_REBUILT = /DROP\s+TRIGGER\s+(IF\s+EXISTS\s+)?require_bound_replay_receipt_20261015\b/i;
 
 const id = (n) => `7b600000-0000-4000-8000-${n.padStart(12, '0')}`;
 const U = { ADMIN: id('a1'), ADMIN_B: id('a2'), REP: id('b1') };
@@ -134,8 +144,15 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
   const before = all.slice(0, at);
+  for (const file of all.slice(at + 1)) {
+    const sql = lf(file);
+    assert.ok(!TOUCHED.test(sql.replace(/EXECUTE\s+FUNCTION/gi, 'EXECUTE')), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
+    if (GUARD_TRIGGER_REBUILT.test(sql)) {
+      const dropped = WRAPPED.filter((op) => !sql.includes(`'${op}'`));
+      assert.deepEqual(dropped, [], `${path.basename(file)} rebuilds the receipt guard trigger without batch-1 operations; re-think this proof`);
+    }
+  }
   const touched = new RegExp(WRAPPED.join('|'));
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);

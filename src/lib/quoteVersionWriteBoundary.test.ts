@@ -657,6 +657,7 @@ describe('quote_versions write boundary — standing predicate', () => {
       // only through get_quote_versions(uuid).
       'quote_versions:snapshot-data-readable',
       'quote_versions:anon-read',
+      'get_quote_versions:contract-pinned',
       'quote_versions:rls-disabled',
       'quote_versions:force-rls-enabled',
       'quote_versions:column-mutation-privilege',
@@ -1113,13 +1114,24 @@ describe('quote_versions write boundary — standing predicate', () => {
     expect(predicate).toContain(
       "has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')",
     );
-    for (const column of [
-      'id', 'quote_id', 'version_number', 'sent_by', 'sent_at',
-      'sent_method', 'pdf_url', 'notes', 'restore_trusted_at',
-    ]) {
-      expect(predicate).toContain(`'${column}'`);
-    }
-    expect(predicate).toContain("'authenticated'::regrole::oid = ANY (p.polroles)");
+    // The exact list the privilege check iterates, not names appearing anywhere.
+    expect(predicate).toMatch(
+      /unnest\(ARRAY\['id', 'quote_id', 'version_number', 'sent_by', 'sent_at',\s+'sent_method', 'pdf_url', 'notes', 'restore_trusted_at'\]\) AS c\(name\)/,
+    );
+    expect(predicate).toContain("pg_has_role('authenticated', pr.role_oid, 'MEMBER')");
+    expect(predicate).toContain(
+      "md5(pg_get_expr(p.polqual, p.polrelid)) = '466a3791a1874c9cba20ac690f330c7b'",
+    );
+  });
+
+  it('pins the snapshot reader to the shape 20261022101000 reviewed', () => {
+    // Same digest formula and expectations as the migration's COST_LOCK_PREFLIGHT.
+    expect(predicate).toContain("'get_quote_versions:contract-pinned'");
+    expect(predicate).toContain(
+      "md5(replace(p.prosrc, chr(13), '')) = '8f0592c4877da51eb5b9074b775ed0cc'",
+    );
+    expect(predicate).toContain("pg_get_userbyid(p.proowner) = 'postgres'");
+    expect(predicate).toContain("ARRAY['search_path=public, pg_temp']");
     expect(predicate).toMatch(/to_regprocedure\('public\.get_quote_versions\(uuid\)'\)\s+AND p\.prosecdef/);
   });
 

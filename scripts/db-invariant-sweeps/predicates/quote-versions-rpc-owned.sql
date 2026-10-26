@@ -99,10 +99,15 @@ UNION ALL
 -- than by name, so a dropped or renamed column reports here instead of making
 -- has_column_privilege raise and turning the whole predicate into an ERROR.
 -- The snapshot itself is read through get_quote_versions(uuid), so losing that
--- routine, its EXECUTE, or its SECURITY DEFINER (an invoker could not read
--- snapshot_data) breaks version history just as surely as losing a column.
+-- routine or its EXECUTE breaks version history just as surely as losing a
+-- column; its body, owner and search_path are pinned in their own branch below.
+-- The policy's row condition is pinned by digest of pg_get_expr(polqual): a
+-- USING (true) would widen reads to every signed-in user and a USING (false)
+-- would empty history, and neither changes the policy's name or command.
+-- Role membership, not an exact role match, decides whether a policy applies,
+-- so a policy aimed at a role authenticated belongs to still counts.
 SELECT 'quote_versions:read-path-regressed' AS violation_key,
-       'authenticated lost its column-level read of a version-history column, qversions_select was removed or no longer applies to authenticated, or get_quote_versions(uuid) is missing, no longer SECURITY DEFINER, or not authenticated-callable — the write boundary must not be satisfied by breaking version history' AS reason
+       'authenticated lost its column-level read of a version-history column, qversions_select was removed, changed its row condition or no longer applies to authenticated, or get_quote_versions(uuid) is missing or not authenticated-callable — the write boundary must not be satisfied by breaking version history; an intended policy change must update the condition digest here (expected 466a3791a1874c9cba20ac690f330c7b)' AS reason
  WHERE NOT has_any_column_privilege('authenticated', 'public.quote_versions', 'SELECT')
     OR EXISTS (
       SELECT 1
@@ -126,17 +131,39 @@ SELECT 'quote_versions:read-path-regressed' AS violation_key,
          AND p.polcmd = 'r'
          AND p.polpermissive
          -- 0 in polroles means PUBLIC, which includes authenticated.
-         AND ('authenticated'::regrole::oid = ANY (p.polroles) OR 0::oid = ANY (p.polroles))
+         AND EXISTS (
+           SELECT 1 FROM unnest(p.polroles) AS pr(role_oid)
+            WHERE pr.role_oid = 0 OR pg_has_role('authenticated', pr.role_oid, 'MEMBER')
+         )
+         AND md5(pg_get_expr(p.polqual, p.polrelid)) = '466a3791a1874c9cba20ac690f330c7b'
     )
     OR CASE
          WHEN to_regprocedure('public.get_quote_versions(uuid)') IS NULL THEN true
          ELSE NOT has_function_privilege('authenticated', 'public.get_quote_versions(uuid)', 'EXECUTE')
-           OR NOT EXISTS (
-             SELECT 1 FROM pg_proc p
-              WHERE p.oid = to_regprocedure('public.get_quote_versions(uuid)')
-                AND p.prosecdef
-           )
        END
+
+UNION ALL
+
+-- get_quote_versions(uuid) is the one browser path to snapshot_data, so it is a
+-- SECURITY DEFINER reader of cost. 20261022101000 checked its reviewed shape
+-- once, at apply time (COST_LOCK_PREFLIGHT); this makes the same claims
+-- standing, with the same body digest formula. A re-emitted body could return
+-- every quote's snapshot, or none, with the name, mode and grants unchanged; an
+-- owner without access to snapshot_data would fail every call. An intentionally
+-- reviewed re-emission must update this pin in the same change.
+SELECT 'get_quote_versions:contract-pinned' AS violation_key,
+       'get_quote_versions(uuid) drifted from the reviewed admin-checked SECURITY DEFINER reader (body, owner postgres, or search_path) — expected body 8f0592c4877da51eb5b9074b775ed0cc, measured '
+         || coalesce((SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
+                       WHERE p.oid = to_regprocedure('public.get_quote_versions(uuid)')), 'signature unresolvable') AS reason
+ WHERE NOT EXISTS (
+   SELECT 1
+     FROM pg_proc p
+    WHERE p.oid = to_regprocedure('public.get_quote_versions(uuid)')
+      AND p.prosecdef
+      AND pg_get_userbyid(p.proowner) = 'postgres'
+      AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']
+      AND md5(replace(p.prosrc, chr(13), '')) = '8f0592c4877da51eb5b9074b775ed0cc'
+ )
 
 UNION ALL
 

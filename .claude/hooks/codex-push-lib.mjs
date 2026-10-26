@@ -4299,7 +4299,9 @@ const GLUED_RUNTIME_RE = /[A-Za-z0-9][$`]|[)}`][A-Za-z0-9]|\$\w+\$|[)}]\$/;
 // Like the other refusals here this is a speed bump, not a boundary.
 export function runtimeProgramRefused(command, gated) {
   if (!programAssembledAtRuntime(command)) return false;
-  return Boolean(gated) || GLUED_RUNTIME_RE.test(String(command || ""));
+  // Quotes are removed first: `"$G""$H"` and `$M1'$M2'` glue pieces just as
+  // `$G$H` does (Luna, 2026-10-26).
+  return Boolean(gated) || GLUED_RUNTIME_RE.test(String(command || "").replace(/["']/g, ""));
 }
 
 // A NESTED command's program name glued from a substitution or variable AND
@@ -4352,7 +4354,8 @@ const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 // `merge` is ordinary data handling, and refusing it was a steady false block.
 // Perl, Ruby and PHP run a shell command from backticks; in JavaScript a
 // backtick is just a template string, so it does not count there.
-const INLINE_CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|shell_exec|passthru|proc_open|open3|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\beval\b|\bfunction\s*\(|\$\(/i;
+// `$\`` is Bun's and zx's shell tag; `new Function` builds code like eval does.
+const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec|_exec|execv|execl|popen|\bsystem\s*\(|startfile|shell_exec|passthru|proc_open|open3|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
 const BACKTICK_RUNS_SHELL = new Set(["perl", "ruby", "php"]);
 function inlineCodeCanAct(program, code) {
   return INLINE_CAPABILITY_RE.test(code) || (BACKTICK_RUNS_SHELL.has(program) && code.includes("`"));

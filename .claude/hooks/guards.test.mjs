@@ -193,12 +193,15 @@ for (const command of [
   "`printf g`h pr m`printf er`ge 951 --squash",
   "P=g$(echo h); $P pr m$(echo e)rge 1",
   "X=h; P=g${X}; $P pr list",
+  'G=g; H=h; M1=mer; M2=ge; "$G""$H" pr "$M1""$M2" 1',
+  "G=g; H=h; M1=mer; M2=ge; '$G'$H pr $M1'$M2' 1",
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code is refused only when it can also start a program or reach the network.
 for (const command of [
   `node -e "const a=[]; a.push(1); console.log(/merge|push/.test('x'))"`,
   `node -e "const s=\`gh pr list\`; console.log(s.length)"`,
+  `node -e "const f = function(){ return /merge/.test('x') }; console.log(f())"`,
   `gh pr view 5 --json title | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const x=[];x.push(d);console.log(x)})"`,
 ]) ok(!inlineCodeReachesGatedAction(command), `harmless inline code allowed: ${command}`);
 for (const command of [
@@ -209,6 +212,9 @@ for (const command of [
   `ruby -e '\`git push origin HEAD:main\`'`,
   `node -e "fetch('https://api.github.com/repos/o/r/pulls/1/merge',{method:'PUT'})"`,
   `deno eval "new Deno.Command('gh',{args:['pr','merge','1']}).outputSync()"`,
+  "bun -e 'Bun.$`gh pr merge 1`'",
+  `python -c "import os; os.posix_spawnp('gh', ['gh','pr','merge','1'], {})"`,
+  `php -r 'pcntl_exec("/usr/bin/gh", ["pr","merge","1"]);'`,
 ]) ok(inlineCodeReachesGatedAction(command), `inline code that can act still refused: ${command}`);
 
 // ── live-testdata ────────────────────────────────────────────────────────

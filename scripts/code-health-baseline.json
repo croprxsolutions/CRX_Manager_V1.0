@@ -750,55 +750,18 @@
     }
   },
   "unused": {
-    "src/components/dispatch/DispatchWizard.tsx": [
-      "type:WizardApplicator",
-      "type:WizardCrew"
-    ],
-    "src/components/field-app/customerSplit.ts": [
-      "type:SplitReconciliation"
-    ],
     "src/components/field-app/invoiceAppliedCarryover.ts": [
-      "export:APPLICATOR_PLACEHOLDERS",
-      "type:NameMap"
-    ],
-    "src/components/fields/FieldCustomerAssignment.tsx": [
-      "type:FieldCustomerAssignmentProps"
+      "export:APPLICATOR_PLACEHOLDERS"
     ],
     "src/components/inventory/BatchAdjustModal.tsx": [
       "export:batchRowIdempotencyKey",
-      "export:classifyAdjustmentError",
-      "type:RowOutcome"
-    ],
-    "src/components/inventory/InventoryPositionMobileCards.tsx": [
-      "type:MobileInventoryPosition"
-    ],
-    "src/components/jobs/appliedRecords.ts": [
-      "type:AppliedCrewRow",
-      "type:AppliedFieldRow",
-      "type:AppliedRecordPatch",
-      "type:AppliedRecordValidation",
-      "type:PersistedWeatherSet",
-      "type:RemainingAcresView",
-      "type:WeatherSetPatch"
-    ],
-    "src/components/jobs/AppliedRecordsManager.tsx": [
-      "type:AppliedJobField"
+      "export:classifyAdjustmentError"
     ],
     "src/components/jobs/jobListColumns.ts": [
-      "export:SHARED_INVOICE_COLUMN_IDS",
-      "type:JobColumnDef"
-    ],
-    "src/components/jobs/JobMassEditModal.tsx": [
-      "type:MassEditJob"
+      "export:SHARED_INVOICE_COLUMN_IDS"
     ],
     "src/components/jobs/JobSearchPicker.tsx": [
       "export:JOB_SEARCH_SELECT"
-    ],
-    "src/components/map/CRXMap.tsx": [
-      "type:CRXMapProps"
-    ],
-    "src/components/map/DrawingHud.tsx": [
-      "type:DrawingHudProps"
     ],
     "src/components/orders/OrderSearchPicker.tsx": [
       "export:ORDER_SEARCH_SELECT"
@@ -807,96 +770,26 @@
       "export:PRODUCT_IMPORT_STRING_FIELDS"
     ],
     "src/components/products/ProductOptionPresentation.tsx": [
-      "export:productPackageLabel",
-      "type:ProductReturnPolicy"
+      "export:productPackageLabel"
     ],
     "src/components/products/ProductSearchPicker.tsx": [
       "export:PRODUCT_SEARCH_SELECT"
     ],
-    "src/components/reports/ReportShell.tsx": [
-      "type:ReportShellProps"
-    ],
-    "src/components/returns/ReturnDetailItems.tsx": [
-      "type:ReturnDetailItemPresentation"
-    ],
-    "src/components/ui/Badge.tsx": [
-      "type:BadgeProps"
-    ],
-    "src/components/ui/PageHeader.tsx": [
-      "type:PageHeaderProps"
-    ],
     "src/components/ui/RecordSearchPicker.tsx": [
       "export:RECORD_SEARCH_LIMIT",
-      "export:RECORD_SEARCH_TIMEOUT_MS",
-      "type:RecordSearchPickerProps"
-    ],
-    "src/components/ui/SearchableSelect.tsx": [
-      "type:SearchableSelectOption",
-      "type:SearchableSelectProps"
-    ],
-    "src/components/ui/Tabs.tsx": [
-      "type:TabsProps"
-    ],
-    "src/components/ui/TransactionThread.tsx": [
-      "type:TransactionThreadProps"
-    ],
-    "src/hooks/useFitBounds.ts": [
-      "type:Bounds"
-    ],
-    "src/hooks/usePrivatePhoto.ts": [
-      "type:PrivatePhoto"
-    ],
-    "src/hooks/useUncertainMutationIntent.ts": [
-      "type:DurableMutationIntentOptions",
-      "type:MutationFailureDisposition"
-    ],
-    "src/lib/activityLogger.ts": [
-      "type:LogActivityParams"
+      "export:RECORD_SEARCH_TIMEOUT_MS"
     ],
     "src/lib/applicatorPrintOptions.ts": [
       "export:parseApplicatorPrintOptions"
     ],
-    "src/lib/applicatorSheetPdf.ts": [
-      "type:ApplicatorSheetPdfOptions"
-    ],
     "src/lib/applicatorSheetPrintData.ts": [
       "export:previousApplicationSummary"
-    ],
-    "src/lib/belowCostApproval.ts": [
-      "type:BelowCostApprovalError"
-    ],
-    "src/lib/billedCustomersResolver.ts": [
-      "type:ResolvedBilledCustomers"
-    ],
-    "src/lib/bulkPOImportRetry.ts": [
-      "type:BulkPOIntentDocument",
-      "type:BulkPOIntentItem"
-    ],
-    "src/lib/chemCalculator.ts": [
-      "type:AppliedConversion",
-      "type:ChemAutofillUnits",
-      "type:ChemUnitBlankSides"
-    ],
-    "src/lib/chemicalSummaryReportData.ts": [
-      "type:ChemicalSummaryCsvRow"
-    ],
-    "src/lib/chemicalSummaryReportFetch.ts": [
-      "type:ChemicalSummaryFetchResult"
-    ],
-    "src/lib/commissionSplitConcurrency.ts": [
-      "type:CommissionSplitKey"
     ],
     "src/lib/companyInfo.ts": [
       "export:COMPANY_TAGLINE"
     ],
-    "src/lib/criticalAction.ts": [
-      "type:CriticalActionOptions"
-    ],
     "src/lib/cropProgramHelpers.ts": [
       "export:normalizeProgramRateUnit"
-    ],
-    "src/lib/csbLookup.ts": [
-      "type:CsbLookupResult"
     ],
     "src/lib/customerInvoiceSummary.ts": [
       "export:SUMMARY_UNPOSTED_STATUSES"
@@ -904,36 +797,8 @@
     "src/lib/customerNameSearch.ts": [
       "export:CUSTOMER_NAME_MATCH_LIMIT"
     ],
-    "src/lib/db.ts": [
-      "type:RpcErrorCode"
-    ],
-    "src/lib/deliveryCompletionEmail.ts": [
-      "type:CompletionEmailItem",
-      "type:DeliveryCompletionEmailParams"
-    ],
     "src/lib/deliveryEvidence.ts": [
-      "export:RECEIPT_LOOKUP_TIMEOUT_MS",
-      "type:FailedCompletionOutcome"
-    ],
-    "src/lib/deliveryInvoiceCoverage.ts": [
-      "type:InvoiceBillingCoverage"
-    ],
-    "src/lib/deliverySplitBilling.ts": [
-      "type:OrderSplitBillingSignal"
-    ],
-    "src/lib/dispatchDisplay.ts": [
-      "type:DispatchBadge",
-      "type:FieldViewCardGroups"
-    ],
-    "src/lib/dispatchWizard.ts": [
-      "type:DispatchAssignmentPayload",
-      "type:DispatchSummaryGroup"
-    ],
-    "src/lib/documentOCR.ts": [
-      "type:OCRResult"
-    ],
-    "src/lib/emailService.ts": [
-      "type:SendEmailResult"
+      "export:RECEIPT_LOOKUP_TIMEOUT_MS"
     ],
     "src/lib/epaDataQualityReport.ts": [
       "export:namesClearlyDifferent"
@@ -945,34 +810,8 @@
     "src/lib/fieldAppNewInvoiceAddress.ts": [
       "export:CREATED_INVOICE_PARAM"
     ],
-    "src/lib/fieldAppWeather.ts": [
-      "type:WeatherRpcParams"
-    ],
-    "src/lib/fieldGeometry.ts": [
-      "type:AcreDivergence"
-    ],
-    "src/lib/fieldInvoiceList.ts": [
-      "type:FieldInvoiceTotals",
-      "type:MonthBatch"
-    ],
     "src/lib/fieldObstacles.ts": [
-      "export:isFieldObstaclePoint",
-      "type:FieldObstacleFeatureProperties"
-    ],
-    "src/lib/idempotency.ts": [
-      "type:IdempotencyBindingRejection",
-      "type:LegacyIntentSnapshot"
-    ],
-    "src/lib/inventoryPositionLookup.ts": [
-      "type:ProductInventoryPosition"
-    ],
-    "src/lib/inventoryShortage.ts": [
-      "type:AggregatedProductNeed",
-      "type:DeliveryProductLine",
-      "type:ProductLineNeed"
-    ],
-    "src/lib/invoiceBatchPosting.ts": [
-      "type:BatchPostInvoice"
+      "export:isFieldObstaclePoint"
     ],
     "src/lib/invoicePdf.ts": [
       "export:isFuelSurchargeLine"
@@ -981,208 +820,43 @@
       "export:OPEN_INVOICE_STATUSES",
       "export:UNKNOWN_SEASON_LABEL"
     ],
-    "src/lib/invoiceSendDisposition.ts": [
-      "type:InvoiceSendDisposition"
-    ],
     "src/lib/invoiceSummaryPdf.ts": [
-      "export:generateCustomerInvoiceSummaryPdf",
-      "type:CustomerInvoiceSummaryPdfData"
-    ],
-    "src/lib/jobListPrint.ts": [
-      "type:JobListPrintData"
-    ],
-    "src/lib/labelGuardrails.ts": [
-      "type:PhiHarvestResult",
-      "type:PhiHarvestStatus",
-      "type:RateComparison",
-      "type:RateComparisonStatus"
+      "export:generateCustomerInvoiceSummaryPdf"
     ],
     "src/lib/licenseStatus.ts": [
-      "export:EXPIRING_SOON_DAYS",
-      "type:LicenseLike",
-      "type:LicenseStatus",
-      "type:LicenseStatusKind"
-    ],
-    "src/lib/loaderVesselOptions.ts": [
-      "type:LoaderVessel"
+      "export:EXPIRING_SOON_DAYS"
     ],
     "src/lib/loaderWorksheet.ts": [
       "export:MANUAL_LOAD_CAPACITY_TOLERANCE"
-    ],
-    "src/lib/loaderWorksheetPdf.ts": [
-      "type:LoaderWorksheetPdfLoadColumn"
-    ],
-    "src/lib/loaderWorksheets.ts": [
-      "type:CondensedLoaderLoadGroup"
-    ],
-    "src/lib/lotRpc.ts": [
-      "type:ExistingLotRow"
-    ],
-    "src/lib/masterMixSummaryFetch.ts": [
-      "type:MasterMixFetchResult"
     ],
     "src/lib/offlineQueue.ts": [
       "export:prepareQueuedAction"
     ],
     "src/lib/offlineReceipts.ts": [
-      "export:getOfflineReceiptStatus",
-      "type:OfflineReceiptDisposition"
-    ],
-    "src/lib/pagePermissions.ts": [
-      "type:PagePermission"
+      "export:getOfflineReceiptStatus"
     ],
     "src/lib/paperTicket.ts": [
       "export:completedAtForDeliveredOn"
-    ],
-    "src/lib/plssLookup.ts": [
-      "type:PlssLookupPoint"
     ],
     "src/lib/productBrands.ts": [
       "export:PRODUCT_BRAND_COLUMNS"
     ],
     "src/lib/productIdentityResolver.ts": [
-      "export:normalizeProductIdentity",
-      "type:ProductIdentityCandidate",
-      "type:ProductIdentityResolution"
+      "export:normalizeProductIdentity"
     ],
     "src/lib/productPricing.ts": [
-      "export:costBasisRows",
-      "type:AppliedCostBasisRow",
-      "type:AppliedPricingRow",
-      "type:ApplyPricingChangeSetInput",
-      "type:ApplyPricingResult",
-      "type:CostBasisPreviewMetadata",
-      "type:CreatePricingWorkbookExportInput",
-      "type:PreviewPricingChangesInput",
-      "type:ProductCostBasisSource"
-    ],
-    "src/lib/productPricingWorkbook.ts": [
-      "type:PricingWorkbookHeader"
-    ],
-    "src/lib/projectedUseReportData.ts": [
-      "type:ProjectedUseCsvRow"
-    ],
-    "src/lib/projectedUseReportFetch.ts": [
-      "type:ProjectedUseFetchResult"
-    ],
-    "src/lib/proofNotification.ts": [
-      "type:ProofEmailInput",
-      "type:ProofRenderInput"
-    ],
-    "src/lib/purchaseOrderEditPayload.ts": [
-      "type:PurchaseOrderEditableLine"
-    ],
-    "src/lib/quoteLifecycleRpc.ts": [
-      "type:ConvertQuoteToOrderResult",
-      "type:CreateQuoteVersionResult",
-      "type:RestoreQuoteVersionResult"
-    ],
-    "src/lib/quoteVersionAdapter.ts": [
-      "type:QuoteVersionHistoryEntry",
-      "type:QuoteVersionList"
-    ],
-    "src/lib/recentPages.ts": [
-      "type:RecentItem",
-      "type:RecordPageVisitOptions"
-    ],
-    "src/lib/recipeHelpers.ts": [
-      "type:RecipeItemPayload"
+      "export:costBasisRows"
     ],
     "src/lib/reconciliation.ts": [
-      "export:FINANCIAL_INVOICE_STATUSES",
-      "type:Discrepancy"
-    ],
-    "src/lib/recordVersionConcurrency.ts": [
-      "type:DirectMutationRowVersionResult"
-    ],
-    "src/lib/rupCompliance.ts": [
-      "type:RUPRegisterDisposition"
+      "export:FINANCIAL_INVOICE_STATUSES"
     ],
     "src/lib/sqlSourceLexer.ts": [
-      "export:dollarTagAt",
-      "type:Ident",
-      "type:Lexed",
-      "type:Span"
-    ],
-    "src/lib/supplierPricing.ts": [
-      "type:StageSupplierPriceImportInput",
-      "type:SupplierObservationCorrection",
-      "type:UpsertSupplierLinkInput"
+      "export:dollarTagAt"
     ],
     "src/lib/supplierPricingWorkbook.ts": [
       "export:MAX_SUPPLIER_QUOTE_ROWS",
       "export:MAX_SUPPLIER_QUOTE_UNCOMPRESSED_BYTES",
-      "export:SUPPLIER_QUOTE_MIME",
-      "type:ParsedSupplierQuoteWorkbook"
-    ],
-    "src/lib/xlsxArchiveSafety.ts": [
-      "type:XlsxArchiveSafetyLimits"
-    ],
-    "src/test-utils/supabaseChain.ts": [
-      "type:QueryChain"
-    ],
-    "src/types/index.ts": [
-      "type:AccountingPeriod",
-      "type:ActionQueueCategory",
-      "type:AllocationSet",
-      "type:BackupRun",
-      "type:BackupSnapshot",
-      "type:CommissionPayment",
-      "type:CommissionPaymentItem",
-      "type:CreditMemoApplication",
-      "type:EmailLog",
-      "type:EmailType",
-      "type:ExternalIdentity",
-      "type:FieldAppBillingLine",
-      "type:FieldAppBillingLineKind",
-      "type:FieldAppBillingSet",
-      "type:FinanceCharge",
-      "type:FinancialAuditLog",
-      "type:IntegrityAlert",
-      "type:IntegrityAlertType",
-      "type:InteractionTranscript",
-      "type:InvoiceLineShare",
-      "type:InvoiceLineShareSnapshot",
-      "type:JobLocationDispatch",
-      "type:JobProductDraw",
-      "type:JobTagAssignment",
-      "type:LegacyVendorResolution",
-      "type:OfflineActionRpcErrorCode",
-      "type:OverlappingField",
-      "type:PrepayApplication",
-      "type:PrepayCredit",
-      "type:PricingChangeSetPreviewRowRecord",
-      "type:PricingChangeSetRecord",
-      "type:PricingChangeSetRowRecord",
-      "type:PricingChangeSetSource",
-      "type:PricingChangeSetStatus",
-      "type:PricingMode",
-      "type:PricingPreviewRowStatus",
-      "type:PricingWorkbookExportRecord",
-      "type:PricingWorkbookExportRowRecord",
-      "type:PricingWorkbookExportStatus",
-      "type:ProcessOfflineActionArgs",
-      "type:ProductCostBasisChangeRow",
-      "type:ProductSupplierLink",
-      "type:ProfilePublic",
-      "type:QuoteProductDraw",
-      "type:ReceivingPhoto",
-      "type:RecordingConsentStatus",
-      "type:ResolveOfflineActionArgs",
-      "type:SetFieldBoundaryResult",
-      "type:SetFieldOverrideAcresResult",
-      "type:SplitBasePriceSource",
-      "type:SupplierLinkStatus",
-      "type:SupplierPriceImport",
-      "type:SupplierPriceImportRow",
-      "type:SupplierPriceImportStatus",
-      "type:SupplierPriceObservation",
-      "type:TeamNoteComment",
-      "type:UserListSettings",
-      "type:VendorAlias",
-      "type:Warehouse",
-      "type:WatchdogFlagDismissal",
-      "type:WriteOff"
+      "export:SUPPLIER_QUOTE_MIME"
     ]
   }
 }

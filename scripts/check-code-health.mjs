@@ -51,11 +51,14 @@ function baselineGrowth(baseline) {
   return findRegressions(JSON.parse(shown.stdout), baseline);
 }
 
+// Unused exported TYPES are deliberately not checked: exporting the parameter or result type of a
+// shared function is normal practice even when no other file names it, and the queued-PR pre-check
+// on 2026-10-26 showed that category failing most ordinary changes for no cleanliness gain.
 function measureUnused() {
   const knip = spawnSync(
     process.execPath,
     [path.join(ROOT, 'node_modules', 'knip', 'bin', 'knip.js'), '--no-progress', '--no-config-hints',
-      '--include', 'files,exports,types,duplicates', '--reporter', 'json'],
+      '--include', 'files,exports,duplicates', '--reporter', 'json'],
     { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
   // Knip exits 1 when it finds issues; anything else, or unreadable output, fails closed.

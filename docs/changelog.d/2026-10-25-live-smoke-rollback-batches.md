@@ -65,7 +65,11 @@ review (5f2e2ccb0) found `BEGIN; SELECT pg_read_file(…); ROLLBACK;` and `pg_fi
 back: a rollback neither unreads a returned file nor restores a deleted one. Server-file functions are now
 matched as a family (`pg_read_*`, `pg_file_*`, `pg_ls_*`, `pg_stat_file`, `pg_logdir_ls`,
 `pg_current_logfile`), with every `pg_log_*` and `http`/`http_*` call, and refused everywhere; `CHECKPOINT`
-disqualifies a batch.
+disqualifies a batch. The Codex App (d5ab5782d) found `CREATE OPERATOR === (…, FUNCTION = setval)` followed
+by `x OPERATOR(===) 1` accepted as rolled back: an operator names its function without `(`, so the name
+checks never saw `setval`. Creating or altering any object that binds a function by name (operator,
+aggregate, type, cast, conversion, text search object, access method, language, transform, event trigger)
+now disqualifies a batch, wherever it appears; no live smoke chain defines one.
 
 **Residual risk, accepted.** "Rolled back" means every table write is undone. The guard reads only the
 submitted text, never the bodies of functions already in the database, so whatever a called RPC or

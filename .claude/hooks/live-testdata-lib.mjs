@@ -548,9 +548,17 @@ const QUERY_TEXT_CALL_RE = /\b(?:query_to_xml\w*|ts_stat|ts_rewrite)\s*\(/i;
 // (plperl's spi_exec_query) (Luna round 2, #1092).
 const SESSION_STATEMENT_RE = /(?:^|\b(?:begin|then|else|loop))\s*(?:load|checkpoint|prepare(?!\s+transaction\b))\b/i;
 const OTHER_LANGUAGE_RE = /\blanguage\s+(?!(?:sql|plpgsql)\b)/i;
+// Objects that bind an existing function by bare name, with no `(` for the name
+// checks to see: `CREATE OPERATOR === (FUNCTION = setval)` then `x OPERATOR(===) 1`
+// runs setval (Codex App, #1092). Aggregates, types, casts, conversions, text
+// search objects, access methods, languages, transforms and event triggers bind
+// functions the same way. No live smoke chain defines or alters one, so any of
+// them disqualifies the batch.
+const FUNCTION_BINDING_DDL_RE = /\b(?:create(?:\s+or\s+replace)?|alter)\s+(?:operator|aggregate|type|cast|(?:default\s+)?conversion|text\s+search|access\s+method|(?:trusted\s+)?(?:procedural\s+)?language|transform|event\s+trigger)\b/i;
 function leavesSessionOrServerEffect(sql) {
   const texts = allStatementTexts(sql);
-  return !texts || hasServerCopy(sql) || texts.some((s) => SESSION_STATEMENT_RE.test(s) || OTHER_LANGUAGE_RE.test(s));
+  return !texts || hasServerCopy(sql) ||
+    texts.some((s) => SESSION_STATEMENT_RE.test(s) || OTHER_LANGUAGE_RE.test(s) || FUNCTION_BINDING_DDL_RE.test(s));
 }
 
 export function isVerifiedRollbackBatch(query) {

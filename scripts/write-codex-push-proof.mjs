@@ -1390,7 +1390,8 @@ export function evaluateSolPreflight({
   if (!requirement || requirement === "unreadable") {
     problems.push(`could not tell whether ${which} needs a CodeRabbit review (labels, files or statuses unreadable). Retry in a minute.`);
   } else if (requirement === "missing" && !coderabbitBusy) {
-    if (!coderabbitRequirement.priorReview) {
+    // Only an explicit "no review yet" lets Sol go first (Codex App P2 on #1125).
+    if (coderabbitRequirement.priorReview === false) {
       // Sol may go first, before CodeRabbit's one review (Mason, 2026-10-26). Its
       // proof stays valid if CodeRabbit then asks for nothing; any fix needs Sol again.
       notes.push(

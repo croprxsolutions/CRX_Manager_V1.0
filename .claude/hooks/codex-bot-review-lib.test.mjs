@@ -713,6 +713,8 @@ const read = (gh, extra = {}) => readCodeRabbitRequirement(gh, { owner: "o", nam
 eq(read(fakeGh()).status, "reviewed", "a merge-only walk with identical PR changes keeps the earlier review");
 eq(read(fakeGh({ atHead: [{ ...prFiles[0], sha: "2".repeat(40) }] })).status, "missing",
   "a merge that changed a PR file voids the earlier review");
+eq(read(fakeGh({ atHead: [{ ...prFiles[0], sha: "2".repeat(40) }] })).priorReview, true,
+  "...and still says CodeRabbit reviewed this PR, so Sol does not go first (Codex App P2 on #1125)");
 eq(read(fakeGh({ atHead: [...prFiles, { filename: "src/lib/newMoney.ts", status: "added", sha: "3".repeat(40) }] })).status, "missing",
   "a merge that added a file to the PR's own changes voids the earlier review");
 {

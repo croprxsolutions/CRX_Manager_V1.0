@@ -1407,6 +1407,8 @@ function collisionPromptSkipsWork(prompt) {
   const first = check({ coderabbitRequirement: { status: "missing", why: "it changes money files", priorReview: false } });
   assert.equal(first.ok, true, "preflight: a money PR with no CodeRabbit review yet may run Sol first");
   assert.match(first.notes.join(" "), /Sol may run first/, "preflight: and says the merge still needs CodeRabbit's review");
+  assert.equal(check({ coderabbitRequirement: { status: "missing", why: "w" } }).ok, false,
+    "preflight: a missing review with no explicit 'no review yet' does not let Sol go first (Codex App P2 on #1125)");
   assert.equal(check({ coderabbitRequirement: { status: "missing", why: "w", priorReview: false }, coderabbitBusy: true }).ok, false,
     "preflight: Sol-first still waits while CodeRabbit is reviewing");
 

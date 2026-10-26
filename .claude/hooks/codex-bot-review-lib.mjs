@@ -616,6 +616,8 @@ export function readCodeRabbitRequirement(runGh, { owner, name, number, deadline
     ...verdict,
     status: "missing",
     reviewedOid: "",
+    // CodeRabbit did review this PR; only the merge voided it (Codex App P2 on #1125).
+    priorReview: true,
     why: `${verdict.why}; the PR's own changes differ between the reviewed commit and the head, so a merge since the review changed them`,
   };
 }

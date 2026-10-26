@@ -177,7 +177,13 @@ failed second step left an accepted quote with no order. It now calls `convert_q
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
 (proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
 rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app.
-Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched. Two small database clean-ups (extra `quote_sections` privileges and a loose
+Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched.
+**The December pre-booking flow had the same gap** (raised by Maksym, checked in the code 2026-10-26): a
+Planned Program quote reserves its stock with holds (`create_planned_holds`), and the trigger
+`release_holds_on_quote_status_change` (latest in `20260706030000`) frees every active hold when the status becomes
+Accepted. The same fix covers it: whole Convert to Order and Book as Order both now reach `convert_quote_to_order`
+with no Accepted save first, so the hold release and the new order are one transaction and a failed conversion
+keeps the pre-booked stock reserved. Partial Order (`draw_down_quote`) never flipped the status first. Two small database clean-ups (extra `quote_sections` privileges and a loose
 `_below_cost_reason_from_json` parser) and a display-only profit mismatch are also recorded; the fixes exist only
 on closed PR #397.
 

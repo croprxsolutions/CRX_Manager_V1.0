@@ -24,23 +24,89 @@ export function isCheckedSourceFile(relative) {
   return relative.startsWith('src/') && !SKIPPED_FILE.test(relative);
 }
 
-// Keyed by rule AND the function ESLint names ("complexity Function 'QuoteBuilder'"), so fixing
-// one grandfathered function cannot make room for a different new one in the same file.
-export function findingKey(message) {
-  const subject = message.message?.match(/^(.+?) has /)?.[1];
-  return subject ? `${message.ruleId} ${subject}` : message.ruleId;
+// ── Which function a finding belongs to ──
+// ESLint's messages call most functions just "Arrow function", so findings are keyed by the
+// function's place in the code instead: its owner chain from the file's syntax tree, such as
+// "QuoteBuilder > handleSave > map". Fixing one grandfathered function then cannot make room
+// for a different new one in the same file, for every rule, nesting depth included.
+
+const FUNCTION_TYPES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+// Climbing past one of these would borrow a name from unrelated surrounding code.
+const NAME_BOUNDARY = /Statement$|Declaration$|^JSXElement$|^JSXFragment$|^Program$/;
+
+function keyName(key) {
+  return key?.name ?? (key?.value != null ? String(key.value) : null);
 }
 
-// ESLint results -> { file: { findingKey: count } }
-export function summarizeSizeResults(root, results) {
+// What the code calls this function: its own name, the variable, key, prop or assignment it
+// is bound to, or failing those the call it is handed to (`items.map(...)` -> "map").
+function functionName(node, ancestors) {
+  if (node.id?.name) return node.id.name;
+  let callee = null;
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const a = ancestors[i];
+    if (a.type === 'VariableDeclarator') return keyName(a.id) ?? callee ?? 'anonymous';
+    if (['Property', 'MethodDefinition', 'PropertyDefinition'].includes(a.type)) return keyName(a.key) ?? 'anonymous';
+    if (a.type === 'JSXAttribute') return keyName(a.name) ?? 'anonymous';
+    if (a.type === 'AssignmentExpression') return keyName(a.left.property ?? a.left) ?? 'anonymous';
+    if (a.type === 'CallExpression' && !callee) callee = keyName(a.callee.property ?? a.callee);
+    if (FUNCTION_TYPES.has(a.type) || NAME_BOUNDARY.test(a.type)) break;
+  }
+  return callee ?? 'anonymous';
+}
+
+// Every function in the file with its location and owner chain.
+export function functionSpans(ast) {
+  const spans = [];
+  const walk = (node, ancestors, chain) => {
+    let ownChain = chain;
+    if (FUNCTION_TYPES.has(node.type)) {
+      ownChain = [...chain, functionName(node, ancestors)];
+      spans.push({ start: node.loc.start, end: node.loc.end, chain: ownChain.join(' > ') });
+    }
+    for (const [field, value] of Object.entries(node)) {
+      if (field === 'parent' || field === 'loc' || field === 'range') continue;
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (child && typeof child.type === 'string') walk(child, [...ancestors, node], ownChain);
+      }
+    }
+  };
+  walk(ast, [], []);
+  return spans;
+}
+
+const before = (a, b) => a.line < b.line || (a.line === b.line && a.column <= b.column);
+
+// The innermost function containing an ESLint position (1-based line and column).
+export function ownerAt(spans, line, column) {
+  const point = { line, column: column - 1 };
+  let best = null;
+  for (const span of spans) {
+    if (before(span.start, point) && before(point, span.end)) {
+      if (!best || before(best.start, span.start)) best = span;
+    }
+  }
+  return best?.chain ?? '(module)';
+}
+
+export function findingKey(message, spans) {
+  if (message.ruleId === 'max-lines') return 'max-lines';
+  return `${message.ruleId} ${ownerAt(spans, message.line, message.column)}`;
+}
+
+// ESLint results -> { file: { findingKey: count } }. `parseSource(filePath)` returns the
+// file's syntax tree with locations; a file it cannot parse fails the check.
+export function summarizeSizeResults(root, results, parseSource) {
   const size = {};
   for (const result of results) {
     const file = relativePath(root, result.filePath);
     if (!isCheckedSourceFile(file)) continue;
+    let spans;
     for (const message of result.messages) {
       if (message.fatal) throw new Error(`${file}: ESLint could not parse the file: ${message.message}`);
       if (!(message.ruleId in SIZE_RULES)) continue;
-      const key = findingKey(message);
+      spans ??= functionSpans(parseSource(result.filePath));
+      const key = findingKey(message, spans);
       size[file] ??= {};
       size[file][key] = (size[file][key] || 0) + 1;
     }

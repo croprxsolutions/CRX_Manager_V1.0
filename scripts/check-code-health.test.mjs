@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import tseslint from 'typescript-eslint';
 import {
   findImprovements,
   findRegressions,
@@ -8,35 +9,82 @@ import {
 } from './check-code-health-lib.mjs';
 
 const ROOT = 'C:\\repo';
+const parse = (source) => () => tseslint.parser.parseForESLint(source, { jsx: true, loc: true, range: true }).ast;
 
-const complexity = (name) => ({ ruleId: 'complexity', message: `${name} has a complexity of 21. Maximum allowed is 20.` });
+// A finding located at the first `needle` on 1-based line `line` of `source`.
+const finding = (source, ruleId, line, needle) => {
+  const column = source.split('\n')[line - 1].indexOf(needle) + 1;
+  assert.ok(column > 0, `test setup: "${needle}" not on line ${line}`);
+  return { ruleId, message: 'over the limit', line, column };
+};
+
+const BIG = [
+  'export function Big() {',
+  '  const handleSave = useCallback(async () => {',
+  '    if (a) { if (b) { if (c) { if (d) { if (e) { go(); } } } } }',
+  '  }, []);',
+  '  const rows = list.filter((row) => row.ok);',
+  '  return <ul>{items.map((item) => <li onClick={() => save(item)} />)}</ul>;',
+  '}',
+  'export const top = run(1, 2, 3, 4, 5, 6);',
+].join('\n');
 assert.deepEqual(
   summarizeSizeResults(ROOT, [
     {
       filePath: 'C:\\repo\\src\\pages\\Big.tsx',
       messages: [
-        complexity("Function 'Big'"),
-        complexity('Arrow function'),
-        complexity('Arrow function'),
-        { ruleId: 'max-depth', message: 'Blocks are nested too deeply (5). Maximum allowed is 4.' },
-        { ruleId: 'no-console', message: 'Unexpected console statement.' },
+        finding(BIG, 'complexity', 1, 'function Big'),
+        finding(BIG, 'complexity', 2, 'async ()'),
+        finding(BIG, 'max-depth', 3, 'if (e)'),
+        finding(BIG, 'complexity', 5, '(row)'),
+        finding(BIG, 'complexity', 6, '(item)'),
+        finding(BIG, 'complexity', 6, '() => save'),
+        finding(BIG, 'max-nested-callbacks', 8, 'run('),
+        { ruleId: 'max-lines', message: 'File has too many lines (700).', line: 601, column: 1 },
+        { ruleId: 'no-console', message: 'Unexpected console statement.', line: 1, column: 1 },
       ],
     },
-    { filePath: 'C:\\repo\\src\\pages\\Big.test.tsx', messages: [complexity("Function 'x'")] },
-    { filePath: 'C:\\repo\\src\\legacy\\old.test.js', messages: [complexity("Function 'x'")] },
-    { filePath: 'C:\\repo\\src\\types\\supabase.ts', messages: [{ ruleId: 'max-lines', message: 'File has too many lines (9000).' }] },
-  ]),
+    { filePath: 'C:\\repo\\src\\pages\\Big.test.tsx', messages: [finding(BIG, 'complexity', 1, 'function')] },
+    { filePath: 'C:\\repo\\src\\legacy\\old.test.js', messages: [finding(BIG, 'complexity', 1, 'function')] },
+    { filePath: 'C:\\repo\\src\\types\\supabase.ts', messages: [{ ruleId: 'max-lines', message: 'x', line: 1, column: 1 }] },
+  ], parse(BIG)),
   {
     'src/pages/Big.tsx': {
-      "complexity Function 'Big'": 1,
-      'complexity Arrow function': 2,
-      'max-depth': 1,
+      'complexity Big': 1,
+      'complexity Big > handleSave': 1,
+      'complexity Big > map': 1,
+      'complexity Big > map > onClick': 1,
+      'complexity Big > rows': 1,
+      'max-depth Big > handleSave': 1,
+      'max-lines': 1,
+      'max-nested-callbacks (module)': 1,
     },
   },
-  'findings are keyed by rule and named function, ignore unrelated rules, and skip tests and type catalogs',
+  'every finding is keyed by the owner chain of the function it sits in; tests and type catalogs are skipped',
+);
+
+// Codex App P2 on #1117: moving a violation from one arrow handler to another must not pass,
+// and neither may moving a deep block from one function to another (Luna round 3).
+const HANDLERS = [
+  'const oldHandler = () => { if (a) { if (b) { if (c) { if (d) { if (e) {} } } } } };',
+  'const newHandler = () => { if (a) { if (b) { if (c) { if (d) { if (e) {} } } } } };',
+].join('\n');
+const at = (ruleId, line, needle) => summarizeSizeResults(ROOT, [{
+  filePath: 'C:\\repo\\src\\pages\\H.tsx',
+  messages: [finding(HANDLERS, ruleId, line, needle)],
+}], parse(HANDLERS));
+assert.deepEqual(
+  findRegressions({ size: at('complexity', 1, '() =>'), unused: {} }, { size: at('complexity', 2, '() =>'), unused: {} }),
+  ['src/pages/H.tsx: complexity newHandler — 1 found, baseline allows 0'],
+  'fixing one arrow handler does not make room for a different new one',
+);
+assert.deepEqual(
+  findRegressions({ size: at('max-depth', 1, 'if (e)'), unused: {} }, { size: at('max-depth', 2, 'if (e)'), unused: {} }),
+  ['src/pages/H.tsx: max-depth newHandler — 1 found, baseline allows 0'],
+  'fixing one deep block does not make room for a different new one',
 );
 assert.throws(
-  () => summarizeSizeResults(ROOT, [{ filePath: 'C:\\repo\\src\\a.ts', messages: [{ fatal: true, message: 'bad' }] }]),
+  () => summarizeSizeResults(ROOT, [{ filePath: 'C:\\repo\\src\\a.ts', messages: [{ fatal: true, message: 'bad' }] }], parse(BIG)),
   /could not parse/,
   'a file ESLint cannot parse fails closed instead of passing unmeasured',
 );

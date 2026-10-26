@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
+import tseslint from 'typescript-eslint';
 import {
   SIZE_RULES,
   findImprovements,
@@ -25,6 +26,11 @@ const BASELINE = path.join(ROOT, 'scripts', 'code-health-baseline.json');
 const update = process.argv.includes('--update');
 const init = process.argv.includes('--init');
 
+function parseSource(file) {
+  const source = readFileSync(file, 'utf8');
+  return tseslint.parser.parseForESLint(source, { jsx: /\.[jt]sx$/.test(file), loc: true, range: true }).ast;
+}
+
 async function measureSize() {
   const eslint = new ESLint({
     cwd: ROOT,
@@ -33,7 +39,8 @@ async function measureSize() {
     // An inline `eslint-disable` must not hide a size or complexity violation from the ratchet.
     allowInlineConfig: false,
   });
-  return summarizeSizeResults(ROOT, await eslint.lintFiles(['src/**/*.{js,jsx,ts,tsx}']));
+  const results = await eslint.lintFiles(['src/**/*.{js,jsx,ts,tsx}']);
+  return summarizeSizeResults(ROOT, results, parseSource);
 }
 
 // A change could raise its own baseline to admit new debt, so the baseline here must allow

@@ -111,6 +111,11 @@ BEGIN
   IF (v_sweep ->> 'new_stuck_job_holds') IS DISTINCT FROM '0' OR (v_sweep ->> 'new_orphan_quote_holds') IS DISTINCT FROM '0' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (c) the new checks should find 0 on the real data: %', v_sweep;
   END IF;
+  -- The sweep counts only NEW alerts; an older unresolved one would hide a stuck hold.
+  IF EXISTS (SELECT 1 FROM public.integrity_alerts
+              WHERE resolved_at IS NULL AND alert_type IN ('stuck_job_hold', 'orphan_quote_hold')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) an unresolved stuck_job_hold / orphan_quote_hold alert already exists';
+  END IF;
   INSERT INTO public.inventory_holds (product_id, quantity, hold_type, source_id, notes, created_by, is_active)
   VALUES (v_plain, 2, 'job', gen_random_uuid(), '[E2E] smoke stuck job hold', v_admin, true),
          (v_plain, 3, 'crop_program', gen_random_uuid(), '[E2E] smoke orphan program hold', v_admin, true);

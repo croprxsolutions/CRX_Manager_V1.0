@@ -107,6 +107,15 @@ describe('Products list margin floors', () => {
     expect(screen.getByText('25.0% net')).toBeInTheDocument();
   });
 
+  it('never shows a margin just under its floor rounded up to the floor', async () => {
+    mocks.products.splice(0, mocks.products.length, { ...product, tier2_margin: 0.14996 });
+    render(<Products />);
+    await screen.findByText('Floor Product');
+    fireEvent.click(screen.getByRole('button', { name: /margins/i }));
+    expect(screen.getByText('14.99% net · under 15% floor')).toBeInTheDocument();
+    expect(screen.queryByText(/15\.00% net/)).not.toBeInTheDocument();
+  });
+
   it('clears a floor by emptying the box, and saves the clear', async () => {
     const input = await openFloorEditor();
     expect(input.value).toBe('15');

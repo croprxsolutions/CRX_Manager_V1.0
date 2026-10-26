@@ -20,6 +20,7 @@ vi.mock('./db', async () => {
 
 import {
   formatMarginFloorPercent,
+  formatNetMarginPercent,
   isUnderMarginFloor,
   marginFloorErrorMessage,
   parseMarginFloorPercent,
@@ -66,6 +67,23 @@ describe('isUnderMarginFloor', () => {
     expect(isUnderMarginFloor(0.01, null)).toBe(false);
     expect(isUnderMarginFloor(0.01, undefined)).toBe(false);
     expect(isUnderMarginFloor(null, 0.15)).toBe(false);
+  });
+});
+
+describe('formatNetMarginPercent', () => {
+  it('shows one decimal when not under a floor', () => {
+    expect(formatNetMarginPercent(0.2, 0.15)).toBe('20.0');
+    expect(formatNetMarginPercent(0.15, 0.15)).toBe('15.0');
+    expect(formatNetMarginPercent(0.1234, null)).toBe('12.3');
+  });
+
+  it('shows two decimals under a floor and never rounds up to the floor', () => {
+    expect(formatNetMarginPercent(0.1, 0.15)).toBe('10.00');
+    expect(formatNetMarginPercent(0.14996, 0.15)).toBe('14.99');
+    expect(formatNetMarginPercent(0.14994, 0.15)).toBe('14.99');
+    expect(formatNetMarginPercent(0.143, 0.1435)).toBe('14.30');
+    expect(formatNetMarginPercent(0.143496, 0.1435)).toBe('14.34');
+    expect(formatNetMarginPercent(-0.00001, 0)).toBe('-0.01');
   });
 });
 

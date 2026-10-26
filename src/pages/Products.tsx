@@ -47,6 +47,7 @@ import {
   fetchMarginFloors,
   formatMarginFloorPercent,
   isMarginFloorRefusal,
+  formatNetMarginPercent,
   isUnderMarginFloor,
   marginFloorErrorMessage,
   parseMarginFloorPercent,
@@ -92,8 +93,7 @@ function NetMarginNote({ margin, floor }: { margin: number; floor: number | unde
   const under = isUnderMarginFloor(margin, floor);
   return (
     <div className={`text-[11px] ${under ? 'font-semibold text-red-700' : 'text-gray-400'}`}>
-      {/* Two decimals when flagged, so 14.996% never reads as "15.0% · under 15% floor". */}
-      {(margin * 100).toFixed(under ? 2 : 1)}% net{under ? ` · under ${formatMarginFloorPercent(floor)}% floor` : ''}
+      {formatNetMarginPercent(margin, floor)}% net{under ? ` · under ${formatMarginFloorPercent(floor)}% floor` : ''}
     </div>
   );
 }

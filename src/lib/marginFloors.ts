@@ -35,6 +35,18 @@ export function isUnderMarginFloor(margin: number | null | undefined, floor: num
   return margin < floor;
 }
 
+/**
+ * A tier's net margin as a percent: one decimal normally, two when under its floor. A flagged margin
+ * never rounds up to the floor (14.996% under 15% reads "14.99", not "15.00"). Compared in whole
+ * hundredths because 0.15 * 100 is 15.000000000000002 in floating point.
+ */
+export function formatNetMarginPercent(margin: number, floor: number | null | undefined): string {
+  if (floor == null || !isUnderMarginFloor(margin, floor)) return (margin * 100).toFixed(1);
+  const floorHundredths = Math.round(floor * 10000);
+  const hundredths = Math.min(Math.round(margin * 10000), floorHundredths - 1);
+  return (hundredths / 100).toFixed(2);
+}
+
 /** Every product's floor, by product id. Products without a floor are absent. */
 export async function fetchMarginFloors(): Promise<Map<string, number>> {
   const { data, error } = await fetchAllRows<{ product_id: string; margin_floor: number }>((from, to) =>

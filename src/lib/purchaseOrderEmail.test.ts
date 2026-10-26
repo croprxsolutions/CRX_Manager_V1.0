@@ -1,31 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { buildPurchaseOrderEmailPayload, purchaseOrderEmailBlocker } from './emailService';
+import { COMPANY_ORDERING_EMAIL } from './companyInfo';
+import { PO_COPY_RECIPIENT } from '../../supabase/functions/_shared/purchaseOrderEmailGate';
 
 const goodLines = [{ unit_cost: 12, cost_needs_review: false }];
 
 describe('purchaseOrderEmailBlocker', () => {
-  it('lets a submitted PO with confirmed costs and a vendor email through', () => {
-    expect(purchaseOrderEmailBlocker({ status: 'submitted', vendorEmail: 'a@b.example', lines: goodLines })).toBeNull();
-    expect(purchaseOrderEmailBlocker({ status: 'partially_received', vendorEmail: 'a@b.example', lines: goodLines })).toBeNull();
+  it('lets a submitted or partly received PO with confirmed costs through', () => {
+    expect(purchaseOrderEmailBlocker({ status: 'submitted', lines: goodLines })).toBeNull();
+    expect(purchaseOrderEmailBlocker({ status: 'partially_received', lines: goodLines })).toBeNull();
   });
 
-  it('explains a vendor with no email and points to the PDF download', () => {
-    for (const vendorEmail of [null, undefined, '  ']) {
-      expect(purchaseOrderEmailBlocker({ status: 'submitted', vendorEmail, lines: goodLines })).toMatch(/no email address on file.*download the PDF/);
-    }
-  });
-
-  it('refuses the wrong status, no lines, and unconfirmed or zero costs', () => {
-    expect(purchaseOrderEmailBlocker({ status: 'draft', vendorEmail: 'a@b.example', lines: goodLines })).toMatch(/submitted/);
-    expect(purchaseOrderEmailBlocker({ status: 'submitted', vendorEmail: 'a@b.example', lines: [] })).toMatch(/no lines/);
-    expect(purchaseOrderEmailBlocker({ status: 'submitted', vendorEmail: 'a@b.example', lines: [{ unit_cost: 0 }] })).toMatch(/Confirm the unit cost/);
-    expect(purchaseOrderEmailBlocker({ status: 'submitted', vendorEmail: 'a@b.example', lines: [{ unit_cost: 5, cost_needs_review: true }] })).toMatch(/Confirm the unit cost/);
+  it('refuses the wrong status (pointing to the PDF), no lines, and unconfirmed or zero costs', () => {
+    expect(purchaseOrderEmailBlocker({ status: 'draft', lines: goodLines })).toMatch(/submitted.*Download the PDF/);
+    expect(purchaseOrderEmailBlocker({ status: 'submitted', lines: [] })).toMatch(/no lines/);
+    expect(purchaseOrderEmailBlocker({ status: 'submitted', lines: [{ unit_cost: 0 }] })).toMatch(/Confirm the unit cost/);
+    expect(purchaseOrderEmailBlocker({ status: 'submitted', lines: [{ unit_cost: 5, cost_needs_review: true }] })).toMatch(/Confirm the unit cost/);
   });
 });
 
 describe('buildPurchaseOrderEmailPayload', () => {
+  const snapshot = {
+    vendor: 'Spinner Ag',
+    expected_delivery_date: '2026-11-03',
+    notes: null,
+    lines: [{ id: 'l-1', product_id: 'p-1', quantity_ordered: 3, unit_cost: 19.99 }],
+  };
   const input = {
-    vendorEmail: ' orders@spinner.example ',
     vendorName: 'Spinner <Ag>',
     purchaseOrderId: 'po-1',
     poNumber: 'PO-2026-0040',
@@ -33,27 +34,27 @@ describe('buildPurchaseOrderEmailPayload', () => {
     attachmentBase64: 'QUJD',
     attachmentFilename: 'Purchase-Order-PO-2026-0040.pdf',
     idempotencyKey: 'key-1',
-    lines: [{ id: 'l-1', quantity_ordered: 3, unit_cost: 19.99 }],
+    snapshot,
   };
 
-  it('addresses the vendor as a purchase_order send with no customer', () => {
+  it('sends the copy to the company ordering address, never a vendor, with no customer', () => {
     const payload = buildPurchaseOrderEmailPayload(input);
     expect(payload).toMatchObject({
-      to: 'orders@spinner.example',
-      subject: 'Purchase Order PO-2026-0040 from Crop RX Solutions',
+      to: COMPANY_ORDERING_EMAIL,
+      subject: 'PO copy PO-2026-0040 - Spinner <Ag>',
       email_type: 'purchase_order',
       resource_type: 'purchase_order',
       resource_id: 'po-1',
       idempotency_key: 'key-1',
       attachments: [{ filename: 'Purchase-Order-PO-2026-0040.pdf', content: 'QUJD' }],
-      purchase_order_lines: [{ id: 'l-1', quantity_ordered: 3, unit_cost: 19.99 }],
+      purchase_order_snapshot: snapshot,
     });
     expect(payload.customer_id).toBeUndefined();
-    expect(payload.html).toContain('Spinner &lt;Ag&gt;');
+    expect(payload.html).toContain('Vendor: Spinner &lt;Ag&gt;');
     expect(payload.html).toContain('Requested delivery: 11/3/2026');
   });
 
-  it('refuses a blank vendor email', () => {
-    expect(() => buildPurchaseOrderEmailPayload({ ...input, vendorEmail: '  ' })).toThrow(/no email address/);
+  it('uses the same ordering address the edge function accepts', () => {
+    expect(COMPANY_ORDERING_EMAIL.toLowerCase()).toBe(PO_COPY_RECIPIENT);
   });
 });

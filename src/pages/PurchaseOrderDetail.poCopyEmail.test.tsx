@@ -3,7 +3,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PurchaseOrderDetail from './PurchaseOrderDetail';
 
-// To-Do 0.15: an admin downloads a purchase order PDF and emails it to the vendor.
+// To-Do 0.15: an admin downloads a purchase order PDF, or emails a copy of it to the
+// company ordering address (never the vendor) for placing the order on the vendor's portal.
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -109,7 +110,7 @@ function renderPage() {
   );
 }
 
-describe('PurchaseOrderDetail purchase order PDF and vendor email', () => {
+describe('PurchaseOrderDetail purchase order PDF and emailed copy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.role = 'admin';
@@ -127,65 +128,73 @@ describe('PurchaseOrderDetail purchase order PDF and vendor email', () => {
     mocks.sendEmail.mockResolvedValue({ success: true, email_log_id: 'log-1' });
   });
 
-  it('tells the admin the vendor has no email, sends nothing, and still downloads the PDF', async () => {
+  it('downloads the PDF with the vendor record filling the vendor block', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /email vendor/i }));
-    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
-      'warning',
-      expect.stringMatching(/no email address on file.*download the PDF/),
-    ));
-    expect(mocks.sendEmail).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /download pdf/i }));
     await waitFor(() => expect(mocks.downloadPurchaseOrderPdf).toHaveBeenCalledTimes(1));
-    const data = mocks.downloadPurchaseOrderPdf.mock.calls[0][0];
-    expect(data).toMatchObject({
+    expect(mocks.downloadPurchaseOrderPdf.mock.calls[0][0]).toMatchObject({
       po_number: 'PO-2026-0040',
       vendor: { name: 'spinner ag', email: null },
       lines: [{ product_name: 'Atrazine 4L', epa_registration: '100-497', quantity_ordered: 3, unit_cost: 19.99 }],
     });
   });
 
-  it('confirms, then emails the PDF to the vendor email on file', async () => {
-    vendors = [{ id: 'v-1', name: 'Spinner Ag', email: ' orders@spinner.example ' }];
+  it('confirms, then emails the copy to the company ordering address even though the vendor has no email', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /email vendor/i }));
-    expect(await screen.findByText(/to Spinner Ag at orders@spinner\.example/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /email po copy/i }));
+    expect(await screen.findByText(/to mason@croprxsolutions\.com.*Nothing is sent to the vendor/)).toBeInTheDocument();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
     await waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(1));
-    expect(mocks.sendEmail.mock.calls[0][0]).toMatchObject({
-      to: 'orders@spinner.example',
+    const payload = mocks.sendEmail.mock.calls[0][0];
+    expect(payload).toMatchObject({
+      to: 'mason@croprxsolutions.com',
       email_type: 'purchase_order',
       resource_type: 'purchase_order',
       resource_id: 'po-1',
       idempotency_key: 'idem:email_purchase_order',
       attachments: [{ filename: 'Purchase-Order-PO-2026-0040.pdf', content: 'UERG' }],
-      purchase_order_lines: [{ id: 'line-1', quantity_ordered: 3, unit_cost: 19.99 }],
+      purchase_order_snapshot: {
+        vendor: 'Spinner Ag',
+        expected_delivery_date: null,
+        notes: null,
+        lines: [{ id: 'line-1', product_id: 'product-1', quantity_ordered: 3, unit_cost: 19.99 }],
+      },
     });
-    expect(mocks.sendEmail.mock.calls[0][0].customer_id).toBeUndefined();
-    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Purchase order emailed to orders@spinner.example'));
+    expect(payload.customer_id).toBeUndefined();
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Purchase order copy emailed to mason@croprxsolutions.com'));
     expect(mocks.resetKey).toHaveBeenCalledWith('email_purchase_order');
     expect(mocks.logActivity).toHaveBeenCalledWith(expect.objectContaining({ event: 'purchase_order_emailed', entityId: 'po-1' }));
   });
 
   it('keeps the idempotency key when the send fails, so a retry replays it', async () => {
-    vendors = [{ id: 'v-1', name: 'Spinner Ag', email: 'orders@spinner.example' }];
-    mocks.sendEmail.mockRejectedValue(new Error('Recipient does not match the vendor email on file'));
+    mocks.sendEmail.mockRejectedValue(new Error('The purchase order changed after its PDF was built. Reload it and send again'));
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /email vendor/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /email po copy/i }));
     fireEvent.click(await screen.findByRole('button', { name: /send email/i }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
       'error',
-      expect.stringContaining('Recipient does not match the vendor email on file'),
+      expect.stringContaining('changed after its PDF was built'),
     ));
     expect(mocks.resetKey).not.toHaveBeenCalledWith('email_purchase_order');
   });
 
+  it('refuses an unconfirmed cost before anything is built or sent', async () => {
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'purchase_orders') return query(po);
+      if (table === 'purchase_order_items') return query([{ ...baseItems[0], cost_needs_review: true }]);
+      if (table === 'vendors') return query(vendors);
+      return query([]);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /email po copy/i }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('warning', expect.stringMatching(/Confirm the unit cost/)));
+    expect(screen.queryByRole('button', { name: /send email/i })).not.toBeInTheDocument();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
   it('refuses to email when the lines changed since the page loaded', async () => {
-    vendors = [{ id: 'v-1', name: 'Spinner Ag', email: 'orders@spinner.example' }];
     let reads = 0;
     mocks.from.mockImplementation((table: string) => {
       if (table === 'purchase_orders') return query(po);
@@ -197,7 +206,7 @@ describe('PurchaseOrderDetail purchase order PDF and vendor email', () => {
       return query([]);
     });
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /email vendor/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /email po copy/i }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('warning', expect.stringMatching(/changed since the page loaded/)));
     expect(screen.queryByRole('button', { name: /send email/i })).not.toBeInTheDocument();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
@@ -213,7 +222,7 @@ describe('PurchaseOrderDetail purchase order PDF and vendor email', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByRole('button', { name: /download pdf/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /email vendor/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /email po copy/i })).not.toBeInTheDocument();
     unmount();
 
     mocks.role = 'sales_rep';
@@ -221,6 +230,6 @@ describe('PurchaseOrderDetail purchase order PDF and vendor email', () => {
     renderPage();
     expect(await screen.findByRole('button', { name: /receive items/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /download pdf/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /email vendor/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /email po copy/i })).not.toBeInTheDocument();
   });
 });

@@ -481,9 +481,9 @@ pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record
 live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
 Mason's REAL-DATA-OK.
 
-Purchase order to vendor (To-Do 0.15, migration `20261026090000`, row 984): the PDF download works once merged,
-but **Email Vendor stays off until Mason approves deploying the `send-email` edge function** (the live function
-answers "Unknown email_type: purchase_order"), and no vendor has an email address yet (Mason's data, Vendors page).
+Purchase order copy (To-Do 0.15, migration `20261026090000`, row 984): the PDF download works once merged,
+but **Email PO Copy (to mason@croprxsolutions.com) stays off until Mason approves deploying the `send-email`
+edge function** (the live function answers "Unknown email_type: purchase_order").
 
 ### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**

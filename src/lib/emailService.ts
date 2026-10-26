@@ -1,4 +1,5 @@
 import { supabase } from './db';
+import { COMPANY_ORDERING_EMAIL } from './companyInfo';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -18,17 +19,22 @@ export type EmailType =
   // Field-app parity #41: after-application courtesy notice to the job's
   // customer(s). Same gated-deploy story as the pre notice above.
   | 'post_application_notice'
-  // To-Do 0.15: a purchase order emailed to its vendor. Admin-only; the edge
-  // function checks the recipient against the vendor's email on file.
+  // To-Do 0.15: a copy of a purchase order emailed to the company ordering address
+  // (never a vendor). Admin-only; the edge function checks the recipient.
   | 'purchase_order';
 
-export interface SendEmailParams {
+/** What a PO copy's PDF prints; the server refuses the send unless it is still the PO. */
+export interface PurchaseOrderEmailSnapshot {
+  vendor: string | null;
+  expected_delivery_date: string | null;
+  notes: string | null;
+  lines: Array<{ id: string; product_id: string; quantity_ordered: number; unit_cost: number }>;
+}
+
+interface SendEmailBase {
   to: string;
   subject: string;
   html: string;
-  email_type: EmailType;
-  /** Required for every customer email; absent only for a 'purchase_order' (a vendor). */
-  customer_id?: string;
   /**
    * Optional resource the email is about. REQUIRED for drivers (only allowed
    * email_type='delivery_completed' with resource_type='delivery'). Admins
@@ -38,10 +44,16 @@ export interface SendEmailParams {
   resource_id?: string;
   idempotency_key?: string;
   attachments?: Array<{ filename: string; content: string }>; // base64
-  /** 'purchase_order' only: the lines the attached PDF prints. The server refuses the send
-   *  unless they still match the PO's lines, so a vendor never gets an out-of-date price. */
-  purchase_order_lines?: Array<{ id: string; quantity_ordered: number; unit_cost: number }>;
 }
+
+/** Every customer email names its customer; a PO copy names none and carries its snapshot. */
+export type SendEmailParams =
+  | (SendEmailBase & { email_type: Exclude<EmailType, 'purchase_order'>; customer_id: string })
+  | (SendEmailBase & {
+      email_type: 'purchase_order';
+      customer_id?: undefined;
+      purchase_order_snapshot: PurchaseOrderEmailSnapshot;
+    });
 
 export interface SendEmailResult {
   success: boolean;
@@ -158,36 +170,33 @@ export function buildInvoiceEmailPayload(input: InvoiceEmailInput): SendEmailPar
   };
 }
 
-// ── Purchase order to vendor (To-Do 0.15) ─────────────────────────────
-// The send-email edge function repeats these checks; here they give the honest
-// message before anything is built or sent.
+// ── Purchase order copy (To-Do 0.15) ──────────────────────────────────
+// Mason places each order himself through the supplier's portal, so a PO copy
+// goes to the company ordering address, never to a vendor. The send-email edge
+// function repeats these checks; here they give the honest message before
+// anything is built or sent.
 
 export const PO_EMAIL_STATUSES = ['submitted', 'partially_received'] as const;
 
 export interface PurchaseOrderEmailCheckInput {
   status: string;
-  vendorEmail: string | null | undefined;
   /** Each line's unit cost (dollars) and whether an admin still has to confirm it. */
   lines: ReadonlyArray<{ unit_cost?: number | null; cost_needs_review?: boolean }>;
 }
 
-/** Why this PO cannot be emailed to its vendor yet, or null when it can. */
+/** Why this PO copy cannot be emailed yet, or null when it can. */
 export function purchaseOrderEmailBlocker(input: PurchaseOrderEmailCheckInput): string | null {
   if (!(PO_EMAIL_STATUSES as readonly string[]).includes(input.status)) {
-    return 'Only a submitted or partly received purchase order can be emailed to the vendor.';
+    return 'Only a submitted or partly received purchase order can be emailed. Download the PDF instead.';
   }
   if (input.lines.length === 0) return 'This purchase order has no lines to send.';
   if (input.lines.some((line) => !line.unit_cost || line.unit_cost <= 0 || line.cost_needs_review)) {
-    return 'Confirm the unit cost on every line before emailing this purchase order to the vendor.';
-  }
-  if (!input.vendorEmail?.trim()) {
-    return 'This vendor has no email address on file. Add one on the Vendors page, or download the PDF and send it yourself.';
+    return 'Confirm the unit cost on every line before emailing this purchase order.';
   }
   return null;
 }
 
 export interface PurchaseOrderEmailInput {
-  vendorEmail: string;
   vendorName: string;
   purchaseOrderId: string;
   poNumber: string;
@@ -198,8 +207,8 @@ export interface PurchaseOrderEmailInput {
   attachmentFilename: string;
   /** The screen's retained idempotency key, so a retry after a lost response replays one send. */
   idempotencyKey: string;
-  /** The lines the PDF prints (dollar unit costs, as stored). */
-  lines: Array<{ id: string; quantity_ordered: number; unit_cost: number }>;
+  /** What the PDF prints (dollar unit costs, as stored). */
+  snapshot: PurchaseOrderEmailSnapshot;
 }
 
 function escapeHtml(text: string): string {
@@ -212,31 +221,27 @@ function escapeHtml(text: string): string {
 }
 
 export function buildPurchaseOrderEmailPayload(input: PurchaseOrderEmailInput): SendEmailParams {
-  const email = input.vendorEmail.trim();
-  if (!email) throw new Error('This vendor has no email address on file');
-
   const poNumber = escapeHtml(input.poNumber);
   const delivery = input.expectedDeliveryDate
     ? `<p style="margin:0 0 8px;color:#374151;">Requested delivery: ${escapeHtml(input.expectedDeliveryDate)}</p>`
     : '';
   const html = buildEmailHtml(`
-          <h2 style="margin:0 0 16px;color:#111827;font-size:18px;">Purchase Order ${poNumber}</h2>
-          <p style="margin:0 0 8px;color:#374151;">Hello ${escapeHtml(input.vendorName)},</p>
-          <p style="margin:0 0 8px;color:#374151;">Please find our purchase order attached.</p>
+          <h2 style="margin:0 0 16px;color:#111827;font-size:18px;">Purchase Order ${poNumber} (copy)</h2>
+          <p style="margin:0 0 8px;color:#374151;">Vendor: ${escapeHtml(input.vendorName)}</p>
           ${delivery}
-          <p style="margin:16px 0 0;color:#374151;">Please reference ${poNumber} on your invoice and packing slip, and reply to confirm the order.</p>
+          <p style="margin:16px 0 0;color:#374151;">The purchase order PDF is attached, for placing this order through the vendor's portal.</p>
         `);
 
   return {
-    to: email,
-    subject: `Purchase Order ${input.poNumber} from Crop RX Solutions`,
+    to: COMPANY_ORDERING_EMAIL,
+    subject: `PO copy ${input.poNumber} - ${input.vendorName}`,
     html,
     email_type: 'purchase_order',
     resource_type: 'purchase_order',
     resource_id: input.purchaseOrderId,
     idempotency_key: input.idempotencyKey,
     attachments: [{ filename: input.attachmentFilename, content: input.attachmentBase64 }],
-    purchase_order_lines: input.lines.map(({ id, quantity_ordered, unit_cost }) => ({ id, quantity_ordered, unit_cost })),
+    purchase_order_snapshot: input.snapshot,
   };
 }
 

@@ -217,20 +217,28 @@ The normal path is `draft` → `submitted` → `fully_received`, passing through
   records, or the product's catalog cost. Inventory value uses catalog cost, so a correction moves no inventory value.
 - Do not reverse a receipt just to fix its cost.
 
-### Sending a PO to the vendor (To-Do 0.15, 2026-10-26)
+### PO PDF and emailed copy (To-Do 0.15, 2026-10-26)
+- Nothing is sent to vendors. Mason places each order himself through the supplier's portal, using a copy
+  of the PO (Mason, 2026-10-26: "we will not actually send vendor emails to them, will make copy and use
+  that to make ordes through the portals our suppliers have so they can be sent to mason@croprxsolutions.com").
 - Admins only, because the PO shows unit costs. The PO page has **Download PDF** (any status; a draft is
   marked "DRAFT - NOT YET SUBMITTED", a cancelled PO "CANCELLED - DO NOT FILL") and, for a `submitted` or
-  `partially_received` PO, **Email Vendor**. The PDF is `src/lib/purchaseOrderPdf.ts`; its line and order
-  totals are whole cents from `src/lib/purchaseOrderMoney.ts`, the same as the screen.
-- `purchase_orders.vendor` is a name, so the vendor is the one active `vendors` row with that name
-  (ignoring case and spaces). Email Vendor says so plainly, and sends nothing, when the vendor has no email,
-  any line has a $0 or unconfirmed (`cost_needs_review`) cost, or the PO has no lines.
+  `partially_received` PO, **Email PO Copy**, which emails the PDF to the company ordering address
+  (`COMPANY_ORDERING_EMAIL` in `src/lib/companyInfo.ts`, mason@croprxsolutions.com). The PDF is
+  `src/lib/purchaseOrderPdf.ts`; its line and order totals are whole cents from
+  `src/lib/purchaseOrderMoney.ts`, the same as the screen. A line with no cost prints "TBD" and an
+  unconfirmed cost is starred.
+- The vendor block is filled from the one active `vendors` row whose name matches `purchase_orders.vendor`
+  (ignoring case and runs of spaces); with no match it shows the PO's vendor name only. Email PO Copy says so
+  plainly, and sends nothing, when any line has a $0 or unconfirmed (`cost_needs_review`) cost or the PO
+  has no lines.
 - The `send-email` edge function's `purchase_order` type repeats every check server-side, before its
   write-ahead log and again just before the provider call (`supabase/functions/_shared/purchaseOrderEmailGate.ts`):
-  admin only, no `customer_id`, `resource_type='purchase_order'`, recipient equal to that vendor's email.
-  The app builds the PDF, so it also sends `purchase_order_lines` (each line's id, quantity and unit cost as
-  printed), and the send is refused unless those are exactly the PO's lines at that moment: a vendor never
-  gets a PDF with an out-of-date price.
+  admin only, no `customer_id`, `resource_type='purchase_order'`, and the recipient must be the ordering
+  address (`PO_COPY_RECIPIENT`, kept equal to `COMPANY_ORDERING_EMAIL` by a test). The app builds the PDF, so
+  it also sends `purchase_order_snapshot` (vendor, requested date, notes, and each line's id, product,
+  quantity and unit cost as printed), and the send is refused unless that is exactly the PO at that moment:
+  an order is never placed from a copy with out-of-date details.
   Sends are logged in `email_log` with `email_type = 'purchase_order'` and a NULL `customer_id`.
 
 ### Source files

@@ -36,6 +36,7 @@ import HelpTip from '../components/ui/HelpTip';
 import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemCostChange, PurchaseOrderCostChangeSource, POStatus, ReceivingRecord, ReceivingCondition, LinkedEntityType, Vendor } from '../types';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import { buildPurchaseOrderEmailPayload, pdfToBase64, purchaseOrderEmailBlocker, sendEmail } from '../lib/emailService';
+import { COMPANY_ORDERING_EMAIL } from '../lib/companyInfo';
 import type { PdfPurchaseOrderData } from '../lib/purchaseOrderPdf';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -75,7 +76,10 @@ function purchaseOrderPdfFingerprint(header: PurchaseOrder | null, lines: readon
   return JSON.stringify([
     header && [header.vendor, header.status, header.submitted_date, header.expected_delivery_date, header.notes],
     lines
-      .map((line) => [line.id, line.product_id, line.quantity_ordered, line.unit_cost ?? null, !!line.cost_needs_review, line.unit_size, line.notes])
+      .map((line) => [
+        line.id, line.product_id, line.product?.product_name ?? line.product_name, line.product?.epa_registration,
+        line.quantity_ordered, line.unit_cost ?? null, !!line.cost_needs_review, line.unit_size, line.notes,
+      ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   ]);
 }
@@ -140,7 +144,7 @@ export default function PurchaseOrderDetail() {
   const setCostsIdem = useIdempotencyKey('set_purchase_order_item_costs', profile?.id || '');
   const [poPdfBusy, setPoPdfBusy] = useState(false);
   // The vendor and PDF data an admin is about to confirm emailing.
-  const [emailPO, setEmailPO] = useState<{ vendorEmail: string; data: PdfPurchaseOrderData; lines: PurchaseOrderItem[] } | null>(null);
+  const [emailPO, setEmailPO] = useState<{ data: PdfPurchaseOrderData; header: PurchaseOrder; lines: PurchaseOrderItem[] } | null>(null);
   const [emailingPO, setEmailingPO] = useState(false);
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [items, setItems] = useState<PurchaseOrderItem[]>([]);
@@ -969,7 +973,10 @@ export default function PurchaseOrderDetail() {
     }
   };
 
-  /* ─── Purchase order PDF + email to vendor (To-Do 0.15, admin-only: it shows costs) ─── */
+  /* ─── Purchase order PDF + emailed copy (To-Do 0.15, admin-only: it shows costs) ─── */
+  // The copy goes to the company ordering address, never a vendor: orders are placed
+  // by hand through each supplier's portal (Mason, 2026-10-26). The vendor record
+  // only fills in the PDF's vendor block.
   // POs store the vendor by name, so match it to the one active vendor of that name.
   const loadPOVendor = async (vendorName: string): Promise<Vendor | null> => {
     const { data, error } = await supabase
@@ -1047,7 +1054,7 @@ export default function PurchaseOrderDetail() {
     try {
       const { header, lines } = await loadPOForPdf(po.id);
       const vendor = await loadPOVendor(header.vendor);
-      const blocker = purchaseOrderEmailBlocker({ status: header.status, vendorEmail: vendor?.email, lines });
+      const blocker = purchaseOrderEmailBlocker({ status: header.status, lines });
       if (blocker) {
         toast('warning', blocker);
         return;
@@ -1057,11 +1064,10 @@ export default function PurchaseOrderDetail() {
         toast('warning', 'This purchase order changed since the page loaded. Reload the page, check it, then email it.');
         return;
       }
-      if (!vendor?.email) return;
-      setEmailPO({ vendorEmail: vendor.email.trim(), data: buildPOPdfData(header, vendor, lines), lines });
+      setEmailPO({ data: buildPOPdfData(header, vendor, lines), header, lines });
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_purchase_order_vendor' } });
-      toast('error', `Could not load the vendor: ${sanitizeError(err)}`);
+      Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_purchase_order_for_email' } });
+      toast('error', `Could not load the purchase order: ${sanitizeError(err)}`);
     } finally {
       setPoPdfBusy(false);
     }
@@ -1073,23 +1079,29 @@ export default function PurchaseOrderDetail() {
     try {
       const { generatePurchaseOrderPdf, purchaseOrderPdfFilename } = await import('../lib/purchaseOrderPdf');
       const doc = await generatePurchaseOrderPdf(emailPO.data);
+      const { header, lines } = emailPO;
       const result = await sendEmail(buildPurchaseOrderEmailPayload({
-        vendorEmail: emailPO.vendorEmail,
         vendorName: emailPO.data.vendor.name,
         purchaseOrderId: po.id,
-        poNumber: po.po_number,
-        expectedDeliveryDate: po.expected_delivery_date
-          ? parseLocalDate(po.expected_delivery_date).toLocaleDateString('en-US')
+        poNumber: header.po_number,
+        expectedDeliveryDate: header.expected_delivery_date
+          ? parseLocalDate(header.expected_delivery_date).toLocaleDateString('en-US')
           : null,
         attachmentBase64: pdfToBase64(doc),
-        attachmentFilename: purchaseOrderPdfFilename(po.po_number),
+        attachmentFilename: purchaseOrderPdfFilename(header.po_number),
         idempotencyKey: emailPOIdem.getKey(),
-        // The server refuses the send unless these are still the PO's lines.
-        lines: emailPO.lines.map((line) => ({
-          id: line.id,
-          quantity_ordered: line.quantity_ordered,
-          unit_cost: line.unit_cost ?? 0,
-        })),
+        // The server refuses the send unless this is still the PO.
+        snapshot: {
+          vendor: header.vendor,
+          expected_delivery_date: header.expected_delivery_date,
+          notes: header.notes,
+          lines: lines.map((line) => ({
+            id: line.id,
+            product_id: line.product_id,
+            quantity_ordered: line.quantity_ordered,
+            unit_cost: line.unit_cost ?? 0,
+          })),
+        },
       }));
       // Confirmed success only: a failed or lost send keeps the key, so a retry replays it.
       emailPOIdem.resetKey();
@@ -1097,12 +1109,12 @@ export default function PurchaseOrderDetail() {
       toast(
         result.deduplicated ? 'info' : 'success',
         result.deduplicated
-          ? 'This purchase order was already emailed (duplicate send skipped).'
-          : `Purchase order emailed to ${emailPO.vendorEmail}`,
+          ? 'This purchase order copy was already emailed (duplicate send skipped).'
+          : `Purchase order copy emailed to ${COMPANY_ORDERING_EMAIL}`,
       );
       await logActivity({
         event: 'purchase_order_emailed',
-        description: `Purchase order ${po.po_number} emailed to ${emailPO.data.vendor.name} (${emailPO.vendorEmail})${result.deduplicated ? ' (confirmed on retry)' : ''}`,
+        description: `Copy of purchase order ${po.po_number} (${emailPO.data.vendor.name}) emailed to ${COMPANY_ORDERING_EMAIL}${result.deduplicated ? ' (confirmed on retry)' : ''}`,
         performedBy: profile.id,
         entityType: 'purchase_order',
         entityId: po.id,
@@ -1531,7 +1543,7 @@ export default function PurchaseOrderDetail() {
                   onClick={handleEmailPOClick}
                   disabled={poPdfBusy}
                 >
-                  Email Vendor
+                  Email PO Copy
                 </Button>
               )}
             </>
@@ -2355,9 +2367,9 @@ export default function PurchaseOrderDetail() {
         open={isAdmin && emailPO !== null}
         onClose={() => { if (!emailingPO) setEmailPO(null); }}
         onConfirm={handleConfirmEmailPO}
-        title={`Email ${po.po_number} to the vendor?`}
+        title={`Email a copy of ${po.po_number}?`}
         message={emailPO
-          ? `This sends the purchase order PDF, with its unit costs and total, to ${emailPO.data.vendor.name} at ${emailPO.vendorEmail}.`
+          ? `This emails the purchase order PDF for ${emailPO.data.vendor.name}, with its unit costs and total, to ${COMPANY_ORDERING_EMAIL}, for placing the order through the vendor's portal. Nothing is sent to the vendor.`
           : ''}
         confirmLabel="Send Email"
         variant="info"

@@ -75,7 +75,8 @@ const DO_PREFIX_RE = /\bdo(?:\s+language\s+[a-z_][a-z0-9_]*)?\s*$/i;
 // an escape, as PostgreSQL does with standard_conforming_strings off. A batch
 // can switch that setting off before a DO body is parsed, so
 // isVerifiedRollbackBatch() requires the verdict to hold under BOTH readings
-// (Codex App, #1092). Always false outside that check.
+// (Codex App, #1092), and classifySql() refuses a query either reading refuses
+// (Codex App, #1093). False outside those two checks.
 let plainBackslashEscapes = false;
 // A character that can continue a PostgreSQL identifier (non-ASCII included).
 const IDENT_CHAR_RE = /[A-Za-z0-9_$\u0080-￿]/;
@@ -575,8 +576,10 @@ function leavesSessionOrServerEffect(sql) {
 
 export function isVerifiedRollbackBatch(query) {
   if (!verifyRollbackOnce(query)) return false;
+  // Restore rather than reset: classifySql() may already be on its escaped pass.
+  const prev = plainBackslashEscapes;
   plainBackslashEscapes = true;
-  try { return verifyRollbackOnce(query); } finally { plainBackslashEscapes = false; }
+  try { return verifyRollbackOnce(query); } finally { plainBackslashEscapes = prev; }
 }
 
 function verifyRollbackOnce(query) {
@@ -1065,7 +1068,19 @@ export function classifySql(query, { realDataOk = false } = {}) {
   const q = String(query || "");
   if (isKnownSweepPredicate(q)) return { block: false, kind: "known-sweep-predicate" };
   if (isKnownSweepQuery(q)) return { block: false, kind: "known-sweep-query" };
-  return classifySqlInner(q, realDataOk);
+  // A batch can turn standard_conforming_strings off before a DO body is parsed,
+  // and then a backslash ends a plain string early: `PERFORM '\'; --'; UPDATE …`
+  // hides the UPDATE as a comment under the standard reading (Codex App, #1093).
+  // So a query with a backslash is judged under both readings, and either
+  // refusal refuses it, as isVerifiedRollbackBatch() already does.
+  const standard = classifySqlInner(q, realDataOk);
+  if (standard.block || !q.includes("\\")) return standard;
+  const prev = plainBackslashEscapes;
+  plainBackslashEscapes = true;
+  try {
+    const escaped = classifySqlInner(q, realDataOk);
+    return escaped.block ? escaped : standard;
+  } finally { plainBackslashEscapes = prev; }
 }
 
 function classifySqlInner(query, realDataOk) {

@@ -390,6 +390,14 @@ for (const [sql, kind] of [
   ["SELECT proname FROM pg_proc WHERE prosrc ILIKE '%insert into invoices%'", "dynamic-sql-write"],
 ]) eq(classifySql(sql).kind, kind, `not [E2E]-targeted, refused as ${kind}: ${sql.slice(0, 70).replace(/\n/g, " ")}`);
 ok(!classifySql("SELECT proname FROM pg_proc WHERE prosrc ILIKE '%insert%invoices%'").block, "a catalog search with the words split is a read");
+// Codex App on #1093: with standard_conforming_strings off, `'\'` ends early, so the
+// `--` and `/*` below are code and the write runs. Either reading refusing refuses.
+for (const sql of [
+  "SET standard_conforming_strings = off; DO $$ BEGIN PERFORM '\\'; --'; UPDATE customers SET phone = '555' WHERE id = 1; END; $$;",
+  "SET standard_conforming_strings = off; SELECT '\\'; --'; DELETE FROM invoices WHERE id = 7;",
+  "SET standard_conforming_strings = off; SELECT '\\' /*'; INSERT INTO customers (name) VALUES ('Real'); SELECT '*/';",
+]) ok(classifySql(sql).block, `a write hidden under the backslash reading is refused: ${sql.slice(40, 100)}`);
+ok(!classifySql("SELECT 'C:\\temp\\x' AS path").block, "a read with backslashes in a string stays allowed");
 // INSERT … SELECT does not show its rows. (Its column list also reads as a call
 // to the older RPC rule, so only the refusal is asserted, not which rule fired.)
 for (const sql of [

@@ -81,3 +81,10 @@ still passes; everywhere else `EXECUTE` in a DO block stays refused as dynamic S
 added the same dollar-quote and `U&"…"` checks, so #1092's earlier versions now answer first
 (`copy-program-or-file`, `unicode-escaped-identifier`), and `COPY … FROM STDIN` is still refused as
 `copy-from`. 66 of the 69 live smoke chains still pass.
+
+**Both string readings (Codex App on 793024132).** With `standard_conforming_strings` off a
+backslash ends a plain string early, so `SET standard_conforming_strings = off; DO $$ BEGIN PERFORM
+'\'; --'; UPDATE customers … END; $$;` hid the UPDATE as a comment and was allowed. A query holding
+a backslash is now classified under both readings and refused if either refuses, as the rollback
+check already did. That input, a top-level `DELETE` and a `/*` variant were allowed before and are
+refused now; a read with backslashes in a string is still allowed.

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PackageCheck, Pencil, Ban, Download, Send, RotateCcw, MessageSquarePlus } from 'lucide-react';
+import { PackageCheck, Pencil, Ban, Download, Send, RotateCcw, MessageSquarePlus, FileDown, Mail } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
@@ -33,7 +33,10 @@ import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE, parseDollarsToCents } 
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import HelpTip from '../components/ui/HelpTip';
-import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemCostChange, PurchaseOrderCostChangeSource, POStatus, ReceivingRecord, ReceivingCondition, LinkedEntityType } from '../types';
+import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemCostChange, PurchaseOrderCostChangeSource, POStatus, ReceivingRecord, ReceivingCondition, LinkedEntityType, Vendor } from '../types';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import { buildPurchaseOrderEmailPayload, pdfToBase64, purchaseOrderEmailBlocker, sendEmail } from '../lib/emailService';
+import type { PdfPurchaseOrderData } from '../lib/purchaseOrderPdf';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { LoadFailedState } from '../components/ui/EmptyState';
@@ -65,6 +68,14 @@ const conditionLabel = (c: string) =>
   c.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
 
 /* ─── Per-item receive state ─── */
+/** What a vendor PO PDF says about each line, so a changed PO is a new email, not a replay. */
+function purchaseOrderLinesFingerprint(lines: readonly PurchaseOrderItem[]): string {
+  return lines
+    .map((line) => `${line.id}:${line.quantity_ordered}:${line.unit_cost ?? ''}:${line.cost_needs_review ? 1 : 0}`)
+    .sort()
+    .join(',');
+}
+
 interface ReceiveItemState {
   qty: string;
   condition: ReceivingCondition;
@@ -119,8 +130,20 @@ export default function PurchaseOrderDetail() {
   const cancelPOIdem = useIdempotencyKey('cancel_purchase_order', profile?.id || '');
   const reverseIdem = useIdempotencyKey('reverse_receiving_record', profile?.id || '');
   const setCostsIdem = useIdempotencyKey('set_purchase_order_item_costs', profile?.id || '');
+  const [poPdfBusy, setPoPdfBusy] = useState(false);
+  // The vendor and PDF data an admin is about to confirm emailing.
+  const [emailPO, setEmailPO] = useState<{ vendorEmail: string; data: PdfPurchaseOrderData } | null>(null);
+  const [emailingPO, setEmailingPO] = useState(false);
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [items, setItems] = useState<PurchaseOrderItem[]>([]);
+  // Kept across a failed send so a retry replays the same email, never a second one.
+  // Scoped to what the PDF says: after a cost or quantity change a send is a new email,
+  // not a replay of the old one.
+  const emailPOIdem = useIdempotencyKey(
+    'email_purchase_order',
+    `${profile?.id || ''}:${id || ''}`,
+    purchaseOrderLinesFingerprint(items),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
@@ -938,6 +961,142 @@ export default function PurchaseOrderDetail() {
     }
   };
 
+  /* ─── Purchase order PDF + email to vendor (To-Do 0.15, admin-only: it shows costs) ─── */
+  // POs store the vendor by name, so match it to the one active vendor of that name.
+  const loadPOVendor = async (vendorName: string): Promise<Vendor | null> => {
+    const { data, error } = await supabase
+      .from('vendors')
+      .select('id, name, contact_name, phone, email, address, default_payment_terms, default_payment_terms_days, notes, created_at, updated_at, deleted_at')
+      .is('deleted_at', null);
+    if (error) throw error;
+    const wanted = vendorName.trim().toLowerCase();
+    const matches = ((data || []) as Vendor[]).filter((v) => v.name.trim().toLowerCase() === wanted);
+    if (matches.length > 1) throw new Error(`More than one vendor is named "${vendorName}"`);
+    return matches[0] ?? null;
+  };
+
+  // The PDF is built from a fresh read of the lines, never from what this page loaded
+  // earlier: another admin may have corrected a cost since.
+  const loadPOLinesForPdf = async (poId: string): Promise<PurchaseOrderItem[]> => {
+    const { data, error } = await supabase
+      .from('purchase_order_items')
+      .select(`${PURCHASE_ORDER_ITEM_COLUMNS}, product:products(${PRODUCT_COLUMNS}, product_family:product_families(name))`)
+      .eq('purchase_order_id', poId);
+    if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('purchase order lines read returned no list');
+    return withAdminCosts('purchase_order_items', data as unknown as PurchaseOrderItem[], true);
+  };
+
+  const buildPOPdfData = (vendor: Vendor | null, lines: PurchaseOrderItem[]): PdfPurchaseOrderData | null => {
+    if (!po) return null;
+    return {
+      po_number: po.po_number,
+      status: po.status,
+      submitted_date: po.submitted_date,
+      expected_delivery_date: po.expected_delivery_date,
+      notes: po.notes,
+      vendor: vendor
+        ? { name: vendor.name, contact_name: vendor.contact_name, phone: vendor.phone, email: vendor.email, address: vendor.address }
+        : { name: po.vendor },
+      lines: lines.map((item) => ({
+        product_name: item.product?.product_name || item.product_name || 'Unknown',
+        epa_registration: item.product?.epa_registration,
+        unit_size: item.unit_size,
+        quantity_ordered: item.quantity_ordered,
+        unit_cost: item.unit_cost ?? null,
+        cost_needs_review: item.cost_needs_review,
+        notes: item.notes,
+      })),
+    };
+  };
+
+  const handleDownloadPOPdf = async () => {
+    if (!po || !isAdmin) return;
+    setPoPdfBusy(true);
+    try {
+      const [vendor, lines] = await Promise.all([loadPOVendor(po.vendor), loadPOLinesForPdf(po.id)]);
+      const data = buildPOPdfData(vendor, lines);
+      if (!data) return;
+      const { downloadPurchaseOrderPdf } = await import('../lib/purchaseOrderPdf');
+      await downloadPurchaseOrderPdf(data);
+      toast('success', 'Purchase order PDF downloaded');
+    } catch (err) {
+      Sentry.captureException(err, { tags: { source: 'pdf', action: 'download_purchase_order_pdf' } });
+      toast('error', `Could not build the purchase order PDF: ${sanitizeError(err)}`);
+    } finally {
+      setPoPdfBusy(false);
+    }
+  };
+
+  const handleEmailPOClick = async () => {
+    if (!po || !isAdmin) return;
+    setPoPdfBusy(true);
+    try {
+      const [vendor, lines] = await Promise.all([loadPOVendor(po.vendor), loadPOLinesForPdf(po.id)]);
+      const blocker = purchaseOrderEmailBlocker({ status: po.status, vendorEmail: vendor?.email, lines });
+      if (blocker) {
+        toast('warning', blocker);
+        return;
+      }
+      // The retry key belongs to the lines on screen; if they changed, show the change first.
+      if (purchaseOrderLinesFingerprint(lines) !== purchaseOrderLinesFingerprint(items)) {
+        toast('warning', 'This purchase order changed since the page loaded. Reload the page, check it, then email it.');
+        return;
+      }
+      const data = buildPOPdfData(vendor, lines);
+      if (!data || !vendor?.email) return;
+      setEmailPO({ vendorEmail: vendor.email.trim(), data });
+    } catch (err) {
+      Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_purchase_order_vendor' } });
+      toast('error', `Could not load the vendor: ${sanitizeError(err)}`);
+    } finally {
+      setPoPdfBusy(false);
+    }
+  };
+
+  const handleConfirmEmailPO = async () => {
+    if (!po || !emailPO || !profile) return;
+    setEmailingPO(true);
+    try {
+      const { generatePurchaseOrderPdf, purchaseOrderPdfFilename } = await import('../lib/purchaseOrderPdf');
+      const doc = await generatePurchaseOrderPdf(emailPO.data);
+      const result = await sendEmail(buildPurchaseOrderEmailPayload({
+        vendorEmail: emailPO.vendorEmail,
+        vendorName: emailPO.data.vendor.name,
+        purchaseOrderId: po.id,
+        poNumber: po.po_number,
+        expectedDeliveryDate: po.expected_delivery_date
+          ? parseLocalDate(po.expected_delivery_date).toLocaleDateString('en-US')
+          : null,
+        attachmentBase64: pdfToBase64(doc),
+        attachmentFilename: purchaseOrderPdfFilename(po.po_number),
+        idempotencyKey: emailPOIdem.getKey(),
+      }));
+      // Confirmed success only: a failed or lost send keeps the key, so a retry replays it.
+      emailPOIdem.resetKey();
+      // Logged on a replay too: the first attempt's email went out even if its answer was lost.
+      toast(
+        result.deduplicated ? 'info' : 'success',
+        result.deduplicated
+          ? 'This purchase order was already emailed (duplicate send skipped).'
+          : `Purchase order emailed to ${emailPO.vendorEmail}`,
+      );
+      await logActivity({
+        event: 'purchase_order_emailed',
+        description: `Purchase order ${po.po_number} emailed to ${emailPO.data.vendor.name} (${emailPO.vendorEmail})${result.deduplicated ? ' (confirmed on retry)' : ''}`,
+        performedBy: profile.id,
+        entityType: 'purchase_order',
+        entityId: po.id,
+      });
+      setEmailPO(null);
+    } catch (err) {
+      Sentry.captureException(err, { tags: { source: 'email', action: 'email_purchase_order' } });
+      toast('error', `Purchase order email failed: ${sanitizeError(err)}`);
+    } finally {
+      setEmailingPO(false);
+    }
+  };
+
   const openReverseModal = (rec: ReceivingRecord) => {
     // Retain the key across modal reopen. A lost response must replay the same
     // reversal intent; the server rejects changed input before a fresh key is minted.
@@ -1333,6 +1492,30 @@ export default function PurchaseOrderDetail() {
             <Button icon={<Send className="w-4 h-4" />} onClick={handleSubmitPO} loading={saving}>
               Submit PO
             </Button>
+          )}
+          {isAdmin && items.length > 0 && (
+            <>
+              <Button
+                variant="secondary"
+                icon={<FileDown className="w-4 h-4" />}
+                showChevron={false}
+                onClick={handleDownloadPOPdf}
+                disabled={poPdfBusy}
+              >
+                Download PDF
+              </Button>
+              {(po.status === 'submitted' || po.status === 'partially_received') && (
+                <Button
+                  variant="secondary"
+                  icon={<Mail className="w-4 h-4" />}
+                  showChevron={false}
+                  onClick={handleEmailPOClick}
+                  disabled={poPdfBusy}
+                >
+                  Email Vendor
+                </Button>
+              )}
+            </>
           )}
           <Button
             variant="secondary"
@@ -1908,7 +2091,7 @@ export default function PurchaseOrderDetail() {
             <Input
               value={editForm.notes}
               onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
-              placeholder="Additional notes"
+              placeholder="Notes (printed on the PO PDF sent to the vendor)"
             />
           </div>
 
@@ -2147,6 +2330,20 @@ export default function PurchaseOrderDetail() {
         entityId={id!}
         prefillTitle={`Follow up: ${po.po_number}`}
         prefillContent={`PO: ${po.po_number}`}
+      />
+
+      <ConfirmModal
+        open={isAdmin && emailPO !== null}
+        onClose={() => { if (!emailingPO) setEmailPO(null); }}
+        onConfirm={handleConfirmEmailPO}
+        title={`Email ${po.po_number} to the vendor?`}
+        message={emailPO
+          ? `This sends the purchase order PDF, with its unit costs and total, to ${emailPO.data.vendor.name} at ${emailPO.vendorEmail}.`
+          : ''}
+        confirmLabel="Send Email"
+        variant="info"
+        icon={Mail}
+        loading={emailingPO}
       />
     </div>
   );

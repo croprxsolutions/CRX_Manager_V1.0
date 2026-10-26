@@ -1,8 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
+import { decidePurchaseOrderEmail, type PoGateResult } from "../_shared/purchaseOrderEmailGate.ts";
 
 // =============================================================================
 // CRX send-email — Sprint F #1 lockdown
@@ -11,8 +12,11 @@ import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 // abuse vectors flagged in the security audit:
 //   1. Recipient `to` MUST match customer.email for the supplied customer_id
 //      (server-side lookup; caller-provided `to` is validated, never trusted).
+//      A 'purchase_order' email goes to a vendor instead: `to` must match the
+//      email on the active vendor named on the PO (To-Do 0.15).
 //   2. email_type is allowlisted per role:
-//        admin, sales_rep -> all 8 types
+//        admin            -> every type, including purchase_order
+//        sales_rep        -> every customer type (purchase cost is admin-only)
 //        driver           -> only delivery_completed (with proof of assignment)
 //   3. Drivers must supply resource_type='delivery' + resource_id and be the
 //      assigned driver of that delivery; the delivery's customer_id must
@@ -32,7 +36,7 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 // --- Allowlists ---------------------------------------------------------------
 
-const ALL_EMAIL_TYPES = new Set([
+const CUSTOMER_EMAIL_TYPES = new Set([
   "invoice",
   "statement",
   "order_confirmed",
@@ -55,12 +59,21 @@ const ALL_EMAIL_TYPES = new Set([
   "post_application_notice",
 ]);
 
+// To-Do 0.15: a purchase order emailed to its vendor. It shows purchase costs,
+// which are admin-only (Mason, 2026-10-18), so only admins may send it.
+const PURCHASE_ORDER_EMAIL_TYPE = "purchase_order";
+// A malformed PO id is a bad request (400), not a failed lookup (503).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ALL_EMAIL_TYPES = new Set([...CUSTOMER_EMAIL_TYPES, PURCHASE_ORDER_EMAIL_TYPE]);
+
 // What email types each role may send.
-//   admin, sales_rep -> all types in ALL_EMAIL_TYPES (incl. pre_application_notice)
-//   driver           -> only delivery_completed
+//   admin     -> all types in ALL_EMAIL_TYPES (incl. purchase_order)
+//   sales_rep -> the customer types (incl. pre_application_notice)
+//   driver    -> only delivery_completed
 const EMAIL_TYPES_BY_ROLE: Record<string, Set<string>> = {
   admin: ALL_EMAIL_TYPES,
-  sales_rep: ALL_EMAIL_TYPES,
+  sales_rep: CUSTOMER_EMAIL_TYPES,
   driver: new Set(["delivery_completed"]),
 };
 
@@ -76,6 +89,40 @@ function decodedBase64Length(b64: string): number {
   // bytes = (len(b64) * 3 / 4) - padding_count
   const padding = (b64.match(/=+$/) || [""])[0].length;
   return Math.floor((b64.length * 3) / 4) - padding;
+}
+
+// Reads what the purchase-order gate needs and lets it decide. Any read error
+// refuses the send (503): never email a vendor on a guess.
+async function checkPurchaseOrderEmail(
+  adminClient: SupabaseClient,
+  purchaseOrderId: string,
+  to: string,
+): Promise<PoGateResult> {
+  const { data: order, error: orderErr } = await adminClient
+    .from("purchase_orders")
+    .select("id, vendor, status")
+    .eq("id", purchaseOrderId)
+    .maybeSingle();
+  if (orderErr) return { ok: false, status: 503, error: `Purchase order lookup failed: ${orderErr.message}` };
+  if (!order) return decidePurchaseOrderEmail(null, [], [], to);
+
+  const { data: lines, error: linesErr } = await adminClient
+    .from("purchase_order_items")
+    .select("unit_cost, cost_needs_review")
+    .eq("purchase_order_id", purchaseOrderId);
+  if (linesErr || !Array.isArray(lines)) {
+    return { ok: false, status: 503, error: `Purchase order lines lookup failed: ${linesErr?.message ?? "no list"}` };
+  }
+
+  const { data: vendors, error: vendorsErr } = await adminClient
+    .from("vendors")
+    .select("id, name, email")
+    .is("deleted_at", null);
+  if (vendorsErr || !Array.isArray(vendors)) {
+    return { ok: false, status: 503, error: `Vendor lookup failed: ${vendorsErr?.message ?? "no list"}` };
+  }
+
+  return decidePurchaseOrderEmail(order, lines, vendors, to);
 }
 
 Deno.serve(async (req: Request) => {
@@ -133,7 +180,19 @@ Deno.serve(async (req: Request) => {
     if (!to || !subject || !html || !email_type) {
       return jsonResponse({ error: "to, subject, html, and email_type are required" }, 400);
     }
-    if (!customer_id) {
+    const isPurchaseOrderEmail = email_type === PURCHASE_ORDER_EMAIL_TYPE;
+    if (isPurchaseOrderEmail) {
+      // A vendor email is about a PO, never a customer.
+      if (customer_id) {
+        return jsonResponse({ error: "Purchase order emails must not carry a customer_id" }, 400);
+      }
+      if (resource_type !== "purchase_order" || typeof resource_id !== "string" || !UUID_PATTERN.test(resource_id)) {
+        return jsonResponse(
+          { error: "Purchase order emails require resource_type='purchase_order' and resource_id" },
+          400,
+        );
+      }
+    } else if (!customer_id) {
       return jsonResponse({ error: "customer_id is required" }, 400);
     }
     if (typeof to !== "string" || typeof subject !== "string" || typeof html !== "string") {
@@ -152,41 +211,50 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 5. Customer email match — recipient is validated server-side from customer_id
-    // PR-03 fix: column is `farm_name`, not `name`. Surface the error explicitly so
-    // future schema drifts don't get silently swallowed by the `!customerRow` 404 path.
-    const { data: customerRow, error: customerErr } = await adminClient
-      .from("customers")
-      .select("id, email, farm_name")
-      .eq("id", customer_id)
-      .maybeSingle();
+    // 5a. Vendor email match for a purchase order (To-Do 0.15). The recipient,
+    // the PO's status and every line's cost are all checked server-side.
+    if (isPurchaseOrderEmail) {
+      const poGate = await checkPurchaseOrderEmail(adminClient, resource_id, to);
+      if (!poGate.ok) {
+        return jsonResponse({ error: poGate.error }, poGate.status);
+      }
+    } else {
+      // 5. Customer email match — recipient is validated server-side from customer_id
+      // PR-03 fix: column is `farm_name`, not `name`. Surface the error explicitly so
+      // future schema drifts don't get silently swallowed by the `!customerRow` 404 path.
+      const { data: customerRow, error: customerErr } = await adminClient
+        .from("customers")
+        .select("id, email, farm_name")
+        .eq("id", customer_id)
+        .maybeSingle();
 
-    if (customerErr) {
-      console.warn("send-email: customers lookup failed", {
-        customer_id,
-        code: customerErr.code,
-        message: customerErr.message,
-      });
-      return jsonResponse(
-        { error: `Customer lookup failed: ${customerErr.message}` },
-        500,
-      );
-    }
+      if (customerErr) {
+        console.warn("send-email: customers lookup failed", {
+          customer_id,
+          code: customerErr.code,
+          message: customerErr.message,
+        });
+        return jsonResponse(
+          { error: `Customer lookup failed: ${customerErr.message}` },
+          500,
+        );
+      }
 
-    if (!customerRow) {
-      return jsonResponse({ error: "customer_id not found" }, 404);
-    }
+      if (!customerRow) {
+        return jsonResponse({ error: "customer_id not found" }, 404);
+      }
 
-    const customerEmail = (customerRow.email || "").trim().toLowerCase();
-    const requestedTo = to.trim().toLowerCase();
-    if (!customerEmail) {
-      return jsonResponse({ error: "Customer has no email on file" }, 400);
-    }
-    if (customerEmail !== requestedTo) {
-      return jsonResponse(
-        { error: "Recipient does not match customer email on file" },
-        403,
-      );
+      const customerEmail = (customerRow.email || "").trim().toLowerCase();
+      const requestedTo = to.trim().toLowerCase();
+      if (!customerEmail) {
+        return jsonResponse({ error: "Customer has no email on file" }, 400);
+      }
+      if (customerEmail !== requestedTo) {
+        return jsonResponse(
+          { error: "Recipient does not match customer email on file" },
+          403,
+        );
+      }
     }
 
     // Invoice sends are gated again inside the server boundary. The browser also
@@ -671,6 +739,38 @@ Deno.serve(async (req: Request) => {
           { error: `${finalGateRefusal}; email send refused`, email_log_id: emailLogId },
           finalGateError ? 503 : 409,
         );
+      }
+    }
+
+    // Same last-moment recheck for a purchase order: it may have been cancelled,
+    // or its vendor email changed, while the steps above ran.
+    if (isPurchaseOrderEmail) {
+      const finalPoGate = await checkPurchaseOrderEmail(adminClient, resource_id, to);
+      if (!finalPoGate.ok) {
+        const poRefusal = `${finalPoGate.error}; email send refused`;
+        const poLogResult = await adminClient
+          .from("email_log")
+          .update({ status: "failed", error_message: poRefusal })
+          .eq("id", emailLogId)
+          .select("id")
+          .maybeSingle();
+        if (poLogResult.error || !poLogResult.data) {
+          await captureEdgeException(
+            new Error(`Final purchase order gate log failed: ${poLogResult.error?.message || "no row returned"}`),
+            {
+              function: "send-email",
+              level: "error",
+              tags: { email_type, phase: "final-po-gate-log" },
+              extra: { resource_id, email_log_id: emailLogId, final_gate_refusal: poRefusal },
+              user: { id: caller.id },
+            },
+          );
+          return jsonResponse(
+            { error: "Email refused, but the audit log could not be finalized", email_log_id: emailLogId },
+            500,
+          );
+        }
+        return jsonResponse({ error: poRefusal, email_log_id: emailLogId }, finalPoGate.status);
       }
     }
 

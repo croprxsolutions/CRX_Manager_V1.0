@@ -4361,7 +4361,7 @@ const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 // backtick is just a template string, so it does not count there.
 // `$\`` is Bun's and zx's shell tag; `new Function` builds code like eval does.
 // Perl `qx(…)` and Ruby `%x(…)` run a shell command too.
-const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\s*\(|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
+const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\b|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
 // Code that names the merge or push ACTION itself (`pr merge`, `['pr','merge']`,
 // Octokit's `pulls.merge`, a `/pulls/1/merge` path, `git push`, `HEAD:main`) is
 // refused however it would run it — a client library reaches GitHub without any

@@ -4289,7 +4289,9 @@ export function programAssembledAtRuntime(command) {
 // `` `printf g`h ``) or two pieces side by side (`$a$b`) spell a word the scan
 // cannot read. A whole reference on its own (`"$NODE" x.mjs`) does not.
 // Two pieces touching (`$a$b`, `$(printf g)\`printf h\``, `${A}${B}`) glue too.
-const GLUED_RUNTIME_RE = /[A-Za-z0-9][$`]|[)}`][A-Za-z0-9]|\$\w+\$|[)}`][$`]/;
+// `\u0001` marks where a double quote was: `"$A"h` and `"$G""$H"` glue across it,
+// while `"$NODE" x` does not (Codex App on #1128).
+const GLUED_RUNTIME_RE = /[A-Za-z0-9]\u0001*[$`]|[)}`]\u0001*[A-Za-z0-9$`]|\$\w+\u0001*\$|\$\w+\u0001+[A-Za-z0-9]/;
 
 // Should a run-time-built program name be refused? (Mason, 2026-10-26, "looser
 // guards".) Running a program from a whole variable — `"$CODEX" --version`,
@@ -4305,7 +4307,7 @@ export function runtimeProgramRefused(command, gated) {
   // Double quotes are removed, so `"$G""$H"` glues just as `$G$H` does (Luna).
   const expandable = String(command || "")
     .replace(/'([^']*)'/g, (_, literal) => literal.replace(/[$`]/g, "x"))
-    .replace(/"/g, "");
+    .replace(/"/g, "\u0001");
   return Boolean(gated) || GLUED_RUNTIME_RE.test(expandable);
 }
 
@@ -4361,7 +4363,7 @@ const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 // backtick is just a template string, so it does not count there.
 // `$\`` is Bun's and zx's shell tag; `new Function` builds code like eval does.
 // Perl `qx(…)` and Ruby `%x(…)` run a shell command too.
-const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\b|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
+const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\b|\bopen\b[^;]*(?:\|-|-\||["']\s*\||\|\s*["'])|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
 // Code that names the merge or push ACTION itself (`pr merge`, `['pr','merge']`,
 // Octokit's `pulls.merge`, a `/pulls/1/merge` path, `git push`, `HEAD:main`) is
 // refused however it would run it — a client library reaches GitHub without any

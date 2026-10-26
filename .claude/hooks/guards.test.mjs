@@ -197,6 +197,7 @@ for (const command of [
   'G=g; H=h; M1=mer; M2=ge; "$G""$H" pr "$M1""$M2" 1',
   "$(printf g)`printf h;` pr $(printf m)`printf erge;` 951 --squash",
   "H=h; R=erge; 'g'$H pr 'm'$R 951 --squash",
+  'A=g; M=mer; "$A"h pr "$M"ge 951 --squash',
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code is refused only when it can also start a program or reach the network.
@@ -206,6 +207,7 @@ for (const command of [
   `node -e "const f = function(){ return /merge/.test('x') }; console.log(f())"`,
   `node -e "const execute=x=>x; console.log(/merge/.test('x'))"`,
   `node -e "const execution=/merge/.test('x'); console.log('git',execution)"`,
+  `perl -e 'open(my $f, "<", "gh-notes.txt") or die; print <$f>'`,
   `node -e "console.log(/gh|git|push|merge/.test(process.argv[1]))" x`,
   `gh pr view 5 --json title | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const x=[];x.push(d);console.log(x)})"`,
 ]) ok(!inlineCodeReachesGatedAction(command), `harmless inline code allowed: ${command}`);
@@ -225,6 +227,7 @@ for (const command of [
   "ruby -e '%x!gh pr --repo owner/repo merge 951 --admin!'",
   "ruby -e 'system \"gh\", *ARGV' pr merge 951 --squash",
   "perl -e 'system \"gh\", @ARGV' pr merge 951 --squash",
+  "perl -e 'open my $p, \"|-\", \"gh\", @ARGV; close $p' pr merge 951 --squash",
   `node -e "const {Octokit}=require('@octokit/rest'); new Octokit({auth:process.env.GH_TOKEN}).rest.pulls.merge({owner:'o',repo:'r',pull_number:951})"`,
 ]) ok(inlineCodeReachesGatedAction(command), `inline code that can act still refused: ${command}`);
 

@@ -7,7 +7,7 @@ const toCents = (dollars: number) => Math.round(dollars * 100);
 interface QuoteLineCostProps {
   /** The cost the line's profit and margin use: its quote-time cost once saved. */
   quotedCost: number;
-  /** The product's cost today; null when the product list carries no cost. */
+  /** The product's cost today; null when the line is not yet quoted or the product list carries no cost. */
   todayCost: number | null;
   pricePerUnit: number;
 }

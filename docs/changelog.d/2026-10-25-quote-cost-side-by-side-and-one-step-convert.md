@@ -6,7 +6,11 @@ Screen only (`src/pages/QuoteBuilder.tsx`, new `src/components/quotes/QuoteLineC
   was quoted at (`quote_items.cost_at_quote_cents`) through every recalculation, the same rule `save_quote`
   applies: the cost stays while the line keeps its id and product. A new line, or a line switched to another
   product, takes today's product cost, as the server stamps it. Before, the first edit swapped in today's cost,
-  so profit and margin jumped on screen and in the payload.
+  so profit and margin jumped on screen and in the payload. One known display gap: a new line added in place of
+  a deleted saved line of the same product keeps the deleted line's cost on the server (its existing
+  one-per-product fallback), while the screen shows today's cost until the quote is reloaded; the server's
+  figures are the ones stored. A Convert refused with `COST_BASIS_REQUIRED` (a legacy line with no recorded
+  cost) now says to revise and save the quote first.
 - **Cost when quoted beside today's cost (To-Do 0.5, pricing slice 5).** The admin-only Cost cell shows both,
   marked "up" when today's cost is higher and "below cost" when the line's price is under today's cost (Convert
   then needs an admin's below-cost approval). Hidden for sales reps and in Customer View; PDFs carry no cost.

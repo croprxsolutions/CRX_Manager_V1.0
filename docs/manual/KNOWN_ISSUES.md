@@ -152,7 +152,7 @@ JobDetail, QuoteBuilder, BlendTicketDetail, PrepayWorkspacePanel, FinanceChargeP
 scanner for this is acknowledged as a weak tripwire.
 
 ### KI-12 — Quote "Convert to Order" can leave an accepted quote with no order
-**MED (latent) · CAUSE FIXED 2026-10-25 (To-Do 1.3) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**
+**MED (latent) · CAUSE FIXED IN CODE 2026-10-25, NOT YET LIVE (To-Do 1.3) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**
 QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) before creating the order, so a
 failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was

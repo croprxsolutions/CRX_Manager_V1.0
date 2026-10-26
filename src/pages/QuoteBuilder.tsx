@@ -651,8 +651,9 @@ export default function QuoteBuilder() {
   const canSend = ['draft', 'revised', 'sent'].includes(currentStatus);
   // The server conversion RPC deliberately resumes an accepted Quote that has
   // no Order and returns the existing Order when one already exists. Keeping
-  // accepted Quotes convertible gives a sales rep a safe retry path if the
-  // accepted-status save committed but its row-version response was uncertain.
+  // accepted Quotes convertible gives a sales rep a safe retry path when a
+  // conversion's reply was lost, or for a quote accepted before conversion was
+  // made atomic (KI-12).
   const canConvert = ['sent', 'revised', 'accepted'].includes(currentStatus);
   // Both whole conversion and draw_down_quote accept sent/revised bookings.
   const canDraw = currentStatus === 'sent' || currentStatus === 'revised';
@@ -1493,7 +1494,11 @@ export default function QuoteBuilder() {
       const tierPrice = getTierPrice(product, tierNum);
       // Use override price if set, otherwise fall back to tier price
       const pricePerUnit = item.price_override != null ? item.price_override : tierPrice;
+      // The recorded cost holds only while the line still names its saved row for this product,
+      // the same test savedLineIdFor applies when saving: a line saved as another product since
+      // the load is priced (and stamped by the server) at today's cost.
       const cost = item.quoted_cost?.productId === product.id
+        && savedLineIdsRef.current.get(item._key)?.productId === product.id
         ? item.quoted_cost.cost
         : (product.current_cost || 0);
       // Fall back to unit_size if inventory_unit is not set on the product
@@ -3462,6 +3467,8 @@ export default function QuoteBuilder() {
       setConverting(false);
       return;
     }
+    // The edits are saved even if the conversion below is refused.
+    if (isDirty) setIsDirty(false);
 
     try {
       // Atomic RPC: order creation + items + inventory prebooking + commissions
@@ -3615,6 +3622,10 @@ export default function QuoteBuilder() {
         toast('warning', 'This booking has partial draw-downs — use "Partial Order" to draw the remaining balance instead of converting.');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
         toast('error', 'This booking is closed — only sent or revised quotes can be converted.');
+      } else if (hasRpcCode(error, RpcErrorCodes.COST_BASIS_REQUIRED)) {
+        // A line saved before quote-time costs were recorded has none. Convert no longer
+        // re-saves the quote, so it is no longer stamped on the way (KI-12).
+        toast('error', 'A line on this quote has no recorded cost. Revise the quote and save it, then convert it again.');
       } else {
       // Bug #30 fix: Extract error message from Supabase RPC error objects
       const errObj = error as Record<string, unknown> | null;
@@ -4804,7 +4815,11 @@ export default function QuoteBuilder() {
                               <td className="px-3 py-2 font-mono text-secondary">
                                 <QuoteLineCost
                                   quotedCost={item.current_cost}
-                                  todayCost={prod?.current_cost ?? null}
+                                  // A line not yet quoted (new, or switched to another product)
+                                  // already shows today's cost.
+                                  todayCost={item.quoted_cost?.productId === item.product_id
+                                    ? prod?.current_cost ?? null
+                                    : null}
                                   pricePerUnit={item.price_per_unit}
                                 />
                               </td>

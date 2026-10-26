@@ -357,8 +357,8 @@ export default function FieldInvoicesPostedPanel() {
         const { list, skipped } = await buildBatchInvoicePdfData(visible, (row) => buildInvoicePdfDataFromRow(toPdfRow(row), {
           show_shares: true, show_price_per_acre: true, show_epa_registration: true, format,
         }));
-        await generateBatchInvoicePdf(list);
-        const done = batchInvoicePrintToast(list.length, skipped);
+        const { failures } = await generateBatchInvoicePdf(list);
+        const done = batchInvoicePrintToast(list.length - failures.length, skipped, failures);
         toast(done.type, done.message);
       },
       toast,

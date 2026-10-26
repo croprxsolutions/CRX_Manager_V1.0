@@ -34,7 +34,7 @@ import {
 } from './invoicePdf';
 
 // One saved line, so the line-read guard sees a normal invoice.
-const ONE_LINE = { description: 'Herbicide', quantity: 1, unit_price_cents: 100000, extended_cents: 100000, cost_cents: 60000 };
+const ONE_LINE = { description: 'Herbicide', quantity: 1, unit_price_cents: 100000, extended_cents: 100000 };
 
 // The DB rows each table returns for the invoice under test.
 interface PerTable {
@@ -208,6 +208,11 @@ describe('buildInvoicePdfDataFromRow — B3 line-read guard', () => {
     await expect(buildInvoicePdfDataFromRow(listRow())).rejects.toThrow('Could not load the invoice lines');
   });
 
+  it('refuses a credit (negative total) with no lines too', async () => {
+    installFromMock({ invoice_items: [] });
+    await expect(buildInvoicePdfDataFromRow(listRow({ total_amount_cents: -5000 }))).rejects.toBeInstanceOf(InvoiceLinesUnavailableError);
+  });
+
   it('still prints a $0 invoice that has no lines', async () => {
     installFromMock({ invoice_items: [] });
     const data = await buildInvoicePdfDataFromRow(listRow({ total_amount_cents: 0, balance_cents: 0 }));
@@ -241,9 +246,25 @@ describe('buildBatchInvoicePdfData — skip and name a bad invoice', () => {
       .rejects.toThrow('INV-1, INV-2');
   });
 
+  it('builds at most 5 invoices at a time and keeps the selection order', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ invoice_number: `INV-${i}` }));
+    let running = 0;
+    let peak = 0;
+    const { list } = await buildBatchInvoicePdfData(rows, async (r) => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((res) => setTimeout(res, 1));
+      running -= 1;
+      return ok(r.invoice_number);
+    });
+    expect(peak).toBeLessThanOrEqual(5);
+    expect(list.map((d) => d.invoice_number)).toEqual(rows.map((r) => r.invoice_number));
+  });
+
   it('any other error still fails the whole batch', async () => {
     await expect(buildBatchInvoicePdfData([{ invoice_number: 'INV-1' }], async () => { throw new Error('boom'); }))
       .rejects.toThrow('boom');
+    expect(mockCapture).not.toHaveBeenCalled();
   });
 
   it('the finished-batch toast names the skipped invoices', () => {
@@ -251,5 +272,14 @@ describe('buildBatchInvoicePdfData — skip and name a bad invoice', () => {
     const warn = batchInvoicePrintToast(1, ['INV-2']);
     expect(warn.type).toBe('warning');
     expect(warn.message).toContain('Skipped INV-2');
+  });
+
+  it('the toast names PDFs that failed to build and shortens a long list', () => {
+    const failed = batchInvoicePrintToast(3, [], ['INV-9']);
+    expect(failed.type).toBe('warning');
+    expect(failed.message).toContain('Printed 3 invoice(s).');
+    expect(failed.message).toContain('Could not make the PDF for INV-9');
+    const many = Array.from({ length: 8 }, (_, i) => `INV-${i}`);
+    expect(batchInvoicePrintToast(0, many).message).toContain('INV-0, INV-1, INV-2, INV-3, INV-4 and 3 more');
   });
 });

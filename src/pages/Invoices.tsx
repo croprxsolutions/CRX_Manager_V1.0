@@ -475,8 +475,8 @@ export default function Invoices() {
           throw new Error('No invoices to print');
         }
 
-        await generateBatchInvoicePdf(pdfDataList);
-        const done = batchInvoicePrintToast(pdfDataList.length, skipped);
+        const { failures } = await generateBatchInvoicePdf(pdfDataList);
+        const done = batchInvoicePrintToast(pdfDataList.length - failures.length, skipped, failures);
         toast(done.type, done.message);
       },
       toast,

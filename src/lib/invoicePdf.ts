@@ -303,15 +303,17 @@ export class InvoiceLinesUnavailableError extends Error {
  * Refuse a PDF whose invoice_items read failed, or returned no lines under a non-zero
  * printed total: either way the customer would get a PDF with no lines under the total.
  */
-export function assertInvoiceLinesLoaded(
+export function assertInvoiceLinesLoaded<T>(
   itemsError: unknown,
-  items: unknown[] | null | undefined,
+  items: T[] | null | undefined,
   printedTotalCents: number,
-): void {
+): asserts items is T[] {
   if (itemsError || !items || (items.length === 0 && printedTotalCents !== 0)) {
     throw new InvoiceLinesUnavailableError();
   }
 }
+
+const BATCH_PDF_CONCURRENCY = 5;
 
 /**
  * Build PDF data for a batch print. An invoice whose lines could not be read is skipped,
@@ -322,7 +324,7 @@ export async function buildBatchInvoicePdfData<R extends { invoice_number: strin
   rows: R[],
   build: (row: R) => Promise<InvoicePdfData>,
 ): Promise<{ list: InvoicePdfData[]; skipped: string[] }> {
-  const results = await Promise.all(rows.map(async (row) => {
+  const buildOrSkip = async (row: R): Promise<InvoicePdfData | null> => {
     try {
       return await build(row);
     } catch (err) {
@@ -330,22 +332,41 @@ export async function buildBatchInvoicePdfData<R extends { invoice_number: strin
       Sentry.captureException(err, { level: 'warning', extra: { invoice_number: row.invoice_number, context: 'batch_invoice_pdf_skip' } });
       return null;
     }
-  }));
+  };
+  // A few invoices at a time, so a large selection does not fire every read at once.
+  const results: Array<InvoicePdfData | null> = [];
+  for (let i = 0; i < rows.length; i += BATCH_PDF_CONCURRENCY) {
+    results.push(...await Promise.all(rows.slice(i, i + BATCH_PDF_CONCURRENCY).map(buildOrSkip)));
+  }
   const list = results.filter((d): d is InvoicePdfData => d !== null);
   const skipped = rows.filter((_, i) => results[i] === null).map((r) => r.invoice_number);
   if (list.length === 0 && skipped.length > 0) {
-    throw new Error(`Could not load the invoice lines for ${skipped.join(', ')}, so no PDF was made. Please try again.`);
+    throw new Error(`Could not load the invoice lines for ${listInvoiceNumbers(skipped)}, so no PDF was made. Please try again.`);
   }
   return { list, skipped };
 }
 
-/** The toast for a finished batch print: success, or a warning naming the skipped invoices. */
-export function batchInvoicePrintToast(printed: number, skipped: string[]): { type: 'success' | 'warning'; message: string } {
-  if (skipped.length === 0) return { type: 'success', message: `Printed ${printed} invoice(s)` };
-  return {
-    type: 'warning',
-    message: `Printed ${printed} invoice(s). Skipped ${skipped.join(', ')}: their lines could not be loaded. Please try those again.`,
-  };
+/** Invoice numbers for a toast: the first five, then a count, so a large batch stays readable. */
+function listInvoiceNumbers(numbers: string[]): string {
+  if (numbers.length <= 5) return numbers.join(', ');
+  return `${numbers.slice(0, 5).join(', ')} and ${numbers.length - 5} more`;
+}
+
+/**
+ * The toast for a finished batch print: success, or a warning naming the invoices that were
+ * skipped (lines not loaded) or whose PDF failed to build. `printed` counts only real downloads.
+ */
+export function batchInvoicePrintToast(
+  printed: number,
+  skipped: string[],
+  failed: string[] = [],
+): { type: 'success' | 'warning'; message: string } {
+  if (skipped.length === 0 && failed.length === 0) return { type: 'success', message: `Printed ${printed} invoice(s)` };
+  const parts = [`Printed ${printed} invoice(s).`];
+  if (skipped.length > 0) parts.push(`Skipped ${listInvoiceNumbers(skipped)}: the invoice lines could not be loaded.`);
+  if (failed.length > 0) parts.push(`Could not make the PDF for ${listInvoiceNumbers(failed)}.`);
+  parts.push('Please print those again.');
+  return { type: 'warning', message: parts.join(' ') };
 }
 
 /**
@@ -1518,7 +1539,9 @@ export async function downloadInvoicePdf(data: InvoicePdfData) {
 // jsPDF doesn't support page-level merging between documents, so each
 // invoice becomes its own file (same approach as batch statements).
 
-export async function generateBatchInvoicePdf(dataList: InvoicePdfData[]) {
+// Returns the last document and the invoice numbers whose PDF failed to build, so the
+// caller's toast counts only the PDFs that actually downloaded.
+export async function generateBatchInvoicePdf(dataList: InvoicePdfData[]): Promise<{ doc: jsPDF; failures: string[] }> {
   if (dataList.length === 0) {
     throw new Error('No invoices to generate');
   }
@@ -1527,7 +1550,7 @@ export async function generateBatchInvoicePdf(dataList: InvoicePdfData[]) {
   if (dataList.length === 1) {
     const doc = await generateInvoicePdf(dataList[0]);
     doc.save(`${dataList[0].invoice_number}.pdf`);
-    return doc;
+    return { doc, failures: [] };
   }
 
   // Generate each invoice as a separate Blob, then combine into a single
@@ -1572,6 +1595,6 @@ export async function generateBatchInvoicePdf(dataList: InvoicePdfData[]) {
     console.warn(`Batch PDF: ${failures.length} invoice(s) failed:`, failures);
   }
 
-  return docs[docs.length - 1].doc;
+  return { doc: docs[docs.length - 1].doc, failures };
 }
 

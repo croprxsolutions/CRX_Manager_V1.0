@@ -165,14 +165,14 @@ export default function UnbilledApplicationsPanel() {
     const seq = ++fetchSeqRef.current;
     setLoading(true);
 
-    // A failed read clears the lists, so no older row keeps a live Create Invoice or Bill next.
+    // A failed read clears the lists, so no older row keeps a live Create Invoice; Bill next
+    // is hidden while loadFailed and comes back only over a list a later read returned.
     const fail = (err: unknown) => {
       if (seq !== fetchSeqRef.current) return false;
       Sentry.captureException(err, { tags: { source: 'fetch', page: 'unbilled-applications' } });
       toast('error', 'Failed to load unbilled applications');
       setJobs([]);
       setTickets([]);
-      setBillNextReady(false);
       setPendingJobInvoice(null);
       setLoadFailed(true);
       setLoading(false);

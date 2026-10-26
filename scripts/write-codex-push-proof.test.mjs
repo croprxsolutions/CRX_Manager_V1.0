@@ -26,6 +26,7 @@ import {
   SOL_PREFLIGHT_QUIET_MS,
   buildCodexPushProof,
   buildCodexReviewPrompt,
+  buildFollowUpEvidence,
   buildFollowUpPromptSection,
   CODEX_VERDICT_TOKEN,
   CODEX_REVIEW_EFFORT,
@@ -1430,7 +1431,21 @@ function collisionPromptSkipsWork(prompt) {
     const many = { ...followUp, files: Array.from({ length: 30 }, (_, i) => ({ ...followUp.files[0], filename: `src/f${i}.ts`, patch: "x".repeat(3000) })) };
     const text = buildFollowUpPromptSection(many, "n0nce").join("\n");
     assert.ok(text.length < 50_000, "follow-up: the whole section stays within one budget");
-    assert.match(text, /text omitted: section budget used/, "follow-up: entries past the budget are named, not silently dropped");
+    assert.match(text, /text omitted here: section budget used; read it in FOLLOWUP_EVIDENCE\.md/, "follow-up: entries past the budget point at the full evidence file");
+    // The workspace file carries everything, unclipped (Codex App P2 on #1125).
+    const evidence = buildFollowUpEvidence(many, "n0nce");
+    assert.equal((evidence.match(/x{3000}/g) || []).length, 30, "follow-up: the evidence file holds every patch in full");
+    assert.match(evidence, /<<<UNTRUSTED-n0nce\n/, "follow-up: the evidence file fences GitHub text as untrusted");
+    const longPatch = buildFollowUpEvidence({ ...followUp, files: [{ ...followUp.files[0], patch: "y".repeat(9000) }] }, "n");
+    assert.ok(longPatch.includes("y".repeat(9000)), "follow-up: a patch over the prompt's 4,000-character excerpt is complete in the file");
+  }
+  {
+    const wrapper = readFileSync(fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
+    const runBody = wrapper.slice(wrapper.indexOf("export function run("));
+    const writesEvidence = runBody.indexOf("writeFileSync(path.join(reviewWorkspace.root, FOLLOWUP_EVIDENCE_FILE), buildFollowUpEvidence(followUp)");
+    assert.ok(writesEvidence > runBody.indexOf("reviewWorkspace = createSanitizedReviewWorkspace(")
+      && writesEvidence < runBody.indexOf("const args = buildCodexExecArgs({", writesEvidence - 2000),
+      "follow-up: run() writes the evidence file into the review workspace before Sol starts");
   }
   const withSection = buildCodexReviewPrompt({ followUp }).split("\n");
   assert.match(withSection.at(-1), /Output the CODEX_PROOF_VERDICT token exactly once/, "follow-up: the verdict instruction stays last");

@@ -94,7 +94,8 @@
 >
 >    The Sol review is then shown those fixes and the findings they answer, and judges whether each
 >    change does only that and whether it changes money, quantity, cost, inventory or idempotency
->    behaviour (`scripts/write-codex-push-proof.mjs`). Measured 2026-10-26, before this rule: 120
+>    behaviour (`scripts/write-codex-push-proof.mjs`). The prompt carries capped excerpts; the
+>    complete findings and fix diffs go into `FOLLOWUP_EVIDENCE.md` in Sol's review packet. Measured 2026-10-26, before this rule: 120
 >    reviews in 7 days, 93% of them on PRs reviewed more than once; CodeRabbit's allowance is per
 >    developer identity (every agent posts as Mason) and drops to one an hour at 80+ reviews a week
 >    (Advanced plan: 10/hour under 50). The plan passed three adversarial Sol rounds.

@@ -2722,82 +2722,117 @@ describe('QuoteBuilder', () => {
     }));
   });
 
-  it('stops on an unconfirmed accepted save and safely resumes conversion after reload', async () => {
-    const fixture = makeQuoteFixture('draft', 7);
-    const { product, section, item } = fixture;
-    const quote = { ...fixture.quote, status: 'sent', created_at: new Date().toISOString() };
-    let reloaded = false;
-    let saveCalls = 0;
+  it('converts a sent quote in one step, without saving it as accepted first (KI-12)', async () => {
+    const fixture = makeQuoteFixture('sent', 7);
+    const quote = { ...fixture.quote, created_at: new Date().toISOString() };
     mockFrom.mockImplementation((table: string) => buildChain({
-      data: table === 'quotes'
-        ? (reloaded ? { ...quote, status: 'accepted', row_version: 9 } : quote)
-        : table === 'quote_sections'
-          ? [section]
-          : table === 'quote_items'
-            ? [item]
-            : table === 'customers'
-              ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
-              : table === 'products'
-                ? [product]
+      data: table === 'quotes' ? quote
+        : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [fixture.item]
+            : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+              : table === 'products' ? [fixture.product]
                 : [],
       error: null,
     }));
-    mockRpc.mockImplementation((name: string) => {
-      if (name === 'save_quote') {
-        saveCalls += 1;
-        return Promise.resolve({
-          data: { quote_id: quote.id, row_version: saveCalls === 1 ? 9 : 10 },
-          error: null,
-        });
-      }
-      if (name === 'convert_quote_to_order') {
-        return Promise.resolve({
-          data: { status: 'already_converted', order_id: 'order-1', warnings: [] },
-          error: null,
-        });
-      }
-      return Promise.resolve({ data: null, error: null });
-    });
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'convert_quote_to_order'
+      ? { data: { status: 'converted', order_id: 'order-1', order_number: 'O-1', warnings: [] }, error: null }
+      : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    const createOrderOpener = await screen.findByRole('button', { name: 'Create Order ▾' });
-    await waitFor(() => expect(createOrderOpener).toBeEnabled());
-    fireEvent.click(createOrderOpener);
+    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    await waitFor(() => expect(opener).toBeEnabled());
+    fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
-    const initialConvertDialog = await screen.findByRole('dialog', { name: /Convert to.*Order/ });
-    const initialConvertButton = within(initialConvertDialog).getByRole('button', { name: 'Create Order' });
-    await waitFor(() => expect(initialConvertButton).toBeEnabled());
-    fireEvent.click(initialConvertButton);
+    const dialog = await screen.findByRole('dialog', { name: /Convert to.*Order/ });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    await waitFor(() => expect(convertButton).toBeEnabled());
+    fireEvent.click(convertButton);
 
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-      'warning',
-      expect.stringContaining('save-protection version could not be confirmed'),
-    ));
-    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('quote was saved'));
-    expect(mockRpc).not.toHaveBeenCalledWith('convert_quote_to_order', expect.anything());
-
-    reloaded = true;
-    fireEvent.click(screen.getByRole('button', { name: 'Reload Quote' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Quote' })).not.toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create Order ▾' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
-    const resumedConvertDialog = await screen.findByRole('dialog', { name: /Convert to.*Order/ });
-    fireEvent.click(within(resumedConvertDialog).getByRole('button', { name: 'Create Order' }));
-
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith(
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-1'));
+    // The RPC accepts the quote in the same transaction as the order, against the loaded token.
+    expect(mockRpc).toHaveBeenCalledWith(
       'convert_quote_to_order',
-      expect.objectContaining({ p_quote_id: quote.id, p_expected_row_version: 9 }),
-    ));
-    expect(saveCalls).toBe(1);
-    expect(mockToast).toHaveBeenCalledWith(
-      'info',
-      expect.stringContaining('already converted'),
+      expect.objectContaining({ p_quote_id: quote.id, p_expected_row_version: 7 }),
     );
-    expect(mockTrackBusinessEvent).not.toHaveBeenCalled();
-    expect(mockNotifyLargeOrder).not.toHaveBeenCalled();
-    expect(mockSendOrderConfirmedEmail).not.toHaveBeenCalled();
-    expect(mockNavigate).toHaveBeenCalledWith('/orders/order-1');
+    expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+  });
+
+  it('leaves the quote status alone when the conversion fails', async () => {
+    const fixture = makeQuoteFixture('sent', 7);
+    const quote = { ...fixture.quote, created_at: new Date().toISOString() };
+    const quoteUpdates: unknown[] = [];
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [fixture.item]
+              : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+                : table === 'products' ? [fixture.product]
+                  : [],
+        error: null,
+      });
+      if (table === 'quotes') {
+        chain.update = (values: unknown) => {
+          quoteUpdates.splice(quoteUpdates.length, 0, values);
+          return chain;
+        };
+      }
+      return chain;
+    });
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'convert_quote_to_order'
+      ? { data: null, error: { message: 'COST_BASIS_REQUIRED: a line has no cost' } }
+      : { data: null, error: null }));
+
+    renderQuoteBuilder(quote.id);
+    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    await waitFor(() => expect(opener).toBeEnabled());
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
+    const dialog = await screen.findByRole('dialog', { name: /Convert to.*Order/ });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    await waitFor(() => expect(convertButton).toBeEnabled());
+    fireEvent.click(convertButton);
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('COST_BASIS_REQUIRED')));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+    expect(quoteUpdates).toEqual([]);
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining('/orders/'));
+  });
+
+  it('keeps a saved line at its quoted cost through an edit, and shows today\'s cost beside it', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    // The product costs 8.00 today; the line was quoted at 6.00.
+    const product = { ...fixture.product, current_cost: 8 };
+    const item = { ...fixture.item, product };
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes' ? fixture.quote
+        : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [item]
+            : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+              : table === 'products' ? [product]
+                : [],
+      error: null,
+    }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { quote_id: fixture.quote.id, row_version: 8, item_ids: {} }, error: null }
+      : { data: null, error: null }));
+
+    renderQuoteBuilder(fixture.quote.id);
+    expect(await screen.findByText('today $8.00 · up')).toBeInTheDocument();
+    const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+    await waitFor(() => expect(units).toBeEnabled());
+    fireEvent.change(units, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    const saveArgs = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
+      p_sections: Array<{ items: Array<{ id: string | null; current_cost: number; profit: number; total_units_needed: number }> }>;
+    };
+    const savedLine = saveArgs.p_sections[0].items[0];
+    expect(savedLine.id).toBe('item-1');
+    expect(savedLine.total_units_needed).toBe(3);
+    expect(savedLine.current_cost).toBe(6);
+    expect(savedLine.profit).toBe(12);
   });
 
   it('locks the quote and the Cancel button while Convert checks for a recent order', async () => {

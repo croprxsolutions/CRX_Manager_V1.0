@@ -86,6 +86,7 @@ import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
+import { QuoteLineCost } from '../components/quotes/QuoteLineCost';
 import type {
   Quote,
   QuoteSection,
@@ -131,6 +132,11 @@ interface LocalItem {
   price_per_unit: number;
   price_override: number | null;
   current_cost: number;
+  // The cost save_quote recorded when this saved line was quoted (cost_at_quote_cents), and its
+  // product. The server keeps that cost while the line keeps its id and product, so the page
+  // prices the line from it instead of today's product cost; a new line or a line switched to
+  // another product takes today's cost, as the server stamps it. Absent for non-admins.
+  quoted_cost?: { productId: string; cost: number };
   suggested_rate: string | null;
   actual_rate: number | null;
   rate_unit: string | null;
@@ -1162,6 +1168,9 @@ export default function QuoteBuilder() {
             price_override: item.price_override ?? null,
             // Absent for non-admins; the server re-derives cost on save either way.
             current_cost: item.current_cost ?? 0,
+            quoted_cost: item.current_cost != null
+              ? { productId: item.product_id, cost: item.current_cost }
+              : undefined,
             suggested_rate: item.suggested_rate,
             actual_rate: item.actual_rate,
             rate_unit: item.rate_unit,
@@ -1484,6 +1493,9 @@ export default function QuoteBuilder() {
       const tierPrice = getTierPrice(product, tierNum);
       // Use override price if set, otherwise fall back to tier price
       const pricePerUnit = item.price_override != null ? item.price_override : tierPrice;
+      const cost = item.quoted_cost?.productId === product.id
+        ? item.quoted_cost.cost
+        : (product.current_cost || 0);
       // Fall back to unit_size if inventory_unit is not set on the product
       const inventoryUnitFactorOz = getConversionFactor(product.inventory_unit || product.unit_size);
 
@@ -1491,7 +1503,7 @@ export default function QuoteBuilder() {
         // User entered total_units_needed directly — skip rate×acres computation
         const totalInventoryUnits = item.total_units_needed || 0;
         const totalPrice = pricePerUnit * totalInventoryUnits;
-        const profit = (pricePerUnit - (product.current_cost || 0)) * totalInventoryUnits;
+        const profit = (pricePerUnit - cost) * totalInventoryUnits;
         const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
 
         // Back-calculate oz/acre and $/acre if acres provided
@@ -1507,7 +1519,7 @@ export default function QuoteBuilder() {
         return {
           ...item,
           price_per_unit: pricePerUnit,
-          current_cost: product.current_cost || 0,
+          current_cost: cost,
           oz_per_acre: ozPerAcre,
           price_per_acre: pricePerAcre,
           total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
@@ -1533,13 +1545,13 @@ export default function QuoteBuilder() {
         ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
         : 0;
       const totalPrice = pricePerUnit * totalInventoryUnits;
-      const profit = (pricePerUnit - (product.current_cost || 0)) * totalInventoryUnits;
+      const profit = (pricePerUnit - cost) * totalInventoryUnits;
       const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
 
       return {
         ...item,
         price_per_unit: pricePerUnit,
-        current_cost: product.current_cost || 0,
+        current_cost: cost,
         oz_per_acre: Math.round(ozPerAcre * 100) / 100,
         price_per_acre: Math.round(pricePerAcre * 100) / 100,
         total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
@@ -3399,12 +3411,10 @@ export default function QuoteBuilder() {
     setConverting(true);
     setConfirmConvertOpen(false);
 
-    // A partially-drawn booking must never be whole-converted — and crucially
-    // must not be saved as 'accepted' first: that status flip releases the
-    // booking's remaining holds BEFORE the RPC gets a chance to refuse
-    // (2026-06-10 BLOCKER). Check the draw ledger up front and route to the
-    // Partial Order flow instead. Fail closed: if the ledger can't be read,
-    // don't risk the destructive pre-accept.
+    // A partially-drawn booking must never be whole-converted. The RPC refuses it
+    // (BOOKING_PARTIALLY_DRAWN); checking the draw ledger up front routes staff
+    // to the Partial Order flow with a clearer message. Fail closed: if the
+    // ledger can't be read, don't start the conversion.
     if (id) {
       try {
         const [orderDrawRes, jobDrawRes] = await Promise.all([
@@ -3439,14 +3449,15 @@ export default function QuoteBuilder() {
       }
     }
 
-    // A normally open Quote must first commit its accepted status. An already
-    // accepted Quote is the recovery/idempotent-resume path: it is read-only in
-    // this UI, and rewriting its sections could disturb an Order that another
-    // attempt already created. Let the server RPC either create the missing
-    // Order or return the existing one without another whole-Quote save.
-    const savedId = status === 'accepted' && quoteId
-      ? quoteId
-      : await saveQuote('accepted');
+    // convert_quote_to_order marks a sent or revised quote accepted in the same
+    // transaction that creates its order, so the quote is never accepted without
+    // one (KNOWN_ISSUES KI-12). Saving it as accepted first did exactly that when
+    // the order then failed. Only unsaved edits are saved first, under the quote's
+    // own status. An accepted quote is the recovery path: the RPC creates the
+    // missing order or returns the existing one, with no whole-quote save.
+    const savedId = isDirty && (status === 'sent' || status === 'revised')
+      ? await saveQuote(status)
+      : quoteId;
     if (!savedId) {
       setConverting(false);
       return;
@@ -3614,26 +3625,7 @@ export default function QuoteBuilder() {
         || 'Failed to create order';
       toast('error', errMsg);
       }
-      // A successful status check proved the quote was not accepted. A draft can
-      // only reach this path through Book as Order, whose mark-presented step
-      // already committed it as sent; keep it sent so normal Convert remains.
-      const revertTo = status === 'accepted' || status === 'draft' ? 'sent' : (status || 'sent');
-      try {
-        const previousRowVersion = quoteRowVersionRef.current;
-        const revertResult = await supabase.from('quotes').update({ status: revertTo }).eq('id', savedId).select('id, row_version');
-        checkMutationResult(revertResult, 'Revert quote status');
-        setStatus(revertTo);
-        applyDirectQuoteMutationRowVersion(
-          previousRowVersion,
-          (revertResult.data as Array<{ row_version?: unknown }>)[0]?.row_version,
-          'reverted',
-        );
-      } catch (revertErr) {
-        // The quote is now stuck 'accepted' with no order — surface it instead
-        // of failing silently so someone fixes the status by hand.
-        Sentry.captureException(revertErr, { tags: { source: 'mutation', action: 'revert_quote_status_after_failed_convert' } });
-        toast('error', `Order creation failed AND the quote could not be reverted to "${revertTo}" — its status may need a manual fix`);
-      }
+      // The conversion rolled back as a whole, so the quote keeps its status.
     }
     setConverting(false);
   };
@@ -3641,8 +3633,8 @@ export default function QuoteBuilder() {
   // U16b: one-step booking for a clean, saved draft. Mark Presented uses the
   // existing create_quote_version path (snapshot + sent), then the existing
   // conversion handler applies all stale/duplicate/draw-down guards. If the
-  // first step succeeds but conversion fails, executeConvertToOrder restores the
-  // quote to sent, so staff can retry with the normal Convert button.
+  // first step succeeds but conversion fails, the quote stays sent, so staff can
+  // retry with the normal Convert button.
   const handleBookAsOrder = async () => {
     setBookingAsOrder(true);
     try {
@@ -4684,7 +4676,7 @@ export default function QuoteBuilder() {
                         <th className="px-5 py-3 font-medium w-8">#</th>
                         <th className="px-3 py-3 font-medium min-w-[200px]">Product</th>
                         <th className="px-3 py-3 font-medium">Price/Unit</th>
-                        {!hideCost && <th className="px-3 py-3 font-medium">Cost</th>}
+                        {!hideCost && <th className="px-3 py-3 font-medium">Cost quoted / today</th>}
                         <th className="px-3 py-3 font-medium">Sug. Rate</th>
                         <th className="px-3 py-3 font-medium">Actual Rate</th>
                         <th className="px-3 py-3 font-medium">Unit</th>
@@ -4810,7 +4802,11 @@ export default function QuoteBuilder() {
                             </td>
                             {!hideCost && (
                               <td className="px-3 py-2 font-mono text-secondary">
-                                {fmt(item.current_cost)}
+                                <QuoteLineCost
+                                  quotedCost={item.current_cost}
+                                  todayCost={prod?.current_cost ?? null}
+                                  pricePerUnit={item.price_per_unit}
+                                />
                               </td>
                             )}
                             <td className="px-3 py-2 text-secondary">

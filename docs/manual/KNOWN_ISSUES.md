@@ -152,10 +152,13 @@ JobDetail, QuoteBuilder, BlendTicketDetail, PrepayWorkspacePanel, FinanceChargeP
 scanner for this is acknowledged as a weak tripwire.
 
 ### KI-12 — Quote "Convert to Order" can leave an accepted quote with no order
-**MED (latent) · OPEN · money/inventory/UI · unassigned (Mason to decide about one real accepted quote with no order)**
-`src/pages/QuoteBuilder.tsx:3419-3421` marks the quote Accepted (releasing its inventory holds) before the order
-is created. If the second step fails the quote reads as converted but has no order and its holds are gone;
-pressing Convert again recovers. Two small database clean-ups (extra `quote_sections` privileges and a loose
+**MED (latent) · CAUSE FIXED 2026-10-25 (To-Do 1.3) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**
+QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) before creating the order, so a
+failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
+revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
+(proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
+rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app.
+Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched. Two small database clean-ups (extra `quote_sections` privileges and a loose
 `_below_cost_reason_from_json` parser) and a display-only profit mismatch are also recorded; the fixes exist only
 on closed PR #397.
 

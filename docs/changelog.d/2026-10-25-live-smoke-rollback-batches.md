@@ -56,7 +56,11 @@ statement's end, `INTO` or `USING`. Anything else disqualifies the batch: a vari
 rather than one spelling (the coordinator's call, 2026-10-25). Three chains run a loop variable over
 `format()` text and are refused until rewritten to `EXECUTE '<literal>' USING …` (follow-up):
 `cost_margin_admin_only_rpc_leaks`, `money_replay_binding_batch1` and the local-only
-`save_quote_customer_row_version`.
+`save_quote_customer_row_version`. Luna's second round on the fix added: executed literal text gets the
+COPY-to-program check too; `LOAD`, `PREPARE` (a prepared statement outlives the rollback in the session)
+and function bodies in any language but `sql`/`plpgsql` (plperl's `spi_exec_query` runs SQL without
+EXECUTE) disqualify a batch; and server-admin calls (`pg_log_backend_memory_contexts`, log rotation,
+restore points, WAL switch, promote, backup and WAL-replay controls) are refused everywhere.
 
 **Residual risk, accepted.** "Rolled back" means every table write is undone. The guard reads only the
 submitted text, never the bodies of functions already in the database, so whatever a called RPC or

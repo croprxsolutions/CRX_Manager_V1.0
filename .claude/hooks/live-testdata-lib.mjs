@@ -334,8 +334,10 @@ const SKIPS_RAISE_RE = /(?:^|;|\b(?:begin|then|else|loop))\s*(?:return|commit|ro
 // batch: none of these is a read, and no rollback undoes them. OUT_OF_TX_RE adds
 // setval/nextval because it reads the full text, supplied function bodies
 // included (Codex App, #1092: a pg_temp helper that calls setval).
-export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write)\s*\(/i;
-const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|setval|nextval)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
+// Server administration calls (log rotation, WAL switches, restore points,
+// backend memory dumps) also act outside the transaction (Luna round 2, #1092).
+export const NON_TX_CALL_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+)\s*\(/i;
+const OUT_OF_TX_RE = /\b(?:dblink\w*|pg_background\w*|http_(?:get|post|put|patch|delete|head|request)|net\.http_\w+|pg_(?:try_)?advisory_(?:lock|unlock)\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_logical_emit_message|pg_replication_origin\w*|pg_logical_slot_\w*|pg_\w*replication_slot\w*|pg_stat\w*_reset\w*|pg_stat_reset\w*|lo_export|lo_import|pg_file_write|pg_log_backend_memory_contexts|pg_rotate_logfile\w*|pg_create_restore_point|pg_switch_wal|pg_promote|pg_backup_\w+|pg_(?:start|stop)_backup|pg_wal_replay_\w+|setval|nextval)\s*\(|\bcreate\s+(?:extension|server|foreign\s+data\s+wrapper|user\s+mapping)\b|\blanguage\s+['"]?(?:c|internal|plpython\w*|plperlu|pltclu)\b/i;
 const SMOKE_TAIL_RE = /raise\s+exception\s+'SMOKE_PASS_ROLLBACK[^']*'[^;]*;\s*end\s*;?\s*$/i;
 
 // The tail rule alone is not enough: `BEGIN …; EXCEPTION WHEN OTHERS THEN RAISE
@@ -505,6 +507,9 @@ function executeRunsOnlyLiterals(src, depth = 0) {
         text = src.slice(i + 1, end - 1);
         if (/\\|\/\*|--/.test(text)) return false;
         text = text.replace(/''/g, "'");
+        // Statement-level checks blank string literals, so executed text gets
+        // them here (Luna round 2: EXECUTE 'COPY … TO PROGRAM …').
+        if (leavesSessionOrServerEffect(text)) return false;
         i = end;
       } else {
         const tag = src[i] === "$" ? matchDollarTag(src, i) : null;
@@ -528,6 +533,18 @@ function executeRunsOnlyLiterals(src, depth = 0) {
 // EXECUTE without the keyword (`query_to_xml('SELECT set' || 'val(…)', …)`).
 // No live smoke chain calls one.
 const QUERY_TEXT_CALL_RE = /\b(?:query_to_xml\w*|ts_stat|ts_rewrite)\s*\(/i;
+// Statements whose effect outlives a rollback, judged on statement text with
+// literals blanked (dollar bodies included): COPY to or from a server program or
+// file; LOAD (a library stays loaded) and PREPARE (a prepared statement stays in
+// the session, where a later plain EXECUTE could run it); and a function body in
+// any language but sql or plpgsql, which can build and run SQL without EXECUTE
+// (plperl's spi_exec_query) (Luna round 2, #1092).
+const SESSION_STATEMENT_RE = /(?:^|\b(?:begin|then|else|loop))\s*(?:load|prepare(?!\s+transaction\b))\b/i;
+const OTHER_LANGUAGE_RE = /\blanguage\s+(?!(?:sql|plpgsql)\b)/i;
+function leavesSessionOrServerEffect(sql) {
+  const texts = allStatementTexts(sql);
+  return !texts || hasServerCopy(sql) || texts.some((s) => SESSION_STATEMENT_RE.test(s) || OTHER_LANGUAGE_RE.test(s));
+}
 
 export function isVerifiedRollbackBatch(query) {
   if (!verifyRollbackOnce(query)) return false;
@@ -539,7 +556,7 @@ function verifyRollbackOnce(query) {
   const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
   if (OUT_OF_TX_RE.test(callNormalizedSql(query)) || hasServerCopy(query)) return false;
   const callText = callNormalizedSql(query);
-  if (QUERY_TEXT_CALL_RE.test(callText) || !executeRunsOnlyLiterals(c)) return false;
+  if (QUERY_TEXT_CALL_RE.test(callText) || leavesSessionOrServerEffect(c) || !executeRunsOnlyLiterals(c)) return false;
   // A literal continued on the next line ('a'<newline>'b') inherits an E''
   // prefix in PostgreSQL, which the walkers here do not model (Codex App,
   // #1092). No live smoke chain uses one, so such a batch is simply refused.

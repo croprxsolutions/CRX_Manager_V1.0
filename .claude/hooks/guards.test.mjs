@@ -589,6 +589,15 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["constant list appended to", `DO $$ DECLARE v_list text[] := ARRAY['SELECT 1']; v_sql text; BEGIN ${del} v_list := v_list || ('SELECT set' || 'val(1)'); FOREACH v_sql IN ARRAY v_list LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["variable named function run with USING", `DO $$ DECLARE function text := 'SELECT set' || 'val(1)'; BEGIN ${del} EXECUTE function USING (1); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["format() shadowed by a function the batch creates", `BEGIN; CREATE FUNCTION public.format(text, text) RETURNS text LANGUAGE sql AS $f$ SELECT 'SELECT set' || 'val(1)' $f$; SET LOCAL search_path = public, pg_catalog; ${rb(`${del}`).replace("BEGIN ", "DECLARE v_sql text; BEGIN FOREACH v_sql IN ARRAY ARRAY[format('SELECT 1', 'x')] LOOP EXECUTE v_sql; END LOOP; ")}`],
+    // Luna round 2 on the dynamic-SQL fix.
+    ["COPY TO PROGRAM inside an executed literal", `BEGIN; ${del} DO $$ BEGIN EXECUTE 'COPY (SELECT 1) TO PROGRAM ''touch /tmp/x'''; END $$; ROLLBACK;`],
+    ["plperl temp function builds SQL without EXECUTE", `BEGIN; ${del} CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE plperl AS $p$ my $fn = "pg_advisory_" . "lock"; spi_exec_query("SELECT $fn(42)"); $p$; SELECT pg_temp.f(); ROLLBACK;`],
+    ["quoted language name", `BEGIN; ${del} CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE "plperl" AS $p$ return; $p$; ROLLBACK;`],
+    ["backend memory-context dump", `BEGIN; ${del} SELECT pg_log_backend_memory_contexts(pg_backend_pid()); ROLLBACK;`],
+    ["log rotation", `BEGIN; ${del} SELECT pg_rotate_logfile(); ROLLBACK;`],
+    ["LOAD a library", `BEGIN; ${del} LOAD '$libdir/auto_explain'; ROLLBACK;`],
+    ["PREPARE outlives the rollback", `BEGIN; ${del} PREPARE p AS DELETE FROM invoices; ROLLBACK;`],
+    ["PREPARE inside an executed literal", rb(`${del} EXECUTE 'PREPARE p AS DELETE FROM invoices';`)],
     ["dollar quotes nested past the cap (Luna)", rb(`${del} PERFORM ${Array.from({ length: 20 }, (_, k) => `$t${k}$`).join("")}x${Array.from({ length: 20 }, (_, k) => `$t${19 - k}$`).join("")};`)],
     // Coordinator, 2026-10-25: close the class, so even a variable over a fixed list is refused.
     ["EXECUTE of a loop variable over fixed literals", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1', 'SELECT 2'] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],

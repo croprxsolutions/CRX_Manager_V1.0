@@ -429,6 +429,26 @@ function preflightRefusesDrift(phase) {
   console.log(`[prover] PREFLIGHT (${phase}): ${cases.length} drifted state(s) each abort the candidate${phase === 'after' ? ' (a second apply is refused)' : ''}`);
 }
 
+// The live smoke chain must pass whether or not every active product has a floor (Codex App P2 on
+// #1102), and must leave the floors exactly as it found them.
+function smokeChain() {
+  stageText('smoke.sql', lf(path.join(ROOT, 'scripts', 'smoke', 'smoke-set-product-margin-floors.sql')));
+  const floors = () => scalar("SELECT COALESCE(string_agg(product_id || '=' || margin_floor, ',' ORDER BY product_id), 'none') FROM public.product_margin_floors;");
+  const run = (label) => {
+    const before = floors();
+    const r = docker([...psqlArgs(), '-f', '/tmp/smoke.sql'], { allowFailure: true });
+    assert.match(r.stderr, /SMOKE_PASS_ROLLBACK/, `smoke chain (${label}) did not pass:\n${r.stderr}`);
+    assert.equal(floors(), before, `smoke chain (${label}) changed the floors`);
+  };
+  run('no floors');
+  psql(`INSERT INTO public.product_margin_floors (product_id, margin_floor, set_by, set_reason)
+    SELECT id, 0.2, '${U.ADMIN}', 'prover: every active product floored' FROM public.products WHERE is_active;`);
+  assert.equal(scalar('SELECT count(*) FROM public.products p WHERE p.is_active AND NOT EXISTS (SELECT 1 FROM public.product_margin_floors f WHERE f.product_id = p.id);'), '0');
+  run('every active product floored');
+  psql("DELETE FROM public.product_margin_floors WHERE set_reason = 'prover: every active product floored';");
+  console.log('[prover] SMOKE CHAIN: passes with no floors and with every active product floored, and leaves the floors as it found them');
+}
+
 function main() {
   const started = Date.now();
   if (!REUSE) buildContainer();
@@ -453,6 +473,8 @@ function main() {
   const gate = scenario([{ key: 'rep, require_admin emptied', as: U.REP, call: setFloors(U.REP, [item(PROD_B, 1)], null, 'k-mut') }], MUTANT_GATE);
   assert.equal(gate['rep, require_admin emptied'], 'ok|1:0', `MUTATION: with require_admin() emptied a rep should set a floor, got ${gate['rep, require_admin emptied']}`);
   console.log('[prover] MUTATION: require_admin() emptied lets a rep set a floor -- so the refusal comes from the admin gate');
+
+  smokeChain();
 
   console.log(`[prover] finished in ${Math.round((Date.now() - started) / 1000)}s`);
   console.log('PRODUCT_MARGIN_FLOORS_PROOF_PASS');

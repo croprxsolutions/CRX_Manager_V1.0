@@ -33,14 +33,18 @@ BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1;
   SELECT id INTO v_wrong FROM public.profiles WHERE role IN ('driver', 'applicator', 'sales_rep') AND is_active
    ORDER BY CASE role WHEN 'driver' THEN 0 WHEN 'applicator' THEN 1 ELSE 2 END, created_at LIMIT 1;
-  -- A product with no floor now, so the chain starts from "no floor". It may have had a floor that was
-  -- cleared: that history stays, so only the rows this run adds are checked below.
+  -- An active product, preferring one with no floor. Its earlier history stays, so only the rows this
+  -- run adds are checked below.
   SELECT p.id INTO v_product FROM public.products p
-   WHERE p.is_active AND NOT EXISTS (SELECT 1 FROM public.product_margin_floors f WHERE f.product_id = p.id)
-   ORDER BY p.created_at, p.id LIMIT 1;
+   WHERE p.is_active
+   ORDER BY EXISTS (SELECT 1 FROM public.product_margin_floors f WHERE f.product_id = p.id), p.created_at, p.id
+   LIMIT 1;
   IF v_admin IS NULL OR v_wrong IS NULL OR v_product IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: need an active admin, an active non-admin and an active product with no floor';
+    RAISE EXCEPTION 'SMOKE_SETUP: need an active admin, an active non-admin and an active product';
   END IF;
+  -- Once every active product has a floor, start this one from "no floor" inside this rolled-back
+  -- transaction: no history row is written and the floor is back when the chain rolls back.
+  DELETE FROM public.product_margin_floors WHERE product_id = v_product;
   v_key := 'smoke:set_product_margin_floors:' || v_suffix;
   v_items := jsonb_build_array(jsonb_build_object('product_id', v_product, 'margin_floor_percent', 12.5));
   SELECT count(*) INTO v_floors_before FROM public.product_margin_floors;

@@ -10,3 +10,9 @@ is at 15.00% — under the 15% floor"); the card now uses the same helper and ha
 Sol (HIGH) on the next head: the card told admins "The price sheet warns on any tier below it", but
 the price sheet's low-margin warning is To-Do 0.1 and not built yet. The card now says tiers are
 flagged on the product page and Products list only, and that the price sheet does not check floors yet.
+
+Codex GitHub App (P2): the live smoke chain `smoke-set-product-margin-floors.sql` needed an active
+product with no floor, so it would fail once every product had one. It now takes any active product
+(preferring one without a floor) and clears its floor inside the rolled-back transaction. The
+real-schema proof runs the chain with no floors and with every active product floored, and checks
+the floors are unchanged afterwards.

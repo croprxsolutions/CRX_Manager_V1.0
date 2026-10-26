@@ -22,6 +22,7 @@ const H = vi.hoisted(() => ({
 }));
 
 const release = () => { const waiting = H.held; H.held = []; waiting.forEach((answer) => answer()); };
+const releaseFirst = () => { H.held.shift()?.(); };
 
 // A query that ignores its filters and answers with the given rows (or a failure).
 function fixedQuery(reply: { data: unknown; error: unknown; count: number | null }, held = false): Record<string, unknown> {
@@ -57,7 +58,7 @@ vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const client = {
     from: (table: string) => fixedQuery(replyFor(table, H.tables[table] ?? []), H.failing.get(table) === 'held'),
-    rpc: (name: string) => fixedQuery(replyFor(name, H.functions[name] ?? [])),
+    rpc: (name: string) => fixedQuery(replyFor(name, H.functions[name] ?? []), H.failing.get(name) === 'held'),
   };
   return { ...actual, supabase: client, supabaseUntyped: client };
 });
@@ -206,6 +207,31 @@ describe('Invoice Detail', () => {
     expect(screen.queryAllByText('Gadget 1 GL').length + screen.queryAllByDisplayValue('Gadget 1 GL').length).toBeGreaterThan(0);
     expect(screen.queryByText('Widget 2.5 GL')).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue('Widget 2.5 GL')).not.toBeInTheDocument();
+  });
+
+  it("a Save on one invoice that finishes after the move to another never leaves the other's spinner up", async () => {
+    // An invoice with an order behind it, so Save may carry its product line.
+    loaded({ ...invoice, order_id: 'o1' });
+    open();
+    H.functions.save_invoice = 'inv1';
+    H.failing.set('save_invoice', 'held');
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }));
+    // The save is out; move to another invoice whose line read is out too.
+    await waitFor(() => expect(H.held.length).toBe(1));
+    const other = { ...invoice, order_id: 'o1', id: 'inv2', invoice_number: 'INV-1002' };
+    H.tables.invoices = [other];
+    H.tables.invoices_postable = [other];
+    H.failing.set('invoice_items', 'held');
+    act(() => { go('/invoices/inv2'); });
+    await waitFor(() => expect(H.held.length).toBe(2));
+    // The save on the first invoice answers, and its reload of that invoice is asked for.
+    await act(async () => { releaseFirst(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    // Then the second invoice's line read answers: the second invoice shows.
+    H.failing.delete('invoice_items');
+    await act(async () => { release(); });
+    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument();
+    expect(screen.getAllByText('INV-1002').length).toBeGreaterThan(0);
   });
 
   it('a split-group read with no list says could not be loaded', async () => {

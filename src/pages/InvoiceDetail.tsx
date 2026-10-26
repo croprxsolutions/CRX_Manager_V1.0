@@ -796,6 +796,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // of the editor, instead of "Invoice not found", an endless spinner, or a form whose Save could
   // write over the real invoice (To-Do 10.5).
   const fetchInvoice = useCallback(async (invoiceId: string) => {
+    // A reload asked for an invoice the page has since left (a Save on A finishing after the move
+    // to B) must not take a request number: that would cancel B's load and leave its spinner up.
+    if (activeInvoiceIdRef.current !== invoiceId) return;
     const request = ++invoiceLoadSeqRef.current;
     setLoading(true);
     setLoadFailedId(null);

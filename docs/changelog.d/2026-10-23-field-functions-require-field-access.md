@@ -7,11 +7,13 @@ Part A of the row 11.4 fix plan in `docs/manual/KNOWN_ISSUES.md`. One new migrat
 
 ### What was wrong
 
-Eighteen `SECURITY DEFINER` functions (they run with the owner's rights, so row security never applies
-inside them) checked nothing, so any signed-in account (applicators, drivers, an `entity_recipient`
-profile, a deactivated user with a live token) could read every customer's fields, boundaries and
-owner names, field billing splits with price overrides, accounts-receivable balances, credit limits,
-the company-wide overdue-invoice list, global search results and every team note on any record.
+Seventeen `SECURITY DEFINER` functions (they run with the owner's rights, so row security never
+applies inside them) checked nothing, so any signed-in account (applicators, drivers, an
+`entity_recipient` profile, a deactivated user with a live token) could read every customer's fields,
+boundaries and owner names, field billing splits with price overrides, accounts-receivable balances,
+credit limits, the company-wide overdue-invoice list, global search results and, through
+`get_notes_for_entity`, the team notes on any record. (The migration pins eighteen bodies; the
+eighteenth, `operational_dashboard_summary`, already refused non-office callers on live.)
 
 ### What changed
 
@@ -29,7 +31,9 @@ the company-wide overdue-invoice list, global search results and every team note
   `get_customer_delivery_remainders`, `check_duplicate_delivery`); they are office-only too.
 * `global_search` returns nothing to anyone but office staff.
 * `get_notes_for_entity` runs as the caller and returns notes only for a record the caller can
-  already read.
+  already read. This does not narrow the Team Board: the `team_notes` read policy (`tnotes_select`)
+  still lets every active profile read every note there, by Mason's decision of 2026-10-23 (To-Do
+  row 11.11).
 * `operational_dashboard_summary` is re-emitted unchanged so the migration files carry the role check
   live already has.
 

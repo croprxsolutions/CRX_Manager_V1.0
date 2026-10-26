@@ -4380,7 +4380,7 @@ const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 // backtick is just a template string, so it does not count there.
 // `$\`` is Bun's and zx's shell tag; `new Function` builds code like eval does.
 // Perl `qx(…)` and Ruby `%x(…)` run a shell command too.
-const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\b|\bopen\b[^;]*(?:\|-|-\||["']\s*\||\|\s*["'])|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
+const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ut)|_exec|execv|execl|popen|\bsystem\b|\bopen\b[^;]*(?:\|-|-\||["']\s*\||\|\s*["'])|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[^\w\s]|\breadpipe\b|%x\s*[^\w\s]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
 // Code that names the merge or push ACTION itself (`pr merge`, `['pr','merge']`,
 // Octokit's `pulls.merge`, a `/pulls/1/merge` path, `git push`, `HEAD:main`) is
 // refused however it would run it — a client library reaches GitHub without any
@@ -4419,8 +4419,11 @@ export function inlineCodeReachesGatedAction(command) {
           : INLINE_CODE_FLAG_RE.test(word) ? [words[at + 1]]
           : cluster ? [cluster[1], words[at + 1]]
           : [];
+        // Also refused: gated code whose merge or push action sits in the same command's
+        // arguments (`perl -e 'print readpipe "gh @ARGV"' pr merge 951`), however the
+        // code runs it — this ends the per-API list chase (Codex App on #1128).
         if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]) &&
-          inlineCodeCanAct(program, String(code)))) return true;
+          (inlineCodeCanAct(program, String(code)) || INLINE_ACTION_RE.test(segment)))) return true;
         // No early stop at the first bare word: a detached option value
         // (`node --require fs -e "…"`) looks like a script argument, so the whole
         // window is scanned (Codex connector, PR #956 third pass).

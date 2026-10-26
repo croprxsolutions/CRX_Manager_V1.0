@@ -232,6 +232,8 @@ for (const command of [
   "ruby -e 'system \"gh\", *ARGV' pr merge 951 --squash",
   "perl -e 'system \"gh\", @ARGV' pr merge 951 --squash",
   "perl -e 'open my $p, \"|-\", \"gh\", @ARGV; close $p' pr merge 951 --squash",
+  "perl -e 'print readpipe \"gh @ARGV\"' pr merge 951 --squash",
+  "ruby -e 'Kernel.public_send(:system, \"gh\", *ARGV)' pr merge 951 --squash",
   `node -e "new (require('@octokit/rest').Octokit)().rest.pulls[ /* note */ 'merge' ]({owner:'o',repo:'r',pull_number:951})"`,
   `node -e "const {Octokit}=require('@octokit/rest'); new Octokit({auth:process.env.GH_TOKEN}).rest.pulls.merge({owner:'o',repo:'r',pull_number:951})"`,
 ]) ok(inlineCodeReachesGatedAction(command), `inline code that can act still refused: ${command}`);

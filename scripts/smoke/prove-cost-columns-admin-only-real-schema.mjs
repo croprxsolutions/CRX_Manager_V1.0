@@ -77,6 +77,13 @@ const LEDGER_ONLY = new Set([
 const LOCKED_TABLES = ['products', 'quotes', 'quote_items', 'quote_versions', 'orders', 'order_items', 'invoices', 'invoice_items', 'jobs', 'job_chemicals', 'blend_ticket_products', 'commissions'];
 // A parked file that grants or revokes on, or alters, a locked table would change what this proof sees.
 const TOUCHED = new RegExp(`(GRANT|REVOKE|ALTER\\s+TABLE)[^;]*\\b(public\\.)?(${LOCKED_TABLES.join('|')})\\b`, 'i');
+// Later files that alter a locked table and were checked against this proof. This proof replays only
+// up to its candidate, so a later file never runs here; each entry says why it leaves the lock intact.
+const REVIEWED_LATER = new Set([
+  // Adds price_tier_at_sale (not a cost) to order_items and invoice_items with no grant to anon or
+  // authenticated; its own VERIFY and prove-last-charged-prices-real-schema.mjs check that.
+  '20261026130000_last_charged_prices.sql',
+]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -177,6 +184,7 @@ function plan() {
   // The candidate's preflight pins every column of every locked table, so any later file that adds
   // a column would already have to change it; a later file granting on these tables would undo it.
   for (const file of all.slice(at + 1)) {
+    if (REVIEWED_LATER.has(path.basename(file))) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and grants on or alters a locked table; re-think this proof`);
   }
   for (const name of PARKED) {

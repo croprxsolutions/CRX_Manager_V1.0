@@ -311,6 +311,7 @@ they belong rather than duplicated here: `get_monthly_summary()` under Financial
 
 ## Pricing
 - `calculate_prices_from_margin()` — trigger: auto-calculate tier prices from margin target
+- `get_last_charged_prices(p_customer_id uuid, p_product_ids uuid[])` (`20261026130000_last_charged_prices.sql`, not applied yet) → jsonb array of `{product_id, unit_price_cents, price_tier, unit_size, charged_on, source}`, one per asked product that has a charge (To-Do 0.3; Mason, 2026-10-14: reps see the last price charged). STABLE, SECURITY DEFINER, `search_path = public, pg_temp`; active admin or sales rep (`require_admin_or_sales_rep()`), so a rep sees charges billed by any rep; nothing else is returned (no document number, quantity, cost, margin or salesperson). Up to 500 products per call (`LAST_CHARGED_TOO_MANY_PRODUCTS`); an empty list returns `[]`; a missing customer raises `CUSTOMER_NOT_FOUND`. **A charge is:** a product line (not a return credit, not an application fee, quantity and price above 0) on a posted, paid or overdue `chemical_sale` or `field_application` invoice billed to that customer, not deleted, not voided, not pricing-pending, dated by `invoice_date`; or a product line (units and price above 0, not pricing-pending) on a confirmed, partly delivered or delivered order for that customer, not deleted and not "needs pricing", that no such invoice line bills, dated by `order_date`. Quotes, draft/unposted/cancelled/voided invoices, credit memos, misc-charge invoices, $0 no-charge lines and cancelled/voided orders never count; credits and returns are left out, not netted. The latest date wins; a same-date tie prefers the invoice, then the later line (created_at, sort_order, id). `price_tier` is the line's `price_tier_at_sale` (NULL = unknown); `unit_size` is the size that line was sold in. Caller: `src/lib/lastChargedPrices.ts` (the quote screen's "Last Charged" card).
 
 ## Season Helpers
 - `compute_season(p_date)` — returns season year for a given date (Oct 1 - Sep 30)
@@ -573,6 +574,11 @@ These are NOT called directly from the frontend. They power triggers, guards, an
 
 ### Global Search
 - `global_search(p_query text, p_limit int DEFAULT 5)` → TABLE(entity_type text, id uuid, primary_text text, secondary_text text) — Searches customers, orders, invoices, deliveries, products with ILIKE. Used by Command Palette (Ctrl+K). Since `20261023090000` it returns no rows to anyone but an active admin or sales rep.
+
+### Last charged price helpers (`20261026130000_last_charged_prices.sql`, not applied yet)
+
+- `_stamp_price_tier_at_sale_20261026()` (trigger `trg_stamp_price_tier_at_sale`: BEFORE INSERT on `order_items`; BEFORE INSERT OR UPDATE OF `order_item_id` on `invoice_items`) and `_order_line_price_tier_20261026(order_id, quote_item_id)`: fill `price_tier_at_sale` (see `database-schema.md`). The UPDATE case covers the invoice editor's save, which re-inserts lines without their order link and restores it afterwards. Executable by no API role. The browser-called reader is `get_last_charged_prices`, under "Pricing".
+- `_split_invoice_content_claim(uuid)` is re-emitted by the same file with `price_tier_at_sale` added to its excluded keys, so stored split-invoice claims stay byte-identical (otherwise every stored claim would mismatch and split invoices could not post).
 
 ### Product brands (`20261022086500_product_brands.sql`, applied live 2026-10-23 as ledger `20261023193816`)
 

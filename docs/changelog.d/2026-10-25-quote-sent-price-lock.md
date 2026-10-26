@@ -31,4 +31,7 @@ erases manual (negotiated) prices on any quote (plan section 7, finding 3).
 
 **Not covered (follow-ups):** the blend-ticket invoice and field-application invoice paths read a quote line's
 current price directly (`create_invoice_from_blend_ticket`, `_save_field_app_invoice_impl_20260714`,
-`resolve_field_app_chemical_price`); they need the same rule.
+`resolve_field_app_chemical_price`); they need the same rule (KNOWN_ISSUES KI-81).
+
+**Docs:** To-Do 1.2, `docs/workflows/QUOTE_TO_DELIVERY.md` (sent-price lock rule), KNOWN_ISSUES KI-81,
+`docs/reference/migration-history.md` row 983.

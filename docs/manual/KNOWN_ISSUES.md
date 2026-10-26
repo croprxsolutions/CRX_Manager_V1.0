@@ -1,7 +1,8 @@
 # Known Issues — what is open today
 
-**Last verified: 2026-10-23 (America/Chicago)** against `main` at `62ca3b640` (code, migration files, merged
-PRs). Live-database facts were NOT re-read for this rewrite (no database access in this pass): any "applied
+**Last verified: 2026-10-25 (America/Chicago)** for KI-12 and KI-81 only (live function bodies and quote rows
+read 2026-10-25, with migration `20261025200000`); every other entry as of 2026-10-23 against `main` at
+`62ca3b640` (code, migration files, merged PRs). Live-database facts were NOT re-read for this rewrite (no database access in this pass): any "applied
 live" statement below is the older record's claim, and every such claim is marked as such.
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
@@ -31,7 +32,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-01 to KI-52 and KI-72 to KI-78; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 48 |
+| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78 and KI-81; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 49 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED during this rewrite, with proof (bottom of file) | 6 |
 
@@ -249,6 +250,17 @@ could slip past a close. No month is closed live (older record's claim), so it i
 - Auto-draft invoice does nothing when an applicator completes a job; policy is Mason's, switch is off. MED, dormant.
 - Two commission design choices wait on Mason (do blend tickets create commissions; may applicators see a job's
   commission split). UNVERIFIED, LOW.
+
+### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
+**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · unassigned**
+The sent-price lock (`20261025200000`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
+orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
+2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
+`_blend_quote_pick_valid_20261020`, or the first line of the job's quote section) and the field-application
+invoice (`_save_field_app_invoice_impl_20260714`, `resolve_field_app_chemical_price`, which take the first quote
+line on the field with no status, customer or deleted filter). After a revision that changed a price and was not
+re-sent, either can bill the unsent price; the field-application lookup can also take a draft, declined or deleted
+quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
 ---
 

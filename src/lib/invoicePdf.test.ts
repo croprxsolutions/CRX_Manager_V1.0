@@ -644,4 +644,9 @@ describe('generateBatchInvoicePdf', () => {
     expect(doc).toBeDefined();
     expect(mockDoc.save).toHaveBeenCalled();
   });
+
+  it('downloads a batch of one invoice (a batch can drop to one after a skip)', async () => {
+    await generateBatchInvoicePdf([makeInvoiceData({ invoice_number: 'INV-2026-0003' })]);
+    expect(mockDoc.save).toHaveBeenCalledWith('INV-2026-0003.pdf');
+  });
 });

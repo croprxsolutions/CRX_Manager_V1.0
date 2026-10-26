@@ -44,20 +44,23 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Only the newest load may install values: the page can switch products while one is in flight.
+  // Only the newest load for the product on screen may install values: the page can switch
+  // products while a load or a save is in flight.
   const loadSeqRef = useRef(0);
+  const productIdRef = useRef(productId);
+  productIdRef.current = productId;
   const load = useCallback(async (): Promise<boolean> => {
     const seq = ++loadSeqRef.current;
     try {
       const [current, changes] = await Promise.all([fetchMarginFloor(productId), fetchMarginFloorHistory(productId)]);
-      if (seq !== loadSeqRef.current) return false;
+      if (seq !== loadSeqRef.current || productIdRef.current !== productId) return false;
       setFloor(current);
       setHistory(changes);
       setDraft(formatMarginFloorPercent(current));
       setLoadState('loaded');
       return true;
     } catch (err) {
-      if (seq !== loadSeqRef.current) return false;
+      if (seq !== loadSeqRef.current || productIdRef.current !== productId) return false;
       Sentry.captureException(err, { extra: { context: 'load_product_margin_floor', productId } });
       setLoadState('failed');
       return false;
@@ -66,6 +69,10 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
 
   useEffect(() => {
     setLoadState('loading');
+    setFloor(null);
+    setHistory([]);
+    setDraft('');
+    setReason('');
     void load();
   }, [load]);
 
@@ -88,6 +95,8 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
         idempotencyKey: getKeyFor(scope),
       });
       resetKeyFor(scope);
+      // The page moved to another product while this save ran: say nothing about it here.
+      if (productIdRef.current !== productId) return;
       setReason('');
       const reloaded = await load();
       if (!reloaded) {
@@ -108,7 +117,17 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId 
   const underTiers = tierMargins
     .map((margin, i) => ({ tier: i + 1, margin }))
     .filter(({ margin }) => isUnderMarginFloor(margin, floor));
-  const dirty = loadState === 'loaded' && draft.trim() !== formatMarginFloorPercent(floor);
+  // Compare values, not text: "15.00" is the saved 15% floor. Text that does not parse counts as a
+  // change, so Save explains what is wrong with it.
+  const draftValue = (() => {
+    try {
+      const percent = parseMarginFloorPercent(draft);
+      return percent === null ? '' : String(percent);
+    } catch {
+      return null;
+    }
+  })();
+  const dirty = loadState === 'loaded' && draftValue !== formatMarginFloorPercent(floor);
 
   return (
     <Card>

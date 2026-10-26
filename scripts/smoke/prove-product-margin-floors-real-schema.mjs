@@ -319,7 +319,7 @@ const SCENARIOS = [
     ['a string', U.ADMIN, setFloors(U.ADMIN, [item(PROD, '15')], null, 'i4'), MISSING_FN, /^22023\|MARGIN_FLOOR_PERCENT_INVALID: /],
     ['missing field', U.ADMIN, setFloors(U.ADMIN, [{ product_id: PROD }], null, 'i5'), MISSING_FN, /^P0001\|MARGIN_FLOOR_PERCENT_REQUIRED: /],
     ['duplicate product (case differs)', U.ADMIN, setFloors(U.ADMIN, [item(PROD, 10), item(PROD.toUpperCase(), 11)], null, 'i6'), MISSING_FN, /^P0001\|MARGIN_FLOOR_PRODUCT_DUPLICATE: /],
-    ['bad product id', U.ADMIN, setFloors(U.ADMIN, [item('nope', 10)], null, 'i7'), MISSING_FN, /^P0001\|MARGIN_FLOOR_PRODUCT_DUPLICATE: /],
+    ['bad product id', U.ADMIN, setFloors(U.ADMIN, [item('nope', 10)], null, 'i7'), MISSING_FN, /^P0001\|MARGIN_FLOOR_ITEM_INVALID: each item needs a valid product_id$/],
     ['unknown product', U.ADMIN, setFloors(U.ADMIN, [item(MISSING, 10)], null, 'i8'), MISSING_FN, /^P0001\|MARGIN_FLOOR_PRODUCT_NOT_FOUND: /],
     ['empty list', U.ADMIN, setFloors(U.ADMIN, [], null, 'i9'), MISSING_FN, /^P0001\|MARGIN_FLOOR_ITEMS_REQUIRED$/],
     ['an item that is not an object', U.ADMIN, setFloors(U.ADMIN, [5], null, 'i13'), MISSING_FN, /^P0001\|MARGIN_FLOOR_ITEM_INVALID: /],

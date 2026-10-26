@@ -102,6 +102,34 @@ describe('ProductMarginFloorCard', () => {
     expect(mocks.setMarginFloors.mock.calls[2][0].idempotencyKey).not.toBe(mocks.setMarginFloors.mock.calls[0][0].idempotencyKey);
   });
 
+  it('treats the same value written differently as unchanged', async () => {
+    render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);
+    fireEvent.change(await screen.findByLabelText('Floor (net margin %)'), { target: { value: '15.00' } });
+    expect(screen.getByRole('button', { name: /save floor/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Floor (net margin %)'), { target: { value: '15.5' } });
+    expect(screen.getByRole('button', { name: /save floor/i })).not.toBeDisabled();
+  });
+
+  it('a save that finishes after moving to another product leaves that product alone', async () => {
+    let finishSave: (value: unknown) => void = () => {};
+    mocks.setMarginFloors.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+    const { rerender } = render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);
+    fireEvent.change(await screen.findByLabelText('Floor (net margin %)'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /save floor/i }));
+    await waitFor(() => expect(mocks.setMarginFloors).toHaveBeenCalledTimes(1));
+
+    mocks.fetchMarginFloor.mockImplementation(async (productId: string) => (productId === 'p1' ? 0.2 : null));
+    mocks.fetchMarginFloorHistory.mockResolvedValue([]);
+    rerender(<ProductMarginFloorCard productId="p2" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);
+    expect(await screen.findByLabelText('Floor (net margin %)')).toHaveValue('');
+
+    finishSave({ success: true, status: 'saved', changed_count: 1, unchanged_count: 0 });
+    await waitFor(() => expect(screen.getByRole('button', { name: /save floor/i })).toBeDisabled());
+    expect(screen.getByLabelText('Floor (net margin %)')).toHaveValue('');
+    expect(mocks.fetchMarginFloor.mock.calls.filter(([productId]) => productId === 'p1')).toHaveLength(1);
+    expect(mocks.toast).not.toHaveBeenCalledWith('success', expect.anything());
+  });
+
   it('says so when the floor cannot be loaded, and offers a retry', async () => {
     mocks.fetchMarginFloor.mockRejectedValueOnce(new Error('offline'));
     render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.2, 0.2]} userId="u1" />);

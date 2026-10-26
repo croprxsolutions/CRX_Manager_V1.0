@@ -234,11 +234,14 @@ BEGIN
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) AS e(value) WHERE jsonb_typeof(e.value) <> 'object') THEN
     RAISE EXCEPTION 'MARGIN_FLOOR_ITEM_INVALID: each item is {product_id, margin_floor_percent}';
   END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) AS e(value)
+              WHERE public._cost_step2_try_uuid(e.value->>'product_id') IS NULL) THEN
+    RAISE EXCEPTION 'MARGIN_FLOOR_ITEM_INVALID: each item needs a valid product_id';
+  END IF;
   -- Compared as uuids: the same product spelled in upper and lower case is one product.
   IF (SELECT count(*) <> count(DISTINCT public._cost_step2_try_uuid(e.value->>'product_id'))
-             OR bool_or(public._cost_step2_try_uuid(e.value->>'product_id') IS NULL)
         FROM jsonb_array_elements(p_items) AS e(value)) THEN
-    RAISE EXCEPTION 'MARGIN_FLOOR_PRODUCT_DUPLICATE: each product must appear once, by a valid id';
+    RAISE EXCEPTION 'MARGIN_FLOOR_PRODUCT_DUPLICATE: each product must appear once';
   END IF;
   IF v_reason IS NOT NULL AND char_length(v_reason) > 500 THEN
     RAISE EXCEPTION 'MARGIN_FLOOR_REASON_TOO_LONG: keep the reason to 500 characters';

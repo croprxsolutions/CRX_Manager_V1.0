@@ -9,6 +9,7 @@ import {
   fetchMarginFloor,
   fetchMarginFloorHistory,
   formatMarginFloorPercent,
+  formatNetMarginPercent,
   isMarginFloorRefusal,
   isUnderMarginFloor,
   marginFloorErrorMessage,
@@ -158,7 +159,7 @@ export default function ProductMarginFloorCard({ productId, tierMargins, userId,
             <div className="flex items-start gap-2 p-2 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-900" role="status">
               <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>
-                {underTiers.map(({ tier, margin }) => `Tier ${tier} is at ${((margin as number) * 100).toFixed(2)}%`).join('; ')}
+                {underTiers.map(({ tier, margin }) => `Tier ${tier} is at ${formatNetMarginPercent(margin as number, floor)}%`).join('; ')}
                 {` — under the ${floorLabel(floor)} floor.`}
               </span>
             </div>

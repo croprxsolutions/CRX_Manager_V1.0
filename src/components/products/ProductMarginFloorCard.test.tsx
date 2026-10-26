@@ -42,6 +42,11 @@ describe('ProductMarginFloorCard', () => {
     expect(screen.getByRole('button', { name: /save floor/i })).toBeDisabled();
   });
 
+  it('never shows a tier just under the floor rounded up to the floor', async () => {
+    render(<ProductMarginFloorCard productId="p1" tierMargins={[0.2, 0.14996, null]} userId="u1" />);
+    expect(await screen.findByRole('status')).toHaveTextContent('Tier 2 is at 14.99% — under the 15% floor.');
+  });
+
   it('flags nothing when the product has no floor', async () => {
     mocks.fetchMarginFloor.mockResolvedValue(null);
     mocks.fetchMarginFloorHistory.mockResolvedValue([]);

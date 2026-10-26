@@ -460,7 +460,11 @@ const INTO_USING_AT_RE = /(?:into|using)(?![A-Za-z0-9_$\u0080-￿])/iy;
 // (`EXECUTE function USING (1)` runs a variable named function, so the target
 // name may not be INTO or USING.)
 const TRIGGER_TARGET_AT_RE = /(?:function|procedure)\s+(?!(?:into|using)(?![A-Za-z0-9_$]))[A-Za-z_][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_$]*)?\s*\(/iy;
-function executeRunsOnlyLiterals(src) {
+// Nesting is capped (Luna, #1092): each level rescans its span, so deep nesting
+// would cost depth × length and could overflow the stack. No chain nests past 3.
+const MAX_EXECUTE_NESTING = 16;
+function executeRunsOnlyLiterals(src, depth = 0) {
+  if (depth > MAX_EXECUTE_NESTING) return false;
   let i = 0;
   while (i < src.length) {
     const ch = src[i];
@@ -480,7 +484,7 @@ function executeRunsOnlyLiterals(src) {
       const tag = matchDollarTag(src, i);
       if (tag) {
         const close = src.indexOf(tag[0], i + tag[0].length);
-        if (close === -1 || !executeRunsOnlyLiterals(src.slice(i + tag[0].length, close))) return false;
+        if (close === -1 || !executeRunsOnlyLiterals(src.slice(i + tag[0].length, close), depth + 1)) return false;
         i = close + tag[0].length; continue;
       }
     }
@@ -510,7 +514,7 @@ function executeRunsOnlyLiterals(src) {
         text = src.slice(i + tag[0].length, close);
         i = close + tag[0].length;
       }
-      if (!executeRunsOnlyLiterals(text)) return false;
+      if (!executeRunsOnlyLiterals(text, depth + 1)) return false;
       while (/\s/.test(src[i] || "")) i++;
       INTO_USING_AT_RE.lastIndex = i;
       if (i < src.length && src[i] !== ";" && !INTO_USING_AT_RE.test(src)) return false;

@@ -58,5 +58,9 @@ rather than one spelling (the coordinator's call, 2026-10-25). Three chains run 
 `cost_margin_admin_only_rpc_leaks`, `money_replay_binding_batch1` and the local-only
 `save_quote_customer_row_version`.
 
-**Residual risk, accepted.** "Rolled back" means every table write is undone; a sequence advanced inside a
-called RPC is not, and keeps its gap (see above).
+**Residual risk, accepted.** "Rolled back" means every table write is undone. The guard reads only the
+submitted text, never the bodies of functions already in the database, so whatever a called RPC or
+trigger does outside the transaction is not seen. On 2026-10-25 that is a sequence advanced inside a
+called RPC or by a column default (`INSERT … DEFAULT VALUES` on a serial table), which keeps its numbering
+gap (see above); none of the remote-call extensions are installed live. Dollar-quoted text nested more
+than 16 deep is refused rather than scanned (Luna).

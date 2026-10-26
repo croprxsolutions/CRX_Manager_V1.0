@@ -47,7 +47,7 @@ suppress the pre-harvest safety warning).
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
 **HIGH · PARTIAL · security · Mason approval needed to narrow permissions; part A applied live, parts B and C not started**
-Until 2026-10-26, any signed-in account, including drivers and applicators, could call database functions that
+Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Applicators can also read every field-table row, not only
 the fields they were dispatched to (still open). Proven by read-only impersonation on 2026-10-22. Planned as
@@ -476,7 +476,7 @@ Mason's REAL-DATA-OK.
 
 ### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**
-- FIXED LIVE 2026-10-26 by part A (PR #1065, history row 980, ledger `20261026021016`): `global_search` let any
+- FIXED LIVE 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25) by part A (PR #1065, history row 980, ledger `20261026021016`): `global_search` let any
   signed-in user search customer names and contacts, order/invoice/delivery numbers and farm names, and
   `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
   to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;

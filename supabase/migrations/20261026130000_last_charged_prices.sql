@@ -16,7 +16,8 @@
 --        invoice line -> billed from an order line: that line's stamped tier, else (an order line
 --                        from before this file) its quote's tier, else unknown -- never today's
 --                        customer tier; not from an order line: the invoice customer's tier.
---      A value the writer sends is kept. Charge lines (no product) and return credits stay NULL.
+--      A value a writer sends is replaced: the database always decides. Charge lines (no product)
+--      and return credits stay NULL.
 --      The invoice editor's save re-inserts lines without their order link and restores it with an
 --      UPDATE, so the trigger also fires on UPDATE OF order_item_id and then re-takes the order
 --      line's tier. A line with no order link is re-stamped at the customer's tier on each save.
@@ -216,7 +217,10 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF NEW.price_tier_at_sale IS NOT NULL OR NEW.product_id IS NULL THEN
+  -- The database always decides the tier: a value a writer sends is replaced, so a line can never
+  -- claim a tier it was not sold at. Lines with no product and return credits carry none.
+  NEW.price_tier_at_sale := NULL;
+  IF NEW.product_id IS NULL THEN
     RETURN NEW;
   END IF;
 
@@ -342,7 +346,6 @@ BEGIN
        AND ii.is_application_fee IS NOT TRUE
        AND ii.quantity > 0
        AND ii.unit_price_cents > 0
-       AND i.invoice_date IS NOT NULL
     UNION ALL
     -- Order prices are stored in dollars at whole cents (order_items_price_per_unit_cent_scale_chk),
     -- so round() is exact. Order lines have no timestamp of their own: the order's is used, and
@@ -359,7 +362,6 @@ BEGIN
        AND oi.pricing_pending IS NOT TRUE
        AND oi.price_per_unit > 0
        AND oi.total_units_needed > 0
-       AND o.order_date IS NOT NULL
        -- Once a counted invoice line bills this order line, the invoice line is the charge.
        AND NOT EXISTS (
          SELECT 1

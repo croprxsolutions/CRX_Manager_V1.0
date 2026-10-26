@@ -313,7 +313,7 @@ function seedFixture() {
       ${INVOICE_LINES.map(([k, p, cents, qty, line, extra]) => `('${iid(k)}', '${P[p]}', '[PROVER] ${p}', ${cents}, ${qty}, ${cents * qty}, ${line ? q(lid(line)) : 'NULL'}, ${extra === 'is_application_fee=true'}, ${extra === 'return' ? q(lid('l2')) : 'NULL'}, ${extra === 'return' ? '0' : 'NULL'}, 0)`).join(',\n      ')};
     COMMIT;`, { user: 'supabase_admin' });
   assert.equal(scalar(`SELECT count(*) FROM public.invoice_items WHERE invoice_id::text LIKE '7c320000-%';`), String(INVOICE_LINES.length), 'invoice lines not seeded');
-  console.log('[prover] seeded four users, two customers, a quote, 8 orders, 12 invoices and their lines');
+  console.log(`[prover] seeded four users, two customers, a quote, ${ORDERS.length} orders, ${INVOICES.length} invoices and their lines`);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -444,8 +444,10 @@ const SCENARIOS = [
     // l5 predates the column and has no quote: its tier at sale is unknown, never today's tier (3).
     ['invoice line for an older, unquoted order line stays unknown', 'owner', NEW_IL('n5', 'ie', 'P3', 'l5'), NO_COLUMN, 'ok|-'],
     ['invoice line with no order line takes the invoice customer tier (3)', 'owner', NEW_IL('n6', 'i3', 'P6'), NO_COLUMN, 'ok|3'],
-    ['a tier the writer sends is kept', 'owner', NEW_IL('n7', 'i3', 'P6', null, 1), NO_COLUMN, 'ok|1'],
-    ['an out-of-range tier is refused', 'owner', NEW_IL('n8', 'i3', 'P6', null, 4), NO_COLUMN, /^23514\|.*invoice_items_price_tier_at_sale_range/],
+    // The database always decides: a tier the writer sends (1, or an impossible 4) is replaced.
+    ['a tier the writer sends is replaced by the real one (3)', 'owner', NEW_IL('n7', 'i3', 'P6', null, 1), NO_COLUMN, 'ok|3'],
+    ['even an impossible sent tier is replaced (3)', 'owner', NEW_IL('n8', 'i3', 'P6', null, 4), NO_COLUMN, 'ok|3'],
+    ['an out-of-range tier written directly is refused', 'owner', { stmt: `UPDATE public.invoice_items SET price_tier_at_sale = 4 WHERE id = '${iid('n6')}'; v := 'updated';` }, NO_COLUMN, /^23514\|.*invoice_items_price_tier_at_sale_range/],
     // The invoice editor's save: the line is re-inserted without its order link (customer tier, 3),
     // then the link is restored by an UPDATE, which re-takes the order line's tier (n3: 2).
     ['a line saved without its order link takes the customer tier (3)', 'owner', NEW_IL('n9', 'i3', 'P2'), NO_COLUMN, 'ok|3'],

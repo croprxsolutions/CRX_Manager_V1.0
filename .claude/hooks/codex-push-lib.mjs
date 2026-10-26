@@ -4288,7 +4288,8 @@ export function programAssembledAtRuntime(command) {
 // Letters glued to a run-time piece (`$(printf g)h`, `m$(echo e)rge`, `g${X}t`,
 // `` `printf g`h ``) or two pieces side by side (`$a$b`) spell a word the scan
 // cannot read. A whole reference on its own (`"$NODE" x.mjs`) does not.
-const GLUED_RUNTIME_RE = /[A-Za-z0-9][$`]|[)}`][A-Za-z0-9]|\$\w+\$|[)}]\$/;
+// Two pieces touching (`$a$b`, `$(printf g)\`printf h\``, `${A}${B}`) glue too.
+const GLUED_RUNTIME_RE = /[A-Za-z0-9][$`]|[)}`][A-Za-z0-9]|\$\w+\$|[)}`][$`]/;
 
 // Should a run-time-built program name be refused? (Mason, 2026-10-26, "looser
 // guards".) Running a program from a whole variable — `"$CODEX" --version`,
@@ -4355,10 +4356,17 @@ const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
 // Perl, Ruby and PHP run a shell command from backticks; in JavaScript a
 // backtick is just a template string, so it does not count there.
 // `$\`` is Bun's and zx's shell tag; `new Function` builds code like eval does.
-const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec|_exec|execv|execl|popen|\bsystem\s*\(|startfile|shell_exec|passthru|proc_open|open3|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
+// Perl `qx(…)` and Ruby `%x(…)` run a shell command too.
+const INLINE_CAPABILITY_RE = /child_process|subprocess|spawn|\bexec(?!ute)|_exec|execv|execl|popen|\bsystem\s*\(|startfile|shell_exec|passthru|proc_open|open3|\bqx\s*[({[\/|'"]|%x\s*[({[]|\bfetch\b|https?:|\brequest\b|socket|deno\.command|bun\.spawn|\$`|\beval\b|\bnew\s+Function\b|\$\(/i;
+// Code that names the merge or push ACTION itself (`pr merge`, `['pr','merge']`,
+// Octokit's `pulls.merge`, a `/pulls/1/merge` path, `git push`, `HEAD:main`) is
+// refused however it would run it — a client library reaches GitHub without any
+// marker above (Luna round 2). The word `push` or `merge` on its own is data.
+const INLINE_ACTION_RE = /\bpr['"\s,]+merge\b|\bpulls\W{1,3}merge\b|mergepullrequest|\bpulls\/[^\s'"]*\/merge\b|\bgit['"\s,]+push\b|\bpush['"\s,]+origin\b|head:main\b/i;
 const BACKTICK_RUNS_SHELL = new Set(["perl", "ruby", "php"]);
 function inlineCodeCanAct(program, code) {
-  return INLINE_CAPABILITY_RE.test(code) || (BACKTICK_RUNS_SHELL.has(program) && code.includes("`"));
+  return INLINE_ACTION_RE.test(code) || INLINE_CAPABILITY_RE.test(code) ||
+    (BACKTICK_RUNS_SHELL.has(program) && code.includes("`"));
 }
 export function inlineCodeReachesGatedAction(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {

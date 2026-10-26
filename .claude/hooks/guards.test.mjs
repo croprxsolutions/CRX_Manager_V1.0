@@ -479,6 +479,8 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["'EXECUTE' as a privilege-name string", rb(`${del} IF has_function_privilege('anon', 'public.f()', 'EXECUTE') THEN NULL; END IF;`)],
     ["CREATE TRIGGER … EXECUTE FUNCTION in executed text", rb(`${del} EXECUTE 'CREATE TRIGGER t BEFORE INSERT ON public.activity_feed FOR EACH ROW EXECUTE FUNCTION public.f()';`)],
     ["EXECUTE of a dollar-quoted pg_temp function", rb(`${del} EXECUTE $sql$ CREATE FUNCTION pg_temp.g() RETURNS int LANGUAGE sql AS $b$ SELECT 1 $b$ $sql$;`)],
+    // Real CASE forms still count once output aliases stop pairing across statements (Codex App, ad4206786).
+    ["CASE statement, nested CASE expressions, CASE after THEN", rb(`${del} CASE 1 WHEN 1 THEN PERFORM CASE WHEN true THEN CASE WHEN false THEN 1 ELSE 2 END END; ELSE NULL; END CASE; IF true THEN CASE WHEN true THEN NULL; END CASE; END IF;`)],
   ]) {
     eq(sql(query).trim(), "", `rollback-only smoke allowed: ${label}`);
   }
@@ -533,7 +535,10 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["qualified columns named begin/end hide the outer handler (Codex App)", `DO $$ BEGIN ${del} PERFORM t.begin FROM (VALUES (1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN PERFORM t.end FROM (VALUES (1)) AS t("end"); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["CASE expression naming begin plus a labeled block (Codex App)", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN <<b>> BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["CASE expression naming begin, no label", `DO $$ BEGIN ${del} PERFORM CASE WHEN true THEN begin ELSE 0 END FROM (VALUES(1)) AS t("begin"); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
-    ["qualified keyword with spaces around the dot (Codex App)", `DO $$ BEGIN ${del} PERFORM t . case FROM (VALUES (1)) AS t("case"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["output aliases case/end hiding an outer handler (Codex App, ad4206786)", `DO $$ BEGIN DELETE FROM customers; PERFORM 1 AS case; EXCEPTION WHEN OTHERS THEN PERFORM 1 AS end; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["bare output labels case/end hiding an outer handler", `DO $$ BEGIN ${del} PERFORM 1 case; EXCEPTION WHEN OTHERS THEN PERFORM 1 end; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["alias case closed by a later END CASE", `DO $$ BEGIN ${del} PERFORM 1 AS case; EXCEPTION WHEN OTHERS THEN NULL; END CASE; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["qualified keyword with spaces around the dot (Codex App)",`DO $$ BEGIN ${del} PERFORM t . case FROM (VALUES (1)) AS t("case"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["schema named begin", `DO $$ BEGIN ${del} PERFORM begin.f(); EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["identifier with a $ that looks like a keyword (Codex App)", `DO $$ BEGIN ${del} PERFORM case$x FROM (VALUES (1)) AS t("case$x"); EXCEPTION WHEN OTHERS THEN BEGIN NULL; END; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
     ["identifier ending in $x$ hides a RETURN", rb(`PERFORM a$x$; RETURN; ${del} PERFORM b$x$;`)],

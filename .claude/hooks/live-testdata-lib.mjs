@@ -381,12 +381,20 @@ function outerBlockHasHandler(stmts) {
       if (!KEYWORDS.has(w)) continue;
       if (toks[i].dotted) return true;
       const top = stack[stack.length - 1];
-      // Every CASE opens a level and the next END closes it (CASE expression or
-      // END CASE).
-      if (w === "case") { stack.push("case"); continue; }
+      // A CASE statement starts a statement or follows BEGIN/THEN/ELSE/LOOP/
+      // DECLARE and closes only with END CASE at a statement start. Any other
+      // CASE is an expression, whose END is in the same statement. Output
+      // aliases (`PERFORM 1 AS case; … PERFORM 1 AS end`) used to pair across
+      // statements and hide an outer handler (Codex App, ad4206786), so an
+      // expression CASE left open at the end of its statement is ambiguous.
+      if (w === "case") {
+        stack.push(top !== "caseexpr" && (i === 0 || OPENERS.has(words[i - 1])) ? "casestmt" : "caseexpr");
+        continue;
+      }
       if (w === "end") {
         const next = words[i + 1];
-        if (top === "case") { stack.pop(); if (next === "case") i++; continue; }
+        if (top === "caseexpr") { if (next === "case") return true; stack.pop(); continue; }
+        if (top === "casestmt") { if (i !== 0 || next !== "case") return true; stack.pop(); i++; continue; }
         if (i !== 0) return true;
         if (next === "if" || next === "loop") { i++; continue; }
         if (stack.length === 0) return true;
@@ -394,14 +402,15 @@ function outerBlockHasHandler(stmts) {
         continue;
       }
       if (w === "begin") {
-        if (top === "case" || !(i === 0 || OPENERS.has(words[i - 1]))) return true;
+        if (top === "caseexpr" || !(i === 0 || OPENERS.has(words[i - 1]))) return true;
         stack.push("begin");
         continue;
       }
       // exception: a section keyword only at a statement start or right after
       // BEGIN; elsewhere it is RAISE EXCEPTION or a name, which is harmless.
-      if ((i === 0 || words[i - 1] === "begin") && top !== "case" && stack.length <= 1) return true;
+      if ((i === 0 || words[i - 1] === "begin") && top !== "caseexpr" && top !== "casestmt" && stack.length <= 1) return true;
     }
+    if (stack[stack.length - 1] === "caseexpr") return true;
   }
   return stack.length !== 0;
 }

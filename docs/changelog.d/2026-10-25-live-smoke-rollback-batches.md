@@ -69,7 +69,11 @@ disqualifies a batch. The Codex App (d5ab5782d) found `CREATE OPERATOR === (…,
 by `x OPERATOR(===) 1` accepted as rolled back: an operator names its function without `(`, so the name
 checks never saw `setval`. Creating or altering any object that binds a function by name (operator,
 aggregate, type, cast, conversion, text search object, access method, language, transform, event trigger)
-now disqualifies a batch, wherever it appears; no live smoke chain defines one.
+now disqualifies a batch, wherever it appears; no live smoke chain defines one. The Codex App (ad4206786)
+then found `PERFORM 1 AS case; EXCEPTION WHEN OTHERS THEN PERFORM 1 AS end;` accepted: the output aliases
+paired as a CASE … END across statements and hid the outer handler. A CASE expression must now close in
+its own statement, and a CASE statement (at a statement start or after BEGIN/THEN/ELSE/LOOP/DECLARE) only
+with `END CASE`; anything else is ambiguous and refused.
 
 **Residual risk, accepted.** "Rolled back" means every table write is undone. The guard reads only the
 submitted text, never the bodies of functions already in the database, so whatever a called RPC or

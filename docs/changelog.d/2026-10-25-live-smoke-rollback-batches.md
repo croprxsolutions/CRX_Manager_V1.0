@@ -36,17 +36,27 @@ everywhere too, and function names are checked with comments and double quotes r
 untrusted language (C, internal, plpython…) disqualify a batch. Real live
 writes outside such a batch are otherwise unchanged.
 
-**Proof.** All 69 live-runnable smoke chains classify as allowed (before: 65 refused), with or without a
-marker; more than 30 attack shapes (conditional or swallowed raise, a raise only in the outer handler, a labeled
+**Proof.** 66 of the 69 live-runnable smoke chains classify as allowed (before: 65 refused), with or
+without a marker; the other three are the dynamic-SQL chains above; more than 30 attack shapes (conditional or swallowed raise, a raise only in the outer handler, a labeled
 outer block left with EXIT, early RETURN, COMMIT/END mid-batch, CALL, dblink, a write before the DO
 block, a raise only in a string or comment, quote and `$tag$` tricks, END or COMMIT AND CHAIN before
 ROLLBACK, a variable or quoted identifier named raise/end, CREATE EXTENSION plus dynamic SQL, session
 advisory locks) are refused, and RPC calls via PERFORM, assignment or CALL are refused outside such a
-batch. Guard suite: 568 assertions.
+batch. Eight dynamic-SQL shapes that c52cc3ce5 accepted as rolled back (Sol's `||` case, `format('%s')`,
+`E'\x76'`, a commented literal, a nested DO, a pg_temp function running its parameter, `query_to_xml`, a
+reassigned loop variable) are refused now.
 
-**Residual risk, accepted.** "Rolled back" means every table write is undone; two things are not. A
-sequence advanced inside a called RPC keeps its gap (see above). And a text check cannot follow dynamic SQL. A batch that assembles a built-in
-non-transactional call from string pieces (for example `EXECUTE 'SELECT pg_advisory_' || 'lock(42)'`)
-gets past it; the worst outcomes found are a lock held until the connection closes or a signalled
-backend, never a persisted data write. Refusing all assembled EXECUTEs would block 20+ existing smoke
-chains.
+**Dynamic SQL (Sol, BLOCKERS on c52cc3ce5).** A text check cannot read SQL assembled at run time, so
+`DO $$ BEGIN EXECUTE 'SELECT set' || 'val(…)'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$` used to
+pass as rolled back while it reset a live sequence. In a rollback-only batch every `EXECUTE` (in DO bodies,
+supplied function bodies and executed text alike) must now run ONE literal the name checks already read: a
+dollar-quoted string, or a plain `'…'` with no backslash and no comment opener, followed only by the
+statement's end, `INTO` or `USING`. Anything else disqualifies the batch: a variable, `||`, `format()`,
+`E'…'`, and `query_to_xml`/`ts_stat`/`ts_rewrite`, which also run text. This closes the whole class
+rather than one spelling (the coordinator's call, 2026-10-25). Three chains run a loop variable over
+`format()` text and are refused until rewritten to `EXECUTE '<literal>' USING …` (follow-up):
+`cost_margin_admin_only_rpc_leaks`, `money_replay_binding_batch1` and the local-only
+`save_quote_customer_row_version`.
+
+**Residual risk, accepted.** "Rolled back" means every table write is undone; a sequence advanced inside a
+called RPC is not, and keeps its gap (see above).

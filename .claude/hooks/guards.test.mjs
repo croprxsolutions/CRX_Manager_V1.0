@@ -474,6 +474,11 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["nested trigger function with RETURN NEW", rb("EXECUTE $q$ CREATE FUNCTION pg_temp.t() RETURNS trigger LANGUAGE plpgsql AS $t$ BEGIN RETURN NEW; END $t$ $q$;")],
     ["temp table ON COMMIT DROP", rb("CREATE TEMP TABLE x (a int) ON COMMIT DROP; PERFORM save_customer('{}');")],
     ["inner block with its own handler", rb(`BEGIN ${del} EXCEPTION WHEN OTHERS THEN NULL; END; IF true THEN NULL; END IF;`)],
+    // Sol on #1092: EXECUTE must run text the guard can read. Literal forms the chains use:
+    ["EXECUTE of a plain literal, INTO and USING", `DO $smoke$ DECLARE v int; BEGIN ${del} EXECUTE 'SET LOCAL ROLE authenticated'; EXECUTE 'SELECT 1' INTO STRICT v; EXECUTE 'SELECT $1' INTO v USING 2; EXECUTE 'RESET ROLE'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $smoke$;`],
+    ["'EXECUTE' as a privilege-name string", rb(`${del} IF has_function_privilege('anon', 'public.f()', 'EXECUTE') THEN NULL; END IF;`)],
+    ["CREATE TRIGGER … EXECUTE FUNCTION in executed text", rb(`${del} EXECUTE 'CREATE TRIGGER t BEFORE INSERT ON public.activity_feed FOR EACH ROW EXECUTE FUNCTION public.f()';`)],
+    ["EXECUTE of a dollar-quoted pg_temp function", rb(`${del} EXECUTE $sql$ CREATE FUNCTION pg_temp.g() RETURNS int LANGUAGE sql AS $b$ SELECT 1 $b$ $sql$;`)],
   ]) {
     eq(sql(query).trim(), "", `rollback-only smoke allowed: ${label}`);
   }
@@ -562,6 +567,31 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ["native-language temp function", `CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE c AS 'x', 'y'; ${rb("PERFORM pg_temp.f();")}`],
     ["statistics reset inside a wrapper", "BEGIN; SELECT pg_stat_reset(); ROLLBACK;"],
     ["setval inside a wrapper", "BEGIN; SELECT setval('invoice_number_seq', 1); ROLLBACK;"],
+    // Sol on #1092 (BLOCKERS on c52cc3ce5): SQL assembled at run time hides any name.
+    ["setval assembled with || (Sol)", "BEGIN; DELETE FROM invoices; DO $$ BEGIN EXECUTE 'SELECT set' || 'val(''public.invoice_number_seq'', 1)'; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;"],
+    ["EXECUTE format('%s')", rb(`${del} EXECUTE format('SELECT %s(''public.invoice_number_seq'', 1)', 'setval');`)],
+    ["EXECUTE of an unconstrained variable", `DO $$ DECLARE v text := 'SELECT set' || 'val(1)'; BEGIN ${del} EXECUTE v; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["EXECUTE E'' with a hex escape", rb(String.raw`${del} EXECUTE E'SELECT set\x76al(''public.invoice_number_seq'', 1)';`)],
+    ["EXECUTE of a literal holding a comment", rb(`${del} EXECUTE 'SELECT setval/**/(''public.invoice_number_seq'', 1)';`)],
+    ["EXECUTE of a literal holding --", rb(`${del} EXECUTE 'SELECT 1 --';`)],
+    ["EXECUTE ( … )", rb(`${del} EXECUTE ('SELECT set' || 'val(1)');`)],
+    ["nested DO inside executed text assembles setval", rb(`${del} EXECUTE 'DO $x$ BEGIN EXECUTE ''SELECT set'' || ''val(1)''; END $x$';`)],
+    ["pg_temp function body assembles setval", "BEGIN; DELETE FROM invoices; CREATE FUNCTION pg_temp.f() RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'SELECT set' || 'val(1)'; END $f$; SELECT pg_temp.f(); ROLLBACK;"],
+    ["pg_temp function runs its text parameter", "BEGIN; DELETE FROM invoices; CREATE FUNCTION pg_temp.f(v_sql text) RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE v_sql; END $f$; SELECT pg_temp.f('SELECT set' || 'val(1)'); ROLLBACK;"],
+    ["query_to_xml runs assembled text", `BEGIN; ${del} SELECT query_to_xml('SELECT set' || 'val(1)', true, false, ''); ROLLBACK;`],
+    ["ts_stat runs assembled text", `BEGIN; ${del} SELECT * FROM ts_stat('SELECT set' || 'val(1)'); ROLLBACK;`],
+    ["loop variable reassigned", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1'] LOOP v_sql := 'SELECT set' || 'val(1)'; EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["loop variable filled by SELECT INTO", `DO $$ DECLARE v_sql text; BEGIN ${del} SELECT 'SELECT set' || 'val(1)' INTO v_sql; EXECUTE v_sql; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["list element assembled with ||", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT set' || 'val(1)'] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["list element format('%I')", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY[format('SELECT %I(1)', 'setval')] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["list element format('DO %L')", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY[format('DO %L', 'BEGIN NULL; END')] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["loop variable shadowed in an inner block", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1'] LOOP DECLARE v_sql text := 'x'; BEGIN EXECUTE v_sql; END; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["constant list appended to", `DO $$ DECLARE v_list text[] := ARRAY['SELECT 1']; v_sql text; BEGIN ${del} v_list := v_list || ('SELECT set' || 'val(1)'); FOREACH v_sql IN ARRAY v_list LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["variable named function run with USING", `DO $$ DECLARE function text := 'SELECT set' || 'val(1)'; BEGIN ${del} EXECUTE function USING (1); RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["format() shadowed by a function the batch creates", `BEGIN; CREATE FUNCTION public.format(text, text) RETURNS text LANGUAGE sql AS $f$ SELECT 'SELECT set' || 'val(1)' $f$; SET LOCAL search_path = public, pg_catalog; ${rb(`${del}`).replace("BEGIN ", "DECLARE v_sql text; BEGIN FOREACH v_sql IN ARRAY ARRAY[format('SELECT 1', 'x')] LOOP EXECUTE v_sql; END LOOP; ")}`],
+    // Coordinator, 2026-10-25: close the class, so even a variable over a fixed list is refused.
+    ["EXECUTE of a loop variable over fixed literals", `DO $$ DECLARE v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1', 'SELECT 2'] LOOP EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
+    ["assignment hidden behind a variable named raise", `DO $$ DECLARE raise boolean := true; v_sql text; BEGIN ${del} FOREACH v_sql IN ARRAY ARRAY['SELECT 1'] LOOP IF raise THEN v_sql := 'x'; END IF; EXECUTE v_sql; END LOOP; RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'; END $$;`],
   ]) {
     ok(sql(query).includes("deny"), `not rollback-only, still denied: ${label}`);
   }
@@ -575,16 +605,22 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
     ok(sql(query).includes("deny"), `RPC call outside a rollback-only batch denied: ${label}`);
   }
   eq(sql("DO $$ BEGIN RAISE NOTICE '%', now(); END $$;").trim(), "", "a read-only DO block using builtins is still allowed");
-  // Every live-runnable smoke chain in the repo classifies as rollback-only.
+  // Every live-runnable smoke chain in the repo classifies as rollback-only, except
+  // three that EXECUTE a variable (a loop over format() text). Dynamic SQL hides
+  // names from the checks (Sol, #1092), so they stay refused until rewritten to
+  // EXECUTE '<literal>' USING ….
   const smokeDir = path.join(__dirname, "..", "..", "scripts", "smoke");
   const smokeSpecs = JSON.parse(fs.readFileSync(path.join(smokeDir, "smoke-specs.json"), "utf8")).specs;
+  const dynamicSqlChains = new Set(["save_quote_customer_row_version", "cost_margin_admin_only_rpc_leaks", "money_replay_binding_batch1"]);
   let smokeCount = 0;
   for (const [key, spec] of Object.entries(smokeSpecs)) {
     if (spec.container_only || spec.psql_only) continue;
+    const verdict = classifySql(fs.readFileSync(path.join(smokeDir, spec.chain), "utf8")).block;
+    if (dynamicSqlChains.has(key)) { eq(verdict, true, `dynamic-SQL chain stays refused: ${key}`); continue; }
     smokeCount++;
-    eq(classifySql(fs.readFileSync(path.join(smokeDir, spec.chain), "utf8")).block, false, `live smoke chain runs through the guard: ${key}`);
+    eq(verdict, false, `live smoke chain runs through the guard: ${key}`);
   }
-  ok(smokeCount >= 69, `smoke chain sweep covered ${smokeCount} chains (69 on 2026-10-25)`);
+  ok(smokeCount >= 66, `smoke chain sweep covered ${smokeCount} chains (66 on 2026-10-25)`);
   fs.rmSync(proj, { recursive: true, force: true });
 }
 // codex-push-guard: a non-push command → silent passthrough (plain git push of a

@@ -435,6 +435,96 @@ export function hasServerCopy(sql) {
   });
 }
 
+// Dynamic SQL. EXECUTE runs a string built at run time, so a name assembled from
+// pieces (`EXECUTE 'SELECT set' || 'val(…)'`) is invisible to the name checks
+// above (Sol, #1092). In a rollback-only batch every code-level EXECUTE must run
+// ONE literal whose text those checks already read: a dollar-quoted string, or a
+// plain '…' with no backslash and no comment opener (either can hide a name),
+// followed only by the statement's end, INTO … or USING …. An executed literal is
+// walked as code in turn, as is every dollar-quoted body, so an EXECUTE inside a
+// pg_temp function body or inside executed text is held to the same rule. A
+// literal that is only data ('EXECUTE' as a privilege name) is not code.
+// Returns false (not verifiable) on anything else.
+function plainLiteralEnd(src, i, esc) {
+  let j = i + (esc ? 2 : 1);
+  while (j < src.length) {
+    if ((esc || plainBackslashEscapes) && src[j] === "\\") { j += 2; continue; }
+    if (src[j] === "'" && src[j + 1] === "'") { j += 2; continue; }
+    if (src[j] === "'") return j + 1;
+    j++;
+  }
+  return -1;
+}
+const WORD_AT_RE = /[A-Za-z_\u0080-￿][A-Za-z0-9_$\u0080-￿]*/y;
+const INTO_USING_AT_RE = /(?:into|using)(?![A-Za-z0-9_$\u0080-￿])/iy;
+// (`EXECUTE function USING (1)` runs a variable named function, so the target
+// name may not be INTO or USING.)
+const TRIGGER_TARGET_AT_RE = /(?:function|procedure)\s+(?!(?:into|using)(?![A-Za-z0-9_$]))[A-Za-z_][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_$]*)?\s*\(/iy;
+function executeRunsOnlyLiterals(src) {
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    const prev = src[i - 1] || "";
+    const esc = (ch === "e" || ch === "E") && src[i + 1] === "'" && !IDENT_CHAR_RE.test(prev);
+    if (ch === "'" || esc) {
+      i = plainLiteralEnd(src, i, esc);
+      if (i < 0) return false;
+      continue;
+    }
+    if (ch === '"') {
+      const close = src.indexOf('"', i + 1);
+      if (close === -1) return false;
+      i = close + 1; continue;
+    }
+    if (ch === "$" && !IDENT_CHAR_RE.test(prev)) {
+      const tag = matchDollarTag(src, i);
+      if (tag) {
+        const close = src.indexOf(tag[0], i + tag[0].length);
+        if (close === -1 || !executeRunsOnlyLiterals(src.slice(i + tag[0].length, close))) return false;
+        i = close + tag[0].length; continue;
+      }
+    }
+    if (/[A-Za-z_\u0080-￿]/.test(ch) && !IDENT_CHAR_RE.test(prev)) {
+      WORD_AT_RE.lastIndex = i;
+      const word = WORD_AT_RE.exec(src)[0];
+      i += word.length;
+      if (word.toLowerCase() !== "execute") continue;
+      while (/\s/.test(src[i] || "")) i++;
+      // CREATE TRIGGER … EXECUTE FUNCTION|PROCEDURE name(…) names a function;
+      // it runs no text.
+      TRIGGER_TARGET_AT_RE.lastIndex = i;
+      if (TRIGGER_TARGET_AT_RE.test(src)) continue;
+      let text;
+      if (src[i] === "'") {
+        const end = plainLiteralEnd(src, i, false);
+        if (end < 0) return false;
+        text = src.slice(i + 1, end - 1);
+        if (/\\|\/\*|--/.test(text)) return false;
+        text = text.replace(/''/g, "'");
+        i = end;
+      } else {
+        const tag = src[i] === "$" ? matchDollarTag(src, i) : null;
+        if (!tag) return false;
+        const close = src.indexOf(tag[0], i + tag[0].length);
+        if (close === -1) return false;
+        text = src.slice(i + tag[0].length, close);
+        i = close + tag[0].length;
+      }
+      if (!executeRunsOnlyLiterals(text)) return false;
+      while (/\s/.test(src[i] || "")) i++;
+      INTO_USING_AT_RE.lastIndex = i;
+      if (i < src.length && src[i] !== ";" && !INTO_USING_AT_RE.test(src)) return false;
+      continue;
+    }
+    i++;
+  }
+  return true;
+}
+// SQL functions that run a query passed to them as text, the same blind spot as
+// EXECUTE without the keyword (`query_to_xml('SELECT set' || 'val(…)', …)`).
+// No live smoke chain calls one.
+const QUERY_TEXT_CALL_RE = /\b(?:query_to_xml\w*|ts_stat|ts_rewrite)\s*\(/i;
+
 export function isVerifiedRollbackBatch(query) {
   if (!verifyRollbackOnce(query)) return false;
   plainBackslashEscapes = true;
@@ -444,6 +534,8 @@ export function isVerifiedRollbackBatch(query) {
 function verifyRollbackOnce(query) {
   const c = stripCommentsQuoteAware(String(query || ""), { intoDollarBodies: true });
   if (OUT_OF_TX_RE.test(callNormalizedSql(query)) || hasServerCopy(query)) return false;
+  const callText = callNormalizedSql(query);
+  if (QUERY_TEXT_CALL_RE.test(callText) || !executeRunsOnlyLiterals(c)) return false;
   // A literal continued on the next line ('a'<newline>'b') inherits an E''
   // prefix in PostgreSQL, which the walkers here do not model (Codex App,
   // #1092). No live smoke chain uses one, so such a batch is simply refused.

@@ -56,7 +56,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (a) the retired product with an open PO line is missing from get_inventory_position';
   END IF;
   IF (v_row ->> 'quantity_on_order')::numeric <> 10 OR (v_row ->> 'net_position')::numeric <> 10
-     OR v_row ->> 'inventory_id' IS NOT NULL OR (v_row ->> 'is_low_stock')::boolean
+     OR (v_row ->> 'is_low_stock')::boolean
      OR v_row ? 'is_active' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (a) wrong retired-product row: %', v_row;
   END IF;

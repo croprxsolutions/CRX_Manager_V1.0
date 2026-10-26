@@ -1,7 +1,7 @@
 ## 2026-10-25 — Inventory: retired products stay on order; holds that can never release are refused and reported; product deletes keep their holds (To-Do 0.13, 0.14, 6.9 holds half)
 
-**What changed.** Migration `20261025090000_inventory_holds_and_retired_on_order_guards` (row 983), approved by
-Mason in chat ("Go ahead with PR A"):
+**What changed.** Migration `20261025090000_inventory_holds_and_retired_on_order_guards` (row 983, PR #1101),
+approved by Mason in chat ("Go ahead with PR A"):
 
 - **0.13.** `get_inventory_position()` now lists a retired product while it still has quantity on an open purchase
   order (submitted or partially received), so "what to order" no longer undercounts. It drops out once nothing is

@@ -236,11 +236,14 @@ export default function OrderDetail() {
           setParentQuote(qData as { id: string; quote_number: string } | null);
         } else { setParentQuote(null); }
 
-        const { data: custData } = await supabase
+        const { data: custData, error: custError } = await supabase
           .from('customers')
           .select('*')
           .eq('id', orderData.customer_id)
           .maybeSingle();
+        // Every order has a customer: a failed or empty read is a failed load, not a page
+        // whose actions run without the customer.
+        if (custError || !custData) return failLoad(custError ?? new Error("The order's customer read returned no row"));
         if (isStale()) return;
         setCustomer(custData as Customer | null);
 

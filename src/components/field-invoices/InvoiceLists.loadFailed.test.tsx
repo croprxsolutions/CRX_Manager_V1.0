@@ -127,6 +127,16 @@ describe('Field Invoices panels', () => {
     });
   }
 
+  it.each([
+    ['Posted', () => <FieldInvoicesPostedPanel />, 'Posted field invoices could not be loaded', 'posted'],
+    ['Unposted', () => <FieldInvoicesUnpostedPanel />, 'Unposted field invoices could not be loaded', 'draft'],
+  ] as const)('%s: a split invoice whose locations read throws fails the load', async (_name, panel, failedTitle, status) => {
+    H.tables.invoices = [{ ...fieldInvoice('0003', status), invoice_group_id: 'grp-1' }];
+    H.failing.set('field_app_locations', 'throws');
+    renderIn(panel());
+    expect(await screen.findByText(failedTitle)).toBeInTheDocument();
+  });
+
   it('Posted: a split invoice whose locations read comes back with no list fails the load', async () => {
     H.tables.invoices = [{ ...fieldInvoice('0002', 'posted'), invoice_group_id: 'grp-1' }];
     H.failing.set('field_app_locations', 'nodata');

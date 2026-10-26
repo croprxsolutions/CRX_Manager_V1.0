@@ -167,7 +167,8 @@ export default function FieldInvoicesPostedPanel() {
         .select('id, invoice_group_id, applied_acres, crop_type, field:fields!field_app_locations_field_id_fkey(field_name, crop_type)', { count: 'exact' })
         .in('invoice_group_id', idChunk)
         .order('id')
-        .range(from, to)));
+        .range(from, to)))
+        .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
       if (seq !== fetchSeq.current) return;
 
       if (groupErr) {

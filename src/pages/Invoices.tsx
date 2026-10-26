@@ -228,6 +228,8 @@ export default function Invoices() {
       salesman_name: inv.salesman_id ? salesmanMap[inv.salesman_id] || null : null,
       order_number: inv.order_id ? orderMap[inv.order_id] || null : null,
     })) as unknown as InvoiceRow[];
+    // Checked again after the label lookups: a newer load (or a newer failure) that started
+    // while they ran wins, so these older rows never come back.
     if (seq !== fetchSeq.current) return;
     if (labelLookupError) {
       Sentry.captureException(labelLookupError, { tags: { source: 'fetch', page: 'invoices', action: 'load_invoice_labels' } });

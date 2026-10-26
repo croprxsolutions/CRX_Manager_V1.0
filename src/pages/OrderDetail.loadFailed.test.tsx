@@ -152,6 +152,13 @@ describe('Order Detail', () => {
     expect(await screen.findByRole('button', { name: /Create Invoice/ })).toBeInTheDocument();
   });
 
+  it.each<Mode>(['error', 'nodata'])('a %s customer read says could not be loaded, not an order with no customer', async (mode) => {
+    H.failing.set('customers', mode);
+    open();
+    expect(await screen.findByText(FAILED)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
+  });
+
   it('a failed order read says could not be loaded, not "Order not found"', async () => {
     H.failing.set('orders', 'error');
     open();

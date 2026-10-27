@@ -46,7 +46,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78 and KI-81; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 49 |
+| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78, KI-81 and KI-82; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 50 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED during this rewrite, with proof (bottom of file) | 6 |
 
@@ -484,7 +484,7 @@ such as `get_quote_versions`), so the typecheck fails, and it adds about 60 live
 moves two `rpcContracts.test.ts` classifications. Records PRs add only the entries their migration changes, compared
 against a live generation.
 
-### KI-81 — The split-billing backfill smoke chain fails on current `main`
+### KI-82 — The split-billing backfill smoke chain fails on current `main`
 **LOW · OPEN · tooling/smoke · unassigned (Mason, 2026-10-27: noted, not now)**
 `scripts/smoke/smoke-backfill-refuse-split-billing.sql` stops before `SMOKE_PASS_ROLLBACK` on a current-main
 database. It completes a delivery with a direct `UPDATE`, which 20261022075000 now refuses

@@ -4358,7 +4358,9 @@ function backtickBodies(text) {
   return quote ? null : bodies;
 }
 const SAFE_RUNTIME_PROGRAM_RE = /^"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})"$/;
-const SAFE_RUNTIME_PROGRAM_GLOBAL_RE = /"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})"/g;
+// A whole word only: `/"$A"` or `x"$A"` is a different executable and must stay
+// visible to the stricter test (Codex App on #1128).
+const SAFE_RUNTIME_PROGRAM_GLOBAL_RE = /(?<=^|[\s;&|(])"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})"(?=$|[\s;&|)])/g;
 // true when a run-time program in `command` (or in any substitution body) is not
 // the allowed shape.
 function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {

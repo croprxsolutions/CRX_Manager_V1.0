@@ -659,6 +659,19 @@ eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crS
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] })).status,
   "missing", "an ordinary commit after the reviewed one needs a new review");
 
+// Whether CodeRabbit ever reviewed: commits(last:100) may not reach an older review.
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD), commit(HEAD)] })).priorReview, false,
+  "a complete commit list with no review means CodeRabbit never reviewed");
+const cutShort = facts({ commits: [commit(OLD), commit(HEAD)] });
+cutShort.commits.totalCount = 150;
+eq(evaluateCodeRabbitRequirement(cutShort).priorReview, undefined,
+  "a cut-short commit list with no review is unknown, not 'never reviewed' (Codex App P2 on #1125)");
+const noTotal = facts({ commits: [commit(OLD), commit(HEAD)] });
+delete noTotal.commits.totalCount;
+eq(evaluateCodeRabbitRequirement(noTotal).priorReview, undefined, "an unreadable commit total is unknown");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] })).priorReview,
+  true, "a listed reviewed commit means CodeRabbit did review");
+
 // The ALLOW direction.
 const reviewedHead = evaluateCodeRabbitRequirement(facts());
 eq([reviewedHead.status, reviewedHead.reviewedOid], ["reviewed", HEAD], "a completed review of the head passes");

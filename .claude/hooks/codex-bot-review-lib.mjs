@@ -520,8 +520,14 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   }
   // Whether CodeRabbit ever completed a review on this PR: before the first one,
   // a Sol review may run first (Mason, 2026-10-26); after it, a later commit may
-  // still be covered by a minor-only review (readMinorFollowUp).
-  return { status: "missing", why, headOid, reviewedOid: "", priorReview: list.some(coderabbitCompletedCommit) };
+  // still be covered by a minor-only review (readMinorFollowUp). The query reads
+  // only the last 100 commits, so "never reviewed" needs the whole list; a cut-short
+  // list without a review is unknown, which never lets Sol go first (Codex App P2 on #1125).
+  const commitTotal = pullRequest?.commits?.totalCount;
+  let priorReview;
+  if (list.some(coderabbitCompletedCommit)) priorReview = true;
+  else if (Number.isInteger(commitTotal) && commitTotal <= list.length) priorReview = false;
+  return { status: "missing", why, headOid, reviewedOid: "", priorReview };
 }
 
 // The PR's own changes relative to main, as {filename: "status:blobsha"}. The

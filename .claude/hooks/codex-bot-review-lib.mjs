@@ -677,6 +677,9 @@ const FOLLOWUP_EXCLUDED_PATHS = [
   /(?:^|\/)tsconfig[^/]*\.json$/, /(?:^|\/)[^/]*\.config\.[^/]+$/, /(?:^|\/)\.git[^/]*$/, /(?:^|\/)\.env/,
   // Configuration by name anywhere: src/config.ts, config/payment-limits.json (Luna round 3).
   /(?:^|\/)config(?:\/|\.[^/]+$)/, /(?:^|\/)[^/]*\.(?:ya?ml|toml|ini)$/,
+  // Every dotfile or dot-folder is tooling or runtime configuration (.nvmrc picks CI's
+  // Node, .npmrc the registry), as are the extensionless build files (Codex App P2 on #1125).
+  /(?:^|\/)\./, /(?:^|\/)(?:dockerfile|makefile|procfile|justfile)(?:\.[^/]*)?$/,
 ];
 const lowerPath = (path) => String(path || "").replace(/\\/g, "/").trim().toLowerCase();
 export function isFollowUpExcludedPath(path) {

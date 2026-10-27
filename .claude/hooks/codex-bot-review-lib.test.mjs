@@ -1016,6 +1016,8 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     && isFollowUpExcludedPath("package-lock.json") && isFollowUpExcludedPath("vite.config.ts") && isFollowUpExcludedPath("AGENTS.md")
     && isFollowUpExcludedPath("src/AGENTS.md") && isFollowUpExcludedPath("src/pages/CLAUDE.md")
     && isFollowUpExcludedPath("src/config.ts") && isFollowUpExcludedPath("config/payment-limits.json")
+    && isFollowUpExcludedPath(".nvmrc") && isFollowUpExcludedPath(".npmrc") && isFollowUpExcludedPath(".node-version")
+    && isFollowUpExcludedPath("src/.babelrc") && isFollowUpExcludedPath("Dockerfile") && isFollowUpExcludedPath("Makefile")
     && !isFollowUpExcludedPath("src/lib/configurePicker.ts")
     && !isFollowUpExcludedPath("src/lib/invoiceMath.ts"), "control files are excluded; app code is not");
   ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && isFollowUpTestPath("scripts/smoke/prove-x-real-schema.mjs")

@@ -86,7 +86,8 @@
      runner, verdict, seed or setup files) (at most 150 changed and 20 deleted lines),
 >      and one new `docs/changelog.d/` entry (at most 40 lines); nothing under `supabase/`, CI,
 >      agent tooling (`.claude/`, `.codex/`, `.agents/`, other `scripts/`), dependencies or
->      configuration (including any `config` file or folder and YAML/TOML/INI files); no rename,
+>      configuration (including any `config` file or folder, YAML/TOML/INI files, every dotfile
+>      or dot-folder such as `.nvmrc`, and `Dockerfile`/`Makefile`-style build files); no rename,
 >      delete, binary or file-mode change; at most 20 files and 30 fix commits.
 >
 >    Accepted residual (Luna round 3 on #1125, deferred): the shared-ledger exception proves only

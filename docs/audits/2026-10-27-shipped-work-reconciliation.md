@@ -11,7 +11,7 @@ This is a shipment-to-document reconciliation, not a rerun of all 68 PRs' produc
 - Updated To-Do 0.1, 0.2, 0.3, 0.6, 0.7, 0.15, 0.16, 9.9 and 11.3. Removed obsolete October 23 aggregate counts and the false headline that pricing/quote locking had not started; retained the January proof requirements.
 - Closed KI-15 only: current `src/pages/Reports.tsx` calls `get_profitability_report` for the three profitability groupings (PR #1134). Archived the original entry and closure evidence.
 - Narrowed KI-30: completed vendor-name/category work is not pending, but business-data cleanup remains.
-- Narrowed KI-47's blanket E2E-marker claim, KI-52's read-side false positives, and KI-72's PO PDF status. The remaining risks stay visible.
+- Closed KI-47's batch-wide E2E-marker sub-item after independent review checked the current per-write classifier: every INSERT row needs its own literal marker, UPDATE/DELETE their own top-level WHERE predicate. Other KI-47 risks remain. Narrowed KI-52's read-side false positives and KI-72's PO PDF status.
 - Receipt names (9.9) are escaped in `src/lib/deliveryReceiptEmail.ts`; delivery completion/resend and Field Mode use the shared builder (PR #1085).
 - Did not close 1.10: comma-safe database searches (#1085) are different from CSV parsing.
 - Did not close 3.6: #1099 explains hidden rep invoice totals; it does not grant full-customer balance visibility.
@@ -66,7 +66,7 @@ The title records what shipped; the disposition records whether that shipment cl
 | [#1090](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1090) | chore(cleanup): drop loadSheetPdf from the audit prompt and regenerate deno.lock | Dead load-sheet audit reference/lock cleanup; not broader print backlog. |
 | [#1091](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1091) | docs(migrations): record 20261022100000 as applied live (row 978, PR #1058) | Bulk-PO reimport apply verified; not spreadsheet CSV parsing 1.10. |
 | [#1092](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1092) | fix(guards): live smoke runs work again — allow verified rollback-only batches | Verified rollback-only SQL allowed; not permission for persistent live writes. |
-| [#1093](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1093) | fix(guards): judge the [E2E] fake-data tag per write, from its own WHERE (#1084 follow-up) | KI-47 destructive E2E exception narrowed; insert/update batch residual kept. |
+| [#1093](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1093) | fix(guards): judge the [E2E] fake-data tag per write, from its own WHERE (#1084 follow-up) | KI-47 batch-wide exemption sub-item closed; all INSERT/UPDATE/DELETE exceptions are per write. Other KI-47 risks remain. |
 | [#1094](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1094) | docs(migrations): record 20261022101000 cost lock as applied live (row 977, PR #1089) | Cost-lock apply verified; 11.3 status corrected. |
 | [#1095](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1095) | fix(invoices): refuse empty-line invoice PDFs on the list, email and batch paths (B3 follow-up) | Empty-line PDF failure fixed; no closure of unrelated PDF layout KI-39. |
 | [#1096](https://github.com/masonwells1/CRX_Manager_V1.0/pull/1096) | docs(migrations): record 20261023090000 field functions as applied live (row 980, PR #1065) | 11.4 part A apply already recorded. |

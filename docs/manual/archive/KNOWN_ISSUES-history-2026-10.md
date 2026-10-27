@@ -7026,3 +7026,9 @@ Closure: PR #1134 merged as `cef4e3015`; current `src/pages/Reports.tsx` reads `
 Original scope: "Vendor-name merges, a 19-product category remap and ~20 junk-row deletes need his decisions (each changes history or deletes real rows)."
 
 PR #1100 and To-Do 0.12/0.16 record Mason's 2026-10-25 closure and that day's live read: no duplicate vendor names, all 595 active products categorized. Only the category/vendor sub-items are closed; junk-row deletion, EPA data and other cleanup remain in KI-30. Those counts are the earlier observation, not re-measured by this audit.
+
+### Closed sub-item 2026-10-27 — KI-47 batch-wide fake-data exemption
+
+Original text: "A `[E2E]` marker exempts a whole SQL batch (`.claude/hooks/live-testdata-lib.mjs:731`). MED."
+
+PRs #1084/#1093 replaced that behavior. Current `live-testdata-lib.mjs` (per-write classifier, lines 1365 onward at reconciliation base `fe258c2fe`) requires a literal marker in every INSERT VALUES row or a top-level marker predicate in each UPDATE/DELETE's own WHERE. A comment, another statement or a SET value does not confer the exemption. Independent Luna review identified and corrected the stale residual claim in this reconciliation. The other KI-47 issues remain open.

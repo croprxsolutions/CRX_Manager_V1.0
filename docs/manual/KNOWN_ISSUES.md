@@ -430,7 +430,6 @@ authenticate proof contents. CodeRabbit's backstop was removed 2026-10-19, which
   `Remove-Item -Recurse`, `git clean --force -d`, `git branch -d -f` and `git commit -n`. A fix sits on branch
   `claude/autopilot-recursive-delete-alias-20260907` (18,131-command sweep) but must be rebuilt on current `main`.
   MED.
-- **PARTIAL, narrowed by PRs #1084/#1093:** destructive fake-data exceptions are judged per statement and its own WHERE clause; a batch-wide marker still exempts ordinary inserts/updates. Keep that residual open (MED); the blanket claim that all destructive statements inherit one marker is closed.
 - Bare `git clean` with a config override is not covered (`bash-safety-lib.mjs:280`). LOW.
 - `review-proof-guard`: the `GIT_EXTERNAL_DIFF` separate-export form and `gh` download over a protected path are
   unblocked (item 1 fixed in PR #530). Capped by Mason's 2026-09-01 decision. LOW.

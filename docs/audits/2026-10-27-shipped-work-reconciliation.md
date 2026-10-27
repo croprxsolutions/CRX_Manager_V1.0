@@ -122,4 +122,3 @@ The title records what shipped; the disposition records whether that shipment cl
 ## Verification and rollback
 
 Validate document drift and whitespace, inspect the rendered Markdown tables/links, and use the normal protected PR checks. No app code or business data is changed. Revert this documentation commit through a PR if a record is wrong; keep the original proof trail in the archive. Newer shipments after the recorded SHA need their own reconciliation.
-

@@ -233,6 +233,12 @@ BEGIN
       -- Billed from an order line: the order line's tier, never today's customer tier (an order
       -- line from before this file with no quote stays unknown).
       NEW.price_tier_at_sale := public._invoice_line_order_tier_20261026(NEW.order_item_id);
+    ELSIF NEW.price_source = 'quoted' THEN
+      -- Priced from a quote with no order line to trace it (create_invoice_from_blend_ticket bills
+      -- a quote's price this way): the quote's tier cannot be recovered reliably, and the
+      -- customer's tier may not be the one that priced it, so the tier stays unknown (Codex App
+      -- P2, PR #1119).
+      NULL;
     ELSE
       SELECT c.assigned_tier::smallint INTO NEW.price_tier_at_sale
         FROM public.invoices i JOIN public.customers c ON c.id = i.customer_id

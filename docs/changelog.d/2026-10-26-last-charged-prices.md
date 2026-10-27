@@ -17,7 +17,9 @@ customer"; price history itself stays admin-only.
   - Every new order and invoice line now records the tier it was sold at (`price_tier_at_sale`), set
     by the database whichever screen writes the line. That includes the invoice editor's save, which
     re-adds lines and then restores their link to the order. Older lines show "Tier unknown" (not
-    guessed). $0 no-charge lines are not a "last charged" price.
+    guessed), and so does a quote-priced invoice line with no order line behind it (a blend-ticket
+    invoice billed at a quote price), because the quote's tier cannot be traced. $0 no-charge lines
+    are not a "last charged" price.
   - The split-billing fingerprint (`_split_invoice_content_claim`) ignores the new column, so split
     invoices already waiting keep posting.
   - No price, cost, quote, order or invoice value is touched. One-time effect: an invoice open on

@@ -454,6 +454,10 @@ const SCENARIOS = [
     // l5 predates the column and has no quote: its tier at sale is unknown, never today's tier (3).
     ['invoice line for an older, unquoted order line stays unknown', 'owner', NEW_IL('n5', 'ie', 'P3', 'l5'), NO_COLUMN, 'ok|-'],
     ['invoice line with no order line takes the invoice customer tier (3)', 'owner', NEW_IL('n6', 'i3', 'P6'), NO_COLUMN, 'ok|3'],
+    // A quote-priced line with no order line (how a blend-ticket invoice bills a quote price): the
+    // quote tier cannot be traced, so it stays unknown rather than claim the customer tier.
+    ['a quote-priced line with no order line stays unknown', 'owner', { stmt: `INSERT INTO public.invoice_items (id, invoice_id, product_id, description, unit_price_cents, quantity, extended_cents, price_source)
+  VALUES ('${iid('nq')}', '${iid('i3')}', '${P.P6}', '[PROVER] P6 quoted', 6000, 1, 6000, 'quoted'); v := (SELECT COALESCE(price_tier_at_sale::text, '-') FROM public.invoice_items WHERE id = '${iid('nq')}');` }, NO_COLUMN, 'ok|-'],
     // The database always decides: a tier the writer sends (1, or an impossible 4) is replaced.
     ['a tier the writer sends is replaced by the real one (3)', 'owner', NEW_IL('n7', 'i3', 'P6', null, 1), NO_COLUMN, 'ok|3'],
     ['even an impossible sent tier is replaced (3)', 'owner', NEW_IL('n8', 'i3', 'P6', null, 4), NO_COLUMN, 'ok|3'],

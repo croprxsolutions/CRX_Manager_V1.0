@@ -714,12 +714,15 @@ export default function Products() {
       );
       return;
     }
+    // The database binds the key to this exact product list, so a filtered export and the full
+    // price sheet each keep their own key; a retry of the same list replays the same export.
+    const exportIntent = JSON.stringify(productIds);
     setWorkbookBusy(true);
     try {
       const pricingExport = await createPricingWorkbookExport({
         productIds,
         performedBy: profile.id,
-        idempotencyKey: exportPricingIdem.getKey(),
+        idempotencyKey: exportPricingIdem.getKeyFor(exportIntent),
       });
       const supplierEvidence = await getSupplierMarketEvidence(productIds);
       const blob = await generateProductPricingWorkbookWithSupplierEvidence(
@@ -732,7 +735,7 @@ export default function Products() {
       anchor.download = `crx-product-pricing-${new Date().toISOString().slice(0, 10)}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
-      exportPricingIdem.resetKey();
+      exportPricingIdem.resetKeyFor(exportIntent);
       toast('success', `Exported ${productIds.length} Product pricing row(s).`);
     } catch (error) {
       toast('error', sanitizeError(error));

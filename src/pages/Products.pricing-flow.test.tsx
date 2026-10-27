@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -96,25 +97,29 @@ vi.mock('../lib/productPricingWorkbook', () => ({
 }));
 
 vi.mock('../components/ui/EditableDataTable', () => ({
-  default: ({ data, onSave }: {
+  default: ({ data, onSave, filters }: {
     data: typeof product[];
     onSave: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
+    filters?: ReactNode;
   }) => (
-    <button
-      disabled={data.length === 0}
-      onClick={() => void onSave(new Map([[
-        data[0].id,
-        {
-          pricing_mode: 'margin_driven',
-          current_cost: '90071992547409.91',
-          tier1_margin_percent: '20',
-          tier2_margin_percent: '15',
-          tier3_margin_percent: '10',
-        },
-      ]]))}
-    >
-      Test inline pricing save
-    </button>
+    <>
+      {filters}
+      <button
+        disabled={data.length === 0}
+        onClick={() => void onSave(new Map([[
+          data[0].id,
+          {
+            pricing_mode: 'margin_driven',
+            current_cost: '90071992547409.91',
+            tier1_margin_percent: '20',
+            tier2_margin_percent: '15',
+            tier3_margin_percent: '10',
+          },
+        ]]))}
+      >
+        Test inline pricing save
+      </button>
+    </>
   ),
 }));
 
@@ -381,6 +386,34 @@ describe('Products governed inline pricing flow', () => {
     await waitFor(() => expect(mockExportPricing).toHaveBeenCalledWith(expect.objectContaining({
       productIds: [product.id],
     })));
+  });
+
+  it('gives each exported product list its own export key, and a retry of the same list the same key', async () => {
+    // The full price sheet is another list, so it gets its own key the same way; the one-row test
+    // ceiling keeps this to two one-product lists.
+    mockExportPricing.mockRejectedValue(new Error('stop after the request'));
+    const fungicideId = '55555555-5555-4555-8555-555555555555';
+    mockProducts.push({ ...product, id: fungicideId, product_name: 'Fungicide Product', category: 'Fungicide' });
+    render(<Products />);
+    const categoryFilter = await screen.findByLabelText('Filter by category');
+    const exportButton = screen.getByRole('button', { name: 'Pricing .xlsx' });
+    fireEvent.change(categoryFilter, { target: { value: 'Herbicide' } });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(mockExportPricing).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(mockExportPricing).toHaveBeenCalledTimes(2));
+    fireEvent.change(categoryFilter, { target: { value: 'Fungicide' } });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(mockExportPricing).toHaveBeenCalledTimes(3));
+
+    const [first, retry, other] = mockExportPricing.mock.calls.map(([args]) => args);
+    expect(first.productIds).toEqual([product.id]);
+    expect(retry.idempotencyKey).toBe(first.idempotencyKey);
+    expect(other.productIds).toEqual([fungicideId]);
+    expect(other.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 
   it('rejects an oversized pricing workbook before reading or parsing the file', async () => {

@@ -13,3 +13,4 @@ No database change. Admins only, like cost itself (cost fields come through `get
   pages and keeps the tab from a sales rep.
 - Checked in the running app on 2026-10-26: 594 of 595 active products over 90 days, 583 with no date.
 - The supplier-evidence rollout stays parked (`app_settings.supplier_cost_basis_enabled` stays false).
+- The To-Do row 0.7 update goes in the session's records PR, not here (every queued PR edits that file).

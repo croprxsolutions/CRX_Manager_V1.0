@@ -56,7 +56,8 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
      `croprxsolutions`.
    - Sentry: crop-rx-solutions.sentry.io → **Settings → Integrations → GitHub** → **Add Installation** →
      `croprxsolutions`. This is what links an error to the commit that likely caused it ("Suspect
-     Commit"); after step 4, add `croprxsolutions/CRX_Manager_V1.0` under that integration's repositories.
+     Commit"). After step 4, if you picked "Only select repositories": github.com/organizations/croprxsolutions
+     → **Settings → GitHub Apps** → Sentry → **Configure** → **Repository access** → add `CRX_Manager_V1.0`.
 4. **YOU: move the repo.** github.com/masonwells1/CRX_Manager_V1.0 → **Settings → General** → bottom of the
    page, **Transfer ownership** → choose `croprxsolutions` → type the repo name to confirm.
 5. **YOU: reconnect Vercel if needed.** Vercel → project → **Settings → Git**. It should show
@@ -70,8 +71,9 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
    - compare secrets, environments, rulesets, required checks and CodeQL against the baseline above;
    - open a small docs-only PR and watch every required check, including `Vercel`, go green on it;
    - after that PR merges, confirm Vercel deployed production from the new address, that Sentry's
-     GitHub integration lists `croprxsolutions/CRX_Manager_V1.0`, and that the next new Sentry error
-     from production shows a **Suspect Commit** (listing the repo alone does not prove the link works);
+     GitHub integration lists `croprxsolutions/CRX_Manager_V1.0`, and that the first Sentry error from
+     production after the move shows a **Suspect Commit** (listing the repo alone does not prove the link
+     works). Errors are rare, so this item may stay open for days; nothing else waits on it;
    - confirm Taha's access shows as **Read**.
 8. **AGENT: follow-up PR** that switches the remaining fixed references to the new address:
    `scripts/land-pr.mjs`, `scripts/daily-landing-summary.mjs` (default only; Actions already passes the

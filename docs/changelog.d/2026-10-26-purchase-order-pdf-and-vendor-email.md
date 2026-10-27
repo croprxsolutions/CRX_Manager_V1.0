@@ -28,7 +28,7 @@ confirmed, and what the app says the attached PDF prints (vendor, requested date
 product, quantity and unit cost) must be exactly the PO at that moment, so an out-of-date copy is refused.
 These checks run before the write-ahead log and again just before the provider call
 (`supabase/functions/_shared/purchaseOrderEmailGate.ts`). Migration
-`20261026090000_email_type_purchase_order.sql` adds the `purchase_order` value to `email_type` so the send
+`20261027070000_email_type_purchase_order.sql` adds the `purchase_order` value to `email_type` so the send
 is logged in `email_log`.
 
 **Not live until:** Mason approves deploying the `send-email` edge function (until then an Email PO Copy

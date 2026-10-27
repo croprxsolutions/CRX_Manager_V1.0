@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-27 5:05 AM Central (10:05 UTC) for the migration ledger only (row 987 `20261026090000`, PR #1114, not yet applied; read-only live check against
+**Last verified:** 2026-10-27 5:05 AM Central (10:05 UTC) for the migration ledger only (row 995 `20261027070000`, PR #1114, not yet applied; read-only live check against
 project `rhyzpcqhnizqbxphqdkr` right after the PR #1138 apply): 1067 rows / 1060 names, `max(version)` `20261027093945` =
 `20261027030000_customer_credit_exposure` (row 991, applied 09:39:45 UTC; PR #1138 merged as `b3da666ec`: a new read-only
 function that totals a customer's open invoices across every sales rep, for PR #1132's credit check; nothing calls it yet),

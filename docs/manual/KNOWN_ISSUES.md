@@ -8,7 +8,7 @@ Central (2026-10-27 02:05 UTC), for KI-01 and KI-73 only (row 11.4 part B, PR #1
 the field-table SELECT policies and the per-role visible-field counts were re-read live read-only (the ledger then
 had 1065 rows). PR #1114 (To-Do 0.15) re-read the `email_type` enum and
 `vendors` emails read-only on 2026-10-26 (10 values; 0 of 13 vendors with an email) for the KI-72 PO-email note;
-its row 987 `20261026090000` is not yet applied. The
+its row 995 `20261027070000` is not yet applied. The
 rest of the file was last verified 2026-10-25 against `main` at `c65b7b351` (code, migration files, merged PRs).
 The 2026-10-23 rewrite had no database access. The 2026-10-25 pass re-read live, read-only, at 10:52 PM Central:
 the migration ledger from `20261022000000` on (so the applied-live claims for `20261022090000`, `20261022101000`
@@ -503,7 +503,7 @@ pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record
 live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
 Mason's REAL-DATA-OK.
 
-Purchase order copy (To-Do 0.15, migration `20261026090000`, row 987): the PDF download works once merged,
+Purchase order copy (To-Do 0.15, migration `20261027070000`, row 995): the PDF download works once merged,
 but **Email PO Copy (to mason@croprxsolutions.com) stays off until Mason approves deploying the `send-email`
 edge function** (the live function answers "Unknown email_type: purchase_order").
 

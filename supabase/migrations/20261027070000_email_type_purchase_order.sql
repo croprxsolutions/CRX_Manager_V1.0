@@ -1,4 +1,4 @@
--- 20261026090000_email_type_purchase_order.sql
+-- 20261027070000_email_type_purchase_order.sql
 -- To-Do 0.15 (2026-10-26): a copy of a purchase order can be emailed as a PDF to
 -- the company ordering address (never to a vendor; Mason places orders through
 -- each supplier's portal).

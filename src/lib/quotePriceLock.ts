@@ -28,6 +28,11 @@ export type UnsentQuoteChange = null | 'unreadable' | 'customer' | 'prices';
 // Both sides are dollars with at most two decimals (a CHECK keeps quote prices at cent scale).
 const toCents = (dollars: number) => Math.round(dollars * 100);
 
+/** Whether two cent-scale dollar prices are the same number of cents. */
+export function samePrice(a: number, b: number): boolean {
+  return toCents(a) === toCents(b);
+}
+
 export function sentItemsOf(version: QuoteVersion | null): SentItem[] {
   return version ? version.snapshot_data.sections.flatMap((section) => section.items) : [];
 }
@@ -41,7 +46,7 @@ export function sentLineState(sentItems: SentItem[], line: PriceLockLine): SentL
   if (sentItemsCarryLineIds(sentItems)) {
     const sent = sentItems.find((item) => item.quote_item_id === line.id && item.product_id === line.product_id);
     if (!sent) return { kind: 'new' };
-    return toCents(sent.price_per_unit) === toCents(line.price_per_unit)
+    return samePrice(sent.price_per_unit, line.price_per_unit)
       ? null
       : { kind: 'price', sentCents: toCents(sent.price_per_unit) };
   }

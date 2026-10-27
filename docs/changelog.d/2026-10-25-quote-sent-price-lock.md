@@ -35,7 +35,9 @@ since V1", the banner says a re-send is needed, and "Rewind to V1" restores the 
 confirmed step. After each save the screen keeps each line at the price the database stored, and a "use
 today's price" choice applies once. The "changed since sent" warning matches lines by id, as the database
 does (`src/lib/quotePriceLock.ts`), including a line added and saved since the page loaded (its id comes from
-the save's reply). The emailed PDF shows the expiry that send stored, not one worked out from the creation date. Refusals show the server's plain-English instruction, on the quote and on
+the save's reply). The emailed PDF shows the expiry that send stored, not one worked out from the creation date. If a save
+stores a different price than the screen shows (the catalog changed after the page loaded), the screen asks
+for a reload, and sending, emailing and converting wait for it. Refusals show the server's plain-English instruction, on the quote and on
 the Quotes list. A tier or customer change no longer erases manual (negotiated) prices on any quote (plan
 section 7, finding 3).
 

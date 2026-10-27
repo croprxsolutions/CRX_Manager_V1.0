@@ -78,7 +78,7 @@ import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow, type UnreadableQuoteVersion } from '../lib/quoteVersionAdapter';
-import { resendRequiredMessage, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine } from '../lib/quotePriceLock';
+import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine } from '../lib/quotePriceLock';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
 import TransactionThread from '../components/ui/TransactionThread';
@@ -2161,6 +2161,7 @@ export default function QuoteBuilder() {
     const wantsTodaysPrice = (item: LocalItem): boolean => item.use_todays_price === true
       && !savedLineIdsRef.current.get(item._key)?.todayApplied;
     const sentLineProducts = new Map<string, { productId: string; price: number; todayChosen: boolean }>();
+    let repricedLines = 0;
     switchedLineKeysRef.current.clear();
 
     // Build sections JSON for the atomic RPC
@@ -2389,10 +2390,12 @@ export default function QuoteBuilder() {
           const sent = sentLineProducts.get(clientKey);
           if (!sent || typeof itemId !== 'string' || switchedLineKeysRef.current.has(clientKey)) continue;
           const storedPrice = storedPrices[clientKey];
+          const price = typeof storedPrice === 'number' && Number.isFinite(storedPrice) ? storedPrice : sent.price;
+          if (!samePrice(price, sent.price)) repricedLines += 1;
           savedLineIds.set(clientKey, {
             id: itemId,
             productId: sent.productId,
-            price: typeof storedPrice === 'number' && Number.isFinite(storedPrice) ? storedPrice : sent.price,
+            price,
             todayApplied: sent.todayChosen,
           });
         }
@@ -2403,6 +2406,15 @@ export default function QuoteBuilder() {
       // continue unless this tab can install the exact authoritative token.
       if (!installAuthoritativeQuoteRowVersion(result.row_version, 'saved')) {
         return null;
+      }
+      // The database priced a line from the catalog as it is now, which changed since this page
+      // loaded, so the lines and totals shown are not the saved ones. Sending, emailing and
+      // converting wait for a reload, so the customer never gets a price the quote does not hold.
+      if (repricedLines > 0) {
+        quoteVersionRecoveryRequiredRef.current = true;
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setStaleSaveOpen(true);
+        toast('warning', `The quote was saved, but ${repricedLines === 1 ? 'one line was' : `${repricedLines} lines were`} priced at today's catalog price, which changed since this page loaded. Reload the quote to see the saved prices before sending it.`);
       }
       // Advance the baseline snapshot ONLY when THIS tab saved its own split edit;
       // an untouched save keeps the old baseline (still shown in the editor) so a

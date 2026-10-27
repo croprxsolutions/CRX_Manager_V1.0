@@ -2985,6 +2985,26 @@ describe('QuoteBuilder', () => {
       expect(screen.queryByText(/Prices or lines changed after V1 was sent/)).not.toBeInTheDocument();
     });
 
+    it('asks for a reload when the database stored a different price than the screen shows', async () => {
+      const { quote } = configureLockedQuote();
+      // The catalog moved to 13.00 after the page loaded at 12.00: save_quote prices today's line at 13.
+      mockRpc.mockImplementation((name: string, args?: unknown) => {
+        if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+        const line = (args as { p_sections: Array<{ items: Array<{ client_key: string }> }> }).p_sections[0].items[0];
+        return Promise.resolve({ data: {
+          quote_id: quote.id, row_version: 8,
+          item_ids: { [line.client_key]: 'item-1' },
+          item_prices: { [line.client_key]: 13 },
+        }, error: null });
+      });
+      renderQuoteBuilder(quote.id);
+      fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
+      expect(await screen.findByRole('button', { name: 'Reload Quote' })).toBeInTheDocument();
+    });
+
     it('rewinds to the version last sent in one confirmed step', async () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);

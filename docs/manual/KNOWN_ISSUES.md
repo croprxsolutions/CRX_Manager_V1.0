@@ -3,7 +3,8 @@
 **Last verified: 2026-10-27 (America/Chicago)** for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
 `20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
-entries name); the migration ledger re-read at 12:05 AM Central by the PR #1138 session (1066 rows, newest `20261027044721`,
+entries name); the migration ledger re-read by the PR #1138 session at 5:05 AM Central after its apply (1067 rows, newest
+`20261027093945` = `20261027030000_customer_credit_exposure`, row 991) and at 12:05 AM Central (newest `20261027044721`,
 then `20261027020546` = part B, consistent with KI-01 and KI-73); 2026-10-26 for KI-01 and KI-73 (row 11.4 part B, checked 9:05 PM Central,
 PR #1103): after part B (`20261026050000`, ledger `20261027020546`) applied live, the `_can_see_field` body md5,
 the field-table SELECT policies and the per-role visible-field counts were re-read live read-only (the ledger then

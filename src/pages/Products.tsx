@@ -44,6 +44,14 @@ import {
 import { getSupplierMarketEvidence } from '../lib/supplierPricing';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import {
+  DEFAULT_STALE_COST_AGE_DAYS,
+  costAgeDays,
+  costAsOfDate,
+  formatCostAsOfCSV as fmtCostAsOfCSV,
+  isCostStale,
+} from '../lib/costFreshness';
+import { parseLocalDate } from '../lib/dateUtils';
+import {
   fetchMarginFloors,
   formatMarginFloorPercent,
   isMarginFloorRefusal,
@@ -249,6 +257,7 @@ export default function Products() {
     const priceCols = showCostMargin
       ? [
           { key: 'current_cost', header: 'Cost', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'cost_updated_date', header: 'Cost As Of', format: fmtCostAsOfCSV },
           { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
           { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
           { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
@@ -329,6 +338,7 @@ export default function Products() {
     const priceCols = includeCost
       ? [
           { key: 'current_cost', header: 'Cost', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'cost_updated_date', header: 'Cost As Of', format: fmtCostAsOfCSV },
           { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
           { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
           { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
@@ -813,6 +823,24 @@ export default function Products() {
                 {row.current_cost != null ? `$${Number(row.current_cost).toFixed(2)}` : '-'}
               </span>
             ),
+          } satisfies EditableColumn<Product>,
+          {
+            // When the cost last changed (To-Do 0.7); Reports > Operational > Stale Costs lists the old ones.
+            key: 'cost_updated_date',
+            header: 'Cost as of',
+            sortable: true,
+            render: (row: Product) => {
+              const asOf = costAsOfDate(row.cost_updated_date);
+              const stale = isCostStale(costAgeDays(asOf), DEFAULT_STALE_COST_AGE_DAYS);
+              return (
+                <span
+                  className={`text-sm ${stale ? 'text-amber-700' : 'text-secondary'}`}
+                  title={stale ? `No cost change in the last ${DEFAULT_STALE_COST_AGE_DAYS} days` : undefined}
+                >
+                  {asOf ? parseLocalDate(asOf).toLocaleDateString() : 'Unknown'}
+                </span>
+              );
+            },
           } satisfies EditableColumn<Product>,
           {
             key: MARGIN_FLOOR_FIELD,

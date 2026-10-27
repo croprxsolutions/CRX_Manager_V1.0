@@ -9,7 +9,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult, describePostInvoiceBlock } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
-import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { exportToCSV } from '../lib/csvExport';
@@ -22,6 +22,9 @@ import CustomerDrawer from '../components/customers/CustomerDrawer';
 import { hasPageAccess } from '../lib/pagePermissions';
 import type { Invoice, InvoiceStatus, InvoicePrintOptions } from '../types';
 import {
+  assertInvoiceLinesLoaded,
+  batchInvoicePrintToast,
+  buildBatchInvoicePdfData,
   generateBatchInvoicePdf,
   groupReturnCreditDisplayItems,
   mapInvoicePdfItem,
@@ -108,6 +111,7 @@ export default function Invoices() {
   // See the `selectedKey` derivation + useEffect below.
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>('');
   const [typeFilter, setTypeFilter] = useState('');
   const [quickDeliveryOnly, setQuickDeliveryOnly] = useState(false);
@@ -134,31 +138,48 @@ export default function Invoices() {
   const fetchInvoices = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
+    // A failed read (an error, or no list) clears the rows and shows "could not be loaded"
+    // with Try again: never "No invoices yet", $0 cards, or older rows whose Post / Void /
+    // Print / Delete still work (To-Do 10.5). Clearing the rows also drops any selection.
+    const failLoad = (err: unknown) => {
+      if (seq !== fetchSeq.current) return;
+      Sentry.captureException(err, { tags: { source: 'fetch', page: 'invoices' } });
+      toast('error', 'Failed to load invoices');
+      setInvoices([]);
+      setSelected(new Set());
+      setLoadError(true);
+      setLoading(false);
+    };
     // PR-07 follow-up: dropped salesman FK embed; resolve via profile_public_view.
     // Read every page: a single request is silently cut off at the server's row cap.
-    const { data, error } = await fetchAllRows((from, to) => supabase
-      .from(INVOICES_POSTABLE)
-      // invoice_post_version: posting refuses a row changed since this list loaded it.
-      .select(`${INVOICE_COLUMNS}, ${INVOICE_POST_VERSION_COLUMNS}, customer:customers!invoices_customer_id_fkey(farm_name)`, { count: 'exact' })
-      .is('deleted_at', null)
-      // Segregation (Mason 2026-06-19): field-application invoices live in their
-      // own area (/field-invoices). This Chemical Sales list excludes them so a
-      // field invoice no longer shows in BOTH lists.
-      .neq('invoice_type', 'field_application')
-      // Open invoices (draft / unposted / posted / overdue) show from EVERY season, so a
-      // prior-season invoice still to post or collect never drops off at the Oct 1
-      // rollover; closed ones (paid / voided / cancelled) stay this-season only,
-      // windowed on created_at as before. See src/lib/invoiceSeasonWindow.ts.
-      .or(openOrInSeasonFilter('created_at'))
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(from, to));
+    let data: unknown[] | null;
+    let error: unknown;
+    try {
+      ({ data, error } = await fetchAllRows((from, to) => pageWithList(supabase
+        .from(INVOICES_POSTABLE)
+        // invoice_post_version: posting refuses a row changed since this list loaded it.
+        .select(`${INVOICE_COLUMNS}, ${INVOICE_POST_VERSION_COLUMNS}, customer:customers!invoices_customer_id_fkey(farm_name)`, { count: 'exact' })
+        .is('deleted_at', null)
+        // Segregation (Mason 2026-06-19): field-application invoices live in their
+        // own area (/field-invoices). This Chemical Sales list excludes them so a
+        // field invoice no longer shows in BOTH lists.
+        .neq('invoice_type', 'field_application')
+        // Open invoices (draft / unposted / posted / overdue) show from EVERY season, so a
+        // prior-season invoice still to post or collect never drops off at the Oct 1
+        // rollover; closed ones (paid / voided / cancelled) stay this-season only,
+        // windowed on created_at as before. See src/lib/invoiceSeasonWindow.ts.
+        .or(openOrInSeasonFilter('created_at'))
+        .order('created_at', { ascending: false })
+        .order('id')
+        .range(from, to))));
+    } catch (err: unknown) {
+      failLoad(err);
+      return;
+    }
     if (seq !== fetchSeq.current) return;
 
-    if (error) {
-      Sentry.captureException(error, { tags: { source: 'fetch', page: 'invoices' } });
-      toast('error', 'Failed to load invoices');
-      setLoading(false);
+    if (error || !data) {
+      failLoad(error ?? new Error('The invoice list read returned no list'));
       return;
     }
 
@@ -168,15 +189,19 @@ export default function Invoices() {
         .filter(Boolean) as string[]
     )];
     const salesmanMap: Record<string, string> = {};
-    // A failed label lookup keeps the list but must not fail silently.
+    // A failed label lookup keeps the list but must not fail silently. One that throws
+    // counts as failed too, so it can never leave the list on its skeleton.
     let labelLookupError: { message: string } | null = null;
+    const lookup = <T,>(read: Promise<{ data: T[] | null; error: { message: string } | null }>) =>
+      read.catch((err: unknown) => ({ data: null, error: { message: err instanceof Error ? err.message : String(err) } }));
     if (salesmanIds.length > 0) {
-      const { data: salesmen, error: salesmenError } = await fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => supabase
+      // pageWithList: a page with no list is a failed lookup (named below), not "no names".
+      const { data: salesmen, error: salesmenError } = await lookup(fetchAllRowsForIds(salesmanIds, (idChunk, from, to) => pageWithList(supabase
         .from('profile_public_view')
         .select('id, full_name', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
-        .range(from, to));
+        .range(from, to))));
       if (salesmenError) labelLookupError = salesmenError;
       ((salesmen || []) as { id: string; full_name: string }[]).forEach((s) => { salesmanMap[s.id] = s.full_name; });
     }
@@ -187,12 +212,12 @@ export default function Invoices() {
     )];
     const orderMap: Record<string, string> = {};
     if (orderIds.length > 0) {
-      const { data: ords, error: ordersLookupError } = await fetchAllRowsForIds(orderIds, (idChunk, from, to) => supabase
+      const { data: ords, error: ordersLookupError } = await lookup(fetchAllRowsForIds(orderIds, (idChunk, from, to) => pageWithList(supabase
         .from('orders')
         .select('id, order_number', { count: 'exact' })
         .in('id', idChunk)
         .order('id')
-        .range(from, to));
+        .range(from, to))));
       if (ordersLookupError) labelLookupError ??= ordersLookupError;
       ((ords || []) as { id: string; order_number: string }[]).forEach((o) => { orderMap[o.id] = o.order_number; });
     }
@@ -203,12 +228,15 @@ export default function Invoices() {
       salesman_name: inv.salesman_id ? salesmanMap[inv.salesman_id] || null : null,
       order_number: inv.order_id ? orderMap[inv.order_id] || null : null,
     })) as unknown as InvoiceRow[];
+    // Checked again after the label lookups: a newer load (or a newer failure) that started
+    // while they ran wins, so these older rows never come back.
     if (seq !== fetchSeq.current) return;
     if (labelLookupError) {
       Sentry.captureException(labelLookupError, { tags: { source: 'fetch', page: 'invoices', action: 'load_invoice_labels' } });
       toast('error', 'Some salesperson or order labels could not be loaded.');
     }
     setInvoices(rows);
+    setLoadError(false);
     setLoading(false);
   }, [toast]);
 
@@ -398,10 +426,9 @@ export default function Invoices() {
     setShowBatchPrintDialog(false);
     await runCriticalAction({
       action: async () => {
-        // Fetch full data for each selected invoice
-        const pdfDataList: InvoicePdfData[] = [];
-
-        for (const inv of selectedInvoices) {
+        // Fetch full data for each selected invoice. An invoice whose lines could not be
+        // read is skipped and named; the rest still print.
+        const { list: pdfDataList, skipped } = await buildBatchInvoicePdfData(selectedInvoices, async (inv) => {
           // Fetch customer details
           const { data: cust, error: custError } = await supabase
             .from('customers')
@@ -413,11 +440,13 @@ export default function Invoices() {
           }
 
           // Fetch items with product details
-          const { data: items } = await supabase
+          const { data: items, error: itemsError } = await supabase
             .from('invoice_items')
             .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
             .eq('invoice_id', inv.id)
             .order('sort_order');
+          // Checked against the same total the PDF prints (total_amount_cents below).
+          assertInvoiceLinesLoaded(itemsError, items, inv.total_amount_cents || 0);
 
           // Fetch shares
           const { data: shares } = await supabase
@@ -464,17 +493,18 @@ export default function Invoices() {
             balance_cents: inv.balance_cents || 0,
             options,
           };
-          pdfDataList.push(pdfData);
-        }
+          return pdfData;
+        });
 
         if (pdfDataList.length === 0) {
           throw new Error('No invoices to print');
         }
 
-        await generateBatchInvoicePdf(pdfDataList);
+        const { failures } = await generateBatchInvoicePdf(pdfDataList);
+        const done = batchInvoicePrintToast(pdfDataList.length - failures.length, skipped, failures);
+        toast(done.type, done.message);
       },
       toast,
-      successMessage: `Printed invoice(s) to PDF`,
       setLoading: setPrinting,
       sentryTag: 'batch_print_invoices',
     });
@@ -833,7 +863,7 @@ export default function Invoices() {
               </div>
               <span className="text-sm text-secondary">Unposted</span>
             </div>
-            <p className="text-2xl font-semibold font-heading text-amber-600">{unpostedCount}</p>
+            <p className="text-2xl font-semibold font-heading text-amber-600">{loadError ? '—' : unpostedCount}</p>
             <p className="text-xs text-secondary mt-1">invoices awaiting review</p>
           </Card>
         </button>
@@ -844,9 +874,9 @@ export default function Invoices() {
             </div>
             <span className="text-sm text-secondary">Posted Total</span>
           </div>
-          <p className="text-2xl font-semibold font-heading text-crx-green">{fmt(postedTotal)}</p>
+          <p className="text-2xl font-semibold font-heading text-crx-green">{loadError ? '—' : fmt(postedTotal)}</p>
           <p className="text-xs text-secondary mt-1">
-            {postedLikeInvoices.length} posted invoices (including overdue)
+            {loadError ? 'Could not be loaded' : `${postedLikeInvoices.length} posted invoices (including overdue)`}
           </p>
         </Card>
         <Card>
@@ -856,7 +886,7 @@ export default function Invoices() {
             </div>
             <span className="text-sm text-secondary">Outstanding</span>
           </div>
-          <p className="text-2xl font-semibold font-heading text-red-600">{fmt(outstandingBalance)}</p>
+          <p className="text-2xl font-semibold font-heading text-red-600">{loadError ? '—' : fmt(outstandingBalance)}</p>
           <p className="text-xs text-secondary mt-1">unpaid balance on posted and overdue invoices</p>
         </Card>
         <p className="sm:col-span-3 text-xs text-secondary">
@@ -885,6 +915,8 @@ export default function Invoices() {
               </Button>
             }
             loading={loading}
+            loadError={loadError}
+            onRetry={() => { void fetchInvoices(); }}
             filters={
               <div className="flex gap-2 items-center">
                 <select

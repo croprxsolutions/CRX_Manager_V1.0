@@ -15,6 +15,8 @@ import ConfirmModal from '../ui/ConfirmModal';
 import MobileCardList from '../ui/MobileCardList';
 import {
   buildInvoicePdfDataFromRow,
+  buildBatchInvoicePdfData,
+  batchInvoicePrintToast,
   generateBatchInvoicePdf,
   generateInvoicePdf,
   downloadInvoicePdf,
@@ -28,7 +30,8 @@ import { isCurrentSeason, openOrInSeasonFilter } from '../../lib/invoiceSeasonWi
 import { computeSeason, seasonStartDate } from '../../utils/season';
 import SeasonTag from '../invoices/SeasonTag';
 import { SkeletonTable } from '../ui/Skeleton';
-import { fetchAllRows, fetchAllRowsForIds } from '../../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../../lib/pagedRead';
+import { LoadFailedState } from '../ui/EmptyState';
 import {
   mapFieldInvoiceRow,
   applyFieldInvoiceFilters,
@@ -123,7 +126,8 @@ export default function FieldInvoicesPostedPanel() {
     // (date_trunc('month', invoice_date)) key off. See src/lib/invoiceSeasonWindow.ts.
     // Read every page: a single request is silently cut off at the server's row cap.
     // The embedded lists are sorted too, so the confirming read compares like with like.
-    const { data, error } = await fetchAllRows((from, to) => supabase
+    // pageWithList: a page with no list (or not a list) fails the read, not "No posted invoices".
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('invoices')
       .select(LIST_SELECT, { count: 'exact' })
       .eq('invoice_type', 'field_application')
@@ -134,10 +138,12 @@ export default function FieldInvoicesPostedPanel() {
       .order('id')
       .order('id', { referencedTable: 'field_app_locations' })
       .order('id', { referencedTable: 'invoice_items' })
-      .range(from, to));
+      .range(from, to)))
+      // A read that throws fails the same way, never leaving the skeleton up for good.
+      .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
     if (seq !== fetchSeq.current) return;
 
-    if (error) {
+    if (error || !data) {
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'field-invoices-posted' } });
       toast('error', 'Failed to load posted field invoices');
       fail();
@@ -156,12 +162,13 @@ export default function FieldInvoicesPostedPanel() {
     )];
 
     if (groupIds.length > 0) {
-      const { data: groupLocs, error: groupErr } = await fetchAllRowsForIds(groupIds, (idChunk, from, to) => supabase
+      const { data: groupLocs, error: groupErr } = await fetchAllRowsForIds(groupIds, (idChunk, from, to) => pageWithList(supabase
         .from('field_app_locations')
         .select('id, invoice_group_id, applied_acres, crop_type, field:fields!field_app_locations_field_id_fkey(field_name, crop_type)', { count: 'exact' })
         .in('invoice_group_id', idChunk)
         .order('id')
-        .range(from, to));
+        .range(from, to)))
+        .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
       if (seq !== fetchSeq.current) return;
 
       if (groupErr) {
@@ -351,15 +358,15 @@ export default function FieldInvoicesPostedPanel() {
     if (visible.length === 0) { toast('error', 'No invoices to print'); return; }
     await runCriticalAction({
       action: async () => {
-        const list = await Promise.all(
-          visible.map((row) => buildInvoicePdfDataFromRow(toPdfRow(row), {
-            show_shares: true, show_price_per_acre: true, show_epa_registration: true, format,
-          }))
-        );
-        await generateBatchInvoicePdf(list);
+        // An invoice whose lines could not be read is skipped and named; the rest still print.
+        const { list, skipped } = await buildBatchInvoicePdfData(visible, (row) => buildInvoicePdfDataFromRow(toPdfRow(row), {
+          show_shares: true, show_price_per_acre: true, show_epa_registration: true, format,
+        }));
+        const { failures } = await generateBatchInvoicePdf(list);
+        const done = batchInvoicePrintToast(list.length - failures.length, skipped, failures);
+        toast(done.type, done.message);
       },
       toast,
-      successMessage: `Printed ${visible.length} invoice(s)`,
       setLoading: setBusy,
       sentryTag: format === 'legacy' ? 'field_invoice_posted_old_print_all' : 'field_invoice_posted_print_all',
     });
@@ -518,7 +525,7 @@ export default function FieldInvoicesPostedPanel() {
       <div className="min-w-0 space-y-4">
         <h2 className="text-xl font-semibold font-heading text-nav-dark">Posted Field Application Invoices</h2>
         <Card>
-          <p role="alert" className="text-center text-red-600 py-8 text-sm">Posted field invoices could not be loaded. Reload to try again.</p>
+          <LoadFailedState title="Posted field invoices could not be loaded" onRetry={() => { void fetchInvoices(); }} />
         </Card>
       </div>
     );

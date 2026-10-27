@@ -1,6 +1,6 @@
 -- ============================================================================
 -- SMOKE CHAIN (rolled back by design): get_last_charged_prices / price_tier_at_sale
--- (20261027045000_last_charged_prices.sql). Run after apply, as ONE statement.
+-- (20261027060000_last_charged_prices.sql). Run after apply, as ONE statement.
 --
 -- Auth probes (template smoke-auth-probe-template.sql):
 --   P1 no-auth      claims ''                      -> AUTH_REQUIRED

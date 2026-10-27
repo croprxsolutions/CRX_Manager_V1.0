@@ -1106,10 +1106,14 @@ BEGIN
   IF v_change_set.status NOT IN ('previewed', 'no_changes') OR v_change_set.expires_at <= now() THEN
     RAISE EXCEPTION 'CHANGE_SET_INVALID_OR_EXPIRED';
   END IF;
-  -- Every pricing row of a preview made under this file carries a source (the preview refuses one
-  -- without), so a row with none was previewed before this migration: it must be previewed again.
+  -- Every pricing row, and every info row that changes the per-acre rate, of a preview made under this
+  -- file carries a source (the preview refuses one without), so a row with none was previewed before
+  -- this migration: it must be previewed again.
   IF EXISTS (SELECT 1 FROM public.pricing_change_set_rows r
-             WHERE r.change_set_id = p_change_set_id AND r.price_source IS NULL) THEN
+             WHERE r.change_set_id = p_change_set_id AND r.price_source IS NULL)
+     OR EXISTS (SELECT 1 FROM public.product_info_change_set_rows i
+                WHERE i.change_set_id = p_change_set_id AND i.price_source IS NULL
+                  AND (i.changes ? 'rate_per_acre' OR i.changes ? 'rate_unit')) THEN
     RAISE EXCEPTION 'PRICING_SOURCE_REQUIRED: this preview was made before sources were required; preview it again';
   END IF;
 

@@ -18,6 +18,7 @@
  *   6. A floor raised after the approval with the same warning code (30% -> 40%) still refuses.
  *   7. A floor change that lands while apply runs (a test trigger, after the engine has locked the
  *      product) rolls the apply back.
+ *   8. A per-acre rate row with no source (a preview made before the migration) is refused at approval.
  *   Grants; preflight drift refusals; a second apply refused; MUTATIONS: the apply approval check
  *   removed lets an unacknowledged typo through; the second read removed lets scenario 7 apply.
  *
@@ -388,6 +389,17 @@ const SCENARIOS = [
     ['apply is rolled back by the second read', U.ADMIN, applyCs('s', 's3'), 'ok|applied', /^P0001\|PRICING_WARNINGS_CHANGED: a margin floor or an open sent quote changed while this change set was applying/],
     ['prices unchanged', 'owner', PRICES(B), 'ok|20.00/30.00/27.00/30.00', 'ok|20.00/30.00/28.00/-'],
     ['the floor change rolled back with it', 'owner', FLOOR(B), 'ok|0.1', 'ok|0.30'],
+  ] },
+  { name: '8. a rate change previewed before this migration (no source) must be previewed again', steps: [
+    ['preview A at $15.50', U.ADMIN, preview('v', [row(A, '10.00', '15.50', '14.00', '13.00', SOURCED)], 'v1'),
+      'ok|previewed|-|-', `ok|previewed|${A}=OPEN_SENT_QUOTE|-`],
+    // What an older preview's per-acre rate row looks like: it changes the rate and names no source.
+    ['the same preview also carries an unsourced rate row', 'owner', { stmt: `INSERT INTO public.product_info_change_set_rows
+        (change_set_id, product_id, expected_version, before_values, after_values, changes, output_fingerprint)
+        VALUES (${CS('v')}, '${A}', 1, '{"rate_per_acre": 30}', '{"rate_per_acre": 32}',
+                '{"rate_per_acre": {"before": 30, "after": 32}}', 'prover');
+      v := 'inserted';` }, 'ok|inserted', 'same'],
+    ['approval is refused', U.ADMIN, approve('v', [ack(A, ['OPEN_SENT_QUOTE'])], 'v2'), NO_APPROVE_FN, /^P0001\|PRICING_SOURCE_REQUIRED: this preview was made before sources were required/],
   ] },
 ];
 

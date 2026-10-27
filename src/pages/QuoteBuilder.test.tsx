@@ -3005,6 +3005,28 @@ describe('QuoteBuilder', () => {
       expect(await screen.findByRole('button', { name: 'Reload Quote' })).toBeInTheDocument();
     });
 
+    it('does not mark the quote presented when its save stored a different price than the preview showed', async () => {
+      const { quote } = configureLockedQuote();
+      mockRpc.mockImplementation((name: string, args?: unknown) => {
+        if (name !== 'save_quote') return Promise.resolve({ data: { version_number: 2, row_version: 9 }, error: null });
+        const line = (args as { p_sections: Array<{ items: Array<{ client_key: string }> }> }).p_sections[0].items[0];
+        return Promise.resolve({ data: {
+          quote_id: quote.id, row_version: 8,
+          item_ids: { [line.client_key]: 'item-1' },
+          item_prices: { [line.client_key]: 13 },
+        }, error: null });
+      });
+      vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:quote'), revokeObjectURL: vi.fn() });
+      renderQuoteBuilder(quote.id);
+      fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Mark as Presented' }));
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
+      expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything());
+      expect(mockRpc).not.toHaveBeenCalledWith('create_quote_version', expect.anything());
+    });
+
     it('rewinds to the version last sent in one confirmed step', async () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);

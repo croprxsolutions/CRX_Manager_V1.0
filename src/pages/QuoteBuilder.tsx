@@ -2407,15 +2407,6 @@ export default function QuoteBuilder() {
       if (!installAuthoritativeQuoteRowVersion(result.row_version, 'saved')) {
         return null;
       }
-      // The database priced a line from the catalog as it is now, which changed since this page
-      // loaded, so the lines and totals shown are not the saved ones. Sending, emailing and
-      // converting wait for a reload, so the customer never gets a price the quote does not hold.
-      if (repricedLines > 0) {
-        quoteVersionRecoveryRequiredRef.current = true;
-        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
-        setStaleSaveOpen(true);
-        toast('warning', `The quote was saved, but ${repricedLines === 1 ? 'one line was' : `${repricedLines} lines were`} priced at today's catalog price, which changed since this page loaded. Reload the quote to see the saved prices before sending it.`);
-      }
       // Advance the baseline snapshot ONLY when THIS tab saved its own split edit;
       // an untouched save keeps the old baseline (still shown in the editor) so a
       // later edit fail-closed-conflicts if another tab changed the split.
@@ -2429,6 +2420,17 @@ export default function QuoteBuilder() {
       if (!quoteId || !isEditing) {
         setQuoteId(savedQuoteId);
         setInstalledQuoteId(savedQuoteId);
+      }
+      // The database priced a line from the catalog as it is now, which changed since this page
+      // loaded, so the lines and totals shown are not the saved ones. The save stands, but no
+      // chained action (Mark Presented, email, convert) may continue from it: they get no id, and
+      // later attempts wait for a reload, so the customer never gets a price they were not shown.
+      if (repricedLines > 0) {
+        quoteVersionRecoveryRequiredRef.current = true;
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setStaleSaveOpen(true);
+        toast('warning', `The quote was saved, but ${repricedLines === 1 ? 'one line was' : `${repricedLines} lines were`} priced at today's catalog price, which changed since this page loaded. Reload the quote to see the saved prices before sending it.`);
+        return null;
       }
       return savedQuoteId;
     } catch (err: unknown) {

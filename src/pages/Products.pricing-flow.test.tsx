@@ -315,6 +315,28 @@ describe('Products governed inline pricing flow', () => {
     expect(keys[2]).not.toBe(keys[0]);
   });
 
+  it('retries an apply whose answer was lost with the same approval and apply keys', async () => {
+    // The first apply committed but its answer never arrived; the retry must replay both steps.
+    mockApplyPricing.mockRejectedValueOnce(new Error('network timeout'));
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test inline pricing save' }));
+    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
+    const apply = await screen.findByRole('button', { name: 'Apply approved changes' });
+    fireEvent.click(apply);
+    await waitFor(() => expect(mockApplyPricing).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply approved changes' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
+    await waitFor(() => expect(mockApplyPricing).toHaveBeenCalledTimes(2));
+
+    const approveKeys = mockApprovePricing.mock.calls.map(([args]) => (args as { idempotencyKey: string }).idempotencyKey);
+    const applyKeys = mockApplyPricing.mock.calls.map(([args]) => (args as { idempotencyKey: string }).idempotencyKey);
+    expect(approveKeys).toHaveLength(2);
+    expect(approveKeys[1]).toBe(approveKeys[0]);
+    expect(applyKeys[1]).toBe(applyKeys[0]);
+  });
+
   it('does not apply when the approval is refused, and says why', async () => {
     mockApprovePricing.mockRejectedValue(new Error('PRICING_WARNINGS_CHANGED: preview it again'));
     render(<Products />);

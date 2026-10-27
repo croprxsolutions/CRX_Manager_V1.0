@@ -738,13 +738,15 @@ export default function ProductDetail() {
         performedBy: profile.id,
         idempotencyKey: getApprovePricingKeyFor(approveIntent),
       });
-      resetApprovePricingKeyFor(approveIntent);
       const result = await applyProductPricingChangeSet({
         changeSetId: pricingPreview.change_set_id,
         requestFingerprint: pricingPreview.request_fingerprint,
         performedBy: profile.id,
         idempotencyKey: getApplyPricingKey(),
       });
+      // Both keys are kept until the apply is confirmed: if its answer is lost, a retry replays the
+      // approval (the database checks the key before refusing an applied change set) and then the apply.
+      resetApprovePricingKeyFor(approveIntent);
       resetApplyPricingKey();
       setPricingReloadRequired(true);
       setIsDirty(true);

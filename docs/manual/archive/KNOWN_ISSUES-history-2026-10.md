@@ -7011,3 +7011,18 @@ The original entry is "OPEN 2026-10-19 (MED; fix pending apply of `2026102207500
 migration was applied live 2026-10-23 12:39:30 UTC (7:39 AM Central) on Mason's in-chat `I approve` (history row
 973). A read-only live check at 12:48 UTC found `get_delivery_receipt_recipient` live (STABLE SECURITY DEFINER),
 and the live site's Deliveries, Delivery Detail and Field Stop bundles call it. Recorded by PR #1061.
+
+### FIXED 2026-10-27 — KI-15 profitability report source (PR #1134)
+
+### KI-15 — Reports > Profitability reads stored order profit, not the server report
+**MED · OPEN · money/UI · unassigned**
+`src/pages/Reports.tsx:299-375` computes margins in the browser from `orders.total_profit` / `order_items.profit`;
+the server report `get_profitability_report` (cost at time of sale) has no caller. Numbers can differ.
+
+Closure: PR #1134 merged as `cef4e3015`; current `src/pages/Reports.tsx` reads `get_profitability_report` for customer, product and month groups. No migration. The PR records a local-app read against real data, all three tabs and paging/failure tests. Bookkeeper approval and full staging acceptance remain To-Do 10.2. Removed from the active list by the 2026-10-27 shipment reconciliation.
+
+### Closed sub-items 2026-10-27 — KI-30 vendor names and categories
+
+Original scope: "Vendor-name merges, a 19-product category remap and ~20 junk-row deletes need his decisions (each changes history or deletes real rows)."
+
+PR #1100 and To-Do 0.12/0.16 record Mason's 2026-10-25 closure and that day's live read: no duplicate vendor names, all 595 active products categorized. Only the category/vendor sub-items are closed; junk-row deletion, EPA data and other cleanup remain in KI-30. Those counts are the earlier observation, not re-measured by this audit.

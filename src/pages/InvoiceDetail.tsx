@@ -212,6 +212,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Email invoice
   const [emailing, setEmailing] = useState(false);
+  const emailingRef = useRef(false);
 
   // Write-off modal + write-off list
   const [showWriteOff, setShowWriteOff] = useState(false);
@@ -1732,6 +1733,21 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('info', 'This $0 invoice is recorded and shown in the account summary, but is not emailed.');
       return;
     }
+    // Busy from the first click: a second click during the lookup would send a second email
+    // (each send carries its own idempotency key).
+    if (emailingRef.current) return;
+    emailingRef.current = true;
+    setEmailing(true);
+    try {
+      await sendInvoiceEmail();
+    } finally {
+      emailingRef.current = false;
+      setEmailing(false);
+    }
+  };
+
+  const sendInvoiceEmail = async () => {
+    if (!profile) return;
     // Read the billed customer by id: the picker list skips inactive customers and stops at 500,
     // so a customer missing from it would read as "no email on file".
     let custEmail: string | null = null;
@@ -1793,7 +1809,6 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       },
       toast,
       successMessage: `Invoice emailed to ${cust.email}`,
-      setLoading: setEmailing,
       sentryTag: 'email_invoice',
     });
   };

@@ -186,6 +186,7 @@ for (const command of [
   'Write-Output "Hello`n$env:USERNAME"',
   `NODE=node; "$NODE" scripts/report.mjs 'literal$USER'`,
   '"$CODEX" --version',
+  `"$NODE" scripts/report.mjs --pattern "*.md" --glob '?x'`,
   "node -e 'console.log(`$HOME ${process.env.USER}`)'",
   'x=$(echo "$HOME" "$USER")',
   "$result = Get-Content $path",
@@ -238,6 +239,10 @@ for (const command of [
   '("$A" "$B" "$C" 951 --admin)',
   '{ "$A" "$B" "$C" 951 --admin; }',
   '("$A" pr "$C")',
+  '"$GH" pr me?ge 951 --admin',
+  '"$GH" pr m*e 951',
+  '"$GH" pr [m]erge 951',
+  '"$GH" pr {merge,x} 951',
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

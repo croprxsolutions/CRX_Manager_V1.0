@@ -4324,6 +4324,9 @@ export function runtimeProgramRefused(command, gated) {
 // (`"$A" "$B" "$C" 951 --admin`, or the action pushed later by options) can be a
 // whole merge hidden in values set earlier (Sol on #1128; Mason, 2026-10-26:
 // "close it narrowly"). `"$NODE" x.mjs` and `"$CODEX" --version` keep passing.
+// The part of a word the shell expands patterns in: quoted spans and escaped
+// characters removed.
+const unquotedText = (word) => String(word).replace(/'[^']*'|"(?:[^"\\]|\\.)*"|\\./g, "");
 // Only text inside single quotes is literal; `''"$B"` still expands (Codex App on #1128).
 // A PowerShell splat (`@params`) passes a variable's values as arguments too.
 const isRuntimeWord = (word) => /[$`]|^@[A-Za-z_]/.test(String(word).replace(/'[^']*'/g, ""));
@@ -4406,6 +4409,9 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
       // other shape that can expand to several words are refused, as on main.
       if (!SAFE_RUNTIME_PROGRAM_RE.test(program)) return true;
       if (words.slice(start + 1).some((word) => isRuntimeWord(stripGrouping(word)))) return true;
+      // A filename pattern or brace list in an argument is filled in by the shell
+      // (`me?ge` can become `merge`), so it is refused here too (Sol on #1128).
+      if (words.slice(start + 1).some((word) => /[*?[{]/.test(unquotedText(stripGrouping(word))))) return true;
     }
   }
   return false;

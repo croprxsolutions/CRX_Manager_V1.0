@@ -203,6 +203,10 @@ for (const command of [
   '$A pr $C 951 --admin',
   '"$GH" pr "$ACTION" 951',
   '"$GH" --repo o/r --hostname github.com pr "$ACTION" 951 --admin',
+  'env "$A" "$B" "$C" 951 --admin',
+  'command "$A" "$B" "$C" 951 --admin',
+  'exec "$A" "$B" "$C" 951 --admin',
+  'env -i PATH=/usr/bin "$A" "$B" "$C" 951 --admin',
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

@@ -4319,10 +4319,11 @@ const isRuntimeWord = (word) => !String(word).startsWith("'") && /[$`]/.test(Str
 function runtimeArgumentsFollowRuntimeProgram(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
     const words = splitShellWordsRaw(segment);
-    let start = 0;
-    while (start < words.length && /^[A-Za-z_]\w*=/.test(String(words[start]))) start += 1;
-    if (start >= words.length || !isRuntimeWord(words[start])) continue;
-    if (words.slice(start + 1).some(isRuntimeWord)) return true;
+    // Every program position, so a wrapper (`env "$A" "$B"`, `command`, `exec`)
+    // does not hide the program it runs (Codex App on #1128).
+    for (const start of programCandidates(words)) {
+      if (isRuntimeWord(words[start]) && words.slice(start + 1).some(isRuntimeWord)) return true;
+    }
   }
   return false;
 }

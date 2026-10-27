@@ -37,6 +37,7 @@ import {
   ENFORCEMENT_SURFACE_PATH_RE,
   proofSearchDirs,
   proofValid,
+  proofValidForMerge,
   pullRequestReviewBlocked,
   pushContextIsAmbiguous,
   pushHiddenByShellComposition,
@@ -1026,9 +1027,9 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
     //
     // NOTE the three-dot semantics: `A...B` is merge-base(A,B)..B, so this only
     // genuinely diffs "against baseSha" when baseSha is an ancestor of headSha.
-    // The risky path enforces that ancestry below; without it a head that is
-    // BEHIND the real base produces the identical diff either way, and changes
-    // living only on the base stay invisible (Codex P1 #2, 2026-07-25).
+    // For a head BEHIND the real base it is the PR's own changes since the merge
+    // base; changes living only on the base stay out of it, which is the accepted
+    // risk of merging a behind head (Mason, 2026-10-26; proofValidForMerge below).
     changedFiles = runGit(["diff", "--name-only", `${baseSha}...${headSha}`], repoDir)
       .split(/\r?\n/)
       .map((file) => file.trim())
@@ -1053,34 +1054,6 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
 
   if (risky.length === 0 && !contentFlagged && !requireProof) return { blocked: false };
 
-  // A Sol proof is about to be demanded (the change is risky, or it is a PR
-  // merge under the autonomous-landing rule). That proof is
-  // only meaningful if the reviewed diff actually covers what will land on main.
-  // When the head does not contain GitHub's current base, the merge result also
-  // includes base-only commits that no review in this flow ever saw — and
-  // `write-codex-push-proof.mjs` hands Sol the same merge-base
-  // patch. Branch protection does not require up-to-date heads, so enforce it
-  // here for risky merges rather than assuming it.
-  if (authoritativeBaseSha) {
-    let headContainsBase = false;
-    try {
-      runGit(["merge-base", "--is-ancestor", baseSha, headSha], repoDir);
-      headContainsBase = true;
-    } catch {
-      headContainsBase = false;
-    }
-    if (!headContainsBase) {
-      return denied(
-        `CODEX PRODUCTION GATE: this pull request needs a Sol proof and its head ${headSha.slice(0, 12)} does not ` +
-        `contain the base it will merge onto (${baseSha.slice(0, 12)}), so the reviewed diff cannot cover ` +
-        `everything the merge lands (fail closed). Update the branch first — merge origin/main into it (or ` +
-        `rebase onto it) and push. After a plain merge of origin/main (not a rebase), ` +
-        `\`node scripts/write-codex-push-proof.mjs --carry-forward\` can keep an earlier clean Sol review of this ` +
-        `branch (it says when only the full review will do); after a rebase, re-run the full review.`
-      );
-    }
-  }
-
   const riskDescription = risky.length > 0
     ? `the main-bound diff changes ${risky.length} risky file(s): ${risky.slice(0, 6).join(", ")}${risky.length > 6 ? ", ..." : ""}`
     : contentFlagged
@@ -1097,11 +1070,27 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   } catch (error) {
     return proofRequirement(headSha, riskDescription, `Sol proof could not be parsed: ${error?.message || error}`, baseSha);
   }
-  if (!proofValid(proof, headSha, nowMs, baseSha)) {
+  // A PR merge may land a head that is behind main (Mason, 2026-10-26;
+  // proofValidForMerge): the proof's own base must be in the head and behind
+  // GitHub's base. A direct push to main keeps the exact-base binding.
+  const isAncestorLocally = (ancestor, descendant) => {
+    try {
+      runGit(["merge-base", "--is-ancestor", ancestor, descendant], repoDir);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const proven = authoritativeBaseSha
+    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
+    : proofValid(proof, headSha, nowMs, baseSha);
+  if (!proven) {
     return proofRequirement(
       headSha,
       riskDescription,
-      `Sol proof is stale, future-dated, bound to a different HEAD or to a base other than ${baseSha}, lacks the required gpt-6-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid.`,
+      authoritativeBaseSha
+        ? `Sol proof is stale, future-dated, bound to a different HEAD, bound to a base the head does not contain or that is not an ancestor of ${baseSha}, lacks the required gpt-6-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid. A head that does not contain main needs origin/main merged in before Sol can review it.`
+        : `Sol proof is stale, future-dated, bound to a different HEAD or to a base other than ${baseSha}, lacks the required gpt-6-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid.`,
       baseSha
     );
   }
@@ -1324,9 +1313,11 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
 //
 // Returns a denial verdict, or null when nothing blocks. Fails OPEN on any
 // error: see the header of codex-bot-review-lib.mjs for why this one predicate
-// does not fail closed like its neighbours here. The 5s budget is deliberately a
-// third of the hook's 15s so the notices below can still be written.
-const CODEX_ADVISORY_BUDGET_MS = 5_000;
+// does not fail closed like its neighbours here. The 7s budget stays under half
+// of the hook's 15s so the notices below can still be written; it rose from 5s
+// on 2026-10-26 because a minor-follow-up check (codex-bot-review-lib.mjs) adds
+// two or three GitHub reads. The hard-gate deadline still caps it.
+const CODEX_ADVISORY_BUDGET_MS = 7_000;
 
 // The hard gates' share of this hook (see createHardGateBudget). The timeout
 // mirrors this hook's entry in .codex/hooks.json and the per-call cap mirrors
@@ -1395,7 +1386,7 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
     return denied(coderabbitFindingsDenial("CODEX PRODUCTION GATE", request.selector, coderabbitOpen));
   }
   if (!coderabbitReview || coderabbitReview.status === "unreadable") {
-    return denied(coderabbitRequirementUnreadableDenial("CODEX PRODUCTION GATE", request.selector));
+    return denied(coderabbitRequirementUnreadableDenial("CODEX PRODUCTION GATE", request.selector, coderabbitReview?.why));
   }
   if (coderabbitReview.status === "missing") {
     // Mason's "skip coderabbit #<this PR>" in THIS session waives only the missing

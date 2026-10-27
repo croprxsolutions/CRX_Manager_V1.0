@@ -21,7 +21,7 @@ interface PricingSourceReasonModalProps {
 
 /**
  * Asks where a new price or cost came from and why, before a product-page or Products-list change is
- * previewed. The database refuses a price or cost change without both (20261026230000).
+ * previewed. The database refuses a price or cost change without both (20261027050000).
  */
 export default function PricingSourceReasonModal({
   open,

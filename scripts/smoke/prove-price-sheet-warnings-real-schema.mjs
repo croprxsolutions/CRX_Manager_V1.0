@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261026230000 candidate: the price sheet is safe to use (To-Do 0.1,
+ * Full-chain proof for the 20261027050000 candidate: the price sheet is safe to use (To-Do 0.1,
  * pricing plan slice 0). Builds the checked-in production schema baseline in a network-disabled
  * Supabase PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate
  * (the margin floors, 20261025210000, included), checks every md5 pin in the candidate's preflight,
@@ -39,7 +39,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261026230000_price_sheet_warnings_and_approval.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261027050000_price_sheet_warnings_and_approval.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

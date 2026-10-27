@@ -139,7 +139,7 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: unauthenticated apply expected AUTH_REQUIRED, got: %', SQLERRM;
     END IF;
   END;
-  -- approve_pricing_change_set (20261026230000) checks its key first, so each probe passes one.
+  -- approve_pricing_change_set (20261027050000) checks its key first, so each probe passes one.
   BEGIN
     PERFORM public.approve_pricing_change_set(gen_random_uuid(), 'x', '[]'::jsonb, NULL, NULL, 'smoke-approve-probe');
     RAISE EXCEPTION 'SMOKE_FAIL: unauthenticated approve was allowed';
@@ -260,7 +260,7 @@ BEGIN
      OR (v_preview->>'apply_allowed')::boolean IS DISTINCT FROM true THEN
     RAISE EXCEPTION 'SMOKE_FAIL: Product-page preview drifted: %', v_preview;
   END IF;
-  -- 20261026230000: an unapproved preview does not apply.
+  -- 20261027050000: an unapproved preview does not apply.
   BEGIN
     PERFORM public.apply_product_cost_basis_change_set(
       (v_preview->>'change_set_id')::uuid, v_preview->>'request_fingerprint',
@@ -432,7 +432,7 @@ BEGIN
 END;
 $smoke$;
 
--- A workbook approval also names the uploaded file (20261026230000).
+-- A workbook approval also names the uploaded file (20261027050000).
 INSERT INTO phase2_live_smoke(key, value)
 SELECT 'workbook-approve', public.approve_pricing_change_set(
   (p.value->>'change_set_id')::uuid,

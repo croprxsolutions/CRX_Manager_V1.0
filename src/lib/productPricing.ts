@@ -216,7 +216,7 @@ export interface PricingPreviewResult {
   pricing_change_count?: number;
   product_info_change_count?: number;
   rows: PricingPreviewRow[];
-  /** Products whose new cost or prices need an acknowledgement before apply (20261026230000). */
+  /** Products whose new cost or prices need an acknowledgement before apply (20261027050000). */
   warnings: PricingWarning[];
 }
 

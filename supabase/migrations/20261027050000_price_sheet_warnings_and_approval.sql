@@ -169,7 +169,7 @@ ALTER TABLE public.cost_history
   ADD COLUMN old_rate_unit text,
   ADD COLUMN new_rate_unit text;
 COMMENT ON COLUMN public.cost_history.price_source IS
-  'Where the new number came from (supplier, document, date), entered with the change (20261026230000). NULL for rows written before.';
+  'Where the new number came from (supplier, document, date), entered with the change (20261027050000). NULL for rows written before.';
 
 ALTER TABLE public.pricing_change_set_rows
   ADD COLUMN price_source text;
@@ -189,7 +189,7 @@ CREATE TABLE public.pricing_change_set_warnings (
   PRIMARY KEY (change_set_id, product_id)
 );
 COMMENT ON TABLE public.pricing_change_set_warnings IS
-  'The warnings a pricing preview showed, per product (20261026230000). Written once by preview_product_cost_basis_changes; RPC-only. No updated_at: rows never change.';
+  'The warnings a pricing preview showed, per product (20261027050000). Written once by preview_product_cost_basis_changes; RPC-only. No updated_at: rows never change.';
 ALTER TABLE public.pricing_change_set_warnings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY pricing_change_set_warnings_rpc_only ON public.pricing_change_set_warnings
   FOR ALL TO PUBLIC USING (false) WITH CHECK (false);
@@ -209,7 +209,7 @@ CREATE TABLE public.pricing_change_set_approvals (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE public.pricing_change_set_approvals IS
-  'Approval receipt for a pricing change set (20261026230000): who approved which preview, when, every warning acknowledged with its reason, and (workbook) the uploaded file''s name and SHA-256. Apply requires it. RPC-only.';
+  'Approval receipt for a pricing change set (20261027050000): who approved which preview, when, every warning acknowledged with its reason, and (workbook) the uploaded file''s name and SHA-256. Apply requires it. RPC-only.';
 ALTER TABLE public.pricing_change_set_approvals ENABLE ROW LEVEL SECURITY;
 CREATE POLICY pricing_change_set_approvals_rpc_only ON public.pricing_change_set_approvals
   FOR ALL TO PUBLIC USING (false) WITH CHECK (false);
@@ -1367,7 +1367,7 @@ BEGIN
   IF current_setting('crx.pricing_authorized', true) IS DISTINCT FROM 'phase1a' THEN
     -- Outside the governed path only the rate can change (require_governed_product_pricing refuses
     -- cost, margin and price writes): the product page's Save Changes edits it directly. Log that too,
-    -- since it moves the per-acre price (20261026230000); a migration with no signed-in user is skipped.
+    -- since it moves the per-acre price (20261027050000); a migration with no signed-in user is skipped.
     -- A blank and a NULL unit are the same unit, so picking the form's blank option logs nothing.
     IF (OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
         OR NULLIF(btrim(OLD.rate_unit), '') IS DISTINCT FROM NULLIF(btrim(NEW.rate_unit), ''))
@@ -1408,7 +1408,7 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_PRICING_HISTORY_CONTEXT_INVALID';
   END IF;
 
-  -- The row's own reason and source, recorded at preview (20261026230000); the session reason is
+  -- The row's own reason and source, recorded at preview (20261027050000); the session reason is
   -- the change set's fallback for rows written before then.
   SELECT r.change_reason, r.price_source INTO v_row_reason, v_price_source
   FROM public.pricing_change_set_rows r

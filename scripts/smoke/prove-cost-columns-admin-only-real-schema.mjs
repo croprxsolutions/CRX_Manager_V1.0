@@ -77,12 +77,16 @@ const LEDGER_ONLY = new Set([
 const LOCKED_TABLES = ['products', 'quotes', 'quote_items', 'quote_versions', 'orders', 'order_items', 'invoices', 'invoice_items', 'jobs', 'job_chemicals', 'blend_ticket_products', 'commissions'];
 // A parked file that grants or revokes on, or alters, a locked table would change what this proof sees.
 const TOUCHED = new RegExp(`(GRANT|REVOKE|ALTER\\s+TABLE)[^;]*\\b(public\\.)?(${LOCKED_TABLES.join('|')})\\b`, 'i');
-// Later files that alter a locked table and were checked against this proof. This proof replays only
-// up to its candidate, so a later file never runs here; each entry says why it leaves the lock intact.
+// Later files that match TOUCHED and were checked against this proof. This proof replays only up to
+// its candidate, so a later file never runs here; each entry says why it leaves the lock intact.
 const REVIEWED_LATER = new Set([
-  // Adds price_tier_at_sale (not a cost) to order_items and invoice_items with no grant to anon or
-  // authenticated; its own VERIFY and prove-last-charged-prices-real-schema.mjs check that.
+  // Adds price_tier_at_sale (not a cost) to order_items and invoice_items with only the read grants
+  // every non-cost column there has and no write grant; its own VERIFY and
+  // prove-last-charged-prices-real-schema.mjs check that. No cost column's grant changes.
   '20261026130000_last_charged_prices.sql',
+  // Alters cost_history (not a locked table); its FK clause names public.products, which is what
+  // matches. No grant on, and no column of, any locked table changes.
+  '20261026140000_product_price_history_starting_snapshot.sql',
 ]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"

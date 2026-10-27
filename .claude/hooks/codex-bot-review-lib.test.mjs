@@ -664,7 +664,7 @@ eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crSt
 // 4a8914672 (reviewed) and 52b05497b (skipped) on PR #1134.
 const crSuite = ({ appId = 347564, slug = "coderabbitai", name = "CodeRabbit", status = "COMPLETED", conclusion = "SUCCESS",
   summary = "Result: Success - Review completed\nRun ID: `6abde565-bfb5-4dc0-8f97-e8db549f6dad`" } = {}) =>
-  ({ nodes: [{ app: { databaseId: appId, slug }, checkRuns: { nodes: [{ name, status, conclusion, summary }] } }] });
+  ({ totalCount: 1, nodes: [{ app: { databaseId: appId, slug }, checkRuns: { totalCount: 1, nodes: [{ name, status, conclusion, summary }] } }] });
 const runCommit = (oid, suite, statuses = []) => ({ commit: { ...commit(oid, { statuses }).commit, checkSuites: suite } });
 ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit), "a CodeRabbit check run 'Review completed' counts with no commit status");
 eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(HEAD, crSuite())] })).status, "reviewed", "a check-run review of the head passes");
@@ -682,6 +682,25 @@ ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", su
 ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped" }),
   [crStatus("Review skipped: automatic reviews are disabled")]).commit), "neither signal completed: not reviewed");
 ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit), "an unreadable suite list is not a review");
+{
+  // Luna on #1125: suites and runs are read first-5 / first-10, so a cut-short list
+  // with no review in view is unknown, never "CodeRabbit never reviewed".
+  const skipped = () => crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped - Review skipped" });
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(OLD, skipped()), runCommit(HEAD, skipped())] })).priorReview, false,
+    "complete commits, suites and runs with no completed review: never reviewed");
+  const manySuites = skipped();
+  manySuites.totalCount = 6;
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(OLD, manySuites), runCommit(HEAD, skipped())] })).priorReview, undefined,
+    "an older commit with more CodeRabbit suites than were read is unknown");
+  const manyRuns = skipped();
+  manyRuns.nodes[0].checkRuns.totalCount = 11;
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(OLD, manyRuns), runCommit(HEAD, skipped())] })).priorReview, undefined,
+    "a suite with more CodeRabbit runs than were read is unknown");
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(OLD, { nodes: [] }), runCommit(HEAD, skipped())] })).priorReview, undefined,
+    "a suite list with no total is unknown");
+  ok(/checkSuites\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY) && /checkRuns\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY),
+    "the requirement read asks for the suite and run totals");
+}
 ok(CODERABBIT_REQUIREMENT_QUERY.includes("filterBy:{appId:347564}") && CODERABBIT_REQUIREMENT_QUERY.includes('checkName:"CodeRabbit"'),
   "the requirement read asks for CodeRabbit's own check runs");
 

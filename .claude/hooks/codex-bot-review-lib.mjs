@@ -450,7 +450,7 @@ query($owner:String!, $name:String!, $number:Int!) {
       commits(last:100) {
         totalCount
         nodes { commit { oid parents(first:2) { totalCount nodes { oid } } status { contexts { context state description creator { login } } }
-          checkSuites(first:5, filterBy:{appId:${CODERABBIT_APP_ID}}) { nodes { app { databaseId slug } checkRuns(first:10, filterBy:{checkName:"CodeRabbit"}) { nodes { name status conclusion summary } } } } } }
+          checkSuites(first:5, filterBy:{appId:${CODERABBIT_APP_ID}}) { totalCount nodes { app { databaseId slug } checkRuns(first:10, filterBy:{checkName:"CodeRabbit"}) { totalCount nodes { name status conclusion summary } } } } } }
       }
     }
   }
@@ -488,6 +488,17 @@ export function coderabbitCompletedCommit(commit) {
       && String(run?.status || "").trim().toUpperCase() === "COMPLETED"
       && String(run?.conclusion || "").trim().toUpperCase() === "SUCCESS"
       && /^Result: Success - Review completed\b/.test(String(run?.summary || "").trim())));
+}
+
+// Were all of CodeRabbit's check suites and runs on this commit read? The query
+// takes the first 5 and 10, so a longer list could hide a review: such a commit
+// can never prove "CodeRabbit never reviewed" (Luna, #1125). A commit read
+// without the field (a recording made before check runs) has only its status.
+function coderabbitRunsComplete(commit) {
+  const suites = commit?.checkSuites;
+  if (suites === undefined) return true;
+  const fits = (list) => Array.isArray(list?.nodes) && Number.isInteger(list?.totalCount) && list.totalCount <= list.nodes.length;
+  return fits(suites) && suites.nodes.every((suite) => fits(suite?.checkRuns));
 }
 
 // Returns { status, why, headOid, reviewedOid } where status is
@@ -549,7 +560,7 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   const commitTotal = pullRequest?.commits?.totalCount;
   let priorReview;
   if (list.some(coderabbitCompletedCommit)) priorReview = true;
-  else if (Number.isInteger(commitTotal) && commitTotal <= list.length) priorReview = false;
+  else if (Number.isInteger(commitTotal) && commitTotal <= list.length && list.every(coderabbitRunsComplete)) priorReview = false;
   return { status: "missing", why, headOid, reviewedOid: "", priorReview };
 }
 

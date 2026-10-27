@@ -6,3 +6,5 @@ also accept a completed SUCCESS check run from CodeRabbit's own app (id 347564) 
 starts "Result: Success - Review completed"; skipped runs never count. Sol's "CodeRabbit is
 reviewing" wait also sees an unfinished check run. Codex App P2: follow-up patches that contain
 CodeRabbit's agent-prompt marker are no longer cut short; only finding bodies drop that block.
+Luna: the check-run read is capped (5 suites, 10 runs per commit), so a cut-short list never
+counts as "CodeRabbit never reviewed".

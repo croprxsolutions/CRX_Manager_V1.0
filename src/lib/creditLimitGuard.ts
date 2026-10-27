@@ -33,9 +33,10 @@ async function creditExposure(customerId: string): Promise<{ limitCents: number 
   if (typeof exposureCents !== 'number' || !Number.isSafeInteger(exposureCents) || exposureCents < 0) {
     throw new Error('customer_credit_exposure returned no usable exposure.');
   }
-  // Null is "no limit" (the server returns a stored 0 or negative limit as null); anything else
-  // must be a positive whole-cent amount.
-  const limitCents = result.credit_limit_cents ?? null;
+  // Only an explicit null is "no limit" (the server returns a stored 0 or negative limit as null);
+  // a missing field is an answer nobody can trust. Anything else must be positive whole cents.
+  if (!('credit_limit_cents' in result)) throw new Error('customer_credit_exposure returned no credit limit field.');
+  const limitCents = result.credit_limit_cents;
   if (limitCents !== null && (typeof limitCents !== 'number' || !Number.isSafeInteger(limitCents) || limitCents <= 0)) {
     throw new Error('customer_credit_exposure returned a credit limit that is not whole cents.');
   }

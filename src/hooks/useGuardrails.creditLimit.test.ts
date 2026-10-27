@@ -169,7 +169,12 @@ describe('credit-limit check fails closed on every failed read', () => {
     });
   }
 
-  for (const limit of ['bad', Number.NaN, 1000.5, 0, -100]) {
+  it('an answer with no credit limit field is unverified, never "no limit" (Sol on #1132)', async () => {
+    H.exposure = { customer_id: 'c1', exposure_cents: 0 };
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });
+  });
+
+  for (const limit of ['bad', Number.NaN, 1000.5, 0, -100, undefined]) {
     it(`a credit limit of ${String(limit)} is unverified, never "no limit"`, async () => {
       H.exposure = { customer_id: 'c1', credit_limit_cents: limit, exposure_cents: 0 };
       expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });

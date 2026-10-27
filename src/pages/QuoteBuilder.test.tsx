@@ -3195,6 +3195,46 @@ describe('QuoteBuilder', () => {
     expect(savedLine.profit).toBe(12);
   });
 
+  it('prices a replacement row at today\'s cost, not the cost recorded for the row it replaced', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    // The product costs 8.00 today; row item-1 was quoted at 6.00.
+    const product = { ...fixture.product, current_cost: 8 };
+    const item = { ...fixture.item, product };
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes' ? fixture.quote
+        : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [item]
+            : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+              : table === 'products' ? [product]
+                : [],
+      error: null,
+    }));
+    // The save stores this line as a new row (as after switching its product away and back),
+    // which the server stamps at today's cost.
+    let saves = 0;
+    mockRpc.mockImplementation((name: string, args?: unknown) => {
+      if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+      const line = (args as { p_sections: Array<{ items: Array<{ client_key: string }> }> }).p_sections[0].items[0];
+      saves += 1;
+      return Promise.resolve({ data: { quote_id: fixture.quote.id, row_version: 7 + saves, item_ids: { [line.client_key]: 'item-9' } }, error: null });
+    });
+    type SaveArgs = { p_sections: Array<{ items: Array<{ id: string | null; current_cost: number }> }> };
+    const saveCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'save_quote').map(([, a]) => (a as SaveArgs).p_sections[0].items[0]);
+
+    renderQuoteBuilder(fixture.quote.id);
+    const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+    await waitFor(() => expect(units).toBeEnabled());
+    fireEvent.change(units, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft/ })).toBeEnabled());
+
+    fireEvent.change(units, { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(2));
+    expect(saveCalls()[1]).toMatchObject({ id: 'item-9', current_cost: 8 });
+  });
+
   it('locks the quote and the Cancel button while Convert checks for a recent order', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const quote = { ...fixture.quote, status: 'sent', created_at: new Date().toISOString() };

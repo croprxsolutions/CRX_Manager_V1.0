@@ -133,11 +133,12 @@ interface LocalItem {
   price_per_unit: number;
   price_override: number | null;
   current_cost: number;
-  // The cost save_quote recorded when this saved line was quoted (cost_at_quote_cents), and its
-  // product. The server keeps that cost while the line keeps its id and product, so the page
-  // prices the line from it instead of today's product cost; a new line or a line switched to
-  // another product takes today's cost, as the server stamps it. Absent for non-admins.
-  quoted_cost?: { productId: string; cost: number };
+  // The cost save_quote recorded when this saved line was quoted (cost_at_quote_cents), with the
+  // saved row and product it belongs to. The server keeps that cost while the line keeps that row
+  // and product, so the page prices the line from it instead of today's product cost; a new line,
+  // or one saved as a replacement row after a product switch, takes today's cost, as the server
+  // stamps it. Absent for non-admins.
+  quoted_cost?: { rowId: string; productId: string; cost: number };
   // "Use today's price" (20261027010000): once the quote has been sent, a saved line keeps its
   // stored price (savedLineIdsRef) unless it has a manual price or this asks for today's price.
   use_todays_price?: boolean;
@@ -234,6 +235,18 @@ function hasUserEnteredItemValues(item: LocalItem): boolean {
     || item.unit_size !== null
     || item.price_unit !== null
     || item.calc_mode !== 'rate_acres';
+}
+
+/** Whether a line still names the saved row (and product) its recorded quote-time cost belongs to. */
+function holdsQuotedCost(
+  item: LocalItem,
+  productId: string,
+  saved: { id: string; productId: string } | undefined,
+): item is LocalItem & { quoted_cost: NonNullable<LocalItem['quoted_cost']> } {
+  return item.quoted_cost != null
+    && item.quoted_cost.productId === productId
+    && saved?.productId === productId
+    && saved.id === item.quoted_cost.rowId;
 }
 
 function makeEmptySection(order: number): LocalSection {
@@ -1213,7 +1226,7 @@ export default function QuoteBuilder() {
             // Absent for non-admins; the server re-derives cost on save either way.
             current_cost: item.current_cost ?? 0,
             quoted_cost: item.current_cost != null
-              ? { productId: item.product_id, cost: item.current_cost }
+              ? { rowId: item.id, productId: item.product_id, cost: item.current_cost }
               : undefined,
             suggested_rate: item.suggested_rate,
             actual_rate: item.actual_rate,
@@ -1546,14 +1559,11 @@ export default function QuoteBuilder() {
   // The price and cost a line is figured at: a manual price, else its locked sent price, else
   // today's tier price; and its quote-time cost, else today's cost.
   const lineBasisFor = useCallback((item: LocalItem, product: Product, tierPrice: number) => {
-    // The saved row this line continues, by the test savedLineIdFor applies when saving. A line
-    // saved as another product since the load is a new row to the server.
-    const keepsSavedRow = savedLineIdsRef.current.get(item._key)?.productId === product.id;
     return {
       pricePerUnit: item.price_override ?? lockedPriceFor(item, product.id) ?? tierPrice,
-      // The recorded cost holds only while the line still names its saved row for this product:
-      // a line saved as another product since the load is stamped by the server at today's cost.
-      cost: item.quoted_cost?.productId === product.id && keepsSavedRow
+      // The recorded cost holds only while the line still names the saved row it was recorded for:
+      // a replacement row (saved after a product switch) is stamped by the server at today's cost.
+      cost: holdsQuotedCost(item, product.id, savedLineIdsRef.current.get(item._key))
         ? item.quoted_cost.cost
         : (product.current_cost || 0),
     };
@@ -5040,7 +5050,7 @@ export default function QuoteBuilder() {
                                   quotedCost={item.current_cost}
                                   // A line not yet quoted (new, or switched to another product)
                                   // already shows today's cost.
-                                  todayCost={item.quoted_cost?.productId === item.product_id
+                                  todayCost={holdsQuotedCost(item, item.product_id, savedLineIdByKey.get(item._key))
                                     ? prod?.current_cost ?? null
                                     : null}
                                   pricePerUnit={item.price_per_unit}

@@ -5,7 +5,8 @@ Screen only (`src/pages/QuoteBuilder.tsx`, new `src/components/quotes/QuoteLineC
 - **Quoted cost kept while editing (To-Do 1.3, pricing slice 1 remainder).** A saved line keeps the cost it
   was quoted at (`quote_items.cost_at_quote_cents`) through every recalculation, the same rule `save_quote`
   applies: the cost stays while the line keeps its id and product. A new line, or a line switched to another
-  product, takes today's product cost, as the server stamps it. Before, the first edit swapped in today's cost,
+  product, takes today's product cost, as the server stamps it. The kept cost is tied to the saved row it was
+  recorded for, so a line switched away and back, then saved as a replacement row, keeps today's cost. Before, the first edit swapped in today's cost,
   so profit and margin jumped on screen and in the payload. One known display gap: a new line added in place of
   a deleted saved line of the same product keeps the deleted line's cost on the server (its existing
   one-per-product fallback), while the screen shows today's cost until the quote is reloaded; the server's

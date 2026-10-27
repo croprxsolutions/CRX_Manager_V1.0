@@ -10,7 +10,7 @@
 --   4. Convert straight from 'sent': one order, quote accepted, the order line at the
 --      sent 7.50 (no save ran, so nothing re-priced it)
 --   5. the old screen path, save as 'accepted' first, no longer re-prices either: since
---      20261027010000 a sent quote keeps its line prices on every save (it re-priced to 8.75 before)
+--      20261027040000 a sent quote keeps its line prices on every save (it re-priced to 8.75 before)
 --   6. P repriced to cost 8.00, above the sent 7.50: Convert of a third sent quote is
 --      refused without a reason (BELOW_COST_REASON_REQUIRED), then converts with an
 --      admin's reason, keeps 7.50 and records the below-cost approval

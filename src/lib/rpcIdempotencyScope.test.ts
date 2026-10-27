@@ -267,7 +267,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // The private layers behind save_quote, create_quote_version and convert_quote_to_order.
   // 20260812115237 (and 20260813080000 for the version impl) created them by ALTER FUNCTION
   // ... RENAME TO, so their bodies kept the public operation literal and each layer shares its
-  // wrapper's receipt namespace. 20261027010000 (sent-price lock) re-emits the live bodies;
+  // wrapper's receipt namespace. 20261027040000 (sent-price lock) re-emits the live bodies;
   // changing the literal would orphan existing receipts.
   _save_quote_below_cost_impl_20260810: ['save_quote'],
   _create_quote_version_owner_impl: ['create_quote_version'],

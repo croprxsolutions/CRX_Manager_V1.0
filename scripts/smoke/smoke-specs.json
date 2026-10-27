@@ -767,7 +767,7 @@
     },
     "convert_sent_quote_in_one_step": {
       "chain": "smoke-convert-sent-quote-in-one-step.sql",
-      "description": "KI-12 / To-Do 1.3: QuoteBuilder converts a sent quote without saving it as accepted first. Convert straight from 'sent' creates exactly one order at the sent price after a reprice and marks the quote accepted in the same call; the old save-as-accepted-first path also keeps the sent price (sent-price lock, 20261027010000); a cost rise above the sent price is refused without a reason (BELOW_COST_REASON_REQUIRED, quote stays sent) and converts with an admin's reason at the sent price, recording a below-cost approval. Terminal rollback.",
+      "description": "KI-12 / To-Do 1.3: QuoteBuilder converts a sent quote without saving it as accepted first. Convert straight from 'sent' creates exactly one order at the sent price after a reprice and marks the quote accepted in the same call; the old save-as-accepted-first path also keeps the sent price (sent-price lock, 20261027040000); a cost rise above the sent price is refused without a reason (BELOW_COST_REASON_REQUIRED, quote stays sent) and converts with an admin's reason at the sent price, recording a below-cost approval. Terminal rollback.",
       "covers": [
         "convert_quote_to_order",
         "save_quote",
@@ -779,7 +779,7 @@
     },
     "quote_sent_price_lock": {
       "chain": "smoke-quote-sent-price-lock.sql",
-      "description": "To-Do 1.2 / migration 20261027010000: a sent quote keeps the prices the customer saw. After a reprice: a quantity-only revision keeps the sent price and expiry and converts at it; re-presenting keeps the price; use_todays_price takes today's price and Convert, Partial Order and an accepted save are refused QUOTE_RESEND_REQUIRED until the re-send (which sets a new expiry), then it converts at the new price; a manual price is refused, rewind restores the sent line id and price and converts; an added line and a changed customer are refused; an unchanged booking draws at the sent price; a revised planned booking cannot schedule a job while a never-sent planned draft can; versions without line ids pair by product (refused with a repeated product); an untrusted last version is refused; a never-sent draft still follows the catalog. Terminal rollback.",
+      "description": "To-Do 1.2 / migration 20261027040000: a sent quote keeps the prices the customer saw. After a reprice: a quantity-only revision keeps the sent price and expiry and converts at it; re-presenting keeps the price; use_todays_price takes today's price and Convert, Partial Order and an accepted save are refused QUOTE_RESEND_REQUIRED until the re-send (which sets a new expiry), then it converts at the new price; a manual price is refused, rewind restores the sent line id and price and converts; an added line and a changed customer are refused; an unchanged booking draws at the sent price; a revised planned booking cannot schedule a job while a never-sent planned draft can; versions without line ids pair by product (refused with a repeated product); an untrusted last version is refused; a never-sent draft still follows the catalog. Terminal rollback.",
       "covers": [
         "save_quote",
         "create_quote_version",

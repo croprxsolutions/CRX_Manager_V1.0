@@ -1,11 +1,11 @@
-## 2026-10-25 — A sent quote keeps the prices the customer saw (To-Do 1.2; migration 20261027010000, not applied)
+## 2026-10-25 — A sent quote keeps the prices the customer saw (To-Do 1.2; migration 20261027040000, not applied)
 
 Mason's decisions of 2026-10-13/14 (pricing plan slice 2,
 `docs/plans/2026-10-13-pricing-history-cost-tracking-and-quote-pricing-PLAN.md`). Before this, every
 `save_quote` re-priced each line without a manual price to today's tier price, so a price change between
 send and accept reached the order.
 
-**Database (`supabase/migrations/20261027010000_quote_sent_price_lock.sql`, not applied yet):**
+**Database (`supabase/migrations/20261027040000_quote_sent_price_lock.sql`, not applied yet):**
 - New `_assert_quote_prices_as_sent(uuid)` (invoker rights, executable by no API role). The version last sent
   to the customer is the price authority: it refuses with `QUOTE_RESEND_REQUIRED` when the customer changed or
   a line is not a sent line for the same product at the same price. A quote never sent passes (a draft keeps

@@ -353,7 +353,7 @@ function makeQuoteFixture(status: 'draft' | 'sent' | 'accepted' = 'draft', rowVe
     is_planned: false,
     commission_split: { splits: [] },
     created_at: RECENT_QUOTE_CREATED_AT,
-    // The expiry a send stores; the emailed PDF shows it (20261027010000).
+    // The expiry a send stores; the emailed PDF shows it (20261027040000).
     expires_at: '2026-11-25',
     ...(rowVersion === undefined ? {} : { row_version: rowVersion }),
   };

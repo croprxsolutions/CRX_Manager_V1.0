@@ -2,7 +2,7 @@
 
 **Last verified: 2026-10-27 (America/Chicago)** for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
-`20261027010000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
+`20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
 entries name); 2026-10-26 for KI-01 and KI-73 (row 11.4 part B, checked 9:05 PM Central,
 PR #1103): after part B (`20261026050000`, ledger `20261027020546`) applied live, the `_can_see_field` body md5,
 the field-table SELECT policies and the per-role visible-field counts were re-read live read-only (the ledger then
@@ -279,7 +279,7 @@ could slip past a close. No month is closed live (older record's claim), so it i
 
 ### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
 **MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · unassigned**
-The sent-price lock (`20261027010000`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
+The sent-price lock (`20261027040000`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
 orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
 2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
 `_blend_quote_pick_valid_20261020`, or the first line of the job's quote section) and the field-application

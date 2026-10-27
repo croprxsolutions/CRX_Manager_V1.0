@@ -10,9 +10,10 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const H = vi.hoisted(() => ({
-  auth: { role: 'admin' as 'admin' | 'sales_rep' },
+  auth: { role: 'admin' as 'admin' | 'sales_rep' | null },
   rpcCalls: [] as string[],
   captureException: vi.fn(),
+  toast: vi.fn(),
 }));
 
 vi.mock('../lib/db', () => {
@@ -34,7 +35,8 @@ vi.mock('../lib/db', () => {
   };
 });
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => H.auth }));
-vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+// A stable toast, like the real provider's, so the load callback is recreated only by its real deps.
+vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: H.captureException } }));
 vi.mock('../components/dashboard/ActionQueue', () => ({ default: () => null }));
 vi.mock('../components/dashboard/DailyBrief', () => ({ default: () => null }));
@@ -67,5 +69,16 @@ describe('Dashboard remainder reminders', () => {
     H.auth.role = 'admin';
     await load();
     expect(H.rpcCalls).toContain('check_remainder_reminders');
+  });
+
+  it('runs the reminder check once the role resolves to admin after loading', async () => {
+    H.auth.role = null;
+    const { rerender } = render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(H.rpcCalls).toContain('release_expired_quote_holds'));
+    expect(H.rpcCalls).not.toContain('check_remainder_reminders');
+
+    H.auth.role = 'admin';
+    rerender(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(H.rpcCalls).toContain('check_remainder_reminders'));
   });
 });

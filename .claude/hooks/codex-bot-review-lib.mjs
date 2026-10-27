@@ -443,6 +443,8 @@ export const CODERABBIT_REQUIREMENT_QUERY = `
 query($owner:String!, $name:String!, $number:Int!) {
   repository(owner:$owner, name:$name) {
     pullRequest(number:$number) {
+      number
+      baseRepository { nameWithOwner }
       headRefOid
       baseRefOid
       labels(first:100) { totalCount nodes { name } }
@@ -467,9 +469,21 @@ export function coderabbitRequirementArgs(owner, name, number) {
   ];
 }
 
+// The pull-request link CodeRabbit puts in its check-run summary, e.g.
+// "(https://app.coderabbit.ai/change-stack/<owner>/<repo>/pull/1134?scope=…)".
+// A check run belongs to a commit, not a PR, so two PRs sharing a head would
+// share it; this link names the PR it reviewed (Sol on #1125).
+export function coderabbitRunReviewedPr(summary, pullRequest) {
+  const number = pullRequest?.number;
+  const repo = String(pullRequest?.baseRepository?.nameWithOwner || "").trim().toLowerCase();
+  if (!Number.isInteger(number) || number <= 0 || !/^[^/\s]+\/[^/\s]+$/.test(repo)) return false;
+  const links = String(summary || "").matchAll(/\(https:\/\/app\.coderabbit\.ai\/change-stack\/([^/\s)]+)\/([^/\s)]+)\/pull\/(\d+)(?=[?#)])/gi);
+  return [...links].some((m) => `${m[1]}/${m[2]}`.toLowerCase() === repo && Number(m[3]) === number);
+}
+
 // Did CodeRabbit itself mark this commit "Review completed", by commit status
-// or by a check run in its own app's suite?
-export function coderabbitCompletedCommit(commit) {
+// or by a check run in its own app's suite that names this pull request?
+export function coderabbitCompletedCommit(commit, pullRequest = null) {
   const contexts = commit?.status?.contexts;
   const byStatus = Array.isArray(contexts) && contexts.some((context) =>
     String(context?.context || "").trim().toLowerCase() === "coderabbit"
@@ -487,7 +501,8 @@ export function coderabbitCompletedCommit(commit) {
       String(run?.name || "").trim() === "CodeRabbit"
       && String(run?.status || "").trim().toUpperCase() === "COMPLETED"
       && String(run?.conclusion || "").trim().toUpperCase() === "SUCCESS"
-      && /^Result: Success - Review completed\b/.test(String(run?.summary || "").trim())));
+      && /^Result: Success - Review completed\b/.test(String(run?.summary || "").trim())
+      && coderabbitRunReviewedPr(run?.summary, pullRequest)));
 }
 
 // Were all of CodeRabbit's check suites and runs on this commit read? The query
@@ -544,7 +559,7 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   }
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const commit = list[i];
-    if (coderabbitCompletedCommit(commit)) {
+    if (coderabbitCompletedCommit(commit, pullRequest)) {
       return { status: "reviewed", why, headOid, reviewedOid: String(commit.oid).trim().toLowerCase() };
     }
     const parents = commit?.parents?.totalCount;
@@ -558,7 +573,7 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   // list without a review is unknown, which never lets Sol go first (Codex App P2 on #1125).
   const commitTotal = pullRequest?.commits?.totalCount;
   let priorReview;
-  if (list.some(coderabbitCompletedCommit)) priorReview = true;
+  if (list.some((commit) => coderabbitCompletedCommit(commit, pullRequest))) priorReview = true;
   else if (Number.isInteger(commitTotal) && commitTotal >= 0 && commitTotal <= list.length && list.every(coderabbitRunsComplete)) priorReview = false;
   return { status: "missing", why, headOid, reviewedOid: "", priorReview };
 }
@@ -864,7 +879,7 @@ export function followUpChain(pullRequest) {
   const fixOid = String(current.oid).toLowerCase();
   const chain = [];
   for (;;) {
-    if (coderabbitCompletedCommit(current)) break;
+    if (coderabbitCompletedCommit(current, pullRequest)) break;
     const parents = parentsOf(current);
     if (!parents) return unreadable("a commit's parents could not be read");
     if (parents.count !== 1) {

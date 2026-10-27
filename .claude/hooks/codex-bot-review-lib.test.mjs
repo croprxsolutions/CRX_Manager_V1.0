@@ -624,6 +624,8 @@ const commit = (oid, { parents = 1, statuses = [] } = {}) =>
   ({ commit: { oid, parents: { totalCount: parents }, status: statuses === null ? null : { contexts: statuses }, checkSuites: { totalCount: 0, nodes: [] } } });
 const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
   headRefOid = HEAD, filesTotal = files.length } = {}) => ({
+  number: 1134,
+  baseRepository: { nameWithOwner: "masonwells1/CRX_Manager_V1.0" },
   headRefOid,
   labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
   files: { totalCount: filesTotal, nodes: files.map((filePath) => ({ path: filePath })) },
@@ -663,25 +665,42 @@ eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crSt
 // CodeRabbit's check run (since 2026-10-27), shaped like GitHub's answer for
 // 4a8914672 (reviewed) and 52b05497b (skipped) on PR #1134.
 const crSuite = ({ appId = 347564, slug = "coderabbitai", name = "CodeRabbit", status = "COMPLETED", conclusion = "SUCCESS",
-  summary = "Result: Success - Review completed\nRun ID: `6abde565-bfb5-4dc0-8f97-e8db549f6dad`" } = {}) =>
+  summary = "Result: Success - Review completed\nRun ID: `6abde565-bfb5-4dc0-8f97-e8db549f6dad`\nCodeRabbit Review: [Open CodeRabbit Review](https://app.coderabbit.ai/change-stack/masonwells1/CRX_Manager_V1.0/pull/1134?scope=ghh_x)" } = {}) =>
   ({ totalCount: 1, nodes: [{ app: { databaseId: appId, slug }, checkRuns: { totalCount: 1, nodes: [{ name, status, conclusion, summary }] } }] });
+const PR_1134 = { number: 1134, baseRepository: { nameWithOwner: "masonwells1/CRX_Manager_V1.0" } };
 const runCommit = (oid, suite, statuses = []) => ({ commit: { ...commit(oid, { statuses }).commit, checkSuites: suite } });
-ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit), "a CodeRabbit check run 'Review completed' counts with no commit status");
+ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit, PR_1134), "a CodeRabbit check run 'Review completed' counts with no commit status");
 eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(HEAD, crSuite())] })).status, "reviewed", "a check-run review of the head passes");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped - Review skipped\nRun ID: `00522ca4`" })).commit),
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped - Review skipped\nRun ID: `00522ca4`" })).commit, PR_1134),
   "a skipped check run (52b05497b) is not a review");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ appId: 15368 })).commit), "a 'CodeRabbit' run from another app id does not count");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ slug: "github-actions" })).commit), "a run whose app slug is not coderabbitai does not count");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ name: "CodeRabbit-fake" })).commit), "another run name does not count");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ status: "IN_PROGRESS", conclusion: null })).commit), "an unfinished run does not count");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "FAILURE" })).commit), "a failed run does not count");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Note: Result: Success - Review completed" })).commit),
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ appId: 15368 })).commit, PR_1134), "a 'CodeRabbit' run from another app id does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ slug: "github-actions" })).commit, PR_1134), "a run whose app slug is not coderabbitai does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ name: "CodeRabbit-fake" })).commit, PR_1134), "another run name does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ status: "IN_PROGRESS", conclusion: null })).commit, PR_1134), "an unfinished run does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "FAILURE" })).commit, PR_1134), "a failed run does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Note: Result: Success - Review completed" })).commit, PR_1134),
   "the summary must START with the completed result");
-ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped" }), [crStatus("Review completed")]).commit),
+ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped" }), [crStatus("Review completed")]).commit, PR_1134),
   "the commit-status signal still counts on its own");
 ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped" }),
-  [crStatus("Review skipped: automatic reviews are disabled")]).commit), "neither signal completed: not reviewed");
-ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit), "an unreadable suite list is not a review");
+  [crStatus("Review skipped: automatic reviews are disabled")]).commit, PR_1134), "neither signal completed: not reviewed");
+// Sol on #1125: a check run belongs to a commit, so it must name THIS pull request.
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit, { ...PR_1134, number: 1135 }),
+  "a check run whose summary links another PR (same head commit) does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit, { ...PR_1134, baseRepository: { nameWithOwner: "someone/fork" } }),
+  "a check run linking the same PR number in another repository does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit), "a check run cannot count without the PR it must name");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\nRun ID: `x`" })).commit, PR_1134),
+  "a check run with no PR link does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\n(https://app.coderabbit.ai/change-stack/masonwells1/CRX_Manager_V1.0/pull/11345?scope=x)" })).commit, PR_1134),
+  "PR 11345's link is not PR 1134's");
+ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\n[Open](https://app.coderabbit.ai/change-stack/MasonWells1/crx_manager_v1.0/pull/1134?scope=x)" })).commit, PR_1134),
+  "the owner and repository compare without case");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(HEAD, crSuite())] }) ).status, "reviewed", "the requirement read binds the run to its own PR");
+const otherPr = facts({ commits: [runCommit(HEAD, crSuite())] });
+otherPr.number = 1135;
+eq(evaluateCodeRabbitRequirement(otherPr).status, "missing", "another PR sharing the reviewed head is still missing its review");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit, PR_1134), "an unreadable suite list is not a review");
 {
   // Luna on #1125: suites and runs are read first-5 / first-10, so a cut-short list
   // with no review in view is unknown, never "CodeRabbit never reviewed".
@@ -712,6 +731,8 @@ ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit), "an unre
   ok(/checkSuites\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY) && /checkRuns\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY),
     "the requirement read asks for the suite and run totals");
 }
+ok(CODERABBIT_REQUIREMENT_QUERY.includes("baseRepository { nameWithOwner }") && /pullRequest\(number:\$number\) \{\s+number/.test(CODERABBIT_REQUIREMENT_QUERY),
+  "the requirement read asks for the PR number and repository");
 ok(CODERABBIT_REQUIREMENT_QUERY.includes("filterBy:{appId:347564}") && CODERABBIT_REQUIREMENT_QUERY.includes('checkName:"CodeRabbit"'),
   "the requirement read asks for CodeRabbit's own check runs");
 

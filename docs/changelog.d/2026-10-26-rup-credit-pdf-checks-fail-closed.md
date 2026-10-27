@@ -33,7 +33,12 @@
   request gives the same message instead of a raw network error.
 - **Print on Invoice Detail** took the address from the customer picker list (500 active
   customers, its read error ignored), so a customer missing from it printed a blank address. It
-  now reads the billed customer by id and refuses the PDF when that read fails.
+  now reads the billed customer by id and refuses the PDF when that read fails. **Email** on the
+  same screen took the address from that list too, so a customer missing from it read as "does not
+  have an email address on file"; it now reads the billed customer's email by id and, when that
+  read fails, says "Could not load the customer's email address, so nothing was sent."
+- Invoice Detail's grouped Post and the Split Billing editor now share one per-member RUP check
+  (`groupMemberRupFinding`), so the two cannot drift apart.
 - **Print Selected on the Invoices list** logged a failed customer read and printed a blank
   address, and ignored a failed shares read. Both now refuse the batch with the same message.
 - Proof: new checks in `rupCompliance.test.ts`, `useGuardrails.creditLimit.test.ts` (was

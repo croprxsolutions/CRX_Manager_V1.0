@@ -33,6 +33,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { retryGenericInvoiceCutover } from '../lib/genericInvoiceCutoverRetry';
 import { Sentry } from '../lib/sentry';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
+import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import WriteOffModal from '../components/invoices/WriteOffModal';
@@ -403,28 +404,14 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           return;
         }
         const parts: string[] = [];
-        for (const inv of grp as Array<{ invoice_number: string; customer_id: string | null; invoice_items: { product_id: string | null }[] | null }>) {
-          // A sibling's lines that came back missing are unread, not "no products".
-          if (!Array.isArray(inv.invoice_items)) {
+        for (const inv of grp as GroupMemberRupInput[]) {
+          // Missing lines, products with no customer, or a failed read: the check did not run.
+          const finding = await groupMemberRupFinding(inv);
+          if (finding === GROUP_CHECK_FAILED) {
             stopUnchecked();
             return;
           }
-          const pids = inv.invoice_items.map((x) => x.product_id).filter((p): p is string => Boolean(p));
-          if (pids.length === 0) continue;
-          // Products with no customer to check a license for is not a pass.
-          if (!inv.customer_id) {
-            stopUnchecked();
-            return;
-          }
-          const res = await checkRUPCompliance(inv.customer_id, pids);
-          if (res.checkFailed) {
-            stopUnchecked();
-            return;
-          }
-          if (res.hasRUPProducts && !res.hasValidLicense) {
-            const disp = rupRegisterDisposition(res);
-            parts.push(`${inv.invoice_number}: ${res.rupProductNames.join(', ')} — ${res.missingLicense ? 'NO applicator license' : 'EXPIRED license'} (${disp.label})`);
-          }
+          if (finding) parts.push(finding);
         }
         if (parts.length > 0) {
           warning = `Posting this invoice group posts every invoice in it. Restricted-use products without a valid license — ${parts.join('; ')}. These will be recorded in the RUP sales register.`;
@@ -1745,8 +1732,24 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('info', 'This $0 invoice is recorded and shown in the account summary, but is not emailed.');
       return;
     }
-    const cust = customers.find(c => c.id === invoice.customer_id);
-    if (!cust?.email) {
+    // Read the billed customer by id: the picker list skips inactive customers and stops at 500,
+    // so a customer missing from it would read as "no email on file".
+    let custEmail: string | null = null;
+    if (invoice.customer_id) {
+      const read = await supabase
+        .from('customers')
+        .select('email')
+        .eq('id', invoice.customer_id)
+        .maybeSingle()
+        .then((r) => r, () => null);
+      if (!read || read.error || !read.data) {
+        toast('error', 'Could not load the customer\'s email address, so nothing was sent. Please try again.');
+        return;
+      }
+      custEmail = read.data.email;
+    }
+    const cust = { email: custEmail };
+    if (!cust.email) {
       toast('error', 'Customer does not have an email address on file');
       return;
     }

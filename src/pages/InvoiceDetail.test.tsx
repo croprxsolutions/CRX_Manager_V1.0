@@ -127,6 +127,7 @@ vi.mock('../lib/emailService', () => ({
   sendEmail: vi.fn(),
   pdfToBase64: vi.fn(),
   buildEmailHtml: vi.fn(() => '<p>test</p>'),
+  isInvoiceEmailSuppressed: vi.fn(() => false),
 }));
 vi.mock('../lib/dateUtils', () => ({
   localToday: vi.fn(() => '2026-03-16'),
@@ -1822,5 +1823,67 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     await openLoaded();
     fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
     expect(await screen.findByRole('button', { name: 'Post Invoice' })).toBeInTheDocument();
+  });
+});
+
+// CodeRabbit on #1132: Email took the address from the customer picker list (active customers,
+// capped at 500, read error ignored), so a customer missing from it read as "no email on file".
+describe('InvoiceDetail — Email reads the billed customer by id', () => {
+  const postedInvoice = {
+    id: 'inv-123', invoice_number: 'INV-0300', status: 'posted', invoice_type: 'chemical_sale',
+    customer_id: 'cust-9', order_id: 'ord-1', total_amount_cents: 2000, balance_cents: 2000,
+    invoice_date: '2026-03-15', due_date: null, created_at: '2026-03-15T00:00:00Z',
+    invoice_group_id: null, invoice_post_version: 'v1:loaded',
+  };
+
+  async function emailWithCustomerRead(answer: () => Record<string, unknown>) {
+    let loaded = false;
+    let invoiceReads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      // Preflight and full read return the row; the order's sibling list returns none.
+      if (table === 'invoices') return buildChain({ data: ++invoiceReads % 3 === 0 ? [] : postedInvoice, error: null });
+      if (table === 'invoice_items') {
+        return buildChain({ data: [{ id: 'it-1', product_id: 'p-1', description: 'Chem', quantity: 2, unit_price_cents: 1000, extended_cents: 2000, sort_order: 0 }], error: null });
+      }
+      // The picker list never has this customer; once loaded, the by-id read gets `answer`.
+      if (table === 'customers') return loaded ? answer() : buildChain({ data: [], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    renderInvoiceDetail();
+    const email = await screen.findByRole('button', { name: /^Email$/ });
+    loaded = true;
+    fireEvent.click(email);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intentKeys.clear();
+    nextIntentKey.value = 0;
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
+  });
+
+  for (const [mode, answer] of Object.entries({
+    error: () => buildChain({ data: null, error: { message: 'connection reset' } }),
+    nodata: () => buildChain({ data: null, error: null }),
+    throws: () => { const { chain, reject } = buildDeferredChain(); reject(new Error('Failed to fetch')); return chain; },
+  })) {
+    it(`sends nothing when the customer email read ${mode === 'nodata' ? 'returns nothing' : mode}`, async () => {
+      const { sendEmail } = await import('../lib/emailService');
+      await emailWithCustomerRead(answer);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Could not load the customer\'s email address')));
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+  }
+
+  it('emails a customer who is missing from the picker list', async () => {
+    const { generateInvoicePdf } = await import('../lib/invoicePdf');
+    await emailWithCustomerRead(() => buildChain({ data: { email: 'farm@example.com', billing_address: '9 Barn Rd', city: 'Town', state: 'IL', zip: '62000', account_number: 'A-9', payment_terms: 'Net 30' }, error: null }));
+    await waitFor(() => expect(generateInvoicePdf).toHaveBeenCalled());
+    expect(mockToast).not.toHaveBeenCalledWith('error', 'Customer does not have an email address on file');
+  });
+
+  it('still says so when the customer has no email on file', async () => {
+    await emailWithCustomerRead(() => buildChain({ data: { email: null }, error: null }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Customer does not have an email address on file'));
   });
 });

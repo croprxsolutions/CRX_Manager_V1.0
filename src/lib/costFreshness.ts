@@ -28,8 +28,13 @@ export function costAsOfDate(costUpdatedDate: string | null | undefined): string
   if (/^\d{4}-\d{2}-\d{2}$/.test(costUpdatedDate)) return costUpdatedDate;
   const at = new Date(costUpdatedDate);
   if (Number.isNaN(at.getTime())) return null;
-  // en-CA formats as YYYY-MM-DD.
-  return businessDateFormat.format(at);
+  // Assembled from parts, as todayInBusinessTz does: the locale's own layout is not relied on.
+  const parts = businessDateFormat.formatToParts(at);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
+  const year = part('year');
+  const month = part('month');
+  const day = part('day');
+  return year && month && day ? `${year}-${month}-${day}` : null;
 }
 
 /** A cost_updated_date for a CSV: the Central business date, or blank without one. */

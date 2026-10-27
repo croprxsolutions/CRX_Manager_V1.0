@@ -652,13 +652,14 @@ export default function Reports() {
       markReportFailed('operational:stale_costs');
       toast('error', 'Failed to load stale costs.');
     };
-    const { data, error } = await fetchAllRows<StaleCostProduct>((from, to) => supabase
+    // pageWithList: a page answered with no list is a failure, not "no stale costs".
+    const { data, error } = await fetchAllRows<StaleCostProduct>((from, to) => pageWithList(supabase
       .from('products')
       .select<string, StaleCostProduct>(STALE_COST_PRODUCT_COLUMNS, { count: 'exact' })
       .eq('is_active', true)
       .order('product_name')
       .order('id')
-      .range(from, to));
+      .range(from, to)));
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       Sentry.captureException(new Error(error.message), { extra: { context: 'stale_costs_load' } });

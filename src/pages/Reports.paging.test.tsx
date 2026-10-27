@@ -68,7 +68,7 @@ function serverRead(source: string, all: () => Row[]): Record<string, unknown> {
 
 vi.mock('../lib/db', () => ({
   supabase: {
-    from: (table: string) => serverRead(table, () => H.tables[table] ?? []),
+    from: (table: string) => serverRead(table, () => (table in H.tables ? H.tables[table] : [])),
     rpc: (name: string, args: Record<string, unknown> | undefined, options?: { count?: string }) => {
       // Cost fields come back as one object keyed by id, not as rows.
       if (name === 'get_admin_cost_fields') return Promise.resolve({ data: H.costFields, error: null });
@@ -215,6 +215,15 @@ describe('Reports past the 1,000-row server cap', () => {
     const exported = H.exportToCSV.mock.calls[0][0] as Row[];
     expect(exported).toHaveLength(TOTAL / 2 + 1);
     expect(H.exportToCSV.mock.calls[0][2]).toBe('stale_costs_over_90_days');
+  });
+
+  it('treats a product page with no list as a failure, not "no stale costs"', async () => {
+    H.tables.products = null as unknown as Row[];
+    await openTab('Operational', 'Stale Costs');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded completely');
+    expect(screen.queryByTestId('rows:No stale costs')).not.toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load stale costs.');
   });
 
   it('keeps the stale-cost tab from a sales rep', async () => {

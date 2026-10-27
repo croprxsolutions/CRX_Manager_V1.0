@@ -4339,7 +4339,9 @@ function backtickBodies(text) {
     if (char === "`") {
       let end = index + 1;
       while (end < text.length && text[end] !== "`") end += text[end] === "\\" ? 2 : 1;
-      if (end >= text.length) return null;
+      // A lone backtick is a PowerShell escape (`` `n ``), and an unclosed one is a
+      // POSIX syntax error that runs nothing, so it is skipped (Codex App on #1128).
+      if (end >= text.length) continue;
       bodies.push(text.slice(index + 1, end));
       index = end;
       continue;
@@ -4378,7 +4380,12 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
     // Every program position, so a wrapper (`env "$A" "$B"`, `command`, `exec`)
     // does not hide the program it runs (Codex App on #1128).
     for (const start of programCandidates(words)) {
-      if (isRuntimeWord(words[start]) && words.slice(start + 1).some(isRuntimeWord)) return true;
+      if (!isRuntimeWord(words[start])) continue;
+      // A bare unquoted `$A` / `${A}` program is word-split by the shell, so
+      // `A='gh pr merge'` hides arguments in the program word itself; the quoted
+      // `"$NODE" x.mjs` stays one word (Codex App on #1128).
+      if (/^\$(?:\{\w+\}|\w+)$/.test(String(words[start]))) return true;
+      if (words.slice(start + 1).some(isRuntimeWord)) return true;
     }
   }
   return false;

@@ -182,7 +182,8 @@ for (const command of [
 for (const command of [
   '"$NODE" scripts/report.mjs --check',
   'CODEX=$(ls -t /c/bin/*/codex.exe | head -1); "$CODEX" --version',
-  'P=python; $P -I scratch/stats.py',
+  'P=python; "$P" -I scratch/stats.py',
+  'Write-Output "Hello`n$env:USERNAME"',
   `NODE=node; "$NODE" scripts/report.mjs 'literal$USER'`,
   '"$CODEX" --version',
   "node -e 'console.log(`$HOME ${process.env.USER}`)'",
@@ -222,6 +223,8 @@ for (const command of [
   `echo "'" \`"$A" "$B" "$C" 951 --admin\` "'"`,
   `echo \\' \`"$A" "$B" "$C" 951 --admin\` \\'`,
   `echo $'\\'' \`"$A" "$B" "$C" 951 --admin\` \\'`,
+  "$A 951 --admin",
+  "P=python; $P -I scratch/stats.py",
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

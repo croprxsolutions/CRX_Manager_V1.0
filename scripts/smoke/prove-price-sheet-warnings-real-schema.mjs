@@ -355,6 +355,13 @@ const SCENARIOS = [
       'ok|previewed|-|-', `ok|previewed|${B}=COST_MOVE_OVER_10_PERCENT+MARGIN_UNDER_FLOOR+PRICE_BELOW_COST+PRICE_MOVE_OVER_10_PERCENT|-`],
     ['what B tier 3 customers pay is shown, not the blank', U.ADMIN, `(SELECT w->'details'->'tiers'->2->>'before_cents' FROM jsonb_array_elements(public.preview_product_cost_basis_changes('products_inline', NULL, ${jb([row(B, '25.00', '30.00', '24.00', '30.00', SOURCED)])}, '${U.ADMIN}', 'c1')->'warnings') w)`,
       'ok|<null>', 'ok|3000'],
+    // A stated $0 tier is a real price to quotes (getQuoteTierPrice, save_quote), not "use tier 1".
+    // With a cost the engine already refuses it (PRICING_ZERO_PRICE_BELOW_COST); at a $0 cost it is
+    // allowed, and A's tier 2 moving from $14 to $0 must warn as a big move, not read as tier 1's $15.
+    ['A tier 2 set to $0 with a cost is refused by the engine', U.ADMIN, preview('z0', [row(A, '10.00', '15.00', '0.00', '13.00', SOURCED)], 'z0k'),
+      'ok|invalid|-|PRICING_ZERO_PRICE_BELOW_COST', 'same'],
+    ['A tier 2 set to $0 at a $0 cost warns as a price move', U.ADMIN, preview('z', [row(A, '0.00', '15.00', '0.00', '13.00', SOURCED)], 'z1'),
+      'ok|previewed|-|-', `ok|previewed|${A}=COST_MOVE_OVER_10_PERCENT+OPEN_SENT_QUOTE+PRICE_MOVE_OVER_10_PERCENT|-`],
     // Cents leave as JSON text, like the rest of the pricing boundary: a number above 2^53 would lose digits.
     ['warning cents are JSON strings, not numbers', U.ADMIN, `(SELECT jsonb_typeof(w->'details'->'cost_before_cents') || '/' || jsonb_typeof(w->'details'->'cost_after_cents') || '/' || jsonb_typeof(w->'details'->'tiers'->0->'before_cents') || '/' || jsonb_typeof(w->'details'->'tiers'->0->'after_cents') FROM jsonb_array_elements(public.preview_product_cost_basis_changes('products_inline', NULL, ${jb([row(B, '25.00', '30.00', '24.00', '30.00', SOURCED)])}, '${U.ADMIN}', 'c1')->'warnings') w)`,
       'ok|<null>', 'ok|string/string/string/string'],

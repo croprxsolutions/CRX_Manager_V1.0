@@ -229,24 +229,25 @@ AS $function$
     SELECT r.product_id,
            round(p.current_cost * 100)::bigint AS cost_before,
            r.output_cost_cents AS cost_after,
-           -- What each tier's customer pays: a blank or $0 tier 2/3 price falls back to tier 1.
+           -- What each tier's customer pays, as quotes price it (getQuoteTierPrice, save_quote): only a
+           -- blank tier 2/3 price falls back to tier 1; a stated $0 is a real price, so a move to $0 warns.
            ARRAY[
              round(p.tier1_price * 100)::bigint,
-             COALESCE(NULLIF(round(p.tier2_price * 100)::bigint, 0), round(p.tier1_price * 100)::bigint),
-             COALESCE(NULLIF(round(p.tier3_price * 100)::bigint, 0), round(p.tier1_price * 100)::bigint)
+             COALESCE(round(p.tier2_price * 100)::bigint, round(p.tier1_price * 100)::bigint),
+             COALESCE(round(p.tier3_price * 100)::bigint, round(p.tier1_price * 100)::bigint)
            ] AS price_before,
            ARRAY[
              r.output_tier1_price_cents,
-             COALESCE(NULLIF(r.output_tier2_price_cents, 0), r.output_tier1_price_cents),
-             COALESCE(NULLIF(r.output_tier3_price_cents, 0), r.output_tier1_price_cents)
+             COALESCE(r.output_tier2_price_cents, r.output_tier1_price_cents),
+             COALESCE(r.output_tier3_price_cents, r.output_tier1_price_cents)
            ] AS price_after,
            -- The stored net margin the floor is defined against (20261025210000: under when
            -- tierN_margin < floor), not one recomputed from cent-rounded prices, which would flag a
-           -- tier set exactly at its floor. A tier that falls back to tier 1 takes tier 1's margin.
+           -- tier set exactly at its floor. Only a blank tier, which falls back to tier 1, takes tier 1's margin.
            ARRAY[
              r.output_tier1_margin,
-             CASE WHEN COALESCE(r.output_tier2_price_cents, 0) = 0 THEN r.output_tier1_margin ELSE r.output_tier2_margin END,
-             CASE WHEN COALESCE(r.output_tier3_price_cents, 0) = 0 THEN r.output_tier1_margin ELSE r.output_tier3_margin END
+             CASE WHEN r.output_tier2_price_cents IS NULL THEN r.output_tier1_margin ELSE r.output_tier2_margin END,
+             CASE WHEN r.output_tier3_price_cents IS NULL THEN r.output_tier1_margin ELSE r.output_tier3_margin END
            ] AS margin_after,
            f.margin_floor
     FROM public.pricing_change_set_rows r

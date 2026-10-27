@@ -15,6 +15,10 @@ const { mockFrom, mockRpc, mockToast, mockNavigate, mockCaptureException, intent
   intentKeys: new Map<string, string>(),
   nextIntentKey: { value: 0 },
 }));
+// The credit check's customer_credit_exposure answer: no limit set unless a test says otherwise.
+const { mockCreditExposure } = vi.hoisted(() => ({
+  mockCreditExposure: vi.fn(() => Promise.resolve({ data: { customer_id: 'cust-1', credit_limit_cents: null, exposure_cents: 0 }, error: null })),
+}));
 
 function buildChain(result: { data: unknown; error: unknown }): Record<string, unknown> {
   const self: Record<string, unknown> = {};
@@ -65,6 +69,10 @@ vi.mock('../lib/costFields', async (importOriginal) => ({
 vi.mock('../lib/db', () => ({
   // The version-bearing reads use the invoices_postable view (20261022090000): same rows as invoices here.
   supabase: { from: (table: string) => mockFrom(table === 'invoices_postable' ? 'invoices' : table), rpc: mockRpc },
+  supabaseUntyped: {
+    from: (table: string) => mockFrom(table),
+    rpc: (name: string, args: unknown) => (name === 'customer_credit_exposure' ? mockCreditExposure() : mockRpc(name, args)),
+  },
   checkMutationResult: vi.fn(),
   assertRpcResult: vi.fn((d) => d),
   sanitizeError: (e: unknown) => sanitizeError(e),
@@ -1657,10 +1665,8 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
         return buildChain({ data: [{ id: 'it-1', product_id: 'p-1', description: 'Chem', quantity: 2, unit_price_cents: 1000, extended_cents: 2000, sort_order: 0 }], error: null });
       }
       if (table === 'customers') {
-        // The picker list reads a list; the credit check reads the one customer, who has no limit.
-        const customers = buildChain({ data: [], error: null });
-        customers.single = () => buildChain({ data: { farm_name: 'Farm', credit_limit_cents: null }, error: null });
-        return customers;
+        // The picker list reads a list; the credit check asks customer_credit_exposure (no limit).
+        return buildChain({ data: [], error: null });
       }
       return buildChain({ data: [], error: null });
     });

@@ -69,8 +69,9 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
      (every worktree shares it) and confirm `git fetch` works;
    - compare secrets, environments, rulesets, required checks and CodeQL against the baseline above;
    - open a small docs-only PR and watch every required check, including `Vercel`, go green on it;
-   - after that PR merges, confirm Vercel deployed production from the new address and that Sentry's
-     GitHub integration lists `croprxsolutions/CRX_Manager_V1.0`;
+   - after that PR merges, confirm Vercel deployed production from the new address, that Sentry's
+     GitHub integration lists `croprxsolutions/CRX_Manager_V1.0`, and that the next new Sentry error
+     from production shows a **Suspect Commit** (listing the repo alone does not prove the link works);
    - confirm Taha's access shows as **Read**.
 8. **AGENT: follow-up PR** that switches the remaining fixed references to the new address:
    `scripts/land-pr.mjs`, `scripts/daily-landing-summary.mjs` (default only; Actions already passes the

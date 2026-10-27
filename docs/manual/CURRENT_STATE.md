@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-26 9:05 PM Central (2026-10-27 02:05 UTC) for the migration ledger only (read-only live
+**Last verified:** 2026-10-27 12:06 AM Central (05:06 UTC) for the migration ledger only (read-only live check by PR #1105 after row 989 applied): 1066 rows / 1059 names, `max(version)` `20261027044721` = `20261026140000_product_price_history_starting_snapshot` (row 989, PR #1122, applied 04:47:21 UTC), which is also the name high-water; `20261027010000` (row 992) is not applied. Earlier read, 2026-10-26 9:05 PM Central (2026-10-27 02:05 UTC), for the migration ledger (read-only live
 check against project `rhyzpcqhnizqbxphqdkr` right after the row 11.4 part B apply): 1065 rows, `max(version)`
 `20261027020546` = `20261026050000_field_tables_follow_field_access` (row 985, applied 2026-10-27 02:05:46 UTC,
 9:05 PM Central on 2026-10-26, on Mason's own `I approve`; PR #1103 merged as `5d8af90c1`: To-Do row 11.4 part B,

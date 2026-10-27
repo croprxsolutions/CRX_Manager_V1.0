@@ -1670,14 +1670,14 @@ const IDEMPOTENCY_BODY_EXEMPT: Record<
   restore_quote_version: 'delegated',
   // Same shape: the wrapper is _begin_below_cost_money_write(...) then RETURN of
   // _convert_quote_to_order_below_cost_impl_20260810, which owns the operation-scoped
-  // check_idempotency lookup and the receipt update. 20261026060000 (sent-price lock) is the
+  // check_idempotency lookup and the receipt update. 20261027010000 (sent-price lock) is the
   // first on-disk CREATE of that impl under its post-rename name, so only now can the walker
   // see through the wrapper.
   convert_quote_to_order: 'delegated',
   // The draw-down cutover barrier: takes the advisory lock, runs the sent-price check and the
   // below-cost context, then RETURNs _draw_down_quote_below_cost_impl_20260810 with the key
   // unchanged; that impl owns the replay. Direct EXECUTE is postgres-only. First re-emitted on
-  // disk by 20261026060000.
+  // disk by 20261027010000.
   _draw_down_quote_intent_impl_20260819: 'delegated',
   // The private-provenance wrapper owns a bound replay claim, adds stable
   // order-item serialization and an owner-only creation claim, then invokes

@@ -4,7 +4,7 @@
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
  * PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate
- * 20261026060000_quote_sent_price_lock (the same skips as the other real-schema provers), seeds an
+ * 20261027010000_quote_sent_price_lock (the same skips as the other real-schema provers), seeds an
  * admin, two sales reps, a driver, a product with a cost and a sent quote, then runs each rolled-back
  * chain as ONE statement (a chain passes only when it ends in its own SMOKE_PASS_ROLLBACK error):
  *   - smoke-convert-sent-quote-in-one-step.sql: Convert straight from a sent quote creates exactly
@@ -39,7 +39,7 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
-const CANDIDATE = path.join(MIGRATIONS, '20261026060000_quote_sent_price_lock.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261027010000_quote_sent_price_lock.sql');
 const CHAINS = {
   'smoke-convert-sent-quote-in-one-step.sql': 'SMOKE_FAIL: (5) an accepted save re-priced the sent quote',
   'smoke-quote-sent-price-lock.sql': 'SMOKE_FAIL: (V1) snapshot lacks the line id',

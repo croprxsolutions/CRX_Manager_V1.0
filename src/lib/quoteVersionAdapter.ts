@@ -58,7 +58,7 @@ function isQuoteSnapshotItem(value: unknown): value is QuoteVersion['snapshot_da
     && isNullableFiniteNumber(value.net_margin)
     && isNullableString(value.calc_mode)
     && isNullableString(value.price_unit)
-    // Recorded since 20261026060000; older versions do not carry them.
+    // Recorded since 20261027010000; older versions do not carry them.
     && (value.quote_item_id === undefined || isNullableString(value.quote_item_id))
     && (value.price_override === undefined || isNullableFiniteNumber(value.price_override));
 }
@@ -103,7 +103,7 @@ function parseQuoteSnapshotSection(
     section_notes: value.section_notes,
     section_header_notes: value.section_header_notes ?? null,
     needed_by_date: value.needed_by_date ?? null,
-    // Recorded since 20261026060000; absent on older versions.
+    // Recorded since 20261027010000; absent on older versions.
     ...(value.field_id !== undefined ? { field_id: value.field_id } : {}),
     items: value.items,
   };

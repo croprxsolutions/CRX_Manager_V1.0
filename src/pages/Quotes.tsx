@@ -262,7 +262,7 @@ export default function Quotes() {
       } else if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
         toast('error', 'This booking is closed — only sent or revised quotes can be converted.');
       } else if (hasRpcCode(err, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
-        // The sent-price lock (20261026060000): an expected refusal with a plain-English instruction.
+        // The sent-price lock (20261027010000): an expected refusal with a plain-English instruction.
         toast('error', resendRequiredMessage(err));
       } else if (hasRpcCode(err, RpcErrorCodes.COST_BASIS_REQUIRED)) {
         toast('error', 'A line on this quote has no recorded cost. Open the quote, revise and save it, then convert it again.');

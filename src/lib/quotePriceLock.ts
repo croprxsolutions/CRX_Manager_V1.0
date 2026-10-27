@@ -7,7 +7,7 @@ export function resendRequiredMessage(err: unknown): string {
     || 'This quote changed after it was last sent. Send it to the customer again, or rewind it to the version last sent, then try again.';
 }
 
-// The screen's view of the sent-price lock (migration 20261026060000). The database check
+// The screen's view of the sent-price lock (migration 20261027010000). The database check
 // `_assert_quote_prices_as_sent` stays the authority; these mirror it so the page can say in advance
 // what Convert, Partial Order and Schedule Job will refuse.
 
@@ -37,7 +37,7 @@ export function sentItemsOf(version: QuoteVersion | null): SentItem[] {
   return version ? version.snapshot_data.sections.flatMap((section) => section.items) : [];
 }
 
-/** Versions written since 20261026060000 name every line; older ones are matched by product. */
+/** Versions written since 20261027010000 name every line; older ones are matched by product. */
 function sentItemsCarryLineIds(sentItems: SentItem[]): boolean {
   return sentItems.length > 0 && sentItems.every((item) => Boolean(item.quote_item_id));
 }

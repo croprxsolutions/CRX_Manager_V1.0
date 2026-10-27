@@ -120,7 +120,7 @@ export const RpcErrorCodes = {
   // proven to overbill across a restore that changes the line partition), the
   // server refuses the restore outright once the booking has been drawn.
   QUOTE_RESTORE_BLOCKED_BY_DRAW: 'QUOTE_RESTORE_BLOCKED_BY_DRAW',
-  // The sent-price lock (migration 20261026060000): Convert, Partial Order, Schedule Job and an
+  // The sent-price lock (migration 20261027010000): Convert, Partial Order, Schedule Job and an
   // accepted save refuse a quote whose prices, lines or customer differ from the version last
   // sent. The detail after the token is a plain-English instruction (re-send, or rewind).
   QUOTE_RESEND_REQUIRED: 'QUOTE_RESEND_REQUIRED',

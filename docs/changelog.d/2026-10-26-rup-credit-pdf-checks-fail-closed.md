@@ -18,7 +18,9 @@
   The open balance was the caller's own invoices read, which for a sales rep only covers the
   invoices they created or sell, so a customer billed by another rep looked under the limit. The
   balance now comes from the server's `check_customer_credit_limit` (posted, overdue and unposted,
-  not deleted, no negative balances), parsed into exact cents. A failed read, an unusable balance
+  not deleted, no negative balances), parsed into exact cents, plus the customer's draft invoices,
+  which that total leaves out but the check has always counted (read page by page as before; a
+  sales rep still sees only the drafts they can read). A failed read, an unusable balance
   or an amount or limit that is not whole cents is "Could not verify credit limit". RUP product lines
   with no customer to check a license for stop Post too.
 - **That stop has no override (Mason, 2026-10-26: "keep the hard stop on both screens").** On
@@ -51,7 +53,7 @@
 - Not changed here: the after-save credit-limit toast on Quote Builder and Job Detail
   (`warnIfOverCreditLimit`) still says nothing when its own read fails (a notice after the save,
   not a check before it); a Print All on the field-invoice lists fails the whole batch, rather
-  than skipping and naming the invoice, when one invoice's details cannot be read; posting an
-  unposted invoice counts its balance once in the server total and again as the new amount (an
-  over-warning, the safe direction); and the other post buttons (Field Application Invoice, the
+  than skipping and naming the invoice, when one invoice's details cannot be read; posting a
+  draft or unposted invoice counts its balance once in the open total and again as the new amount
+  (an over-warning, the safe direction, as the old check did for drafts); and the other post buttons (Field Application Invoice, the
   Drafts panel, Office Cockpit, batch post) run no client-side RUP or credit check at all, as before.

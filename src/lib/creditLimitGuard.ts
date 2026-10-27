@@ -1,5 +1,6 @@
 import { assertRpcResult, supabase } from './db';
 import { formatCents } from './money';
+import { fetchAllRows, pageWithList } from './pagedRead';
 import { parseDollarsToCentsSigned } from './parseCents';
 import { Sentry } from './sentry';
 
@@ -35,6 +36,32 @@ async function outstandingBalanceCents(customerId: string): Promise<number | nul
 }
 
 /**
+ * The customer's draft invoices in whole cents. check_customer_credit_limit leaves drafts out,
+ * but the credit check has always counted them (Sol on #1132): a $9,000 draft plus a $2,000
+ * order against a $10,000 limit must still warn. Read page by page as before; a failed page, or
+ * one with no list, throws rather than reading as no drafts. Negative balances count as 0, as
+ * on the server.
+ */
+async function draftBalanceCents(customerId: string): Promise<number> {
+  const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
+    .from('invoices')
+    .select('id, balance_cents', { count: 'exact' })
+    .eq('customer_id', customerId)
+    .eq('status', 'draft')
+    .is('deleted_at', null)
+    .order('id')
+    .range(from, to)));
+  if (error) throw new Error(error.message);
+  let total = 0;
+  for (const row of data ?? []) {
+    const cents = row.balance_cents ?? 0;
+    if (!Number.isSafeInteger(cents)) throw new Error('A draft balance is not whole cents.');
+    total += Math.max(cents, 0);
+  }
+  return total;
+}
+
+/**
  * Whether a new amount keeps the customer within their credit limit. Every read
  * that fails, or answers with no customer row or no usable balance, is `unverified` —
  * the old code read a failed customer read as "no limit set" and passed.
@@ -60,8 +87,9 @@ export async function evaluateCreditLimit({ customerId, newAmountCents }: Credit
     // Anything else must be whole cents; a limit that is not cannot be compared.
     if (!Number.isSafeInteger(customer.credit_limit_cents)) throw new Error('The credit limit is not whole cents.');
 
-    const currentBalance = await outstandingBalanceCents(customerId);
-    if (currentBalance === null) throw new Error('check_customer_credit_limit returned no usable balance.');
+    const openBalance = await outstandingBalanceCents(customerId);
+    if (openBalance === null) throw new Error('check_customer_credit_limit returned no usable balance.');
+    const currentBalance = openBalance + await draftBalanceCents(customerId);
 
     const overBy = currentBalance + newAmountCents - customer.credit_limit_cents;
     if (overBy > 0) {

@@ -21,6 +21,10 @@ const H = vi.hoisted(() => ({
   rpcAnswer: null as unknown,
   rpcFail: null as FailMode | null,
   rpcCalls: [] as Array<{ name: string; args: unknown }>,
+  // Draft invoices, which the server total leaves out (Sol on #1132).
+  drafts: [] as Array<{ id: string; balance_cents: number | null }>,
+  draftFail: null as FailMode | null,
+  invoiceFilters: [] as unknown[][],
 }));
 
 function answer(mode: FailMode | null, ok: unknown): Promise<{ data: unknown; error: unknown }> {
@@ -35,9 +39,13 @@ vi.mock('../lib/db', () => {
   const chain: Record<string, unknown> = {};
   for (const m of ['select', 'eq']) chain[m] = () => chain;
   chain.single = () => answer(H.customerFail, H.customer);
+  const invoices: Record<string, unknown> = {};
+  for (const m of ['select', 'eq', 'is', 'order']) invoices[m] = (...args: unknown[]) => { H.invoiceFilters.push([m, ...args]); return invoices; };
+  invoices.range = (from: number, to: number) => answer(H.draftFail, H.drafts.slice(from, to + 1))
+    .then((r) => ({ ...r, count: H.draftFail ? null : H.drafts.length }));
   return {
     supabase: {
-      from: () => chain,
+      from: (table: string) => (table === 'invoices' ? invoices : chain),
       rpc: (name: string, args: unknown) => { H.rpcCalls.push({ name, args }); return answer(H.rpcFail, H.rpcAnswer); },
     },
     assertRpcResult: (data: unknown, name: string) => {
@@ -58,6 +66,9 @@ beforeEach(() => {
   H.rpcAnswer = { exceeded: true, credit_limit: 1002, outstanding_ar: 1005, farm_name: 'Big Farm' };
   H.rpcFail = null;
   H.rpcCalls = [];
+  H.drafts = [];
+  H.draftFail = null;
+  H.invoiceFilters = [];
 });
 
 async function runHook(newAmountCents: number) {
@@ -90,6 +101,35 @@ describe('credit-limit check on the server balance', () => {
     const { passed, warning } = await runHook(100);
     expect(passed).toBe(true);
     expect(warning).toBeNull();
+  });
+
+  it('counts draft invoices, which the server total leaves out', async () => {
+    // $9,000 draft + $2,000 new against $10,000 with nothing else open: over by $1,000.
+    H.customer = { farm_name: 'Big Farm', credit_limit_cents: 1_000_000 };
+    H.rpcAnswer = { outstanding_ar: 0 };
+    H.drafts = [{ id: 'd1', balance_cents: 900_000 }];
+    const result = await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 200_000 });
+    expect(result).toEqual({ status: 'over', message: expect.stringContaining('$1,000.00 over') });
+    expect(H.invoiceFilters).toEqual(expect.arrayContaining([['eq', 'customer_id', 'c1'], ['eq', 'status', 'draft'], ['is', 'deleted_at', null]]));
+  });
+
+  it('a negative draft balance counts as 0, as on the server', async () => {
+    H.customer = { farm_name: 'Big Farm', credit_limit_cents: 1_000_000 };
+    H.rpcAnswer = { outstanding_ar: 9_000 };
+    H.drafts = [{ id: 'd1', balance_cents: -50_000 }, { id: 'd2', balance_cents: null }];
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100_000 })).toEqual({ status: 'ok' });
+  });
+
+  for (const mode of ['error', 'nodata', 'notlist', 'throws'] as const) {
+    it(`a draft read that ${mode === 'nodata' ? 'returns no list' : mode} is unverified, never "no drafts"`, async () => {
+      H.draftFail = mode;
+      expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });
+    });
+  }
+
+  it('a draft balance that is not whole cents is unverified', async () => {
+    H.drafts = [{ id: 'd1', balance_cents: 10.5 }];
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });
   });
 
   it('a customer with no limit set passes without asking for the balance', async () => {

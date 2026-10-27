@@ -82,7 +82,8 @@
 >      brought in nothing but main (the shared status ledgers both sides edit excepted:
 >      `KNOWN_ISSUES.md`, `TO_DO_LIST.md`, `CURRENT_STATE.md`, `migration-history.md`, `docs/CHANGELOG.md`);
 >    - the fixes touch only files that hold a finding (edits, at most 60 changed lines in total),
->      test files including `scripts/smoke/` chains (at most 150 changed and 20 deleted lines),
+>      test files including `scripts/smoke/` chains (`smoke-*.sql`, `prove-*.mjs`; never the
+     runner, verdict, seed or setup files) (at most 150 changed and 20 deleted lines),
 >      and one new `docs/changelog.d/` entry (at most 40 lines); nothing under `supabase/`, CI,
 >      agent tooling (`.claude/`, `.codex/`, `.agents/`, other `scripts/`), dependencies or
 >      configuration (including any `config` file or folder and YAML/TOML/INI files); no rename,

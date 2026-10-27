@@ -1018,9 +1018,13 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
     && isFollowUpExcludedPath("src/config.ts") && isFollowUpExcludedPath("config/payment-limits.json")
     && !isFollowUpExcludedPath("src/lib/configurePicker.ts")
     && !isFollowUpExcludedPath("src/lib/invoiceMath.ts"), "control files are excluded; app code is not");
-  ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && !isFollowUpTestPath("scripts/smoke/smoke-specs.json")
-    && !isFollowUpTestPath("scripts/write-codex-push-proof.mjs"), "only smoke chains count as tests under scripts/");
-  // The required pre-merge checks are exactly the custom checks in .coderabbit.yaml.
+  ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && isFollowUpTestPath("scripts/smoke/prove-x-real-schema.mjs")
+    && !isFollowUpTestPath("scripts/smoke/smoke-specs.json")
+    && !isFollowUpTestPath("scripts/smoke/run-smoke.mjs") && !isFollowUpTestPath("scripts/smoke/interpret-result.mjs")
+    && !isFollowUpTestPath("scripts/smoke/seed-supplier-pricing-phase1a.sql")
+    && !isFollowUpTestPath("scripts/smoke/setup-offline-action-receipt-failure-proof.sql")
+    && !isFollowUpTestPath("scripts/write-codex-push-proof.mjs"),
+    "only smoke and prover chains count as tests under scripts/; the runner, verdict, seed and setup files do not");  // The required pre-merge checks are exactly the custom checks in .coderabbit.yaml.
   const yaml = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".coderabbit.yaml"), "utf8");
   const customNames = [...yaml.slice(yaml.indexOf("custom_checks:")).matchAll(/^\s+- name: (.+)$/gm)].map((m) => m[1].trim().toLowerCase());
   eq([...FOLLOWUP_REQUIRED_CHECKS].sort(), customNames.sort(), "FOLLOWUP_REQUIRED_CHECKS matches .coderabbit.yaml's custom checks");

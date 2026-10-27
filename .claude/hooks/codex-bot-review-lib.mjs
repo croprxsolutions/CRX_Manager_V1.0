@@ -684,11 +684,13 @@ export function isFollowUpExcludedPath(path) {
   return !p || FOLLOWUP_EXCLUDED_PATHS.some((re) => re.test(p));
 }
 // scripts/smoke/ holds the rolled-back business-chain tests (ship.md Step 5.4),
-// which fixes often extend; the rest of scripts/ stays excluded.
+// which fixes often extend. Only the chains themselves (smoke-*.sql, prove-*.mjs)
+// count; the runner and verdict code (run-smoke.mjs, interpret-result.mjs, seeds,
+// setup) and the rest of scripts/ stay excluded (Codex App P2 on #1125).
 export function isFollowUpTestPath(path) {
   const p = lowerPath(path);
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(p) || /^tests\//.test(p) || /\/__tests__\//.test(p)
-    || /^scripts\/smoke\/[^/]+\.(?:sql|mjs)$/.test(p);
+    || /^scripts\/smoke\/smoke-[^/]+\.sql$/.test(p) || /^scripts\/smoke\/prove-[^/]+\.mjs$/.test(p);
 }
 // The shared status ledgers almost every PR edits. A merge of main may change one
 // even when the PR edits it too; policy and reference documents get no such
@@ -866,8 +868,9 @@ export function evaluateFollowUpDiff(compare, { chain, findingPaths = [], struct
       return { kind: "unreadable", why: "a changed file in the fixes could not be read", files: [] };
     }
     // Hard-excluded paths stay excluded even for test files there (agent tooling,
-    // CI); scripts/smoke/ chains are the one exception (Luna round 1 on #1125).
-    if (isFollowUpExcludedPath(filename) && !/^scripts\/smoke\//.test(lowerPath(filename))) {
+    // CI); scripts/smoke/ chains are the one exception (Luna round 1 on #1125), and
+    // only the chains themselves, not the runner or verdict code (Codex App P2).
+    if (isFollowUpExcludedPath(filename) && !(/^scripts\/smoke\//.test(lowerPath(filename)) && isFollowUpTestPath(filename))) {
       return notCovered(`the fixes change ${filename}, which always gets a fresh review`);
     }
     if (file?.previous_filename || !["modified", "added"].includes(status)) {

@@ -78,7 +78,7 @@ import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow, type UnreadableQuoteVersion } from '../lib/quoteVersionAdapter';
-import { resendRequiredMessage, sentItemsOf, sentLineState, unsentQuoteChange } from '../lib/quotePriceLock';
+import { resendRequiredMessage, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine } from '../lib/quotePriceLock';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
 import TransactionThread from '../components/ui/TransactionThread';
@@ -536,14 +536,6 @@ export default function QuoteBuilder() {
     [quoteVersions],
   );
   const lastSentItems = useMemo(() => sentItemsOf(lastSentVersion), [lastSentVersion]);
-  // The database's re-send rule as the page can see it (src/lib/quotePriceLock.ts).
-  const unsentChange = useMemo(() => unsentQuoteChange({
-    lastSent: lastSentVersion,
-    newestVersionNumber: [...quoteVersions, ...unreadableQuoteVersions]
-      .reduce((newest, v) => Math.max(newest, v.version_number), 0),
-    customerId,
-    lines: sections.flatMap((sec) => sec.items.filter((item) => item.product_id)),
-  }), [lastSentVersion, quoteVersions, unreadableQuoteVersions, customerId, sections]);
   // One newest-first list, not readable-then-unreadable: see orderedQuoteVersionHistory. The two
   // state arrays stay separate because everything else (restore, compare, the Sentry report) may
   // only ever see the readable ones.
@@ -633,6 +625,25 @@ export default function QuoteBuilder() {
     price: number;
     todayApplied?: boolean;
   }>());
+  // The render-side copy of savedLineIdsRef, set with it on load and on each save. A line added and
+  // saved since the page loaded has no local id, so the price lock names it from here.
+  const [savedLineIdByKey, setSavedLineIdByKey] = useState<ReadonlyMap<string, { id: string; productId: string }>>(new Map());
+  const priceLockLineOf = useCallback((item: LocalItem): PriceLockLine => {
+    const saved = savedLineIdByKey.get(item._key);
+    return {
+      id: saved && saved.productId === item.product_id ? saved.id : undefined,
+      product_id: item.product_id,
+      price_per_unit: item.price_per_unit,
+    };
+  }, [savedLineIdByKey]);
+  // The database's re-send rule as the page can see it (src/lib/quotePriceLock.ts).
+  const unsentChange = useMemo(() => unsentQuoteChange({
+    lastSent: lastSentVersion,
+    newestVersionNumber: [...quoteVersions, ...unreadableQuoteVersions]
+      .reduce((newest, v) => Math.max(newest, v.version_number), 0),
+    customerId,
+    lines: sections.flatMap((sec) => sec.items.filter((item) => item.product_id).map(priceLockLineOf)),
+  }), [lastSentVersion, quoteVersions, unreadableQuoteVersions, customerId, sections, priceLockLineOf]);
   // Lines switched to another product since the last save was sent. A switched
   // line stops being its saved line, even if it is later switched back, so the
   // reply of a save that was in flight must not hand it an id again.
@@ -1284,6 +1295,7 @@ export default function QuoteBuilder() {
         .filter((item) => item.id)
         .map((item) => [item._key, { id: item.id as string, productId: item.product_id, price: item.price_per_unit }]),
     );
+    setSavedLineIdByKey(new Map(savedLineIdsRef.current));
     setSections(localSections.length > 0 ? localSections : [makeEmptySection(1)]);
 
     // U13 (#111): which sections already have a job scheduled from them, so the
@@ -2385,6 +2397,7 @@ export default function QuoteBuilder() {
           });
         }
         savedLineIdsRef.current = savedLineIds;
+        setSavedLineIdByKey(new Map(savedLineIds));
       }
       // The save committed, but conversion and other chained actions must not
       // continue unless this tab can install the exact authoritative token.
@@ -2929,6 +2942,20 @@ export default function QuoteBuilder() {
         toast('error', 'The quote was frozen, but the email was NOT sent. Reload the quote, then email it again.');
         return;
       }
+      // Each send starts a new validity window (20261026060000), so the PDF shows the expiry the
+      // database just stored, not one worked out from the creation date. The version key is kept,
+      // so a retry replays this send and reads the same date.
+      const { data: sentQuote, error: expiryErr } = await supabase
+        .from('quotes')
+        .select('expires_at')
+        .eq('id', quoteId)
+        .maybeSingle();
+      const sentExpiry = (sentQuote as { expires_at?: string | null } | null)?.expires_at;
+      if (expiryErr || !sentExpiry) {
+        if (expiryErr) Sentry.captureException(expiryErr, { tags: { source: 'read', action: 'email_quote_expiry' } });
+        toast('error', 'The quote was frozen, but the email was NOT sent: its expiry date could not be read. Email it again.');
+        return;
+      }
       // Same rich (download) PDF the customer would receive.
       const pdfData = {
         quote_number: quoteNumber,
@@ -2937,16 +2964,10 @@ export default function QuoteBuilder() {
         customer_phone: selectedCustomer?.phone || undefined,
         customer_address: selectedCustomer?.billing_address || undefined,
         sales_rep_name: profile?.full_name || 'Sales Rep',
-        // Codex round-8 P2: a frozen/sent quote re-emailed later must show its ORIGINAL
-        // issue + expiry dates, not today's — otherwise the grower gets a document that
-        // looks newly issued with a fresh validity window even though the DB quote is
-        // frozen (and may already be expired). Use the persisted created_at + its
-        // valid_days window; fall back to now only for an unsaved quote (which the
-        // isDirty/quoteId guards above already prevent from emailing).
+        // Codex round-8 P2: the issue date stays the quote's persisted created_at, not today's.
+        // The expiry is the one this send stored (a date-only value, read as a local date).
         created_at: quoteCreatedAt || new Date().toISOString(),
-        expires_at: quoteCreatedAt
-          ? new Date(new Date(quoteCreatedAt).getTime() + validDays * 24 * 60 * 60 * 1000).toISOString()
-          : undefined,
+        expires_at: parseLocalDate(sentExpiry).toISOString(),
         valid_days: validDays,
         tier,
         header_notes: headerNotes || undefined,
@@ -4858,7 +4879,7 @@ export default function QuoteBuilder() {
                           ? todayPrice
                           : null;
                         const sentState = priceLocked && lastSentVersion && item.product_id
-                          ? sentLineState(lastSentItems, item)
+                          ? sentLineState(lastSentItems, priceLockLineOf(item))
                           : null;
                         const sentHint = sentState == null || !lastSentVersion
                           ? null

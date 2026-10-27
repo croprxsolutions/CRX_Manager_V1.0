@@ -272,7 +272,14 @@ vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({ notifyLargeOrder: mockNotifyLargeOrder, notifyCreditLimitExceeded: vi.fn() }));
 vi.mock('../lib/metrics', () => ({ trackBusinessEvent: mockTrackBusinessEvent }));
 vi.mock('../lib/orderConfirmedEmail', () => ({ sendOrderConfirmedEmail: mockSendOrderConfirmedEmail }));
-vi.mock('../lib/dateUtils', () => ({ localDatePlusDays: vi.fn(() => '2026-04-15'), localToday: vi.fn(() => '2026-03-16') }));
+vi.mock('../lib/dateUtils', () => ({
+  localDatePlusDays: vi.fn(() => '2026-04-15'),
+  localToday: vi.fn(() => '2026-03-16'),
+  parseLocalDate: (dateStr: string) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  },
+}));
 vi.mock('../lib/quotePdf', () => ({ downloadQuotePdf: vi.fn(), generateQuotePdf: mockGenerateQuotePdf }));
 vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, pdfToBase64: vi.fn(), buildEmailHtml: vi.fn(() => '<p>test</p>') }));
 vi.mock('../lib/rupCompliance', () => ({
@@ -346,6 +353,8 @@ function makeQuoteFixture(status: 'draft' | 'sent' | 'accepted' = 'draft', rowVe
     is_planned: false,
     commission_split: { splits: [] },
     created_at: RECENT_QUOTE_CREATED_AT,
+    // The expiry a send stores; the emailed PDF shows it (20261026060000).
+    expires_at: '2026-11-25',
     ...(rowVersion === undefined ? {} : { row_version: rowVersion }),
   };
   const product = {
@@ -2547,7 +2556,45 @@ describe('QuoteBuilder', () => {
       p_method: 'emailed',
       p_expected_row_version: 7,
     }));
+    // The PDF carries the expiry this send stored, read as a local date, not created_at + valid_days.
+    expect(mockGenerateQuotePdf).toHaveBeenCalledWith(
+      expect.objectContaining({ expires_at: new Date(2026, 10, 25).toISOString() }),
+      expect.anything(),
+    );
     expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('Quote emailed'));
+  });
+
+  it('does not email the quote when the expiry its send stored cannot be read', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const { product, section, item } = fixture;
+    const quote = { ...fixture.quote, status: 'sent' };
+    let quoteReads = 0;
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes'
+        ? (++quoteReads <= 2 ? quote : quoteReads === 3 ? { ...quote, row_version: 8 } : { ...quote, row_version: 8, expires_at: null })
+        : table === 'quote_sections'
+          ? [section]
+          : table === 'quote_items'
+            ? [item]
+            : table === 'customers'
+              ? [{ id: 'customer-1', farm_name: 'Farm', email: 'grower@example.com', assigned_tier: 1, is_active: true }]
+              : table === 'products'
+                ? [product]
+                : [],
+      error: null,
+    }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(
+      name === 'create_quote_version'
+        ? { data: { version_number: 2, status: 'created', row_version: 8 }, error: null }
+        : { data: null, error: null },
+    ));
+
+    renderQuoteBuilder(quote.id);
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('expiry date could not be read')));
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it('replays the same version key and original token after the snapshot succeeds but email delivery fails', async () => {
@@ -2854,7 +2901,7 @@ describe('QuoteBuilder', () => {
         : name === 'restore_quote_version'
           ? { data: { status: 'restored', restored_from_version: 1, quote_id: quote.id, row_version: 8 }, error: null }
           : { data: null, error: null }));
-      return { quote };
+      return { quote, sentVersion };
     }
     const savedLine = () => (mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
       p_sections: Array<{ items: Array<{ id: string | null; price_per_unit: number; price_override: number | null; use_todays_price: boolean }> }>;
@@ -2910,6 +2957,32 @@ describe('QuoteBuilder', () => {
       // Clearing the manual price returns the line to what the database now holds (11), not 10.
       fireEvent.click(screen.getByRole('button', { name: 'Reset the manual price' }));
       expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(11);
+    });
+
+    it('names a line by the row id its save returned, not only the id it loaded with', async () => {
+      const { quote, sentVersion } = configureLockedQuote();
+      // The sent version names the row the next save returns (item-2), as for a line added and
+      // saved since the page loaded: its local item never carries that id.
+      sentVersion.snapshot_data.sections[0].items[0].quote_item_id = 'item-2';
+      mockRpc.mockImplementation((name: string, args?: unknown) => {
+        if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+        const line = (args as { p_sections: Array<{ items: Array<{ client_key: string; price_per_unit: number }> }> })
+          .p_sections[0].items[0];
+        return Promise.resolve({ data: {
+          quote_id: quote.id, row_version: 8,
+          item_ids: { [line.client_key]: 'item-2' },
+          item_prices: { [line.client_key]: line.price_per_unit },
+        }, error: null });
+      });
+      renderQuoteBuilder(quote.id);
+      expect(await screen.findByText('New since V1')).toBeInTheDocument();
+      const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+      await waitFor(() => expect(units).toBeEnabled());
+      fireEvent.change(units, { target: { value: '3' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+
+      await waitFor(() => expect(screen.queryByText('New since V1')).not.toBeInTheDocument());
+      expect(screen.queryByText(/Prices or lines changed after V1 was sent/)).not.toBeInTheDocument();
     });
 
     it('rewinds to the version last sent in one confirmed step', async () => {

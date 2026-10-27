@@ -35,8 +35,8 @@
 --      workbook change set also names the uploaded file (name, SHA-256). It recomputes the warnings
 --      and refuses (PRICING_WARNINGS_CHANGED) if their codes or details (a floor's value, which sent
 --      quotes) differ from the preview's. The receipt
---      (pricing_change_set_approvals) keeps who, when, the acknowledgements, the warning set and the
---      file.
+--      (pricing_change_set_approvals) keeps who, when, the acknowledgements, the warning codes and the
+--      file (the details stay in pricing_change_set_warnings under the same change set).
 --
 --   3. APPLY requires that receipt: apply_product_cost_basis_change_set refuses
 --      PRICING_APPROVAL_REQUIRED without an approval by the same admin of the same preview, and
@@ -1276,9 +1276,14 @@ BEGIN
   -- or a receipt. Instead the warnings' other inputs (floors, open sent quotes) are read again after the
   -- engine has locked and updated the products. A floor writer locks the product row
   -- (set_product_margin_floors, FOR NO KEY UPDATE), so a floor change either shows in that second read
-  -- or waits for this commit. KNOWN GAP, accepted: a quote sent between that read and the commit is not
-  -- seen (sending takes no product lock); the sent-quote price lock (To-Do 1.2) removes it.
-  SELECT status INTO v_status FROM public.pricing_change_sets WHERE id = p_change_set_id;
+  -- or waits for this commit. The second read covers every product of the set, so an unrelated floor
+  -- or quote change in that moment also refuses (fails safe: preview again). KNOWN GAP, accepted: a
+  -- quote change between that read and the commit is not seen, since none takes a product lock
+  -- (sent, revised, planned-accepted, restored, or a line's manual price cleared); nor is a floor
+  -- written outside set_product_margin_floors. The sent-quote price lock (To-Do 1.2) removes the quote half.
+  -- FOR UPDATE: the change set before the receipt, the order approve uses, so an approve and an apply of
+  -- the same set cannot deadlock (the inner engine takes this row lock again, before any other).
+  SELECT status INTO v_status FROM public.pricing_change_sets WHERE id = p_change_set_id FOR UPDATE;
   IF v_status IS NOT NULL AND v_status IS DISTINCT FROM 'applied' THEN
     -- FOR SHARE: a same-admin re-approval cannot replace the receipt between this check and commit.
     SELECT * INTO v_approval
@@ -1466,13 +1471,17 @@ BEGIN
   FOREACH f IN ARRAY ARRAY['public._pricing_change_set_warnings(uuid)', 'public._pricing_change_set_warning_set(uuid)',
                           'public._pricing_change_set_warning_inputs(uuid)'] LOOP
     IF EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS r(role)
-                WHERE has_function_privilege(r.role, f, 'EXECUTE')) THEN
+                WHERE has_function_privilege(r.role, f, 'EXECUTE'))
+       OR (EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metabase_ro')
+           AND has_function_privilege('metabase_ro', f, 'EXECUTE')) THEN
       RAISE EXCEPTION 'PRICE_SHEET_VERIFY: % is executable by an API role', f;
     END IF;
   END LOOP;
 
   IF has_function_privilege('anon', 'public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)', 'EXECUTE')
+     OR (EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metabase_ro')
+         AND has_function_privilege('metabase_ro', 'public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)', 'EXECUTE'))
      OR NOT has_function_privilege('authenticated', 'public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)', 'EXECUTE')
      OR (SELECT p.prosecdef IS NOT TRUE OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
            FROM pg_proc p WHERE p.oid = 'public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)'::regprocedure) THEN
@@ -1486,7 +1495,10 @@ BEGIN
      OR has_function_privilege('anon', 'public.apply_product_cost_basis_change_set(uuid,text,uuid,text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.write_product_pricing_history()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.preview_product_pricing_changes(text,uuid,jsonb,uuid,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.apply_product_pricing_change_set(uuid,text,uuid,text)', 'EXECUTE') THEN
+     OR has_function_privilege('authenticated', 'public.apply_product_pricing_change_set(uuid,text,uuid,text)', 'EXECUTE')
+     -- The approval gate lives in the wrapper: the engine under it must stay out of the API's reach.
+     OR has_function_privilege('authenticated', 'public._apply_product_cost_basis_change_set_serialized_inner(uuid,text,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._apply_product_cost_basis_change_set_serialized_inner(uuid,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'PRICE_SHEET_VERIFY: a replaced or inner pricing function changed who can execute it';
   END IF;
   IF position('PRICING_APPROVAL_REQUIRED' IN (SELECT prosrc FROM pg_proc WHERE oid = 'public.apply_product_cost_basis_change_set(uuid,text,uuid,text)'::regprocedure)) = 0

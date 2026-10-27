@@ -46,7 +46,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78 and KI-81; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 49 |
+| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78 and KI-81 to KI-83; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 51 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED during this rewrite, with proof (bottom of file) | 6 |
 
@@ -292,6 +292,14 @@ line on the field with no status, customer or deleted filter). After a revision 
 re-sent, either can bill the unsent price; the field-application lookup can also take a draft, declined or deleted
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
+### KI-82 — The open quote screen can show a stale cost for a line it just saved
+**LOW · OPEN (found 2026-10-27, Sol review of PR #1105) · money (display only) · unassigned**
+After Save, `src/pages/QuoteBuilder.tsx` records a new line's saved id and stored price but does not load the
+cost the database recorded for that line (`quote_items.cost_at_quote_cents`). If the product's cost changed after
+the page loaded, the Cost, Profit and Margin shown to an admin can differ from the saved figures until the page is
+reloaded. Saved prices, costs and totals are correct; PDFs never show cost. Fix: refresh each saved line's recorded
+cost after a save, and prove it on the live screen.
+
 ---
 
 ## Inventory and deliveries
@@ -391,6 +399,17 @@ document ingestion, provenance-trigger handling, transcript purge, a citing desi
 **LOW · OPEN · process · unassigned**
 Grower portal; OCR auto-fill of re-entry/pre-harvest intervals (held back as a compliance risk); offline-recovery
 items (photo/signature persistence, idempotent email replay) and a real-phone offline test (MED, UNVERIFIED).
+
+### KI-83 — The `idempotency_keys` table has no TypeScript type
+**LOW · OPEN (found 2026-10-27, migration-drift review of `20261027040000`; predates it) · database · unassigned**
+`idempotency_keys` is the internal table where database functions record a retry key and its saved answer, so a
+repeated request returns the first result instead of acting twice. Many functions write to it (including the
+quote save re-emitted by `20261027040000`), and every column they write is in `.claude/schema-registry.json` and in
+the generated `src/types/supabase.ts`, but the shared hand-written types in `src/types/index.ts` have no interface
+for it. Two screens read one column of it directly (`QuickDeliveryModal.tsx` and `InvoiceDetail.tsx` check that
+`request_fingerprint` exists), so nothing is broken; the gap only means the migration review's TypeScript
+cross-check, which reads `src/types/index.ts`, cannot confirm those writes. Fix: confirm with the
+`typescript-types-drift-reviewer` whether to add an interface or record the table as intentionally untyped.
 
 ---
 

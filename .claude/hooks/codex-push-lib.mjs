@@ -4396,13 +4396,16 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
       // glued name (`g$X`) is left to programAssembledAtRuntime, which refuses it
       // below, and heredoc text (`Don't expand $HOME`) is not a program.
       // Single-quoted spans are dropped first, so `''"$A"` is read as `"$A"`.
-      if (!/^"?[$`@]/.test(String(words[start]).replace(/'[^']*'/g, "")) || !isRuntimeWord(words[start])) continue;
+      // Grouping brackets are stripped as programCandidates does, so `("$A"` is read
+      // as `"$A"` and its arguments are checked (Codex App on #1128).
+      const program = stripGrouping(words[start]);
+      if (!/^"?[$`@]/.test(program.replace(/'[^']*'/g, "")) || !isRuntimeWord(program)) continue;
       // ALLOW-LIST (Mason, 2026-10-26): the only run-time program allowed is one
       // quoted simple variable, `"$NODE"` / `"${NODE}"`, which the shell keeps as a
       // single word. Unquoted `$A` (word-split), arrays `"${A[@]}"`, `"$@"` and every
       // other shape that can expand to several words are refused, as on main.
-      if (!SAFE_RUNTIME_PROGRAM_RE.test(String(words[start]))) return true;
-      if (words.slice(start + 1).some(isRuntimeWord)) return true;
+      if (!SAFE_RUNTIME_PROGRAM_RE.test(program)) return true;
+      if (words.slice(start + 1).some((word) => isRuntimeWord(stripGrouping(word)))) return true;
     }
   }
   return false;

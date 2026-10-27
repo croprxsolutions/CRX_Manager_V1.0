@@ -214,6 +214,12 @@ export interface CostHistory {
   new_pricing_version: number | null;
   change_note: string | null;
   changed_at: string;
+  // 20261027050000 (To-Do 0.1); NULL on rows written before it.
+  price_source?: string | null;
+  old_rate_per_acre?: number | null;
+  new_rate_per_acre?: number | null;
+  old_rate_unit?: string | null;
+  new_rate_unit?: string | null;
 }
 
 // ── Pricing worksheet persistence (Phase 1a) ────────────────────
@@ -834,7 +840,12 @@ export interface QuoteVersion {
       section_notes: string | null;
       section_header_notes: string | null;
       needed_by_date: string | null;
+      // Recorded since 20261027040000; absent on older versions.
+      field_id?: string | null;
       items: Array<{
+        // Recorded since 20261027040000; absent on older versions.
+        quote_item_id?: string | null;
+        price_override?: number | null;
         product_id: string;
         product_name: string;
         sku: string | null;
@@ -3930,7 +3941,10 @@ export type EmailType =
   // Field-app parity #40: pre-application customer notice (matches the DB
   // email_type enum value; the send-email edge allow-list entry is prepared,
   // its deploy gated for Mason).
-  | 'pre_application_notice';
+  | 'pre_application_notice'
+  | 'post_application_notice'
+  // To-Do 0.15: a purchase order emailed to its vendor (admin-only).
+  | 'purchase_order';
 
 export interface EmailLog {
   id: string;

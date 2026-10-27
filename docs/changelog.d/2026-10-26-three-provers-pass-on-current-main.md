@@ -5,7 +5,7 @@ anything on current main, because newer migrations and smoke edits landed after 
 (#1106 could only run two of them from old checkouts):
 
 - `prove-money-replay-binding-batch1-real-schema.mjs` required its candidate (20261016060000) to be the
-  newest migration; 30 newer ones exist.
+  newest migration; 32 newer ones exist.
 - `prove-cost-margin-admin-only-rpc-leaks-real-schema.mjs` refused any later file that merely *named* a
   covered function, and five later files name them inside their own preflight pin lists.
 - `prove-quote-customer-row-version-real-schema.mjs` (candidate 20260730235031) ran smokes that have
@@ -21,7 +21,7 @@ anything on current main, because newer migrations and smoke edits landed after 
   or revokes on `ALL FUNCTIONS IN SCHEMA`; SQL comments are stripped first so none can split a
   match. Batch 1 now
   covers the nine wrappers, their nine impls, the fingerprint/binder/guard helpers and
-  `check_idempotency_intent`, and adds a new step 7: after every earlier step, it replays all 30 later
+  `check_idempotency_intent`, and adds a new step 7: after every earlier step, it replays all 32 later
   migrations on top of the candidate and checks, on that current-main database, that the rebuilt
   `require_bound_replay_receipt_20261015` trigger (batches 2, 3a, 3b) still covers all nine batch-1
   operations and still refuses an unbound receipt for each one.
@@ -42,5 +42,5 @@ No smoke chain, migration or app code changed.
 
 **Proof (each run locally on this branch, Docker):**
 `MONEY_REPLAY_BINDING_BATCH1_PROOF_PASS`, `COST_MARGIN_RPC_LEAKS_PROOF_PASS`,
-`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS ... post_baseline_replay=through_candidate_then_126_later smoke_matrices=candidate_era_after_candidate+current_on_20261025090000...
+`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS ... post_baseline_replay=through_candidate_then_128_later smoke_matrices=candidate_era_after_candidate+current_on_20261026050000...
 legacy_lifecycle_smokes=6/6`.

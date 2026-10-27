@@ -4315,7 +4315,8 @@ export function runtimeProgramRefused(command, gated) {
 // (`"$A" "$B" "$C" 951 --admin`, or the action pushed later by options) can be a
 // whole merge hidden in values set earlier (Sol on #1128; Mason, 2026-10-26:
 // "close it narrowly"). `"$NODE" x.mjs` and `"$CODEX" --version` keep passing.
-const isRuntimeWord = (word) => !String(word).startsWith("'") && /[$`]/.test(String(word));
+// Only text inside single quotes is literal; `''"$B"` still expands (Codex App on #1128).
+const isRuntimeWord = (word) => /[$`]/.test(String(word).replace(/'[^']*'/g, ""));
 function runtimeArgumentsFollowRuntimeProgram(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
     const words = splitShellWordsRaw(segment);

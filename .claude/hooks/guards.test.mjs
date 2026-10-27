@@ -207,6 +207,8 @@ for (const command of [
   'command "$A" "$B" "$C" 951 --admin',
   'exec "$A" "$B" "$C" 951 --admin',
   'env -i PATH=/usr/bin "$A" "$B" "$C" 951 --admin',
+  `"$A" ''"$B" ''"$C" 951 --admin`,
+  `''"$A" "$B" "$C" 951 --admin`,
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

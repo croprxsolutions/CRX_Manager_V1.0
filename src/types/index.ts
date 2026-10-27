@@ -751,7 +751,7 @@ export interface QuoteSection {
 export interface LastChargedPrice {
   product_id: string;
   unit_price_cents: number;
-  /** NULL = sold before the tier at sale was recorded (20261026130000). */
+  /** NULL = sold before the tier at sale was recorded (20261027045000). */
   price_tier: 1 | 2 | 3 | null;
   /** The unit size that charged line was sold in (the price is per this unit). */
   unit_size: string | null;
@@ -1006,7 +1006,7 @@ export interface OrderItem {
    */
   cost_at_time_cents?: number | null;
   /** Tier (1-3) in effect when the line was written; NULL = unknown (older lines). Stamped by a
-   * trigger (20261026130000); never written by the app. Optional until the screens select it. */
+   * trigger (20261027045000); never written by the app. Optional until the screens select it. */
   price_tier_at_sale?: 1 | 2 | 3 | null;
   actual_rate: number | null;
   rate_unit: string | null;
@@ -2039,7 +2039,7 @@ export interface InvoiceItem {
   return_credit_cogs_cents?: number | null;
   return_credit_source_item_id?: string | null;
   /** Tier (1-3) in effect when the line was written; NULL = unknown (older lines) or not a product
-   * line. Stamped by a trigger (20261026130000); never written by the app. Optional until the
+   * line. Stamped by a trigger (20261027045000); never written by the app. Optional until the
    * screens select it. */
   price_tier_at_sale?: 1 | 2 | 3 | null;
   // Goal 3 charge line (mig 20261021050000): set only on a line with no product, quantity 1 and

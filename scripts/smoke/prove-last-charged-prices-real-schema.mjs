@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261026130000 candidate: "What did we charge this customer before?"
+ * Full-chain proof for the 20261027045000 candidate: "What did we charge this customer before?"
  * (To-Do 0.3, pricing plan slice 3; Mason, 2026-10-14: reps see the last price charged).
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
@@ -43,7 +43,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261026130000_last_charged_prices.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261027045000_last_charged_prices.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

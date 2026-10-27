@@ -4,7 +4,7 @@ import type { LastChargedPrice } from '../types';
 
 /**
  * "What did we charge this customer before?" (To-Do 0.3, pricing plan slice 3). The database
- * decides what counts as a charge (get_last_charged_prices, 20261026130000): posted, paid or overdue
+ * decides what counts as a charge (get_last_charged_prices, 20261027045000): posted, paid or overdue
  * invoice lines, and priced confirmed or delivered order lines not yet on such an invoice. Admins and
  * sales reps read it (Mason, 2026-10-14), across reps; it carries no cost or margin.
  */

@@ -151,9 +151,9 @@ GRANT REFERENCES (price_tier_at_sale) ON public.invoice_items TO authenticated;
 GRANT SELECT (price_tier_at_sale) ON public.invoice_items TO anon;
 
 COMMENT ON COLUMN public.order_items.price_tier_at_sale IS
-  'Price tier (1-3) in effect when this line was written: its quote''s tier, else the customer''s assigned tier then. NULL = unknown (lines written before 20261026130000). Read by get_last_charged_prices.';
+  'Price tier (1-3) in effect when this line was written: its quote''s tier, else the customer''s assigned tier then. NULL = unknown (lines written before 20261027045000). Read by get_last_charged_prices.';
 COMMENT ON COLUMN public.invoice_items.price_tier_at_sale IS
-  'Price tier (1-3) in effect when this line was written: its order line''s tier, else the invoice customer''s assigned tier then. NULL = unknown (lines written before 20261026130000) or not a product line. Read by get_last_charged_prices.';
+  'Price tier (1-3) in effect when this line was written: its order line''s tier, else the invoice customer''s assigned tier then. NULL = unknown (lines written before 20261027045000) or not a product line. Read by get_last_charged_prices.';
 
 -- An order line's tier: its own quote's, else its order's quote's, else the order customer's now.
 CREATE FUNCTION public._order_line_price_tier_20261026(p_order_id uuid, p_quote_item_id uuid)

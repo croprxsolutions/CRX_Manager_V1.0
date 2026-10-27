@@ -4,7 +4,7 @@ The quote screen now shows, for each product on the quote, the last price this c
 with the tier and the date. Mason, 2026-10-14: sales reps "should see the last price we charged this
 customer"; price history itself stays admin-only.
 
-- **Database** (`20261026130000_last_charged_prices.sql`):
+- **Database** (`20261027045000_last_charged_prices.sql`):
   - New read function `get_last_charged_prices`, for admins and sales reps. A rep sees charges billed
     by any rep, because invoice access alone would hide another rep's bills. It returns only the price,
     tier, date and whether it came from an invoice or an order. It never returns cost, margin,

@@ -185,6 +185,7 @@ for (const command of [
   'P=python; $P -I scratch/stats.py',
   `NODE=node; "$NODE" scripts/report.mjs 'literal$USER'`,
   '"$CODEX" --version',
+  "node -e 'console.log(`$HOME ${process.env.USER}`)'",
 ]) ok(!runtimeProgramRefused(command, couldReachGatedAction([command])), `whole-variable program allowed: ${command}`);
 for (const command of [
   "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",

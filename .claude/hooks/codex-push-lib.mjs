@@ -4327,7 +4327,8 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
   // past the depth limit any substitution at all is refused, as elsewhere here.
   const split = splitSubstitutions(text);
   const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []),
-    ...[...text.matchAll(/`([^`]*)`/g)].map((match) => match[1])];
+    // Backticks inside single quotes are literal text (a JS template string), not commands.
+    ...[...text.replace(/'[^']*'/g, "''").matchAll(/`([^`]*)`/g)].map((match) => match[1])];
   if (inners.length > 0 && depth >= NESTED_MAX_DEPTH) return true;
   if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1))) return true;
   for (const segment of splitCommandSegments(text)) {

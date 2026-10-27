@@ -702,6 +702,13 @@ ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit), "an unre
   delete noSuites.commit.checkSuites;
   eq(evaluateCodeRabbitRequirement(facts({ commits: [noSuites, runCommit(HEAD, skipped())] })).priorReview, undefined,
     "a commit read without its check suites is unknown (Luna round 2)");
+  const negative = skipped();
+  negative.totalCount = -1;
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(OLD, negative), runCommit(HEAD, skipped())] })).priorReview, undefined,
+    "a negative suite total is unknown (Luna round 3)");
+  const negativeCommits = facts({ commits: [commit(OLD), commit(HEAD)] });
+  negativeCommits.commits.totalCount = -1;
+  eq(evaluateCodeRabbitRequirement(negativeCommits).priorReview, undefined, "a negative commit total is unknown");
   ok(/checkSuites\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY) && /checkRuns\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY),
     "the requirement read asks for the suite and run totals");
 }

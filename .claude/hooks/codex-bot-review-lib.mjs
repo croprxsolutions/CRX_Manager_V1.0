@@ -496,7 +496,7 @@ export function coderabbitCompletedCommit(commit) {
 // malformed field is not proof either.
 function coderabbitRunsComplete(commit) {
   const suites = commit?.checkSuites;
-  const fits = (list) => Array.isArray(list?.nodes) && Number.isInteger(list?.totalCount) && list.totalCount <= list.nodes.length;
+  const fits = (list) => Array.isArray(list?.nodes) && Number.isInteger(list?.totalCount) && list.totalCount >= 0 && list.totalCount <= list.nodes.length;
   return fits(suites) && suites.nodes.every((suite) => fits(suite?.checkRuns));
 }
 
@@ -559,7 +559,7 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   const commitTotal = pullRequest?.commits?.totalCount;
   let priorReview;
   if (list.some(coderabbitCompletedCommit)) priorReview = true;
-  else if (Number.isInteger(commitTotal) && commitTotal <= list.length && list.every(coderabbitRunsComplete)) priorReview = false;
+  else if (Number.isInteger(commitTotal) && commitTotal >= 0 && commitTotal <= list.length && list.every(coderabbitRunsComplete)) priorReview = false;
   return { status: "missing", why, headOid, reviewedOid: "", priorReview };
 }
 

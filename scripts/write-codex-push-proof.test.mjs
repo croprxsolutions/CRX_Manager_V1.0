@@ -1483,6 +1483,8 @@ function collisionPromptSkipsWork(prompt) {
     assert.equal(coderabbitCheckRunInProgress([run("in_progress", at(5), 1)], now), false, "preflight: another app's run does not count");
     assert.equal(coderabbitCheckRunInProgress([run("in_progress", null)], now), null, "preflight: an undated unfinished run is unreadable");
     assert.equal(coderabbitCheckRunInProgress([], now), false, "preflight: no run is not busy");
+    assert.equal(coderabbitCheckRunInProgress([{ ...run("in_progress", at(5)), app: null }], now), null, "preflight: a run with no readable app is unreadable");
+    assert.equal(coderabbitCheckRunInProgress([{ ...run("in_progress", at(5)), name: undefined }], now), null, "preflight: a run with no readable name is unreadable");
   }
   const wrapperRun = readFileSync(fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url)), "utf8");
   assert.match(wrapperRun, /buildCodexReviewPrompt\(\{ base: GUARDED_BASE, followUp, followUpNonce \}\)/, "follow-up: run() passes its nonce to the prompt");

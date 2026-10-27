@@ -1271,11 +1271,14 @@ export function coderabbitReviewInProgress(statuses, nowMs = Date.now()) {
 
 // The same question for CodeRabbit's check runs (it reports by check run since
 // 2026-10-27): a "CodeRabbit" run from its own app that has not completed and
-// started within the stale window. An undated unfinished run is unreadable (null).
+// started within the stale window. An undated unfinished run, or one whose app
+// or name cannot be read, is unreadable (null): the read asked for CodeRabbit's
+// runs only, so it cannot be waved off as someone else's (Luna round 3).
 export function coderabbitCheckRunInProgress(checkRuns, nowMs = Date.now()) {
   let busy = false;
   for (const run of Array.isArray(checkRuns) ? checkRuns : []) {
-    if (run?.app?.id !== CODERABBIT_APP_ID || String(run?.name || "").trim() !== "CodeRabbit") continue;
+    if (!Number.isInteger(run?.app?.id) || typeof run?.name !== "string") return null;
+    if (run.app.id !== CODERABBIT_APP_ID || String(run?.name || "").trim() !== "CodeRabbit") continue;
     if (String(run?.status || "").trim().toLowerCase() === "completed") continue;
     const at = Date.parse(run?.started_at || "");
     if (!Number.isFinite(at)) return null;
@@ -1527,7 +1530,8 @@ export function readSolPreflightFacts(root, headSha, baseSha) {
     // unreadable, never "not busy" (Luna on #1125).
     if (!Array.isArray(pages) || !pages.length || pages.some((page) => !Array.isArray(page?.check_runs))) throw new Error("unreadable check runs");
     const runs = pages.flatMap((page) => page.check_runs);
-    if (!Number.isInteger(pages[0]?.total_count) || runs.length < pages[0].total_count) throw new Error("incomplete check runs");
+    const total = pages[0]?.total_count;
+    if (!Number.isInteger(total) || total < 0 || runs.length < total) throw new Error("incomplete check runs");
     const byStatus = coderabbitReviewInProgress(statuses, facts.nowMs);
     const byRun = coderabbitCheckRunInProgress(runs, facts.nowMs);
     facts.coderabbitBusy = byStatus === null || byRun === null ? null : byStatus || byRun;

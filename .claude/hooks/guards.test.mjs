@@ -229,6 +229,9 @@ for (const command of [
   '"$@" 951 --admin',
   '"${A:-gh}" pr list',
   '"$A$B" pr list',
+  `"$NODE" --version; ''"$A" ''"$B" ''"$C" 951 --admin`,
+  `"$NODE" --version; ''"$A" pr list`,
+  `"$NODE" --version; $A pr list`,
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

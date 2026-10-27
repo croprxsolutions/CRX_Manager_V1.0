@@ -107,6 +107,47 @@ export function purchaseOrderStatusBanner(status: string): string | null {
   return null;
 }
 
+/**
+ * Everything the PO PDF prints, so a changed PO is a new email (not a replay of the
+ * old one) and an admin never confirms one version and sends another. The status
+ * counts only through its banner: a submitted and a partly received PO print the
+ * same PDF, so a receipt between a lost send and its retry keeps the retry key.
+ */
+export function purchaseOrderPdfFingerprint(
+  header: {
+    po_number: string;
+    vendor: string;
+    status: string;
+    submitted_date: string | null;
+    expected_delivery_date: string | null;
+    notes?: string | null;
+  } | null,
+  lines: ReadonlyArray<{
+    id: string;
+    product_id: string;
+    product_name?: string | null;
+    product?: { product_name?: string | null; epa_registration?: string | null } | null;
+    quantity_ordered: number;
+    unit_cost?: number | null;
+    cost_needs_review?: boolean | null;
+    unit_size?: string | null;
+    notes?: string | null;
+  }>,
+): string {
+  return JSON.stringify([
+    header && [
+      header.po_number, header.vendor, purchaseOrderStatusBanner(header.status), header.submitted_date,
+      header.expected_delivery_date, header.notes,
+    ],
+    lines
+      .map((line) => [
+        line.id, line.product_id, line.product?.product_name ?? line.product_name, line.product?.epa_registration,
+        line.quantity_ordered, line.unit_cost ?? null, !!line.cost_needs_review, line.unit_size, line.notes,
+      ])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  ]);
+}
+
 export function purchaseOrderPdfFilename(poNumber: string): string {
   return `Purchase-Order-${poNumber}.pdf`;
 }

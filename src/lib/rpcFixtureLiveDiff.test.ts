@@ -40,8 +40,10 @@ import { dirname, join } from 'node:path';
 import * as ts from 'typescript';
 
 // -------------------------------------------------------------------------
-// Checked-in live snapshot — verified 2026-10-26, 731 public functions, plus the 3 that
-// 20261027060000 adds (applied before its PR merges; the merge gates require the apply first)
+// Checked-in live snapshot — verified 2026-10-26, 731 public functions, plus 7 added by hand:
+// the 2 margin-floor functions (20261025210000), customer_credit_exposure (20261027030000) and
+// the 4 that 20261027060000 adds (applied before its PR merges; the merge gates require the
+// apply first). 731 + 7 = 738
 // (see LIVE_PG_PROC_COUNT below, which is authoritative; includes trigger/helper
 // functions and supersets the user-facing RPCs).
 // Kept as the raw comma-joined DB output to make regeneration a single paste.

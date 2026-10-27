@@ -188,6 +188,8 @@ for (const command of [
   "node -e 'console.log(`$HOME ${process.env.USER}`)'",
   'x=$(echo "$HOME" "$USER")',
   "$result = Get-Content $path",
+  "# don't expand anything special\nprintf '%s\\n' \"$HOME\"",
+  "cat <<'EOF'\nDon't expand $HOME\nEOF",
 ]) ok(!runtimeProgramRefused(command, couldReachGatedAction([command])), `whole-variable program allowed: ${command}`);
 for (const command of [
   "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",

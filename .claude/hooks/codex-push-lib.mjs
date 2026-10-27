@@ -4354,9 +4354,11 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
   // Substitution bodies run too (`echo "$("$A" "$B" "$C")"`, Codex App on #1128);
   // past the depth limit any substitution at all is refused, as elsewhere here.
   const split = splitSubstitutions(text);
-  const backticks = backtickBodies(text);
-  // Quoting the scanner cannot follow is refused when it could hide a variable.
-  if (backticks === null) return /[$`@]/.test(text);
+  // Quoting the scanner cannot follow matters only if a backtick could be hidden by
+  // it; an apostrophe in a comment or heredoc (`don't`) is not (Codex App on #1128).
+  const scanned = backtickBodies(text);
+  if (scanned === null && text.includes("`")) return true;
+  const backticks = scanned ?? [];
   const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []), ...backticks];
   if (inners.length > 0 && depth >= NESTED_MAX_DEPTH) return true;
   if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1))) return true;

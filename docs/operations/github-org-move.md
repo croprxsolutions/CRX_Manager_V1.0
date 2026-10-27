@@ -54,6 +54,9 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
    - CodeRabbit: app.coderabbit.ai → **Add organization** → `croprxsolutions`.
    - Codex (ChatGPT) GitHub connector: github.com/apps → the ChatGPT Codex Connector app → **Configure** →
      `croprxsolutions`.
+   - Sentry: crop-rx-solutions.sentry.io → **Settings → Integrations → GitHub** → **Add Installation** →
+     `croprxsolutions`. This is what links an error to the commit that likely caused it ("Suspect
+     Commit"); after step 4, add `croprxsolutions/CRX_Manager_V1.0` under that integration's repositories.
 4. **YOU: move the repo.** github.com/masonwells1/CRX_Manager_V1.0 → **Settings → General** → bottom of the
    page, **Transfer ownership** → choose `croprxsolutions` → type the repo name to confirm.
 5. **YOU: reconnect Vercel if needed.** Vercel → project → **Settings → Git**. It should show
@@ -66,6 +69,8 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
      (every worktree shares it) and confirm `git fetch` works;
    - compare secrets, environments, rulesets, required checks and CodeQL against the baseline above;
    - open a small docs-only PR and watch every required check, including `Vercel`, go green on it;
+   - after that PR merges, confirm Vercel deployed production from the new address and that Sentry's
+     GitHub integration lists `croprxsolutions/CRX_Manager_V1.0`;
    - confirm Taha's access shows as **Read**.
 8. **AGENT: follow-up PR** that switches the remaining fixed references to the new address:
    `scripts/land-pr.mjs`, `scripts/daily-landing-summary.mjs` (default only; Actions already passes the

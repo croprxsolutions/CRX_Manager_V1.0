@@ -26,7 +26,9 @@ async function rupFinding(inv: GroupMember): Promise<string | null | typeof FAIL
   // A member's lines that came back missing are unread, not "no products".
   if (!Array.isArray(inv.invoice_items)) return FAILED;
   const pids = inv.invoice_items.map((x) => x.product_id).filter((p): p is string => Boolean(p));
-  if (!inv.customer_id || pids.length === 0) return null;
+  if (pids.length === 0) return null;
+  // Products with no customer to check a license for is not a pass.
+  if (!inv.customer_id) return FAILED;
   const res = await checkRUPCompliance(inv.customer_id, pids);
   if (res.checkFailed) return FAILED;
   if (!res.hasRUPProducts || res.hasValidLicense) return null;

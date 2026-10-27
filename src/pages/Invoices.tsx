@@ -431,11 +431,14 @@ export default function Invoices() {
         // read is skipped and named; the rest still print.
         const { list: pdfDataList, skipped } = await buildBatchInvoicePdfData(selectedInvoices, async (inv) => {
           // Fetch customer details
+          // A dropped request is a failed read too: the same refusal, not a raw network error.
+          const detailsUnavailable = () => { throw new InvoiceDetailsUnavailableError(); };
           const { data: cust, error: custError } = await supabase
             .from('customers')
             .select('billing_address, city, state, zip, account_number, payment_terms')
             .eq('id', inv.customer_id)
-            .maybeSingle();
+            .maybeSingle()
+            .then((r) => r, detailsUnavailable);
           // A failed or missing customer read refuses the PDF: printing on would send the
           // customer an invoice with a blank address block (To-Do 10.5 follow-up).
           if (custError || !cust) throw new InvoiceDetailsUnavailableError();
@@ -453,7 +456,8 @@ export default function Invoices() {
           const { data: shares, error: sharesError } = await supabase
             .from('invoice_shares')
             .select('*, customer:customers!invoice_shares_customer_id_fkey(farm_name)')
-            .eq('invoice_id', inv.id);
+            .eq('invoice_id', inv.id)
+            .then((r) => r, detailsUnavailable);
           // A split invoice printed without its shares would hide who owes what.
           if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
 

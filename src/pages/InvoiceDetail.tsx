@@ -410,7 +410,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             return;
           }
           const pids = inv.invoice_items.map((x) => x.product_id).filter((p): p is string => Boolean(p));
-          if (!inv.customer_id || pids.length === 0) continue;
+          if (pids.length === 0) continue;
+          // Products with no customer to check a license for is not a pass.
+          if (!inv.customer_id) {
+            stopUnchecked();
+            return;
+          }
           const res = await checkRUPCompliance(inv.customer_id, pids);
           if (res.checkFailed) {
             stopUnchecked();
@@ -427,7 +432,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       } else {
         // The SAVED customer and lines — what post_invoice posts — not the on-screen copy.
         const productIds = saved.productIds;
-        if (saved.customerId && productIds.length > 0) {
+        if (productIds.length > 0) {
+          // Products with no customer to check a license for is not a pass.
+          if (!saved.customerId) {
+            stopUnchecked();
+            return;
+          }
           const res = await checkRUPCompliance(saved.customerId, productIds);
           if (res.checkFailed) {
             stopUnchecked();

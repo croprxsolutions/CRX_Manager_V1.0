@@ -107,7 +107,7 @@ describe('Invoices — Print Selected', () => {
 
   const cases: Array<[string, FailMode]> = [
     ['customers', 'error'], ['customers', 'nodata'], ['customers', 'throws'],
-    ['invoice_shares', 'error'], ['invoice_shares', 'nodata'], ['invoice_shares', 'notlist'],
+    ['invoice_shares', 'error'], ['invoice_shares', 'nodata'], ['invoice_shares', 'notlist'], ['invoice_shares', 'throws'],
   ];
   for (const [table, mode] of cases) {
     it(`prints nothing and says so when the ${table} read ${mode === 'nodata' ? 'returns nothing' : mode}`, async () => {
@@ -118,9 +118,7 @@ describe('Invoices — Print Selected', () => {
       fireEvent.click(screen.getAllByRole('checkbox')[0]);
       fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
       fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
-      // A dropped request fails the batch with its own error; every other failure names the details.
-      const message = mode === 'throws' ? 'socket hang up' : 'Could not load the invoice details';
-      await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining(message)));
+      await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Could not load the invoice details')));
       expect(H.printed).not.toHaveBeenCalled();
     });
   }

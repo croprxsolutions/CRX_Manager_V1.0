@@ -1655,6 +1655,12 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
       if (table === 'invoice_items') {
         return buildChain({ data: [{ id: 'it-1', product_id: 'p-1', description: 'Chem', quantity: 2, unit_price_cents: 1000, extended_cents: 2000, sort_order: 0 }], error: null });
       }
+      if (table === 'customers') {
+        // The picker list reads a list; the credit check reads the one customer, who has no limit.
+        const customers = buildChain({ data: [], error: null });
+        customers.single = () => buildChain({ data: { farm_name: 'Farm', credit_limit_cents: null }, error: null });
+        return customers;
+      }
       return buildChain({ data: [], error: null });
     });
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));

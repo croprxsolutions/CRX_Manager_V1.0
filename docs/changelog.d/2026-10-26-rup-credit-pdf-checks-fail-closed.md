@@ -19,7 +19,8 @@
   invoices they created or sell, so a customer billed by another rep looked under the limit. The
   balance now comes from the server's `check_customer_credit_limit` (posted, overdue and unposted,
   not deleted, no negative balances), parsed into exact cents. A failed read, an unusable balance
-  or an amount that is not a number is "Could not verify credit limit".
+  or an amount or limit that is not whole cents is "Could not verify credit limit". RUP product lines
+  with no customer to check a license for stop Post too.
 - **That stop has no override (Mason, 2026-10-26: "keep the hard stop on both screens").** On
   Invoice Detail and New Order the could-not-verify banner no longer offers "Continue Anyway"; an
   over-limit warning still does. The override now lives in the hook and is spent by the next

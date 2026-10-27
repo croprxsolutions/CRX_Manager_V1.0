@@ -40,8 +40,8 @@ async function outstandingBalanceCents(customerId: string): Promise<number | nul
  * the old code read a failed customer read as "no limit set" and passed.
  */
 export async function evaluateCreditLimit({ customerId, newAmountCents }: CreditLimitParams): Promise<CreditLimitResult> {
-  // An amount that is not a number cannot be compared to the limit, so it is never a pass.
-  if (!Number.isFinite(newAmountCents)) return { status: 'unverified' };
+  // An amount that is not whole cents cannot be compared to the limit, so it is never a pass.
+  if (!Number.isSafeInteger(newAmountCents)) return { status: 'unverified' };
   if (!customerId || newAmountCents <= 0) return { status: 'ok' };
 
   try {
@@ -56,7 +56,9 @@ export async function evaluateCreditLimit({ customerId, newAmountCents }: Credit
     if (!customer) throw new Error('The customer read returned no row.');
 
     // No limit set: Customer Detail saves a blank limit as 0, so 0 means none too.
-    if (!customer.credit_limit_cents) return { status: 'ok' };
+    if (customer.credit_limit_cents === null || customer.credit_limit_cents === 0) return { status: 'ok' };
+    // Anything else must be whole cents; a limit that is not cannot be compared.
+    if (!Number.isSafeInteger(customer.credit_limit_cents)) throw new Error('The credit limit is not whole cents.');
 
     const currentBalance = await outstandingBalanceCents(customerId);
     if (currentBalance === null) throw new Error('check_customer_credit_limit returned no usable balance.');

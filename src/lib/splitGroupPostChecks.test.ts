@@ -81,6 +81,11 @@ describe('checkSplitGroupBeforePost', () => {
     expect(H.rup).not.toHaveBeenCalled();
   });
 
+  it('stops when a member has products but no customer to check a license for', async () => {
+    H.group = [{ invoice_number: 'INV-1', customer_id: null, total_amount_cents: 5000, invoice_items: [{ product_id: 'p1' }] }];
+    expect(await checkSplitGroupBeforePost('grp-1')).toEqual({ ok: false, message: RUP_POST_CHECK_FAILED_MESSAGE });
+  });
+
   it('stops when one member\'s RUP check could not run', async () => {
     H.rup.mockResolvedValueOnce(rupResult({})).mockResolvedValueOnce(rupResult({ checkFailed: true }));
     expect(await checkSplitGroupBeforePost('grp-1')).toEqual({ ok: false, message: RUP_POST_CHECK_FAILED_MESSAGE });

@@ -164,7 +164,20 @@ describe('credit-limit check fails closed on every failed read', () => {
     });
   }
 
-  it('an amount that is not a number is unverified, never a pass', async () => {
+  it('an amount that is not whole cents is unverified, never a pass', async () => {
     expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: Number.NaN })).toEqual({ status: 'unverified' });
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100.25 })).toEqual({ status: 'unverified' });
+  });
+
+  for (const limit of ['bad', Number.NaN, 1000.5]) {
+    it(`a credit limit of ${String(limit)} is unverified, never "no limit"`, async () => {
+      H.customer = { farm_name: 'Big Farm', credit_limit_cents: limit };
+      expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'unverified' });
+    });
+  }
+
+  it('a credit limit of 0 still means no limit', async () => {
+    H.customer = { farm_name: 'Big Farm', credit_limit_cents: 0 };
+    expect(await evaluateCreditLimit({ customerId: 'c1', newAmountCents: 100 })).toEqual({ status: 'ok' });
   });
 });

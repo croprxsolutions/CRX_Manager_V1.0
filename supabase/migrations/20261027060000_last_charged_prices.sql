@@ -41,7 +41,9 @@
 --          invoice billed to the customer, not deleted, not voided, not awaiting pricing, quantity
 --          and price above 0. Draft, unposted, cancelled and voided invoices do not count, nor do
 --          credit memos or misc-charge invoices. Return-credit lines, charge-only lines, application
---          fees and $0 no-charge lines do not count. Date: invoice_date.
+--          fees and $0 no-charge lines do not count. An invoice made from a spray job
+--          (transfer_job_to_invoice: job_id set, no billing set) does not count: it stores each
+--          chemical as quantity 1 at the line total. Date: invoice_date.
 --        - an order product line on a confirmed, partly delivered or delivered order for the
 --          customer, not deleted, priced (not "needs pricing", line not pricing-pending, price above
 --          0), units above 0, that no counted invoice line bills. Cancelled and voided orders do not
@@ -343,6 +345,13 @@ BEGIN
        AND i.deleted_at IS NULL
        AND i.voided_at IS NULL
        AND i.pricing_pending IS NOT TRUE
+       -- An invoice made from a spray job (transfer_job_to_invoice) stores each chemical line as
+       -- quantity 1 at the line total, so its unit_price_cents is not a per-unit price. Left out
+       -- (Codex App P2, PR #1119); the job's product then shows its last per-unit charge instead.
+       -- A split-billing child of a job (_save_field_app_split_invoice_impl) also carries job_id,
+       -- but always with field_app_billing_set_id and per-unit lines, so it counts; the job
+       -- transfer never sets a billing set.
+       AND (i.job_id IS NULL OR i.field_app_billing_set_id IS NOT NULL)
        AND ii.return_credit_source_item_id IS NULL
        AND ii.is_application_fee IS NOT TRUE
        AND ii.quantity > 0
@@ -407,7 +416,7 @@ REVOKE ALL ON FUNCTION public.get_last_charged_prices(uuid, uuid[]) FROM PUBLIC,
 GRANT EXECUTE ON FUNCTION public.get_last_charged_prices(uuid, uuid[]) TO authenticated;
 
 COMMENT ON FUNCTION public.get_last_charged_prices(uuid, uuid[]) IS
-  'Admin or sales rep: for each product, the latest price charged to this customer (posted/paid/overdue invoice line, else a priced confirmed/delivered order line not yet on such an invoice): unit price cents, tier at sale (NULL = unknown), date, source. Reads across reps by design (To-Do 0.3; Mason, 2026-10-14).';
+  'Admin or sales rep: for each product, the latest price charged to this customer (posted/paid/overdue invoice line, not from a spray-job transfer invoice, else a priced confirmed/delivered order line not yet on such an invoice): unit price cents, tier at sale (NULL = unknown), date, source. Reads across reps by design (To-Do 0.3; Mason, 2026-10-14).';
 
 -- ---------------------------------------------------------------------------
 -- VERIFY

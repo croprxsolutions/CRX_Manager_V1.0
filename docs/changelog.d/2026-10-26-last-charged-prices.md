@@ -11,7 +11,9 @@ customer"; price history itself stays admin-only.
     quantity, document numbers or who sold it.
   - What counts as a charge: a posted, paid or overdue invoice line, or a priced confirmed or
     delivered order line not yet on such an invoice. Quotes, drafts, unposted, cancelled or voided
-    invoices, credit memos, misc charges, returns and cancelled orders never count.
+    invoices, credit memos, misc charges, returns, cancelled orders and invoices made from a spray job
+    never count (a spray-job invoice stores each chemical as one line at its total, not a per-unit
+    price; Codex App, 2026-10-27).
   - Every new order and invoice line now records the tier it was sold at (`price_tier_at_sale`), set
     by the database whichever screen writes the line. That includes the invoice editor's save, which
     re-adds lines and then restores their link to the order. Older lines show "Tier unknown" (not

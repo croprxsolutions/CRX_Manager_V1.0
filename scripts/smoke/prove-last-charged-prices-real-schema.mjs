@@ -199,7 +199,7 @@ const id = (n) => `7c320000-0000-4000-8000-${n.padStart(12, '0')}`;
 const U = { ADMIN: id('a1'), ADMIN_OFF: id('a3'), REP: id('b1'), DRIVER: id('d1') };
 const CA = id('c1'); // tier 2
 const CB = id('c2'); // tier 3
-const P = Object.fromEntries(['1', '2', '3', '4', '5', '6', '7'].map((n) => [`P${n}`, id(`f${n}`)]));
+const P = Object.fromEntries(['1', '2', '3', '4', '5', '6', '7', '8'].map((n) => [`P${n}`, id(`f${n}`)]));
 const QA = id('91'); const QS = id('92'); const QI = id('93');
 const MISSING = id('ff');
 const q = (value) => `'${value}'`;
@@ -246,6 +246,13 @@ const INVOICES = [
   ['ib', CB, 'posted', 'chemical_sale', '2026-09-01', false, false],
   ['ic', CA, 'posted', 'misc_charge', '2026-09-02', false, false],
   ['id', CA, 'posted', 'chemical_sale', '2026-09-03', false, false],
+  // A posted invoice made from a spray job: its line is quantity 1 at the line total, never counted.
+  ['ij', CA, 'posted', 'field_application', '2026-08-01', false, false, null, 'job'],
+  // A posted field-application invoice with no job (the field-app editor's per-unit lines) counts.
+  ['ik', CA, 'posted', 'field_application', '2026-08-02', false, false],
+  // A split-billing child made from a spray job: it carries the job AND a billing set, and its lines
+  // are per-unit (_save_field_app_split_invoice_impl), so it counts.
+  ['il', CA, 'posted', 'field_application', '2026-08-03', false, false, null, 'job+set'],
 ];
 // [invoice key, product, unit cents, quantity, order line key, extra columns]
 const INVOICE_LINES = [
@@ -262,6 +269,9 @@ const INVOICE_LINES = [
   ['ic', 'P5', 7000, 5, null, ''],
   ['id', 'P5', 7100, 1, null, 'is_application_fee=true'],
   ['id', 'P7', 7200, -1, null, 'return'],
+  ['ij', 'P2', 20000, 1, null, ''],
+  ['ik', 'P3', 3300, 5, null, ''],
+  ['il', 'P8', 4400, 5, null, ''],
 ];
 // Fixture keys ('o2', 'i7', 'l5') spelled as hex inside the uuid.
 const hex = (key) => Buffer.from(key).toString('hex');
@@ -307,8 +317,8 @@ function seedFixture() {
       ${ORDERS.map(([k, c, s, d, del, ps, quote]) => `('${oid(k)}', 'ORD-PROVER-${k}', '${c}', '${s}', '${d}', ${del ? 'now()' : 'NULL'}, '${ps}', ${quote ? q(quote) : 'NULL'})`).join(',\n      ')};
     INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, total_units_needed, total_price) VALUES
       ${ORDER_LINES.map(([k, o, p, price, units]) => `('${lid(k)}', '${oid(o)}', '${P[p]}', '[PROVER] ${p}', ${price}, ${units}, ${price} * ${units})`).join(',\n      ')};
-    INSERT INTO public.invoices (id, invoice_number, customer_id, status, invoice_type, invoice_date, deleted_at, voided_at, posted_at, created_by, order_id) VALUES
-      ${INVOICES.map(([k, c, s, t, d, del, voided, order]) => `('${iid(k)}', 'INV-PROVER-${k}', '${c}', '${s}', '${t}', '${d}', ${del ? 'now()' : 'NULL'}, ${voided ? 'now()' : 'NULL'}, ${['posted', 'paid', 'overdue', 'voided'].includes(s) ? 'now()' : 'NULL'}, '${U.ADMIN}', ${order ? q(oid(order)) : 'NULL'})`).join(',\n      ')};
+    INSERT INTO public.invoices (id, invoice_number, customer_id, status, invoice_type, invoice_date, deleted_at, voided_at, posted_at, created_by, order_id, job_id, field_app_billing_set_id) VALUES
+      ${INVOICES.map(([k, c, s, t, d, del, voided, order, job = '']) => `('${iid(k)}', 'INV-PROVER-${k}', '${c}', '${s}', '${t}', '${d}', ${del ? 'now()' : 'NULL'}, ${voided ? 'now()' : 'NULL'}, ${['posted', 'paid', 'overdue', 'voided'].includes(s) ? 'now()' : 'NULL'}, '${U.ADMIN}', ${order ? q(oid(order)) : 'NULL'}, ${job ? q(id(`3${hex(k)}`)) : 'NULL'}, ${job.includes('set') ? q(id(`4${hex(k)}`)) : 'NULL'})`).join(',\n      ')};
     INSERT INTO public.invoice_items (invoice_id, product_id, description, unit_price_cents, quantity, extended_cents, order_item_id, is_application_fee, return_credit_source_item_id, return_credit_cogs_cents, cost_cents) VALUES
       ${INVOICE_LINES.map(([k, p, cents, qty, line, extra]) => `('${iid(k)}', '${P[p]}', '[PROVER] ${p}', ${cents}, ${qty}, ${cents * qty}, ${line ? q(lid(line)) : 'NULL'}, ${extra === 'is_application_fee=true'}, ${extra === 'return' ? q(lid('l2')) : 'NULL'}, ${extra === 'return' ? '0' : 'NULL'}, 0)`).join(',\n      ')};
     COMMIT;`, { user: 'supabase_admin' });
@@ -380,7 +390,7 @@ const ZERO_LINES = `${STAMP}
     VALUES ('${iid('id')}', '${P.P6}', '[PROVER] P6 no charge', 0, 5, 0, 0);
   INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, total_units_needed, total_price)
     VALUES ('${oid('o9')}', '${P.P2}', '[PROVER] P2 free', 0, 5, 0);`;
-const EXPECTED_A = 'P1:4100:2:2026-04-01:order;P2:2000:-:2026-02-01:invoice;P3:3100:-:2026-01-20:invoice;P6:5100:3:2026-07-01:invoice';
+const EXPECTED_A = 'P1:4100:2:2026-04-01:order;P2:2000:-:2026-02-01:invoice;P3:3300:-:2026-08-02:invoice;P6:5100:3:2026-07-01:invoice;P8:4400:-:2026-08-03:invoice';
 
 // Section 3 rows, written with every trigger on (as the owner, the way the RPCs write them).
 const TIER = (table, where) => `(SELECT COALESCE(string_agg(COALESCE(price_tier_at_sale::text, '-'), ',' ORDER BY id), 'none') FROM public.${table} WHERE ${where})`;

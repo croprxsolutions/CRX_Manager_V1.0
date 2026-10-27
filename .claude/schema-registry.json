@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-10-26",
+    "generated_at": "2026-10-27",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261026214418",
+    "migrations_high_water": "20261027144628",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -445,6 +445,11 @@
       "20261023100000_revoke_load_recipe_into_job_app_access",
       "20261025090000_inventory_holds_and_retired_on_order_guards",
       "20261025210000_product_margin_floors",
+      "20261026050000_field_tables_follow_field_access",
+      "20261026140000_product_price_history_starting_snapshot",
+      "20261027030000_customer_credit_exposure",
+      "20261027040000_quote_sent_price_lock",
+      "20261027050000_price_sheet_warnings_and_approval",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1417,6 +1422,7 @@
     "prepay_applications",
     "pricing_change_set_preview_rows",
     "pricing_change_set_rows",
+    "pricing_change_set_warnings",
     "pricing_change_sets",
     "pricing_workbook_export_rows",
     "pricing_workbook_exports",
@@ -1680,7 +1686,8 @@
         "legacy_frontend",
         "pricing_worksheet",
         "product_page",
-        "products_inline"
+        "products_inline",
+        "starting_snapshot"
       ],
       "constraints": [
         "cost_history_change_source_check"
@@ -3107,6 +3114,24 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "cost_history",
+      "constraint": "cost_history_changed_by_required",
+      "def": "CHECK (((changed_by IS NOT NULL) OR (change_source = 'starting_snapshot'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "cost_history",
+      "constraint": "cost_history_starting_snapshot_unchanged",
+      "def": "CHECK (((change_source IS DISTINCT FROM 'starting_snapshot'::text) OR ((changed_by IS NULL) AND (NOT (old_cost IS DISTINCT FROM new_cost)) AND (NOT (old_tier1_price IS DISTINCT FROM new_tier1_price)) AND (NOT (old_tier2_price IS DISTINCT FROM new_tier2_price)) AND (NOT (old_tier3_price IS DISTINCT FROM new_tier3_price)) AND (NOT (old_tier1_margin IS DISTINCT FROM new_tier1_margin)) AND (NOT (old_tier2_margin IS DISTINCT FROM new_tier2_margin)) AND (NOT (old_tier3_margin IS DISTINCT FROM new_tier3_margin)) AND (NOT (old_pricing_version IS DISTINCT FROM new_pricing_version)))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "cost_history",
+      "constraint": "cost_history_tier_prices_whole_cents",
+      "def": "CHECK ((((old_tier1_price IS NULL) OR ((old_tier1_price = round(old_tier1_price, 2)) AND (old_tier1_price > '-10000000000'::numeric) AND (old_tier1_price < '10000000000'::numeric))) AND ((new_tier1_price IS NULL) OR ((new_tier1_price = round(new_tier1_price, 2)) AND (new_tier1_price > '-10000000000'::numeric) AND (new_tier1_price < '10000000000'::numeric))) AND ((old_tier2_price IS NULL) OR ((old_tier2_price = round(old_tier2_price, 2)) AND (old_tier2_price > '-10000000000'::numeric) AND (old_tier2_price < '10000000000'::numeric))) AND ((new_tier2_price IS NULL) OR ((new_tier2_price = round(new_tier2_price, 2)) AND (new_tier2_price > '-10000000000'::numeric) AND (new_tier2_price < '10000000000'::numeric))) AND ((old_tier3_price IS NULL) OR ((old_tier3_price = round(old_tier3_price, 2)) AND (old_tier3_price > '-10000000000'::numeric) AND (old_tier3_price < '10000000000'::numeric))) AND ((new_tier3_price IS NULL) OR ((new_tier3_price = round(new_tier3_price, 2)) AND (new_tier3_price > '-10000000000'::numeric) AND (new_tier3_price < '10000000000'::numeric)))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "credit_memo_applications",
       "constraint": "credit_memo_applications_amount_cents_check",
       "def": "CHECK ((amount_cents > 0))",
@@ -3719,6 +3744,30 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "pricing_change_set_approvals",
+      "constraint": "pricing_change_set_approvals_acknowledgements_check",
+      "def": "CHECK ((jsonb_typeof(acknowledgements) = 'array'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "pricing_change_set_approvals",
+      "constraint": "pricing_change_set_approvals_source_file_name_check",
+      "def": "CHECK (((source_file_name IS NULL) OR ((char_length(source_file_name) >= 1) AND (char_length(source_file_name) <= 255))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "pricing_change_set_approvals",
+      "constraint": "pricing_change_set_approvals_source_file_sha256_check",
+      "def": "CHECK (((source_file_sha256 IS NULL) OR (source_file_sha256 ~ '^[0-9a-f]{64}$'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "pricing_change_set_approvals",
+      "constraint": "pricing_change_set_approvals_warning_codes_check",
+      "def": "CHECK ((jsonb_typeof(warning_codes) = 'object'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
       "table": "pricing_change_set_preview_rows",
       "constraint": "pricing_change_set_preview_rows_check",
       "def": "CHECK ((((row_status = ANY (ARRAY['ready'::text, 'unchanged'::text])) AND (error_code IS NULL) AND (effect IS NOT NULL)) OR ((row_status = ANY (ARRAY['conflict'::text, 'invalid'::text])) AND (error_code IS NOT NULL))))",
@@ -3770,6 +3819,18 @@
       "table": "pricing_change_set_rows",
       "constraint": "pricing_change_set_rows_output_tier3_price_cents_check",
       "def": "CHECK ((output_tier3_price_cents >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "pricing_change_set_warnings",
+      "constraint": "pricing_change_set_warnings_details_check",
+      "def": "CHECK ((jsonb_typeof(details) = 'object'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "pricing_change_set_warnings",
+      "constraint": "pricing_change_set_warnings_warning_codes_check",
+      "def": "CHECK ((cardinality(warning_codes) > 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -4734,7 +4795,6 @@
     "cost_history": {
       "no_default": [
         "product_id",
-        "changed_by",
         "change_source"
       ],
       "with_default": [
@@ -5710,6 +5770,19 @@
         "updated_at"
       ]
     },
+    "pricing_change_set_approvals": {
+      "no_default": [
+        "change_set_id",
+        "approved_by",
+        "request_fingerprint",
+        "warning_codes",
+        "acknowledgements"
+      ],
+      "with_default": [
+        "approved_at",
+        "updated_at"
+      ]
+    },
     "pricing_change_set_preview_rows": {
       "no_default": [
         "change_set_id",
@@ -5737,6 +5810,17 @@
         "output_fingerprint"
       ],
       "with_default": []
+    },
+    "pricing_change_set_warnings": {
+      "no_default": [
+        "change_set_id",
+        "product_id",
+        "warning_codes",
+        "details"
+      ],
+      "with_default": [
+        "created_at"
+      ]
     },
     "pricing_change_sets": {
       "no_default": [
@@ -6924,7 +7008,12 @@
       "change_reason",
       "change_set_id",
       "old_pricing_version",
-      "new_pricing_version"
+      "new_pricing_version",
+      "price_source",
+      "old_rate_per_acre",
+      "new_rate_per_acre",
+      "old_rate_unit",
+      "new_rate_unit"
     ],
     "credit_memo_applications": [
       "id",
@@ -8091,6 +8180,17 @@
       "quote_id",
       "allocation_set_id"
     ],
+    "pricing_change_set_approvals": [
+      "change_set_id",
+      "approved_by",
+      "approved_at",
+      "request_fingerprint",
+      "warning_codes",
+      "acknowledgements",
+      "source_file_name",
+      "source_file_sha256",
+      "updated_at"
+    ],
     "pricing_change_set_preview_rows": [
       "change_set_id",
       "sequence",
@@ -8127,7 +8227,15 @@
       "output_tier1_price_per_acre_cents",
       "output_tier2_price_per_acre_cents",
       "output_tier3_price_per_acre_cents",
-      "output_fingerprint"
+      "output_fingerprint",
+      "price_source"
+    ],
+    "pricing_change_set_warnings": [
+      "change_set_id",
+      "product_id",
+      "warning_codes",
+      "details",
+      "created_at"
     ],
     "pricing_change_sets": [
       "id",
@@ -8251,7 +8359,9 @@
       "before_values",
       "after_values",
       "changes",
-      "output_fingerprint"
+      "output_fingerprint",
+      "change_reason",
+      "price_source"
     ],
     "product_label_drafts": [
       "id",

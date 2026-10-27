@@ -4357,8 +4357,19 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
   const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []), ...backticks];
   if (inners.length > 0 && depth >= NESTED_MAX_DEPTH) return true;
   if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1))) return true;
-  for (const segment of splitCommandSegments(text)) {
-    const words = splitShellWordsRaw(segment);
+  // The outer command is read with each body collapsed, as programBuiltAtRuntime
+  // does, so `x=$(echo "$HOME" "$USER")` is one assignment, not a program `"$HOME"`
+  // (Codex App on #1128).
+  let outer = split.outer;
+  for (const body of backticks) outer = outer.replace(`\`${body}\``, "``");
+  for (const segment of splitCommandSegments(outer)) {
+    let words = splitShellWordsRaw(segment);
+    // A PowerShell assignment target (`$result = Get-Content $path`) is not a program.
+    if (POWERSHELL_ASSIGNED_RE.test(words[0] ?? "") && POWERSHELL_ASSIGN_OP_RE.test(words[1] ?? "")) {
+      words = words.slice(2);
+    } else if (POWERSHELL_ASSIGNMENT_WORD_RE.test(words[0] ?? "")) {
+      words = words.slice(1);
+    }
     // Every program position, so a wrapper (`env "$A" "$B"`, `command`, `exec`)
     // does not hide the program it runs (Codex App on #1128).
     for (const start of programCandidates(words)) {

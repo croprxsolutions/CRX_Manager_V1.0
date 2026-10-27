@@ -4301,6 +4301,9 @@ const GLUED_RUNTIME_RE = /[A-Za-z0-9]\u0001*[$`]|[)}`]\u0001*[A-Za-z0-9$`]|\$\w+
 // glued together from run-time pieces, which is how a merge or push is hidden.
 // Like the other refusals here this is a speed bump, not a boundary.
 export function runtimeProgramRefused(command, gated) {
+  // Checked on its own: it reads substitution bodies itself, which the
+  // program-name test below may not report (`echo \`"$A" "$B"\``).
+  if (runtimeArgumentsFollowRuntimeProgram(command)) return true;
   if (!programAssembledAtRuntime(command)) return false;
   // Single-quoted text is literal: its letters stay (`'g'$H` still glues, Codex App
   // on #1128) but a `$` or backtick inside it does not expand (`'literal$USER'`).
@@ -4308,7 +4311,7 @@ export function runtimeProgramRefused(command, gated) {
   const expandable = String(command || "")
     .replace(/'([^']*)'/g, (_, literal) => literal.replace(/[$`]/g, "x"))
     .replace(/"/g, "\u0001");
-  return Boolean(gated) || GLUED_RUNTIME_RE.test(expandable) || runtimeArgumentsFollowRuntimeProgram(command);
+  return Boolean(gated) || GLUED_RUNTIME_RE.test(expandable);
 }
 
 // A program run from a variable with any variable among its arguments
@@ -4318,8 +4321,16 @@ export function runtimeProgramRefused(command, gated) {
 // Only text inside single quotes is literal; `''"$B"` still expands (Codex App on #1128).
 // A PowerShell splat (`@params`) passes a variable's values as arguments too.
 const isRuntimeWord = (word) => /[$`]|^@[A-Za-z_]/.test(String(word).replace(/'[^']*'/g, ""));
-function runtimeArgumentsFollowRuntimeProgram(command) {
-  for (const segment of splitCommandSegments(String(command || ""))) {
+function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
+  const text = String(command || "");
+  // Substitution bodies run too (`echo "$("$A" "$B" "$C")"`, Codex App on #1128);
+  // past the depth limit any substitution at all is refused, as elsewhere here.
+  const split = splitSubstitutions(text);
+  const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []),
+    ...[...text.matchAll(/`([^`]*)`/g)].map((match) => match[1])];
+  if (inners.length > 0 && depth >= NESTED_MAX_DEPTH) return true;
+  if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1))) return true;
+  for (const segment of splitCommandSegments(text)) {
     const words = splitShellWordsRaw(segment);
     // Every program position, so a wrapper (`env "$A" "$B"`, `command`, `exec`)
     // does not hide the program it runs (Codex App on #1128).

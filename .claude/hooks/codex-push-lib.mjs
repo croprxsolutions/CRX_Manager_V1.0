@@ -4316,7 +4316,8 @@ export function runtimeProgramRefused(command, gated) {
 // whole merge hidden in values set earlier (Sol on #1128; Mason, 2026-10-26:
 // "close it narrowly"). `"$NODE" x.mjs` and `"$CODEX" --version` keep passing.
 // Only text inside single quotes is literal; `''"$B"` still expands (Codex App on #1128).
-const isRuntimeWord = (word) => /[$`]/.test(String(word).replace(/'[^']*'/g, ""));
+// A PowerShell splat (`@params`) passes a variable's values as arguments too.
+const isRuntimeWord = (word) => /[$`]|^@[A-Za-z_]/.test(String(word).replace(/'[^']*'/g, ""));
 function runtimeArgumentsFollowRuntimeProgram(command) {
   for (const segment of splitCommandSegments(String(command || ""))) {
     const words = splitShellWordsRaw(segment);

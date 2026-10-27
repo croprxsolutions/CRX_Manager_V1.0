@@ -42,7 +42,7 @@ The PO enum migration `20261027070000_email_type_purchase_order` was **not in th
 
 ## Other sessions and overlap
 
-Open #1148 carries overlapping records for 0.1/0.6/0.7. Open #1153 carries overlapping last-charged-price records. Open #1154 is now limited to the registry rebuild and related cost-field/type classifications; it no longer edits the working lists. These are not shipped evidence and should be rebased/reconciled with this update before landing. PR #1147 merged during this audit; its PO-email snapshot/retry fixes are included, with the email deployment still pending. Open #1151 contains a dashboard reminder fix, #1152 hold-latch narrowing and #1149 organization-address support. Those open PRs are not credited as completed here. This audit does not edit or close another session's PR.
+Open #1148 carries overlapping records for 0.1/0.6/0.7. Open #1153 carries overlapping last-charged-price records. Open #1154 is now limited to the registry rebuild and related cost-field/type classifications; it no longer edits the working lists. None of those open PRs is shipped evidence. Only the overlapping working-list records in #1148/#1153 need reconciliation with this update before landing. PR #1147 merged during this audit; its PO-email snapshot/retry fixes are included, with the email deployment still pending. Open #1151 contains a dashboard reminder fix, #1152 hold-latch narrowing and #1149 organization-address support. Those open PRs are not credited as completed here. This audit does not edit or close another session's PR.
 
 ## Every merged PR and its disposition
 

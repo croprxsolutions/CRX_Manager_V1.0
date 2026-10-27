@@ -23,7 +23,8 @@
 --                                    (product_margin_floors, 20261025210000; no floor = no check)
 --        OPEN_SENT_QUOTE             a price changes while a sent, revised or planned-accepted quote
 --                                    with no sent version has this product on a line with no manual
---                                    price: such a quote still re-prices on its next save. A quote
+--                                    price and the quote's own tier price changes: such a quote still
+--                                    re-prices on its next save, at its tier (save_quote). A quote
 --                                    with a sent version keeps its prices (the sent-quote price lock,
 --                                    20261027040000, To-Do 1.2), so it raises nothing.
 --      Tier prices are the ones customers pay: a blank or $0 tier 2/3 price falls back to tier 1.
@@ -287,16 +288,20 @@ AS $function$
   ), open_quotes AS (
     -- The quotes that still re-price on their next save. A quote with a sent version keeps each saved
     -- line's price (the sent-quote price lock, 20261027040000: save_quote's v_price_locked), so it is out.
+    -- save_quote prices a line at the quote's tier (CASE v_tier: 1, 2, anything else tier 3; blank = 1),
+    -- so only a quote whose own tier's price moves counts: a tier 2 change cannot reach a tier 1 quote.
     SELECT qi.product_id,
            count(DISTINCT q.id) AS quote_count,
            (array_agg(DISTINCT q.quote_number ORDER BY q.quote_number))[1:10] AS quote_numbers
     FROM public.quote_items qi
     JOIN public.quotes q ON q.id = qi.quote_id
+    JOIN tiers t ON t.product_id = qi.product_id
+                AND t.tier = CASE COALESCE(q.tier, 1) WHEN 1 THEN 1 WHEN 2 THEN 2 ELSE 3 END
+                AND t.after_cents IS DISTINCT FROM t.before_cents
     WHERE q.deleted_at IS NULL
       AND (q.status IN ('sent', 'revised') OR (q.status = 'accepted' AND q.is_planned))
       AND qi.price_override IS NULL
       AND NOT EXISTS (SELECT 1 FROM public.quote_versions qv WHERE qv.quote_id = q.id)
-      AND qi.product_id IN (SELECT c.product_id FROM changed c)
     GROUP BY qi.product_id
   ), coded AS (
     SELECT f.*, q.quote_count, q.quote_numbers,
@@ -343,8 +348,11 @@ $function$;
 REVOKE ALL ON FUNCTION public._pricing_change_set_warning_set(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- What the warnings read besides the change set and the product row: each product's margin floor and
--- the open sent quotes holding it (the open_quotes rule above), as {product_id: {margin_floor,
--- open_quote_ids}}. Apply reads it before and after the pricing engine locks the products.
+-- the open sent quotes holding it (the open_quotes rule above) with each quote's tier, as
+-- {product_id: {margin_floor, open_quotes: [[quote id, tier], ...]}}. Apply reads it before and after
+-- the pricing engine locks the products. Which tiers move is not re-derived here: by the second read
+-- the engine has written the new prices. Every open quote is listed with its tier instead, so a quote
+-- added, removed or moved to another tier in that moment refuses (fails safe: preview again).
 CREATE FUNCTION public._pricing_change_set_warning_inputs(p_change_set_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -353,8 +361,9 @@ SET search_path = public, pg_temp
 AS $function$
   SELECT COALESCE(jsonb_object_agg(r.product_id::text, jsonb_build_object(
            'margin_floor', f.margin_floor,
-           'open_quote_ids', COALESCE((
-             SELECT jsonb_agg(DISTINCT q.id ORDER BY q.id)
+           'open_quotes', COALESCE((
+             SELECT jsonb_agg(DISTINCT jsonb_build_array(q.id, COALESCE(q.tier, 1))
+                              ORDER BY jsonb_build_array(q.id, COALESCE(q.tier, 1)))
                FROM public.quote_items qi
                JOIN public.quotes q ON q.id = qi.quote_id
               WHERE qi.product_id = r.product_id

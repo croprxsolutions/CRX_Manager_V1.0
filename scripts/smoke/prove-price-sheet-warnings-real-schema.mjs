@@ -360,8 +360,8 @@ const SCENARIOS = [
     // allowed, and A's tier 2 moving from $14 to $0 must warn as a big move, not read as tier 1's $15.
     ['A tier 2 set to $0 with a cost is refused by the engine', U.ADMIN, preview('z0', [row(A, '10.00', '15.00', '0.00', '13.00', SOURCED)], 'z0k'),
       'ok|invalid|-|PRICING_ZERO_PRICE_BELOW_COST', 'same'],
-    ['A tier 2 set to $0 at a $0 cost warns as a price move', U.ADMIN, preview('z', [row(A, '0.00', '15.00', '0.00', '13.00', SOURCED)], 'z1'),
-      'ok|previewed|-|-', `ok|previewed|${A}=COST_MOVE_OVER_10_PERCENT+OPEN_SENT_QUOTE+PRICE_MOVE_OVER_10_PERCENT|-`],
+    ['A tier 2 set to $0 at a $0 cost warns as a price move (the tier 1 quote is not flagged)', U.ADMIN, preview('z', [row(A, '0.00', '15.00', '0.00', '13.00', SOURCED)], 'z1'),
+      'ok|previewed|-|-', `ok|previewed|${A}=COST_MOVE_OVER_10_PERCENT+PRICE_MOVE_OVER_10_PERCENT|-`],
     // Cents leave as JSON text, like the rest of the pricing boundary: a number above 2^53 would lose digits.
     ['warning cents are JSON strings, not numbers', U.ADMIN, `(SELECT jsonb_typeof(w->'details'->'cost_before_cents') || '/' || jsonb_typeof(w->'details'->'cost_after_cents') || '/' || jsonb_typeof(w->'details'->'tiers'->0->'before_cents') || '/' || jsonb_typeof(w->'details'->'tiers'->0->'after_cents') FROM jsonb_array_elements(public.preview_product_cost_basis_changes('products_inline', NULL, ${jb([row(B, '25.00', '30.00', '24.00', '30.00', SOURCED)])}, '${U.ADMIN}', 'c1')->'warnings') w)`,
       'ok|<null>', 'ok|string/string/string/string'],
@@ -424,6 +424,16 @@ const SCENARIOS = [
     ['approve with no acknowledgements', U.ADMIN, approve('q', [], 'q2'), NO_APPROVE_FN, 'ok|approved:0'],
     ['apply; the second read sees no open quote either', U.ADMIN, applyCs('q', 'q3'), 'ok|applied', 'same'],
     ['prices now', 'owner', PRICES(A), 'ok|10.00/15.50/14.00/13.00', 'same'],
+  ] },
+  // save_quote prices a line at the quote's own tier (CASE v_tier), so only that tier's change reaches it.
+  { name: '10. only a change to the quote\'s own tier flags it', steps: [
+    ['the tier 1 quote, tier 2 moves 3%: nothing flagged', U.ADMIN, preview('r1', [row(A, '10.00', '15.00', '14.40', '13.00', SOURCED)], 'r1'),
+      'ok|previewed|-|-', 'same'],
+    ['the quote moves to tier 2', 'owner', { stmt: `UPDATE public.quotes SET tier = 2 WHERE id = '${QUOTE}'; v := 'tier 2';` }, 'ok|tier 2', 'same'],
+    ['the same tier 2 move now flags it', U.ADMIN, preview('r2', [row(A, '10.00', '15.00', '14.40', '13.00', SOURCED)], 'r2'),
+      'ok|previewed|-|-', `ok|previewed|${A}=OPEN_SENT_QUOTE|-`],
+    ['a tier 1 move does not', U.ADMIN, preview('r3', [row(A, '10.00', '15.40', '14.00', '13.00', SOURCED)], 'r3'),
+      'ok|previewed|-|-', 'same'],
   ] },
 ];
 

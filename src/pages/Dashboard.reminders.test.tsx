@@ -68,7 +68,7 @@ describe('Dashboard remainder reminders', () => {
   it('an admin load still runs the reminder check', async () => {
     H.auth.role = 'admin';
     await load();
-    expect(H.rpcCalls).toContain('check_remainder_reminders');
+    expect(H.rpcCalls.filter((n) => n === 'check_remainder_reminders')).toHaveLength(1);
   });
 
   it('runs the reminder check once the role resolves to admin after loading', async () => {
@@ -80,5 +80,8 @@ describe('Dashboard remainder reminders', () => {
     H.auth.role = 'admin';
     rerender(<MemoryRouter><Dashboard /></MemoryRouter>);
     await waitFor(() => expect(H.rpcCalls).toContain('check_remainder_reminders'));
+    // Let any second load settle before counting.
+    await waitFor(() => expect(H.rpcCalls.filter((n) => n === 'release_expired_quote_holds')).toHaveLength(2));
+    expect(H.rpcCalls.filter((n) => n === 'check_remainder_reminders')).toHaveLength(1);
   });
 });

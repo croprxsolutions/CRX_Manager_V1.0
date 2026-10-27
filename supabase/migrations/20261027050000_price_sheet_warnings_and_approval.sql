@@ -22,9 +22,10 @@
 --        MARGIN_UNDER_FLOOR          any tier's net margin is under the product's floor
 --                                    (product_margin_floors, 20261025210000; no floor = no check)
 --        OPEN_SENT_QUOTE             a price changes while a sent, revised or planned-accepted quote
---                                    has this product on a line with no manual price -- until the
---                                    sent-quote price lock (To-Do 1.2) is live, such quotes re-price on
---                                    their next save or Convert (plan section 8, rollout gate)
+--                                    with no sent version has this product on a line with no manual
+--                                    price: such a quote still re-prices on its next save. A quote
+--                                    with a sent version keeps its prices (the sent-quote price lock,
+--                                    20261027040000, To-Do 1.2), so it raises nothing.
 --      Tier prices are the ones customers pay: a blank or $0 tier 2/3 price falls back to tier 1.
 --      The preview stores the exact set in pricing_change_set_warnings and returns it.
 --
@@ -66,11 +67,12 @@
 --
 --   ROLLOUT GATE (plan section 8): this goes live immediately because it only adds checks; the
 --   monthly price-sheet routine is not adopted for live price changes until the sent-quote price lock
---   (To-Do 1.2) is live and margin floors are set. Until then OPEN_SENT_QUOTE makes the old hand check
---   of the Quotes list a hard, acknowledged warning.
+--   (To-Do 1.2) is live and margin floors are set. OPEN_SENT_QUOTE makes the old hand check of the
+--   Quotes list a hard, acknowledged warning for the quotes that lock does not cover (no sent version).
 --
--- DEPENDS ON 20261025210000_product_margin_floors (product_margin_floors); the preflight refuses
---   without it.
+-- DEPENDS ON 20261025210000_product_margin_floors (product_margin_floors) and
+--   20261027040000_quote_sent_price_lock (_assert_quote_prices_as_sent: OPEN_SENT_QUOTE leaves out the
+--   quotes it locks); the preflight refuses without either.
 --
 -- caller-analysis: approve_pricing_change_set :: NEW; src/lib/productPricing.ts (applyProductPricingChangeSet calls it before apply; Products.tsx, ProductDetail.tsx)
 -- caller-analysis: preview_product_cost_basis_changes :: body extended, same signature and grants; src/lib/productPricing.ts
@@ -131,6 +133,9 @@ BEGIN
 
   IF to_regclass('public.product_margin_floors') IS NULL THEN
     RAISE EXCEPTION 'PRICE_SHEET_PREFLIGHT: product_margin_floors (20261025210000) must be applied first';
+  END IF;
+  IF to_regprocedure('public._assert_quote_prices_as_sent(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'PRICE_SHEET_PREFLIGHT: the sent-quote price lock (20261027040000) must be applied first';
   END IF;
 
   -- By name, every overload: to_regproc() is NULL when a name has several.
@@ -280,7 +285,8 @@ AS $function$
     FROM tiers t
     GROUP BY t.product_id
   ), open_quotes AS (
-    -- Until the sent-quote price lock (To-Do 1.2) is live, these re-price on their next save or Convert.
+    -- The quotes that still re-price on their next save. A quote with a sent version keeps each saved
+    -- line's price (the sent-quote price lock, 20261027040000: save_quote's v_price_locked), so it is out.
     SELECT qi.product_id,
            count(DISTINCT q.id) AS quote_count,
            (array_agg(DISTINCT q.quote_number ORDER BY q.quote_number))[1:10] AS quote_numbers
@@ -289,6 +295,7 @@ AS $function$
     WHERE q.deleted_at IS NULL
       AND (q.status IN ('sent', 'revised') OR (q.status = 'accepted' AND q.is_planned))
       AND qi.price_override IS NULL
+      AND NOT EXISTS (SELECT 1 FROM public.quote_versions qv WHERE qv.quote_id = q.id)
       AND qi.product_id IN (SELECT c.product_id FROM changed c)
     GROUP BY qi.product_id
   ), coded AS (
@@ -353,7 +360,8 @@ AS $function$
               WHERE qi.product_id = r.product_id
                 AND q.deleted_at IS NULL
                 AND (q.status IN ('sent', 'revised') OR (q.status = 'accepted' AND q.is_planned))
-                AND qi.price_override IS NULL), '[]'::jsonb))), '{}'::jsonb)
+                AND qi.price_override IS NULL
+                AND NOT EXISTS (SELECT 1 FROM public.quote_versions qv WHERE qv.quote_id = q.id)), '[]'::jsonb))), '{}'::jsonb)
   FROM (SELECT DISTINCT cr.product_id FROM public.pricing_change_set_rows cr
          WHERE cr.change_set_id = p_change_set_id) r
   LEFT JOIN public.product_margin_floors f ON f.product_id = r.product_id
@@ -1286,7 +1294,8 @@ BEGIN
   -- or quote change in that moment also refuses (fails safe: preview again). KNOWN GAP, accepted: a
   -- quote change between that read and the commit is not seen, since none takes a product lock
   -- (sent, revised, planned-accepted, restored, or a line's manual price cleared); nor is a floor
-  -- written outside set_product_margin_floors. The sent-quote price lock (To-Do 1.2) removes the quote half.
+  -- written outside set_product_margin_floors. The sent-quote price lock (20261027040000) narrows the quote
+  -- half to quotes with no sent version; a quote sent in that moment drops out, which only removes a warning.
   -- FOR UPDATE: the change set before the receipt, the order approve uses, so an approve and an apply of
   -- the same set cannot deadlock (the inner engine takes this row lock again, before any other).
   SELECT status INTO v_status FROM public.pricing_change_sets WHERE id = p_change_set_id FOR UPDATE;

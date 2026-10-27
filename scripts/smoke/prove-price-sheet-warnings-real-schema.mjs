@@ -411,6 +411,20 @@ const SCENARIOS = [
       v := 'inserted';` }, 'ok|inserted', 'same'],
     ['approval is refused', U.ADMIN, approve('v', [ack(A, ['OPEN_SENT_QUOTE'])], 'v2'), NO_APPROVE_FN, /^P0001\|PRICING_SOURCE_REQUIRED: this preview was made before sources were required/],
   ] },
+  // The sent-quote price lock (20261027040000): once a quote has a sent version, save_quote keeps each
+  // saved line's price, so a price change cannot reach it and OPEN_SENT_QUOTE leaves it out.
+  { name: '9. a quote with a sent version keeps its prices, so it raises no warning', steps: [
+    ['the sent quote gets a sent version', 'owner', { stmt: `INSERT INTO public.quote_versions (quote_id, version_number, sent_by, snapshot_data)
+        VALUES ('${QUOTE}', 1, '${U.ADMIN}', '{}'::jsonb);
+      v := 'versioned';` }, 'ok|versioned', 'same'],
+    ['a tenfold typo on A is still flagged, without the quote', U.ADMIN, preview('q0', [row(A, '10.00', '150.00', '14.00', '13.00', SOURCED)], 'q0'),
+      'ok|previewed|-|-', `ok|previewed|${A}=PRICE_MOVE_OVER_10_PERCENT|-`],
+    ['a 3% move on A: nothing flagged', U.ADMIN, preview('q', [row(A, '10.00', '15.50', '14.00', '13.00', SOURCED)], 'q1'),
+      'ok|previewed|-|-', 'same'],
+    ['approve with no acknowledgements', U.ADMIN, approve('q', [], 'q2'), NO_APPROVE_FN, 'ok|approved:0'],
+    ['apply; the second read sees no open quote either', U.ADMIN, applyCs('q', 'q3'), 'ok|applied', 'same'],
+    ['prices now', 'owner', PRICES(A), 'ok|10.00/15.50/14.00/13.00', 'same'],
+  ] },
 ];
 
 function runMatrix(phase) {
@@ -477,6 +491,8 @@ function preflightRefusesDrift(phase) {
       /PRICE_SHEET_PREFLIGHT: public\.write_product_pricing_history\(\) changed since 2026-10-25/],
     ['DROP TABLE public.product_margin_floor_changes; DROP TABLE public.product_margin_floors;',
       /PRICE_SHEET_PREFLIGHT: product_margin_floors \(20261025210000\) must be applied first/],
+    ['DROP FUNCTION public._assert_quote_prices_as_sent(uuid);',
+      /PRICE_SHEET_PREFLIGHT: the sent-quote price lock \(20261027040000\) must be applied first/],
     ['ALTER TABLE public.cost_history ADD COLUMN price_source text;',
       /PRICE_SHEET_PREFLIGHT: an object this migration creates already exists/],
     ['ALTER TABLE public.products DISABLE TRIGGER trigger_write_product_pricing_history;',

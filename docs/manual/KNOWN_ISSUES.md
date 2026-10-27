@@ -10,7 +10,9 @@ migration ledger re-read by the PR #1138 session at 5:05 AM Central after its ap
 then `20261027020546` = part B, consistent with KI-01 and KI-73); 2026-10-26 for KI-01 and KI-73 (row 11.4 part B, checked 9:05 PM Central,
 PR #1103): after part B (`20261026050000`, ledger `20261027020546`) applied live, the `_can_see_field` body md5,
 the field-table SELECT policies and the per-role visible-field counts were re-read live read-only (the ledger then
-had 1065 rows). The
+had 1065 rows). PR #1114 (To-Do 0.15) re-read the `email_type` enum and
+`vendors` emails read-only on 2026-10-26 (10 values; 0 of 13 vendors with an email) for the KI-72 PO-email note;
+its row 995 `20261027070000` is not yet applied. The
 rest of the file was last verified 2026-10-25 against `main` at `c65b7b351` (code, migration files, merged PRs).
 The 2026-10-23 rewrite had no database access. The 2026-10-25 pass re-read live, read-only, at 10:52 PM Central:
 the migration ledger from `20261022000000` on (so the applied-live claims for `20261022090000`, `20261022101000`
@@ -46,7 +48,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78, KI-81 and KI-82; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 50 |
+| Open or partly open entries (KI-01 to KI-52, KI-72 to KI-78 and KI-81 to KI-84; several bundle related small items; includes the entries or sub-items marked UNVERIFIED) | 52 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED during this rewrite, with proof (bottom of file) | 6 |
 
@@ -282,7 +284,7 @@ could slip past a close. No month is closed live (older record's claim), so it i
   commission split). UNVERIFIED, LOW.
 
 ### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
-**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · unassigned**
+**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · unassigned (Mason, 2026-10-27: fix later, not now)**
 The sent-price lock (`20261027040000`, live since 2026-10-27, ledger `20261027123725`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
 orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
 2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
@@ -291,6 +293,14 @@ invoice (`_save_field_app_invoice_impl_20260714`, `resolve_field_app_chemical_pr
 line on the field with no status, customer or deleted filter). After a revision that changed a price and was not
 re-sent, either can bill the unsent price; the field-application lookup can also take a draft, declined or deleted
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
+
+### KI-82 — The open quote screen can show a stale cost for a line it just saved
+**LOW · OPEN (found 2026-10-27, Sol review of PR #1105) · money (display only) · unassigned**
+After Save, `src/pages/QuoteBuilder.tsx` records a new line's saved id and stored price but does not load the
+cost the database recorded for that line (`quote_items.cost_at_quote_cents`). If the product's cost changed after
+the page loaded, the Cost, Profit and Margin shown to an admin can differ from the saved figures until the page is
+reloaded. Saved prices, costs and totals are correct; PDFs never show cost. Fix: refresh each saved line's recorded
+cost after a save, and prove it on the live screen.
 
 ---
 
@@ -392,6 +402,17 @@ document ingestion, provenance-trigger handling, transcript purge, a citing desi
 Grower portal; OCR auto-fill of re-entry/pre-harvest intervals (held back as a compliance risk); offline-recovery
 items (photo/signature persistence, idempotent email replay) and a real-phone offline test (MED, UNVERIFIED).
 
+### KI-83 — The `idempotency_keys` table has no TypeScript type
+**LOW · OPEN (found 2026-10-27, migration-drift review of `20261027040000`; predates it) · database · unassigned**
+`idempotency_keys` is the internal table where database functions record a retry key and its saved answer, so a
+repeated request returns the first result instead of acting twice. Many functions write to it (including the
+quote save re-emitted by `20261027040000`), and every column they write is in `.claude/schema-registry.json` and in
+the generated `src/types/supabase.ts`, but the shared hand-written types in `src/types/index.ts` have no interface
+for it. Two screens read one column of it directly (`QuickDeliveryModal.tsx` and `InvoiceDetail.tsx` check that
+`request_fingerprint` exists), so nothing is broken; the gap only means the migration review's TypeScript
+cross-check, which reads `src/types/index.ts`, cannot confirm those writes. Fix: confirm with the
+`typescript-types-drift-reviewer` whether to add an interface or record the table as intentionally untyped.
+
 ---
 
 ## Tooling, guards and CI (affect the agents and the build, not customers)
@@ -484,7 +505,7 @@ such as `get_quote_versions`), so the typecheck fails, and it adds about 60 live
 moves two `rpcContracts.test.ts` classifications. Records PRs add only the entries their migration changes, compared
 against a live generation.
 
-### KI-82 — The split-billing backfill smoke chain fails on current `main`
+### KI-84 — The split-billing backfill smoke chain fails on current `main`
 **LOW · OPEN · tooling/smoke · unassigned (Mason, 2026-10-27: noted, not now)**
 `scripts/smoke/smoke-backfill-refuse-split-billing.sql` stops before `SMOKE_PASS_ROLLBACK` on a current-main
 database. It completes a delivery with a direct `UPDATE`, which 20261022075000 now refuses
@@ -527,6 +548,10 @@ CRX-LIFE-001, reps creating a `field_application` invoice through the order
 pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record). Two proof gates remain: the 29th
 live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
 Mason's REAL-DATA-OK.
+
+Purchase order copy (To-Do 0.15, migration `20261027070000`, row 995): the PDF download works once merged,
+but **Email PO Copy (to mason@croprxsolutions.com) stays off until Mason approves deploying the `send-email`
+edge function** (the live function answers "Unknown email_type: purchase_order").
 
 ### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**

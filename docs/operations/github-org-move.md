@@ -37,7 +37,8 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
 
 ## Steps
 
-1. **YOU: create the organization.** On github.com, click your picture (top right) → **Your organizations** →
+1. **YOU: create the organization — soon, even before the rest.** This claims the name; until it exists,
+   someone else could register `croprxsolutions`. On github.com, click your picture (top right) → **Your organizations** →
    **New organization** → **Free**. Name: `croprxsolutions`. Contact email: Mason@croprxsolutions.com.
    "Belongs to": **A business or institution**, name **Crop RX Solutions**. Skip inviting anyone.
 2. **YOU: lock down default access.** In the new organization: **Settings → Member privileges → Base

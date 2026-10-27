@@ -5,4 +5,6 @@
 - KI-83 (LOW, database): `idempotency_keys` has no interface in `src/types/index.ts` (the generated
   `src/types/supabase.ts` has it), so the migration review's TypeScript
   cross-check cannot confirm writes to it (migration-drift review of `20261027040000`; the gap predates it).
+- KI-81 (blend-ticket and field-application invoices read the live quote price) stays open, marked by Mason on
+  2026-10-27: fix later, not now.
 - Summary count of open entries 49 → 51.

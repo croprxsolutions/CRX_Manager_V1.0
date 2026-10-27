@@ -4303,8 +4303,12 @@ const GLUED_RUNTIME_RE = /[A-Za-z0-9]\u0001*[$`]|[)}`]\u0001*[A-Za-z0-9$`]|\$\w+
 export function runtimeProgramRefused(command, gated) {
   // Checked on its own: it reads substitution bodies itself, which the
   // program-name test below may not report (`echo \`"$A" "$B"\``).
-  if (runtimeArgumentsFollowRuntimeProgram(command)) return true;
+  const seen = { safe: 0 };
+  if (runtimeArgumentsFollowRuntimeProgram(command, 0, seen)) return true;
   if (!programAssembledAtRuntime(command)) return false;
+  // The stricter program-name test found a run-time program the allow-list scan did
+  // not see in its allowed shape (a nested shell, a shape it does not parse): refuse.
+  if (seen.safe === 0) return true;
   // Single-quoted text is literal: its letters stay (`'g'$H` still glues, Codex App
   // on #1128) but a `$` or backtick inside it does not expand (`'literal$USER'`).
   // Double quotes are removed, so `"$G""$H"` glues just as `$G$H` does (Luna).
@@ -4351,7 +4355,10 @@ function backtickBodies(text) {
   }
   return quote ? null : bodies;
 }
-function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
+const SAFE_RUNTIME_PROGRAM_RE = /^"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})"$/;
+// true when a run-time program in `command` (or in any substitution body) is not
+// the allowed shape; `seen.safe` counts the allowed ones it found.
+function runtimeArgumentsFollowRuntimeProgram(command, depth = 0, seen = { safe: 0 }) {
   const text = String(command || "");
   // Substitution bodies run too (`echo "$("$A" "$B" "$C")"`, Codex App on #1128);
   // past the depth limit any substitution at all is refused, as elsewhere here.
@@ -4363,7 +4370,7 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
   const backticks = scanned ?? [];
   const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []), ...backticks];
   if (inners.length > 0 && depth >= NESTED_MAX_DEPTH) return true;
-  if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1))) return true;
+  if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1, seen))) return true;
   // The outer command is read with each body collapsed, as programBuiltAtRuntime
   // does, so `x=$(echo "$HOME" "$USER")` is one assignment, not a program `"$HOME"`
   // (Codex App on #1128).
@@ -4380,12 +4387,17 @@ function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
     // Every program position, so a wrapper (`env "$A" "$B"`, `command`, `exec`)
     // does not hide the program it runs (Codex App on #1128).
     for (const start of programCandidates(words)) {
-      if (!isRuntimeWord(words[start])) continue;
-      // A bare unquoted `$A` / `${A}` program is word-split by the shell, so
-      // `A='gh pr merge'` hides arguments in the program word itself; the quoted
-      // `"$NODE" x.mjs` stays one word (Codex App on #1128).
-      if (/^\$(?:\{\w+\}|\w+)$/.test(String(words[start]))) return true;
+      // Only a word that starts with an expansion is a run-time program here; a
+      // glued name (`g$X`) is left to programAssembledAtRuntime, which refuses it
+      // below, and heredoc text (`Don't expand $HOME`) is not a program.
+      if (!/^"?[$`@]/.test(String(words[start])) || !isRuntimeWord(words[start])) continue;
+      // ALLOW-LIST (Mason, 2026-10-26): the only run-time program allowed is one
+      // quoted simple variable, `"$NODE"` / `"${NODE}"`, which the shell keeps as a
+      // single word. Unquoted `$A` (word-split), arrays `"${A[@]}"`, `"$@"` and every
+      // other shape that can expand to several words are refused, as on main.
+      if (!SAFE_RUNTIME_PROGRAM_RE.test(String(words[start]))) return true;
       if (words.slice(start + 1).some(isRuntimeWord)) return true;
+      seen.safe += 1;
     }
   }
   return false;

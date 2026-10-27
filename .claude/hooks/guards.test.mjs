@@ -225,6 +225,10 @@ for (const command of [
   `echo $'\\'' \`"$A" "$B" "$C" 951 --admin\` \\'`,
   "$A 951 --admin",
   "P=python; $P -I scratch/stats.py",
+  'read -ra ARGS <<< "$VALUES"; "${ARGS[@]}" 951 --admin',
+  '"$@" 951 --admin',
+  '"${A:-gh}" pr list',
+  '"$A$B" pr list',
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

@@ -47,7 +47,10 @@
 --      (PRICING_REASON_REQUIRED / PRICING_SOURCE_REQUIRED) when either is blank, and keeps both on the
 --      change-set rows (new columns pricing_change_set_rows.price_source,
 --      product_info_change_set_rows.change_reason / price_source). The app stops filling a generic
---      default reason.
+--      default reason. NOT COVERED (a named follow-up): the product page's Save Changes still edits
+--      rate_per_acre / rate_unit directly (an admin-only column grant, 20260718190000), outside
+--      preview and approval. Section 5 now logs that edit in cost_history with a fixed reason and no
+--      source; before this file it left no history at all.
 --
 --   5. HISTORY: write_product_pricing_history (the live body from 20260717042803, otherwise
 --      unchanged) also writes a cost_history row for a per-acre rate or rate-unit change (plan section
@@ -231,6 +234,14 @@ AS $function$
              COALESCE(NULLIF(r.output_tier2_price_cents, 0), r.output_tier1_price_cents),
              COALESCE(NULLIF(r.output_tier3_price_cents, 0), r.output_tier1_price_cents)
            ] AS price_after,
+           -- The stored net margin the floor is defined against (20261025210000: under when
+           -- tierN_margin < floor), not one recomputed from cent-rounded prices, which would flag a
+           -- tier set exactly at its floor. A tier that falls back to tier 1 takes tier 1's margin.
+           ARRAY[
+             r.output_tier1_margin,
+             CASE WHEN COALESCE(r.output_tier2_price_cents, 0) = 0 THEN r.output_tier1_margin ELSE r.output_tier2_margin END,
+             CASE WHEN COALESCE(r.output_tier3_price_cents, 0) = 0 THEN r.output_tier1_margin ELSE r.output_tier3_margin END
+           ] AS margin_after,
            f.margin_floor
     FROM public.pricing_change_set_rows r
     JOIN public.products p ON p.id = r.product_id
@@ -239,25 +250,24 @@ AS $function$
   ), tiers AS (
     SELECT c.product_id, c.cost_before, c.cost_after, c.margin_floor, t.tier,
            c.price_before[t.tier] AS before_cents,
-           c.price_after[t.tier] AS after_cents
+           c.price_after[t.tier] AS after_cents,
+           c.margin_after[t.tier] AS margin_after
     FROM changed c CROSS JOIN generate_series(1, 3) AS t(tier)
   ), flags AS (
     SELECT t.product_id,
            max(t.cost_before) AS cost_before,
            max(t.cost_after) AS cost_after,
            max(t.margin_floor) AS margin_floor,
-           -- More than 10% up or down, or a price appearing from nothing (integer cents, no rounding).
+           -- More than 10% up or down, or a price appearing from nothing (exact numeric, no rounding or overflow).
            bool_or(t.after_cents IS DISTINCT FROM t.before_cents AND (
              COALESCE(t.before_cents, 0) = 0
-             OR abs(COALESCE(t.after_cents, 0) - t.before_cents) * 10 > t.before_cents)) AS price_move,
+             OR abs(COALESCE(t.after_cents, 0)::numeric - t.before_cents) * 10 > t.before_cents)) AS price_move,
            bool_or(t.after_cents IS NOT NULL AND t.after_cents < t.cost_after) AS below_cost,
-           bool_or(t.margin_floor IS NOT NULL AND t.after_cents > 0
-                   AND (t.after_cents - t.cost_after)::numeric / t.after_cents < t.margin_floor) AS under_floor,
+           bool_or(t.margin_floor IS NOT NULL AND t.margin_after < t.margin_floor) AS under_floor,
            bool_or(t.after_cents IS DISTINCT FROM t.before_cents) AS price_changed,
            jsonb_agg(jsonb_build_object(
              'tier', t.tier, 'before_cents', t.before_cents, 'after_cents', t.after_cents,
-             'margin', CASE WHEN t.after_cents > 0
-                            THEN round((t.after_cents - t.cost_after)::numeric / t.after_cents, 6) END
+             'margin', t.margin_after
            ) ORDER BY t.tier) AS tiers
     FROM tiers t
     GROUP BY t.product_id
@@ -278,7 +288,7 @@ AS $function$
            array_remove(ARRAY[
              CASE WHEN f.cost_after IS DISTINCT FROM f.cost_before AND (
                     COALESCE(f.cost_before, 0) = 0
-                    OR abs(f.cost_after - f.cost_before) * 10 > f.cost_before)
+                    OR abs(f.cost_after::numeric - f.cost_before) * 10 > f.cost_before)
                   THEN 'COST_MOVE_OVER_10_PERCENT' END,
              CASE WHEN f.price_move THEN 'PRICE_MOVE_OVER_10_PERCENT' END,
              CASE WHEN f.below_cost THEN 'PRICE_BELOW_COST' END,
@@ -1063,6 +1073,12 @@ BEGIN
   IF v_change_set.status NOT IN ('previewed', 'no_changes') OR v_change_set.expires_at <= now() THEN
     RAISE EXCEPTION 'CHANGE_SET_INVALID_OR_EXPIRED';
   END IF;
+  -- Every pricing row of a preview made under this file carries a source (the preview refuses one
+  -- without), so a row with none was previewed before this migration: it must be previewed again.
+  IF EXISTS (SELECT 1 FROM public.pricing_change_set_rows r
+             WHERE r.change_set_id = p_change_set_id AND r.price_source IS NULL) THEN
+    RAISE EXCEPTION 'PRICING_SOURCE_REQUIRED: this preview was made before sources were required; preview it again';
+  END IF;
 
   -- The warnings must be the ones the preview showed: a floor or an open quote may have changed since.
   SELECT COALESCE(jsonb_object_agg(w.product_id::text, to_jsonb(w.warning_codes)), '{}'::jsonb)
@@ -1216,12 +1232,19 @@ BEGIN
   -- Applies only as approved (To-Do 0.1): an approval by this admin of this exact preview, whose
   -- acknowledged warnings still equal the warnings recomputed now (a margin floor or an open sent
   -- quote can change after the preview). An already-applied set goes on to the inner engine, which
-  -- replays its stored result or refuses a different key.
+  -- replays its stored result or refuses a different key; a missing one gets its CHANGE_SET_NOT_FOUND.
+  -- KNOWN GAP, accepted: the products are not locked before this check. Locking them here would
+  -- reverse the inner engine's evidence-before-product lock order (20260722064814) and could deadlock
+  -- a supplier-price correction or a receipt. So a margin floor change or a quote sent in the
+  -- milliseconds between this check and the inner engine's own product lock is not re-checked; the
+  -- sent-quote price lock (To-Do 1.2) removes the quote half of that.
   SELECT status INTO v_status FROM public.pricing_change_sets WHERE id = p_change_set_id;
-  IF v_status IS DISTINCT FROM 'applied' THEN
+  IF v_status IS NOT NULL AND v_status IS DISTINCT FROM 'applied' THEN
+    -- FOR SHARE: a same-admin re-approval cannot replace the receipt between this check and commit.
     SELECT * INTO v_approval
     FROM public.pricing_change_set_approvals
-    WHERE change_set_id = p_change_set_id;
+    WHERE change_set_id = p_change_set_id
+    FOR SHARE;
     IF NOT FOUND
        OR v_approval.approved_by IS DISTINCT FROM v_actor
        OR v_approval.request_fingerprint IS DISTINCT FROM p_request_fingerprint THEN
@@ -1284,7 +1307,9 @@ BEGIN
     -- Outside the governed path only the rate can change (require_governed_product_pricing refuses
     -- cost, margin and price writes): the product page's Save Changes edits it directly. Log that too,
     -- since it moves the per-acre price (20261026230000); a migration with no signed-in user is skipped.
-    IF (OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre OR OLD.rate_unit IS DISTINCT FROM NEW.rate_unit)
+    -- A blank and a NULL unit are the same unit, so picking the form's blank option logs nothing.
+    IF (OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
+        OR NULLIF(btrim(OLD.rate_unit), '') IS DISTINCT FROM NULLIF(btrim(NEW.rate_unit), ''))
        AND auth.uid() IS NOT NULL THEN
       INSERT INTO public.cost_history(
         product_id, changed_by,

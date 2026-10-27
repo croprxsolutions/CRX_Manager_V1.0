@@ -599,7 +599,8 @@ export default function NewOrder() {
       const totalCents = items.filter(i => i.product_id && i.quantity > 0)
         .reduce((sum, i) => sum + Math.round(i.total_price * 100), 0);
       const creditOk = await checkCreditLimit({ customerId, newAmountCents: totalCents });
-      if (!creditOk && !creditWarning?.dismissed) return;
+      // The hook lets an overridden over-limit warning through and never a check that could not run.
+      if (!creditOk) return;
     }
 
     await submitOrder();

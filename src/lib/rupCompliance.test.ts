@@ -187,6 +187,9 @@ describe('rupRegisterDisposition (#6 — UI disposition matches the DB record)',
   it('no RUP products -> records nothing', () => {
     expect(rupRegisterDisposition(rupRes({ hasRUPProducts: false }))).toEqual({ status: null, label: null });
   });
+  it('a check that could not run has no disposition, never an expired-license WARNING', () => {
+    expect(rupRegisterDisposition(rupRes({ hasRUPProducts: true, checkFailed: true }))).toEqual({ status: null, label: null });
+  });
   it('RUP + valid license -> records nothing', () => {
     expect(rupRegisterDisposition(rupRes({ hasRUPProducts: true, hasValidLicense: true }))).toEqual({ status: null, label: null });
   });

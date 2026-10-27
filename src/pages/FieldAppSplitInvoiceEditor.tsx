@@ -244,6 +244,7 @@ export default function FieldAppSplitInvoiceEditor() {
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
   const [showPostConfirm, setShowPostConfirm] = useState(false);
+  const [postChecking, setPostChecking] = useState(false);
   // Codex round-8 P2: the credit-limit + RUP-license advisories the normal invoice post shows.
   const [postWarning, setPostWarning] = useState<string | null>(null);
   const [resultInvoices, setResultInvoices] = useState<ResultInvoice[]>([]);
@@ -757,7 +758,9 @@ export default function FieldAppSplitInvoiceEditor() {
   // The whole group's RUP-license and credit-limit checks, before the confirm. A check that
   // could not run stops here with an error toast instead of opening a clean-looking confirm.
   const openPostConfirm = async () => {
-    const result = await checkSplitGroupBeforePost(invoiceGroupId);
+    // Post stays busy while the checks run (a few reads per member), so a second click waits.
+    setPostChecking(true);
+    const result = await checkSplitGroupBeforePost(invoiceGroupId).finally(() => setPostChecking(false));
     if (!result.ok) {
       toast('error', result.message);
       return;
@@ -958,8 +961,8 @@ export default function FieldAppSplitInvoiceEditor() {
             variant="primary"
             icon={<Send className="w-4 h-4" />}
             showChevron={false}
-            disabled={!invoiceGroupId || reopenBusy || posted || dirtyAfterSave || saving || posting}
-            loading={posting}
+            disabled={!invoiceGroupId || reopenBusy || posted || dirtyAfterSave || saving || posting || postChecking}
+            loading={posting || postChecking}
             onClick={openPostConfirm}
             title={dirtyAfterSave ? 'You have unsaved changes — re-save the draft before posting.' : undefined}
           >

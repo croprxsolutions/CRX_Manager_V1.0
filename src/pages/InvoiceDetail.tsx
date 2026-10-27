@@ -404,7 +404,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         }
         const parts: string[] = [];
         for (const inv of grp as Array<{ invoice_number: string; customer_id: string | null; invoice_items: { product_id: string | null }[] | null }>) {
-          const pids = (inv.invoice_items || []).map((x) => x.product_id).filter((p): p is string => Boolean(p));
+          // A sibling's lines that came back missing are unread, not "no products".
+          if (!Array.isArray(inv.invoice_items)) {
+            stopUnchecked();
+            return;
+          }
+          const pids = inv.invoice_items.map((x) => x.product_id).filter((p): p is string => Boolean(p));
           if (!inv.customer_id || pids.length === 0) continue;
           const res = await checkRUPCompliance(inv.customer_id, pids);
           if (res.checkFailed) {
@@ -1226,7 +1231,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     // Credit-limit check on the SAVED customer and total — the account and amount post_invoice
     // posts. Limitation (unchanged): for a split group this checks THIS invoice's total only,
-    // although post_invoice_group posts every sibling; it is a dismissible warning, not a gate.
+    // although post_invoice_group posts every sibling. Over the limit is a warning that "Continue
+    // Anyway" overrides; a check that could not run stops the post with no override (the hook).
     // `posting` is set before the check so the form stays locked from the confirm to the end.
     setPosting(true);
     let creditOk: boolean;
@@ -1237,7 +1243,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setPosting(false);
       throw err;
     }
-    if (!creditOk && !creditWarning?.dismissed) {
+    if (!creditOk) {
       setPosting(false);
       return;
     }

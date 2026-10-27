@@ -3,16 +3,28 @@
 - **Restricted-use (RUP) license check** (`src/lib/rupCompliance.ts`): a products or license read
   that failed, threw, came back empty or was not a list read as "no RUP products" (or a generic
   warning that nothing acted on), so an RUP sale could reach the post confirm looking clean. It now
-  returns `checkFailed` with "The restricted-use (RUP) license check could not be run. Try again."
+  returns `checkFailed`; New Order, Quote Builder and the delivery screens show "The restricted-use
+  (RUP) license check could not be run. Reload the page to check again." and no longer log a failed
+  check as an "RUP products … without valid license" activity. A failed check has no RUP register
+  disposition.
 - **Post on Invoice Detail and on the Split Billing editor:** a check that could not run (the RUP
-  read, the split group's sibling read, or a check that threw) used to fall through to the plain
-  confirm. Post now stops with "… could not be run, so nothing was posted. Try again." and no
-  confirm opens. A real RUP finding is still a warning on the confirm, not a gate.
-- **Credit-limit check** (`src/lib/creditLimitGuard.ts`, used by `useCreditLimitCheck`): a failed
-  or empty customer read read as "no credit limit set" and passed. It now goes to the existing
-  "Could not verify credit limit" stop, and an invoices page with no list is no longer a $0
-  balance. The Split Billing editor says "could not verify" instead of calling the invoice over
-  the limit, and stops before the confirm.
+  read, the split group's sibling read, a sibling whose lines came back missing, a group with no
+  members, or a check that threw) used to fall through to the plain confirm. Post now stops with
+  "… could not be run, so nothing was posted. Try again." and no confirm opens. A real RUP finding
+  is still a warning on the confirm, not a gate. The Split Billing Post button stays busy while its
+  checks run.
+- **Credit-limit check** (`src/lib/creditLimitGuard.ts`, used by `useCreditLimitCheck` and the
+  Split Billing editor): a failed or empty customer read read as "no credit limit set" and passed.
+  The open balance was the caller's own invoices read, which for a sales rep only covers the
+  invoices they created or sell, so a customer billed by another rep looked under the limit. The
+  balance now comes from the server's `check_customer_credit_limit` (posted, overdue and unposted,
+  not deleted, no negative balances), parsed into exact cents. A failed read, an unusable balance
+  or an amount that is not a number is "Could not verify credit limit".
+- **That stop has no override (Mason, 2026-10-26: "keep the hard stop on both screens").** On
+  Invoice Detail and New Order the could-not-verify banner no longer offers "Continue Anyway"; an
+  over-limit warning still does. The override now lives in the hook and is spent by the next
+  check: before, the page read a dismissed flag from an older warning, so after one "Continue
+  Anyway" a later could-not-verify result also went through.
 - **Invoice PDF from a list or the field editor** (`buildInvoicePdfDataFromRow`): a failed customer,
   shares, billing or applied-acres read printed the PDF with the address, split shares, terms,
   notes or diluent total silently blank. It now stops with "Could not load the invoice details
@@ -23,15 +35,17 @@
   now reads the billed customer by id and refuses the PDF when that read fails.
 - **Print Selected on the Invoices list** logged a failed customer read and printed a blank
   address, and ignored a failed shares read. Both now refuse the batch with the same message.
-- The credit-limit check also treats an amount that is not a number as unverified, and the Split
-  Billing post check stops when the group read answers no members.
-- New Order, Quote Builder and New Delivery show the could-not-run message as their RUP warning and
-  no longer log a failed check as an "RUP products … without valid license" activity.
-- Proof: new checks in `rupCompliance.test.ts`, `useGuardrails.paging.test.ts`,
-  `buildInvoicePdfDataFromRow.test.ts`, `splitGroupPostChecks.test.ts`, `InvoiceDetail.test.tsx`
-  and `Invoices.batchPrint.test.tsx` fail when each fix is undone. Invoice Detail Post (RUP and credit limit), the Split Billing
-  editor's Post and the Field Invoices Print were each checked in the dev app, working and failing
-  (error, no data, not a list, dropped connection), against a local fake Supabase server.
+- Proof: new checks in `rupCompliance.test.ts`, `useGuardrails.creditLimit.test.ts` (was
+  `useGuardrails.paging.test.ts`), `buildInvoicePdfDataFromRow.test.ts`,
+  `splitGroupPostChecks.test.ts`, `InvoiceDetail.test.tsx` and `Invoices.batchPrint.test.tsx` fail
+  when each fix is undone. Invoice Detail Post (RUP, credit limit, over-limit override and the
+  no-override stop), the Split Billing editor's Post and the Field Invoices Print were each checked
+  in the dev app, working and failing (error, no data, not a list, dropped connection), against a
+  local fake Supabase server.
 - Not changed here: the after-save credit-limit toast on Quote Builder and Job Detail
-  (`warnIfOverCreditLimit`) still says nothing when its own read fails (it is a notice after the
-  save, not a check before it).
+  (`warnIfOverCreditLimit`) still says nothing when its own read fails (a notice after the save,
+  not a check before it); a Print All on the field-invoice lists fails the whole batch, rather
+  than skipping and naming the invoice, when one invoice's details cannot be read; posting an
+  unposted invoice counts its balance once in the server total and again as the new amount (an
+  over-warning, the safe direction); and the other post buttons (Field Application Invoice, the
+  Drafts panel, Office Cockpit, batch post) run no client-side RUP or credit check at all, as before.

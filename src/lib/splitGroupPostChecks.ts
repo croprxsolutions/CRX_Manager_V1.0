@@ -23,7 +23,9 @@ const FAILED = Symbol('check failed');
 
 /** The member's RUP finding for the warning, null when there is none. */
 async function rupFinding(inv: GroupMember): Promise<string | null | typeof FAILED> {
-  const pids = (inv.invoice_items || []).map((x) => x.product_id).filter((p): p is string => Boolean(p));
+  // A member's lines that came back missing are unread, not "no products".
+  if (!Array.isArray(inv.invoice_items)) return FAILED;
+  const pids = inv.invoice_items.map((x) => x.product_id).filter((p): p is string => Boolean(p));
   if (!inv.customer_id || pids.length === 0) return null;
   const res = await checkRUPCompliance(inv.customer_id, pids);
   if (res.checkFailed) return FAILED;

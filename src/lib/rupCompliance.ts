@@ -12,8 +12,10 @@ export interface RUPComplianceResult {
   checkFailed: boolean;
 }
 
+// Shown as the warning on New Order, Quote Builder and the delivery screens, which run the check
+// when the customer or products change: a reload runs it again.
 export const RUP_CHECK_FAILED_MESSAGE =
-  'The restricted-use (RUP) license check could not be run. Try again.';
+  'The restricted-use (RUP) license check could not be run. Reload the page to check again.';
 
 /** Shown when a post stops because its RUP check could not run. */
 export const RUP_POST_CHECK_FAILED_MESSAGE =
@@ -119,7 +121,7 @@ export type RUPRegisterDisposition = {
  * A `checkFailed` result has no disposition: callers stop before asking for one.
  */
 export function rupRegisterDisposition(res: RUPComplianceResult): RUPRegisterDisposition {
-  if (!res.hasRUPProducts || res.hasValidLicense) return { status: null, label: null };
+  if (res.checkFailed || !res.hasRUPProducts || res.hasValidLicense) return { status: null, label: null };
   if (res.missingLicense) return { status: 'non_compliant', label: 'NON-COMPLIANT' };
   return { status: 'warning', label: 'WARNING' };
 }

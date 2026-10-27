@@ -1,5 +1,6 @@
-import { supabase } from './db';
-import { fetchAllRows, pageWithList } from './pagedRead';
+import { assertRpcResult, supabase } from './db';
+import { formatCents } from './money';
+import { parseDollarsToCentsSigned } from './parseCents';
 import { Sentry } from './sentry';
 
 export interface CreditLimitParams {
@@ -17,8 +18,25 @@ export const CREDIT_LIMIT_UNVERIFIED_MESSAGE =
   'Could not verify credit limit. Please refresh and try again before completing this transaction.';
 
 /**
+ * The customer's open balance in whole cents, as check_customer_credit_limit adds it up on the
+ * server (posted, overdue and unposted invoices, not deleted, no negative balances). The server
+ * reads every invoice: a sales rep's own read is limited to the invoices they created or sell,
+ * so a customer billed by another rep looked under the limit. Null when the answer is not a
+ * whole-cent amount.
+ */
+async function outstandingBalanceCents(customerId: string): Promise<number | null> {
+  const { data, error } = await supabase.rpc('check_customer_credit_limit', { p_customer_id: customerId });
+  if (error) throw error;
+  const result = assertRpcResult<{ outstanding_ar?: unknown }>(data, 'check_customer_credit_limit');
+  // The server sends dollars (cents / 100.0); parse its decimal text into exact cents.
+  if (typeof result.outstanding_ar !== 'number' || !Number.isFinite(result.outstanding_ar)) return null;
+  const cents = parseDollarsToCentsSigned(String(result.outstanding_ar));
+  return cents !== null && cents >= 0 ? cents : null;
+}
+
+/**
  * Whether a new amount keeps the customer within their credit limit. Every read
- * that fails, or answers with no customer row or no list, is `unverified` —
+ * that fails, or answers with no customer row or no usable balance, is `unverified` —
  * the old code read a failed customer read as "no limit set" and passed.
  */
 export async function evaluateCreditLimit({ customerId, newAmountCents }: CreditLimitParams): Promise<CreditLimitResult> {
@@ -27,7 +45,7 @@ export async function evaluateCreditLimit({ customerId, newAmountCents }: Credit
   if (!customerId || newAmountCents <= 0) return { status: 'ok' };
 
   try {
-    // Get customer credit limit
+    // The limit itself: every office user can read every customer.
     const { data: customer, error: customerError } = await supabase
       .from('customers')
       .select('farm_name, credit_limit_cents')
@@ -40,31 +58,14 @@ export async function evaluateCreditLimit({ customerId, newAmountCents }: Credit
     // No limit set: Customer Detail saves a blank limit as 0, so 0 means none too.
     if (!customer.credit_limit_cents) return { status: 'ok' };
 
-    // Get current unpaid invoice balance
-    // Every open invoice, page by page: one request stopped at the server's
-    // row cap and understated the balance (Goal 4 L17). A failed read, or a
-    // page with no list, is unverified instead of reading as a zero balance.
-    const { data: invoices, error: invoicesError } = await fetchAllRows((from, to) => pageWithList(supabase
-      .from('invoices')
-      .select('id, balance_cents', { count: 'exact' })
-      .eq('customer_id', customerId)
-      .in('status', ['draft', 'unposted', 'posted', 'overdue'])
-      .order('id')
-      .range(from, to)));
-    if (invoicesError || !invoices) throw new Error(invoicesError?.message ?? 'The invoices read returned no list.');
+    const currentBalance = await outstandingBalanceCents(customerId);
+    if (currentBalance === null) throw new Error('check_customer_credit_limit returned no usable balance.');
 
-    const currentBalance = invoices.reduce(
-      (sum, inv) => sum + (inv.balance_cents || 0),
-      0
-    );
-
-    const projectedTotal = currentBalance + newAmountCents;
-    const overBy = projectedTotal - customer.credit_limit_cents;
-
+    const overBy = currentBalance + newAmountCents - customer.credit_limit_cents;
     if (overBy > 0) {
       return {
         status: 'over',
-        message: `This will put ${customer.farm_name} $${(overBy / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })} over their $${(customer.credit_limit_cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })} credit limit.`,
+        message: `This will put ${customer.farm_name} ${formatCents(overBy)} over their ${formatCents(customer.credit_limit_cents)} credit limit.`,
       };
     }
     return { status: 'ok' };

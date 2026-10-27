@@ -698,6 +698,8 @@ ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success
   "the owner and repository compare without case");
 ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\n[Open](https://app.coderabbit.ai/change-stack/masonwells1/CRX_Manager_V1.0/pull/1134/)" })).commit, PR_1134),
   "a trailing slash after the PR number still reads");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\n[Open](https://app.coderabbit.ai/change-stack/masonwells1/CRX_Manager_V1.0/pull/1134/unrelated)" })).commit, PR_1134),
+  "a longer path after the PR number is not this PR's review link (Luna on #1125)");
 {
   // Luna on #1125: a completed run with no readable PR link is not "never reviewed".
   const unbound = facts({ commits: [runCommit(OLD, crSuite({ summary: "Result: Success - Review completed\nRun ID: `x`" })), commit(HEAD)] });

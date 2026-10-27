@@ -473,7 +473,7 @@ export function coderabbitRequirementArgs(owner, name, number) {
 // "(https://app.coderabbit.ai/change-stack/<owner>/<repo>/pull/1134?scope=…)".
 // A check run belongs to a commit, not a PR, so two PRs sharing a head would
 // share it; this link names the PR it reviewed (Sol on #1125).
-const CODERABBIT_PR_LINK = /\(https:\/\/app\.coderabbit\.ai\/change-stack\/([^/\s)]+)\/([^/\s)]+)\/pull\/(\d+)(?=[/?#)])/gi;
+const CODERABBIT_PR_LINK = /\(https:\/\/app\.coderabbit\.ai\/change-stack\/([^/\s)]+)\/([^/\s)]+)\/pull\/(\d+)(?=\/?[?#)])/gi;
 export function coderabbitRunReviewedPr(summary, pullRequest) {
   const number = pullRequest?.number;
   const repo = String(pullRequest?.baseRepository?.nameWithOwner || "").trim().toLowerCase();

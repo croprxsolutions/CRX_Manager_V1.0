@@ -15,8 +15,11 @@
  *   3. Below cost, under the margin floor, a cost move over 10%, and tier fallback in the details.
  *   4. A floor set after the approval makes apply (and re-approval) refuse: the warnings changed.
  *   5. A per-acre rate change on the product page writes a history row.
- *   Grants; preflight drift refusals; a second apply refused; MUTATION: the apply approval check
- *   removed lets an unacknowledged typo through.
+ *   6. A floor raised after the approval with the same warning code (30% -> 40%) still refuses.
+ *   7. A floor change that lands while apply runs (a test trigger, after the engine has locked the
+ *      product) rolls the apply back.
+ *   Grants; preflight drift refusals; a second apply refused; MUTATIONS: the apply approval check
+ *   removed lets an unacknowledged typo through; the second read removed lets scenario 7 apply.
  *
  * Run: node scripts/smoke/prove-price-sheet-warnings-real-schema.mjs   (needs Docker)
  * Prints PRICE_SHEET_WARNINGS_PROOF_PASS on success. CRX_PROVER_VERBOSE=1 prints every step.
@@ -48,7 +51,7 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(FUNCTION\s+(public\.)?"?(preview_product_cost_basis_changes|apply_product_cost_basis_change_set|write_product_pricing_history|approve_pricing_change_set|_pricing_change_set_warnings|_pricing_change_set_warning_codes|preview_product_pricing_changes|apply_product_pricing_change_set|_apply_product_cost_basis_change_set_serialized_inner|_resolve_product_cost_basis_row|_product_cost_basis_row_required|is_admin|check_idempotency_intent|save_idempotency|_bind_replay_receipt_20261015|_replay_fingerprint_20261015|_cost_step2_try_uuid)\b|pricing_change_set|product_margin_floor|cost_history)/i;
+const TOUCHED = /(FUNCTION\s+(public\.)?"?(preview_product_cost_basis_changes|apply_product_cost_basis_change_set|write_product_pricing_history|approve_pricing_change_set|_pricing_change_set_warnings|_pricing_change_set_warning_set|_pricing_change_set_warning_inputs|preview_product_pricing_changes|apply_product_pricing_change_set|_apply_product_cost_basis_change_set_serialized_inner|_resolve_product_cost_basis_row|_product_cost_basis_row_required|is_admin|check_idempotency_intent|save_idempotency|_bind_replay_receipt_20261015|_replay_fingerprint_20261015|_cost_step2_try_uuid)\b|pricing_change_set|product_margin_floor|cost_history)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -289,9 +292,15 @@ const ack = (product, codes, reason = 'checked against the supplier letter') => 
 const PRICES = (product) => `(SELECT round(current_cost, 2) || '/' || round(tier1_price, 2) || '/' || round(tier2_price, 2) || '/' || COALESCE(round(tier3_price, 2)::text, '-') FROM public.products WHERE id = '${product}')`;
 const LAST_HIST = (product) => `(SELECT COALESCE(change_reason, '-') || '|' || COALESCE(to_jsonb(h)->>'price_source', '-') || '|' || change_source || '|' || COALESCE(to_jsonb(h)->>'new_rate_per_acre', '-')
   FROM public.cost_history h WHERE product_id = '${product}' ORDER BY changed_at DESC, id DESC LIMIT 1)`;
-const HIST_COUNT = (product) => `(SELECT count(*) FROM public.cost_history WHERE product_id = '${product}')`;
+const FLOOR = (product) => `(SELECT COALESCE((SELECT margin_floor::text FROM public.product_margin_floors WHERE product_id = '${product}'), '-'))`;
+const HIST_COUNT = (product) =>`(SELECT count(*) FROM public.cost_history WHERE product_id = '${product}')`;
 
-const NO_APPROVE_FN = /^42883\|function public\.approve_pricing_change_set\(.*\) does not exist$/;
+// A floor change for B that lands inside apply, after the engine has updated (so locked) B: what a
+// concurrent set_product_margin_floors does once that lock is released to it.
+const ARM_MID_APPLY_FLOOR = { stmt: `CREATE FUNCTION public.prover_floor_mid_apply() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$ BEGIN UPDATE public.product_margin_floors SET margin_floor = 0.1 WHERE product_id = NEW.id; RETURN NULL; END $fn$;
+  CREATE TRIGGER prover_floor_mid_apply AFTER UPDATE ON public.products FOR EACH ROW WHEN (NEW.id = '${PROD_B}') EXECUTE FUNCTION public.prover_floor_mid_apply();
+  v := 'armed';` };
+const NO_APPROVE_FN =/^42883\|function public\.approve_pricing_change_set\(.*\) does not exist$/;
 const A = PROD;
 const B = PROD_B;
 
@@ -362,6 +371,24 @@ const SCENARIOS = [
     ['a migration (no user) changing the rate writes nothing', 'bare', { stmt: `UPDATE public.products SET rate_per_acre = 40 WHERE id = '${B}'; v := 'updated';` }, 'ok|updated', 'same'],
     ['no history for B', 'owner', HIST_COUNT(B), 'ok|0', 'same'],
   ] },
+  { name: '6. a floor raised with the same warning code', steps: [
+    ['preview B tier 2 at $27, under the 30% floor', U.ADMIN, preview('r', [row(B, '20.00', '30.00', '27.00', '30.00', SOURCED)], 'r1'),
+      'ok|previewed|-|-', `ok|previewed|${B}=MARGIN_UNDER_FLOOR|-`],
+    ['approve', U.ADMIN, approve('r', [ack(B, ['MARGIN_UNDER_FLOOR'])], 'r2'), NO_APPROVE_FN, 'ok|approved:1'],
+    ['another admin raises the floor to 40% (still under it: same code)', U.ADMIN2, `(SELECT public.set_product_margin_floors(${jb([{ product_id: B, margin_floor_percent: 40 }])}, NULL, '${U.ADMIN2}', 'r3')->>'status')`, 'ok|saved', 'same'],
+    ['apply is refused: the floor in the warning changed', U.ADMIN, applyCs('r', 'r4'), 'ok|applied', /^P0001\|PRICING_WARNINGS_CHANGED: the warnings for this change set changed after it was approved/],
+    ['re-approving with the same acknowledgement is refused too', U.ADMIN, approve('r', [ack(B, ['MARGIN_UNDER_FLOOR'])], 'r5'), NO_APPROVE_FN, /^P0001\|PRICING_WARNINGS_CHANGED: /],
+    ['prices unchanged', 'owner', PRICES(B), 'ok|20.00/30.00/27.00/30.00', 'ok|20.00/30.00/28.00/-'],
+  ] },
+  { name: '7. a floor change landing while apply runs', steps: [
+    ['a floor change is wired to land mid-apply', 'owner', ARM_MID_APPLY_FLOOR, 'ok|armed', 'same'],
+    ['preview B tier 2 at $27', U.ADMIN, preview('s', [row(B, '20.00', '30.00', '27.00', '30.00', SOURCED)], 's1'),
+      'ok|previewed|-|-', `ok|previewed|${B}=MARGIN_UNDER_FLOOR|-`],
+    ['approve', U.ADMIN, approve('s', [ack(B, ['MARGIN_UNDER_FLOOR'])], 's2'), NO_APPROVE_FN, 'ok|approved:1'],
+    ['apply is rolled back by the second read', U.ADMIN, applyCs('s', 's3'), 'ok|applied', /^P0001\|PRICING_WARNINGS_CHANGED: a margin floor or an open sent quote changed while this change set was applying/],
+    ['prices unchanged', 'owner', PRICES(B), 'ok|20.00/30.00/27.00/30.00', 'ok|20.00/30.00/28.00/-'],
+    ['the floor change rolled back with it', 'owner', FLOOR(B), 'ok|0.1', 'ok|0.30'],
+  ] },
 ];
 
 function runMatrix(phase) {
@@ -398,13 +425,14 @@ function grants() {
       has_function_privilege('anon', p.oid, 'EXECUTE'), has_function_privilege('authenticated', p.oid, 'EXECUTE'),
       has_function_privilege('service_role', p.oid, 'EXECUTE'), array_to_string(p.proconfig, ';')
     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
-     AND p.proname IN ('approve_pricing_change_set', '_pricing_change_set_warnings', '_pricing_change_set_warning_codes',
+     AND p.proname IN ('approve_pricing_change_set', '_pricing_change_set_warnings', '_pricing_change_set_warning_set', '_pricing_change_set_warning_inputs',
                        'preview_product_cost_basis_changes', 'apply_product_cost_basis_change_set', 'write_product_pricing_history')
     ORDER BY 1;` }).stdout.trim().split(/\r?\n/).map((l) => l.split('|'));
   const want = {
     'approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)': ['f', 't', 'f'],
     '_pricing_change_set_warnings(uuid)': ['f', 'f', 'f'],
-    '_pricing_change_set_warning_codes(uuid)': ['f', 'f', 'f'],
+    '_pricing_change_set_warning_set(uuid)': ['f', 'f', 'f'],
+    '_pricing_change_set_warning_inputs(uuid)': ['f', 'f', 'f'],
     'preview_product_cost_basis_changes(text,uuid,jsonb,uuid,text)': ['f', 't', 'f'],
     'apply_product_cost_basis_change_set(uuid,text,uuid,text)': ['f', 't', 'f'],
     'write_product_pricing_history()': ['f', 'f', 't'],
@@ -471,6 +499,18 @@ function main() {
   ], mutant);
   assert.equal(mut['apply unapproved, check removed'], 'ok|applied', `MUTATION: without the approval check an unapproved typo should apply, got ${mut['apply unapproved, check removed']}`);
   console.log('[prover] MUTATION: with the approval check removed an unacknowledged tenfold typo applies -- so the refusal comes from that check');
+
+  // MUTATION: the second read after the engine is what rolls back a floor change landing mid-apply.
+  const mutant2 = wrapper.replace(/  -- The second read[\s\S]*?\n  END IF;\n  RETURN v_result;/, '  RETURN v_result;');
+  assert.notEqual(mutant2, wrapper, 'the mutation must remove the second read');
+  const mut2 = scenario([
+    { key: 'arm', as: 'owner', ...ARM_MID_APPLY_FLOOR },
+    { key: 'preview', as: U.ADMIN, call: preview('n', [row(B, '20.00', '30.00', '27.00', '30.00', SOURCED)], 'n1') },
+    { key: 'approve', as: U.ADMIN, call: approve('n', [ack(B, ['MARGIN_UNDER_FLOOR'])], 'n2') },
+    { key: 'apply, second read removed', as: U.ADMIN, call: applyCs('n', 'n3') },
+  ], mutant2);
+  assert.equal(mut2['apply, second read removed'], 'ok|applied', `MUTATION: without the second read the mid-apply floor change should go unseen, got ${mut2['apply, second read removed']}`);
+  console.log('[prover] MUTATION: with the second read removed a floor change landing mid-apply goes unseen -- so that read is what refuses it');
 
   // The live pricing smoke chain, updated for this migration, must pass on it as it will after apply.
   // Its first check reads the live default-off cost-basis switch, a data row the replay does not carry.

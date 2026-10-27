@@ -294,6 +294,27 @@ describe('Products governed inline pricing flow', () => {
     await waitFor(() => expect(mockApplyPricing).toHaveBeenCalled());
   });
 
+  it('retries a failed preview with the same key, but a changed reason gets a new one', async () => {
+    mockPreviewPricing.mockRejectedValueOnce(new Error('network timeout')).mockRejectedValueOnce(new Error('network timeout'));
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test inline pricing save' }));
+    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview changes' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview changes' })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up 10%' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledTimes(3));
+
+    const keys = mockPreviewPricing.mock.calls.map(([args]) => (args as { idempotencyKey: string }).idempotencyKey);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
   it('does not apply when the approval is refused, and says why', async () => {
     mockApprovePricing.mockRejectedValue(new Error('PRICING_WARNINGS_CHANGED: preview it again'));
     render(<Products />);

@@ -266,8 +266,8 @@ export default function ProductDetail() {
     resetKey: resetPreviewPricingKey,
   } = useIdempotencyKey('preview_product_pricing_changes', profile?.id ?? '');
   const {
-    getKey: getApprovePricingKey,
-    resetKey: resetApprovePricingKey,
+    getKeyFor: getApprovePricingKeyFor,
+    resetKeyFor: resetApprovePricingKeyFor,
   } = useIdempotencyKey('approve_pricing_change_set', profile?.id ?? '');
   const {
     getKey: getApplyPricingKey,
@@ -724,16 +724,18 @@ export default function ProductDetail() {
     }
     setApplyingPricing(true);
     try {
-      // The database applies only an approved preview, with every warning acknowledged.
+      // The database applies only an approved preview, with every warning acknowledged. One key per
+      // exact approval: a corrected reason is a new request (a re-approval replaces the receipt).
+      const approveIntent = JSON.stringify([pricingPreview.change_set_id, acknowledgements]);
       await approvePricingChangeSet({
         changeSetId: pricingPreview.change_set_id,
         requestFingerprint: pricingPreview.request_fingerprint,
         acknowledgements,
         sourceFile: null,
         performedBy: profile.id,
-        idempotencyKey: getApprovePricingKey(),
+        idempotencyKey: getApprovePricingKeyFor(approveIntent),
       });
-      resetApprovePricingKey();
+      resetApprovePricingKeyFor(approveIntent);
       const result = await applyProductPricingChangeSet({
         changeSetId: pricingPreview.change_set_id,
         requestFingerprint: pricingPreview.request_fingerprint,
@@ -1762,7 +1764,6 @@ export default function ProductDetail() {
         title={pricingPreviewTitle}
         onClose={() => {
           setPricingPreview(null);
-          resetApprovePricingKey();
           resetApplyPricingKey();
         }}
         onApprove={(acknowledgements) => void handleApplyPricing(acknowledgements)}

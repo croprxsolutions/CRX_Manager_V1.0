@@ -33,14 +33,18 @@
 --      the preview is live. Every warned product needs one acknowledgement naming exactly its warning
 --      codes, with a reason (1-500 characters); no acknowledgement for a product without warnings. A
 --      workbook change set also names the uploaded file (name, SHA-256). It recomputes the warnings
---      and refuses (PRICING_WARNINGS_CHANGED) if they differ from the preview's. The receipt
+--      and refuses (PRICING_WARNINGS_CHANGED) if their codes or details (a floor's value, which sent
+--      quotes) differ from the preview's. The receipt
 --      (pricing_change_set_approvals) keeps who, when, the acknowledgements, the warning set and the
 --      file.
 --
 --   3. APPLY requires that receipt: apply_product_cost_basis_change_set refuses
 --      PRICING_APPROVAL_REQUIRED without an approval by the same admin of the same preview, and
---      PRICING_WARNINGS_CHANGED when the warnings recomputed at apply differ from the approved set.
---      Its body is otherwise the live one (20260722091359), as is the inner engine it calls.
+--      PRICING_WARNINGS_CHANGED when the warnings recomputed at apply differ from the approved set,
+--      or when a margin floor or the open sent quotes change while it applies (read again once the
+--      inner engine holds the product locks; no product lock is taken earlier, which would reverse the
+--      engine's lock order). Its body is otherwise the live one (20260722091359), as is the inner
+--      engine it calls.
 --
 --   4. SOURCE AND REASON on every row that changes a price, the cost or the per-acre rate (plan
 --      section 7, finding 6; section 8, gap 4): the preview marks such a row invalid
@@ -73,7 +77,7 @@
 -- caller-analysis: apply_product_cost_basis_change_set :: body extended, same signature and grants; src/lib/productPricing.ts
 --
 -- GRANTS: only the routine lock-down of objects this file creates: approve_pricing_change_set EXECUTE
---   to authenticated only; the two helpers and the two new tables to no API role (RPC-only, like the
+--   to authenticated only; the three helpers and the two new tables to no API role (RPC-only, like the
 --   other change-set tables). CREATE OR REPLACE keeps the three replaced functions' grants.
 --
 -- ROLLBACK (no data loss beyond the receipts and warnings written since):
@@ -81,7 +85,8 @@
 --   apply_product_cost_basis_change_set from 20260722091359 and write_product_pricing_history from
 --   20260717042803 (not those whole files);
 --   DROP FUNCTION public.approve_pricing_change_set(uuid, text, jsonb, jsonb, uuid, text);
---   DROP FUNCTION public._pricing_change_set_warning_codes(uuid);
+--   DROP FUNCTION public._pricing_change_set_warning_set(uuid);
+--   DROP FUNCTION public._pricing_change_set_warning_inputs(uuid);
 --   DROP FUNCTION public._pricing_change_set_warnings(uuid);
 --   DROP TABLE public.pricing_change_set_approvals, public.pricing_change_set_warnings;
 --   the new columns can stay (nullable, nothing else reads them).
@@ -134,7 +139,8 @@ BEGIN
      OR EXISTS (SELECT 1 FROM pg_proc p
                  WHERE p.pronamespace = 'public'::regnamespace
                    AND p.proname IN ('approve_pricing_change_set', '_pricing_change_set_warnings',
-                                     '_pricing_change_set_warning_codes'))
+                                     '_pricing_change_set_warning_set',
+                                     '_pricing_change_set_warning_inputs'))
      OR EXISTS (SELECT 1 FROM information_schema.columns
                  WHERE table_schema = 'public'
                    AND ((table_name = 'cost_history' AND column_name IN ('price_source', 'old_rate_per_acre',
@@ -313,17 +319,44 @@ AS $function$
 $function$;
 REVOKE ALL ON FUNCTION public._pricing_change_set_warnings(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
--- The warning set as {product_id: [codes]}, the form approvals record and compare.
-CREATE FUNCTION public._pricing_change_set_warning_codes(p_change_set_id uuid)
+-- The warning set as {product_id: {warning_codes, details}}, the form approval and apply compare with
+-- the preview's: a floor raised from 15% to 50%, or a second sent quote, keeps the codes but is a change.
+CREATE FUNCTION public._pricing_change_set_warning_set(p_change_set_id uuid)
 RETURNS jsonb
 LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $function$
-  SELECT COALESCE(jsonb_object_agg(w.product_id::text, to_jsonb(w.warning_codes)), '{}'::jsonb)
+  SELECT COALESCE(jsonb_object_agg(w.product_id::text,
+           jsonb_build_object('warning_codes', to_jsonb(w.warning_codes), 'details', w.details)), '{}'::jsonb)
   FROM public._pricing_change_set_warnings(p_change_set_id) w
 $function$;
-REVOKE ALL ON FUNCTION public._pricing_change_set_warning_codes(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+REVOKE ALL ON FUNCTION public._pricing_change_set_warning_set(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
+-- What the warnings read besides the change set and the product row: each product's margin floor and
+-- the open sent quotes holding it (the open_quotes rule above), as {product_id: {margin_floor,
+-- open_quote_ids}}. Apply reads it before and after the pricing engine locks the products.
+CREATE FUNCTION public._pricing_change_set_warning_inputs(p_change_set_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $function$
+  SELECT COALESCE(jsonb_object_agg(r.product_id::text, jsonb_build_object(
+           'margin_floor', f.margin_floor,
+           'open_quote_ids', COALESCE((
+             SELECT jsonb_agg(DISTINCT q.id ORDER BY q.id)
+               FROM public.quote_items qi
+               JOIN public.quotes q ON q.id = qi.quote_id
+              WHERE qi.product_id = r.product_id
+                AND q.deleted_at IS NULL
+                AND (q.status IN ('sent', 'revised') OR (q.status = 'accepted' AND q.is_planned))
+                AND qi.price_override IS NULL), '[]'::jsonb))), '{}'::jsonb)
+  FROM (SELECT DISTINCT cr.product_id FROM public.pricing_change_set_rows cr
+         WHERE cr.change_set_id = p_change_set_id) r
+  LEFT JOIN public.product_margin_floors f ON f.product_id = r.product_id
+$function$;
+REVOKE ALL ON FUNCTION public._pricing_change_set_warning_inputs(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- ---------------------------------------------------------------------------
 -- 4 + 1. The preview wrapper: the live body plus the source/reason check and the warnings.
@@ -1013,7 +1046,7 @@ DECLARE
   v_replay jsonb;
   v_change_set public.pricing_change_sets%ROWTYPE;
   v_stored jsonb;
-  v_now jsonb;
+  v_stored_set jsonb;
   v_ack jsonb;
   v_product_id uuid;
   v_codes jsonb;
@@ -1080,13 +1113,15 @@ BEGIN
     RAISE EXCEPTION 'PRICING_SOURCE_REQUIRED: this preview was made before sources were required; preview it again';
   END IF;
 
-  -- The warnings must be the ones the preview showed: a floor or an open quote may have changed since.
-  SELECT COALESCE(jsonb_object_agg(w.product_id::text, to_jsonb(w.warning_codes)), '{}'::jsonb)
-    INTO v_stored
+  -- The warnings must be the ones the preview showed, codes and details: a floor or an open quote may
+  -- have changed since.
+  SELECT COALESCE(jsonb_object_agg(w.product_id::text, to_jsonb(w.warning_codes)), '{}'::jsonb),
+         COALESCE(jsonb_object_agg(w.product_id::text, jsonb_build_object(
+           'warning_codes', to_jsonb(w.warning_codes), 'details', w.details)), '{}'::jsonb)
+    INTO v_stored, v_stored_set
     FROM public.pricing_change_set_warnings w
    WHERE w.change_set_id = p_change_set_id;
-  v_now := public._pricing_change_set_warning_codes(p_change_set_id);
-  IF v_now IS DISTINCT FROM v_stored THEN
+  IF public._pricing_change_set_warning_set(p_change_set_id) IS DISTINCT FROM v_stored_set THEN
     RAISE EXCEPTION 'PRICING_WARNINGS_CHANGED: the warnings for this change set changed after the preview; preview it again';
   END IF;
 
@@ -1196,6 +1231,8 @@ DECLARE
   v_result jsonb;
   v_status text;
   v_approval public.pricing_change_set_approvals%ROWTYPE;
+  v_stored_set jsonb;
+  v_inputs jsonb;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
@@ -1230,14 +1267,17 @@ BEGIN
     hashtextextended('crx_apply_product_cost_basis_change_set', 0)
   );
   -- Applies only as approved (To-Do 0.1): an approval by this admin of this exact preview, whose
-  -- acknowledged warnings still equal the warnings recomputed now (a margin floor or an open sent
-  -- quote can change after the preview). An already-applied set goes on to the inner engine, which
-  -- replays its stored result or refuses a different key; a missing one gets its CHANGE_SET_NOT_FOUND.
-  -- KNOWN GAP, accepted: the products are not locked before this check. Locking them here would
-  -- reverse the inner engine's evidence-before-product lock order (20260722064814) and could deadlock
-  -- a supplier-price correction or a receipt. So a margin floor change or a quote sent in the
-  -- milliseconds between this check and the inner engine's own product lock is not re-checked; the
-  -- sent-quote price lock (To-Do 1.2) removes the quote half of that.
+  -- warnings (codes and details, which approval matched to the preview's) still equal the warnings
+  -- recomputed now (a margin floor or an open sent quote can change after the preview). An
+  -- already-applied set goes on to the inner engine, which replays its stored result or refuses a
+  -- different key; a missing one gets its CHANGE_SET_NOT_FOUND.
+  -- The products are not locked before this check: that would reverse the inner engine's
+  -- evidence-before-product lock order (20260722064814) and could deadlock a supplier-price correction
+  -- or a receipt. Instead the warnings' other inputs (floors, open sent quotes) are read again after the
+  -- engine has locked and updated the products. A floor writer locks the product row
+  -- (set_product_margin_floors, FOR NO KEY UPDATE), so a floor change either shows in that second read
+  -- or waits for this commit. KNOWN GAP, accepted: a quote sent between that read and the commit is not
+  -- seen (sending takes no product lock); the sent-quote price lock (To-Do 1.2) removes it.
   SELECT status INTO v_status FROM public.pricing_change_sets WHERE id = p_change_set_id;
   IF v_status IS NOT NULL AND v_status IS DISTINCT FROM 'applied' THEN
     -- FOR SHARE: a same-admin re-approval cannot replace the receipt between this check and commit.
@@ -1250,7 +1290,13 @@ BEGIN
        OR v_approval.request_fingerprint IS DISTINCT FROM p_request_fingerprint THEN
       RAISE EXCEPTION 'PRICING_APPROVAL_REQUIRED: approve this preview, acknowledging every warning, before applying it';
     END IF;
-    IF v_approval.warning_codes IS DISTINCT FROM public._pricing_change_set_warning_codes(p_change_set_id) THEN
+    v_inputs := public._pricing_change_set_warning_inputs(p_change_set_id);
+    SELECT COALESCE(jsonb_object_agg(w.product_id::text, jsonb_build_object(
+             'warning_codes', to_jsonb(w.warning_codes), 'details', w.details)), '{}'::jsonb)
+      INTO v_stored_set
+      FROM public.pricing_change_set_warnings w
+     WHERE w.change_set_id = p_change_set_id;
+    IF public._pricing_change_set_warning_set(p_change_set_id) IS DISTINCT FROM v_stored_set THEN
       RAISE EXCEPTION 'PRICING_WARNINGS_CHANGED: the warnings for this change set changed after it was approved; preview it again';
     END IF;
   END IF;
@@ -1261,6 +1307,12 @@ BEGIN
     p_performed_by,
     p_idempotency_key
   );
+  -- The second read (see above): the products are locked by now, so a changed floor or a quote sent
+  -- since the check rolls the whole apply back.
+  IF v_inputs IS NOT NULL
+     AND public._pricing_change_set_warning_inputs(p_change_set_id) IS DISTINCT FROM v_inputs THEN
+    RAISE EXCEPTION 'PRICING_WARNINGS_CHANGED: a margin floor or an open sent quote changed while this change set was applying; preview it again';
+  END IF;
   RETURN v_result;
 END;
 $function$;
@@ -1411,7 +1463,8 @@ BEGIN
     END IF;
   END LOOP;
 
-  FOREACH f IN ARRAY ARRAY['public._pricing_change_set_warnings(uuid)', 'public._pricing_change_set_warning_codes(uuid)'] LOOP
+  FOREACH f IN ARRAY ARRAY['public._pricing_change_set_warnings(uuid)', 'public._pricing_change_set_warning_set(uuid)',
+                          'public._pricing_change_set_warning_inputs(uuid)'] LOOP
     IF EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS r(role)
                 WHERE has_function_privilege(r.role, f, 'EXECUTE')) THEN
       RAISE EXCEPTION 'PRICE_SHEET_VERIFY: % is executable by an API role', f;

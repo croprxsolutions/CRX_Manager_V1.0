@@ -676,13 +676,17 @@ export default function Products() {
     if (!profile || !pendingInlineRows) return;
     setPreviewingInline(true);
     try {
+      const rows = pendingInlineRows.map((row) => ({ ...row, change_reason: reason, price_source: source }));
+      // One key per exact request: a retry after changing the source or reason is a new request, so it
+      // must not reuse the key of one whose outcome is unknown (the server refuses a changed payload).
+      const intent = JSON.stringify(rows);
       const preview = await previewProductPricingChanges({
         source: 'products_inline',
-        rows: pendingInlineRows.map((row) => ({ ...row, change_reason: reason, price_source: source })),
+        rows,
         performedBy: profile.id,
-        idempotencyKey: previewPricingIdem.getKey(),
+        idempotencyKey: previewPricingIdem.getKeyFor(intent),
       });
-      previewPricingIdem.resetKey();
+      previewPricingIdem.resetKeyFor(intent);
       setPendingInlineRows(null);
       setPricingSourceFile(null);
       setPricingPreview(preview);
@@ -751,14 +755,16 @@ export default function Products() {
     try {
       const parsed = await parseProductPricingWorkbookWithSupplierEvidence(await file.arrayBuffer());
       const sourceFile: PricingSourceFile = { name: file.name, sha256: await sha256Hex(file) };
+      // One key per exact request (the file's bytes decide the rows), as for the inline preview.
+      const intent = JSON.stringify(['workbook', sourceFile.sha256]);
       const preview = await previewProductPricingChanges({
         source: 'pricing_worksheet',
         exportId: parsed.exportId,
         rows: parsed.rows,
         performedBy: profile.id,
-        idempotencyKey: previewPricingIdem.getKey(),
+        idempotencyKey: previewPricingIdem.getKeyFor(intent),
       });
-      previewPricingIdem.resetKey();
+      previewPricingIdem.resetKeyFor(intent);
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
@@ -774,15 +780,18 @@ export default function Products() {
     setApplyingPricing(true);
     try {
       // The database applies only an approved preview: every warning acknowledged, the file named.
+      const sourceFile = pricingPreview.source === 'pricing_worksheet' ? pricingSourceFile : null;
+      // One key per exact approval: a corrected reason is a new request (a re-approval replaces the receipt).
+      const approveIntent = JSON.stringify([pricingPreview.change_set_id, acknowledgements, sourceFile]);
       await approvePricingChangeSet({
         changeSetId: pricingPreview.change_set_id,
         requestFingerprint: pricingPreview.request_fingerprint,
         acknowledgements,
-        sourceFile: pricingPreview.source === 'pricing_worksheet' ? pricingSourceFile : null,
+        sourceFile,
         performedBy: profile.id,
-        idempotencyKey: approvePricingIdem.getKey(),
+        idempotencyKey: approvePricingIdem.getKeyFor(approveIntent),
       });
-      approvePricingIdem.resetKey();
+      approvePricingIdem.resetKeyFor(approveIntent);
       const result = await applyProductPricingChangeSet({
         changeSetId: pricingPreview.change_set_id,
         requestFingerprint: pricingPreview.request_fingerprint,
@@ -1179,7 +1188,6 @@ export default function Products() {
         onClose={() => {
           setPricingPreview(null);
           setPricingSourceFile(null);
-          approvePricingIdem.resetKey();
           applyPricingIdem.resetKey();
         }}
         onApprove={(acknowledgements) => void handleApplyPricing(acknowledgements)}

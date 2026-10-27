@@ -355,6 +355,9 @@ const SCENARIOS = [
       'ok|previewed|-|-', `ok|previewed|${B}=COST_MOVE_OVER_10_PERCENT+MARGIN_UNDER_FLOOR+PRICE_BELOW_COST+PRICE_MOVE_OVER_10_PERCENT|-`],
     ['what B tier 3 customers pay is shown, not the blank', U.ADMIN, `(SELECT w->'details'->'tiers'->2->>'before_cents' FROM jsonb_array_elements(public.preview_product_cost_basis_changes('products_inline', NULL, ${jb([row(B, '25.00', '30.00', '24.00', '30.00', SOURCED)])}, '${U.ADMIN}', 'c1')->'warnings') w)`,
       'ok|<null>', 'ok|3000'],
+    // Cents leave as JSON text, like the rest of the pricing boundary: a number above 2^53 would lose digits.
+    ['warning cents are JSON strings, not numbers', U.ADMIN, `(SELECT jsonb_typeof(w->'details'->'cost_before_cents') || '/' || jsonb_typeof(w->'details'->'cost_after_cents') || '/' || jsonb_typeof(w->'details'->'tiers'->0->'before_cents') || '/' || jsonb_typeof(w->'details'->'tiers'->0->'after_cents') FROM jsonb_array_elements(public.preview_product_cost_basis_changes('products_inline', NULL, ${jb([row(B, '25.00', '30.00', '24.00', '30.00', SOURCED)])}, '${U.ADMIN}', 'c1')->'warnings') w)`,
+      'ok|<null>', 'ok|string/string/string/string'],
   ] },
   { name: '4. warnings that change after approval', steps: [
     ['preview B tier 2 at $27.50 (under no floor yet once cleared)', U.ADMIN, `(SELECT public.set_product_margin_floors(${jb([{ product_id: B, margin_floor_percent: null }])}, NULL, '${U.ADMIN}', 'w0')->>'status')`, 'ok|saved', 'same'],

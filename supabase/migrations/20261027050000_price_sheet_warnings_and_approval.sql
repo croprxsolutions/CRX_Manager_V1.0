@@ -271,8 +271,9 @@ AS $function$
            bool_or(t.after_cents IS NOT NULL AND t.after_cents < t.cost_after) AS below_cost,
            bool_or(t.margin_floor IS NOT NULL AND t.margin_after < t.margin_floor) AS under_floor,
            bool_or(t.after_cents IS DISTINCT FROM t.before_cents) AS price_changed,
+           -- Cents go out as text, like the rest of the pricing boundary: a JSON number above 2^53 loses digits.
            jsonb_agg(jsonb_build_object(
-             'tier', t.tier, 'before_cents', t.before_cents, 'after_cents', t.after_cents,
+             'tier', t.tier, 'before_cents', t.before_cents::text, 'after_cents', t.after_cents::text,
              'margin', t.margin_after
            ) ORDER BY t.tier) AS tiers
     FROM tiers t
@@ -306,8 +307,8 @@ AS $function$
   )
   SELECT c.product_id, c.codes,
          jsonb_build_object(
-           'cost_before_cents', c.cost_before,
-           'cost_after_cents', c.cost_after,
+           'cost_before_cents', c.cost_before::text,
+           'cost_after_cents', c.cost_after::text,
            'margin_floor', c.margin_floor,
            'tiers', c.tiers,
            'open_quote_count', COALESCE(c.quote_count, 0),

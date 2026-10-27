@@ -4327,6 +4327,9 @@ const isRuntimeWord = (word) => /[$`]|^@[A-Za-z_]/.test(String(word).replace(/'[
 // that dropped `'…'` spans was fooled by `"'" \`cmd\` "'"` (security review on
 // #1128). null when a quote or backtick is left open.
 function backtickBodies(text) {
+  // ANSI-C quoting (`$'\''`) has its own escapes this scanner does not model, so
+  // it is treated as unreadable and the caller refuses (security review on #1128).
+  if (text.includes("$'")) return null;
   const bodies = [];
   let quote = "";
   for (let index = 0; index < text.length; index += 1) {

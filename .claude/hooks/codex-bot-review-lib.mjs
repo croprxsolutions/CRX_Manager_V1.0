@@ -492,11 +492,10 @@ export function coderabbitCompletedCommit(commit) {
 
 // Were all of CodeRabbit's check suites and runs on this commit read? The query
 // takes the first 5 and 10, so a longer list could hide a review: such a commit
-// can never prove "CodeRabbit never reviewed" (Luna, #1125). A commit read
-// without the field (a recording made before check runs) has only its status.
+// can never prove "CodeRabbit never reviewed" (Luna, #1125). A missing or
+// malformed field is not proof either.
 function coderabbitRunsComplete(commit) {
   const suites = commit?.checkSuites;
-  if (suites === undefined) return true;
   const fits = (list) => Array.isArray(list?.nodes) && Number.isInteger(list?.totalCount) && list.totalCount <= list.nodes.length;
   return fits(suites) && suites.nodes.every((suite) => fits(suite?.checkRuns));
 }

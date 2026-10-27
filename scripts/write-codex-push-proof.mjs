@@ -1519,10 +1519,15 @@ export function readSolPreflightFacts(root, headSha, baseSha) {
     const statuses = JSON.parse(preflightGh(root, [
       "api", `repos/${owner}/${name}/commits/${headSha}/statuses?per_page=100`, "--paginate", "--slurp",
     ])).flat();
-    const runs = JSON.parse(preflightGh(root, [
+    const pages = JSON.parse(preflightGh(root, [
       "api", `repos/${owner}/${name}/commits/${headSha}/check-runs?check_name=CodeRabbit&app_id=${CODERABBIT_APP_ID}&per_page=100`,
       "--paginate", "--slurp",
-    ])).flatMap((page) => page?.check_runs || []);
+    ]));
+    // A page without its run list, or fewer runs than GitHub's total, is
+    // unreadable, never "not busy" (Luna on #1125).
+    if (!Array.isArray(pages) || !pages.length || pages.some((page) => !Array.isArray(page?.check_runs))) throw new Error("unreadable check runs");
+    const runs = pages.flatMap((page) => page.check_runs);
+    if (!Number.isInteger(pages[0]?.total_count) || runs.length < pages[0].total_count) throw new Error("incomplete check runs");
     const byStatus = coderabbitReviewInProgress(statuses, facts.nowMs);
     const byRun = coderabbitCheckRunInProgress(runs, facts.nowMs);
     facts.coderabbitBusy = byStatus === null || byRun === null ? null : byStatus || byRun;

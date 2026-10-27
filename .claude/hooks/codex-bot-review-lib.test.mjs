@@ -621,7 +621,7 @@ const MID = "4a1b2c3d4e5f60718293a4b5c6d7e8f901234567";
 const crStatus = (description, { login = "coderabbitai", state = "SUCCESS", context = "CodeRabbit" } = {}) =>
   ({ context, state, description, creator: { login } });
 const commit = (oid, { parents = 1, statuses = [] } = {}) =>
-  ({ commit: { oid, parents: { totalCount: parents }, status: statuses === null ? null : { contexts: statuses } } });
+  ({ commit: { oid, parents: { totalCount: parents }, status: statuses === null ? null : { contexts: statuses }, checkSuites: { totalCount: 0, nodes: [] } } });
 const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
   headRefOid = HEAD, filesTotal = files.length } = {}) => ({
   headRefOid,
@@ -698,6 +698,10 @@ ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit), "an unre
     "a suite with more CodeRabbit runs than were read is unknown");
   eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(OLD, { nodes: [] }), runCommit(HEAD, skipped())] })).priorReview, undefined,
     "a suite list with no total is unknown");
+  const noSuites = commit(OLD);
+  delete noSuites.commit.checkSuites;
+  eq(evaluateCodeRabbitRequirement(facts({ commits: [noSuites, runCommit(HEAD, skipped())] })).priorReview, undefined,
+    "a commit read without its check suites is unknown (Luna round 2)");
   ok(/checkSuites\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY) && /checkRuns\([^)]*\) \{ totalCount/.test(CODERABBIT_REQUIREMENT_QUERY),
     "the requirement read asks for the suite and run totals");
 }

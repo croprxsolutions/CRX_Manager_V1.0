@@ -473,12 +473,25 @@ export function coderabbitRequirementArgs(owner, name, number) {
 // "(https://app.coderabbit.ai/change-stack/<owner>/<repo>/pull/1134?scope=…)".
 // A check run belongs to a commit, not a PR, so two PRs sharing a head would
 // share it; this link names the PR it reviewed (Sol on #1125).
+const CODERABBIT_PR_LINK = /\(https:\/\/app\.coderabbit\.ai\/change-stack\/([^/\s)]+)\/([^/\s)]+)\/pull\/(\d+)(?=[/?#)])/gi;
 export function coderabbitRunReviewedPr(summary, pullRequest) {
   const number = pullRequest?.number;
   const repo = String(pullRequest?.baseRepository?.nameWithOwner || "").trim().toLowerCase();
   if (!Number.isInteger(number) || number <= 0 || !/^[^/\s]+\/[^/\s]+$/.test(repo)) return false;
-  const links = String(summary || "").matchAll(/\(https:\/\/app\.coderabbit\.ai\/change-stack\/([^/\s)]+)\/([^/\s)]+)\/pull\/(\d+)(?=[?#)])/gi);
+  const links = String(summary || "").matchAll(CODERABBIT_PR_LINK);
   return [...links].some((m) => `${m[1]}/${m[2]}`.toLowerCase() === repo && Number(m[3]) === number);
+}
+
+// A completed CodeRabbit review run whose PR link cannot be read: it may be this
+// PR's review, so it can never prove "CodeRabbit never reviewed" (Luna on #1125).
+function coderabbitUnboundCompletedRun(commit) {
+  const suites = commit?.checkSuites?.nodes;
+  if (!Array.isArray(suites)) return false;
+  return suites.some((suite) => suite?.app?.databaseId === CODERABBIT_APP_ID && Array.isArray(suite?.checkRuns?.nodes)
+    && suite.checkRuns.nodes.some((run) =>
+      String(run?.conclusion || "").trim().toUpperCase() === "SUCCESS"
+      && /^Result: Success - Review completed\b/.test(String(run?.summary || "").trim())
+      && ![...String(run?.summary || "").matchAll(CODERABBIT_PR_LINK)].length));
 }
 
 // Did CodeRabbit itself mark this commit "Review completed", by commit status
@@ -574,7 +587,8 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   const commitTotal = pullRequest?.commits?.totalCount;
   let priorReview;
   if (list.some((commit) => coderabbitCompletedCommit(commit, pullRequest))) priorReview = true;
-  else if (Number.isInteger(commitTotal) && commitTotal >= 0 && commitTotal <= list.length && list.every(coderabbitRunsComplete)) priorReview = false;
+  else if (Number.isInteger(commitTotal) && commitTotal >= 0 && commitTotal <= list.length && list.every(coderabbitRunsComplete)
+    && !list.some(coderabbitUnboundCompletedRun)) priorReview = false;
   return { status: "missing", why, headOid, reviewedOid: "", priorReview };
 }
 

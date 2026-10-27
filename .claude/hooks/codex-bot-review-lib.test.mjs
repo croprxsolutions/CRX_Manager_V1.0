@@ -696,6 +696,16 @@ ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Succes
   "PR 11345's link is not PR 1134's");
 ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\n[Open](https://app.coderabbit.ai/change-stack/MasonWells1/crx_manager_v1.0/pull/1134?scope=x)" })).commit, PR_1134),
   "the owner and repository compare without case");
+ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Result: Success - Review completed\n[Open](https://app.coderabbit.ai/change-stack/masonwells1/CRX_Manager_V1.0/pull/1134/)" })).commit, PR_1134),
+  "a trailing slash after the PR number still reads");
+{
+  // Luna on #1125: a completed run with no readable PR link is not "never reviewed".
+  const unbound = facts({ commits: [runCommit(OLD, crSuite({ summary: "Result: Success - Review completed\nRun ID: `x`" })), commit(HEAD)] });
+  eq(evaluateCodeRabbitRequirement(unbound).priorReview, undefined, "a completed run with an unreadable PR link leaves priorReview unknown");
+  const elsewhere = facts({ commits: [runCommit(OLD, crSuite()), commit(HEAD)] });
+  elsewhere.number = 1135;
+  eq(evaluateCodeRabbitRequirement(elsewhere).priorReview, false, "a run that clearly names another PR is not this PR's review");
+}
 eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(HEAD, crSuite())] }) ).status, "reviewed", "the requirement read binds the run to its own PR");
 const otherPr = facts({ commits: [runCommit(HEAD, crSuite())] });
 otherPr.number = 1135;

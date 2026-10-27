@@ -3005,6 +3005,42 @@ describe('QuoteBuilder', () => {
       expect(await screen.findByRole('button', { name: 'Reload Quote' })).toBeInTheDocument();
     });
 
+    it('opens a new quote whose create stored a different price, instead of a reload that cannot recover it', async () => {
+      // On /quotes/new the reload dialog cannot load the quote (the route names none) and the next
+      // save would send no quote id, creating a second quote. The create opens the saved quote.
+      const product = { id: 'product-1', product_name: 'Product', is_active: true, current_cost: 6, tier1_price: 10, unit_size: 'gal', inventory_unit: 'gal' };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true,
+          default_commission_split: { splits: [{ recipient: 'Rep', percentage: 100 }] } }]
+          : table === 'products' ? [product]
+            : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string, args?: unknown) => {
+        if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+        const line = (args as { p_sections: Array<{ items: Array<{ client_key: string }> }> }).p_sections[0].items[0];
+        return Promise.resolve({ data: {
+          quote_id: 'quote-new', row_version: 1,
+          item_ids: { [line.client_key]: 'item-1' },
+          item_prices: { [line.client_key]: 13 },
+        }, error: null });
+      });
+      renderQuoteBuilder();
+      const customerBox = await screen.findByRole('combobox', { name: 'Customer' });
+      fireEvent.change(customerBox, { target: { value: 'Farm' } });
+      fireEvent.click(await screen.findByRole('option', { name: /Farm/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+      fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));
+      const picker = await screen.findByRole('dialog');
+      fireEvent.click(await within(picker).findByRole('button', { name: /T1 price/ }));
+      fireEvent.change(await screen.findByRole('spinbutton', { name: 'Units needed' }), { target: { value: '2' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/quotes/quote-new', { replace: true }));
+      expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Check the saved prices before sending it'));
+      expect(screen.queryByRole('button', { name: 'Reload Quote' })).not.toBeInTheDocument();
+    });
+
     it('does not mark the quote presented when its save stored a different price than the preview showed', async () => {
       const { quote } = configureLockedQuote();
       mockRpc.mockImplementation((name: string, args?: unknown) => {

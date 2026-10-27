@@ -767,7 +767,7 @@
     },
     "convert_sent_quote_in_one_step": {
       "chain": "smoke-convert-sent-quote-in-one-step.sql",
-      "description": "KI-12 / To-Do 1.3: QuoteBuilder converts a sent quote without saving it as accepted first. Convert straight from 'sent' creates exactly one order at the sent price after a reprice and marks the quote accepted in the same call; the old save-as-accepted-first path re-prices the line (contrast); a cost rise above the sent price is refused without a reason (BELOW_COST_REASON_REQUIRED, quote stays sent) and converts with an admin's reason at the sent price, recording a below-cost approval. Terminal rollback.",
+      "description": "KI-12 / To-Do 1.3: QuoteBuilder converts a sent quote without saving it as accepted first. Convert straight from 'sent' creates exactly one order at the sent price after a reprice and marks the quote accepted in the same call; the old save-as-accepted-first path also keeps the sent price (sent-price lock, 20261027010000); a cost rise above the sent price is refused without a reason (BELOW_COST_REASON_REQUIRED, quote stays sent) and converts with an admin's reason at the sent price, recording a below-cost approval. Terminal rollback.",
       "covers": [
         "convert_quote_to_order",
         "save_quote",

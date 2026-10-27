@@ -14,13 +14,13 @@
  *   - smoke-quote-sent-price-lock.sql: the lock itself (To-Do 1.2), every case in its header.
  * Steps:
  *   1. BEFORE: both chains fail at their first lock step (the accepted save re-prices; V1 records no
- *      line id), and every regression chain below is recorded.
+ *      line id), and every regression chain below ends with its listed outcome.
  *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the candidate stops at its preflight.
  *   3. MUTATIONS: the candidate with one safeguard removed (and its postflight dropped so the chain,
  *      not the postflight, has to notice) is applied inside a transaction that never commits; the
  *      lock chain fails at that safeguard's own step.
  *   4. The candidate applies and prints POSTFLIGHT_OK; a second apply is refused by its preflight.
- *   5. AFTER: both chains pass, and every regression chain ends exactly as it did BEFORE.
+ *   5. AFTER: both chains pass, and every regression chain ends with that same listed outcome.
  *
  * Run: node scripts/smoke/prove-quote-pricing-real-schema.mjs   (needs Docker)
  * Prints QUOTE_PRICING_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -44,18 +44,22 @@ const CHAINS = {
   'smoke-convert-sent-quote-in-one-step.sql': 'SMOKE_FAIL: (5) an accepted save re-priced the sent quote',
   'smoke-quote-sent-price-lock.sql': 'SMOKE_FAIL: (V1) snapshot lacks the line id',
 };
-// Existing chains over the functions the candidate re-emits: each must end the same way after it.
-const REGRESSION = [
-  'smoke-save-quote-repeated-product-line-ids.sql',
-  'smoke-quote-version-restore-trust.sql',
-  'smoke-quote-version-write-boundary.sql',
-  'smoke-draw-down-quote-intent-binding.sql',
-  'smoke-save-quote-drawn-guard.sql',
-  'smoke-job_from_quote_activity_feed_fix.sql',
-  'smoke-save-quote-customer-row-version.sql',
-  'smoke-revert-quote-escape-hatch.sql',
-  'smoke-quotes-rep-own-name.sql',
-];
+// Existing chains over the functions the candidate re-emits, each with the outcome (as outcome()
+// masks it) it must have both BEFORE and AFTER the candidate, so a chain that stops running cannot
+// hide behind an unchanged failure.
+const REGRESSION = {
+  'smoke-save-quote-repeated-product-line-ids.sql': 'PASS',
+  'smoke-quote-version-restore-trust.sql': 'PASS',
+  'smoke-quote-version-write-boundary.sql': 'PASS',
+  'smoke-draw-down-quote-intent-binding.sql': 'PASS',
+  'smoke-save-quote-drawn-guard.sql': 'PASS',
+  'smoke-job_from_quote_activity_feed_fix.sql': 'PASS',
+  'smoke-save-quote-customer-row-version.sql': 'PASS',
+  // Its fixture product has no cost, so the later cost-basis rule refuses its re-convert before
+  // and after the candidate alike (a fixture gap older than this work).
+  'smoke-revert-quote-escape-hatch.sql': 'ERROR:  COST_BASIS_REQUIRED:<uuid>',
+  'smoke-quotes-rep-own-name.sql': 'PASS',
+};
 // Each safeguard removed in turn, and the lock chain step that must notice.
 const MUTATIONS = [
   ['convert gate', `  ) THEN
@@ -297,14 +301,17 @@ try {
   seed();
   const candidate = lf(CANDIDATE);
 
-  // 1. BEFORE: both new chains fail at their first lock step; record every regression chain.
+  // 1. BEFORE: both new chains fail at their first lock step; every regression chain ends as listed.
   for (const [chain, expected] of Object.entries(CHAINS)) {
     const line = runChain(chain);
     assert.ok(line.includes(expected), `BEFORE: ${chain} should fail with "${expected}", got: ${line}`);
     console.log(`[prover] BEFORE ${chain}: fails as expected (${expected})`);
   }
-  const before = new Map(REGRESSION.map((chain) => [chain, outcome(runChain(chain))]));
-  for (const [chain, result] of before) console.log(`[prover] BEFORE ${chain}: ${result}`);
+  for (const [chain, expected] of Object.entries(REGRESSION)) {
+    const result = outcome(runChain(chain));
+    assert.equal(result, expected, `BEFORE: ${chain} should end "${expected}", got "${result}"`);
+    console.log(`[prover] BEFORE ${chain}: ${result}`);
+  }
 
   // 2. AUTOCOMMIT: statement by statement, the preflight stops the file before any change.
   stageText('candidate.sql', candidate);
@@ -333,18 +340,17 @@ try {
   assert.match(again.output, /PREFLIGHT_/, `a second apply failed outside the preflight:\n${again.output}`);
   console.log('[prover] APPLY: POSTFLIGHT_OK; re-apply refused by the preflight');
 
-  // 5. AFTER: both chains pass, every regression chain ends exactly as before.
+  // 5. AFTER: both chains pass, every regression chain ends as listed, as it did before.
   for (const chain of Object.keys(CHAINS)) {
     const line = runChain(chain);
     assert.ok(line.includes('SMOKE_PASS_ROLLBACK'), `AFTER: ${chain} did not pass: ${line}`);
     console.log(`[prover] AFTER ${chain}: ${line.replace(/^.*ERROR:\s*/, '')}`);
   }
-  for (const chain of REGRESSION) {
+  for (const [chain, expected] of Object.entries(REGRESSION)) {
     const result = outcome(runChain(chain));
-    assert.equal(result, before.get(chain), `AFTER: ${chain} changed from "${before.get(chain)}" to "${result}"`);
+    assert.equal(result, expected, `AFTER: ${chain} changed from "${expected}" to "${result}"`);
     console.log(`[prover] AFTER ${chain}: unchanged (${result})`);
   }
-  assert.ok([...before.values()].filter((r) => r === 'PASS').length >= 6, 'too few regression chains ran to a pass');
   console.log('QUOTE_PRICING_PROOF_PASS');
 } finally {
   if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true });

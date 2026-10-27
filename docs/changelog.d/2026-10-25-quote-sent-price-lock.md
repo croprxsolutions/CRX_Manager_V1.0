@@ -38,7 +38,9 @@ does (`src/lib/quotePriceLock.ts`), including a line added and saved since the p
 the save's reply). The emailed PDF shows the expiry that send stored, not one worked out from the creation date. If a save
 stores a different price than the screen shows (the catalog changed after the page loaded), the screen asks
 for a reload; an action chained to that save (Mark Presented, email, convert) stops, and later ones wait for
-the reload. Refusals show the server's plain-English instruction, on the quote and on
+the reload. A brand-new quote has no saved page to reload, so its first save instead warns and opens the saved
+quote, which shows the stored prices (the reload could not load it, and the next save would have created a
+second quote; CodeRabbit, PR #1105). Refusals show the server's plain-English instruction, on the quote and on
 the Quotes list. A tier or customer change no longer erases manual (negotiated) prices on any quote (plan
 section 7, finding 3).
 

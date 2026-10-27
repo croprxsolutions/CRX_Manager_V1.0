@@ -2436,10 +2436,18 @@ export default function QuoteBuilder() {
       // chained action (Mark Presented, email, convert) may continue from it: they get no id, and
       // later attempts wait for a reload, so the customer never gets a price they were not shown.
       if (repricedLines > 0) {
+        const repricedCount = repricedLines === 1 ? 'one line was' : `${repricedLines} lines were`;
+        // A create has no saved page to reload yet (the route is still /quotes/new), so the
+        // reload dialog could never recover it and the next save would create a second quote.
+        // Only Save Draft creates, and it opens the saved quote, which loads the stored prices.
+        if (!quoteIdAtSend) {
+          toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Check the saved prices before sending it.`);
+          return savedQuoteId;
+        }
         quoteVersionRecoveryRequiredRef.current = true;
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setStaleSaveOpen(true);
-        toast('warning', `The quote was saved, but ${repricedLines === 1 ? 'one line was' : `${repricedLines} lines were`} priced at today's catalog price, which changed since this page loaded. Reload the quote to see the saved prices before sending it.`);
+        toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Reload the quote to see the saved prices before sending it.`);
         return null;
       }
       return savedQuoteId;

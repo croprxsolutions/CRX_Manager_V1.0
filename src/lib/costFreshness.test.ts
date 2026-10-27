@@ -6,6 +6,7 @@ describe('cost freshness', () => {
     // 03:30 UTC on Oct 2 is still Oct 1 in Chicago.
     expect(costAsOfDate('2026-10-02T03:30:00Z')).toBe('2026-10-01');
     expect(costAsOfDate('2026-10-02T15:00:00+00:00')).toBe('2026-10-02');
+    expect(costAsOfDate('2026-07-28')).toBe('2026-07-28');
     expect(costAsOfDate(null)).toBeNull();
     expect(costAsOfDate('not a date')).toBeNull();
   });

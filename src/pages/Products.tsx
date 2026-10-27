@@ -47,10 +47,10 @@ import {
   DEFAULT_STALE_COST_AGE_DAYS,
   costAgeDays,
   costAsOfDate,
-  formatCostAsOfCSV as fmtCostAsOfCSV,
+  formatCostAsOfCSV,
   isCostStale,
 } from '../lib/costFreshness';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import {
   fetchMarginFloors,
   formatMarginFloorPercent,
@@ -122,6 +122,8 @@ export default function Products() {
   const [deactivating, setDeactivating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
+  // Once per render, not per row: the "Cost as of" column dates every product against it.
+  const costFreshnessToday = todayInBusinessTz();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [pricingPreview, setPricingPreview] = useState<PricingPreviewResult | null>(null);
   const [applyingPricing, setApplyingPricing] = useState(false);
@@ -257,7 +259,7 @@ export default function Products() {
     const priceCols = showCostMargin
       ? [
           { key: 'current_cost', header: 'Cost', format: (v: unknown) => fmtCSV(v as number) },
-          { key: 'cost_updated_date', header: 'Cost As Of', format: fmtCostAsOfCSV },
+          { key: 'cost_updated_date', header: 'Cost As Of', format: formatCostAsOfCSV },
           { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
           { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
           { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
@@ -338,7 +340,7 @@ export default function Products() {
     const priceCols = includeCost
       ? [
           { key: 'current_cost', header: 'Cost', format: (v: unknown) => fmtCSV(v as number) },
-          { key: 'cost_updated_date', header: 'Cost As Of', format: fmtCostAsOfCSV },
+          { key: 'cost_updated_date', header: 'Cost As Of', format: formatCostAsOfCSV },
           { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
           { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
           { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
@@ -831,13 +833,15 @@ export default function Products() {
             sortable: true,
             render: (row: Product) => {
               const asOf = costAsOfDate(row.cost_updated_date);
-              const stale = isCostStale(costAgeDays(asOf), DEFAULT_STALE_COST_AGE_DAYS);
+              const stale = isCostStale(costAgeDays(asOf, costFreshnessToday), DEFAULT_STALE_COST_AGE_DAYS);
+              const note = !asOf
+                ? 'No cost change date is recorded for this product'
+                : stale ? `No cost change in the last ${DEFAULT_STALE_COST_AGE_DAYS} days` : undefined;
               return (
-                <span
-                  className={`text-sm ${stale ? 'text-amber-700' : 'text-secondary'}`}
-                  title={stale ? `No cost change in the last ${DEFAULT_STALE_COST_AGE_DAYS} days` : undefined}
-                >
+                <span className={`text-sm ${stale ? 'text-amber-700' : 'text-secondary'}`} title={note}>
                   {asOf ? parseLocalDate(asOf).toLocaleDateString() : 'Unknown'}
+                  {asOf && stale && <span aria-hidden="true"> (old)</span>}
+                  {note && <span className="sr-only">. {note}</span>}
                 </span>
               );
             },

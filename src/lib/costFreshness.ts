@@ -6,7 +6,12 @@
  * A cost re-entered at the same value keeps its old date. A product with no date has a cost that
  * cannot be shown to be current, so the stale-cost report always lists it.
  */
-import { todayInBusinessTz } from './dateUtils';
+import { BUSINESS_TIMEZONE, todayInBusinessTz } from './dateUtils';
+
+// Built once: the Products list dates every row on each render.
+const businessDateFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: BUSINESS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+});
 
 /** The ages an admin can pick on the stale-cost report, in days. */
 export const STALE_COST_AGE_OPTIONS = [30, 90, 180, 365] as const;
@@ -19,9 +24,12 @@ const DAY_MS = 86_400_000;
 /** The Central business date (YYYY-MM-DD) a cost was last changed, or null without a usable date. */
 export function costAsOfDate(costUpdatedDate: string | null | undefined): string | null {
   if (!costUpdatedDate) return null;
+  // The column is a timestamptz; a bare date is already a business date (new Date would read it as UTC).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(costUpdatedDate)) return costUpdatedDate;
   const at = new Date(costUpdatedDate);
   if (Number.isNaN(at.getTime())) return null;
-  return todayInBusinessTz(at);
+  // en-CA formats as YYYY-MM-DD.
+  return businessDateFormat.format(at);
 }
 
 /** A cost_updated_date for a CSV: the Central business date, or blank without one. */

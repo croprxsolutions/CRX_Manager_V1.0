@@ -13,7 +13,7 @@ import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { exportToCSV, fmtCSV, fmtDateCSV, fmtDateOnlyCSV } from '../lib/csvExport';
-import { formatExactUSD } from '../lib/money';
+import { formatExactUSD, formatUSD } from '../lib/money';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
@@ -705,7 +705,11 @@ export default function Reports() {
       .order('id')
       .range(from, to));
     if (seq !== reportLoadSeq.current) return;
-    if (error) { fail(); return; }
+    if (error) {
+      Sentry.captureException(new Error(error.message), { extra: { context: 'stale_costs_load' } });
+      fail();
+      return;
+    }
     let products: StaleCostProduct[];
     try {
       products = await withAdminCosts('products', data || [], isAdmin);
@@ -1271,6 +1275,10 @@ export default function Reports() {
         { key: 'below_reorder', header: 'Below Reorder', format: (v) => v ? 'Yes' : 'No' },
       ], 'inventory_cost');
     } else if (operationalTab === 'stale_costs') {
+      if (staleCostData.length === 0) {
+        toast('info', 'No stale costs to export.');
+        return;
+      }
       exportToCSV(staleCostData, [
         { key: 'product_name', header: 'Product' },
         { key: 'sku', header: 'SKU' },
@@ -1431,9 +1439,11 @@ export default function Reports() {
     { key: 'sku', header: 'SKU' },
     { key: 'category', header: 'Category', sortable: true },
     { key: 'vendor', header: 'Vendor', sortable: true },
-    { key: 'current_cost', header: 'Cost', render: (r) => <span className="font-mono">{r.current_cost != null ? fmt(r.current_cost) : '-'}</span> },
-    { key: 'cost_as_of', header: 'Cost As Of', sortable: true, render: (r) => (r.cost_as_of ? parseLocalDate(r.cost_as_of).toLocaleDateString() : <Badge variant="warning">Unknown</Badge>) },
-    { key: 'cost_age_days', header: 'Days Old', sortable: true, render: (r) => <span className="font-mono">{r.cost_age_days ?? '—'}</span> },
+    // Cents shown: a cost that moved by cents must not look unchanged (this page's fmt rounds to dollars).
+    { key: 'current_cost', header: 'Cost', render: (r) => <span className="font-mono">{r.current_cost != null ? formatUSD(r.current_cost) : '-'}</span> },
+    // Not sortable: the list comes oldest first with undated costs on top, and a sort would put them last.
+    { key: 'cost_as_of', header: 'Cost As Of', render: (r) => (r.cost_as_of ? parseLocalDate(r.cost_as_of).toLocaleDateString() : <Badge variant="warning">Unknown</Badge>) },
+    { key: 'cost_age_days', header: 'Days Old', render: (r) => <span className="font-mono">{r.cost_age_days ?? '—'}</span> },
   ];
 
   const priceListCols: Column<Record<string, unknown>>[] = [
@@ -1779,12 +1789,11 @@ export default function Reports() {
             </div>
           )}
 
-          {isAdmin && operationalTab === 'stale_costs' && !reportFailed && (
+          {isAdmin && operationalTab === 'stale_costs' && !reportFailed && !loading && (
             <div className="flex flex-wrap items-center gap-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-900">
               <label className="flex items-center gap-2">
                 <span className="font-semibold">Cost not changed in over</span>
                 <select
-                  aria-label="Stale cost age"
                   value={staleCostAge}
                   onChange={(e) => setStaleCostAge(Number(e.target.value) as StaleCostAgeDays)}
                   className="px-2 py-1 text-sm border border-amber-300 rounded-md bg-white"
@@ -1801,8 +1810,8 @@ export default function Reports() {
 
           {!reportFailed && !(operationalTab === 'price_list' && priceListError) && <Card padding={false}>
             <div className="p-5">
-              {isAdmin && operationalTab === 'stale_costs' && <DataTable data={staleCostData} columns={staleCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'vendor']} emptyTitle="No stale costs" emptyDescription="Every active product's cost changed within the selected age." loading={loading} />}
-              {isAdmin && operationalTab === 'inventory_cost' &&<DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category']} emptyTitle="No inventory data" loading={loading} />}
+              {isAdmin && operationalTab === 'stale_costs' && <DataTable data={staleCostData} columns={staleCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category', 'vendor']} emptyTitle="No stale costs" emptyDescription="Every active product's cost changed within the selected age." loading={loading} />}
+              {isAdmin && operationalTab === 'inventory_cost' && <DataTable data={inventoryCostData as unknown as Record<string, unknown>[]} columns={inventoryCostCols as unknown as Column<Record<string, unknown>>[]} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'category']} emptyTitle="No inventory data" loading={loading} />}
               {operationalTab === 'chemical_history' && <DataTable data={chemHistoryData as unknown as Record<string, unknown>[]} columns={chemHistoryCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No chemical history" emptyDescription="Select a product and date range" loading={loading} />}
               {operationalTab === 'posted_applications' && <DataTable data={postedAppsData} columns={postedAppsCols} searchable searchKeys={['customer_name', 'record_number']} emptyTitle="No posted applications" loading={loading} />}
               {operationalTab === 'price_list' && <DataTable data={priceListData} columns={priceListCols} searchable searchPlaceholder="Search products..." searchKeys={['product_name', 'sku', 'vendor']} emptyTitle="No products" loading={loading || priceListPending} />}

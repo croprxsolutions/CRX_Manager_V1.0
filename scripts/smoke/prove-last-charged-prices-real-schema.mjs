@@ -446,10 +446,11 @@ const SCENARIOS = [
   ] },
   { name: '3. the tier stamp', steps: [
     ['order line from the quote takes the quote tier (1)', 'owner', NEW_OL('n1', 'o9', 'P4', QI), NO_COLUMN, 'ok|1'],
-    ['order line on a quote order without a quote line takes the order quote tier (1)', 'owner', NEW_OL('n2', 'o9', 'P1'), NO_COLUMN, 'ok|1'],
+    // A product added to a quote's order later has no quote line and is priced at the customer tier.
+    ['order line added to a quote order without a quote line takes the customer tier (2)', 'owner', NEW_OL('n2', 'o9', 'P1'), NO_COLUMN, 'ok|2'],
     ['order line with no quote takes the customer tier (2)', 'owner', NEW_OL('n3', 'o2', 'P2'), NO_COLUMN, 'ok|2'],
     ['Farm A moves to tier 3', 'owner', { stmt: `UPDATE public.customers SET assigned_tier = 3 WHERE id = '${CA}'; v := 'moved';` }, 'ok|moved', 'same'],
-    ['stamped order lines keep their tier', 'owner', TIER('order_items', `id IN ('${lid('n1')}', '${lid('n2')}', '${lid('n3')}')`), NO_COLUMN, 'ok|1,1,2'],
+    ['stamped order lines keep their tier', 'owner', TIER('order_items', `id IN ('${lid('n1')}', '${lid('n2')}', '${lid('n3')}')`), NO_COLUMN, 'ok|1,2,2'],
     ['invoice line for an order line takes its tier (2)', 'owner', NEW_IL('n4', 'i3', 'P2', 'n3'), /^23503\|.*invoice_items_order_item_id_fkey/, 'ok|2'], // before: line n3 was never written
     // l5 predates the column and has no quote: its tier at sale is unknown, never today's tier (3).
     ['invoice line for an older, unquoted order line stays unknown', 'owner', NEW_IL('n5', 'ie', 'P3', 'l5'), NO_COLUMN, 'ok|-'],

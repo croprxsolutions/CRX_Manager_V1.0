@@ -11,10 +11,11 @@
 --   1. price_tier_at_sale on order_items and invoice_items (smallint 1-3, nullable). The tier a line
 --      was sold at was never stored, and customers.assigned_tier can change later, so a BEFORE INSERT
 --      trigger stamps it on every new product line, whichever function writes it:
---        order line   -> the tier of the quote it came from (the line's quote, else the order's),
---                        else the order customer's assigned tier at that moment;
+--        order line   -> the tier of the quote its quote line came from, else the order
+--                        customer's assigned tier at that moment (a product added to a quote's
+--                        order later is priced at the customer's tier);
 --        invoice line -> billed from an order line: that line's stamped tier, else (an order line
---                        from before this file) its quote's tier, else unknown -- never today's
+--                        from before this file) its quote line's tier, else unknown -- never today's
 --                        customer tier; not from an order line: the invoice customer's tier.
 --      A value a writer sends is replaced: the database always decides. Charge lines (no product)
 --      and return credits stay NULL.
@@ -157,7 +158,10 @@ COMMENT ON COLUMN public.order_items.price_tier_at_sale IS
 COMMENT ON COLUMN public.invoice_items.price_tier_at_sale IS
   'Price tier (1-3) in effect when this line was written: its order line''s tier, else the invoice customer''s assigned tier then. NULL = unknown (lines written before 20261027060000) or not a product line. Read by get_last_charged_prices.';
 
--- An order line's tier: its own quote's, else its order's quote's, else the order customer's now.
+-- An order line's tier: its own quote line's quote tier, else the order customer's now. Not the
+-- order's quote tier: the converter and draw-down always link each quote-priced line to its quote
+-- line, and a product added to the order later (update_order_items, no quote line) is priced at the
+-- customer's tier (Codex App P2, PR #1119).
 CREATE FUNCTION public._order_line_price_tier_20261026(p_order_id uuid, p_quote_item_id uuid)
 RETURNS smallint
 LANGUAGE sql
@@ -168,8 +172,6 @@ AS $function$
   SELECT COALESCE(
     (SELECT q.tier FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id
       WHERE qi.id = p_quote_item_id),
-    (SELECT q.tier FROM public.orders o JOIN public.quotes q ON q.id = o.quote_id
-      WHERE o.id = p_order_id),
     (SELECT c.assigned_tier FROM public.orders o JOIN public.customers c ON c.id = o.customer_id
       WHERE o.id = p_order_id)
   )::smallint;
@@ -190,9 +192,7 @@ AS $function$
   SELECT COALESCE(
     oi.price_tier_at_sale,
     (SELECT q.tier FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id
-      WHERE qi.id = oi.quote_item_id),
-    (SELECT q.tier FROM public.orders o JOIN public.quotes q ON q.id = o.quote_id
-      WHERE o.id = oi.order_id)
+      WHERE qi.id = oi.quote_item_id)
   )::smallint
   FROM public.order_items oi
   WHERE oi.id = p_order_item_id;

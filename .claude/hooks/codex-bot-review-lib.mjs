@@ -397,6 +397,15 @@ export function coderabbitFindingsDenial(prefix, selector, count) {
 // "Review rate limited" / "Review skipped: …" otherwise. The creator is checked
 // because anyone with write access can post a status with any context name —
 // including an agent through Mason's account.
+//
+// AND A CHECK RUN  (measured 2026-10-27 on #1134, 4a8914672 / 52b05497b)
+// From about 01:45 UTC on 2026-10-27 CodeRabbit reports a finished review as a
+// check run named "CodeRabbit" (conclusion SUCCESS, summary "Result: Success -
+// Review completed") and may set no commit status at all; a skip is conclusion
+// SKIPPED, "Result: Skipped - Review skipped". Only the CodeRabbit GitHub App can
+// create a check run in its own suite, so the app's id is the identity check.
+// Either signal counts.
+export const CODERABBIT_APP_ID = 347564;
 export const CODERABBIT_REQUIRED_LABEL = "needs-coderabbit";
 
 // Lower-case substrings of a src/ path that mark it as money, invoice, payment,
@@ -428,7 +437,8 @@ export function isMoneyPath(path) {
 }
 
 // One GraphQL read: labels, changed files, and the PR's commits with their
-// parent counts and latest commit statuses (newest commit last).
+// parent counts, latest commit statuses and CodeRabbit's own check runs (newest
+// commit last).
 export const CODERABBIT_REQUIREMENT_QUERY = `
 query($owner:String!, $name:String!, $number:Int!) {
   repository(owner:$owner, name:$name) {
@@ -439,7 +449,8 @@ query($owner:String!, $name:String!, $number:Int!) {
       files(first:100) { totalCount nodes { path } }
       commits(last:100) {
         totalCount
-        nodes { commit { oid parents(first:2) { totalCount nodes { oid } } status { contexts { context state description creator { login } } } } }
+        nodes { commit { oid parents(first:2) { totalCount nodes { oid } } status { contexts { context state description creator { login } } }
+          checkSuites(first:5, filterBy:{appId:${CODERABBIT_APP_ID}}) { nodes { app { databaseId slug } checkRuns(first:10, filterBy:{checkName:"CodeRabbit"}) { nodes { name status conclusion summary } } } } } }
       }
     }
   }
@@ -456,15 +467,27 @@ export function coderabbitRequirementArgs(owner, name, number) {
   ];
 }
 
-// Did CodeRabbit itself mark this commit "Review completed"?
+// Did CodeRabbit itself mark this commit "Review completed", by commit status
+// or by a check run in its own app's suite?
 export function coderabbitCompletedCommit(commit) {
   const contexts = commit?.status?.contexts;
-  if (!Array.isArray(contexts)) return false;
-  return contexts.some((context) =>
+  const byStatus = Array.isArray(contexts) && contexts.some((context) =>
     String(context?.context || "").trim().toLowerCase() === "coderabbit"
     && isCodeRabbitLogin(context?.creator?.login)
     && String(context?.state || "").trim().toUpperCase() === "SUCCESS"
     && /^review completed\b/i.test(String(context?.description || "").trim()));
+  if (byStatus) return true;
+  const suites = commit?.checkSuites?.nodes;
+  if (!Array.isArray(suites)) return false;
+  return suites.some((suite) =>
+    suite?.app?.databaseId === CODERABBIT_APP_ID
+    && String(suite?.app?.slug || "").trim().toLowerCase() === "coderabbitai"
+    && Array.isArray(suite?.checkRuns?.nodes)
+    && suite.checkRuns.nodes.some((run) =>
+      String(run?.name || "").trim() === "CodeRabbit"
+      && String(run?.status || "").trim().toUpperCase() === "COMPLETED"
+      && String(run?.conclusion || "").trim().toUpperCase() === "SUCCESS"
+      && /^Result: Success - Review completed\b/.test(String(run?.summary || "").trim())));
 }
 
 // Returns { status, why, headOid, reviewedOid } where status is

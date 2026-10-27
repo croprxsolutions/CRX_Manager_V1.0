@@ -115,7 +115,10 @@
 > review of any other PR, the agent adds that label** (`gh pr edit <n> --add-label needs-coderabbit`)
 > so the gate holds it too. A qualifying PR merges (or applies its migration) only when CodeRabbit
 > itself set its `CodeRabbit` commit status to "Review completed" on the head, or on an earlier
-> PR commit followed only by merge commits. The status, not a review object, is the evidence:
+> PR commit followed only by merge commits. Since 2026-10-27 CodeRabbit may report instead by a
+> `CodeRabbit` check run from its own GitHub App (id 347564), completed with conclusion SUCCESS
+> and a summary starting "Result: Success - Review completed"; either signal counts, and a
+> SKIPPED run does not. The status, not a review object, is the evidence:
 > CodeRabbit files an empty review object whenever it answers a thread reply, while its status
 > says "Review rate limited" or "Review skipped: …" when it did not review. A status posted by
 > anyone other than CodeRabbit (an agent through Mason's account, for example) does not count.

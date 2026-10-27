@@ -59,6 +59,7 @@ import {
   CODEX_THREADS_QUERY,
   coderabbitThreadCount,
   collectCodexThreads,
+  CODERABBIT_APP_ID,
   evaluateCodexBotReview,
   isCodeRabbitLogin,
   isCodexBotLogin,
@@ -959,7 +960,13 @@ export function newFollowUpNonce() {
   return randomBytes(8).toString("hex");
 }
 function untrustedText(text) {
-  return String(text || "").split("<!-- ai-agent-prompt:start -->")[0].replace(/UNTRUSTED-/gi, "UNTRUSTED_");
+  return String(text || "").replace(/UNTRUSTED-/gi, "UNTRUSTED_");
+}
+// The agent-prompt block is dropped from finding bodies only: a patch may hold
+// that marker as ordinary text (a test fixture), and cutting there would hide
+// later hunks from Sol (Codex App P2 on #1125).
+function findingText(text) {
+  return untrustedText(String(text || "").split("<!-- ai-agent-prompt:start -->")[0]);
 }
 function followUpFence(nonce) {
   if (!/^[0-9a-z]{1,64}$/i.test(String(nonce || ""))) throw new Error("follow-up fence needs a nonce");
@@ -977,7 +984,7 @@ export function buildFollowUpEvidence(followUp, nonce) {
     "",
   ];
   for (const finding of followUp.findings) {
-    lines.push(`## Finding ${quote(finding.id)} (${quote(finding.severity)}) at ${quote(finding.path)} line ${quote(finding.line)}`, open, untrustedText(finding.body), close, "");
+    lines.push(`## Finding ${quote(finding.id)} (${quote(finding.severity)}) at ${quote(finding.path)} line ${quote(finding.line)}`, open, findingText(finding.body), close, "");
   }
   for (const file of followUp.files) {
     lines.push(`## Fix diff for ${quote(file.filename)} (${quote(file.category)}, +${quote(file.additions)} -${quote(file.deletions)})`, open, untrustedText(file.patch), close, "");
@@ -988,7 +995,7 @@ export function buildFollowUpPromptSection(followUp, nonce) {
   if (!followUp || !Array.isArray(followUp.findings) || !Array.isArray(followUp.files)) return [];
   const { open, close } = followUpFence(nonce);
   const clip = (text) => {
-    const value = untrustedText(text).trim();
+    const value = text.trim();
     return value.length > FOLLOWUP_TEXT_CAP ? `${value.slice(0, FOLLOWUP_TEXT_CAP)}\n[cut at ${FOLLOWUP_TEXT_CAP} characters]` : value;
   };
   const lines = [
@@ -1022,10 +1029,10 @@ export function buildFollowUpPromptSection(followUp, nonce) {
     lines.push(heading, open, body, close);
   };
   for (const finding of followUp.findings) {
-    block(`Finding ${count(finding.id)} (${quote(finding.severity)}) at ${quote(finding.path)} line ${count(finding.line)}:`, finding.body);
+    block(`Finding ${count(finding.id)} (${quote(finding.severity)}) at ${quote(finding.path)} line ${count(finding.line)}:`, findingText(finding.body));
   }
   for (const file of followUp.files) {
-    block(`Fix diff for ${quote(file.filename)} (${quote(file.category)}, +${count(file.additions)} -${count(file.deletions)}):`, file.patch);
+    block(`Fix diff for ${quote(file.filename)} (${quote(file.category)}, +${count(file.additions)} -${count(file.deletions)}):`, untrustedText(file.patch));
   }
   return lines;
 }
@@ -1260,6 +1267,21 @@ export function coderabbitReviewInProgress(statuses, nowMs = Date.now()) {
     if (!newest || at > newest.at) newest = { at, state: String(status?.state || "").trim().toLowerCase() };
   }
   return Boolean(newest && newest.state === "pending" && nowMs - newest.at < CODERABBIT_STALE_PENDING_MS);
+}
+
+// The same question for CodeRabbit's check runs (it reports by check run since
+// 2026-10-27): a "CodeRabbit" run from its own app that has not completed and
+// started within the stale window. An undated unfinished run is unreadable (null).
+export function coderabbitCheckRunInProgress(checkRuns, nowMs = Date.now()) {
+  let busy = false;
+  for (const run of Array.isArray(checkRuns) ? checkRuns : []) {
+    if (run?.app?.id !== CODERABBIT_APP_ID || String(run?.name || "").trim() !== "CodeRabbit") continue;
+    if (String(run?.status || "").trim().toLowerCase() === "completed") continue;
+    const at = Date.parse(run?.started_at || "");
+    if (!Number.isFinite(at)) return null;
+    if (nowMs - at < CODERABBIT_STALE_PENDING_MS) busy = true;
+  }
+  return busy;
 }
 
 // When GitHub first saw this commit: the earliest check suite created for it.
@@ -1497,7 +1519,13 @@ export function readSolPreflightFacts(root, headSha, baseSha) {
     const statuses = JSON.parse(preflightGh(root, [
       "api", `repos/${owner}/${name}/commits/${headSha}/statuses?per_page=100`, "--paginate", "--slurp",
     ])).flat();
-    facts.coderabbitBusy = coderabbitReviewInProgress(statuses, facts.nowMs);
+    const runs = JSON.parse(preflightGh(root, [
+      "api", `repos/${owner}/${name}/commits/${headSha}/check-runs?check_name=CodeRabbit&app_id=${CODERABBIT_APP_ID}&per_page=100`,
+      "--paginate", "--slurp",
+    ])).flatMap((page) => page?.check_runs || []);
+    const byStatus = coderabbitReviewInProgress(statuses, facts.nowMs);
+    const byRun = coderabbitCheckRunInProgress(runs, facts.nowMs);
+    facts.coderabbitBusy = byStatus === null || byRun === null ? null : byStatus || byRun;
   } catch { facts.coderabbitBusy = null; }
   try {
     const pages = JSON.parse(preflightGh(root, [

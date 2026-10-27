@@ -15,6 +15,7 @@ import {
   CODEX_THREADS_QUERY,
   CODEX_THREAD_MAX_PAGES,
   CODERABBIT_REQUIRED_LABEL,
+  CODERABBIT_REQUIREMENT_QUERY,
   codexBotFindingsDenial,
   coderabbitCompletedCommit,
   coderabbitFindingSeverity,
@@ -659,6 +660,31 @@ eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crS
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] })).status,
   "missing", "an ordinary commit after the reviewed one needs a new review");
 
+// CodeRabbit's check run (since 2026-10-27), shaped like GitHub's answer for
+// 4a8914672 (reviewed) and 52b05497b (skipped) on PR #1134.
+const crSuite = ({ appId = 347564, slug = "coderabbitai", name = "CodeRabbit", status = "COMPLETED", conclusion = "SUCCESS",
+  summary = "Result: Success - Review completed\nRun ID: `6abde565-bfb5-4dc0-8f97-e8db549f6dad`" } = {}) =>
+  ({ nodes: [{ app: { databaseId: appId, slug }, checkRuns: { nodes: [{ name, status, conclusion, summary }] } }] });
+const runCommit = (oid, suite, statuses = []) => ({ commit: { ...commit(oid, { statuses }).commit, checkSuites: suite } });
+ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite()).commit), "a CodeRabbit check run 'Review completed' counts with no commit status");
+eq(evaluateCodeRabbitRequirement(facts({ commits: [runCommit(HEAD, crSuite())] })).status, "reviewed", "a check-run review of the head passes");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped - Review skipped\nRun ID: `00522ca4`" })).commit),
+  "a skipped check run (52b05497b) is not a review");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ appId: 15368 })).commit), "a 'CodeRabbit' run from another app id does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ slug: "github-actions" })).commit), "a run whose app slug is not coderabbitai does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ name: "CodeRabbit-fake" })).commit), "another run name does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ status: "IN_PROGRESS", conclusion: null })).commit), "an unfinished run does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "FAILURE" })).commit), "a failed run does not count");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ summary: "Note: Result: Success - Review completed" })).commit),
+  "the summary must START with the completed result");
+ok(coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped" }), [crStatus("Review completed")]).commit),
+  "the commit-status signal still counts on its own");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, crSuite({ conclusion: "SKIPPED", summary: "Result: Skipped" }),
+  [crStatus("Review skipped: automatic reviews are disabled")]).commit), "neither signal completed: not reviewed");
+ok(!coderabbitCompletedCommit(runCommit(HEAD, { nodes: null }).commit), "an unreadable suite list is not a review");
+ok(CODERABBIT_REQUIREMENT_QUERY.includes("filterBy:{appId:347564}") && CODERABBIT_REQUIREMENT_QUERY.includes('checkName:"CodeRabbit"'),
+  "the requirement read asks for CodeRabbit's own check runs");
+
 // Whether CodeRabbit ever reviewed: commits(last:100) may not reach an older review.
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD), commit(HEAD)] })).priorReview, false,
   "a complete commit list with no review means CodeRabbit never reviewed");
@@ -809,15 +835,21 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
   const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "coderabbit-followup");
   const loadFixture = (number) => JSON.parse(readFileSync(path.join(fixtureDir, `pr${number}.json`), "utf8"));
   const isFollowUpRead = (args) => args[1] === "graphql" && args.some((arg) => String(arg).includes('reviews(first:100, author:"coderabbitai[bot]")'));
+  const isRequirementRead = (args) => args[1] === "graphql" && args.some((arg) => String(arg).includes("commits(last:100)"));
   // Replays calls by their exact arguments; `edit(kind, value)` may change a parsed answer.
   const replay = (fixture, edit = () => {}) => {
     const answers = new Map(fixture.calls.map((call) => [JSON.stringify(call.args), call.out]));
     // A broken copy may change which trees the follow-up read asks for; answer
     // it with the recorded read (a tree it lacks reads as "not a plain file").
     const followUpAnswer = fixture.calls.find((call) => isFollowUpRead(call.args))?.out;
+    // Recorded before the read also asked for check runs (2026-10-27): answer the
+    // current query with the recorded one, whose commits carry statuses only.
+    const requirementAnswer = fixture.calls.find((call) => isRequirementRead(call.args))?.out;
     const head = JSON.parse(fixture.calls[0].out).data.repository.pullRequest.headRefOid;
     return (args) => {
-      const out = isFollowUpRead(args) ? followUpAnswer : answers.get(JSON.stringify(args));
+      const out = isFollowUpRead(args) ? followUpAnswer
+        : isRequirementRead(args) ? requirementAnswer
+        : answers.get(JSON.stringify(args));
       if (out === undefined) throw new Error(`fixture has no answer for gh ${args.slice(0, 2).join(" ")}`);
       // "fixes" is the R...F compare; "tipFix"/"tipHead" are the PR's own changes
       // against the base at the last fix and at the head.

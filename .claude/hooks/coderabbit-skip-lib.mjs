@@ -152,8 +152,10 @@ const usablePr = (n) => Number.isInteger(n) && n > 0;
 // GitHub returned for the PR; any other repository gets no waiver (Codex App
 // P2 on #1035: `gh pr merge -R other/repo 1018`). "This repository" is the app
 // repo under either owner (app-repo-identity.mjs), so the move to the
-// `croprxsolutions` organization keeps a waiver working.
-export const CODERABBIT_SKIP_REPOSITORY = "masonwells1/CRX_Manager_V1.0";
+// `croprxsolutions` organization keeps a waiver working. The address below is only
+// the one printed in instructions (GitHub redirects it after the move); it is not
+// exported, so nothing can use it as the identity check.
+const CODERABBIT_SKIP_REPOSITORY = "masonwells1/CRX_Manager_V1.0";
 export const isSkipRepository = (owner, name) => isAppRepoPath(`${String(owner ?? "")}/${String(name ?? "")}`);
 
 /**

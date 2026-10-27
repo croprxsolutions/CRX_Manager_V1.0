@@ -41,9 +41,11 @@ CodeRabbit reviews done under the old address won't count for those PRs after th
    **New organization** → **Free**. Name: `croprxsolutions`. Contact email: Mason@croprxsolutions.com.
    "Belongs to": **A business or institution**, name **Crop RX Solutions**. Skip inviting anyone.
 2. **YOU: lock down default access.** In the new organization: **Settings → Member privileges → Base
-   permissions → No permission**. Under **Settings → Third-party access → OAuth app policy**, approve
-   **GitHub CLI** when it's listed (or choose "No restrictions"), or the agents' `gh` commands can't reach the
-   repo after the move.
+   permissions → No permission**. Under **Settings → Third-party access → OAuth app policy**, keep the
+   restrictions on and approve **GitHub CLI** only (it appears there after its first request; the agent
+   session in step 7 triggers that request and tells you when to click). Without it the agents' `gh`
+   commands can't reach the repo after the move. Don't choose "No restrictions": that would let any app
+   a member authorizes reach the organization's repos.
 3. **YOU: install the apps on the organization** (each asks you to pick the organization and "Only select
    repositories"; the repo can be picked after step 4, or choose "All repositories"):
    - Vercel: vercel.com → your project → **Settings → Git** → it shows the connected repo; use **Install

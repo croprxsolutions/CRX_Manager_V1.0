@@ -37,7 +37,8 @@ import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemCostChange, Pur
 import ConfirmModal from '../components/ui/ConfirmModal';
 import { buildPurchaseOrderEmailPayload, pdfToBase64, purchaseOrderEmailBlocker, sendEmail } from '../lib/emailService';
 import { COMPANY_ORDERING_EMAIL } from '../lib/companyInfo';
-import { purchaseOrderPdfFingerprint, type PdfPurchaseOrderData } from '../lib/purchaseOrderPdf';
+import type { PdfPurchaseOrderData } from '../lib/purchaseOrderPdf';
+import { purchaseOrderPdfFingerprint } from '../lib/purchaseOrderFingerprint';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { LoadFailedState } from '../components/ui/EmptyState';

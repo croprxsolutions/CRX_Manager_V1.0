@@ -215,6 +215,8 @@ for (const command of [
   'echo "$("$A" "$B" "$C" 951 --admin)"',
   'x=$(echo $(env "$A" "$B" "$C" 951))',
   'echo `"$A" "$B" "$C" 951 --admin`',
+  `echo "'" \`"$A" "$B" "$C" 951 --admin\` "'"`,
+  `echo \\' \`"$A" "$B" "$C" 951 --admin\` \\'`,
 ]) ok(runtimeProgramRefused(command, couldReachGatedAction([command])), `hidden program still refused: ${command}`);
 
 // Inline code that shows a gated word stays refused (the loosening was dropped,

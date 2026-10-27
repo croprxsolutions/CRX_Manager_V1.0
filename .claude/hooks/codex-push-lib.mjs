@@ -4321,14 +4321,40 @@ export function runtimeProgramRefused(command, gated) {
 // Only text inside single quotes is literal; `''"$B"` still expands (Codex App on #1128).
 // A PowerShell splat (`@params`) passes a variable's values as arguments too.
 const isRuntimeWord = (word) => /[$`]|^@[A-Za-z_]/.test(String(word).replace(/'[^']*'/g, ""));
+// The bodies of backtick substitutions, read with POSIX quoting: a backtick inside
+// single quotes is literal (a JS template string), one inside double quotes still
+// runs, and a backslash escapes the next character outside single quotes. A regex
+// that dropped `'…'` spans was fooled by `"'" \`cmd\` "'"` (security review on
+// #1128). null when a quote or backtick is left open.
+function backtickBodies(text) {
+  const bodies = [];
+  let quote = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote === "'") { if (char === "'") quote = ""; continue; }
+    if (char === "\\") { index += 1; continue; }
+    if (char === "`") {
+      let end = index + 1;
+      while (end < text.length && text[end] !== "`") end += text[end] === "\\" ? 2 : 1;
+      if (end >= text.length) return null;
+      bodies.push(text.slice(index + 1, end));
+      index = end;
+      continue;
+    }
+    if (char === '"') quote = quote === '"' ? "" : '"';
+    else if (char === "'" && !quote) quote = "'";
+  }
+  return quote ? null : bodies;
+}
 function runtimeArgumentsFollowRuntimeProgram(command, depth = 0) {
   const text = String(command || "");
   // Substitution bodies run too (`echo "$("$A" "$B" "$C")"`, Codex App on #1128);
   // past the depth limit any substitution at all is refused, as elsewhere here.
   const split = splitSubstitutions(text);
-  const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []),
-    // Backticks inside single quotes are literal text (a JS template string), not commands.
-    ...[...text.replace(/'[^']*'/g, "''").matchAll(/`([^`]*)`/g)].map((match) => match[1])];
+  const backticks = backtickBodies(text);
+  // Quoting the scanner cannot follow is refused when it could hide a variable.
+  if (backticks === null) return /[$`@]/.test(text);
+  const inners = [...split.inners, ...(split.unclosed !== undefined ? [split.unclosed] : []), ...backticks];
   if (inners.length > 0 && depth >= NESTED_MAX_DEPTH) return true;
   if (inners.some((inner) => runtimeArgumentsFollowRuntimeProgram(inner, depth + 1))) return true;
   for (const segment of splitCommandSegments(text)) {

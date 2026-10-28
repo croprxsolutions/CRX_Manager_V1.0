@@ -1,5 +1,9 @@
 # CRX Manager — Current State
 
+**Last verified:** 2026-10-28 (America/Chicago), scoped to the migration ledger and To-Do 2.7 driver notices only. Fresh read-only `list_migrations` and ledger queries returned 1075 rows; latest version `20261028121259`, name `20261027080300_notification_sender_recorded`. Live `notifications.created_by` exists as `uuid`. The ledger does not contain candidate `20261028185038_driver_delivery_issue_notifications`, and its `_notify_driver_delivery_issue()` function is absent from the live catalog. The detailed-notice change remains draft PR #1178, not a production resolution. No merge, live apply or deployment is authorized. Other historical production/deployment claims below retain their original verification scope and dates.
+
+## Historical ledger verification
+
 **Last verified:** 2026-10-27 1:59 PM Central (18:59 UTC) for the migration ledger only: row 995, `20261027070000_email_type_purchase_order` (To-Do 0.15, PR #1114; records PR #1155), applied live at 18:59:37 UTC as ledger version `20261027185937`, so the email log accepts the `purchase_order` type; read-only check right after: 1071 rows, effective ordering high-water `20261027070000`. The `send-email` deploy that sends PO copies waits for Mason's yes. Earlier read, 2026-10-27 7:37 AM Central (12:37 UTC) (row 995 `20261027070000`, PR #1114, not yet applied; read-only live check against
 project `rhyzpcqhnizqbxphqdkr` right after the PR #1105 apply): 1068 rows, `max(version)` `20261027123725` =
 `20261027040000_quote_sent_price_lock` (row 992; PR #1105 merged as `f1503ba91`: a sent quote keeps the prices the

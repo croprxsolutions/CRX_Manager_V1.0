@@ -1,8 +1,10 @@
 # Known Issues — what is open today
 
+**Last verified: 2026-10-28 (America/Chicago)** for the targeted To-Do 2.7 driver-notice and migration-ledger check only. Fresh live read-only evidence: 1075 ledger rows; latest version `20261028121259`, name `20261027080300_notification_sender_recorded`; `notifications.created_by` exists as `uuid`. Candidate `20261028185038_driver_delivery_issue_notifications` is absent from the ledger and its trigger function is absent from the live catalog. Draft PR #1178 therefore does not close the production driver-report notice gap. The broader reconciliation and other issue evidence/counts retain their dated scope below; this is not a new full audit.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
+**Earlier verification: 2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
 `20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
 entries name; at 7:37 AM Central that migration applied live, ledger `20261027123725`, 1068 rows, and a read-only

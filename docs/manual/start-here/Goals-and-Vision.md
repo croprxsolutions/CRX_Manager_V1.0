@@ -6,7 +6,7 @@ tags: [start-here, goals]
 
 ← [[Home]]
 
-> Drawn from Mason's recorded decisions, mainly [[plans/2026-10-13-direction-and-goals|Direction and Goals (Oct 2026)]] and the [[ROADMAP|historical roadmap]]. Where they disagree, the Direction and Goals doc wins. **Mason: the "In my own words" section at the bottom is yours to fill in.**
+> Drawn from Mason's recorded decisions, mainly [[plans/2026-10-13-direction-and-goals|Direction and Goals (Oct 2026)]] and the [[ROADMAP|historical roadmap]]. Where they disagree, the Direction and Goals doc wins. The "In my own words" section at the bottom is Mason's.
 
 ## What Crop RX Solutions is
 
@@ -47,10 +47,29 @@ These ideas come from the June 2026 strategic review. Most are after the January
 - **Spend on product, not process.** Target at least 3 product changes for every 1 tooling change.
 - **Before the January launch, an outside senior developer reviews everything** and signs off in writing.
 
-## In my own words (Mason, fill in)
+## In my own words
 
-- Why I'm building this:
-- What CRX lets me do that Chem Man never could:
-- Where I want Crop RX to be in 5 years:
-- What would make me proud of this app:
-- What Taha should know about how I think:
+> *Drafted by Claude from Mason's past conversations and recorded decisions, for Mason to approve or edit (2026-10-28).*
+
+**Why I'm building this.** I run an ag retail business, and we farm too. I'm not a software developer by trade. I build CRX because no off-the-shelf system fits how a small retailer like us actually works: quote, deliver, apply in the field, bill, and get paid, with the compliance records done right along the way. Chem Man got us this far, but we were bending our business around the software. I want software bent around our business.
+
+**What CRX lets me do that Chem Man never could.**
+- See the whole business in one place: quotes, orders, deliveries, field work, inventory, invoices, payments and commissions, all connected.
+- Trust the numbers. The rules for money and inventory live in the database, so a double-click or a dropped phone signal can't quietly create a wrong bill.
+- Know what to order before we run short, and what each product really costs us.
+- Make compliance automatic instead of a pile of paperwork.
+- Look and work like modern software, on a phone in the field as well as in the office.
+- Keep growing it: charts, automatic weather, job costing, online payments, whatever the business needs next, without waiting on someone else's roadmap.
+
+**Where I want Crop RX to be in 5 years.** A $10-million-a-year business running entirely on CRX, with room to grow past that without a rewrite. Customers who can see their balance and pay online. Every acre we apply gets billed, and data comes straight off the equipment. And maybe, if it makes sense as a business, CRX becomes something other retailers can use too.
+
+**What would make me proud of this app.** January 2027: every bill goes out of CRX, the books reconcile every day, nothing gets retyped into QuickBooks, my staff find it easier than what they had, and an independent senior developer looks under the hood and signs off that it's solid.
+
+**What Taha should know about how I work.**
+- I can't read code. Explain things to me in plain English: what changes, why, what could go wrong, and how you proved it works. Give me one recommendation, not a menu.
+- Wrong money worries me most: a wrong bill, wrong inventory or lost data. Correct beats fast, every time.
+- "Done" means you ran it and saw it work, not just that the tests passed.
+- Make the technical calls yourself. Ask me about business decisions and risk trade-offs.
+- Always ask me first before anything you can't undo: changing the live database, deleting data, deploying, or touching money, security or accounts.
+- Our decisions are written down in the Decision Log. Check it before re-opening a settled question.
+- The repository is public. Never put secrets or customer details in it.

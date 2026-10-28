@@ -22,6 +22,8 @@ DECLARE
   v_count int;
   v_i int;
   v_notes text;
+  v_issue_type text;
+  v_issue_label text;
   v_delivered numeric;
   v_failed boolean;
 BEGIN
@@ -42,7 +44,7 @@ BEGIN
   INSERT INTO public.inventory(product_id,location,quantity_available,quantity_prebooked,unit_size)
     VALUES(v_product,'Main Warehouse',100,0,'GL');
 
-  FOR v_i IN 1..5 LOOP
+  FOR v_i IN 1..11 LOOP
     PERFORM set_config('request.jwt.claim.sub',v_admin::text,true);
     PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',v_admin,'role','authenticated')::text,true);
     INSERT INTO public.orders(order_number,customer_id,status,booking_draw)
@@ -63,6 +65,10 @@ BEGIN
       WHEN 2 THEN E'Damage: Atrazine container leaking.\n<img src=x onerror=alert(1)>'
       WHEN 3 THEN '   ' WHEN 5 THEN 'Damage: cap broken; office please review.' ELSE NULL END;
     v_delivered := CASE WHEN v_i=1 THEN 3 ELSE 5 END;
+    v_issue_type := CASE WHEN v_i=4 THEN NULL WHEN v_i<=5 THEN 'other'
+      ELSE (ARRAY['customer_not_home','gate_locked','road_blocked','wrong_address','refused','weather'])[v_i-5] END;
+    v_issue_label := CASE WHEN v_i<=5 THEN 'Other'
+      ELSE (ARRAY['Customer Not Home','Gate Locked','Road Blocked','Wrong Address','Refused','Weather'])[v_i-5] END;
     SELECT quantity_available INTO v_stock FROM public.inventory WHERE product_id=v_product AND location='Main Warehouse';
     IF v_i=5 THEN
       -- Local fault injection: the notice must not be silently lost on insert failure.
@@ -94,11 +100,11 @@ BEGIN
     END IF;
     SET CONSTRAINTS ALL DEFERRED;
     v_result := public.complete_delivery(v_d,'[SMOKE] Signer',v_driver,jsonb_build_object(v_di::text,v_delivered),
-      CASE WHEN v_i=4 THEN NULL ELSE 'other' END,v_notes,v_key,NULL,'signature',v_path);
+      v_issue_type,v_notes,v_key,NULL,'signature',v_path);
     SET CONSTRAINTS ALL IMMEDIATE;
     -- The committed-result retry takes the same key and returns the same receipt.
     v_again := public.complete_delivery(v_d,'[SMOKE] Signer',v_driver,jsonb_build_object(v_di::text,v_delivered),
-      CASE WHEN v_i=4 THEN NULL ELSE 'other' END,v_notes,v_key,NULL,'signature',v_path);
+      v_issue_type,v_notes,v_key,NULL,'signature',v_path);
     SET CONSTRAINTS ALL IMMEDIATE;
     IF v_again IS DISTINCT FROM v_result THEN RAISE EXCEPTION 'SMOKE_FAIL: replay changed result'; END IF;
     RESET ROLE;
@@ -114,7 +120,7 @@ BEGIN
     IF v_i=1 AND (v_message NOT LIKE '%planned 5; delivered 3; units GL; short 2%') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: shortage quantities: %',v_message;
     END IF;
-    IF v_message NOT LIKE '%Order [SMOKE] REPORT-%' OR v_message NOT LIKE '%Reported issue: Other%'
+    IF v_message NOT LIKE '%Order [SMOKE] REPORT-%' OR position('Reported issue: ' || v_issue_label in v_message)=0
       OR v_message NOT LIKE '%[SMOKE] Atrazine <img src=x onerror=alert(1)>%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: report identity or recorded type missing';
     END IF;
@@ -129,6 +135,13 @@ BEGIN
     SET LOCAL ROLE authenticated;
     IF EXISTS(SELECT 1 FROM public.notifications WHERE related_entity_id=v_d AND notification_type='delivery_issue_reported') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: driver could read office notice';
+    END IF;
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub',v_admin::text,true);
+    PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',v_admin,'role','authenticated')::text,true);
+    SET LOCAL ROLE authenticated;
+    IF (SELECT count(*) FROM public.notifications WHERE related_entity_id=v_d AND notification_type='delivery_issue_reported') <> 1 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: office could not read its report';
     END IF;
     RESET ROLE;
   END LOOP;

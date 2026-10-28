@@ -106,7 +106,7 @@ try {
   sql(`BEGIN;\n${read(`supabase/migrations/${candidate}`)}\nCOMMIT;`);
   const after = sql(chain,'postgres',true);
   assert.match(after.stderr,/SMOKE_PASS_ROLLBACK/,after.stderr);
-  console.log('AFTER: shortage, damage explanation, missing details, no-issue, permissions, replay, insert failure and retry: SMOKE_PASS_ROLLBACK');
+  console.log('AFTER: shortage, damage explanation, all seven issue labels, missing details, no-issue, permissions, replay, insert failure and retry: SMOKE_PASS_ROLLBACK');
   // A synchronous trigger would read old line quantities. This mutation must be detected.
   const immediate = read(`supabase/migrations/${candidate}`).replace('DEFERRABLE INITIALLY DEFERRED','NOT DEFERRABLE INITIALLY IMMEDIATE');
   sql(`BEGIN;\n${immediate}\nCOMMIT;`);
@@ -115,8 +115,8 @@ try {
   console.log('MUTATION: premature notice reads stale quantities; regression catches it.');
   sql(`BEGIN;\n${read(`supabase/migrations/${candidate}`)}\nCOMMIT;`);
   sql(`BEGIN;\n${chain.replace("RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';", "RAISE NOTICE 'SMOKE_COMMIT_PASS';")}\nCOMMIT;`);
-  assert.equal(sql("SELECT count(*) FROM public.notifications WHERE notification_type='delivery_issue_reported';").stdout.trim(),'4');
-  console.log('COMMIT: four report notices persisted for five synthetic driver completions (one without an issue); office can read them in a new transaction.');
+  assert.equal(sql("SELECT count(*) FROM public.notifications WHERE notification_type='delivery_issue_reported';").stdout.trim(),'10');
+  console.log('COMMIT: ten report notices persisted for eleven synthetic driver completions (one without an issue); a new transaction reads them.');
   console.log('DRIVER_DELIVERY_ISSUE_PROOF_PASS');
 } finally {
   if (process.argv.includes('--keep-container')) console.log(`Kept own isolated container ${name}`);

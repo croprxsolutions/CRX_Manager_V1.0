@@ -1,10 +1,10 @@
-# Migration History (latest entry 999)
+# Migration History (latest entry 1001)
 
 ## Unapplied payment-date candidate (draft review) — 2026-10-28
 
 | Row | Version | Description |
 |---:|---|---|
-| payment-date | 20261028175551 | **LOCAL CANDIDATE — NOT APPLIED.** `20261028175551_chicago_payment_business_date.sql` resolves omitted dates and the current payment/prepay season from America/Chicago after replay. New envelopes mark raw date intent for strict request matching; unmarked v1 and bare cached results stay compatible. Draft publication is authorized after clean Sonnet review; no merge/live apply/deploy is authorized. Re-read live 2026-10-28: candidate absent from the 1075-row ledger. SQL sha256: `5ced6a5e8e3d8a40d7ecca4985d2bd5e3d25ca6f980f2dee1e6bacabff9b93dd`. Rollback: use a separately reviewed forward migration preserving marked and unmarked retry entries; never rewrite payment rows. Confirm dates, seasons and replay locally before release. |
+| 1001 | 20261028175551 | **LOCAL CANDIDATE — NOT APPLIED.** `20261028175551_chicago_payment_business_date.sql` resolves omitted dates and the current payment/prepay season from America/Chicago after replay. New envelopes mark raw date intent for strict request matching; unmarked v1 and bare cached results stay compatible. Draft publication is authorized after clean Sonnet review; no merge/live apply/deploy is authorized. Re-read live 2026-10-28: candidate absent from the 1075-row ledger. SQL sha256: `5ced6a5e8e3d8a40d7ecca4985d2bd5e3d25ca6f980f2dee1e6bacabff9b93dd`. Rollback: use a separately reviewed forward migration preserving marked and unmarked retry entries; never rewrite payment rows. Confirm dates, seasons and replay locally before release. |
 
 > **LATEST LIVE EVIDENCE (read this first).** The most recent read-only
 > `list_migrations` observation is at the top of this file, immediately below.

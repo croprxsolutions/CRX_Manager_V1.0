@@ -974,22 +974,13 @@ export default function QuoteBuilder() {
 
   const generateQuoteNumber = async () => {
     // Use server-side sequence to prevent race conditions
-    const { data, error } = await supabase.rpc('generate_quote_number');
-    if (error || !data) {
-      // Fallback for backward compatibility
-      const year = new Date().getFullYear();
-      const { count, error: countError } = await supabase
-        .from('quotes')
-        .select('id', { count: 'exact', head: true })
-        .like('quote_number', `Q-${year}-%`);
-      if (countError) {
-        toast('error', 'Failed to generate quote number. Please try again.');
-        return;
-      }
-      const next = (count || 0) + 1;
-      setQuoteNumber(`Q-${year}-${String(next).padStart(4, '0')}`);
-    } else {
+    try {
+      const { data, error } = await supabase.rpc('generate_quote_number');
+      if (error || !data) throw error ?? new Error('Quote number unavailable');
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
+    } catch (err) {
+      Sentry.captureException(err, { extra: { context: 'generate_quote_number' } });
+      toast('error', 'Failed to generate quote number. Please refresh and try again.');
     }
   };
 
@@ -2052,6 +2043,10 @@ export default function QuoteBuilder() {
     }
     if (!referenceDataReady) {
       toast('error', 'Products are still loading. Try again in a moment.');
+      return null;
+    }
+    if (!quoteNumber) {
+      toast('error', 'A quote number could not be confirmed. Please refresh and try again.');
       return null;
     }
     if (!profile) return null;

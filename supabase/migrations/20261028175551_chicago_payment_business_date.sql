@@ -1,6 +1,7 @@
 -- STATUS: NOT APPLIED
 -- Local candidate only; parked at Mason's request. No live apply authorized.
 -- Default payment dates resolve after replay to the America/Chicago business day.
+-- The current payment/prepay season uses that same Chicago business day.
 -- Explicit dates, allocation math, grants, and the atomic v1 replay protocol stay intact.
 -- ============================================================================
 -- Keep the existing function identity, security attributes, and grants.
@@ -22,6 +23,7 @@ DECLARE
   v_sum_allocated bigint := 0;
   v_set_id uuid;
   v_current_season integer;
+  v_business_date date;
   v_prepay_cents bigint;
   v_result jsonb;
   v_allocation_count integer := 0;
@@ -129,14 +131,17 @@ BEGIN
 
   -- Keep an omitted date as NULL in the request fingerprint. Resolve it only
   -- after replay so retries retain the original result across Chicago midnight.
-  p_payment_date := COALESCE(p_payment_date, (now() AT TIME ZONE 'America/Chicago')::date);
+  v_business_date := (now() AT TIME ZONE 'America/Chicago')::date;
+  p_payment_date := COALESCE(p_payment_date, v_business_date);
   PERFORM check_period_open(p_payment_date);
 
   SELECT farm_name INTO v_customer_name FROM customers WHERE id = p_customer_id;
 
-  v_current_season := CASE WHEN extract(month FROM CURRENT_DATE) >= 10
-    THEN extract(year FROM CURRENT_DATE)::integer + 1
-    ELSE extract(year FROM CURRENT_DATE)::integer END;
+  -- Prepay still belongs to the current season, even for an explicit backdate.
+  -- Advance that season at Chicago midnight on October 1, never at UTC midnight.
+  v_current_season := CASE WHEN extract(month FROM v_business_date) >= 10
+    THEN extract(year FROM v_business_date)::integer + 1
+    ELSE extract(year FROM v_business_date)::integer END;
 
   SELECT COALESCE(MAX(version), 0) + 1 INTO v_next_version
   FROM allocation_sets WHERE entity_type = 'payment' AND entity_id = p_customer_id;

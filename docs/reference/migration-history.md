@@ -4,7 +4,7 @@
 
 | Row | Version | Description |
 |---:|---|---|
-| payment-date | 20261028175551 | **LOCAL CANDIDATE — NOT APPLIED.** `20261028175551_chicago_payment_business_date.sql` resolves omitted payment dates in America/Chicago after replay lookup; explicit dates and the existing atomic v1 claim remain supported. Parked at Mason's explicit no-merge/no-live-apply boundary. SQL sha256: `455287e603b678835a9db8d7323ea21435dab8b19b18b5f32083bbaa160de630`. Rollback: if ever applied, use a separately reviewed forward migration restoring the preceding function definition, without rewriting payment rows; confirm dates and retry behavior locally before release. |
+| payment-date | 20261028175551 | **LOCAL CANDIDATE — NOT APPLIED.** `20261028175551_chicago_payment_business_date.sql` resolves omitted payment dates and the current payment/prepay season from America/Chicago after replay lookup; explicit dates and the existing atomic v1 claim remain supported. Parked at Mason's explicit no-merge/no-live-apply boundary. SQL sha256: `a32e3853f4803afba0b1e1781fef6c134ff428ae17913e80d2cccc45a202b425`. Rollback: if ever applied, use a separately reviewed forward migration restoring the preceding function definition, without rewriting payment rows; confirm dates, seasons and retry behavior locally before release. |
 
 > **LATEST LIVE EVIDENCE (read this first).** The most recent read-only
 > `list_migrations` observation is at the top of this file, immediately below.

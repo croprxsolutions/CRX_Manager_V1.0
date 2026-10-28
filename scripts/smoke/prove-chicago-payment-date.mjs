@@ -49,6 +49,16 @@ const expectDate = (key, date) => `DO $$ DECLARE r jsonb; d date; BEGIN
   SELECT payment_date INTO d FROM public.allocation_sets WHERE id=(r->>'allocation_set_id')::uuid;
   IF d IS DISTINCT FROM '${date}'::date THEN RAISE EXCEPTION 'wrong date: %, expected ${date}', d; END IF;
 END $$;`;
+const expectSeason = (key, date, season, explicitDate) => `DO $$ DECLARE r jsonb; BEGIN
+  r := ${call(key, explicitDate)};
+  IF NOT EXISTS (SELECT 1 FROM public.allocation_sets
+    WHERE id=(r->>'allocation_set_id')::uuid AND payment_date='${date}'::date AND season=${season})
+    THEN RAISE EXCEPTION 'wrong payment date or season, expected ${date}/${season}'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.prepay_credits
+    WHERE allocation_set_id=(r->>'allocation_set_id')::uuid AND season=${season}
+      AND original_amount_cents=100 AND balance_cents=100)
+    THEN RAISE EXCEPTION 'wrong prepay season or amount, expected ${season}'; END IF;
+END $$;`;
 
 try {
   docker(['run', '-d', '--name', name, '--network', 'none', '-e', 'POSTGRES_PASSWORD=postgres',
@@ -91,6 +101,10 @@ try {
   END $$;`);
   console.log('PASS: exact candidate runs with real database clock; ACL unchanged');
 
+  // The existing insert trigger also expires replay keys. Its cleanup must
+  // share the controlled clock, including past-date season-boundary retries.
+  const replayGuard = sql("SELECT pg_get_functiondef('public._guard_idempotency_key_insert()'::regprocedure)");
+  sql(clocked(replayGuard));
   sql(clocked(old));
   assert.throws(() => run(expectDate('before', '2026-12-31')), /wrong date: 2027-01-01/);
   console.log('PASS: regression fails before fix on December 31 evening');
@@ -143,13 +157,39 @@ try {
     END $$;
     ROLLBACK;`);
   console.log('PASS: pre-migration v1 request replays after default change');
-  // Preserve the pre-existing current-season behavior; changing prepay season
-  // allocation is a separate business rule, outside this date-default fix.
-  run(`DO $$ DECLARE r jsonb; BEGIN r := ${call('season-scope')};
-    IF NOT EXISTS (SELECT 1 FROM allocation_sets WHERE id=(r->>'allocation_set_id')::uuid
-      AND payment_date='2026-09-30'::date AND season=2027) THEN RAISE EXCEPTION 'season scope changed'; END IF;
-  END $$;`, '2026-10-01 01:00+00');
-  console.log('PASS: existing current-season rule preserved (separate deferred boundary issue)');
+  // Restore only the old season clock in a disposable mutant: the new season
+  // assertion must fail even while the Chicago payment-date default works.
+  const seasonBlock = /v_current_season := CASE[\s\S]*?END;/;
+  assert.match(fixed, seasonBlock);
+  const utcSeason = fixed.replace(seasonBlock, (block) => block.replaceAll('v_business_date', 'CURRENT_DATE'));
+  sql(clocked(utcSeason));
+  assert.throws(() => run(expectSeason('season-before', '2026-09-30', 2026), '2026-10-01 01:00+00'), /wrong payment date or season/);
+  console.log('PASS: old UTC season rule fails the September 30 evening regression');
+  sql(clocked(fixed));
+  const seasonBoundaries = [
+    ['2026-10-01 00:01+00', '2026-09-30', 2026],
+    ['2026-10-01 04:59:59+00', '2026-09-30', 2026],
+    ['2026-10-01 05:00+00', '2026-10-01', 2027],
+    ['2027-01-01 05:59:59+00', '2026-12-31', 2027],
+    ['2027-01-01 06:00+00', '2027-01-01', 2027],
+  ];
+  for (const [clock, date, season] of seasonBoundaries) {
+    for (const timezone of ['UTC', 'Asia/Tokyo', 'America/Chicago']) {
+      run(expectSeason('season-boundary', date, season), clock, actor, timezone);
+    }
+  }
+  run(expectSeason('backdated', '2026-09-15', 2027, '2026-09-15'), '2026-10-01 05:00+00');
+  run(`DO $$ DECLARE first_result jsonb; BEGIN
+    first_result := ${call('season-retry')};
+    PERFORM set_config('crx.proof_clock','2026-10-01 05:01+00',true);
+    IF ${call('season-retry')} IS DISTINCT FROM first_result THEN RAISE EXCEPTION 'season retry changed result'; END IF;
+    IF (SELECT count(*) FROM allocation_sets WHERE customer_id='${customer}') <> 1 THEN RAISE EXCEPTION 'season retry duplicated'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM allocation_sets WHERE id=(first_result->>'allocation_set_id')::uuid
+      AND payment_date='2026-09-30'::date AND season=2026) THEN RAISE EXCEPTION 'season retry changed date or season'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM prepay_credits WHERE allocation_set_id=(first_result->>'allocation_set_id')::uuid
+      AND season=2026 AND original_amount_cents=100 AND balance_cents=100) THEN RAISE EXCEPTION 'season retry changed prepay'; END IF;
+  END $$;`, '2026-10-01 04:59+00');
+  console.log('PASS: 15 Chicago season boundaries, allocation/prepay parity, explicit backdate and season-crossing replay');
   for (const [index, role] of ['sales_rep', 'driver', 'applicator'].entries()) {
     const roleActor = `ac670000-0000-4000-8000-00000000000${index + 3}`;
     sql(`INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES

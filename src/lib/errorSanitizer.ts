@@ -98,6 +98,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
+  [/^ORDER_INVOICE_EXCEEDS_DELIVERED\b/,
+   'Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,

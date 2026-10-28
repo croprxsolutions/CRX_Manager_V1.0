@@ -106,7 +106,7 @@ const invoiceRpcCalls = () => mockRpc.mock.calls
   .map((call) => call[0])
   .filter((name) => name === 'create_invoice_from_order' || name === 'create_split_invoices_from_order');
 
-async function clickCreateInvoice() {
+async function clickCreateInvoice(click = true) {
   mockFrom.mockImplementation((table: string) => buildChain(answerFor(table), tables.singles[table] ?? null));
   render(
     <MemoryRouter initialEntries={['/orders/ord-split']}>
@@ -116,14 +116,15 @@ async function clickCreateInvoice() {
       </Routes>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: /^Create Invoice/i }));
+  await screen.findAllByText('ORD-SPLIT');
+  if (click) fireEvent.click(await screen.findByRole('button', { name: /^Create Split Invoices$/i }));
 }
 
 describe('OrderDetail Create Invoice follows the real field split', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tables.lists = { order_items: [LINE] };
-    tables.singles = { orders: ORDER, customers: { id: 'cust-1', farm_name: 'Order Farm', contact_name: null, phone: null, billing_address: null } };
+    tables.singles = { orders: { ...ORDER, status: 'fulfilled' }, customers: { id: 'cust-1', farm_name: 'Order Farm', contact_name: null, phone: null, billing_address: null } };
     tables.failing = new Set();
     tables.allocReads = [];
     tables.allocCalls = 0;
@@ -131,22 +132,30 @@ describe('OrderDetail Create Invoice follows the real field split', () => {
 
   it('a failed allocation read blocks the invoice instead of billing one customer for the whole order', async () => {
     tables.allocReads = [{ error: 'connection reset' }];
-    await clickCreateInvoice();
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/field split details failed to load/i)));
+    await clickCreateInvoice(false);
+    expect(screen.queryByRole('button', { name: /^Create.*Invoice/i })).not.toBeInTheDocument();
     expect(invoiceRpcCalls()).toEqual([]);
   });
 
   it('an allocation the page did not load (added elsewhere, or a stale read) blocks the invoice', async () => {
     // The page loads no allocations; the check just before billing finds one.
-    tables.allocReads = [{ rows: [] }, { rows: [ALLOCATION] }];
+    tables.allocReads = [{ rows: [ALLOCATION] }, { rows: [] }];
     await clickCreateInvoice();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/field split changed since this page loaded/i)));
     expect(invoiceRpcCalls()).toEqual([]);
   });
 
-  it('an order with no field split still gets its single invoice', async () => {
-    tables.allocReads = [{ rows: [] }];
+  it('a delivered order with a field split creates its split invoices', async () => {
+    tables.allocReads = [{ rows: [ALLOCATION] }];
     await clickCreateInvoice();
-    await waitFor(() => expect(invoiceRpcCalls()).toEqual(['create_invoice_from_order']));
+    await waitFor(() => expect(invoiceRpcCalls()).toEqual(['create_split_invoices_from_order']));
+  });
+
+  it('an undelivered order explains prepay and offers no invoice action', async () => {
+    tables.singles.orders = ORDER;
+    await clickCreateInvoice(false);
+    expect(screen.queryByRole('button', { name: /^Create.*Invoice/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Product invoices are created after delivery.*prepay/i)).toBeInTheDocument();
+    expect(invoiceRpcCalls()).toEqual([]);
   });
 });

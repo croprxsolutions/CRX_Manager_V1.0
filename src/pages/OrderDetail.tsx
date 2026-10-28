@@ -1130,12 +1130,6 @@ export default function OrderDetail() {
   const hasPendingDelivery = deliveries.some(
     (d) => d.status === 'scheduled' || d.status === 'in_progress'
   );
-  // W5 (sell-side #4): any non-cancelled/voided delivery means the order is billed
-  // per-delivery — create_invoice_from_order now hard-rejects an order-level invoice
-  // in that case, so don't even offer the "Create Invoice" button.
-  const hasActiveDelivery = deliveries.some(
-    (d) => d.status !== 'cancelled' && d.status !== 'voided'
-  );
 
   const onCreateInvoiceClick = () => {
     // F1 click-level repair: do NOT retire the key here.
@@ -1417,23 +1411,11 @@ export default function OrderDetail() {
                   Booking draw — items locked
                 </span>
               )}
-              {order.status !== 'cancelled' && order.status !== 'fulfilled' && !hasActiveInvoice && !hasActiveDelivery && (<>
-                <Button
-                  variant="secondary"
-                  icon={<FileText className="w-4 h-4" />}
-                  showChevron={false}
-                  onClick={onCreateInvoiceClick}
-                  loading={creatingInvoice}
-                >
-                  Create Invoice
-                </Button>
-                <HelpTip
-                  text={hasPendingDelivery
-                    ? "A delivery is already scheduled. The recommended path is to wait for the driver to complete the delivery — an invoice will be created automatically with the actual delivered quantities. Clicking this opens a warning."
-                    : "Generates a draft invoice from the order. It stays in draft until you review and post it — nothing is sent to the customer yet."}
-                  className="ml-1"
-                />
-              </>)}
+              {order.status !== 'fulfilled' && order.status !== 'cancelled' && order.status !== 'voided' && (
+                <span className="text-xs text-secondary self-center">
+                  Product invoices are created after delivery. Record advance payments as prepay.
+                </span>
+              )}
               {/* U7 SAFE-SCOPE: a delivered field/acre-allocated order that should be split-billed
                   per owner (complete_delivery skipped the mono-bill auto-draft to avoid over-billing
                   undelivered quantity). Gate on the DERIVABLE state, not the needs_split_billing

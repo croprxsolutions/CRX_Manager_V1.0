@@ -155,7 +155,7 @@ describe('OrderDetail', () => {
     });
   });
 
-  it('keeps Create Invoice available when the only linked invoice is a posted return credit', async () => {
+  it('a posted return credit does not enable invoicing before delivery', async () => {
     const orderData = {
       id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
@@ -176,7 +176,8 @@ describe('OrderDetail', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('button', { name: 'Create Invoice' })).toBeInTheDocument();
+    expect(await screen.findByText(/Product invoices are created after delivery/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Invoice' })).not.toBeInTheDocument();
   });
 
   it('#67: shows a plain Cancel Order action on a confirmed order, not the old dead-option Change Status dropdown', async () => {

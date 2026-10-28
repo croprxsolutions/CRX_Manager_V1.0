@@ -69,6 +69,11 @@ describe('sanitizeError', () => {
     expect(shown).toBe('Nothing was changed. This delivery was billed outside CRX, so it cannot be moved to another order');
   });
 
+  it('explains the cumulative order delivery cap without exposing server details', () => {
+    expect(sanitizeError('ORDER_INVOICE_EXCEEDS_DELIVERED: internal detail'))
+      .toBe('Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay');
+  });
+
   it('explains a delivery invoice that bills beyond its delivery', () => {
     expect(sanitizeError('DELIVERY_INVOICE_EXCEEDS_DELIVERED: invoice CS-2026-0055 bills 8.0000 of Capreno, but delivery DEL-00074 allows 6'))
       .toBe('Nothing was changed. This invoice is for one delivery, so it can bill only the products and quantities that delivery delivered (invoice CS-2026-0055 bills 8.0000 of Capreno, but delivery DEL-00074 allows 6)');

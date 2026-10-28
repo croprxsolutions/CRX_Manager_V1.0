@@ -14,6 +14,7 @@ Welcome to the CRX Manager knowledge vault. This is the shared notebook for **Ma
 2. **[[Plans-and-Roadmap|Plans and Roadmap]]**: what we're building now, in what order, and the dates that matter.
 3. **[[Codebase-Map|Codebase Map]]**: a plain-English tour of the code folders and where each kind of work lives.
 4. **[[How-to-Use-This-Vault|How to Use This Vault]]**: how the notes are organized and the house rules for editing them.
+5. **[[Working-with-Taha|Working with Taha]]**: who decides what, what needs Mason's OK, and how work flows between us.
 
 ## The one-sentence version
 

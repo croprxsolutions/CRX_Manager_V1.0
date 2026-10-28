@@ -17,7 +17,8 @@ if [ -z "$previous" ]; then
 fi
 
 # The previous commit may be missing from Vercel's shallow clone, or gone after a force-push.
-if ! changed="$(git diff --name-only "$previous" "$current" 2>/dev/null)"; then
+# --no-renames lists both sides of a move, so a site file moved into docs/ still counts.
+if ! changed="$(git diff --no-renames --name-only "$previous" "$current" 2>/dev/null)"; then
   echo "Build: could not compare with the previous deployment ($previous)."
   exit 1
 fi

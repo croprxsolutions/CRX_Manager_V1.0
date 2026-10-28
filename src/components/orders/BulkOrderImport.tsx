@@ -228,10 +228,13 @@ export default function BulkOrderImport({
       return { valid: [], invalid: [] };
     }
 
+    const statusBlocked = new Set<string>();
+    const statusErrors: ValidationResult['invalid'] = [];
     if (orderFieldMap.status !== undefined) {
       const invalidStatuses = rows.flatMap((row, idx) => {
         const status = row[orderFieldMap.status];
         if (normalizeImportStatus(status)) return [];
+        statusBlocked.add(row[orderFieldMap.order_number]);
 
         const data: Record<string, string> = {};
         headers.forEach((header, columnIndex) => {
@@ -244,13 +247,13 @@ export default function BulkOrderImport({
         }];
       });
 
-      if (invalidStatuses.length > 0) {
-        return { valid: [], invalid: invalidStatuses };
-      }
+      statusErrors.push(...invalidStatuses);
     }
 
     const ordersMap = new Map<string, ParsedOrder>();
-    const { blocked, invalid } = checkOrderCsvGroups(headers, rows, rowNumbers, orderFieldMap);
+    const { blocked, invalid, headersByOrder } = checkOrderCsvGroups(headers, rows, rowNumbers, orderFieldMap);
+    statusBlocked.forEach((number) => blocked.add(number));
+    invalid.push(...statusErrors);
 
     rows.forEach((row, idx) => {
       const rowData: Record<string, string> = {};
@@ -286,21 +289,24 @@ export default function BulkOrderImport({
           blocked.add(orderNumber);
           invalid.push({
             row: rowNumbers[idx],
-            error: 'Missing or invalid quantity, price, or unit cost. Use non-negative decimal numbers (quantity must be positive), without thousands separators or lost digits. The entire order is excluded.',
+            error: !orderNumber || !customerName || !productName
+              ? 'Missing required order number, customer name, or product name. The entire order is excluded.'
+              : 'Missing or invalid quantity, price, or unit cost. Use non-negative decimal numbers (quantity must be positive), without thousands separators or lost digits. The entire order is excluded.',
             data: rowData,
           });
           return;
         }
 
         if (!ordersMap.has(orderNumber)) {
+          const header = headersByOrder.get(orderNumber)!;
           ordersMap.set(orderNumber, {
             order_number: orderNumber,
             customer_name: customerName,
             order_date: orderFieldMap.order_date !== undefined
-              ? row[orderFieldMap.order_date]
+              ? header[orderFieldMap.order_date] || localToday()
               : localToday(),
             status: 'confirmed',
-            notes: orderFieldMap.notes !== undefined ? row[orderFieldMap.notes] : undefined,
+            notes: orderFieldMap.notes !== undefined ? header[orderFieldMap.notes] : undefined,
             items: [],
             idempotency_key: generateIdempotencyKey(`bulk_import_order:${orderNumber}`, profile?.id || 'anon'),
           });
@@ -369,7 +375,9 @@ export default function BulkOrderImport({
 
       setValidation({ valid: parsedOrders, invalid });
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error parsing file' } });
+      if (!(error instanceof QuoteOrderCsvError)) {
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error parsing file' } });
+      }
       toast('error', error instanceof QuoteOrderCsvError ? error.message : 'Error parsing file');
     } finally {
       setParsing(false);
@@ -499,7 +507,7 @@ export default function BulkOrderImport({
         }, 0);
         const totalProfitCents = totalPriceCents - totalCostCents;
         if (![totalPriceCents, totalCostCents, totalProfitCents].every(Number.isSafeInteger)) {
-          throw new Error('Imported money exceeds the supported whole-cent range. Reduce the values and retry.');
+          throw new QuoteOrderCsvError('Imported money exceeds the supported whole-cent range. Reduce the values and retry.');
         }
         const totalMarginPct = totalPriceCents > 0
           ? (totalProfitCents / totalPriceCents) * 100
@@ -532,13 +540,13 @@ export default function BulkOrderImport({
 
         successCount++;
       } catch (error) {
-        if (!isBelowCostApprovalHandledError(error)) {
+        if (!isBelowCostApprovalHandledError(error) && !(error instanceof QuoteOrderCsvError)) {
           Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error importing order' } });
         }
         failedCount++;
         failures.push({
           orderNumber: order.order_number,
-          details: ['The order could not be imported. Review its values and retry.'],
+          details: [error instanceof QuoteOrderCsvError ? error.message : 'The order could not be imported. Review its values and retry.'],
         });
       }
     }
@@ -580,6 +588,7 @@ export default function BulkOrderImport({
                   <ul className="list-disc list-inside space-y-1 text-xs ml-2">
                     <li>Required: order_number, customer_name, product_name, quantity, price_per_unit</li>
                     <li>Optional: order_date, unit_size, notes (Product current cost is always used)</li>
+                    <li>Blank dates and order notes inherit the first populated value for that order. Conflicting populated values exclude the entire order.</li>
                     <li>Imports always create confirmed orders; fulfillment and cancellation use the normal workflow</li>
                   </ul>
                 </div>

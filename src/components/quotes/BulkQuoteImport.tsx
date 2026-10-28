@@ -15,7 +15,8 @@ import { withAdminCosts } from '../../lib/costFields';
 import { logActivity } from '../../lib/activityLogger';
 import type { Json } from '../../types/supabase';
 import { resolveExactProductIdentity } from '../../lib/productIdentityResolver';
-import { purchaseOrderLineTotalCents, purchaseOrderUnitCostCents } from '../../lib/purchaseOrderMoney';
+import { isWholeCentPurchaseOrderCost, purchaseOrderUnitCostCents } from '../../lib/purchaseOrderMoney';
+import { quoteImportAmounts } from '../../lib/quoteImportMath';
 
 interface BulkQuoteImportProps {
   open: boolean;
@@ -94,11 +95,6 @@ const toMoneyCents = (value: number | null | undefined): bigint => {
 };
 
 const centsToDollars = (cents: bigint): number => Number(checkedCents(Number(cents))) / 100;
-
-const multiplyCentsByQuantity = (unitCents: bigint, quantity: number): bigint => {
-  if (!Number.isFinite(quantity)) throw new Error('Imported quantity exceeds the supported range. Reduce the values and retry.');
-  return checkedCents(purchaseOrderLineTotalCents(quantity, centsToDollars(unitCents)));
-};
 
 const stableStringify = (value: unknown): string => {
   if (value === undefined || value === null) return 'null';
@@ -374,7 +370,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               field === 'actual_rate'
             ) {
               const num = parseQuoteOrderCsvNumber(value);
-              if (value && (!Number.isFinite(num) || num < 0)) {
+              if (value && (!Number.isFinite(num) || num < 0 || (field === 'price_per_unit' && !isWholeCentPurchaseOrderCost(num)))) {
                 invalidNumbers.push(field);
               } else if (value) {
                 item[field] = num;
@@ -388,7 +384,8 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               }
             } else if (field === 'valid_days') {
               const days = parseQuoteOrderCsvNumber(value);
-              if (Number.isInteger(days) && days > 0 && Number.isFinite(new Date(Date.now() + days * 86400000).getTime())) {
+              const expiry = new Date(Date.now() + days * 86400000);
+              if (Number.isInteger(days) && days > 0 && Number.isFinite(expiry.getTime()) && expiry.getUTCFullYear() <= 9999) {
                 item[field] = days;
               } else if (value) {
                 invalidNumbers.push(field);
@@ -403,7 +400,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
         if (invalidNumbers.length > 0) {
           invalid.push({
             row: rowNumbers[idx],
-            error: `Invalid numeric fields: ${invalidNumbers.join(', ')}. Use plain numbers without thousands separators, negative values, or lost digits; tier must be 1, 2, or 3 and valid_days a positive whole number producing a valid date.`,
+            error: `Invalid numeric fields: ${invalidNumbers.join(', ')}. Use plain numbers without thousands separators, negative values, or lost digits; prices must have no more than two decimal places, tier must be 1, 2, or 3, and valid_days must produce an expiry no later than year 9999.`,
             data: rowData,
           });
           return;
@@ -432,9 +429,11 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
       setValidation(rejectPartiallyInvalidQuoteGroups(validRows, invalid));
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
-        extra: { context: 'BulkQuoteImport.parseCSVFile' },
-      });
+      if (!(error instanceof QuoteOrderCsvError)) {
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+          extra: { context: 'BulkQuoteImport.parseCSVFile' },
+        });
+      }
       toast('error', error instanceof QuoteOrderCsvError ? error.message : 'Failed to parse file. Please ensure it is a valid CSV.');
     }
     setParsing(false);
@@ -615,18 +614,19 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               if (actualRate !== null && (!rateConv || rateConv.factor_oz <= 0)) {
                 throw new Error(`Unsupported rate unit "${rateUnit || 'blank'}" for product ${item.product_name}`);
               }
-              const oz_per_acre = actualRate !== null ? actualRate * rateConv!.factor_oz : 0;
-
               const conv = inventoryUnit
                 ? unitConversions.find((c: { unit: string; factor_oz: number }) => normalizeUnitName(c.unit) === normalizeUnitName(inventoryUnit))
                 : null;
-              if (acres > 0 && oz_per_acre > 0 && (!conv || conv.factor_oz <= 0)) {
+              if (acres > 0 && (actualRate ?? 0) > 0 && (!conv || conv.factor_oz <= 0)) {
                 throw new Error(`Unsupported inventory unit "${inventoryUnit || 'blank'}" for product ${item.product_name}`);
               }
               const conversionFactor = conv?.factor_oz ?? 1;
-              const total_units_needed = acres && oz_per_acre ? (acres * oz_per_acre) / conversionFactor : 0;
-              const lineTotalPriceCents = multiplyCentsByQuantity(pricePerUnitCents, total_units_needed);
-              const lineTotalCostCents = multiplyCentsByQuantity(currentCostCents, total_units_needed);
+              const amounts = quoteImportAmounts({ acres, rate: actualRate ?? 0, rateFactor: rateConv?.factor_oz ?? 1,
+                inventoryFactor: conversionFactor, priceCents: pricePerUnitCents, costCents: currentCostCents });
+              const oz_per_acre = amounts.ouncesPerAcre;
+              const total_units_needed = amounts.totalUnits;
+              const lineTotalPriceCents = amounts.priceCents;
+              const lineTotalCostCents = amounts.costCents;
               const profitCents = lineTotalPriceCents - lineTotalCostCents;
               const total_price = centsToDollars(lineTotalPriceCents);
               const profit = centsToDollars(profitCents);
@@ -802,6 +802,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               section_name, acres, price_per_unit, oz_per_acre, actual_rate, rate_unit, notes, tier (1-3),
               status (draft), valid_days, header_notes, footer_notes
             </p>
+            <p className="text-xs text-gray-500 mt-2">Prices must have no more than two decimal places. A quote with an invalid row is excluded in full.</p>
           </div>
         </div>
 

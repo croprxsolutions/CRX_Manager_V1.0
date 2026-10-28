@@ -15,6 +15,12 @@ describe('CSV decimal numbers', () => {
 });
 
 describe('quote and order CSV records', () => {
+  it('keeps empty quoted cells and whitespace after a closing quote', () => {
+    expect(parseQuoteOrderCsv('a,b\n"",x\n"a" ,b').rows).toEqual([['', 'x'], ['a', 'b']]);
+  });
+  it('identifies both the current and starting lines for a multiline unclosed quote', () => {
+    expect(() => parseQuoteOrderCsv('a,b\nx,"first\nsecond')).toThrow('CSV line 3: Unclosed quoted field starting on line 2');
+  });
   it.each(['\n', '\r\n', '\r'])('handles quoted cells and %j line endings', (eol) => {
     const parsed = parseQuoteOrderCsv([
       '\uFEFF"customer",product,quantity,price,notes',

@@ -7,7 +7,7 @@ interface InvalidOrderCsvRow {
 /** Repeated order headers must agree; never choose one customer's header for another's items. */
 export function checkOrderCsvGroups(
   headers: string[], rows: string[][], rowNumbers: number[], fields: Record<string, number>,
-): { blocked: Set<string>; invalid: InvalidOrderCsvRow[] } {
+): { blocked: Set<string>; invalid: InvalidOrderCsvRow[]; headersByOrder: Map<string, string[]> } {
   const firstRows = new Map<string, string[]>();
   const blocked = new Set<string>();
   const invalid: InvalidOrderCsvRow[] = [];
@@ -15,11 +15,15 @@ export function checkOrderCsvGroups(
     const orderNumber = row[fields.order_number];
     const first = firstRows.get(orderNumber);
     if (!first) {
-      firstRows.set(orderNumber, row);
+      firstRows.set(orderNumber, [...row]);
       return;
     }
-    const conflicts = ['customer_name', 'order_date', 'notes'].filter((field) =>
-      fields[field] !== undefined && row[fields[field]] !== first[fields[field]]);
+    const conflicts = ['customer_name', 'order_date', 'notes'].filter((field) => {
+      const column = fields[field];
+      if (column === undefined || !row[column]) return false;
+      if (field !== 'customer_name' && !first[column]) first[column] = row[column];
+      return row[column] !== first[column];
+    });
     if (!conflicts.length) return;
     blocked.add(orderNumber);
     invalid.push({
@@ -28,5 +32,5 @@ export function checkOrderCsvGroups(
       data: Object.fromEntries(headers.map((header, column) => [header, row[column]])),
     });
   });
-  return { blocked, invalid };
+  return { blocked, invalid, headersByOrder: firstRows };
 }

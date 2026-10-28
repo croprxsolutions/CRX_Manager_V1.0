@@ -1,6 +1,7 @@
 export class QuoteOrderCsvError extends Error {}
 
 function decimalIdentity(text: string): string {
+  // Compare canonical decimal digits, since comparing Numbers would hide digits already lost in parsing.
   const [mantissa, exponent = '0'] = text.toLowerCase().split('e');
   const [whole, fraction = ''] = mantissa.replace(/^[+-]/, '').split('.');
   const digits = `${whole}${fraction}`.replace(/^0+/, '');

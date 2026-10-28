@@ -58,6 +58,13 @@ vi.mock('../../lib/sentry', () => ({
 
 import BulkOrderImport from './BulkOrderImport';
 
+async function parseCsvFile(container: HTMLElement, csv: string) {
+  const file = new File([csv], 'review-cases.csv', { type: 'text/csv' });
+  Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+  fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+  fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+}
+
 describe('BulkOrderImport', () => {
   const defaultProps = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
   beforeEach(() => {
@@ -85,6 +92,36 @@ describe('BulkOrderImport', () => {
   it('renders when open', () => {
     render(<BulkOrderImport {...defaultProps} />);
     expect(screen.getByText(/import orders/i)).toBeInTheDocument();
+  });
+
+  it.each([false, true])('inherits optional order headers without dropping continuation items, reverse=%s', async (reverse) => {
+    const rows = ['O-INHERIT,North Farm,2026-10-28,Header notes,SKU-B,2,20', 'O-INHERIT,North Farm,,,SKU-B,1,20'];
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    await parseCsvFile(container, ['order_number,customer_name,order_date,notes,product_name,quantity,price_per_unit', ...(reverse ? rows.reverse() : rows)].join('\n'));
+    await screen.findByText(/O-INHERIT/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({
+      p_order_date: '2026-10-28', p_notes: 'Header notes', p_total_price: 60,
+      p_items: [expect.anything(), expect.anything()],
+    })));
+  });
+
+  it('reports one accurate error for a blank required customer on a continuation row', async () => {
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    await parseCsvFile(container, 'order_number,customer_name,product_name,quantity,price_per_unit\nO-REQUIRED,North Farm,SKU-B,2,20\nO-REQUIRED,,SKU-B,1,20');
+    expect(await screen.findByText(/Missing required order number, customer name, or product name/)).toBeInTheDocument();
+    expect(screen.queryByText(/Conflicting customer_name/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/invalid quantity, price/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /import 1 order/i })).not.toBeInTheDocument();
+  });
+
+  it('excludes only the order with an invalid status and preserves an unrelated order', async () => {
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    await parseCsvFile(container, 'order_number,customer_name,status,product_name,quantity,price_per_unit\nO-BAD,North Farm,fulfilled,SKU-B,1,20\nO-BAD,North Farm,confirmed,SKU-B,1,20\nO-GOOD,North Farm,confirmed,SKU-B,1,20');
+    await screen.findByText(/Only confirmed orders/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({ p_order_number: 'O-GOOD' })));
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'bulk_import_order')).toHaveLength(1);
   });
 
   it.each([
@@ -143,6 +180,7 @@ describe('BulkOrderImport', () => {
     await screen.findByText(/O-RANGE/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
     expect(await screen.findByRole('list', { name: /order import failure details/i })).toHaveTextContent('Order O-RANGE');
+    expect(screen.getByRole('list', { name: /order import failure details/i })).toHaveTextContent('Imported money exceeds the supported whole-cent range');
     expect(mocks.rpc).not.toHaveBeenCalledWith('bulk_import_order', expect.anything());
   });
 

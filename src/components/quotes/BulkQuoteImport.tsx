@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { parseQuoteOrderCsv, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -236,23 +237,6 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
     return null;
   };
 
-  const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return { headers: [], rows: [] };
-
-    const headers = lines[0].split(',').map((h) => h.trim());
-    const rows: string[][] = [];
-
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map((c) => c.trim());
-      if (cols.length > 0 && cols[0]) {
-        rows.push(cols);
-      }
-    }
-
-    return { headers, rows };
-  };
-
   const parseWithVisionOCR = async (file: File): Promise<{ valid: ParsedQuoteItem[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> }> => {
     const result = await processDocumentWithOCR(file, 'quote_list');
 
@@ -308,6 +292,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
   const handleParse = async () => {
     if (!file) return;
+    setValidation(null);
     setParsing(true);
 
     try {
@@ -320,7 +305,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       }
 
       const text = await file.text();
-      const { headers, rows } = parseCSV(text);
+      const { headers, rows, rowNumbers } = parseQuoteOrderCsv(text);
 
       if (rows.length === 0) {
         toast('error', 'No valid data found in file');
@@ -400,7 +385,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
         if (!item.quote_number || !item.customer_farm_name || !item.product_name) {
           invalid.push({
-            row: idx + 2,
+            row: rowNumbers[idx],
             error: 'Missing required fields (quote_number, customer_farm_name, or product_name)',
             data: rowData,
           });
@@ -409,14 +394,14 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
         if (item.status && !IMPORTABLE_QUOTE_STATUSES.has(item.status)) {
           invalid.push({
-            row: idx + 2,
+            row: rowNumbers[idx],
             error: 'Unsupported status. Bulk quote imports may only create draft quotes.',
             data: rowData,
           });
           return;
         }
 
-        validRows.push({ row: idx + 2, item: item as ParsedQuoteItem, data: rowData });
+        validRows.push({ row: rowNumbers[idx], item: item as ParsedQuoteItem, data: rowData });
       });
 
       setValidation(rejectPartiallyInvalidQuoteGroups(validRows, invalid));
@@ -424,7 +409,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
         extra: { context: 'BulkQuoteImport.parseCSVFile' },
       });
-      toast('error', 'Failed to parse file. Please ensure it is a valid CSV.');
+      toast('error', error instanceof QuoteOrderCsvError ? error.message : 'Failed to parse file. Please ensure it is a valid CSV.');
     }
     setParsing(false);
   };

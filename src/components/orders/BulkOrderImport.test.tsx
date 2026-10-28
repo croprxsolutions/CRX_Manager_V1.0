@@ -87,6 +87,40 @@ describe('BulkOrderImport', () => {
     expect(screen.getByText(/import orders/i)).toBeInTheDocument();
   });
 
+  it('imports quoted names without shifting mapped quantity or price', async () => {
+    const customerQuery = chainable({ data: { id: 'customer-quoted' }, error: null });
+    mocks.from.mockImplementation((table: string) => table === 'customers' ? customerQuery : chainable({
+      data: [{ id: 'product-quoted', product_name: 'Mix, "A"', sku: 'MIX-A', is_active: true }], error: null,
+    }));
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    const csv = '\uFEFF"Order No",Buyer,Item,Qty,Unit Price,Item Notes\r\nO-QUOTED,"Wells, ""Family"" Farms","Mix, ""A""",2,12.50,"Line one\r\nLine two"\r\n';
+    const file = new File([csv], 'quoted.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/O-QUOTED/);
+    expect(screen.getByText(/Wells, "Family" Farms/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({
+      p_customer_id: 'customer-quoted',
+      p_total_price: 25,
+      p_items: [expect.objectContaining({ product_id: 'product-quoted', product_name: 'Mix, "A"', total_units_needed: 2, price_per_unit: 12.5, notes: 'Line one\r\nLine two' })],
+    })));
+    expect(customerQuery.ilike).toHaveBeenCalledWith('farm_name', 'Wells, "Family" Farms');
+  });
+
+  it.each(['O-BAD,"Unclosed,Roundup,2,20', 'O-BAD,Wells,Farm,Roundup,2,20'])('blocks malformed CSV before import: %s', async (row) => {
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    const csv = `order_number,customer_name,product_name,quantity,price_per_unit\n${row}`;
+    const file = new File([csv], 'bad.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringMatching(/CSV line 2:.*Correct the file/)));
+    expect(screen.queryByRole('button', { name: /import \d+ order/i })).not.toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it('does not render when closed', () => {
     render(<BulkOrderImport {...defaultProps} open={false} />);
     expect(screen.queryByText(/import orders/i)).not.toBeInTheDocument();

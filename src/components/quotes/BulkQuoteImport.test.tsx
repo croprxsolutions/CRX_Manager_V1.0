@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
       return chainable({ data: dataByTable[table] ?? [], error: null });
     }),
     rpc: vi.fn((_name: string, _args: Record<string, unknown>) => Promise.resolve({ data: { quote_id: 'quote-1' }, error: null })),
+    toast: vi.fn(),
     assertRpcResult: vi.fn((data: unknown) => data),
     logActivity: vi.fn(() => Promise.resolve()),
   };
@@ -65,7 +66,7 @@ vi.mock('../../lib/documentOCR', () => ({
 }));
 
 vi.mock('../ui/Toast', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mocks.toast }),
 }));
 
 import BulkQuoteImport from './BulkQuoteImport';
@@ -88,6 +89,45 @@ describe('BulkQuoteImport', () => {
   it('renders when open', () => {
     render(<BulkQuoteImport {...defaultProps} />);
     expect(screen.getByText(/bulk quote/i)).toBeInTheDocument();
+  });
+
+  it('imports quoted customer, product and section names with mapped numeric cells intact', async () => {
+    mocks.from.mockImplementation((table: string) => {
+      const dataByTable: Record<string, unknown[]> = {
+        customers: [{ id: 'customer-quoted', farm_name: 'Wells, "Family" Farms' }],
+        products: [{ id: 'product-quoted', product_name: 'Mix, "A"', sku: 'MIX-A', inventory_unit: 'Gallon', is_active: true }],
+        unit_conversions: [{ unit: 'oz', factor_oz: 1 }, { unit: 'Gallon', factor_oz: 128 }],
+      };
+      return mocks.chainable({ data: dataByTable[table] ?? [], error: null });
+    });
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = '\uFEFF"Quote",Farm,Group,Item,Acreage,Unit Price,oz/acre,Notes\r\nQ-QUOTED,"Wells, ""Family"" Farms","Spring, East","Mix, ""A""",10,12.50,32,"Line one\r\nLine two"\r\n';
+    const file = new File([csv], 'quoted.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-QUOTED/);
+    expect(screen.getByText(/Wells, "Family" Farms/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+      p_quote_payload: expect.objectContaining({ customer_id: 'customer-quoted' }),
+      p_sections: [expect.objectContaining({
+        section_name: 'Spring, East',
+        items: [expect.objectContaining({ product_id: 'product-quoted', acres: 10, price_per_unit: 12.5, actual_rate: 32, notes: 'Line one\r\nLine two' })],
+      })],
+    })));
+  });
+
+  it.each(['Q-BAD,"Unclosed,Roundup', 'Q-BAD,Wells,Farm,Roundup'])('blocks malformed CSV before import: %s', async (row) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name\n${row}`;
+    const file = new File([csv], 'bad.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringMatching(/CSV line 2:.*Correct the file/)));
+    expect(screen.queryByRole('button', { name: /import \d+ quote/i })).not.toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('does not render when closed', () => {

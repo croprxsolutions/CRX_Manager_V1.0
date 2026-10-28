@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { parseQuoteOrderCsv, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -133,18 +134,6 @@ export default function BulkOrderImport({
     return null;
   };
 
-  const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return { headers: [], rows: [] };
-
-    const headers = lines[0].split(',').map((h) => h.trim());
-    const rows = lines.slice(1).map((line) =>
-      line.split(',').map((cell) => cell.trim().replace(/^["']|["']$/g, ''))
-    );
-
-    return { headers, rows };
-  };
-
   const parseWithVisionOCR = async (file: File): Promise<{ valid: ParsedOrder[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> }> => {
     const result = await processDocumentWithOCR(file, 'invoice');
 
@@ -207,7 +196,7 @@ export default function BulkOrderImport({
   };
 
   const parseCSVOrders = (text: string): { valid: ParsedOrder[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> } => {
-    const { headers, rows } = parseCSV(text);
+    const { headers, rows, rowNumbers } = parseQuoteOrderCsv(text);
 
     if (headers.length === 0 || rows.length === 0) {
       return { valid: [], invalid: [] };
@@ -247,7 +236,7 @@ export default function BulkOrderImport({
           data[header] = row[columnIndex];
         });
         return [{
-          row: idx + 2,
+          row: rowNumbers[idx],
           error: 'Only confirmed orders can be imported. Complete or cancel them through the normal delivery workflow.',
           data,
         }];
@@ -293,7 +282,7 @@ export default function BulkOrderImport({
           || (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost < 0))
         ) {
           invalid.push({
-            row: idx + 2,
+            row: rowNumbers[idx],
             error: 'Missing or invalid quantity, price, or unit cost',
             data: rowData,
           });
@@ -325,7 +314,7 @@ export default function BulkOrderImport({
         });
       } catch {
         invalid.push({
-          row: idx + 2,
+          row: rowNumbers[idx],
           error: 'Error parsing row',
           data: rowData,
         });
@@ -339,6 +328,7 @@ export default function BulkOrderImport({
   const handleParse = async () => {
     if (!file) return;
 
+    setValidation(null);
     setParsing(true);
 
     try {
@@ -376,7 +366,7 @@ export default function BulkOrderImport({
       setValidation({ valid: parsedOrders, invalid });
     } catch (error) {
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error parsing file' } });
-      toast('error', 'Error parsing file');
+      toast('error', error instanceof QuoteOrderCsvError ? error.message : 'Error parsing file');
     } finally {
       setParsing(false);
     }

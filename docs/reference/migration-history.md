@@ -12,6 +12,8 @@ ledger row or sequence number assigned.** Local branch `codex/order-concurrency-
 review limits and future rollout/rollback: [order edit concurrency](order-edit-concurrency.md).
 Mason prohibited live apply, deploy and merge for this task. Refresh the ledger and finish the
 delivery gates before any later integration; this candidate is not evidence of a live change.
+Review follow-up adds explicit save receipts, bound retry replay after later edits, and
+owner-only ticket-number generation. The future permission change needs explicit owner approval.
 
 **Live capture — 2026-10-28 03:44 UTC (10:44 PM Central 2026-10-27; read-only `execute_sql` on `supabase_migrations.schema_migrations`, the full ledger, row by row, before rows 996–999 apply for PR #1164):** 1071 rows, `max(version)` `20261027185937` = `20261027070000_email_type_purchase_order` (row 995). The effective ordering high-water (each name's 14-digit stamp, else its version) is `20261027070000`. No live row is named `20261027080%`, so rows 996–999 (`20261027080000`–`20261027080300`) are all strictly greater and apply next, in that order.
 

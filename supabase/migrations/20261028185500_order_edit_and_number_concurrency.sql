@@ -37,16 +37,17 @@ BEGIN
   ELSIF TG_OP = 'INSERT' THEN
     UPDATE public.orders SET row_version = row_version + 1 WHERE id = NEW.order_id;
   ELSE
-    -- Stable parent order when a privileged workflow moves a line between orders.
+    -- Lock both parents before the AFTER totals trigger locks the destination.
     PERFORM 1 FROM public.orders WHERE id IN (OLD.order_id, NEW.order_id) ORDER BY id FOR UPDATE;
     UPDATE public.orders SET row_version = row_version + 1 WHERE id IN (OLD.order_id, NEW.order_id);
   END IF;
-  RETURN NULL;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.bump_order_item_edit_version() FROM PUBLIC, anon, authenticated, service_role;
 DROP TRIGGER IF EXISTS order_items_bump_edit_version ON public.order_items;
-CREATE TRIGGER order_items_bump_edit_version AFTER INSERT OR UPDATE OR DELETE ON public.order_items
+CREATE TRIGGER order_items_bump_edit_version BEFORE INSERT OR UPDATE OR DELETE ON public.order_items
 FOR EACH ROW EXECUTE FUNCTION public.bump_order_item_edit_version();
 
 -- Replace the public entry point, retaining the existing private implementation chain.
@@ -84,18 +85,17 @@ BEGIN
     v_existing := public.check_idempotency(p_idempotency_key, 'update_order_items');
   END IF;
 
-  SELECT row_version INTO v_version FROM public.orders
-   WHERE id = p_order_id AND deleted_at IS NULL FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'ORDER_NOT_FOUND'; END IF;
   IF v_existing IS NOT NULL THEN
     IF v_existing->'_order_edit_request' IS DISTINCT FROM v_request THEN
       RAISE EXCEPTION 'IDEMPOTENCY_PAYLOAD_CONFLICT';
     END IF;
-    IF (v_existing->>'row_version')::bigint IS DISTINCT FROM v_version THEN
-      RAISE EXCEPTION 'ORDER_STALE_WRITE';
-    END IF;
+    -- This is the original completed write, even if a later editor has saved.
+    -- Authorization was rechecked above; replay never performs another mutation.
     RETURN v_existing - '_order_edit_request';
   END IF;
+  SELECT row_version INTO v_version FROM public.orders
+   WHERE id = p_order_id AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ORDER_NOT_FOUND'; END IF;
   IF p_expected_row_version IS DISTINCT FROM v_version THEN
     RAISE EXCEPTION 'ORDER_STALE_WRITE';
   END IF;
@@ -103,7 +103,7 @@ BEGIN
   v_result := public._update_order_items_below_cost_impl_20260810(
     p_order_id, p_items, v_actor, p_idempotency_key);
   SELECT row_version INTO v_version FROM public.orders WHERE id = p_order_id;
-  v_result := v_result || jsonb_build_object('order_id', p_order_id, 'row_version', v_version);
+  v_result := v_result || jsonb_build_object('success', true, 'order_id', p_order_id, 'row_version', v_version);
   IF p_idempotency_key IS NOT NULL THEN
     -- The private implementation already saved its receipt under this locked key.
     UPDATE public.idempotency_keys
@@ -136,6 +136,9 @@ BEGIN
   RETURN 'BT-' || v_year || '-' || lpad(v_next, greatest(4, length(v_next)), '0');
 END;
 $$;
+
+-- Number generation is an internal step of create_blend_ticket's transaction.
+REVOKE ALL ON FUNCTION public.generate_ticket_number() FROM PUBLIC, anon, authenticated, service_role;
 
 -- Assign versions at the insert boundary rather than copying payment/date logic.
 -- All existing allocation writers retain their authorization, idempotency and money checks.

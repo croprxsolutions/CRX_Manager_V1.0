@@ -102,18 +102,22 @@ test('two editors: first save wins, second draft survives conflict and failed re
   expect(errors).toEqual([]); expect(otherErrors).toEqual([]);
 });
 
-test('a lost save response retries with the same version, request and key', async ({ page }) => {
+for (const laterEdit of [false, true]) {
+test(`a lost save response retries the same request${laterEdit ? ' after another editor saves' : ''}`, async ({ page }) => {
   const state = backend(); state.loseReply = true;
   const errors = await isolate(page, state); await openEditor(page);
   await qtyInput(page).fill('16');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByText(/Failed to fetch|NetworkError|network|try again/i).first()).toBeVisible();
   await expect(qtyInput(page)).toHaveValue('16');
+  if (laterEdit) { state.quantity = 19; state.version = 11; }
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
   expect(state.saves).toHaveLength(2); expect(state.saves[1]).toEqual(state.saves[0]);
-  expect(state.version).toBe(9); expect(errors).toEqual([]);
+  expect(state.version).toBe(laterEdit ? 11 : 9);
+  expect(state.quantity).toBe(laterEdit ? 19 : 16); expect(errors).toEqual([]);
 });
+}
 
 test('a missing version fails the read closed and sends no save', async ({ page }) => {
   const state = backend(); state.missingVersion = true; await isolate(page, state);

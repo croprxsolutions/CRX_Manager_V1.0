@@ -198,6 +198,46 @@ function asyncSql(sql) {
     child.stdin.end(sql);
   });
 }
+async function reparentConcurrency() {
+  assert.equal(scalar(`SELECT tgtype FROM pg_trigger WHERE tgrelid='public.order_items'::regclass
+    AND tgname='order_items_bump_edit_version';`), '31', 'candidate must install a BEFORE row trigger for insert/update/delete');
+  const a = id('91'); const b = id('92'); const x = id('93'); const y = id('94');
+  psql(`INSERT INTO public.orders (id,order_number,customer_id,status) VALUES
+    ('${a}','ORD-PROVER-MOVE-A','${CUSTOMER}','confirmed'),
+    ('${b}','ORD-PROVER-MOVE-B','${CUSTOMER}','confirmed');
+    INSERT INTO public.order_items (id,order_id,product_id,product_name,unit_size,price_per_unit,cost_per_unit,total_units_needed,total_price)
+    VALUES ('${x}','${a}','${PRODUCT}','[PROVER] Move A','gal',20,10,1,20),
+           ('${y}','${b}','${PRODUCT}','[PROVER] Move B','gal',20,10,1,20);
+    CREATE FUNCTION public.order_edit_proof_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN PERFORM pg_sleep(0.3); RETURN NULL; END $$;
+    CREATE TRIGGER order_edit_proof_barrier AFTER UPDATE ON public.order_items
+    FOR EACH ROW EXECUTE FUNCTION public.order_edit_proof_barrier();`);
+  const moves = () => Promise.all([
+    asyncSql(`BEGIN; UPDATE public.order_items SET order_id='${b}' WHERE id='${x}'; ROLLBACK;`),
+    asyncSql(`BEGIN; UPDATE public.order_items SET order_id='${a}' WHERE id='${y}'; ROLLBACK;`),
+  ]);
+  // Local mutation: demonstrate the unsafe AFTER ordering while both totals updates
+  // hold their destination locks. Both transactions roll back, including the survivor.
+  psql(`DROP TRIGGER order_items_bump_edit_version ON public.order_items;
+    CREATE TRIGGER order_items_bump_edit_version AFTER INSERT OR UPDATE OR DELETE ON public.order_items
+    FOR EACH ROW EXECUTE FUNCTION public.bump_order_item_edit_version();`);
+  const broken = await moves();
+  assert.ok(broken.some((r) => r.status !== 0 && /deadlock detected/.test(r.stderr)), 'AFTER-order mutation must reproduce the deadlock');
+  psql(`DROP TRIGGER order_items_bump_edit_version ON public.order_items;
+    CREATE TRIGGER order_items_bump_edit_version BEFORE INSERT OR UPDATE OR DELETE ON public.order_items
+    FOR EACH ROW EXECUTE FUNCTION public.bump_order_item_edit_version();`);
+  const fixed = await moves();
+  for (const r of fixed) assert.equal(r.status, 0, r.stderr);
+  const oldA = Number(scalar(`SELECT row_version FROM public.orders WHERE id='${a}';`));
+  const oldB = Number(scalar(`SELECT row_version FROM public.orders WHERE id='${b}';`));
+  psql(`BEGIN; UPDATE public.order_items SET order_id='${b}' WHERE id='${x}';
+    DO $$ BEGIN IF (SELECT row_version FROM public.orders WHERE id='${a}') <= ${oldA}
+      OR (SELECT row_version FROM public.orders WHERE id='${b}') <= ${oldB}
+      THEN RAISE EXCEPTION 'REPARENT_VERSION_NOT_ADVANCED'; END IF; END $$; ROLLBACK;
+    DROP TRIGGER order_edit_proof_barrier ON public.order_items;
+    DROP FUNCTION public.order_edit_proof_barrier();`);
+  console.log('[proof] MUTATION: AFTER parent locking deadlocks; BEFORE locking allows both opposite moves and invalidates both parents (moves rolled back)');
+}
 async function concurrency() {
   const expected = version();
   const [a, b] = await Promise.all([
@@ -219,6 +259,14 @@ async function concurrency() {
   refused(save(before + 2, retryVersion, 'edit-double-submit'), 'IDEMPOTENCY_PAYLOAD_CONFLICT');
   console.log('[proof] concurrent double-submit and sequential retry replay one receipt; changed payload refused');
 
+  const receiptBeforeLaterEdit = JSON.parse(scalar(sessionSql(save(before + 1, retryVersion, 'edit-double-submit'))));
+  psql(sessionSql(save(before + 2, committedVersion, 'edit-later-editor')));
+  const laterVersion = version();
+  const receiptAfterLaterEdit = JSON.parse(scalar(sessionSql(save(before + 1, retryVersion, 'edit-double-submit'))));
+  assert.deepEqual(receiptAfterLaterEdit, receiptBeforeLaterEdit);
+  assert.equal(quantity(), before + 2); assert.equal(version(), laterVersion);
+  console.log('[proof] a lost reply replays its original receipt after a later editor saves, without overwriting that editor');
+
   const payments = (key) => `SELECT public.allocate_payment('${CUSTOMER}',100,'check',NULL,NULL,CURRENT_DATE,NULL,'[]'::jsonb,'${ADMIN}','${key}');`;
   const paid = await Promise.all([asyncSql(sessionSql(`${payments('allocation-a')} SELECT pg_sleep(0.4);`)),
     asyncSql(sessionSql(`${payments('allocation-b')} SELECT pg_sleep(0.4);`))]);
@@ -227,13 +275,14 @@ async function concurrency() {
   assert.equal(scalar(`SELECT sum(total_payment_cents) FROM public.allocation_sets WHERE customer_id='${CUSTOMER}';`), '200');
   console.log('[proof] two real payment RPCs: versions 1 and 2, both cents amounts retained');
 
-  const ticket = () => `INSERT INTO public.blend_tickets (ticket_number, uploaded_by, status)
-    VALUES (public.generate_ticket_number(),'${ADMIN}','pending') RETURNING ticket_number;`;
-  const tickets = await Promise.all([asyncSql(`BEGIN; ${claims()} ${ticket()} SELECT pg_sleep(0.4); COMMIT;`),
-    asyncSql(`BEGIN; ${claims()} ${ticket()} SELECT pg_sleep(0.4); COMMIT;`)]);
+  const ticket = (suffix) => `SELECT public.create_blend_ticket('${id(suffix)}',
+    '{"customer_id":"${CUSTOMER}"}'::jsonb, '[]'::jsonb, '[]'::jsonb, false, '${ADMIN}', 'ticket-${suffix}');`;
+  const tickets = await Promise.all([asyncSql(sessionSql(`${ticket('81')} SELECT pg_sleep(0.4);`)),
+    asyncSql(sessionSql(`${ticket('82')} SELECT pg_sleep(0.4);`))]);
   for (const r of tickets) assert.equal(r.status, 0, r.stderr);
   assert.equal(scalar('SELECT count(DISTINCT ticket_number) FROM public.blend_tickets;'), '2');
-  console.log('[proof] simultaneous ticket creation transactions produced two distinct numbers');
+  refused('SELECT public.generate_ticket_number();', 'permission denied for function generate_ticket_number');
+  console.log('[proof] two authenticated ticket-creation RPCs produced distinct numbers; standalone generator access refused');
 }
 
 try {
@@ -247,8 +296,27 @@ try {
   console.log('[proof] BEFORE: two unversioned editors silently replaced the same line in sequence');
   stageText('candidate.sql', lf(CANDIDATE));
   const applied = apply('candidate.sql'); assert.equal(applied.status, 0, applied.output);
+  const sql = lf(CANDIDATE);
+  const wrapperStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.update_order_items(');
+  const wrapperEnd = sql.indexOf('REVOKE ALL ON FUNCTION public.update_order_items(', wrapperStart);
+  assert.ok(wrapperStart >= 0 && wrapperEnd > wrapperStart);
+  const brokenReceiptWrapper = sql.slice(wrapperStart, wrapperEnd).replace("'success', true, ", '');
+  const brokenReceipt = JSON.parse(scalar(`BEGIN; ${brokenReceiptWrapper} ${claims()}
+    SET LOCAL ROLE authenticated; ${save(12, version(), 'receipt-mutation')} ROLLBACK;`));
+  assert.notEqual(brokenReceipt.success, true, 'mutation check must reproduce the receipt rejected by the UI');
+  console.log('[proof] MUTATION: omitting the success marker reproduces the real SQL/UI receipt mismatch; rolled back');
   let v = version();
-  psql(sessionSql(save(12, v, 'edit-ordinary'))); assert.equal(quantity(), 12); assert.ok(version() > v);
+  const receipt = JSON.parse(scalar(sessionSql(save(12, v, 'edit-ordinary'))));
+  assert.equal(receipt.success, true); assert.equal(receipt.order_id, ORDER);
+  assert.equal(receipt.row_version, version());
+  assert.equal(quantity(), 12); assert.ok(version() > v);
+  console.log('[proof] the real SQL receipt matches the UI success/order/version contract');
+  const revokedReplay = psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.profiles SET role='driver' WHERE id='${ADMIN}';
+    SET LOCAL session_replication_role = origin; ${claims()} SET LOCAL ROLE authenticated;
+    ${save(12, v, 'edit-ordinary')} ROLLBACK;`, { allowFailure: true });
+  assert.notEqual(revokedReplay.status, 0); assert.match(revokedReplay.stderr, /INSUFFICIENT_ROLE/);
+  console.log('[proof] a cached receipt cannot be replayed after the actor loses its permitted role');
   refused(save(13, v, 'edit-stale'), 'ORDER_STALE_WRITE'); assert.equal(quantity(), 12);
   refused(save(13, null, 'edit-no-version'), 'ORDER_EXPECTED_VERSION_REQUIRED');
   refused(save(13, version(), 'edit-driver', DRIVER), 'INSUFFICIENT_ROLE', DRIVER);
@@ -266,6 +334,7 @@ try {
   assert.equal(Number(scalar(`SELECT total_profit FROM public.orders WHERE id='${ORDER}';`)), quantity() * 10);
   assert.equal(Number(scalar(`SELECT quantity_prebooked FROM public.inventory WHERE product_id='${PRODUCT}' AND location='Main Warehouse';`)), quantity());
   console.log('[proof] final order price, cost, profit and inventory reservation match the winning quantity');
+  await reparentConcurrency();
   const again = apply('candidate.sql'); assert.equal(again.status, 0, again.output);
   console.log('ORDER_EDIT_CONCURRENCY_REAL_SCHEMA_PASS');
 } finally {

@@ -29,6 +29,24 @@ Minor style suggestions (upload-test deduplication, helper naming, harmless nega
   and the two source-line labels on multiline quoting errors) do not change correctness
   and are left out of this focused fix. No agent workflow or database changes are needed.
 
+Sonnet's follow-up confirmed the fixes with zero BLOCKER/HIGH/MED, and found one LOW:
+a missing first customer caused false conflicts on later populated rows. The group check
+now compares populated customers with the first populated customer; the required-field
+validator still excludes the order for its missing customer. Blank order IDs are never
+grouped. Customer-name lookups also escape literal percent, underscore, and backslash,
+so imported names cannot be treated as wildcard patterns. The UI states the all-blank
+date fallback to today. Earlier parking entries now cross-reference this record.
+Final follow-up proof: all 147 focused tests and 34 browser checks pass, with zero external
+requests/page errors. All four newly added customer/group regressions fail on the prior
+commit. Lint, typecheck, build, code-health, and independent compliance refresh are clean.
+
+Remaining minor observations are recorded rather than widening this fix: case-sensitive
+customer header comparison is deliberately conservative; order sub-cent rounding remains
+the established server behavior; pre-existing quote-wide header consistency and duplicate
+Product/Description mapping need their own focused treatment. Corrupt conversion-factor
+reference data is refused safely. Upload-time quote configuration/range errors continue
+to be observable through Sentry. No test or gate is waived by these scope notes.
+
 Parked base remains a3423a812; the sole upstream commit 5b0246530 changes documentation
 only, with no overlapping source files. No main merge or history rewrite was performed.
 Rollback: revert this follow-up commit. No production import, migration, push, or deployment.

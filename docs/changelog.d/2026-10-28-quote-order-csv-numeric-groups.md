@@ -1,5 +1,8 @@
 ## 2026-10-28 - CSV numeric edges and consistent order headers
 
+Superseded in part by `2026-10-28-csv-sonnet-review-fixes.md`: quote sub-cent prices
+are now refused, and blank optional order dates/notes inherit the header.
+
 Follow-up to To-Do 1.10 on `codex/quote-order-quoted-fields`, parked locally at
 Mason's explicit no-merge instruction. No migration, production import, or deployment.
 

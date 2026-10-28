@@ -420,7 +420,7 @@ export default function BulkOrderImport({
         const { data: customer, error: custError } = await supabase
           .from('customers')
           .select('id')
-          .ilike('farm_name', order.customer_name)
+          .ilike('farm_name', order.customer_name.replace(/[\\%_]/g, (char) => `\\${char}`))
           .maybeSingle();
 
         if (custError) {
@@ -588,7 +588,7 @@ export default function BulkOrderImport({
                   <ul className="list-disc list-inside space-y-1 text-xs ml-2">
                     <li>Required: order_number, customer_name, product_name, quantity, price_per_unit</li>
                     <li>Optional: order_date, unit_size, notes (Product current cost is always used)</li>
-                    <li>Blank dates and order notes inherit the first populated value for that order. Conflicting populated values exclude the entire order.</li>
+                    <li>Blank dates and order notes inherit the first populated value for that order. If every date is blank, today is used. Conflicting populated values exclude the entire order.</li>
                     <li>Imports always create confirmed orders; fulfillment and cancellation use the normal workflow</li>
                   </ul>
                 </div>

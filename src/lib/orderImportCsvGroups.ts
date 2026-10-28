@@ -13,6 +13,7 @@ export function checkOrderCsvGroups(
   const invalid: InvalidOrderCsvRow[] = [];
   rows.forEach((row, index) => {
     const orderNumber = row[fields.order_number];
+    if (!orderNumber) return;
     const first = firstRows.get(orderNumber);
     if (!first) {
       firstRows.set(orderNumber, [...row]);
@@ -21,7 +22,7 @@ export function checkOrderCsvGroups(
     const conflicts = ['customer_name', 'order_date', 'notes'].filter((field) => {
       const column = fields[field];
       if (column === undefined || !row[column]) return false;
-      if (field !== 'customer_name' && !first[column]) first[column] = row[column];
+      if (!first[column]) first[column] = row[column];
       return row[column] !== first[column];
     });
     if (!conflicts.length) return;

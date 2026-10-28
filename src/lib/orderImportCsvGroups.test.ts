@@ -28,4 +28,15 @@ describe('repeated CSV order headers', () => {
     const blank = [...first]; blank[1] = '';
     expect(checkOrderCsvGroups(headers, [first, blank], [2, 3], fields).invalid).toEqual([]);
   });
+  it('does not compare valid customer rows against a missing first customer', () => {
+    const blank = [...first]; blank[1] = '';
+    expect(checkOrderCsvGroups(headers, [blank, first, first], [2, 3, 4], fields).invalid).toEqual([]);
+  });
+  it('does not invent groups or conflicts for blank order numbers', () => {
+    const blank = [...first]; blank[0] = '';
+    const other = [...blank]; other[1] = 'Other Farm';
+    const result = checkOrderCsvGroups(headers, [blank, other], [2, 3], fields);
+    expect(result.invalid).toEqual([]);
+    expect(result.headersByOrder.size).toBe(0);
+  });
 });

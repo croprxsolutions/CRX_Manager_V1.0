@@ -1,5 +1,7 @@
 ## 2026-10-28 - Quote and order CSV quoted fields (To-Do 1.10)
 
+Follow-up behavior and current proof are recorded in `2026-10-28-csv-sonnet-review-fixes.md`.
+
 Built on branch `codex/quote-order-quoted-fields`; parked for Mason's requested no-merge batch.
 Not merged, deployed, or verified in production. No migration or production writes required.
 

@@ -73,12 +73,22 @@ proof observed; parked pending final review and protected delivery. Not live.**
 - **Delivery gate unavailable:** this session's SQL guard refused the generated read-only
   live sweep queries with “Codex only permits clearly read-only SQL.” The required sweep
   could not be checked, try again. No sweep pass is claimed.
-- **Canonical workflow incomplete:** the installed Claude CLI loaded the actual workflow.
-  Its first run was blocked by plan-mode SQL restrictions. The normal-mode retry
-  `wf_8317e470-db8` aborted internally after 619 seconds: one layer VERIFIED, three
-  unfinished, no structured overall result. The stale CLI process was closed after the
-  runtime had already marked the workflow killed. No workflow pass is claimed; do not
-  substitute scoped reviews for this gate. No denied sweep was rerouted through Claude.
+- **Canonical workflow completed on retry:** native Claude background session `49b86c41`
+  ran `wf_d74f383a-6ac` to completion in 670 seconds. All four layers and both requested
+  skeptics returned evidence; no layers or verifier results are missing. The broad audit
+  is evidence-complete but not clean: one confirmed pre-existing HIGH and 31 lower-priority
+  findings require separate triage. This does not erase the clear scoped candidate reviews.
+  Full operational details are retained privately; no overall clean verdict is claimed.
+  Earlier plan-mode and foreground attempts remain failed runs, superseded by this retry.
+- **Live-sweep setup checked:** the strict runner fails closed without `SUPABASE_DB_URL`
+  and `psql`. Claude found no saved read-only connection. An existing backup account is
+  present, but its credential was not available; the approved CLI connection is writable.
+  No new login, credential rotation, permission change or denied sweep execution occurred.
+- **Compatibility repair blocked:** shared safety code already recognizes fingerprinted
+  sweep packets, while the Codex SQL guard rejects them. Its documented Claude repair
+  handoff was itself refused by the active protected-harness guard. No repair was applied
+  or activated, no query was rerouted, and no guard was weakened. A clean isolated repair
+  checkout and private handoff are prepared for the authorized maintainer route.
 - Luna round one identified a SQL/UI receipt mismatch and retry and generator contract
   issues. The candidate now emits explicit success, replays a bound receipt after later
   edits without writing again, and keeps number generation inside owner transactions.
@@ -95,10 +105,10 @@ proof observed; parked pending final review and protected delivery. Not live.**
 - Final exact-SHA Sol review, guarded push and a draft PR remain outstanding because
   prerequisite gates are not green. The supported Sol wrapper dry-run also refuses
   preflight without an identified PR. No Sol proof was minted. This task is parked
-  locally, not ready to deliver. Finish the unavailable workflow/sweep evidence in a
+  locally, not ready to deliver. Finish the remaining sweep evidence and audit triage in a
   supported session before PR and final review; no merge/apply/deploy is authorized.
 
-The unpublished local branch was rebased onto `origin/main` at `32469af54` after confirming
-the six upstream build/documentation files did not overlap this candidate. Product code
-and SQL were unchanged by that rebase. Scoped security and drift reviews are clear;
+The unpublished local branch was refreshed onto `origin/main` at `9b7150416`. Upstream
+changes include planning documentation and CI/final-review tooling; product code and
+SQL in this candidate were unchanged by the rebases. Scoped security and drift reviews are clear;
 the final local agent-workflow test suite also passed.

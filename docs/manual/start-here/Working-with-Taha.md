@@ -25,6 +25,27 @@ AI agents (Claude and Codex) also build and review much of the code. They follow
 - Turn on two-factor sign-in for both accounts. Admin access can reach the live database and its keys.
 - Where every service, key and account lives: [[manual/SERVICES_AND_ACCOUNTS|Services and Accounts]]. It lists names and locations only, never values.
 
+## Your job, and what's in scope
+
+**The job:** stabilize, clean up and prove what already exists. No new features unless Mason asks.
+
+**The deadline:** selling starts in the **second week of December 2026**. By then quoting, pre-booking, delivery, inventory, cost tracking and product pricing must be stable (Mason, 2026-10-16). Chem Man's last bill is 2026-12-31.
+
+| In scope | Not in scope (for now) |
+|---|---|
+| Customers and the product catalog | Field application jobs and field invoicing, field maps, blend tickets |
+| Monthly bulk price updates and price history | Compliance and EPA features |
+| Cost tracking and margins | Crop programs, rebates, call lists, extra dashboards |
+| Quotes, orders and deliveries | Redesigning accounts payable or commission payments |
+| Chemical-sale invoicing | QuickBooks, Stripe, backups |
+| Payments, prepay and receivables | |
+| Inventory | |
+| Core reports: sales, inventory, cost and margin, receivables | |
+
+Field application is out of scope because it's already at Chem Man parity (see [[Chem-Man-vs-CRX|Chem Man vs CRX]]). Don't break it, though.
+
+**Where to start:** the verified bug list Mason shares with you privately (it isn't in this public repo). The items in the December scope come first. Then the [[manual/TO_DO_LIST|To-Do List]].
+
 ## Ask Mason first
 
 Admin access makes these possible. Don't do them without Mason's explicit OK in your conversation with him:
@@ -60,6 +81,7 @@ Everything else is your call. Mason would rather hear "here's what I did and how
 3. Learn the business rules: [[workflows/QUOTE_TO_DELIVERY|Quote to Delivery]], [[workflows/INVENTORY_RULES|Inventory Rules]] and [[workflows/RLS_SECURITY_GUIDE|Who can see what]].
 4. Read [[Plans-and-Roadmap|Plans and Roadmap]] and the [[manual/TO_DO_LIST|To-Do List]] to see what matters before January 1, 2027.
 5. Skim the [[manual/DECISION_LOG|Decision Log]] so you don't reopen settled questions.
+6. Read [[Lessons-Learned|Lessons Learned]]: the mistakes that already cost CRX time.
 
 ## Notes between us
 

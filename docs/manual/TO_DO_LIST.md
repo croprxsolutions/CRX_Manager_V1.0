@@ -9,7 +9,7 @@
 **Owner:** Mason Wells approves. **Drafted:** 2026-10-21 by Claude, as asked in `docs/plans/2026-10-13-direction-and-goals.md` section 2 ("must work on day one" list, checkpoint 2026-10-31).
 **Reviewed:** an advisory Codex `gpt-6-sol` (high) review of the first draft, 2026-10-21. It made 57 findings. Claude checked each against the goals doc and the code. Most were applied; the few that weren't are listed at the end, with the reason.
 **Status:** APPROVED. Mason, in chat, 2026-10-22: "Approve the revised day-one list. Yes, un-park the small cost-freshness part (as-of date and stale-cost report). Names: not chosen yet." That approves the ranking rule, every rank and the build order. The open items in "What Mason needs to decide" stay open until answered. The list was revised with Mason's changes of 2026-10-22 before he approved it. Everything before delivery comes first: quoting, product pricing, cost tracking, inventory (knowing what to order) and invoicing. Field-app, job and blend-ticket invoices are built last. Returns, including "sitting at farm" tracking, can wait. Jobs can have two applicators. Rep-only rules wait because there are no regular reps yet. Nothing here authorizes building anything. Each item is built through its own goal and pull request.
-**Completed-item cleanup: 2026-10-28.** Seven resolved rows and three answered decision entries were removed. The [completion record](../audits/2026-10-28-to-do-completed-items.md) preserves their original wording, evidence and verification limits. All other rows remain.
+**Completed-item cleanup: 2026-10-28.** Six completed rows and three answered decision entries were removed. The [completion record](../audits/2026-10-28-to-do-completed-items.md) preserves their original wording, evidence and verification limits. All other rows remain.
 
 **Evidence date:** reconciled 2026-10-27 against GitHub `main` at `fe258c2fe`, all 68 PRs returned by the merged-date query for October 25–27 (UTC), current source, and the live read-only migration ledger. The [reconciliation record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR, dispositions and limits. Existing per-row live checks keep their original dates. A merge is not an apply or a full staging proof. Open record PRs #1148 and #1153 were not treated as shipped; their overlapping records must be reconciled before those PRs land.
 
@@ -47,7 +47,7 @@ Mason's priority is everything that happens **before delivery**: quoting, produc
    - quoting and orders: 1.1, 1.4, then the SHOULD quote fixes 1.6–1.12;
    - invoicing: 3.1–3.5;
    - Chicago dates at the year boundary: quote and order numbers 12.1, payment dates 6.7.
-2. **Delivering and billing it:** deliveries and retry safety 2.1–2.3 and 2.6, then the SHOULD item 2.8 (the delivered brand and its EPA number), split billing 4.1–4.3, payments and prepay 6.1–6.8, commissions 8.1, 8.3 and 8.4, documents and emails 9.1–9.9.
+2. **Delivering and billing it:** deliveries and retry safety 2.1–2.3 and 2.6, then the SHOULD item 2.8 (the delivered brand and its EPA number), split billing 4.1–4.3, payments and prepay 6.1–6.9, commissions 8.1, 8.3 and 8.4, documents and emails 9.1–9.9.
 3. **Complete numbers at volume:** 10.1–10.4.
 4. **Last:** everything marked CAN-WAIT (section 17).
 
@@ -170,6 +170,7 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 | 6.6 | A customer's full payment history past 200 entries | **Open** (goals doc, Goal 4 list). Goal 4's done test includes a 200+ payment history, and Goal 4 is a launch gate. | Goal 4 | MUST |
 | 6.7 | **A payment's date is Chicago's date, not the server's** | **Open.** `allocate_payment` defaults the payment date to the server's `CURRENT_DATE` (UTC, six hours ahead), and the payment screen never sends a date (latest definition `supabase/migrations/20260713060300_harden_allocate_payment_idempotency.sql`, checked 2026-10-22; old `TODO.md` (2026-09-27), §5). A payment entered after 6 pm can land on the wrong day, and on December 31 in the wrong month and year. | Fix (year boundary) | MUST |
 | 6.8 | A check that each customer's prepay balance equals the sum of their prepay credits | **Not built** (old `TODO.md` (2026-09-27), §5). Prepay could drift silently. | New check; part of 16.5 | SHOULD |
+| 6.9 | No leftover money records on deleted orders (deliveries, commissions), and deleting a product doesn't wipe its stock holds | **Holds half fixed** by PR #1101 (2026-10-25, migration `20261025090000`, history row 983, applied live 2026-10-26): deleting a product with holds is refused instead of wiping them. **Money half checked read-only 2026-10-25, nothing changed:** 5 completed deliveries sit on 2 deleted orders (ORD-2026-0342, ORD-2026-0345; spring 2026, no CRX invoice, not in the billed-outside list), plus 2 voided and 1 cancelled delivery and 2 cancelled commissions; 0 invoices, 0 payments. **Mason decided 2026-10-26: leave the 5 completed deliveries as they are**, and fix the 14 March orders later, under 15.2. | Verify remaining cleanup and prevention | SHOULD |
 
 ## 7. Returns
 

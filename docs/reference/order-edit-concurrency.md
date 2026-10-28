@@ -53,8 +53,8 @@ proof observed; parked pending final review and protected delivery. Not live.**
 
 - The isolated real-schema proof printed `ORDER_EDIT_CONCURRENCY_REAL_SCHEMA_PASS`, including
   the before/after overwrite reproduction and final order totals/reservation checks.
-- The combined local browser run passed all three scenarios. The focused page/dialog suite
-  passed 14 tests after the snapshot helper extraction.
+- The combined local browser run passed all three scenarios. The affected page/dialog suites
+  passed 53 tests across seven files after the snapshot helper extraction and version-fixture updates.
 - TypeScript, lint, production build, code-health, agent-guidance and agent-workflow checks
   passed. The larger regression suite is tracked separately at closeout.
 - Scoped security, compliance and type reviews found no BLOCKER/HIGH. Migration drift review

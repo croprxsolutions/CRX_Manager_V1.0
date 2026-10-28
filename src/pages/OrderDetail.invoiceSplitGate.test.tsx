@@ -76,7 +76,7 @@ vi.mock('../components/team/RelatedNotes', () => ({ default: () => null }));
 import OrderDetail from './OrderDetail';
 
 const ORDER = {
-  id: 'ord-split', order_number: 'ORD-SPLIT', status: 'confirmed', customer_id: 'cust-1',
+  id: 'ord-split', order_number: 'ORD-SPLIT', status: 'confirmed', customer_id: 'cust-1', row_version: 1,
   order_date: '2026-10-01', total_cents: 0, total_cost: 0, total_price: 0,
   total_profit: 0, total_margin_pct: 0, order_name: null, notes: null,
   program_notes: null, created_at: '2026-10-01T00:00:00Z',

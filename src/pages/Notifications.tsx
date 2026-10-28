@@ -203,7 +203,7 @@ export default function Notifications() {
                       <span className="w-2 h-2 rounded-full bg-crx-green shrink-0" />
                     )}
                   </div>
-                  <p className="text-xs text-secondary mt-0.5 line-clamp-2">{n.message}</p>
+                  <p className={`text-xs text-secondary mt-0.5 ${n.notification_type === 'delivery_issue_reported' ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>{n.message}</p>
                   {n.sender_name && <p className="text-xs text-secondary mt-0.5">From {n.sender_name}</p>}
                   <p className="text-xs text-gray-400 mt-1">
                     {new Date(n.created_at).toLocaleString()}

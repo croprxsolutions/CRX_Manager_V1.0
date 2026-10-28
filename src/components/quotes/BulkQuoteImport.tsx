@@ -73,6 +73,9 @@ const FIELD_MAPPINGS: Record<string, string[]> = {
 
 const IMPORTABLE_QUOTE_STATUSES = new Set(['draft']);
 
+const parseCsvDecimal = (value: string): number =>
+  /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value) ? Number(value) : NaN;
+
 const normalizeQuoteNumber = (quoteNumber?: string | null): string =>
   quoteNumber?.trim().toUpperCase() ?? '';
 
@@ -338,6 +341,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       rows.forEach((cols, idx) => {
         const item: Partial<ParsedQuoteItem> = {};
         const rowData: Record<string, string> = {};
+        const invalidNumbers: string[] = [];
 
         cols.forEach((value, colIdx) => {
           const field = fieldMapping[colIdx];
@@ -362,19 +366,25 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               field === 'oz_per_acre' ||
               field === 'actual_rate'
             ) {
-              const num = parseFloat(value);
-              if (!isNaN(num)) {
+              const num = parseCsvDecimal(value);
+              if (value && !Number.isFinite(num)) {
+                invalidNumbers.push(field);
+              } else if (value) {
                 item[field] = num;
               }
             } else if (field === 'tier') {
-              const tier = parseInt(value);
+              const tier = parseCsvDecimal(value);
               if ([1, 2, 3].includes(tier)) {
                 item[field] = tier;
+              } else if (value) {
+                invalidNumbers.push(field);
               }
             } else if (field === 'valid_days') {
-              const days = parseInt(value);
-              if (!isNaN(days) && days > 0) {
+              const days = parseCsvDecimal(value);
+              if (Number.isInteger(days) && days > 0) {
                 item[field] = days;
+              } else if (value) {
+                invalidNumbers.push(field);
               }
             }
           }
@@ -382,6 +392,15 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
         const normalizedStatus = item.status?.toLowerCase().trim();
         if (normalizedStatus) item.status = normalizedStatus;
+
+        if (invalidNumbers.length > 0) {
+          invalid.push({
+            row: rowNumbers[idx],
+            error: `Invalid numeric fields: ${invalidNumbers.join(', ')}. Use plain numbers without thousands separators; tier must be 1, 2, or 3 and valid_days a positive whole number.`,
+            data: rowData,
+          });
+          return;
+        }
 
         if (!item.quote_number || !item.customer_farm_name || !item.product_name) {
           invalid.push({

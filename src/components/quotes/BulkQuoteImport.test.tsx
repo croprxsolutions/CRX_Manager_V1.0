@@ -130,6 +130,29 @@ describe('BulkQuoteImport', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['price_per_unit', '1,200.00'],
+    ['price_per_unit', '20 dollars'],
+    ['acres', '1,200'],
+    ['actual_rate', '32oz'],
+    ['tier', '1,000'],
+    ['valid_days', '15 days'],
+    ['price_per_unit', '0x10'],
+    ['tier', '0x2'],
+    ['valid_days', '0xF'],
+  ])('rejects partial numeric conversion for %s=%s', async (field, value) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name,${field}\nQ-NUMBER,North Farm,Roundup,"${value}"`;
+    const file = new File([csv], 'numeric.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(/Invalid numeric fields:/)).toHaveTextContent(field);
+    expect(screen.getByText(/Use plain numbers without thousands separators/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it('does not render when closed', () => {
     render(<BulkQuoteImport {...defaultProps} open={false} />);
     expect(screen.queryByText(/bulk quote/i)).not.toBeInTheDocument();

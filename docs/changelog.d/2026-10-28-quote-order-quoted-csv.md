@@ -14,9 +14,14 @@ Not merged, deployed, or verified in production. No migration or production writ
   quoted-import regressions were observed failing against the original importer source.
 - Local synthetic browser proof exercises both real dialogs as admin and sales rep. It uses
   dependency stubs and makes no production requests; it does not prove database execution.
-- Observed proof: 50 focused tests pass; both quoted-import tests fail on original source;
-  eight browser success/failure checks pass with zero external requests and zero page errors.
+- Quote numeric cells reject partial conversions such as `"1,200.00"` or `32oz`, with plain-number
+  guidance. Tier and validity-day cells also require a complete valid number.
+- Observed proof: 59 focused tests pass; both quoted-import tests fail on original source;
+  ten browser success/failure checks pass with zero external requests and zero page errors.
   Lint, TypeScript, production build, code-health, and agent-guidance checks pass.
+- Independent compliance and Luna xhigh reviews are clean after resolving numeric-input
+  findings. Sol, CodeRabbit, remote CI, and production verification remain release-time work;
+  this task parks local commits without pushing a PR or merging.
 
 Rollback: revert this isolated parser/import change before release; no data rollback is needed.
 Before release: finish applicable independent reviews and protected PR checks, and verify the

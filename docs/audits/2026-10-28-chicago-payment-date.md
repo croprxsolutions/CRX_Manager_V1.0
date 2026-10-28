@@ -2,7 +2,7 @@
 
 ## Status and design
 
-Current implementation is on `codex/chicago-payment-retry-intent-20261028` in `C:/CRX_payment_retry_intent`, based on refreshed `origin/main` at `5b0246530` plus the two earlier parked commits. The original reviewed branch/worktree at `741273f2b` remains unchanged. Parked at Mason's explicit no-push/no-merge/no-live-apply/no-deploy boundary. No production writes, migration applies, deployments, grants, or settings changes were performed.
+Current implementation is on `codex/chicago-payment-retry-intent-20261028` in `C:/CRX_payment_retry_intent`, based on refreshed `origin/main` at `5b0246530` plus the two earlier parked commits. The original reviewed branch/worktree at `741273f2b` remains unchanged. Mason now authorizes publication as a draft PR after a clean Sonnet 5.5/high review. The current boundary is draft only: no ready-for-review switch, auto-merge, merge, live migration apply, or deployment. No production data/settings/grants have changed.
 
 Live read-only `pg_get_functiondef` on 2026-10-28 confirmed a single `allocate_payment(uuid,bigint,text,text,text,date,text,jsonb,uuid,text)` overload, with `p_payment_date DEFAULT CURRENT_DATE`. Its body matches `20260713060300_harden_allocate_payment_idempotency.sql`, normalized body MD5 `6a945a2510d8e788d4e6f03c0c6d7563`; the local prover independently checks the baseline body against that pin. The live period helper checks the supplied date against closed periods. The live duplicate-key trigger recognizes the existing v1 envelope, preserved here.
 
@@ -11,6 +11,8 @@ Both `src/pages/PaymentAllocation.tsx` and `src/pages/InvoiceDetail.tsx` omit th
 The optional date default becomes NULL. New payments resolve `(now() AT TIME ZONE 'America/Chicago')::date` after replay lookup. Explicit dates remain unchanged; explicit NULL defaults like omission. The fingerprint retains the raw date argument. New claims and cached results retain `_contract = allocate_payment_v1` for the existing trigger, and add top-level `_date_intent_version = 1`. For marked keys, explicit-to-omitted/NULL, omitted-to-explicit and changed explicit dates reject. Identical explicit dates and omitted/NULL defaults replay. Only older v1 entries without that marker normalize an omitted date using the cached date, because those entries cannot distinguish the old eager default from an explicit date. Older bare cached results retain their previous replay path. Other request fields still compare; stored dates and expiry policy remain unchanged.
 
 Mason's follow-up explicitly includes the season defect. One Chicago business date is captured after replay and used for both the omitted date and current payment/prepay season. The October-to-September season now advances at Chicago midnight on October 1, independent of the database timezone. Explicit backdated payment dates are preserved; new prepay credit still belongs to the current Chicago season rather than the historical payment-date season. Allocation math, invoice status recomputation, actor/role checks, grants, and function identity are preserved. Quote/order/rebate numbering is out of scope.
+
+Deliberate scope limit: the shared `current_season()` helper still calls `compute_season(CURRENT_DATE)` (re-read live on 2026-10-28). During the roughly five-hour September 30 Chicago evening window, workflows that use that UTC helper can already default to the next season while this corrected payment/prepay path remains in the current Chicago season. This migration does not change those other workflows or the shared helper.
 
 ## Verification and limits
 
@@ -36,15 +38,17 @@ Security, drift, compliance and TypeScript independent reviewers found no code b
 
 Earlier Luna findings about the copied permission tail and the legacy retry test were fixed; there are no GRANT/REVOKE statements, and the legacy test crosses Chicago midnight. The previously deferred MED season issue is now included by Mason's explicit follow-up request and fixed using the shared Chicago business date. The new season tests replace the earlier test that deliberately preserved that defect.
 
-No final Sol proof, CodeRabbit current-head review or green CI is claimed. These delivery gates remain required before release. No draft PR is required to preserve local work. Do not merge/apply under this task's authority. A later release must refresh source/live evidence and migration ordering and use all guarded delivery paths.
+No final Sol delivery proof, CodeRabbit current-head review or green CI is claimed. These delivery gates remain required before release. Publication as a draft PR is authorized after Sonnet's clean review; keep it draft. Do not merge/apply/deploy under this task's authority. A later release must refresh source/live evidence and migration ordering and use all guarded delivery paths.
 
 Rollback, if ever applied: use a new reviewed forward migration without rewriting payment rows. It must retain compatibility with the new raw-date-intent marker and older unmarked/bare receipts; blindly restoring the old eager-date function could reject retries of marked omitted-date entries. Verify default/explicit dates, seasons, period guards and all receipt formats locally before release.
 
-Proposed shared-list status, returned without editing TO_DO_LIST/CURRENT_STATE/DECISION_LOG: **6.7 locally implemented and tested; parked, not shipped. Release reviews/CI/live apply remain pending under the no-merge boundary.**
+Proposed shared-list status: **6.7 implemented and tested for draft review, not shipped. Release reviews/CI/live apply remain pending under the draft-only boundary.** CURRENT_STATE/KNOWN_ISSUES receive only the fresh, scoped read-only checks needed by the pre-PR documentation gate; the broader old reconciliation is not re-dated.
 
 Graphify was built from `a3423a81`. `graphify explain allocate_payment` returned an older season-calendar definition. Current callers, the latest migration and the live definition supplied authoritative evidence.
 
 ## Historical closeout before the season follow-up
+
+The historical closeouts below describe the earlier local-only stages. Their no-push/no-PR statements were true at those checkpoints and do not override the current draft-publication authorization above.
 
 - Final full migration SHA256: `455287e603b678835a9db8d7323ea21435dab8b19b18b5f32083bbaa160de630`.
 - Final disposable proof printed `CHICAGO_PAYMENT_DATE_PROOF_PASS`, including the extended legacy-midnight case, all four roles and the preserved season boundary.
@@ -54,7 +58,7 @@ Graphify was built from `a3423a81`. `graphify explain allocate_payment` returned
 - Security reviewer rechecked the final SHA after removal of the historical permission tail: no RLS/grant finding. Luna: no BLOCKER/HIGH; two findings fixed, one pre-existing MED season issue explicitly deferred above. No final Sol or public delivery gate is claimed.
 - Park this as local work. No PR was opened or branch pushed. Not merged; no migration applied or deployment performed.
 
-## Season follow-up closeout - 2026-10-28
+## Historical season follow-up closeout - 2026-10-28
 
 - Mason explicitly requested fixing the deferred season issue, followed by Luna at xhigh, while retaining no merge/apply/deploy authority.
 - Current migration SHA256: `a32e3853f4803afba0b1e1781fef6c134ff428ae17913e80d2cccc45a202b425`. This supersedes the historical hash above; the parked migration-history pin matches.
@@ -65,7 +69,7 @@ Graphify was built from `a3423a81`. `graphify explain allocate_payment` returned
 - No final Sol, CodeRabbit, CI, full current-production-schema replay or live release proof is claimed. The former season MED is resolved locally rather than deferred. Do not treat this as shipped.
 - Keep the same local branch/worktree parked. No push or PR, no merge, no live migration apply, no deployment, and no production data/settings/grant changes occurred.
 
-## Retry-date-intent follow-up closeout - 2026-10-28
+## Historical retry-date-intent follow-up closeout - 2026-10-28
 
 - Sol's review of `741273f2b` found one MED: a new explicit-date key could be retried with the date omitted and silently match. Mason explicitly requested fixing that while retaining older-key compatibility and repeating Sol at high, with no push/merge/live apply/deploy.
 - Work continues in `C:/CRX_payment_retry_intent`, branch `codex/chicago-payment-retry-intent-20261028`, based on current main `5b0246530` with the original two parked commits cherry-picked. No history or files in the original worktree were changed.
@@ -78,3 +82,11 @@ Graphify was built from `a3423a81`. `graphify explain allocate_payment` returned
 - Independent security, drift, type and compliance re-reviews found no findings in the retry-intent change.
 - Requested final advisory reviewer: `gpt-6-sol`, reasoning `high`, isolated read-only CLI, session `01a183ef-13d6-7413-958c-3f3ceef8762e`. Verdict `PAYMENT_REVIEW: CLEAN`, no actionable finding. The reviewer received frozen migration/proof/diff and the unchanged shared insert-trigger source. This was static source review; runtime proof was executed separately by the implementing session.
 - No formal Sol delivery proof, CodeRabbit, green CI, fresh production verification, or full current-production-schema replay is claimed. Keep parked. No branch was pushed, PR opened, merge performed, live migration applied, deployment performed, or production data/settings/grants changed.
+
+## Draft preparation and Sonnet review - 2026-10-28
+
+- First requested review was VERIFIED on `claude-sonnet-5-5`, effort `high`, with no permission denials. It found no code, BLOCKER, HIGH or MED finding; two LOW documentation findings required changes before a clean result: disclose the UTC shared-season-helper limit, and replace current local-only delivery wording with the newly authorized draft-only scope. Both are corrected above and in the changelog/history notes. The earlier no-push checkpoints remain explicitly historical.
+- Fresh read-only `list_migrations` returned 1075 rows, latest version `20261028121259` / name `20261027080300_notification_sender_recorded`; the candidate is absent. Fresh `pg_get_functiondef` confirms `allocate_payment` still defaults `CURRENT_DATE` and computes its current season from `CURRENT_DATE`; `current_season()` still calls `compute_season(CURRENT_DATE)`. These observations supersede earlier inability to refresh the catalog, and confirm this candidate is not live. No production writes occurred.
+- The documentation freshness gate initially failed CURRENT_STATE/KNOWN_ISSUES dated 2026-10-27. Their new 2026-10-28 entries are limited to the executed payment/ledger checks and explicitly retain the earlier broad-reconciliation dates and issue counts.
+- Optional NIT dispositions: retain the existing inline season calculation and `now()` convention rather than change reviewed financial SQL; retain the dated changelog chronology; full Docker proof remains an explicit local command, not an automatic CI claim. The legacy changed-explicit-date branch is present and source-reviewed, though a separate probe for that legacy mismatch and automatic proof wiring remain optional coverage improvements. The named history row is machine-readable and can receive an ordinal when release accounting assigns it.
+- The SQL file, behavior proof and SHA256 `5ced6a5e8e3d8a40d7ecca4985d2bd5e3d25ca6f980f2dee1e6bacabff9b93dd` are unchanged by this documentation follow-up. The recorded runtime proof remains applicable. No merge/live apply/deployment is authorized by draft publication.

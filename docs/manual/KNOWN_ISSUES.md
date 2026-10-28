@@ -1,8 +1,10 @@
 # Known Issues — what is open today
 
+**Last verified: 2026-10-28 (America/Chicago)** for the targeted payment-date pre-PR check only. Fresh live read-only function definitions confirm `allocate_payment` still uses the server's `CURRENT_DATE` for default dates and current payment/prepay season. The 1075-row live migration ledger does not contain candidate `20261028175551_chicago_payment_business_date.sql`; the fixes remain a draft-only candidate, not a production resolution. Shared `current_season()` still uses UTC `CURRENT_DATE`, so other callers retain their September 30 evening boundary difference. The broader reconciliation, other issue evidence and counts retain their dated scope below. See [payment evidence](../audits/2026-10-28-chicago-payment-date.md).
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
+**Earlier verification: 2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
 `20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
 entries name; at 7:37 AM Central that migration applied live, ledger `20261027123725`, 1068 rows, and a read-only

@@ -286,5 +286,5 @@ supabase/migrations/20260911120000_bind_adjust_inventory_receipt_to_intent.sql t
 scripts/smoke/smoke-adjust-inventory-intent-binding.sql text eol=lf
 scripts/smoke/prove-adjust-inventory-intent-binding-real-schema.mjs text eol=lf
 
-# Keep the parked Chicago payment-date candidate's SHA stable across checkouts.
+# Keep the unapplied Chicago payment-date candidate's SHA stable across checkouts.
 supabase/migrations/20261028175551_chicago_payment_business_date.sql text eol=lf

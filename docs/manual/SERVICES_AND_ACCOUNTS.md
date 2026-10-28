@@ -213,7 +213,10 @@ passphrase.
 **Current state (2026-10-28):** Mason gave Taha K. GitHub admin and decided to make him a Supabase
 Administrator, skipping steps 1 to 3. GitHub admin can merge without the agents' review gates and
 change `main`'s protection. When the engagement ends, remove him from GitHub and Supabase on the
-same day and rotate any key he handled.
+same day. Admin access can read or create credentials without anyone noticing, so rotate every key
+those roles reach, not only the ones he is known to have used: the Supabase service-role key,
+database password and Edge Function secrets, and the GitHub Actions secrets. Then delete any deploy
+keys, webhooks or app installations he added.
 
 The backup repo `CRX_Backups`, the backup passphrase, the domain registrar, Google Workspace
 and billing stay with Mason.

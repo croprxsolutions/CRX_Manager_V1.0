@@ -72,9 +72,13 @@ proof observed; parked pending final review and protected delivery. Not live.**
   now present. The later applying session must assign its live entry only after actual apply.
 - **Delivery gate unavailable:** this session's SQL guard refused the generated read-only
   live sweep queries with “Codex only permits clearly read-only SQL.” The required sweep
-  could not be checked, try again. No sweep pass is claimed. The canonical workflow was
-  requested through the installed Claude CLI; its result is tracked separately. Do not
-  substitute the scoped reviews for a completed canonical workflow.
+  could not be checked, try again. No sweep pass is claimed.
+- **Canonical workflow incomplete:** the installed Claude CLI loaded the actual workflow.
+  Its first run was blocked by plan-mode SQL restrictions. The normal-mode retry
+  `wf_8317e470-db8` aborted internally after 619 seconds: one layer VERIFIED, three
+  unfinished, no structured overall result. The stale CLI process was closed after the
+  runtime had already marked the workflow killed. No workflow pass is claimed; do not
+  substitute scoped reviews for this gate. No denied sweep was rerouted through Claude.
 - Luna round one identified a SQL/UI receipt mismatch and retry and generator contract
   issues. The candidate now emits explicit success, replays a bound receipt after later
   edits without writing again, and keeps number generation inside owner transactions.
@@ -89,4 +93,12 @@ proof observed; parked pending final review and protected delivery. Not live.**
   no role memberships, superuser status or RLS bypass, and order RLS is enabled. Keeping
   the column grant follows the existing column-carved convention without exposing rows.
 - Final exact-SHA Sol review, guarded push and a draft PR remain outstanding because
-  prerequisite gates are not green. This task is parked locally, not ready to deliver.
+  prerequisite gates are not green. The supported Sol wrapper dry-run also refuses
+  preflight without an identified PR. No Sol proof was minted. This task is parked
+  locally, not ready to deliver. Finish the unavailable workflow/sweep evidence in a
+  supported session before PR and final review; no merge/apply/deploy is authorized.
+
+The unpublished local branch was rebased onto `origin/main` at `32469af54` after confirming
+the six upstream build/documentation files did not overlap this candidate. Product code
+and SQL were unchanged by that rebase. Scoped security and drift reviews are clear;
+the final local agent-workflow test suite also passed.

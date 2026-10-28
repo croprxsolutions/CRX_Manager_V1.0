@@ -11,6 +11,8 @@ Review follow-up aligns SQL save receipts with the editor, preserves original re
 across later edits, and makes the ticket-number helper owner-only behind ticket creation.
 Real-schema and four browser scenarios passed; the renewed regression run passed 6,632
 tests. Future live permission narrowing requires explicit owner approval.
+The final trigger-order proof and scoped security/drift reviews pass. Canonical workflow
+execution aborted without a complete verdict; live sweeps and final Sol remain blocked.
 
 Verification commands, scope limits, future rollout and rollback are documented in
 `docs/reference/order-edit-concurrency.md`. Shared to-do/status files are intentionally left

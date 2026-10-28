@@ -113,6 +113,10 @@ The safe optional live lock timeout can be assessed by the future apply session.
 Keep the PR a draft. Do not enable auto-merge, merge, apply, deploy, or write
 production data/settings/permissions. Future delivery needs refreshed evidence
 and all remaining protected review/CI/apply gates.
+The branch-specific `git.deploymentEnabled` entry in `vercel.json` is false for
+`codex/chicago-document-numbers-20261028` so the authorized push cannot trigger
+an automatic preview deployment. Other branches, including main, retain their
+existing default behavior. No Vercel project settings were changed through an API.
 
 Rollback is a forward migration re-emitting the three reviewed bodies with the
 prior year expression. Never reset counters/sequences or renumber records.

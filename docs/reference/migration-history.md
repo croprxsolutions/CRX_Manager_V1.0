@@ -1,6 +1,6 @@
 # Migration History (latest entry 999)
 
-## Parked payment-date candidate — 2026-10-28
+## Unapplied payment-date candidate (draft review) — 2026-10-28
 
 | Row | Version | Description |
 |---:|---|---|

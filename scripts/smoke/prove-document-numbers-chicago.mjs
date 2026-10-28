@@ -8,10 +8,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const REUSE = process.argv.find(arg => arg.startsWith('--reuse='))?.slice(8);
-const NAME = REUSE || `crx-document-numbers-${process.pid}-${Date.now().toString(36)}`;
-assert.match(NAME, /^crx-document-numbers-[a-z0-9-]+$/, 'only this proof owns the container');
-const KEEP = process.argv.includes('--keep') || Boolean(REUSE);
+const NAME = `crx-document-numbers-${process.pid}-${Date.now().toString(36)}`;
+assert.ok(process.argv.slice(2).every(arg => arg === '--keep'), 'only --keep is supported; reuse is deliberately refused');
+const KEEP = process.argv.includes('--keep');
+let createdContainerId = null;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
@@ -76,18 +76,13 @@ function asyncSql(sql) {
   });
 }
 async function main() {
-  if (!REUSE) buildContainer();
-  else {
-    // Restore only this local fixture's prior bodies before replaying the matrix.
-    const emitted = lf(CANDIDATE).match(/CREATE OR REPLACE FUNCTION[\s\S]*?\$fn\$;/g);
-    assert.equal(emitted?.length, 3);
-    for (const def of emitted) psql(def.replaceAll("(now() AT TIME ZONE 'America/Chicago')::date", 'current_date'));
-  }
+  buildContainer();
   for (const [sig, old] of SPECS) assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid='public.${sig}'::regprocedure;`), old, `live fidelity: ${sig}`);
   const before = contract();
   const oldDefs = definitions();
   stageText('candidate.sql', lf(CANDIDATE));
-  assert.equal(apply('candidate.sql').status, 0, 'migration applies');
+  const installed = apply('candidate.sql');
+  assert.equal(installed.status, 0, `migration applies: ${installed.output}`);
   assert.equal(contract(), before, 'signature, owner, grants and search path preserved');
   for (const [sig,,hash] of SPECS) assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid='public.${sig}'::regprocedure;`),hash);
   assert.equal(apply('candidate.sql').status,0,'replay safe');
@@ -145,10 +140,29 @@ async function main() {
   assert.notEqual(apply('candidate.sql').status,0,'unexpected body drift refused');
   for (const def of fixedDefs) psql(def);
   assert.equal(contract(),before,'all contracts still preserved');
+  for (const change of [
+    'ALTER FUNCTION public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text) SECURITY INVOKER;',
+    'ALTER FUNCTION public.generate_quote_number() SET search_path = public, pg_temp;',
+    'CREATE ROLE number_proof_owner; GRANT number_proof_owner TO postgres WITH SET TRUE; GRANT CREATE ON SCHEMA public TO number_proof_owner; ALTER FUNCTION public.generate_order_number() OWNER TO number_proof_owner;',
+    'REVOKE EXECUTE ON FUNCTION public.generate_quote_number() FROM authenticated;',
+  ]) {
+    const refused = psql(`BEGIN; ${change}\n${lf(CANDIDATE)}`, { allowFailure: true });
+    assert.notEqual(refused.status, 0, 'preflight refuses changed function contract');
+    assert.match(refused.stderr, /CONTRACT_FAIL/);
+    assert.equal(contract(), before, 'failed preflight rolls back the local mutation');
+  }
+  const badReplacement = lf(CANDIDATE).replace('RETURNS text\nLANGUAGE plpgsql\nSET search_path = public',
+    'RETURNS text\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = public');
+  assert.notEqual(badReplacement, lf(CANDIDATE));
+  const postflightRefusal = psql(badReplacement, { allowFailure: true });
+  assert.notEqual(postflightRefusal.status, 0, 'postflight refuses an incorrect emitted contract');
+  assert.match(postflightRefusal.stderr, /CONTRACT_FAIL/);
+  assert.equal(contract(), before, 'postflight refusal rolls back the whole migration');
+  console.log('PASS preflight/postflight refuse owner, grants, search-path and security drift');
   console.log('DOCUMENT_NUMBERS_CHICAGO_PROOF_PASS');
 }
 try { await main(); }
-finally { if (!KEEP) docker(['rm','-f',NAME],{allowFailure:true}); }
+finally { if (createdContainerId && !KEEP) docker(['rm','--force',createdContainerId],{allowFailure:true}); }
 // Container plumbing (the shared real-schema harness).
 function docker(args, options = {}) {
   const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
@@ -223,7 +237,9 @@ function installLiveAuthUid() {
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
 function buildContainer() {
-  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  const startedContainerId = docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]).stdout.trim();
+  assert.match(startedContainerId, /^[0-9a-f]{64}$/, 'Docker must identify the container this run created');
+  createdContainerId = startedContainerId;
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);

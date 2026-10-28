@@ -33,6 +33,38 @@ BEGIN
 END;
 $preflight$;
 
+DO $contract_preflight$
+DECLARE
+  v_fn record;
+BEGIN
+  IF (SELECT count(*) FROM pg_proc
+       WHERE pronamespace = 'public'::regnamespace
+         AND proname IN ('generate_quote_number', 'generate_order_number', 'create_rebate_claim')) <> 3 THEN
+    RAISE EXCEPTION 'CONTRACT_FAIL: unexpected numbering overload';
+  END IF;
+  FOR v_fn IN
+    SELECT * FROM pg_proc
+     WHERE oid IN ('public.generate_quote_number()'::regprocedure,
+                   'public.generate_order_number()'::regprocedure,
+                   'public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)'::regprocedure)
+  LOOP
+    IF v_fn.prosecdef IS DISTINCT FROM (v_fn.proname = 'create_rebate_claim')
+       OR v_fn.proconfig IS DISTINCT FROM
+         (CASE WHEN v_fn.proname = 'create_rebate_claim'
+              THEN ARRAY['search_path=public, pg_temp'] ELSE ARRAY['search_path=public'] END)
+       OR pg_get_userbyid(v_fn.proowner) <> 'postgres'
+       OR v_fn.pronargdefaults <> (CASE WHEN v_fn.proname = 'create_rebate_claim' THEN 5 ELSE 0 END)
+       OR pg_get_expr(v_fn.proargdefaults, 0) IS DISTINCT FROM
+         (CASE WHEN v_fn.proname = 'create_rebate_claim'
+              THEN 'NULL::uuid, NULL::uuid, NULL::uuid, NULL::text, NULL::text' ELSE NULL END)
+       OR v_fn.proacl::text IS DISTINCT FROM
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}' THEN
+      RAISE EXCEPTION 'CONTRACT_FAIL: % settings, defaults, owner or grants drifted; re-review before applying', v_fn.proname;
+    END IF;
+  END LOOP;
+END;
+$contract_preflight$;
+
 CREATE OR REPLACE FUNCTION public.create_rebate_claim(p_program_id uuid, p_quantity numeric, p_claim_amount_cents bigint,
   p_order_id uuid DEFAULT NULL, p_customer_id uuid DEFAULT NULL, p_product_id uuid DEFAULT NULL,
   p_notes text DEFAULT NULL, p_idempotency_key text DEFAULT NULL)
@@ -135,5 +167,50 @@ BEGIN
   RETURN 'Q-' || extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text || '-' || lpad(nextval('quote_number_seq')::text, 4, '0');
 END;
 $fn$;
+
+DO $contract_postflight$
+DECLARE
+  v_fn record;
+BEGIN
+  IF (SELECT count(*) FROM pg_proc
+       WHERE pronamespace = 'public'::regnamespace
+         AND proname IN ('generate_quote_number', 'generate_order_number', 'create_rebate_claim')) <> 3 THEN
+    RAISE EXCEPTION 'CONTRACT_FAIL: unexpected numbering overload';
+  END IF;
+  FOR v_fn IN
+    SELECT * FROM pg_proc
+     WHERE oid IN ('public.generate_quote_number()'::regprocedure,
+                   'public.generate_order_number()'::regprocedure,
+                   'public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)'::regprocedure)
+  LOOP
+    IF v_fn.prosecdef IS DISTINCT FROM (v_fn.proname = 'create_rebate_claim')
+       OR v_fn.proconfig IS DISTINCT FROM
+         (CASE WHEN v_fn.proname = 'create_rebate_claim'
+              THEN ARRAY['search_path=public, pg_temp'] ELSE ARRAY['search_path=public'] END)
+       OR pg_get_userbyid(v_fn.proowner) <> 'postgres'
+       OR v_fn.pronargdefaults <> (CASE WHEN v_fn.proname = 'create_rebate_claim' THEN 5 ELSE 0 END)
+       OR pg_get_expr(v_fn.proargdefaults, 0) IS DISTINCT FROM
+         (CASE WHEN v_fn.proname = 'create_rebate_claim'
+              THEN 'NULL::uuid, NULL::uuid, NULL::uuid, NULL::text, NULL::text' ELSE NULL END)
+       OR v_fn.proacl::text IS DISTINCT FROM
+         '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}' THEN
+      RAISE EXCEPTION 'CONTRACT_FAIL: % settings, defaults, owner or grants drifted; re-review before applying', v_fn.proname;
+    END IF;
+    IF md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM
+       (CASE v_fn.proname
+         WHEN 'generate_quote_number' THEN '997d2761e4ccad424ec37b2eacf9bb60'
+         WHEN 'generate_order_number' THEN '12ea44c2fab96aa4f3b84becd99aa8cf'
+         WHEN 'create_rebate_claim' THEN 'b10a817e3ed45f227c5a471a837b3a4c'
+       END) THEN
+      RAISE EXCEPTION 'CONTRACT_FAIL: % replacement body mismatch', v_fn.proname;
+    END IF;
+  END LOOP;
+  IF extract(year FROM (TIMESTAMPTZ '2027-01-01 00:00:00+00' AT TIME ZONE 'America/Chicago')::date) <> 2026
+     OR extract(year FROM (TIMESTAMPTZ '2027-01-01 05:59:59+00' AT TIME ZONE 'America/Chicago')::date) <> 2026
+     OR extract(year FROM (TIMESTAMPTZ '2027-01-01 06:00:00+00' AT TIME ZONE 'America/Chicago')::date) <> 2027 THEN
+    RAISE EXCEPTION 'CONTRACT_FAIL: Chicago year boundary assertion failed';
+  END IF;
+END;
+$contract_postflight$;
 
 COMMIT;

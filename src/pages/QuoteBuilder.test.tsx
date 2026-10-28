@@ -1144,6 +1144,20 @@ describe('QuoteBuilder', () => {
     expect(mockFrom).not.toHaveBeenCalledWith('quotes');
   });
 
+  it('waits for server numbering before enabling Save Draft', async () => {
+    let resolveNumber!: (result: { data: string; error: null }) => void;
+    const number = new Promise<{ data: string; error: null }>((resolve) => { resolveNumber = resolve; });
+    mockRpc.mockImplementation((name: string) => name === 'generate_quote_number'
+      ? number : Promise.resolve({ data: null, error: null }));
+    renderQuoteBuilder();
+    const save = await screen.findByRole('button', { name: 'Save Draft' });
+    expect(save).toBeDisabled();
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('quote number'));
+    await act(async () => resolveNumber({ data: 'Q-2026-9876', error: null }));
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(screen.getByText('Q-2026-9876')).toBeInTheDocument();
+  });
+
   it.each(['error', 'empty', 'blank', 'throw'])('refuses to invent a quote number after a server %s', async (failure) => {
     mockRpc.mockImplementation((name: string) => {
       if (name !== 'generate_quote_number') return Promise.resolve({ data: null, error: null });

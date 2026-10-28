@@ -1,116 +1,110 @@
-# To-Do 12.1: Chicago document-number year - parked candidate
+# To-Do 12.1: Chicago document-number year - draft-only candidate
 
-Scope: quote, order and rebate-claim numbering only. Existing invoice numbering
-and payment dates are unchanged. No existing identifiers are rewritten and no
-sequence or counter is reset. This candidate has not been merged or applied live.
+Scope: quote, order and rebate-claim numbering only. Invoice numbering, payment
+dates, existing identifiers, formats, sequences and counters are unchanged.
+Mason authorized a guarded push and draft PR after a clean Sonnet 5.5 high-effort
+review and green checks. No merge, live apply or deployment is authorized.
 
 ## Current-source and live read-only evidence
 
-Started from `origin/main` at `5b0246530` in isolated checkout
-`C:/CRX_chicago_document_numbers`, branch
-`codex/chicago-document-numbers-20261028`.
+Base: `origin/main` at `5b0246530`, still current when the final suite completed.
+Checkout: `C:/CRX_chicago_document_numbers`.
+Branch: `codex/chicago-document-numbers-20261028`.
 
 Live `pg_proc` inspection on 2026-10-28 found one signature each:
+`generate_quote_number()`, `generate_order_number()`, and
+`create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)`.
+The generators retain their sequences and active-role checks. Claim creation
+retains five defaults, role checks, scoped idempotency helpers and its atomic
+yearly counter increment.
 
-- `generate_quote_number()` and `generate_order_number()` return text and use
-  their existing PostgreSQL sequences. Active-role checks remain unchanged.
-- `create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)` returns JSON,
-  retains five defaults, its existing role checks and scoped idempotency helpers,
-  and increments the yearly counter through atomic `INSERT ... ON CONFLICT`.
+The candidate replaces only `current_date` in these bodies with
+`(now() AT TIME ZONE 'America/Chicago')::date`, following the invoice pattern in
+`20260914100100_next_invoice_number_year_chicago.sql`. Preflight and postflight
+verify signatures, overload counts, original/replacement body hashes, security
+mode, search path, owner, default arguments and existing grants. Postflight also
+asserts the Chicago year boundary. No grants change.
 
-All three still used `current_date` for year selection. The candidate replaces
-only that expression with `(now() AT TIME ZONE 'America/Chicago')::date`, matching
-`20260914100100_next_invoice_number_year_chicago.sql`. The migration pins the
-inspected original bodies and its own replacements and checks overload count and
-signature before re-emitting explicit function definitions. No grants change.
+Live caller inspection confirmed quote templates, duplication and rollover use
+the quote generator; direct orders, quick delivery, conversion, booking draw-down
+and rush orders use the order generator. The quote and blend-ticket screens
+consume those results. Rebates use the claim RPC. Quote Builder no longer invents
+a browser number after failure; new-quote Save Draft waits for allocation and
+distinguishes pending from failed allocation.
 
-Live caller inspection confirmed quote template creation, duplication and season
-rollover use `generate_quote_number`. Direct order creation, quick delivery,
-conversion, booking draw-down and rush orders use `generate_order_number`.
-The quote and blend-ticket screens consume these RPC results. Rebates already
-use `create_rebate_claim`; no browser year generation remains in the quote screen.
+The live ledger had 1,075 rows. Its effective maximum (leading authored-name
+timestamp, else version) was `20261027080300`: version `20261028121259`,
+name `20261027080300_notification_sender_recorded`. This candidate sorts later.
+Refresh the ledger before any future apply.
 
-The fresh live migration ledger contained 1,075 rows. Comparing each row's
-leading authored-name timestamp, falling back to version, gave effective maximum
-`20261027080300` (version `20261028121259`,
-`20261027080300_notification_sender_recorded`). This candidate sorts later.
-Refresh this observation before any future apply.
+Graphify refreshed from the base. `graphify explain generate_order_number`
+returned an older definition and only its containing-file edge; current source
+and live caller inspection supplied the authoritative paths above.
 
-Graphify refreshed from the starting commit. `graphify explain
-generate_order_number` returned the older 20260209200000 definition and only its
-containing-file edge; current source and live caller inspection supplied the
-authoritative paths above.
+## Observed verification
 
-## Verification
-
-- Typecheck, lint and production build passed.
-- Focused quote-page suite: 110/110 passed, including server-number success and
-  error, null/empty-string and rejected-request cases with no browser fallback.
-- Security, compliance and focused type review: clean. Migration drift review:
-  no remaining technical HIGH after the fresh ledger evidence; shared migration
-  history bookkeeping is deferred to the future authorized apply.
-- Full-schema local proof passed: `DOCUMENT_NUMBERS_CHICAGO_PROOF_PASS`, after
-  baseline restore and 155 post-baseline migrations. Seven controlled instants
-  each passed in UTC, Chicago and Tokyo sessions: UTC New Year before Chicago
-  midnight, immediately before/at/after Chicago midnight, summer and winter.
-  The old year expression reproduced the early rollover; the fix prevented it.
-  Twelve concurrent transactions returned unique quote/order/claim numbers.
-  A claim replayed across midnight retained its original ID/number. Admin and
-  sales-rep calls succeeded; driver and applicator calls were refused. Invalid
-  quantity and unexpected body drift were refused. Apply/reapply, body hashes,
-  signatures, defaults, owners, ACLs and search paths were verified.
-- Local browser proof passed: `DOCUMENT_NUMBERS_BROWSER_PROOF_PASS`. The real
-  quote screen displayed the server number. Error, null, empty-string and
-  rejected-request cases showed the failure and refused Save Draft after a
-  customer was selected: zero fallback count queries, zero save RPCs, and zero
-  page errors. All API traffic used an intercepted loopback fake backend.
+- Final application suite: 480 files passed, 6,638 tests passed, 123 skipped.
+  Command: `npm run test -- --maxWorkers=1`.
+- Focused quote suite: 111/111 passed, including pending allocation, server
+  success, errors, null/empty-string and rejected requests.
+- Typecheck and lint passed after review fixes. The initial build passed; the
+  protected pre-push hook rechecks typecheck and build on the final head.
+- Complete `test:agent-workflows` and `check:agent-guidance` passed. Earlier
+  mocked guard failures passed on retry without changing any guard.
+- The cost-field check passed its isolated 30-test retry. A later two-worker run
+  had an inventory retry timeout; its isolated 20-test run passed. The final
+  one-worker full suite above passed all 480 files. No checks were weakened.
+- `DOCUMENT_NUMBERS_CHICAGO_PROOF_PASS`: supported baseline plus 155 post-baseline
+  migrations in a network-disabled PostgreSQL 17 container. Seven clock cases
+  passed in UTC, Chicago and Tokyo: UTC New Year before Chicago midnight,
+  immediately before/at/after Chicago midnight, summer and winter. The old
+  expression reproduced early rollover.
+- Twelve concurrent transactions produced unique quote/order/claim numbers.
+  A cross-midnight claim retry retained its ID/number. Admin and sales-rep calls
+  succeeded; driver/applicator calls were refused. Invalid quantity and body
+  drift were refused. Apply/reapply preserved all function contracts.
+- Metadata mutation checks passed: changed security mode, owner, search path or
+  grants caused preflight refusal and rollback. An incorrect emitted security
+  mode caused postflight refusal and rollback of the whole migration.
+- `DOCUMENT_NUMBERS_BROWSER_PROOF_PASS`: the real page waited for a delayed
+  allocation, then enabled Save Draft. Four failure cases refused saving after
+  customer selection: zero fallback count queries, zero save RPCs, zero page
+  errors. Every API request used an intercepted loopback fake backend.
   Screenshot: `graphify-out/number-browser.png` (private local artifact).
-- `check:agent-guidance` passed. The broad suite was not green: unchanged
-  `src/lib/costFields.test.ts` failed its invoices_postable/schema-registry
-  column assertion, and `QuotesOrdersDeliveries.loadFailed.test.tsx` hit a
-  worker-termination timeout. The earlier parallel run hit worker-start timeouts.
-- `test:agent-workflows` failed in the unchanged
-  `.codex/hooks/production-action-guard.test.mjs` at line 482 (mock base commit
-  unavailable); retry failed at line 1615 (mocked push proof expected accepted).
-  No guard was changed, weakened or bypassed. This remains a push blocker.
-- Luna (`gpt-6-luna`, xhigh; review session
-  `01a183f2-b533-7392-ac12-e1adf1d4162e`) reported one HIGH and one MED.
-  The HIGH is refuted: every preflight contains original AND candidate body
-  hashes, and actual local apply followed by reapply succeeded. The MED concerns
-  pre-existing `lpad(...,4,'0')` truncation above 9,999. It is deferred as a
-  separate numbering-capacity issue; this scoped fix preserves identifier
-  formatting and sequence behavior. No clean exact-head Sol proof is claimed:
-  required broad/guard checks failed, so no push or PR was attempted.
 
-The reproducible database command is
-`node scripts/smoke/prove-document-numbers-chicago.mjs`. It restores the supported
-schema baseline in a network-disabled disposable PostgreSQL 17 container,
-replays post-baseline migrations using the existing harness exclusions, verifies
-the original live-body hashes, applies and replays the candidate, then exercises
-year-boundary, summer/winter, session-timezone, concurrency, retry, invalid-input
-and role-refusal cases. Controlled clock cases replace only the installed local
-function's `now()`/`current_date` with literal instants; there is no production
-clock override or clock parameter. It restores the exact candidate definitions
-after testing. The first run completed schema replay and migration-contract
-checks but stopped on a proof-script multiline-definition decoding error; that
-  script issue was corrected before the rerun. The first role-fixture setup was
-  refused by the real profile guard; a separate synthetic administrator now
-  performs fixture role changes without altering the guard. Reuse runs use
-  fresh test keys, preserving the actual claim retry behavior.
+Reproduce with `node scripts/smoke/prove-document-numbers-chicago.mjs`. The
+submitted script always creates a fresh network-disabled container, accepts no
+database URL, refuses reuse, and cleans up only its successfully created
+container ID. Literal clock substitution affects installed local definitions
+only; there is no production clock override.
 
-## Parking and later delivery
+## Review reconciliation
 
-Do not merge, enable auto-merge, apply a migration, deploy, or write production
-data in this task. There is no PR while required checks remain unresolved.
-The assigned session owns implementation/proof; a future authorized delivery
-session owns fresh base/overlap/ledger checks, green required checks, independent
-Luna and exact-head Sol review, guarded push and any requested PR.
+Security, compliance, focused types and migration-drift reviews found no
+unresolved technical HIGH. Shared migration-history bookkeeping is deferred
+until a future authorized apply; no applied row is claimed here.
 
-Rollback is a forward migration re-emitting these same three reviewed bodies
-with the prior `current_date` year expression. Never reset sequences/counters or
-renumber existing records. Refresh the live function contracts first.
+Luna's original HIGH about absent candidate hashes was refuted by source and
+successful actual apply/reapply. Its later MED about container reuse was fixed
+by removing reuse and binding cleanup to the created container ID. Pre-existing
+`lpad(...,4,'0')` truncation above 9,999 remains a separate deferred capacity issue.
 
-Proposed shared to-do status: "12.1 implemented and parked locally; Chicago
-business-year selection covers quotes/orders/rebate claims, with no existing
-renumbering or sequence reset. Not merged or applied; see this proof record for
-verified results and remaining gates."
+The first direct Claude review used `sonnet` at high effort; its capture resolved
+to `claude-sonnet-5`, not the requested 5.5. Its requests for stronger migration
+checks, pending/failed numbering UX, a corrected comment and green checks are
+addressed above. Draft-only delivery requires an explicit `claude-sonnet-5-5`
+high-effort review through `scripts/run-claude-review.mjs`, whose private capture
+records the resolved model and reviewed head. No final Sol/merge proof is claimed.
+
+## Delivery boundary and rollback
+
+Keep the PR a draft. Do not enable auto-merge, merge, apply, deploy, or write
+production data/settings/permissions. Future delivery needs refreshed evidence
+and all remaining protected review/CI/apply gates.
+
+Rollback is a forward migration re-emitting the three reviewed bodies with the
+prior year expression. Never reset counters/sequences or renumber records.
+
+Proposed shared to-do status: "12.1 built as a draft-only candidate; local Chicago
+boundary, concurrency, retry and failure proof passed. Not merged or applied.
+See this record and the draft PR for current delivery evidence."

@@ -55,11 +55,17 @@ proof observed; parked pending final review and protected delivery. Not live.**
   the before/after overwrite reproduction and final order totals/reservation checks.
 - The combined local browser run passed all three scenarios. The affected page/dialog suites
   passed 53 tests across seven files after the snapshot helper extraction and version-fixture updates.
+- The first broad run completed 480 files: 473 passed, seven failed, with 6595 tests passed,
+  37 failed and 123 skipped. Those seven files exposed version-fixture and column/trigger
+  integration mismatches, corrected in this branch. Their focused reruns pass; a final full
+  480-file rerun has not been performed, so the broad-suite gate is not claimed green.
+- The final combined focused rerun passed **180 tests in nine files**, including every file
+  that failed in the first broad run and the shared conflict-dialog suite.
 - TypeScript, lint, production build, code-health, agent-guidance and agent-workflow checks
   passed. The larger regression suite is tracked separately at closeout.
 - Scoped security, compliance and type reviews found no BLOCKER/HIGH. Migration drift review
-  found one MED: add the migration-history record during integration. The unique candidate
-  record is in this task's changelog; do not imply it has a live ledger entry.
+  requested a migration-history record; an explicitly parked, unnumbered candidate record is
+  now present. The later applying session must assign its live entry only after actual apply.
 - **Delivery gate unavailable:** this session's SQL guard refused the generated read-only
   live sweep queries with “Codex only permits clearly read-only SQL.” The required sweep
   could not be checked, try again. No sweep pass is claimed. The four-layer workflow runtime

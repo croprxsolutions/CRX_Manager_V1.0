@@ -8,6 +8,8 @@ SET LOCAL lock_timeout = '10s';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS row_version bigint NOT NULL DEFAULT 1;
 -- Orders use column-level SELECT grants to keep costs private.
 GRANT SELECT (row_version) ON public.orders TO authenticated;
+GRANT REFERENCES (row_version) ON public.orders TO authenticated;
+GRANT SELECT (row_version) ON public.orders TO anon;
 
 CREATE OR REPLACE FUNCTION public.bump_order_edit_version()
 RETURNS trigger LANGUAGE plpgsql

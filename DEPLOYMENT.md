@@ -65,6 +65,9 @@ which does not exist yet. See [TESTING.md](./TESTING.md#running-e2e-tests).
   repository root or under `supabase/` or `scripts/`. Anything else — and any case it cannot
   compare (a branch's first push, a commit missing from Vercel's shallow clone) — builds as
   before. Markdown under `src/` or `public/` always builds, because it can reach the site.
+  The script only sees git, not Vercel settings: after changing a Vercel environment variable,
+  redeploy production from the Vercel dashboard, or push a commit whose message contains
+  `[force build]`, which always builds. A notes-only push no longer picks up the new value.
 - The custom domain `croprxsolutions.app` is attached in the Vercel project settings. Changing
   domains is an owner decision (`AGENTS.md`).
 

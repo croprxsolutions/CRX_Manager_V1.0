@@ -10,6 +10,15 @@ set -u
 previous="${VERCEL_GIT_PREVIOUS_SHA:-}"
 current="${VERCEL_GIT_COMMIT_SHA:-HEAD}"
 
+# Escape hatch: Vercel settings (such as environment variables) are not in git, so a
+# change there needs a build this script cannot see. Put [force build] in the commit message.
+case "${VERCEL_GIT_COMMIT_MESSAGE:-}" in
+  *"[force build]"*)
+    echo "Build: [force build] in the commit message."
+    exit 1
+    ;;
+esac
+
 # No earlier successful deployment on this branch (e.g. its first push): build.
 if [ -z "$previous" ]; then
   echo "Build: no previous deployment to compare against."
@@ -28,14 +37,21 @@ if [ -z "$changed" ]; then
   exit 1
 fi
 
-# Paths the Vite build never reads. Markdown under src/ or public/ is excluded,
-# because files there can end up in the built site.
-app_files="$(printf '%s\n' "$changed" | grep -vE '^(docs/|\.claude/|\.agents/|\.codex/)' | grep -vE '^[^/]+\.md$|^(supabase|scripts)/.*\.md$')"
+# Plain shell matching, so no helper program can fail and empty the list by accident.
+# Markdown under src/ or public/ is not listed, because files there can reach the built site.
+while IFS= read -r file; do
+  case "$file" in
+    docs/* | .claude/* | .agents/* | .codex/*) ;;
+    */*.md)
+      case "$file" in
+        supabase/* | scripts/*) ;;
+        *) echo "Build: app files changed, e.g. $file"; exit 1 ;;
+      esac
+      ;;
+    *.md) ;;
+    *) echo "Build: app files changed, e.g. $file"; exit 1 ;;
+  esac
+done <<< "$changed"
 
-if [ -z "$app_files" ]; then
-  echo "Skip: only notes and docs changed since $previous."
-  exit 0
-fi
-
-echo "Build: app files changed, e.g. $(printf '%s\n' "$app_files" | head -1)"
-exit 1
+echo "Skip: only notes and docs changed since $previous."
+exit 0

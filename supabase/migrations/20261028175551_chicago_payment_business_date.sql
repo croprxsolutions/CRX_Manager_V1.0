@@ -65,6 +65,7 @@ BEGIN
       'allocate_payment',
       jsonb_build_object(
         '_contract', 'allocate_payment_v1',
+        '_date_intent_version', 1,
         'request', v_idem_request,
         'response', NULL
       )
@@ -88,11 +89,12 @@ BEGIN
       END IF;
 
       IF v_idem_row.result->>'_contract' = 'allocate_payment_v1' THEN
-        -- A caller that omits the date is retrying the original business intent,
-        -- even after midnight or across this migration. Old v1 entries stored
-        -- the eagerly evaluated default date; use that date only for comparison.
-        -- Explicitly supplied dates still have to match exactly.
-        IF p_payment_date IS NULL THEN
+        -- Old v1 entries eagerly evaluated the date default and cannot tell
+        -- omission from an explicit date. Normalize only those older entries.
+        -- New entries mark raw date intent, so explicit-to-omitted changes
+        -- reject while unchanged omitted-date retries work across midnight.
+        IF p_payment_date IS NULL
+           AND NOT (v_idem_row.result ? '_date_intent_version') THEN
           v_idem_request := jsonb_set(v_idem_request, '{payment_date}',
             v_idem_row.result->'request'->'payment_date');
         END IF;
@@ -271,6 +273,7 @@ BEGIN
     UPDATE idempotency_keys
     SET result = jsonb_build_object(
       '_contract', 'allocate_payment_v1',
+      '_date_intent_version', 1,
       'request', v_idem_request,
       'response', v_result
     )

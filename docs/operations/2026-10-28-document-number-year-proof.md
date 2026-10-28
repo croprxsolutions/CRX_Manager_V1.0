@@ -7,7 +7,11 @@ review and green checks. No merge, live apply or deployment is authorized.
 
 ## Current-source and live read-only evidence
 
-Base: `origin/main` at `5b0246530`, still current when the final suite completed.
+Initial base: `origin/main` at `5b0246530`, still current when the final suite completed.
+Before the final review, the unpublished commits were rebased onto `32469af54`,
+which adds the notes-only Vercel build skip. Its `ignoreCommand` is preserved
+together with this branch's exact-name preview-deployment block. No application
+or numbering function changed during that refresh.
 Checkout: `C:/CRX_chicago_document_numbers`.
 Branch: `codex/chicago-document-numbers-20261028`.
 

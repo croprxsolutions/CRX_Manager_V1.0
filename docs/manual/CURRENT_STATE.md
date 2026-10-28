@@ -1,5 +1,15 @@
 # CRX Manager — Current State
 
+**Last verified:** 2026-10-28 (America/Chicago), targeted read-only verification for
+draft PR #1174's CI follow-up. Live ledger: 1075 rows, latest version
+`20261028121259`, name `20261027080300_notification_sender_recorded`. The existing
+delivery-cap helpers are present; the draft's order-cap helpers are absent.
+`20261028175633_cap_order_invoices_at_delivered` is not applied. This PR remains
+draft with no merge or production deployment. Older sections retain their own
+verification dates; this check does not re-certify unrelated features.
+
+Earlier ledger verification details follow.
+
 **Last verified:** 2026-10-27 1:59 PM Central (18:59 UTC) for the migration ledger only: row 995, `20261027070000_email_type_purchase_order` (To-Do 0.15, PR #1114; records PR #1155), applied live at 18:59:37 UTC as ledger version `20261027185937`, so the email log accepts the `purchase_order` type; read-only check right after: 1071 rows, effective ordering high-water `20261027070000`. The `send-email` deploy that sends PO copies waits for Mason's yes. Earlier read, 2026-10-27 7:37 AM Central (12:37 UTC) (row 995 `20261027070000`, PR #1114, not yet applied; read-only live check against
 project `rhyzpcqhnizqbxphqdkr` right after the PR #1105 apply): 1068 rows, `max(version)` `20261027123725` =
 `20261027040000_quote_sent_price_lock` (row 992; PR #1105 merged as `f1503ba91`: a sent quote keeps the prices the

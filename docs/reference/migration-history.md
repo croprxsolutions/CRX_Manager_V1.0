@@ -1,8 +1,18 @@
-# Migration History (latest entry 999)
+# Migration History (latest entry 1000)
 
 > **LATEST LIVE EVIDENCE (read this first).** The most recent read-only
 > `list_migrations` observation is at the top of this file, immediately below.
 > Do not scroll for it, and do not treat any older dated block as the latest.
+
+**Live capture — 2026-10-28, PR #1174 CI follow-up (read-only):** 1075 rows,
+`max(version)` `20261028121259`, latest name
+`20261027080300_notification_sender_recorded`. The candidate below is not applied;
+the existing delivery-cap helpers remain present and the new order-cap helpers
+are absent. No migration or production write ran during this verification.
+
+| # | Migration timestamp | Purpose |
+|---|---------------------|---------|
+| 1000 | 20261028175633 | **NOT APPLIED — draft PR #1174.** `20261028175633_cap_order_invoices_at_delivered.sql` adds cumulative delivered-quantity validation for order billing, preserving delivery-specific checks, split provenance, return credits and quick-delivery drafts. Local real-schema pipeline and concurrency proof passed; production verification remains pending. No rows are rewritten. Rollback is a separately reviewed migration removing only the new order-cap triggers/helpers. |
 
 **Live capture — 2026-10-28 (after 7:13 AM Central; read-only `execute_sql` on `supabase_migrations.schema_migrations` after rows 996–999 applied for PR #1164):** 1075 rows, `max(version)` `20261028121259` = `20261027080300_notification_sender_recorded` (row 999). The effective ordering high-water is `20261027080300`.
 

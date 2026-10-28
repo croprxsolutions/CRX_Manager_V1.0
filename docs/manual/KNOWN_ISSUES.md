@@ -1,5 +1,14 @@
 # Known Issues — what is open today
 
+**Last verified: 2026-10-28 (America/Chicago)** for the targeted PR #1174 billing
+status and live ledger only. Read-only evidence: 1075 migration rows; latest
+version `20261028121259`, name `20261027080300_notification_sender_recorded`.
+The existing delivery-cap helpers are present, and the new order-cap helpers are
+absent. The order-wide cap is implemented locally on draft PR #1174 but remains
+unapplied and unshipped; its production gap stays open. No live writes ran.
+Earlier reconciliation and individual issue dates below retain their original
+scope; this is not a fresh full security audit.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
 **Last verified: 2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read

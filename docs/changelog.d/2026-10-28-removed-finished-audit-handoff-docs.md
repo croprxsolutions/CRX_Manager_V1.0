@@ -12,9 +12,14 @@ Every removed file is listed, with why it went and how to restore it from git, i
 the product-data-model plans, the gauntlet index and three older audits now say "removed 2026-10-28"
 and point to that list; the frozen `KNOWN_ISSUES` history file got one header note instead.
 
-Kept on purpose: anything a database migration, agent command, hook or script refers to, anything
-outside the documentation-only folders (handled in a later part with full review), and every
-idea or brainstorm document, which Mason is reviewing one by one.
+Mason then went through the unbuilt idea and design documents in chat. At his choice this also
+removes the grower-portal build-or-reuse audit, the June open-source idea-mining study (17 files),
+the June product-scoring report and its prompt, and two unbuilt split-billing designs. He kept the
+grower-portal brainstorm, the sprayer packet to-do, the inventory costing plan and the earmark
+engine summary.
+
+Kept on purpose: anything a database migration, agent command, hook or script refers to, and
+anything outside the documentation-only folders (handled in a later part with full review).
 
 Proof: a repository-wide search found no remaining reference to a removed file outside the change
 log history, raw `git status` output quoted inside older audits, and the annotated mentions.

@@ -66,3 +66,19 @@ points here. Raw `git status` output quoted inside older audits was left as reco
 | `docs/handoffs/2026-08-12-live-sql-guard-maintenance-build-to-review.md` | Header said "superseded; nothing below is actionable". |
 | `docs/handoffs/2026-09-12-pr-comment-session-closeout.md` | September session closeout; finished. |
 | `docs/reports/2026-09-11-guard-denial-baseline.md` | One-time baseline; header said "frozen", no re-measure planned. |
+
+## Old idea and design docs Mason chose to drop (2026-10-28)
+
+Mason went through the unbuilt idea and design documents one by one in chat and chose to remove
+these. The October goals doc (`docs/plans/2026-10-13-direction-and-goals.md`) and the to-do list
+(`docs/manual/TO_DO_LIST.md`) are the current plan.
+
+| File | Why it went |
+|---|---|
+| `docs/plans/2026-06-14-portal-roadmap-build-vs-reuse-audit.md` | June build-or-reuse audit for the grower portal; its database facts were stale. The portal brainstorm itself is kept. |
+| `docs/audits/2026-06-19-future-projects-idea-mining/` (16 files) | June study of six open-source farm and business apps; replaced as a plan by the goals doc. |
+| `docs/research/2026-06-19-future-projects-open-source-comparison.md` | Companion to that study. |
+| `docs/research/2026-06-10-world-class-deep-dive-report.md` | June product scoring; describes the app as it was then. |
+| `docs/research/2026-06-10-world-class-product-deep-dive-prompt.md` | The prompt that produced that report. |
+| `docs/audits/split-billing-B-perdelivery-design-2026-07-10.md` | Unbuilt July split-billing design; split billing is now built from the goals doc. |
+| `docs/audits/nightly-debug/DESIGN-split-invoices-multifield-by-acres.md` | Unbuilt June split-billing design; same reason. |

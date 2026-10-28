@@ -87,6 +87,65 @@ describe('BulkOrderImport', () => {
     expect(screen.getByText(/import orders/i)).toBeInTheDocument();
   });
 
+  it.each([
+    ['customer_name', 'Other Farm'], ['order_date', '2026-10-29'], ['notes', 'Different notes'],
+  ])('rejects the whole order when repeated %s disagrees', async (field, conflict) => {
+    const header = ['order_number', 'customer_name', 'order_date', 'notes', 'product_name', 'quantity', 'price_per_unit'];
+    const first = ['O-CONFLICT', 'North Farm', '2026-10-28', 'Header notes', 'SKU-B', '2', '20'];
+    const second = [...first];
+    second[header.indexOf(field)] = conflict;
+    const csv = [header.join(','), first.join(','), second.join(','), 'O-GOOD,North Farm,2026-10-28,Header notes,SKU-B,1,20'].join('\n');
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    const file = new File([csv], 'conflict.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(new RegExp(`Conflicting.*${field}`))).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({ p_order_number: 'O-GOOD' })));
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'bulk_import_order')).toHaveLength(1);
+  });
+
+  it.each(['0x10', '0b10', '0o10', '1e-999', '9007199254740993', '1.0000000000000001', 'NaN', 'Infinity', '1,200', '2 units'])('blocks the whole order for invalid quantity %s', async (quantity) => {
+    const csv = `order_number,customer_name,product_name,quantity,price_per_unit\nO-PARTIAL,North Farm,SKU-B,2,20\nO-PARTIAL,North Farm,SKU-B,"${quantity}",20`;
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    const file = new File([csv], 'numeric-edge.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(/invalid quantity, price, or unit cost/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /import 1 order/i })).not.toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('preserves distinct Description items in one order without treating them as conflicting header notes', async () => {
+    const csv = 'Order No,Buyer,Description,Qty,Unit Price\nO-DESC,North Farm,SKU-A,+2,1.25e1\nO-DESC,North Farm,SKU-B,.5,12.50';
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    const file = new File([csv], 'descriptions.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/O-DESC/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({
+      p_order_number: 'O-DESC', p_total_price: 31.25, p_notes: undefined,
+      p_items: [expect.objectContaining({ product_id: 'product-a', total_units_needed: 2 }), expect.objectContaining({ product_id: 'product-b', total_units_needed: 0.5 })],
+    })));
+  });
+
+  it('blocks unsafe order money before bulk_import_order', async () => {
+    const csv = 'order_number,customer_name,product_name,quantity,price_per_unit\nO-RANGE,North Farm,SKU-B,1,1e14';
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    const file = new File([csv], 'range.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/O-RANGE/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    expect(await screen.findByRole('list', { name: /order import failure details/i })).toHaveTextContent('Order O-RANGE');
+    expect(mocks.rpc).not.toHaveBeenCalledWith('bulk_import_order', expect.anything());
+  });
+
   it('imports quoted names without shifting mapped quantity or price', async () => {
     const customerQuery = chainable({ data: { id: 'customer-quoted' }, error: null });
     mocks.from.mockImplementation((table: string) => table === 'customers' ? customerQuery : chainable({

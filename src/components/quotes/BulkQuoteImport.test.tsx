@@ -140,6 +140,15 @@ describe('BulkQuoteImport', () => {
     ['price_per_unit', '0x10'],
     ['tier', '0x2'],
     ['valid_days', '0xF'],
+    ['price_per_unit', '0b10'],
+    ['price_per_unit', '0o10'],
+    ['price_per_unit', '1e-999'],
+    ['price_per_unit', '1.0000000000000001'],
+    ['acres', '9007199254740993'],
+    ['actual_rate', '-1'],
+    ['price_per_unit', '-20'],
+    ['price_per_unit', '1e308'],
+    ['valid_days', '100000001'],
   ])('rejects partial numeric conversion for %s=%s', async (field, value) => {
     const { container } = render(<BulkQuoteImport {...defaultProps} />);
     const csv = `quote_number,customer_farm_name,product_name,${field}\nQ-NUMBER,North Farm,Roundup,"${value}"`;
@@ -151,6 +160,48 @@ describe('BulkQuoteImport', () => {
     expect(screen.getByText(/Use plain numbers without thousands separators/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([['1.005', 1.01], ['0.145', 0.15], ['0.105', 0.11]])('normalizes quote price %s with exact decimal half-up rounding', async (price, expected) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name,acres,oz_per_acre,price_per_unit\nQ-CENTS,North Farm,Roundup,1,128,${price}`;
+    const file = new File([csv], 'cents.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-CENTS/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+      p_quote_payload: expect.objectContaining({ total_price: expected }),
+      p_sections: [expect.objectContaining({ items: [expect.objectContaining({ price_per_unit: expected, price_override: expected, total_price: expected })] })],
+    })));
+  });
+
+  it('rounds fractional quote quantities in exact whole cents', async () => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = 'quote_number,customer_farm_name,product_name,acres,oz_per_acre,price_per_unit\nQ-FRACTION,North Farm,Roundup,.145,128,1';
+    const file = new File([csv], 'fraction.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-FRACTION/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+      p_quote_payload: expect.objectContaining({ total_price: 0.15 }),
+    })));
+  });
+
+  it('blocks unsafe quote money before save_quote', async () => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = 'quote_number,customer_farm_name,product_name,acres,oz_per_acre,price_per_unit\nQ-RANGE,North Farm,Roundup,1,128,1e14';
+    const file = new File([csv], 'range.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-RANGE/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    expect(await screen.findByText(/Imported money exceeds/)).toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
   });
 
   it('does not render when closed', () => {

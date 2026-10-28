@@ -1,5 +1,23 @@
 export class QuoteOrderCsvError extends Error {}
 
+function decimalIdentity(text: string): string {
+  const [mantissa, exponent = '0'] = text.toLowerCase().split('e');
+  const [whole, fraction = ''] = mantissa.replace(/^[+-]/, '').split('.');
+  const digits = `${whole}${fraction}`.replace(/^0+/, '');
+  const significant = digits.replace(/0+$/, '');
+  if (!significant) return '0';
+  const scale = BigInt(exponent) - BigInt(fraction.length) + BigInt(digits.length - significant.length);
+  return `${mantissa.startsWith('-') ? '-' : ''}${significant}e${scale}`;
+}
+
+/** Refuse nondecimal syntax, overflow, underflow, and loss of decimal digits in Number conversion. */
+export function parseQuoteOrderCsvNumber(text: string): number {
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return NaN;
+  const value = Number(text);
+  if (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER) return NaN;
+  return decimalIdentity(text) === decimalIdentity(String(value)) ? value : NaN;
+}
+
 function readQuotedCharacter(source: string, index: number) {
   const char = source[index];
   if (char === '"') {

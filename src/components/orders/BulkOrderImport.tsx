@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { parseQuoteOrderCsv, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
+import { parseQuoteOrderCsv, parseQuoteOrderCsvNumber, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
+import { checkOrderCsvGroups } from '../../lib/orderImportCsvGroups';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -207,10 +208,11 @@ export default function BulkOrderImport({
 
     headers.forEach((header, idx) => {
       const orderField = detectFieldMapping(header, ORDER_FIELD_MAPPINGS);
-      if (orderField) {
+      const itemField = detectFieldMapping(header, ITEM_FIELD_MAPPINGS);
+      // "description" is a Product alias; different item descriptions are not conflicting order notes.
+      if (orderField && !(orderField === 'notes' && itemField === 'product_name')) {
         orderFieldMap[orderField] = idx;
       }
-      const itemField = detectFieldMapping(header, ITEM_FIELD_MAPPINGS);
       if (itemField) {
         itemFieldMap[itemField] = idx;
       }
@@ -248,7 +250,7 @@ export default function BulkOrderImport({
     }
 
     const ordersMap = new Map<string, ParsedOrder>();
-    const invalid: Array<{ row: number; error: string; data: Record<string, string> }> = [];
+    const { blocked, invalid } = checkOrderCsvGroups(headers, rows, rowNumbers, orderFieldMap);
 
     rows.forEach((row, idx) => {
       const rowData: Record<string, string> = {};
@@ -262,12 +264,12 @@ export default function BulkOrderImport({
         const productName = row[itemFieldMap.product_name];
         const rawQuantity = row[itemFieldMap.quantity]?.trim();
         const rawPricePerUnit = row[itemFieldMap.price_per_unit]?.trim();
-        const quantity = Number(rawQuantity);
-        const pricePerUnit = Number(rawPricePerUnit);
+        const quantity = parseQuoteOrderCsvNumber(rawQuantity);
+        const pricePerUnit = parseQuoteOrderCsvNumber(rawPricePerUnit);
         const rawUnitCost = itemFieldMap.unit_cost !== undefined
           ? row[itemFieldMap.unit_cost]?.trim()
           : '';
-        const unitCost = rawUnitCost ? Number(rawUnitCost) : undefined;
+        const unitCost = rawUnitCost ? parseQuoteOrderCsvNumber(rawUnitCost) : undefined;
 
         if (
           !orderNumber
@@ -281,9 +283,10 @@ export default function BulkOrderImport({
           || pricePerUnit < 0
           || (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost < 0))
         ) {
+          blocked.add(orderNumber);
           invalid.push({
             row: rowNumbers[idx],
-            error: 'Missing or invalid quantity, price, or unit cost',
+            error: 'Missing or invalid quantity, price, or unit cost. Use non-negative decimal numbers (quantity must be positive), without thousands separators or lost digits. The entire order is excluded.',
             data: rowData,
           });
           return;
@@ -313,6 +316,7 @@ export default function BulkOrderImport({
           notes: itemFieldMap.item_notes !== undefined ? row[itemFieldMap.item_notes] : undefined,
         });
       } catch {
+        blocked.add(row[orderFieldMap.order_number]);
         invalid.push({
           row: rowNumbers[idx],
           error: 'Error parsing row',
@@ -321,7 +325,7 @@ export default function BulkOrderImport({
       }
     });
 
-    const valid = Array.from(ordersMap.values());
+    const valid = Array.from(ordersMap.values()).filter((order) => !blocked.has(order.order_number));
     return { valid, invalid };
   };
 
@@ -494,6 +498,9 @@ export default function BulkOrderImport({
           return sum + purchaseOrderLineTotalCents(item.quantity, resolution.product.current_cost ?? 0);
         }, 0);
         const totalProfitCents = totalPriceCents - totalCostCents;
+        if (![totalPriceCents, totalCostCents, totalProfitCents].every(Number.isSafeInteger)) {
+          throw new Error('Imported money exceeds the supported whole-cent range. Reduce the values and retry.');
+        }
         const totalMarginPct = totalPriceCents > 0
           ? (totalProfitCents / totalPriceCents) * 100
           : 0;

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { parseQuoteOrderCsv, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
+import { parseQuoteOrderCsv, parseQuoteOrderCsvNumber, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -15,6 +15,7 @@ import { withAdminCosts } from '../../lib/costFields';
 import { logActivity } from '../../lib/activityLogger';
 import type { Json } from '../../types/supabase';
 import { resolveExactProductIdentity } from '../../lib/productIdentityResolver';
+import { purchaseOrderLineTotalCents, purchaseOrderUnitCostCents } from '../../lib/purchaseOrderMoney';
 
 interface BulkQuoteImportProps {
   open: boolean;
@@ -73,9 +74,6 @@ const FIELD_MAPPINGS: Record<string, string[]> = {
 
 const IMPORTABLE_QUOTE_STATUSES = new Set(['draft']);
 
-const parseCsvDecimal = (value: string): number =>
-  /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value) ? Number(value) : NaN;
-
 const normalizeQuoteNumber = (quoteNumber?: string | null): string =>
   quoteNumber?.trim().toUpperCase() ?? '';
 
@@ -85,13 +83,22 @@ const escapeIlikePattern = (value: string): string =>
 const normalizeUnitName = (unit?: string | null): string =>
   unit?.toLowerCase().trim() ?? '';
 
-const toMoneyCents = (value: number | null | undefined): bigint =>
-  BigInt(Math.round((value ?? 0) * 100));
+const checkedCents = (value: number): bigint => {
+  if (!Number.isSafeInteger(value)) throw new Error('Imported money exceeds the supported whole-cent range. Reduce the values and retry.');
+  return BigInt(value);
+};
 
-const centsToDollars = (cents: bigint): number => Number(cents) / 100;
+const toMoneyCents = (value: number | null | undefined): bigint => {
+  if (value != null && !Number.isFinite(value)) throw new Error('Imported money must be finite. Correct the values and retry.');
+  return checkedCents(purchaseOrderUnitCostCents(value ?? 0));
+};
 
-const multiplyCentsByQuantity = (unitCents: bigint, quantity: number): bigint =>
-  BigInt(Math.round(Number(unitCents) * quantity));
+const centsToDollars = (cents: bigint): number => Number(checkedCents(Number(cents))) / 100;
+
+const multiplyCentsByQuantity = (unitCents: bigint, quantity: number): bigint => {
+  if (!Number.isFinite(quantity)) throw new Error('Imported quantity exceeds the supported range. Reduce the values and retry.');
+  return checkedCents(purchaseOrderLineTotalCents(quantity, centsToDollars(unitCents)));
+};
 
 const stableStringify = (value: unknown): string => {
   if (value === undefined || value === null) return 'null';
@@ -366,22 +373,22 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               field === 'oz_per_acre' ||
               field === 'actual_rate'
             ) {
-              const num = parseCsvDecimal(value);
-              if (value && !Number.isFinite(num)) {
+              const num = parseQuoteOrderCsvNumber(value);
+              if (value && (!Number.isFinite(num) || num < 0)) {
                 invalidNumbers.push(field);
               } else if (value) {
                 item[field] = num;
               }
             } else if (field === 'tier') {
-              const tier = parseCsvDecimal(value);
+              const tier = parseQuoteOrderCsvNumber(value);
               if ([1, 2, 3].includes(tier)) {
                 item[field] = tier;
               } else if (value) {
                 invalidNumbers.push(field);
               }
             } else if (field === 'valid_days') {
-              const days = parseCsvDecimal(value);
-              if (Number.isInteger(days) && days > 0) {
+              const days = parseQuoteOrderCsvNumber(value);
+              if (Number.isInteger(days) && days > 0 && Number.isFinite(new Date(Date.now() + days * 86400000).getTime())) {
                 item[field] = days;
               } else if (value) {
                 invalidNumbers.push(field);
@@ -396,7 +403,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
         if (invalidNumbers.length > 0) {
           invalid.push({
             row: rowNumbers[idx],
-            error: `Invalid numeric fields: ${invalidNumbers.join(', ')}. Use plain numbers without thousands separators; tier must be 1, 2, or 3 and valid_days a positive whole number.`,
+            error: `Invalid numeric fields: ${invalidNumbers.join(', ')}. Use plain numbers without thousands separators, negative values, or lost digits; tier must be 1, 2, or 3 and valid_days a positive whole number producing a valid date.`,
             data: rowData,
           });
           return;

@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { parseQuoteOrderCsv } from './quoteOrderCsv';
+import { parseQuoteOrderCsv, parseQuoteOrderCsvNumber } from './quoteOrderCsv';
+
+describe('CSV decimal numbers', () => {
+  it.each([
+    ['0', 0], ['-0', 0], ['+2', 2], ['02.5000', 2.5], ['.5', 0.5], ['2.', 2],
+    ['2e2', 200], ['1.25e-2', 0.0125], ['1e-3', 0.001], ['0.105', 0.105],
+  ])('keeps supported decimal %s', (text, expected) => {
+    expect(parseQuoteOrderCsvNumber(text) === expected).toBe(true);
+  });
+  it.each(['', 'NaN', 'Infinity', '-Infinity', '1e309', '1e-999', '9007199254740993',
+    '1.0000000000000001', '0.10000000000000001', '0x10', '0b10', '0o10', '1,200', '$20', '2 units'])('rejects ambiguous or lossy %s', (text) => {
+    expect(parseQuoteOrderCsvNumber(text)).toBeNaN();
+  });
+});
 
 describe('quote and order CSV records', () => {
   it.each(['\n', '\r\n', '\r'])('handles quoted cells and %j line endings', (eol) => {

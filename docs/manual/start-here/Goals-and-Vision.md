@@ -51,9 +51,11 @@ These ideas come from the June 2026 strategic review. Most are after the January
 
 > *Drafted by Claude from Mason's past conversations and recorded decisions, for Mason to approve or edit (2026-10-28).*
 
-**Why I'm building this.** I run an ag retail business, and we farm too. I'm not a software developer by trade. I build CRX because no off-the-shelf system fits how a small retailer like us actually works: quote, deliver, apply in the field, bill, and get paid, with the compliance records done right along the way. Chem Man got us this far, but we were bending our business around the software. I want software bent around our business.
+**Why I'm building this.** I run an ag retail business, and we farm too. I'm not a software developer by trade. I build CRX because no off-the-shelf system fits how a small retailer like us actually works: quote, deliver, apply in the field, bill, and get paid, with the compliance records done right along the way. Chem Man is excellent at field application, but it was terrible at the rest of what we do: chemical sales, inventory and quoting. We were bending our business around the software. I want software bent around our business: as good as Chem Man in the field, and far better everywhere else.
 
 **What CRX lets me do that Chem Man never could.**
+- Handle chemical sales, quoting and inventory properly, the areas where Chem Man was weakest.
+- Match Chem Man's field-application strengths. That bar is high, and CRX already covers its field-app features.
 - See the whole business in one place: quotes, orders, deliveries, field work, inventory, invoices, payments and commissions, all connected.
 - Trust the numbers. The rules for money and inventory live in the database, so a double-click or a dropped phone signal can't quietly create a wrong bill.
 - Know what to order before we run short, and what each product really costs us.

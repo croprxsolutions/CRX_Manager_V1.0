@@ -96,6 +96,18 @@ addressed above. Draft-only delivery requires an explicit `claude-sonnet-5-5`
 high-effort review through `scripts/run-claude-review.mjs`, whose private capture
 records the resolved model and reviewed head. No final Sol/merge proof is claimed.
 
+The explicit Sonnet 5.5 high-effort run at `60394fd0c` completed with no BLOCKER,
+HIGH or MED. Its two LOW documentation findings are addressed in KI-18 and the
+RPC reference: the unapplied candidate is linked and the capacity deferral has
+Codex ownership. Optional NITs remain named here: malformed saved quotes with an
+empty number can show the pending message, Sentry can receive the original RPC
+error object, and late allocation cancellation needs a separate quote-route
+lifecycle follow-up (owner: Codex). Those pre-existing/diagnostic cases do not
+change the tested year-selection behavior and are deferred from this scope.
+The dated manual review record is retained because the follow-up migration
+commit required a newly added ledger record; it points to this detailed record.
+The safe optional live lock timeout can be assessed by the future apply session.
+
 ## Delivery boundary and rollback
 
 Keep the PR a draft. Do not enable auto-merge, merge, apply, deploy, or write
@@ -104,6 +116,10 @@ and all remaining protected review/CI/apply gates.
 
 Rollback is a forward migration re-emitting the three reviewed bodies with the
 prior year expression. Never reset counters/sequences or renumber records.
+Quote/order prior definitions are in `20261027080100_number_generators_active_signed_in_only.sql`.
+For exact prior bodies, write the candidate's three explicit definitions with only
+the Chicago date expression restored to `current_date`, and verify the original
+body hashes pinned by its preflight. Do not dynamically rewrite live function source.
 
 Proposed shared to-do status: "12.1 built as a draft-only candidate; local Chicago
 boundary, concurrency, retry and failure proof passed. Not merged or applied.

@@ -253,6 +253,13 @@ tiers is not built; the linkage field is not used for money today.
 **MED (safety path) / LOW · OPEN · money/UI · unassigned (fix the JobDetail one first)**
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Cosmetic. LOW.
+  **Draft-only candidate built 2026-10-28 (To-Do 12.1, owner: Codex):** migration
+  `20261028185021_document_numbers_chicago_year` and its client failure handling are verified locally,
+  **not applied or merged**. See [the proof record](../operations/2026-10-28-document-number-year-proof.md).
+- **Document-number capacity (LOW, deferred; owner: Codex numbering-capacity follow-up):** existing
+  `lpad(...,4,'0')` in the quote/order sequences and yearly rebate counter truncates values above 9,999.
+  This behavior is preserved by the 12.1 candidate and needs its own format/capacity fix with threshold
+  and concurrency proof. This note does not assert the current live sequence positions.
 - `invoices.season` defaults to `current_season()` = UTC date, and the blend-ticket path uses it
   (`20261020210000:1050,1227`): about five hours each 30 Sept evening can stamp the next season. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-

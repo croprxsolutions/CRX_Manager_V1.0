@@ -246,6 +246,9 @@ Migrations `20260714220000` through `20260714224000` preserve existing public si
 
 ## Sequential Numbers (advisory locks)
 The `next_*_number` generators use the America/Chicago calendar year (`20260908140000`; invoices `20260914100100`, applied 2026-09-21). `generate_quote_number()`, `generate_order_number()` and `create_rebate_claim` still use the UTC year, so a quote, order or rebate claim made after 6 pm Chicago time on December 31 gets next year's number (`docs/manual/KNOWN_ISSUES.md`).
+**Draft-only candidate, not applied or merged (2026-10-28):** `20261028185021_document_numbers_chicago_year`
+changes these three year selections to Chicago time while preserving their signatures, allocators, grants
+and retry handling. See [the local verification record](../operations/2026-10-28-document-number-year-proof.md).
 - `next_delivery_number()` -> DEL-NNNNN (no year, 5 digits)
 - `next_po_number()` -> PO-YYYY-NNNN
 - `next_application_record_number()` -> APP-YYYY-NNNN
@@ -254,7 +257,7 @@ The `next_*_number` generators use the America/Chicago calendar year (`202609081
 - `next_cycle_count_number()` -> CC-YYYY-NNNNN (5 digits)
 - `next_return_number()` -> RMA-YYYY-NNNN
 - `next_commission_payment_number()` -> CP-YYYY-NNNN
-- `generate_order_number()` — auto-generate order number. Active admins, sales reps and server functions only: no EXECUTE for anon/PUBLIC, `PROFILE_INACTIVE` for an inactive account, `NUMBER_ROLE_REQUIRED` for any other role (migration `20261027080100`, not applied)
+- `generate_order_number()` — auto-generate order number. Active admins, sales reps and server functions only: no EXECUTE for anon/PUBLIC, `PROFILE_INACTIVE` for an inactive account, `NUMBER_ROLE_REQUIRED` for any other role (migration `20261027080100`; matching live function contract inspected 2026-10-28)
 - `generate_quote_number()` — auto-generate quote number. Same rule as `generate_order_number()`
 - `generate_ticket_number()` — auto-generate blend ticket number
 

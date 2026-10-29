@@ -1907,8 +1907,11 @@ export function cleanMainMergeParent(root, headSha, baseSha) {
   if (parents.length !== 2 || !parents.every((sha) => CARRY_SHA_RE.test(sha))) return null;
   const [branchHead, mainSide] = parents;
   if (!gitOk(["merge-base", "--is-ancestor", mainSide, baseSha], root)) return null;
-  const fork = runGit(["merge-base", branchHead, mainSide], { cwd: root });
-  if (!CARRY_SHA_RE.test(fork)) return null;
+  // Exactly one split point: with several (criss-cross), git picks one and the
+  // shared-file check below could miss an overlap (Luna MED, PR #1206).
+  const forks = runGit(["merge-base", "--all", branchHead, mainSide], { cwd: root }).split(/\s+/).filter(Boolean);
+  if (forks.length !== 1 || !CARRY_SHA_RE.test(forks[0])) return null;
+  const [fork] = forks;
   const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", mainSide, branchHead], {
     cwd: root, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
   });

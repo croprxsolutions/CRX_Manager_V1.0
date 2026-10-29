@@ -1391,6 +1391,39 @@ function collisionPromptSkipsWork(prompt) {
         git("update-ref", "refs/remotes/origin/main", movedMain);
         git("checkout", "-q", "main");
       }
+      // The clean-merge exception refuses a criss-cross too (Luna MED). Branch commit B0 is
+      // dated later than main's Mc, so plain merge-base picks B0 and the branch's deletion of
+      // Mc's file would look like no shared change.
+      {
+        const at = (date, ...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], {
+          cwd: repo, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        }).trim();
+        at("2026-01-01T00:00:00Z", "checkout", "-q", "-b", "cx-main", branchHead);
+        writeFileSync(path.join(repo, "guard.txt"), "guard\n");
+        at("2026-01-02T00:00:00Z", "add", ".");
+        at("2026-01-02T00:00:00Z", "commit", "-qm", "Mc");
+        const mc = git("rev-parse", "HEAD");
+        at("2026-01-01T00:00:00Z", "checkout", "-q", "-b", "cx-branch", branchHead);
+        writeFileSync(path.join(repo, "feat.txt"), "feat\n");
+        at("2026-01-05T00:00:00Z", "add", ".");
+        at("2026-01-05T00:00:00Z", "commit", "-qm", "B0");
+        const b0 = git("rev-parse", "HEAD");
+        at("2026-01-06T00:00:00Z", "checkout", "-q", "cx-main");
+        at("2026-01-06T00:00:00Z", "merge", "-q", "--no-edit", b0);
+        const mainTip = git("rev-parse", "HEAD");
+        at("2026-01-07T00:00:00Z", "checkout", "-q", "cx-branch");
+        at("2026-01-07T00:00:00Z", "merge", "-q", "--no-edit", mc);
+        at("2026-01-07T00:00:00Z", "rm", "-q", "guard.txt");
+        at("2026-01-07T00:00:00Z", "commit", "-qm", "drop guard");
+        const branchTip = git("rev-parse", "HEAD");
+        assert.equal(git("merge-base", "--all", branchTip, mainTip).split(/\s+/).length, 2, "criss-cross fixture: two merge-bases");
+        assert.equal(git("merge-base", branchTip, mainTip), b0, "criss-cross fixture: plain merge-base picks the later-dated B0");
+        at("2026-01-08T00:00:00Z", "merge", "-q", "--no-edit", mainTip);
+        assert.equal(cleanMainMergeParent(repo, git("rev-parse", "HEAD"), mainTip), null, "clean merge: a criss-cross merge is not treated as clean");
+        git("checkout", "-q", "main");
+        git("update-ref", "refs/remotes/origin/main", movedMain);
+        git("checkout", "-q", "main");
+      }
 
       // A clean main merge (no shared files) names the pre-merge head; a shared file or a
       // hand edit does not.

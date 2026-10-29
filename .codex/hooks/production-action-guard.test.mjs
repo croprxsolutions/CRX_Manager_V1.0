@@ -621,6 +621,9 @@ try {
       toolName: "PowerShell", toolInput: { command: `gh pr merge 5 --squash --match-head-commit ${head}` }, repoDir: branch.repo,
       nowMs: Date.now(),
       runGh: (args) => {
+        if (args.includes("Accept: application/vnd.github.diff")) {
+          return `diff --git a/${later} b/${later}\n--- /dev/null\n+++ b/${later}\n@@ -0,0 +1 @@\n+export const x = 1;\n`;
+        }
         if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
           compared.push(String(args[1]));
           return JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: branch.sha, head,
@@ -2093,8 +2096,12 @@ try {
     // file and old name as a plain file (mode 100644) unless `kinds` says
     // otherwise; a `<sha>:<path>` key sets the kind at that commit only. Records
     // every gh call so the test can see the comparison was asked for.
-    const ghFor = (pr, compare, calls = [], kinds = {}) => (args) => {
+    const ghFor = (pr, compare, calls = [], kinds = {}, diff = null) => (args) => {
       calls.push(args);
+      if (args.includes("Accept: application/vnd.github.diff")) {
+        return diff ?? (compare?.files || []).map(({ filename }) =>
+          `diff --git a/${filename} b/${filename}\n--- a/${filename}\n+++ b/${filename}\n@@ -1 +1 @@\n-old\n+export const label = "ready";\n`).join("");
+      }
       if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
         if (compare instanceof Error) throw compare;
         return JSON.stringify(compare);
@@ -2113,13 +2120,13 @@ try {
       }
       return JSON.stringify(pr);
     };
-    const mergeDocs = ({ pr = docsPr, compare = compareOf(["docs/plans/2026-10-07-note.md"]), pin = docsPin, calls, kinds } = {}) =>
+    const mergeDocs = ({ pr = docsPr, compare = compareOf(["docs/plans/2026-10-07-note.md"]), pin = docsPin, calls, kinds, diff } = {}) =>
       evaluateProductionAction({
         toolName: "PowerShell",
         toolInput: { command: `gh pr merge 870 --squash${pin}` },
         repoDir: docs.repo,
         nowMs: now,
-        runGh: ghFor(pr, compare, calls, kinds),
+        runGh: ghFor(pr, compare, calls, kinds, diff),
       });
 
     const calls = [];
@@ -2178,6 +2185,10 @@ try {
     const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
     assert.equal(mergeDocs({ compare: counted([["src/components/customers/CustomerFacts.tsx", 40], ["src/components/Label.tsx", 10]]) }).blocked, false,
       "a small pull request of ordinary app files merges with no Sol proof");
+    // Sol, 2026-10-29: money logic in an ordinarily named file still needs Sol.
+    assert.equal(mergeDocs({ compare: counted([["src/components/Label.tsx", 2]]),
+      diff: "diff --git a/src/components/Label.tsx b/src/components/Label.tsx\n--- a/src/components/Label.tsx\n+++ b/src/components/Label.tsx\n@@ -1 +1 @@\n-old\n+const total_cents = a + b;\n" }).blocked, true,
+      "cents arithmetic in an ordinary app file still needs Sol");
     assert.equal(mergeDocs({ compare: counted([["src/components/customers/CustomerFacts.tsx", 1]]), kinds: { "src/components/customers/CustomerFacts.tsx": { mode: 0o120000 } } }).blocked, true,
       "a symlink at a low-risk path still needs Sol (Luna, 2026-10-29)");
     for (const [label, entries] of [

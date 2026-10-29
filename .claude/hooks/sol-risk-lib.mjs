@@ -15,7 +15,7 @@
 // or submodule at a harmless path can redirect code (Luna, 2026-10-29).
 
 import { isMoneyPath, pathWords } from "./codex-bot-review-lib.mjs";
-import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
+import { ghApiRepoPath, riskyContentMatches, sanitizeForMessage } from "./codex-push-lib.mjs";
 import { SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS, treeProblem } from "./sol-exempt-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
@@ -124,7 +124,14 @@ export function solRiskOnGitHub({ baseSha: rawBase, headSha: rawHead, repo, gh }
     const verdict = classifySolRisk(answer.files);
     if (verdict.risky) return verdict;
     const problem = treeProblem({ files: answer.files, baseSha, headSha, repoPath, gh });
-    return problem ? { risky: true, reason: problem } : verdict;
+    if (problem) return { risky: true, reason: problem };
+    // File names alone miss money or permission logic in an ordinarily named file
+    // (Sol, 2026-10-29): scan the diff text with the push gate's content patterns.
+    const diff = String(gh(["api", "-H", "Accept: application/vnd.github.diff", `${repoPath}/compare/${baseSha}...${headSha}`]));
+    if (!/^diff --git /m.test(diff)) return { risky: true, reason: "GitHub's diff could not be read" };
+    const flagged = riskyContentMatches(diff).find(({ file }) => !/\.md$/i.test(String(file)));
+    if (flagged) return { risky: true, reason: `${show(flagged.file)} changes code that looks like money, inventory, permissions or data writes (${show(flagged.tokens.map(({ token }) => token).join(", "))})` };
+    return verdict;
   } catch (error) {
     return { risky: true, reason: `GitHub's file list could not be classified (${show(String(error?.message || error))})` };
   }

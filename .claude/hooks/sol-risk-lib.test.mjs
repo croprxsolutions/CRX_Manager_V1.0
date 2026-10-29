@@ -47,10 +47,33 @@ const tree = (kind = { mode: 0o100644, type: "blob" }) => {
   const folder = { entries: [{ name: "Label.tsx", ...kind }] };
   return JSON.stringify({ data: { repository: { d0: folder, d1: folder } } });
 };
-const ask = (stdout, extra = {}, kinds = tree()) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
-  gh: (args) => { if (args[1] === "graphql") return kinds; if (stdout instanceof Error) throw stdout; return stdout; }, ...extra });
+const diffOf = (name, added) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old\n+${added}\n`;
+const LABEL_DIFF = diffOf("src/components/Label.tsx", "export const label = 'Ready';");
+const ask = (stdout, extra = {}, kinds = tree(), diff = LABEL_DIFF) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
+  gh: (args) => {
+    if (args[1] === "graphql") return kinds;
+    if (args.includes("Accept: application/vnd.github.diff")) { if (diff instanceof Error) throw diff; return diff; }
+    if (stdout instanceof Error) throw stdout; return stdout;
+  }, ...extra });
 
 check("a clean base..head comparison of a UI file is low risk", () => assert.equal(ask(answer()).risky, false));
+// Sol, 2026-10-29: an ordinarily named file can still carry money or permission logic.
+check("money, permission or data-write code in an ordinary file needs Sol", () => {
+  for (const added of ["const total_cents = a + b;", "if (role === 'admin') show();", "await db.from('x').update(row);",
+    "const price = 5;", "await supabase.rpc('apply_prepay');"]) {
+    assert.equal(ask(answer(), {}, tree(), diffOf("src/components/Label.tsx", added)).risky, true, added);
+  }
+});
+check("money words in a notes file do not need Sol", () => {
+  const files = [file("src/components/Label.tsx"), file("docs/plans/x.md")];
+  const diff = LABEL_DIFF + diffOf("docs/plans/x.md", "Inventory price total: track the role of each rep.");
+  const folder = { entries: [{ name: "Label.tsx", mode: 0o100644, type: "blob" }, { name: "x.md", mode: 0o100644, type: "blob" }] };
+  const kinds = JSON.stringify({ data: { repository: { d0: folder, d1: folder, d2: folder, d3: folder } } });
+  assert.equal(ask(answer({ files }), {}, kinds, diff).risky, false);
+});
+check("an unreadable or failed diff needs Sol", () => {
+  for (const diff of ["", "not a diff", new Error("406 too large")]) assert.equal(ask(answer(), {}, tree(), diff).risky, true);
+});
 check("a symlink, submodule or unreadable file kind at a low-risk path needs Sol", () => {
   assert.equal(ask(answer(), {}, tree({ mode: 0o120000, type: "blob" })).risky, true);
   assert.equal(ask(answer(), {}, tree({ mode: 0o160000, type: "commit" })).risky, true);

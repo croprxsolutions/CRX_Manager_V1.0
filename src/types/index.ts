@@ -928,6 +928,8 @@ export type OrderStatus = 'confirmed' | 'partially_fulfilled' | 'fulfilled' | 'c
 
 export interface Order {
   id: string;
+  /** Database version for the header and lines; missing versions cannot be edited. */
+  row_version?: number;
   order_number: string;
   order_name: string | null;
   quote_id: string | null;

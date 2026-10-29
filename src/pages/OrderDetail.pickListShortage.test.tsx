@@ -90,7 +90,7 @@ vi.mock('../lib/orderPickListPdf', () => ({ downloadPickListPdf: mockDownloadPic
 import OrderDetail from './OrderDetail';
 
 const ORDER = {
-  id: 'ord-tier', order_number: 'ORD-TIER', status: 'confirmed', customer_id: 'cust-1',
+  id: 'ord-tier', order_number: 'ORD-TIER', status: 'confirmed', customer_id: 'cust-1', row_version: 1,
   order_date: '2026-08-17', total_cents: 0, total_cost: 0, total_price: 0,
   total_profit: 0, total_margin_pct: 0, order_name: null, notes: null,
   program_notes: null, created_at: '2026-08-17T00:00:00Z',

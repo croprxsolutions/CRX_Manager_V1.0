@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const name = `crx-payment-date-${process.pid}`;
-const candidate = '20261028175551_chicago_payment_business_date.sql';
+const candidate = '20261029160200_chicago_payment_business_date.sql';
 const signature = 'public.allocate_payment(uuid,bigint,text,text,text,date,text,jsonb,uuid,text)';
 const actor = 'ac670000-0000-4000-8000-000000000001';
 const customer = 'ac670000-0000-4000-8000-000000000002';

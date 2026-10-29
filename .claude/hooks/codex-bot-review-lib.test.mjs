@@ -640,6 +640,12 @@ ok(isMoneyPath("supabase/migrations/20261021000000_anything.sql") && isMoneyPath
   "every migration and Edge Function qualifies");
 ok(!isMoneyPath("docs/reference/invoices.md") && !isMoneyPath(".claude/hooks/x.mjs") && !isMoneyPath("src/lib/pagedRead.ts")
   && !isMoneyPath("src/components/Map.tsx"), "docs, hooks and non-money src files do not");
+// Words, not substrings (Mason, 2026-10-29).
+ok(!isMoneyPath("src/pages/Reports.paging.test.tsx") && !isMoneyPath("src/components/BorderBox.tsx")
+  && !isMoneyPath("src/lib/syntaxHighlight.ts"), "paging, border and syntax are not money words");
+ok(isMoneyPath("src/pages/Deliveries.tsx") && isMoneyPath("src/lib/reconciliation.ts") && isMoneyPath("src/pages/ARaging.tsx")
+  && isMoneyPath("src/lib/fuelSurcharge.ts") && isMoneyPath("src/pages/CycleCount.tsx") && isMoneyPath("src/lib/orderTotals.ts"),
+"plurals, camelCase pieces and joined word pairs still qualify");
 eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md", "src/components/Map.tsx"], commits: [commit(HEAD)] })).status,
   "not-required", "a non-money PR with no label is not gated");
 eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], labels: [CODERABBIT_REQUIRED_LABEL], commits: [commit(HEAD)] })).status,

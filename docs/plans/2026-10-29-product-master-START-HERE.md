@@ -10,8 +10,9 @@
 
 | What | File | Read it for |
 |---|---|---|
+| **The grand plan (2026-10-29)** | `docs/plans/2026-10-29-product-GRAND-PLAN.md` | All product work in one order: this Product Master work is Stage 1; weight, chemistry, brands, rates, comparison, use guidance, families, clean-up and images follow. Sol-reviewed; it revised the build sheet's order |
 | The 43 items | `docs/plans/2026-10-28-product-master-setup-edits-BACKLOG.md` | What's wrong or missing on product setup: Mason's requests (items 1–2) and the review's findings (items 3–43) |
-| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 16 work packages: approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
+| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 20 work packages (16 on 2026-10-28, plus WP-PM-14, WP-PM-16, DM-0 and WP-PM-15 from the grand plan; see its section 2a): approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
 | **The build loop** | `docs/plans/2026-10-28-product-master-loop-MISSION.md` | How a session builds it: Codex builds, Claude checks and proves, one draft PR per package, nothing merged or applied live. Passes `node scripts/validate-mission-doc.mjs` |
 | Weight per gallon and active ingredients | `docs/plans/2026-10-28-product-data-model-REFRESH.md` | The larger feature that follows (To-Do row 2.9), refreshed from the August plan |
 | Mason's decisions | `docs/manual/DECISION_LOG.md`, the three 2026-10-28 entries (Product Master backlog; product data model) | Every business answer, so the build needs no owner input |
@@ -46,6 +47,7 @@ The old branch `loop/product-master-2026-10` holds a superseded first draft of t
 3. **Auto-summarize is set for a long run.** In a `claude` terminal, run `/autocompact 800000`; it takes effect for the next session. Set it back to `300000` afterwards.
 4. **Codex has usage left.** The builder runs on Codex (`gpt-6-sol` for money and database packages, `gpt-6-luna` for screen-only ones).
 5. **Start it from the desktop app.** A session can't be started over Remote Control.
+6. **The grand plan's questions are answered** (Mason, 2026-10-29; `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 10). Check for any later changes Mason sends after reading the plan.
 
 ## 4. The prompt to paste
 
@@ -67,23 +69,28 @@ Never: merge, mark a PR ready, push to main, apply a migration live, write live 
 
 - **Order:**
   1. dropdowns
-  2. pricing page
-  3. sales sheet and list
-  4. change history
-  5. turning products off safely
-  6. setup checks in the database
-  7. forms, units and containers
-  8. Use Timing
-  9. the Unit audit
-  10. new-product flow and Duplicate
-  11. one cost path and the tier-order warning
-  12. bulk import
-  13. bulk detail update
-  14. list editing
-  15. corrections to existing records
-  16. reorder display
+  2. RUP "known incomplete" notice
+  3. "Search EPA labels" link
+  4. pricing page
+  5. sales sheet and list
+  6. change history
+  7. turning products off safely
+  8. setup checks in the database
+  9. forms, units and containers
+  10. data clean-up review lists (forms, SKUs, duplicates)
+  11. Use Timing
+  12. the Unit audit
+  13. new-product flow and basic Duplicate
+  14. one cost path and the tier-order warning
+  15. vendors on the product page
+  16. setup workbook and the "Lock rates" switch
+  17. bulk import
+  18. list editing
+  19. corrections to existing records
+  20. reorder display
 - **Pace:** an 8-hour run will probably finish 6–10 packages properly; the rest queue for another run.
 - **Parked for Mason:**
   - the Unit back-fill: Sol's BLOCKER, so audit only, and Mason sees the mismatch list first;
+  - the data clean-up itself: Mason types the missing SKUs and approves each fix. Bulk import and the detail workbook stay as draft PRs until it is done;
   - any migration that changes grants on `products`, which needs his `I approve`.
 - **The morning report** lists, per package: the PR, the proof, what's still owed (Mason's click-through on the preview, the Sol merge gate, CodeRabbit for money packages) and a suggested merge order.

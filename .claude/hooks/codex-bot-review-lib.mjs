@@ -408,32 +408,53 @@ export function coderabbitFindingsDenial(prefix, selector, count) {
 export const CODERABBIT_APP_ID = 347564;
 export const CODERABBIT_REQUIRED_LABEL = "needs-coderabbit";
 
-// Lower-case substrings of a src/ path that mark it as money, invoice, payment,
+// Word stems of a src/ path that mark it as money, invoice, payment,
 // inventory or cost code. Deliberately broad ("when unsure, it qualifies"):
 // a false positive costs one CodeRabbit request, a miss lands money code with
 // no second reviewer. Anything this list misses is what the label is for.
 // ACCEPTED GAP (Mason, 2026-10-21, "money only, accept the gap", choosing this
 // over gating every src/ change): money logic in a generically named file is
 // not caught here; the agent's duty to add the label is the only cover for it.
+//
+// Matched against the path's WORDS, not as substrings (Mason, 2026-10-29): a
+// substring test made `paging` an "aging" file, `border` an "order" file and
+// `syntax` a "tax" file, each costing a CodeRabbit wait. A stem matches the start
+// of a word (split at punctuation and camelCase) or of two adjacent words joined
+// (`cycleCount`, `lotRpc`). Checked against every tracked src/ file on 2026-10-29:
+// only six non-money `*.paging.test.*` files left the set, and eight delivery and
+// reconciliation files the substring list had missed (`deliveries` never contained
+// `delivery`) joined it.
 export const MONEY_PATH_WORDS = Object.freeze([
   "invoice", "payment", "prepay", "credit", "money", "cents", "price", "pricing", "cost", "margin",
-  "inventory", "stock", "commission", "bill", "purchase", "bulkpo", "refund", "return", "deposit",
-  "ledger", "tax", "aging", "statement", "quote", "order", "delivery", "blend", "split", "cash",
+  "inventor", "stock", "commission", "bill", "purchase", "bulkpo", "refund", "return", "deposit",
+  "ledger", "tax", "aging", "statement", "quote", "order", "deliver", "blend", "split", "cash",
   "charge", "discount", "payable", "receivable", "receipt", "financ", "profit", "sales", "booking",
-  "cyclecount", "lotrpc", "idempot",
+  "cyclecount", "lotrpc", "idempot", "surcharge", "reconcil", "araging",
   // src/lib/chemCalculator.ts turns quantities and per-unit prices into billed
   // amounts (Sol, PR #1009).
   "calculator",
 ]);
 
+function pathWords(path) {
+  const words = String(path)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return [...words, ...words.slice(0, -1).map((word, i) => word + words[i + 1])];
+}
+
 // Every database migration and Edge Function qualifies: financial and inventory
 // invariants live in PostgreSQL (AGENTS.md), so a path list cannot tell a money
 // migration from any other.
 export function isMoneyPath(path) {
-  const p = String(path || "").replace(/\\/g, "/").trim().toLowerCase();
+  const raw = String(path || "").replace(/\\/g, "/").trim();
+  const p = raw.toLowerCase();
   if (/^supabase\/(?:migrations|functions)\//.test(p)) return true;
   if (!p.startsWith("src/")) return false;
-  return MONEY_PATH_WORDS.some((word) => p.includes(word));
+  const words = pathWords(raw);
+  return MONEY_PATH_WORDS.some((stem) => words.some((word) => word.startsWith(stem)));
 }
 
 // One GraphQL read: labels, changed files, and the PR's commits with their

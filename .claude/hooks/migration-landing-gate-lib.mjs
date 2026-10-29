@@ -42,9 +42,10 @@ import {
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
-// A live apply keeps the 30-minute Sol window (Mason, 2026-10-23: "Keep
-// migration apply at 30 minutes"); the merge gates accept a Sol proof for 24 hours.
-export const APPLY_SOL_PROOF_MAX_AGE_MS = 30 * 60 * 1000;
+// A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
+// (Mason, 2026-10-29, superseding his 2026-10-23 "Keep migration apply at 30
+// minutes"). The PR's head, checks and reviews are still read live at apply time.
+export const APPLY_SOL_PROOF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function refuse(why) {
   return {

@@ -86,7 +86,7 @@ const FAILED = 'This order could not be loaded';
 
 // A confirmed, unbilled order: Create Invoice shows for it only while no active invoice covers it.
 const order = {
-  id: 'ord-1', order_number: 'ORD-0042', status: 'confirmed', customer_id: 'cust-1',
+  id: 'ord-1', order_number: 'ORD-0042', status: 'confirmed', customer_id: 'cust-1', row_version: 1,
   order_date: '2026-10-01', total_price: 500, order_name: 'Fall Order', notes: '',
   created_at: '2026-10-01T00:00:00Z', delivery_priority: 'normal',
 };

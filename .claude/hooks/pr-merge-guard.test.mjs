@@ -463,8 +463,8 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     // Luna, PR #956 round 3.
     ["node -e \"require('child_process').execSync(String.fromCodePoint(103,104,32,112,114,32,109,101,114,103,101,32,57,53,49))\"", /on its input/],
     ["perl -e'system(join(\"\", \"g\",\"h pr \",\"mer\",\"ge 951\"))'", /on its input/],
-    // A program name assembled from variables (Codex connector, PR #956; main allowed it too).
-    ["a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash", /built at run time/],
+    // A program name assembled from variables beside a visible gated word.
+    ["a=g; b=h; $a$b pr merge 951 --squash", /built at run time/],
     // String concatenation hides the gated word (Luna, PR #956 round 1).
     ["node - <<'EOF'\nrequire('child_process').execSync('g'+'h pr '+'mer'+'ge 951')\nEOF", /on its input/],
     ["python - <<'EOF'\nimport subprocess; subprocess.run('g'+'h pr mer'+'ge 1', shell=True)\nEOF", /on its input/],
@@ -480,6 +480,17 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(r.decision?.permissionDecision === "deny" && why.test(r.decision?.permissionDecisionReason || ""),
       `the real hook refuses ${JSON.stringify(command.slice(0, 60))} for the expected reason`);
+  }
+  // ACCEPTED HOLE (Mason, 2026-10-29: "i am fine with holes"): a program started
+  // from a variable is refused only beside a gated word, so a command whose name
+  // AND verbs are all assembled from variables passes, and so does the ordinary
+  // `CODEX=$(ls … | head -1); "$CODEX" exec …` that this refusal used to block.
+  for (const command of [
+    "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
+    "CODEX=$(ls -t /c/tools/*/codex.exe | head -1); timeout 2400 \"$CODEX\" exec --ephemeral -m gpt-6-sol -c 'model_reasoning_effort=\"high\"'",
+  ]) {
+    r = runHook({ tool_name: "Bash", tool_input: { command } });
+    ok(!r.decision, `accepted hole / ordinary launch is allowed: ${JSON.stringify(command.slice(0, 60))}`);
   }
   // 2026-10-18: the run-time-text and fed-to-interpreter refusals apply only
   // when the command could reach a merge or GitHub call (couldReachGatedAction).

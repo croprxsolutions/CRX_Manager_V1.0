@@ -4,7 +4,7 @@ Local implementation; not merged, applied or deployed. Mason requested separate
 implementations without merging. Shared to-do/current-state/decision files are
 intentionally untouched during parallel work.
 
-- New migration `20261028175633_cap_order_invoices_at_delivered` adds an immediate
+- New migration `20261029160000_cap_order_invoices_at_delivered` adds an immediate
   order-wide product quantity check alongside the existing per-delivery checks.
   It counts active split siblings and added product lines together, rechecks
   posting and restoration, and serializes new billing with the existing order lock.

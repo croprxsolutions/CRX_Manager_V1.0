@@ -1,10 +1,6 @@
 {
-  "git": {
-    "deploymentEnabled": {
-      "codex/invoice-delivered-caps-20261028": false
-    }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
+  "rewrites":[{ "source": "/(.*)", "destination": "/index.html" }],
   "headers": [
     {
       "source": "/(.*)",

@@ -124,6 +124,7 @@ describe('OrderDetail', () => {
 
   it('renders order detail when data loads', async () => {
     const orderData = {
+      row_version: 1,
       id: 'ord-123',
       order_number: 'ORD-0099',
       status: 'confirmed',
@@ -157,6 +158,7 @@ describe('OrderDetail', () => {
 
   it('a posted return credit does not enable invoicing before delivery', async () => {
     const orderData = {
+      row_version: 1,
       id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
       total_profit: 20000, total_margin_pct: 40.0, order_name: 'Spring Order', notes: '',
@@ -182,6 +184,7 @@ describe('OrderDetail', () => {
 
   it('#67: shows a plain Cancel Order action on a confirmed order, not the old dead-option Change Status dropdown', async () => {
     const orderData = {
+      row_version: 1,
       id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
       total_profit: 20000, total_margin_pct: 40.0, order_name: 'Spring Order', notes: '',
@@ -201,6 +204,7 @@ describe('OrderDetail', () => {
   it('refreshes without duplicate side effects when cancellation returns no new-success marker', async () => {
     let orderReads = 0;
     const orderData = {
+      row_version: 1,
       id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
       total_profit: 20000, total_margin_pct: 40.0, order_name: 'Spring Order', notes: '',
@@ -249,6 +253,7 @@ describe('OrderDetail', () => {
 
   it('labels a partially fulfilled order as Cancel Remaining Quantity and explains the short-close behavior', async () => {
     const orderData = {
+      row_version: 1,
       id: 'ord-123', order_number: 'ORD-0099', status: 'partially_fulfilled', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
       total_profit: 20000, total_margin_pct: 40.0, order_name: 'Spring Order', notes: '',
@@ -302,6 +307,7 @@ describe('OrderDetail', () => {
 
   it('posts split draft invoices through one atomic group RPC', async () => {
     const orderData = {
+      row_version: 1,
       id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
       total_profit: 20000, total_margin_pct: 40, order_name: 'Spring Order', notes: '',
@@ -347,6 +353,7 @@ describe('OrderDetail', () => {
 
   it('sanitizes an internal contention token when posting draft invoices', async () => {
     const orderData = {
+      row_version: 1,
       id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
       order_date: '2026-03-15', total_cents: 50000, total_cost: 30000, total_price: 50000,
       total_profit: 20000, total_margin_pct: 40, order_name: 'Spring Order', notes: '',

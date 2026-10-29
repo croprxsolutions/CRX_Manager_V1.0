@@ -7,3 +7,6 @@
   PR #1174's `20261029160000`. The SQL is unchanged.
 - Migration-history row 1003 is reserved for it; the draft-only live-check notes
   in CURRENT_STATE and KNOWN_ISSUES give way to main's newer ones.
+- Refreshed the KI-18 freshness note after read-only production checks confirmed
+  quote, order, rebate-claim, and blend-ticket year generators still use
+  `current_date`; the live ledger's latest entry is now recorded there.

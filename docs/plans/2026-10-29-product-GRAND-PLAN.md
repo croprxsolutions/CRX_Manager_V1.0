@@ -443,16 +443,16 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
 - **Filled at the shop from bulk:** a new recorded stock step, **BLK-1 "Fill a tote from bulk"** (Stage 2, after PAR-2, which links each tote size to its Bulk row):
   - it takes the tote's gallons out of the Bulk stock and adds one tote to the tote's stock, in one step;
   - it's a database operation with a retry key and a recorded who and when;
-  - **a shortfall in Bulk stock:** question 14 (recommended: warn and allow, recording the shortfall for the next count, as deliveries do);
-  - **the tote's cost:** question 15 (recommended: the tote's gallons at Bulk's current average cost per gallon, in whole cents, with no added container cost; a vendor-filled tote keeps its received cost);
+  - **a shortfall in Bulk stock** warns and goes ahead, recording the shortfall for the next stock count, as deliveries do (Mason, 2026-10-29, question 14);
+  - **the tote's cost** is its gallons at Bulk's current average cost per gallon, in whole cents, with nothing added for the tote itself; a vendor-filled tote keeps the cost it was received at (Mason, 2026-10-29, question 15);
   - the fill locks the Bulk and tote stock rows while it runs, so two fills can't use the same gallons;
   - it's undone only by a recorded opposite step, which links to the fill, and is refused once that tote has been sold, delivered or used in another fill.
 
   *Done when (in the harness):*
   - filling a 265-gal tote from a Bulk stock of 1,000 gal leaves 735 gal and one more tote, and a repeat with the same retry key returns the first result and changes nothing;
   - two fills at once from 300 gal can't both take the same gallons;
-  - a short fill behaves as Mason answers question 14;
-  - stock value moves as the formula in question 15 says, to the cent, for both a shop-filled and a vendor-filled tote;
+  - a fill from 200 gal for a 265-gal tote warns, goes ahead, and records the 65-gal shortfall for the next count;
+  - stock value moves at Bulk's average cost per gallon times the gallons filled, to the cent for a shop-filled tote, while a vendor-filled tote keeps its received cost;
   - undoing a fill restores both counts and values; undoing a sold tote's fill is refused.
 
 **No tote deposits or container charges** (Mason, 2026-10-29, question 13: "no they dont"), so nothing is stored for them. Return policy stays on the sellable size, never on the parent.
@@ -852,9 +852,9 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 12. **Fixed totes and bulk stock** (overlap 14): are fixed-size totes filled at your shop from your bulk supply, or do they arrive already filled from the vendor? **Answer: both.** Vendor-filled totes are received as packages; shop-filled totes use BLK-1 (overlap 14).
 13. **Tote deposits and returns** (overlap 14): do any totes carry a deposit or a charge, and come back to you or the vendor? **Answer: no.** No deposit or container charge is stored.
 
-**Open, from Sol's third review (2026-10-29):**
-14. **Filling a tote when the system shows too little Bulk** (BLK-1): warn and allow, recording the shortfall for the next stock count (like deliveries), or refuse the fill? Recommend **warn and allow**, because a stock count can be wrong while the tank really has the product.
-15. **What a shop-filled tote costs** (BLK-1): its gallons at Bulk's current average cost per gallon, with nothing added for the tote itself? Recommend **yes**. A vendor-filled tote keeps the cost it was received at.
+**Answered by Mason, 2026-10-29, fourth set ("Yes, as recommended"):**
+14. **Filling a tote when the system shows too little Bulk** (BLK-1): warn and allow, recording the shortfall for the next stock count (like deliveries), or refuse the fill? Recommend **warn and allow**, because a stock count can be wrong while the tank really has the product. **Answer: warn and allow.**
+15. **What a shop-filled tote costs** (BLK-1): its gallons at Bulk's current average cost per gallon, with nothing added for the tote itself? Recommend **yes**. A vendor-filled tote keeps the cost it was received at. **Answer: yes.**
 
 **Over-label rates (Mason, 2026-10-29: "over label rate needs to warn not block"):** a house rate above the label's maximum warns with a recorded reason and is flagged wherever it's used; it is never refused (RT-1).
 

@@ -2872,6 +2872,52 @@ describe('QuoteBuilder', () => {
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining('/orders/'));
   });
 
+  // Item 11 (Mason 2026-10-26): a rep is warned when cost has gone up since a line was quoted,
+  // without seeing any cost number (20261030090000 returns yes/no flags only).
+  describe('cost-rise warning for reps', () => {
+    function serveSentQuote(alerts: Array<{ quote_item_id: string; cost_rose: boolean; below_cost: boolean }>) {
+      const fixture = makeQuoteFixture('sent', 7);
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? fixture.quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [fixture.item]
+              : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+                : table === 'products' ? [fixture.product]
+                  : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_quote_cost_alerts'
+        ? { data: alerts, error: null }
+        : { data: null, error: null }));
+      return fixture;
+    }
+
+    it('tells a rep the cost has gone up, with no numbers', async () => {
+      authState.role = 'sales_rep';
+      const fixture = serveSentQuote([{ quote_item_id: 'item-1', cost_rose: true, below_cost: false }]);
+      renderQuoteBuilder(fixture.quote.id);
+      expect(await screen.findByText('Cost has gone up since this was quoted.')).toBeInTheDocument();
+      expect(mockRpc).toHaveBeenCalledWith('get_quote_cost_alerts', { p_quote_id: fixture.quote.id });
+      expect(screen.queryByText(/today \$/)).not.toBeInTheDocument();
+    });
+
+    it('tells a rep when the price is below today’s cost', async () => {
+      authState.role = 'sales_rep';
+      const fixture = serveSentQuote([{ quote_item_id: 'item-1', cost_rose: true, below_cost: true }]);
+      renderQuoteBuilder(fixture.quote.id);
+      expect(await screen.findByText("Below today's cost: converting needs an admin's approval.")).toBeInTheDocument();
+      expect(screen.queryByText('Cost has gone up since this was quoted.')).not.toBeInTheDocument();
+    });
+
+    it('does not ask for the flags for an admin, who sees the costs themselves', async () => {
+      const fixture = serveSentQuote([{ quote_item_id: 'item-1', cost_rose: true, below_cost: false }]);
+      renderQuoteBuilder(fixture.quote.id);
+      await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      expect(mockRpc).not.toHaveBeenCalledWith('get_quote_cost_alerts', expect.anything());
+      expect(screen.queryByText('Cost has gone up since this was quoted.')).not.toBeInTheDocument();
+    });
+  });
+
   describe('sent-price lock (To-Do 1.2)', () => {
     // A revised quote whose V1 was sent at 10.00; the catalog tier 1 price is 12.00 today.
     function configureLockedQuote() {

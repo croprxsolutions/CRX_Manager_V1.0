@@ -933,22 +933,6 @@ function clearCodexPushProof({ root, headSha }) {
 // accepts, bypassing review entirely.
 export const GUARDED_BASE = "origin/main";
 
-// The exact commit a full review is pinned to: where this head last met
-// origin/main (`git merge-base`), so origin/main...HEAD is exactly this branch's
-// own changes. That is origin/main itself when the head contains it; when main
-// has moved on, the branch no longer has to merge it before Sol (Mason,
-// 2026-10-29), and the merge gate accepts a proof whose base the head contains
-// (Mason, 2026-10-26). Git derives it; no caller can choose it. "" = unreadable.
-// A criss-cross history has SEVERAL merge-bases and git picks one by commit date,
-// which a branch author controls; a review against the "wrong" one can hide the
-// deletion of main code the other base holds (security review, PR #1206). So
-// anything but exactly one merge-base refuses: merge origin/main in, which
-// leaves origin/main itself as the only one.
-export function reviewBaseFor(root, headSha) {
-  const bases = runGit(["merge-base", "--all", GUARDED_BASE, headSha], { cwd: root }).split(/\s+/).filter(Boolean);
-  return bases.length === 1 && /^[0-9a-f]{40}$/i.test(bases[0]) ? bases[0] : "";
-}
-
 // Fixed review prompt. `codex review --base` can't carry a prompt (so it can't be
 // told to emit a machine verdict), so we drive `codex exec` with these fixed
 // INSTRUCTIONS instead. The base is hard-pinned into the prompt; the branch diff
@@ -1352,18 +1336,17 @@ export function evaluateSolPreflight({
   const head = String(headSha || "").trim().toLowerCase();
   const problems = [];
   const notes = [];
-  // run() passes the merge-base of origin/main and HEAD (reviewBaseFor), which the
-  // head always contains, so this only refuses an unreadable or hand-passed base.
+  // Sol reviews against the local origin/main, a ref every worktree shares, so a
+  // peer's fetch can move it past this branch. A clean review of a head that
+  // lacks its base can neither merge (GitHub: BEHIND) nor be carried forward, so
+  // it would be paid for again (#1075 paid five times, 2026-10-23).
   if (headContainsBase === false) {
     problems.push(
       "this branch does not contain the latest main this checkout knows about (origin/main). Run " +
       "`git merge origin/main` (no fetch needed), push, wait for the Codex GitHub App's review of that push, then run Sol.",
     );
   } else if (headContainsBase !== true) {
-    problems.push(
-      "could not find exactly one point where this branch split from origin/main (the history is criss-crossed, " +
-      "or git could not answer). Run `git merge origin/main`, push, wait for the Codex GitHub App, then run Sol.",
-    );
+    problems.push("could not check that this branch contains origin/main. Retry in a minute.");
   }
   if (!pr) {
     problems.push(
@@ -2247,11 +2230,10 @@ export function run(argv = process.argv.slice(2)) {
       `[dry-run] Sandbox-startup fallback: ${fallbackBin || "none found (a sandbox startup failure fails closed)"}\n`,
     );
     process.stdout.write(`[dry-run] Command: codex ${args.slice(0, -1).join(" ")} <review-prompt>\n`);
+    process.stdout.write(`[dry-run] Review base (pinned): ${GUARDED_BASE}\n`);
     process.stdout.write(`[dry-run] Would mint proof at: ${codexPushProofPath(root, "<HEAD>")}\n`);
     const head = runGit(["rev-parse", "HEAD"], { cwd: root });
-    const dryBase = reviewBaseFor(root, head);
-    process.stdout.write(`[dry-run] Review base (pinned): merge-base of ${GUARDED_BASE} and HEAD = ${dryBase || "unreadable"}\n`);
-    const preflight = solPreflight(root, head, dryBase);
+    const preflight = solPreflight(root, head, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
     process.stdout.write(
       `[dry-run] Sol pre-flight for ${head.slice(0, 12)}: ${preflight.ok ? "would run" : "would REFUSE"}\n` +
       `${preflightReport(preflight)}\n`,
@@ -2271,7 +2253,7 @@ export function run(argv = process.argv.slice(2)) {
   // session committed / checked out, or edits appeared), the review no longer
   // describes HEAD — revoke, never mint.
   const headBefore = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseBefore = reviewBaseFor(root, headBefore);
+  const baseBefore = runGit(["rev-parse", GUARDED_BASE], { cwd: root });
   const cleanBefore = worktreeIsClean(root);
   if (!cleanBefore) {
     process.stderr.write("The push-proof reviewer requires a clean worktree before building its sanitized snapshot.\n");
@@ -2308,7 +2290,7 @@ export function run(argv = process.argv.slice(2)) {
   try {
     reviewWorkspace = createSanitizedReviewWorkspace({
       sourceRoot: root,
-      baseRef: baseBefore,
+      baseRef: GUARDED_BASE,
       candidateRef: headBefore,
     });
     if (reviewWorkspace.baseSha !== baseBefore || reviewWorkspace.headSha !== headBefore) {
@@ -2364,17 +2346,16 @@ export function run(argv = process.argv.slice(2)) {
   }
 
   const headAfter = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseAfter = reviewBaseFor(root, headAfter);
+  const baseAfter = runGit(["rev-parse", GUARDED_BASE], { cwd: root });
   const cleanAfter = worktreeIsClean(root);
   const verdict = codexReviewProofVerdict({ status: result.status, stdout: result.stdout });
 
   // Both status reads must SUCCEED and be clean, and HEAD must be an unchanged
   // 40-hex sha. A failed git status (STATUS_UNAVAILABLE sentinel) makes
   // worktreeIsClean false, so it can never be mistaken for a clean tree.
-  // The review base (merge-base of origin/main and HEAD) must also be an unchanged
-  // 40-hex sha: the proof records the base it was reviewed against, and if it
-  // shifted mid-review the review no longer describes origin/main...HEAD, so mint
-  // nothing. A fetch that only moves main forward past the branch leaves it as is.
+  // origin/main must also be an unchanged 40-hex sha: the proof records the base
+  // it was reviewed against, and if the base shifted mid-review the review no
+  // longer describes origin/main...HEAD, so mint nothing.
   const contextStable =
     headAfter &&
     headAfter === headBefore &&

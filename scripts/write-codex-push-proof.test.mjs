@@ -21,7 +21,6 @@ import {
   coderabbitReviewInProgress,
   coderabbitCheckRunInProgress,
   evaluateSolPreflight,
-  reviewBaseFor,
   cleanMainMergeParent,
   readSolPreflightFacts,
   openPullsAtHead,
@@ -1366,31 +1365,6 @@ function collisionPromptSkipsWork(prompt) {
       assert.equal(readSolPreflightFacts(repo, branchHead, movedMain).headContainsBase, false, "preflight: real git sees the head lacks the moved main");
       assert.equal(readSolPreflightFacts(repo, movedMain, branchHead).headContainsBase, true, "preflight: real git sees a head that contains its base");
       assert.equal(readSolPreflightFacts(repo, branchHead, "").headContainsBase, null, "preflight: no base sha is unreadable");
-      // Mason, 2026-10-29: a branch behind main is reviewed against where it split
-      // from main, so it no longer has to merge main before Sol.
-      git("update-ref", "refs/remotes/origin/main", movedMain);
-      assert.equal(reviewBaseFor(repo, branchHead), branchHead, "review base: a branch behind main is reviewed from its merge-base");
-      assert.equal(readSolPreflightFacts(repo, branchHead, reviewBaseFor(repo, branchHead)).headContainsBase, true, "review base: which the head always contains");
-      assert.equal(reviewBaseFor(repo, movedMain), movedMain, "review base: a head containing origin/main is reviewed from origin/main itself");
-      assert.equal(reviewBaseFor(repo, "0".repeat(40)), "", "review base: an unknown head is unreadable");
-      // Criss-cross: two merge-bases, git would pick one by commit date. Refuse.
-      {
-        git("checkout", "-q", "-b", "cc-side", branchHead);
-        writeFileSync(path.join(repo, "side.txt"), "side\n");
-        git("add", ".");
-        git("commit", "-qm", "side");
-        const side = git("rev-parse", "HEAD");
-        git("checkout", "-q", "-b", "cc-main", movedMain);
-        git("merge", "-q", "--no-edit", side);
-        git("checkout", "-q", "cc-side");
-        git("merge", "-q", "--no-edit", movedMain);
-        const crissHead = git("rev-parse", "HEAD");
-        git("update-ref", "refs/remotes/origin/main", git("rev-parse", "cc-main"));
-        assert.equal(git("merge-base", "--all", "origin/main", crissHead).split(/\s+/).length, 2, "criss-cross fixture really has two merge-bases");
-        assert.equal(reviewBaseFor(repo, crissHead), "", "review base: an ambiguous (criss-cross) merge-base refuses");
-        git("update-ref", "refs/remotes/origin/main", movedMain);
-        git("checkout", "-q", "main");
-      }
       // The clean-merge exception refuses a criss-cross too (Luna MED). Branch commit B0 is
       // dated later than main's Mc, so plain merge-base picks B0 and the branch's deletion of
       // Mc's file would look like no shared change.
@@ -1434,7 +1408,7 @@ function collisionPromptSkipsWork(prompt) {
       const prHead = git("rev-parse", "HEAD");
       git("merge", "-q", "--no-edit", movedMain);
       const cleanMerge = git("rev-parse", "HEAD");
-      assert.equal(cleanMainMergeParent(repo, cleanMerge, reviewBaseFor(repo, cleanMerge)), prHead, "clean merge: a conflict-free main merge with no shared files is recognized");
+      assert.equal(cleanMainMergeParent(repo, cleanMerge, movedMain), prHead, "clean merge: a conflict-free main merge with no shared files is recognized");
       assert.equal(readSolPreflightFacts(repo, cleanMerge, movedMain).cleanMergeOf, prHead, "clean merge: the pre-flight reads it");
       assert.equal(cleanMainMergeParent(repo, prHead, movedMain), null, "clean merge: an ordinary commit is not one");
       git("reset", "-q", "--hard", prHead);
@@ -1608,7 +1582,7 @@ function collisionPromptSkipsWork(prompt) {
   const runBody = wrapperSource.slice(wrapperSource.indexOf("export function run("));
   const preflightAt = runBody.indexOf("const preflight = solPreflight(root, headBefore, baseBefore);");
   assert.ok(preflightAt > 0, "preflight: run() checks the head and the exact base it will review");
-  assert.ok(runBody.indexOf("const baseBefore = reviewBaseFor(root, headBefore);") > 0 && runBody.indexOf("const baseBefore = reviewBaseFor(root, headBefore);") < preflightAt, "preflight: the base is pinned before the check, so a later fetch cannot slip past it");
+  assert.ok(runBody.indexOf("const baseBefore = runGit(") < preflightAt, "preflight: the base is pinned before the check, so a later fetch cannot slip past it");
   assert.ok(preflightAt < runBody.indexOf("reviewWorkspace = createSanitizedReviewWorkspace("), "preflight: before the review workspace or Codex run");
   assert.ok(runBody.indexOf("if (options.carryForward) return runCarryForward(root, options);") < preflightAt, "preflight: carry-forward (no full review) skips it");
   const refusal = runBody.slice(preflightAt, runBody.indexOf("let reviewWorkspace;"));

@@ -108,7 +108,8 @@ try {
   assert.match(after.stderr,/SMOKE_PASS_ROLLBACK/,after.stderr);
   console.log('AFTER: shortage, damage explanation, all seven issue labels, missing details, no-issue, permissions, replay, insert failure and retry: SMOKE_PASS_ROLLBACK');
   // A synchronous trigger would read old line quantities. This mutation must be detected.
-  const immediate = read(`supabase/migrations/${candidate}`).replace('DEFERRABLE INITIALLY DEFERRED','NOT DEFERRABLE INITIALLY IMMEDIATE');
+  // The postflight (correctly) refuses a non-deferred trigger, so cut it off for the mutation only.
+  const immediate = read(`supabase/migrations/${candidate}`).replace('DEFERRABLE INITIALLY DEFERRED','NOT DEFERRABLE INITIALLY IMMEDIATE').split('-- Postflight:')[0];
   sql(`BEGIN;\n${immediate}\nCOMMIT;`);
   const mutation = sql(chain,'postgres',true);
   assert.match(mutation.stderr,/SMOKE_FAIL: shortage quantities/,mutation.stderr);

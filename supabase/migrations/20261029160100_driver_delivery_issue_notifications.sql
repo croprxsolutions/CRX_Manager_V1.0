@@ -1,4 +1,4 @@
--- Office report details from the committed delivery, including offline completions.
+-- Office report details from the committed delivery when a driver completes it with an issue.
 -- No billing, inventory, delivery lifecycle, grants on existing objects, or historical rows change.
 -- The deferred trigger runs after complete_delivery has saved all line quantities. A failed
 -- notification insert rolls back the completion, so its existing idempotent retry remains safe.
@@ -45,7 +45,7 @@ BEGIN
     CASE WHEN v_delivery.order_number IS NOT NULL THEN ' (Order ' || v_delivery.order_number || ')'
       ELSE ' (Order not recorded)' END ||
     E'\nReported issue: ' || v_type ||
-    E'\nDriver explanation: ' || COALESCE(NULLIF(btrim(v_delivery.issue_notes), ''), 'Not provided') ||
+    E'\nDriver explanation: ' || COALESCE(NULLIF(left(btrim(v_delivery.issue_notes), 2000), ''), 'Not provided') ||
     E'\nDelivery lines (damage amounts and affected lines are only as described by the driver):\n' ||
     COALESCE(v_lines, 'No delivery lines recorded');
 
@@ -62,7 +62,8 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public._notify_driver_delivery_issue() FROM PUBLIC, anon, authenticated;
+ALTER FUNCTION public._notify_driver_delivery_issue() OWNER TO postgres;
+REVOKE EXECUTE ON FUNCTION public._notify_driver_delivery_issue() FROM PUBLIC, anon, authenticated, service_role;
 
 DROP TRIGGER IF EXISTS driver_delivery_issue_notice ON public.deliveries;
 CREATE CONSTRAINT TRIGGER driver_delivery_issue_notice
@@ -72,3 +73,29 @@ FOR EACH ROW
 WHEN (OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'completed'
   AND NEW.issue_type IS NOT NULL AND NEW.issue_type <> 'none')
 EXECUTE FUNCTION public._notify_driver_delivery_issue();
+
+-- Postflight: fail the whole migration if the trigger or its function is not as intended.
+DO $postflight$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
+    WHERE p.oid = 'public._notify_driver_delivery_issue()'::regprocedure
+      AND p.prosecdef AND r.rolname = 'postgres'
+      AND p.proconfig @> ARRAY['search_path=public, pg_temp']
+  ) THEN
+    RAISE EXCEPTION 'DRIVER_ISSUE_NOTICE_POSTFLIGHT: function not SECURITY DEFINER / postgres-owned / search_path pinned';
+  END IF;
+  IF has_function_privilege('anon', 'public._notify_driver_delivery_issue()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._notify_driver_delivery_issue()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._notify_driver_delivery_issue()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'DRIVER_ISSUE_NOTICE_POSTFLIGHT: an app role can still execute the trigger function';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid = 'public.deliveries'::regclass AND tgname = 'driver_delivery_issue_notice'
+      AND tgenabled = 'O' AND tgdeferrable AND tginitdeferred
+  ) THEN
+    RAISE EXCEPTION 'DRIVER_ISSUE_NOTICE_POSTFLIGHT: deferred trigger missing or disabled';
+  END IF;
+END
+$postflight$;

@@ -641,8 +641,19 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ]) {
     ok(at(needle) > 0 && at(needle) < exemptionCall, `${gate} is checked before the exemption is asked`);
   }
-  eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 2,
-    "exactly two allow points: a valid Sol proof, or the exemption");
+  eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 3,
+    "exactly three allow points: a valid Sol proof, the exemption, or a low-risk pull request");
+  // Sol only on risky pull requests (Mason, 2026-10-29): asked after the exemption,
+  // with the same budgeted gh, and its allow is guarded by its own answer.
+  const riskCall = at("solRiskOnGitHub(");
+  ok(riskCall > exemptionCall, "the risk check is asked only after the documentation-only exemption");
+  ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
+    "the risk check spends the shared hard-gate budget");
+  eq((guardSource.match(/\brisk\s*=/g) || []).length, 1, "`risk` is assigned exactly once, from the module's answer");
+  eq((guardSource.match(/\.risky\b/g) || []).length, 1, "`.risky` is read in exactly one place: the allow decision");
+  ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
+    "the low-risk allow point is guarded by risk.risky");
+  ok(/import \{ solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   const exemptAllow = gateRequestSource.slice(exemptionCall);
   const guardedAllow = exemptAllow.match(/if \(exemption\.exempt\) \{([\s\S]{0,700}?)advisoryQueue\.push\(request\);\s*return;\s*\}/);
   ok(guardedAllow && !/\bdeny\(/.test(guardedAllow[1]) && exemptAllow.indexOf("advisoryQueue.push(request)") < exemptAllow.indexOf("deny("),
@@ -812,13 +823,14 @@ ok(/gh\(args, REQUIREMENT_CALL_TIMEOUT_MS\)\)\?\.data\?\.repository\?\.pullReque
 }
 ok(/if\s*\(\s*!pullRequestChecksGreen\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "the green-pipeline denial is unconditional (no --auto exemption left)");
-ok(!/riskyFiles|contentIsRisky|advisoryQueue\.push\(request\);\s*return;\s*\}\s*\/\/[^\n]*risky/i.test(gateRequestSource),
-  "no risky/non-risky split survives: there is no allow point before the Sol proof check");
-// Two allow points since Mason's documentation-only exemption (2026-10-07): a
-// valid Sol proof, or — only when there is none — the exemption. Both sit behind
-// the proof scan, so neither can be reached before every other gate ran.
-eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 2,
-  "exactly two allow points (the Sol proof, then the documentation-only exemption), both behind the proof scan");
+ok(!/riskyFiles|contentIsRisky/i.test(gateRequestSource),
+  "no hand-rolled risky/non-risky split: only sol-risk-lib.mjs decides it");
+// Three allow points: a valid Sol proof, then — only when there is none — the
+// documentation-only exemption (Mason, 2026-10-07), then a low-risk pull request
+// (Mason, 2026-10-29). All sit behind the proof scan, so none can be reached
+// before every other gate ran.
+eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 3,
+  "exactly three allow points (the Sol proof, the documentation-only exemption, a low-risk pull request), all behind the proof scan");
 ok(gateRequestSource.indexOf("advisoryQueue.push(request)") > gateRequestSource.indexOf("proofValid(data, headSha"),
   "the first allow point comes after the exact-head Sol proof validated");
 

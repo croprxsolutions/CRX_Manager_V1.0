@@ -9,9 +9,9 @@
 //     (2026-09-26; CodeRabbit approval dropped 2026-10-19): the newest run of every
 //     check is green with mergeStateStatus CLEAN, and a fresh gpt-6-sol/high
 //     Codex proof is bound to that head and GitHub's real base (minted only by
-//     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Every diff
-//     needs the proof, except a documentation-only one as defined in
-//     sol-exempt-lib.mjs (Mason, 2026-10-07);
+//     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Only a risky
+//     diff needs the proof (sol-risk-lib.mjs, Mason 2026-10-29); a
+//     documentation-only one never does (sol-exempt-lib.mjs, Mason 2026-10-07);
 //   * `--auto` into main → denied, because it lands later-pushed commits after
 //     this gate has run (Codex round-4 finding);
 //   * `--admin`, CHANGES_REQUESTED, GraphQL mergePullRequest, raw REST merges and
@@ -70,6 +70,7 @@ import {
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
+import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -678,10 +679,22 @@ function gateRequest(request) {
     return;
   }
 
+  // ── Sol only on risky pull requests (Mason, 2026-10-29) ────────────────────
+  // Same placement and budget as the exemption above; any failure is "risky".
+  const risk = solRiskOnGitHub({ baseSha, headSha, repo: request.repo, gh: hardGateGh });
+  if (!risk.risky) {
+    process.stderr.write(
+      `SOL NOT REQUIRED: low-risk pull request (${risk.reason}; Mason, 2026-10-29). ` +
+      `Head ${String(headSha).slice(0, 12)} has every check green.\n`,
+    );
+    advisoryQueue.push(request);
+    return;
+  }
+
   deny(
-    `PR MERGE GATE: every merge into main needs a fresh gpt-6-sol/high Codex proof bound to this exact ` +
-    `head and a base the head contains (Mason's autonomous-landing rule, 2026-09-26). None was found, and the ` +
-    `documentation-only exemption does not apply: ${exemption.reason}.\n\n` +
+    `PR MERGE GATE: this merge into main needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
+    `(Sol is required on money, inventory, database, merge-machinery or large pull requests; Mason, 2026-10-29). ` +
+    `None was found, and the documentation-only exemption does not apply: ${exemption.reason}.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
     `  2. \`git fetch origin\` and merge origin/main into the branch if the head does not contain it (GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +

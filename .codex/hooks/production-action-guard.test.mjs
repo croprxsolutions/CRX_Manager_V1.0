@@ -1329,7 +1329,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 19, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 20, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // app-repo-identity decides which repository the push gate and the CodeRabbit
   // waiver treat as the app repo, and loads at startup through codex-push-lib
   // (Codex App P1 on #1149): Codex may not edit it.
@@ -2047,6 +2047,8 @@ try {
     };
     const compareOf = (files, overrides = {}) => ({
       status: "ahead", ahead_by: 1, behind_by: 0, merge_base: docs.base, head: docs.sha,
+      // No `changes` line count: the low-risk check (sol-risk-lib.mjs) then always
+      // answers "Sol required", so these cases test the exemption alone.
       files: files.map((filename) => ({ filename, previous_filename: null, status: "modified" })),
       ...overrides,
     });
@@ -2096,7 +2098,7 @@ try {
       ".claude/hooks/pr-merge-guard.mjs",
       ".codex/hooks/production-action-guard.mjs",
       "supabase/migrations/20261007000000_x.sql",
-      "src/App.tsx",
+      "src/lib/invoiceMath.ts",
       "package.json",
       "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
       "docs/reference/agent-guardrails.md",
@@ -2134,6 +2136,23 @@ try {
     assert.match(exBit.reason, /not a plain file at the base/, "and the refusal says the base version was not a plain file");
     assert.equal(mergeDocs({ compare: compareOf(["docs/plans/2026-10-07-note.md"], { head: docs.base }) }).blocked, true,
       "a comparison that does not end at the PR's head needs Sol");
+
+    // Sol only on risky pull requests (Mason, 2026-10-29): the same merge-ready PR
+    // with no Sol proof, now with GitHub's line counts.
+    const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
+    assert.equal(mergeDocs({ compare: counted([["src/App.tsx", 40], ["src/components/Label.tsx", 10]]) }).blocked, false,
+      "a small pull request of ordinary app files merges with no Sol proof");
+    for (const [label, entries] of [
+      ["a money file", [["src/App.tsx", 5], ["src/lib/invoiceMath.ts", 5]]],
+      ["an inventory file", [["src/pages/Inventory.tsx", 5]]],
+      ["a migration", [["supabase/migrations/20261029000000_x.sql", 5]]],
+      ["a merge-gate file", [[".claude/hooks/pr-merge-guard.mjs", 5]]],
+      ["over 500 changed lines", [["src/App.tsx", 300], ["src/components/Label.tsx", 201]]],
+    ]) {
+      const verdict = mergeDocs({ compare: counted(entries) });
+      assert.equal(verdict.blocked, true, `a pull request with ${label} still needs Sol`);
+      assert.match(verdict.reason, /Sol is required because/, `and the denial says why (${label})`);
+    }
 
     // The hook's time limit runs out INSIDE the exemption (Luna, round 3): the
     // comparison is slow, so the file-kind lookup after it must not start. A hook

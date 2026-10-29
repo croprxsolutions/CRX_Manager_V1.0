@@ -188,7 +188,7 @@ const reviewChainChecks = [
   ["never disabling a gate", /never bypass, disable, or weaken hooks/i],
   ["pinned reviewer models only", /never a newer model the gates do not yet accept/i],
   ["the Luna exit bar", /no BLOCKER or HIGH remains and every MED\/LOW is fixed, refuted with evidence, or named as a deferral/i],
-  ["a Sol review for every merge (Mason, 2026-10-29: once, before the PR)", /every merge into `main` needs one clean independent \*\*Sol\*\* high-effort review, inside 24 hours, of the PR's head or of an earlier commit on its branch/i],
+  ["a Sol review for every risky merge (Mason, 2026-10-29: once, before the PR, risky PRs only)", /a merge into `main` needs one clean independent \*\*Sol\*\* high-effort review, inside 24 hours, of the PR's head or of an earlier commit on its branch, when the PR touches money, inventory or database files/i],
   ["Sol running before the PR opens", /\*\*Sol on the computer, before the PR opens\*\*/i],
   ["review fixes staying on the same PR", /fixes stay on the same PR/i],
 ];

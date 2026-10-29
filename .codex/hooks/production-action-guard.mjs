@@ -69,6 +69,7 @@ import {
   readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
+import { solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 
@@ -122,7 +123,9 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // decides whether Mason waived a money PR's CodeRabbit review (Codex App P1, #1035).
 // `read-only-search-lib` joined 2026-10-27: imported at startup, and it decides
 // which shell commands skip the checks below as plain searches.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+// `sol-risk-lib` joined 2026-10-29: imported at startup, and it decides whether a
+// merge needs Sol at all.
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|sol-risk-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -137,6 +140,7 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   ".claude/hooks/review-proof-guard.mjs",
   ".claude/hooks/live-testdata-lib.mjs",
   ".claude/hooks/sol-exempt-lib.mjs",
+  ".claude/hooks/sol-risk-lib.mjs",
   ".claude/hooks/coderabbit-skip-lib.mjs",
   ".claude/hooks/read-only-search-lib.mjs",
   // Imported by codex-push-lib and coderabbit-skip-lib, so it loads at guard
@@ -1347,7 +1351,18 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
       gh: (args) => runGh(args, repoDir),
     });
     if (exemption.exempt) return { blocked: false, advisoryRequest: request };
-    return denied(`${mainVerdict.reason}\n\nThe documentation-only exemption does not apply: ${exemption.reason}.`);
+    // Sol only on risky pull requests (Mason, 2026-10-29) — mirror of pr-merge-guard.mjs.
+    const risk = solRiskOnGitHub({
+      baseSha: pullRequest.baseRefOid,
+      headSha: pullRequest.headRefOid,
+      repo: request.repo,
+      gh: (args) => runGh(args, repoDir),
+    });
+    if (!risk.risky) return { blocked: false, advisoryRequest: request };
+    return denied(
+      `${mainVerdict.reason}\n\nSol is required because ${risk.reason} (money, inventory, database, merge-machinery ` +
+      `or large pull requests need Sol; Mason, 2026-10-29). The documentation-only exemption does not apply: ${exemption.reason}.`,
+    );
   }
   if (mainVerdict.blocked) return mainVerdict;
 

@@ -531,9 +531,10 @@ ok(
 // allow point, behind that proof — the old non-risky allow point, which returned
 // before the proof section, is gone. Mason's documentation-only exemption
 // (2026-10-07) adds the second and last: reached only when the proof scan found
-// nothing, and only for a docs-only diff (sol-exempt-lib.mjs). The pins are:
-// exactly two pushes, both after every hard gate and the proof section; the one
-// call site sits after the loop.
+// nothing, and only for a docs-only diff (sol-exempt-lib.mjs). Mason's "Sol only
+// on risky PRs" (2026-10-29) adds the third, right after it (sol-risk-lib.mjs).
+// The pins are: exactly three pushes, all after every hard gate and the proof
+// section; the one call site sits after the loop.
 const claudeQueuePushes = [...guardSource.matchAll(/advisoryQueue\.push\(request\);/g)].map((m) => m.index);
 const claudeAdvisoryCalls = [...guardSource.matchAll(/codexAdvisory\(request, advisoryDeadlineMs\);/g)].map((m) => m.index);
 const claudeGreenAt = guardSource.indexOf("green-pipeline requirement");
@@ -541,8 +542,8 @@ const claudeProofAt = guardSource.indexOf("every main merge → require the fres
 const claudeRequestLoopAt = guardSource.indexOf("for (const request of requests) gateRequest(request);");
 eq(
   claudeQueuePushes.length,
-  2,
-  "the Claude guard has exactly TWO allow points — the Sol proof and the documentation-only exemption; a third would be a merge path that skips both",
+  3,
+  "the Claude guard has exactly THREE allow points — the Sol proof, the documentation-only exemption and a low-risk pull request; a fourth would be a merge path that skips all three",
 );
 eq(
   claudeAdvisoryCalls.length,

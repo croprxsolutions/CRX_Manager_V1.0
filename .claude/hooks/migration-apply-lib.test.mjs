@@ -1721,27 +1721,23 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     const oldProof = path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}-older-base.json`);
     writeFileSync(oldProof, JSON.stringify({ ...goodProof, base_sha: OLD }));
     const c = (from, to, jq) => `repos/{owner}/{repo}/compare/${from}...${to} ${jq}`;
-    const FILES = "[.files[]?.filename]";
-    const moved = (files, over = {}) => gate({ behindBy: "3\n", compare: {
+    const LOG = `log --first-parent -m --no-renames --name-only --format= ${OLD}..${BASE_SHA} -- supabase/migrations/`;
+    const moved = (log, over = {}) => gate({ behindBy: "3\n", git: { [LOG]: log }, compare: {
       [c(OLD, HEAD_SHA, ".behind_by")]: "0\n",
       [c(OLD, BASE_SHA, ".behind_by")]: "0\n",
-      [c(OLD, BASE_SHA, FILES)]: files,
       ...over,
     } });
     try {
-      ok(moved(JSON.stringify(["src/pages/Other.tsx", "docs/manual/KNOWN_ISSUES.md"])).ok === true,
-        "an older-base proof passes when main gained no migration since");
-      refused(moved(JSON.stringify(["src/x.ts", "supabase/migrations/20261029000000_other.sql"])),
+      ok(moved("\n\n").ok === true, "an older-base proof passes when no main commit since touched a migration");
+      refused(moved("supabase/migrations/20261029000000_other.sql\n"),
         "no fresh gpt-6-sol/high proof covers", "a migration that landed on main since the review refuses");
-      refused(moved(new Error("HTTP 502")), "no fresh gpt-6-sol/high proof covers", "an unreadable main file list refuses");
-      refused(moved("not json"), "no fresh gpt-6-sol/high proof covers", "a malformed main file list refuses");
-      refused(moved("[]"), "no fresh gpt-6-sol/high proof covers", "an empty main file list refuses");
-      refused(moved(JSON.stringify(Array.from({ length: 300 }, (_, i) => `src/f${i}.ts`))),
-        "no fresh gpt-6-sol/high proof covers", "a truncated (300-file) main file list refuses");
-      refused(moved("[]", { [c(OLD, HEAD_SHA, ".behind_by")]: "1\n" }),
+      refused(moved(new Error("fatal: bad revision")), "git fetch origin", "an unfetched or unreadable main history refuses");
+      refused(moved("\n", { [c(OLD, HEAD_SHA, ".behind_by")]: "1\n" }),
         "no fresh gpt-6-sol/high proof covers", "a head that lacks the proof's base refuses");
-      refused(moved(JSON.stringify(["src/x.ts"]), { [c(OLD, BASE_SHA, ".behind_by")]: "4\n" }),
+      refused(moved("\n", { [c(OLD, BASE_SHA, ".behind_by")]: "4\n" }),
         "no fresh gpt-6-sol/high proof covers", "a proof base main does not contain refuses");
+      refused(moved("\n", { [c(OLD, BASE_SHA, ".behind_by")]: new Error("HTTP 502") }),
+        "no fresh gpt-6-sol/high proof covers", "an unanswerable ancestry compare refuses");
     } finally {
       rmSync(oldProof, { force: true });
     }

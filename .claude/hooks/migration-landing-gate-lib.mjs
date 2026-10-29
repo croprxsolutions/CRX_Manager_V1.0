@@ -63,24 +63,24 @@ function refuse(why) {
 
 // A Sol proof reviewed on an older main still covers a live apply when (1) the
 // head contains the proof's base, so the review saw exactly this PR's changes,
-// (2) GitHub's base contains it, so main only moved forward, and (3) none of
-// main's commits since then touch supabase/migrations/ (Mason, 2026-10-29).
-// GitHub's compare lists at most 300 files, so a longer list cannot be trusted
-// and refuses. `gh` throws or returns junk → false.
-export function proofBaseStillCovers({ proofBase, headSha, baseSha, gh }) {
+// (2) GitHub's base contains it, so main only moved forward, and (3) no commit
+// on main since then touched supabase/migrations/ (Mason, 2026-10-29). (3) walks
+// main's own history one step at a time, each commit against its first parent,
+// so a migration added then removed, or renamed out of the folder, still counts
+// (Luna HIGH: a net compare hides both). It reads local git, so GitHub's base
+// must be fetched; a missing commit throws and refuses. Unreadable → false.
+export function proofBaseStillCovers({ proofBase, headSha, baseSha, gh, git }) {
   const SHA = /^[0-9a-f]{40}$/i;
   if (![proofBase, headSha, baseSha].every((sha) => SHA.test(String(sha || "")))) return false;
   if (!headContainsBaseOnGitHub({ baseSha: proofBase, headSha, gh })) return false;
   if (proofBase === baseSha) return true;
   if (!headContainsBaseOnGitHub({ baseSha: proofBase, headSha: baseSha, gh })) return false;
-  let files;
-  try {
-    files = JSON.parse(String(gh(["api", `repos/{owner}/{repo}/compare/${proofBase}...${baseSha}`, "--jq", "[.files[]?.filename]"])));
-  } catch {
-    return false;
-  }
-  if (!Array.isArray(files) || files.length === 0 || files.length >= 300) return false;
-  return files.every((name) => typeof name === "string" && !name.startsWith("supabase/migrations/"));
+  const touched = git([
+    "log", "--first-parent", "-m", "--no-renames", "--name-only", "--format=",
+    `${proofBase}..${baseSha}`, "--", "supabase/migrations/",
+  ]);
+  if (typeof touched !== "string") return false;
+  return touched.trim() === "";
 }
 
 export function evaluateLandingGate({
@@ -303,7 +303,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   for (const data of proofs) {
     if (proven) break;
     try {
-      proven = proofBaseStillCovers({ proofBase: data.base_sha, headSha: head, baseSha, gh });
+      proven = proofBaseStillCovers({ proofBase: data.base_sha, headSha: head, baseSha, gh, git });
     } catch (error) {
       if (OUT(error)) throw error;
     }
@@ -311,7 +311,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (!proven) {
     return refuse(
       `no fresh gpt-6-sol/high proof covers ${number}'s head ${head.slice(0, 12)} on its base ${baseSha.slice(0, 12)}: ` +
-      "either none is bound to this head, or main gained a migration (or could not be checked) since the review. " +
+      "either none is bound to this head, or main gained a migration (or could not be checked; run `git fetch origin` first) since the review. " +
       "Merge origin/main into the branch, push, and re-run the checks and the Sol review.",
     );
   }

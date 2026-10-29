@@ -939,9 +939,14 @@ export const GUARDED_BASE = "origin/main";
 // has moved on, the branch no longer has to merge it before Sol (Mason,
 // 2026-10-29), and the merge gate accepts a proof whose base the head contains
 // (Mason, 2026-10-26). Git derives it; no caller can choose it. "" = unreadable.
+// A criss-cross history has SEVERAL merge-bases and git picks one by commit date,
+// which a branch author controls; a review against the "wrong" one can hide the
+// deletion of main code the other base holds (security review, PR #1206). So
+// anything but exactly one merge-base refuses: merge origin/main in, which
+// leaves origin/main itself as the only one.
 export function reviewBaseFor(root, headSha) {
-  const base = runGit(["merge-base", GUARDED_BASE, headSha], { cwd: root });
-  return /^[0-9a-f]{40}$/i.test(base) ? base : "";
+  const bases = runGit(["merge-base", "--all", GUARDED_BASE, headSha], { cwd: root }).split(/\s+/).filter(Boolean);
+  return bases.length === 1 && /^[0-9a-f]{40}$/i.test(bases[0]) ? bases[0] : "";
 }
 
 // Fixed review prompt. `codex review --base` can't carry a prompt (so it can't be
@@ -1354,7 +1359,10 @@ export function evaluateSolPreflight({
       "`git merge origin/main` (no fetch needed), push, wait for the Codex GitHub App's review of that push, then run Sol.",
     );
   } else if (headContainsBase !== true) {
-    problems.push("could not check that this branch contains origin/main. Retry in a minute.");
+    problems.push(
+      "could not find exactly one point where this branch split from origin/main (the history is criss-crossed, " +
+      "or git could not answer). Run `git merge origin/main`, push, wait for the Codex GitHub App, then run Sol.",
+    );
   }
   if (!pr) {
     problems.push(

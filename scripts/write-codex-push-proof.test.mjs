@@ -1373,6 +1373,24 @@ function collisionPromptSkipsWork(prompt) {
       assert.equal(readSolPreflightFacts(repo, branchHead, reviewBaseFor(repo, branchHead)).headContainsBase, true, "review base: which the head always contains");
       assert.equal(reviewBaseFor(repo, movedMain), movedMain, "review base: a head containing origin/main is reviewed from origin/main itself");
       assert.equal(reviewBaseFor(repo, "0".repeat(40)), "", "review base: an unknown head is unreadable");
+      // Criss-cross: two merge-bases, git would pick one by commit date. Refuse.
+      {
+        git("checkout", "-q", "-b", "cc-side", branchHead);
+        writeFileSync(path.join(repo, "side.txt"), "side\n");
+        git("add", ".");
+        git("commit", "-qm", "side");
+        const side = git("rev-parse", "HEAD");
+        git("checkout", "-q", "-b", "cc-main", movedMain);
+        git("merge", "-q", "--no-edit", side);
+        git("checkout", "-q", "cc-side");
+        git("merge", "-q", "--no-edit", movedMain);
+        const crissHead = git("rev-parse", "HEAD");
+        git("update-ref", "refs/remotes/origin/main", git("rev-parse", "cc-main"));
+        assert.equal(git("merge-base", "--all", "origin/main", crissHead).split(/\s+/).length, 2, "criss-cross fixture really has two merge-bases");
+        assert.equal(reviewBaseFor(repo, crissHead), "", "review base: an ambiguous (criss-cross) merge-base refuses");
+        git("update-ref", "refs/remotes/origin/main", movedMain);
+        git("checkout", "-q", "main");
+      }
 
       // A clean main merge (no shared files) names the pre-merge head; a shared file or a
       // hand edit does not.

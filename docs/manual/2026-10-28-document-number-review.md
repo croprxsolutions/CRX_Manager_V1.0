@@ -18,7 +18,7 @@ Luna's concern about selecting an unverified reusable container is addressed by
 removing reuse. The submitted proof always creates its own isolated container
 and cleans up only the container ID returned by its successful creation call.
 
-The first Claude alias resolved to Sonnet 5. The requested explicit Sonnet 5.5
-high-effort review and normal push hooks are still required before draft-only
-GitHub delivery. No merge, live migration apply or deployment is authorized.
+The first Claude alias resolved to Sonnet 5. The explicit Sonnet 5.5 high-effort
+review later completed (see the proof record). Superseded status: not applied or
+merged; landing follows the `ship.md` gates.
 See [the detailed proof record](../operations/2026-10-28-document-number-year-proof.md).

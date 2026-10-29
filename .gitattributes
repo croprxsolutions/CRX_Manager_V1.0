@@ -285,3 +285,6 @@ scripts/smoke/prove-invoice-season-follows-invoice-date.mjs text eol=lf
 supabase/migrations/20260911120000_bind_adjust_inventory_receipt_to_intent.sql text eol=lf
 scripts/smoke/smoke-adjust-inventory-intent-binding.sql text eol=lf
 scripts/smoke/prove-adjust-inventory-intent-binding-real-schema.mjs text eol=lf
+
+# Keep the unapplied document-year candidate stable across checkouts.
+supabase/migrations/20261029160300_document_numbers_chicago_year.sql text eol=lf

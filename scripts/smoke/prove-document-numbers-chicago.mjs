@@ -154,7 +154,8 @@ async function main() {
   const badReplacement = lf(CANDIDATE).replace('RETURNS text\nLANGUAGE plpgsql\nSET search_path = public',
     'RETURNS text\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = public');
   assert.notEqual(badReplacement, lf(CANDIDATE));
-  const postflightRefusal = psql(badReplacement, { allowFailure: true });
+  // The migration carries no transaction control; the apply wrapper (and this proof) supplies it.
+  const postflightRefusal = psql(`BEGIN;\n${badReplacement}\nCOMMIT;`, { allowFailure: true });
   assert.notEqual(postflightRefusal.status, 0, 'postflight refuses an incorrect emitted contract');
   assert.match(postflightRefusal.stderr, /CONTRACT_FAIL/);
   assert.equal(contract(), before, 'postflight refusal rolls back the whole migration');

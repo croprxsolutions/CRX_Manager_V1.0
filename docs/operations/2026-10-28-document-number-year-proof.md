@@ -1,17 +1,18 @@
-# To-Do 12.1: Chicago document-number year - draft-only candidate
+# To-Do 12.1: Chicago document-number year - unapplied candidate
 
 Scope: quote, order and rebate-claim numbering only. Invoice numbering, payment
 dates, existing identifiers, formats, sequences and counters are unchanged.
-Mason authorized a guarded push and draft PR after a clean Sonnet 5.5 high-effort
-review and green checks. No merge, live apply or deployment is authorized.
+The sections below are the 2026-10-28 evidence (before the 2026-10-29 re-stamp and
+the main merge); the "Landing status" section at the end is current. Not applied
+or merged; landing follows the `ship.md` gates.
 
 ## Current-source and live read-only evidence
 
 Initial base: `origin/main` at `5b0246530`, still current when the final suite completed.
 Before the final review, the unpublished commits were rebased onto `32469af54`,
 which adds the notes-only Vercel build skip. Its `ignoreCommand` is preserved
-together with this branch's exact-name preview-deployment block. No application
-or numbering function changed during that refresh.
+(the branch's preview-deployment hold was later removed). No application or
+numbering function changed during that refresh.
 Checkout: `C:/CRX_chicago_document_numbers`.
 Branch: `codex/chicago-document-numbers-20261028`.
 
@@ -114,13 +115,8 @@ The safe optional live lock timeout can be assessed by the future apply session.
 
 ## Delivery boundary and rollback
 
-Keep the PR a draft. Do not enable auto-merge, merge, apply, deploy, or write
-production data/settings/permissions. Future delivery needs refreshed evidence
-and all remaining protected review/CI/apply gates.
-The branch-specific `git.deploymentEnabled` entry in `vercel.json` is false for
-`codex/chicago-document-numbers-20261028` so the authorized push cannot trigger
-an automatic preview deployment. Other branches, including main, retain their
-existing default behavior. No Vercel project settings were changed through an API.
+Not applied and not merged. Delivery follows the `ship.md` gates (CI, reviews,
+final Sol, guarded apply before merge). No Vercel project settings were changed.
 
 Rollback is a forward migration re-emitting the three reviewed bodies with the
 prior year expression. Never reset counters/sequences or renumber records.
@@ -129,6 +125,20 @@ For exact prior bodies, write the candidate's three explicit definitions with on
 the Chicago date expression restored to `current_date`, and verify the original
 body hashes pinned by its preflight. Do not dynamically rewrite live function source.
 
-Proposed shared to-do status: "12.1 built as a draft-only candidate; local Chicago
-boundary, concurrency, retry and failure proof passed. Not merged or applied.
-See this record and the draft PR for current delivery evidence."
+Proposed shared to-do status: "12.1 built; local Chicago boundary, concurrency,
+retry and failure proof passed. Not merged or applied until the landing gates
+finish. See this record and the PR for current delivery evidence."
+
+## Landing status - 2026-10-29
+
+- The candidate is `20261029160300_document_numbers_chicago_year.sql` (history row
+  1005; authored as `20261028185021`, re-stamped after the
+  live order-edit migration `20261028185500`). The earlier evidence above ran on the
+  authored stamp; the function bodies are unchanged by the re-stamp and
+  `20261028185500` does not touch these three functions.
+- The live ledger at the last read was 1,077 rows with ordering high-water
+  `20261028185500` (the figures above are the older 2026-10-28 read).
+- Review round 1 (Luna, compliance, security) fixed in this head: quote screen now
+  clears the previous number when a new allocation starts and no longer reports
+  "still loading" for an existing quote; stale stamp/draft-only wording corrected.
+  The 9,999 `lpad` capacity limit stays a separate deferred follow-up (owner: Codex).

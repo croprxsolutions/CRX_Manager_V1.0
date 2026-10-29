@@ -5,7 +5,6 @@
 -- 20260914100100_next_invoice_number_year_chicago.sql; each allocation is intentionally new.
 -- create_rebate_claim retains check_idempotency/save_idempotency.
 -- Rollback: re-emit the three reviewed prior bodies; never reset counters or renumber rows.
-BEGIN;
 DO $preflight$
 DECLARE
   v_count int;
@@ -213,5 +212,3 @@ BEGIN
   END IF;
 END;
 $contract_postflight$;
-
-COMMIT;

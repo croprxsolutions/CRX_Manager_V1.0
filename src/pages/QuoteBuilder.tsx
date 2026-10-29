@@ -439,7 +439,8 @@ export default function QuoteBuilder() {
   const loadedCommissionSplitRef = useRef<CommissionSplit | null>(null);
   const commissionSplitTouchedRef = useRef(false);
   const [quoteNumber, setQuoteNumber] = useState('');
-  const [quoteNumberLoading, setQuoteNumberLoading] = useState(true);
+  // Only a new quote allocates a number; an existing quote's number arrives with its row.
+  const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
   const [status, setStatus] = useState<QuoteStatus>('draft');
   const [quoteId, setQuoteId] = useState<string | null>(id || null);
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
@@ -976,9 +977,11 @@ export default function QuoteBuilder() {
   const generateQuoteNumber = async () => {
     // Use server-side sequence to prevent race conditions
     setQuoteNumberLoading(true);
+    // Never keep a previous quote's number if this allocation fails.
+    setQuoteNumber('');
     try {
       const { data, error } = await supabase.rpc('generate_quote_number');
-      if (error || !data) throw error ?? new Error('Quote number unavailable');
+      if (error || !data) throw new Error(error?.message ?? 'Quote number unavailable');
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
     } catch (err) {
       Sentry.captureException(err, { extra: { context: 'generate_quote_number' } });

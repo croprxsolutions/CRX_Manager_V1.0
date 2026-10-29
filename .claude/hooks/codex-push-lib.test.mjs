@@ -1722,6 +1722,9 @@ assert.equal(pushUsesConfigRootEnv("GIT_DIR_BACKUP=/tmp/x git push origin main")
 assert.equal(pushUsesConfigRootEnv("GIT_DIRTY=1 git push origin main"), false, "GIT_DIRTY is not GIT_DIR");
 assert.equal(pushUsesConfigRootEnv("MY_HOME=/tmp/x git push origin main"), false, "a variable ENDING in HOME is not HOME");
 assert.equal(pushUsesConfigRootEnv("GIT_DIR=/tmp/evil git push origin main"), true, "...but the real GIT_DIR still fires");
+// Prose is not a variable (Mason, 2026-10-29).
+assert.equal(pushUsesConfigRootEnv(`git commit -m "the home .claude folder" && git push origin feature/x`), false, "the word home in a commit message is not HOME");
+assert.equal(pushUsesConfigRootEnv(`$env:home = "C:/evil"; git push origin main`), true, "a PowerShell $env:home in any case still fires");
 // 2026-08-05: the check denied every Linux `git -C /home/... push`, because the
 // case-insensitive bare-text match hit the `/home/` path segment. That is the
 // form this guard's own denial messages recommend, so on a web/mobile session

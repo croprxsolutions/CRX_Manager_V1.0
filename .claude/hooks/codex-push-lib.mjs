@@ -1971,12 +1971,19 @@ export function divergentPushLookups(scrubbed, ambient) {
 // assignment name cannot contain `-` at all, and no override spelling below puts
 // one on either side of the name, so a hyphen adjacent to the match means the
 // text is part of a path or a branch name rather than a variable.
-const CONFIG_ROOT_ENV_RE =
-  /(?<![A-Za-z0-9_/\\-])(?:HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|XDG_CONFIG_HOME|GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_CEILING_DIRECTORIES|GIT_DISCOVERY_ACROSS_FILESYSTEM)(?![A-Za-z0-9_-])/i;
+//
+// Case matters for the shell spelling (Mason, 2026-10-29: accept holes over false
+// alarms): POSIX variables are upper-case, so the word "home" in a commit message
+// pushed in the same command is prose, not HOME. PowerShell's `$env:` names are
+// case-insensitive and stay matched in any case. Accepted hole: a lower-case
+// variable of the same name in a POSIX shell is not one git reads anyway.
+const CONFIG_ROOT_ENV_NAMES = "HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|XDG_CONFIG_HOME|GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_CEILING_DIRECTORIES|GIT_DISCOVERY_ACROSS_FILESYSTEM";
+const CONFIG_ROOT_ENV_RE = new RegExp(`(?<![A-Za-z0-9_/\\\\-])(?:${CONFIG_ROOT_ENV_NAMES})(?![A-Za-z0-9_-])`);
+const CONFIG_ROOT_PS_ENV_RE = new RegExp(`\\$env:(?:${CONFIG_ROOT_ENV_NAMES})(?![A-Za-z0-9_-])`, "i");
 export function pushUsesConfigRootEnv(cmd) {
   const text = String(cmd || "");
   if (!isGitPush(text)) return false;
-  return CONFIG_ROOT_ENV_RE.test(text);
+  return CONFIG_ROOT_ENV_RE.test(text) || CONFIG_ROOT_PS_ENV_RE.test(text);
 }
 
 // The general net behind both of the specific rules above. A push command that

@@ -1346,6 +1346,7 @@ export function evaluateSolPreflight({
   readyForReviewMs = Number.NaN,
   headContainsBase,
   cleanMergeOf = null,
+  cleanMergeThreads = null,
   nowMs = Date.now(),
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
@@ -1386,11 +1387,13 @@ export function evaluateSolPreflight({
   const quietFor = Number.isFinite(quietSince) ? nowMs - quietSince : -1;
   const runningFor = Number.isFinite(codexState?.at) ? nowMs - codexState.at : -1;
   const reviewedHere = codexState?.sha === head && codexState?.status === "completed";
+  let skippedAppWait = false;
   if (codexState === undefined || codexState?.unreadable) {
     problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
   } else if (!reviewedHere && cleanMergeOf && (codexState?.sha === head || (codexState?.sha === cleanMergeOf && codexState?.status === "completed"))) {
     // Mason, 2026-10-29: a clean main merge adds none of the PR's own changes, so
     // Sol need not wait for the App to re-read it. Its threads are still checked below.
+    skippedAppWait = true;
     notes.push(`${head.slice(0, 9)} only merges main into ${cleanMergeOf.slice(0, 9)} (no conflicts, no shared files), so Sol does not wait for the Codex GitHub App to review it again.`);
   } else if (!reviewedHere && codexState?.sha === head) {
     // Its review of THIS commit has started and not finished: wait for it, however long, until it is plainly dead.
@@ -1419,6 +1422,16 @@ export function evaluateSolPreflight({
       `the Codex GitHub App has ${codexThreads.unresolvedAtHead} unanswered comment(s) on this commit. ` +
       "Fix them (one push for all of them) or reply with a reason and resolve each thread, then run Sol.",
     );
+  }
+  // The skip reuses the App's review of the pre-merge commit, so its threads on that
+  // commit must be answered too: against the merge head they only read as stale (App P1, PR #1206).
+  if (skippedAppWait && cleanMergeThreads?.status === "findings-at-head") {
+    problems.push(
+      `the Codex GitHub App has ${cleanMergeThreads.unresolvedAtHead} unanswered comment(s) on ${cleanMergeOf.slice(0, 9)}, ` +
+      "the commit before the main merge. Fix them or reply with a reason and resolve each thread, then run Sol.",
+    );
+  } else if (skippedAppWait && (!cleanMergeThreads || cleanMergeThreads.status === "incomplete")) {
+    problems.push(`could not read the Codex GitHub App threads on ${cleanMergeOf.slice(0, 9)}, the commit before the main merge. Retry in a minute.`);
   }
 
   if (coderabbitOpen === null || coderabbitOpen === undefined) {
@@ -1607,6 +1620,7 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
     // Threads read for a different head than the one Sol would review prove nothing.
     if (String(node.headRefOid || "").toLowerCase() === headSha.toLowerCase()) {
       facts.codexThreads = evaluateCodexBotReview(node);
+      if (facts.cleanMergeOf) facts.cleanMergeThreads = evaluateCodexBotReview({ ...node, headRefOid: facts.cleanMergeOf });
       facts.coderabbitOpen = coderabbitThreadCount(node);
     }
   } catch { /* left null: refuses */ }

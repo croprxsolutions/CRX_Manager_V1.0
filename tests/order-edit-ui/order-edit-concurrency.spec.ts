@@ -16,7 +16,7 @@ function session() {
 }
 type Request = { p_order_id: string; p_expected_row_version: number; p_idempotency_key: string; p_items: { total_units_needed: number }[] };
 function backend() {
-  return { version: 7, quantity: 10, failRead: false, missingVersion: false, missingOrder: false, orderReadDelayMs: 0, loseReply: false, saves: [] as Request[], receipts: new Map<string, { order_id: string; row_version: number; success: boolean }>() };
+  return { version: 7, quantity: 10, failRead: false, missingVersion: false, missingOrder: false, orderReadDelayMs: 0, role: 'admin', planned: false, loseReply: false, saves: [] as Request[], receipts: new Map<string, { order_id: string; row_version: number; success: boolean }>() };
 }
 async function isolate(page: Page, state: ReturnType<typeof backend>) {
   const errors: string[] = [];
@@ -29,14 +29,16 @@ async function isolate(page: Page, state: ReturnType<typeof backend>) {
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204 });
     if (url.pathname === '/auth/v1/token') return json(session());
     if (url.pathname === '/auth/v1/user') return json(user);
-    if (url.pathname === '/rest/v1/profiles') return json({ id: ACTOR, email: user.email, full_name: 'Order Proof Admin', role: 'admin', is_active: true, denied_pages: [] });
+    if (url.pathname === '/rest/v1/profiles') return json({ id: ACTOR, email: user.email, full_name: 'Order Proof Admin', role: state.role, is_active: true, denied_pages: [] });
     if (url.pathname === '/rest/v1/orders') {
+      // The planned toggle is a direct update; the order's triggers advance its version.
+      if (req.method() === 'PATCH') { state.planned = req.postDataJSON().is_planned; state.version += 1; return json([{ id: ORDER }]); }
       if (state.failRead) return json({ message: 'controlled failed order read' }, 500);
       if (state.orderReadDelayMs) await new Promise((resolve) => setTimeout(resolve, state.orderReadDelayMs));
       if (state.missingOrder) return json(null);
       return json({ id: ORDER, order_number: 'ORD-LOCAL-1', customer_id: CUSTOMER, status: 'confirmed', order_date: '2026-10-28',
         created_at: '2026-10-28T00:00:00Z', row_version: state.missingVersion ? null : state.version, total_price: state.quantity * 20,
-        pricing_status: 'priced', commission_split: null, is_planned: false, booking_draw: false, deleted_at: null });
+        pricing_status: 'priced', commission_split: null, is_planned: state.planned, booking_draw: false, deleted_at: null });
     }
     if (url.pathname === '/rest/v1/customers') return json(url.searchParams.get('id') === `eq.${CUSTOMER}`
       ? { id: CUSTOMER, farm_name: 'Local Proof Farm', assigned_tier: 1 } : [{ id: CUSTOMER, farm_name: 'Local Proof Farm' }], 200, 1);
@@ -147,6 +149,38 @@ test('a conflict reload that finds no order keeps the unsaved draft on screen', 
   await expect(page.getByText('Order not found')).toHaveCount(0);
   await expect(qtyInput(page)).toHaveValue('17');
   expect(state.saves).toHaveLength(1); expect(errors).toEqual([]);
+});
+
+test('marking the order planned refreshes the version the next edit saves against', async ({ page }) => {
+  const state = backend(); const errors = await isolate(page, state); await openEditor(page);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByTitle('Click to mark as Planned').click();
+  await expect(page.getByTitle('Click to mark as Committed')).toBeEnabled();
+  await page.getByRole('button', { name: 'Edit Order' }).click();
+  await qtyInput(page).fill('15');
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
+  expect(state.saves.map((r) => r.p_expected_row_version)).toEqual([8]);
+  expect(state.quantity).toBe(15); expect(errors).toEqual([]);
+});
+
+test('a role refresh while editing keeps the editor and its unsaved draft', async ({ page, context }) => {
+  const state = backend(); const errors = await isolate(page, state); await openEditor(page);
+  await qtyInput(page).fill('16');
+  state.role = 'sales_rep';
+  // Signing in again in another tab re-confirms the same user here (SIGNED_IN), which reloads
+  // the profile; the new role rebuilds the page's loader and it reads the order again.
+  const orderReread = page.waitForResponse((r) => r.url().includes('/rest/v1/orders'));
+  const other = await context.newPage(); await isolate(other, state);
+  // The new tab starts without the stored session so it shows the sign-in form.
+  await other.addInitScript(() => window.localStorage.clear());
+  await other.goto('/'); await other.getByLabel('Email').fill(user.email);
+  await other.getByLabel('Password').fill('isolated-proof-password');
+  await other.getByRole('button', { name: 'Sign In' }).click();
+  await orderReread;
+  await expect(page.getByRole('button', { name: 'Save Changes' })).toBeVisible();
+  await expect(qtyInput(page)).toHaveValue('16');
+  expect(errors).toEqual([]);
 });
 
 test('a missing version fails the read closed and sends no save', async ({ page }) => {

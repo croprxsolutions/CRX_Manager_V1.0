@@ -12,6 +12,10 @@
 -- execute_sql call. "SMOKE_PASS_ROLLBACK" = pass; any other error = real failure.
 -- After the migration is applied, the CREATE OR REPLACE is idempotent so this file
 -- still serves as a post-apply smoke.
+-- HISTORICAL ONLY once 20261028185500_order_edit_and_number_concurrency is applied:
+-- that migration drops this four-argument form for one that requires the order's
+-- row_version, so recreating it here would test a function production no longer
+-- has. Do not run this file after that migration (it is in no smoke-specs chain).
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.update_order_items(

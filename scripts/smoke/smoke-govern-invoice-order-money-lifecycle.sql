@@ -198,20 +198,28 @@ BEGIN
     FROM public.inventory_transactions
    WHERE order_id = v_swap_order;
   BEGIN
-    PERFORM public.update_order_items(
-      v_swap_order,
-      jsonb_build_array(jsonb_build_object(
-        'id', v_swap_item,
-        'product_id', v_other_product,
-        'product_name', '[E2E] forbidden swap target',
-        'unit_size', 'GL',
-        'cost_per_unit', 5,
-        'price_per_unit', 9,
-        'total_units_needed', 2
-      )),
-      v_admin,
-      'e2e-life-forbidden-swap-' || v_suffix
-    );
+    -- 20261028185500 replaced the four-argument form with one that requires the
+    -- order's current row_version; send it so the lineage lock, not the version
+    -- check, is what refuses this edit before and after that migration.
+    EXECUTE CASE
+        WHEN to_regprocedure('public.update_order_items(uuid,jsonb,uuid,text,bigint)') IS NOT NULL
+          THEN 'SELECT public.update_order_items($1, $2, $3, $4, $5)'
+        ELSE 'SELECT public.update_order_items($1, $2, $3, $4)'
+      END
+      USING
+        v_swap_order,
+        jsonb_build_array(jsonb_build_object(
+          'id', v_swap_item,
+          'product_id', v_other_product,
+          'product_name', '[E2E] forbidden swap target',
+          'unit_size', 'GL',
+          'cost_per_unit', 5,
+          'price_per_unit', 9,
+          'total_units_needed', 2
+        )),
+        v_admin,
+        'e2e-life-forbidden-swap-' || v_suffix,
+        (SELECT (to_jsonb(o)->>'row_version')::bigint FROM public.orders o WHERE o.id = v_swap_order);
     RAISE EXCEPTION 'SMOKE_FAIL: order edit swapped a product linked to a scheduled delivery';
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;

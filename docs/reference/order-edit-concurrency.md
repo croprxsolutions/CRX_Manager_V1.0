@@ -134,3 +134,26 @@ CodeRabbit's full review of `33f9b0a15` raised four comments; two were fixed and
 - **Deferred (Minor):** blend-ticket numbers take their year from the database (UTC) date. The
   quote and order number generators use the same rule; changing one alone would make them
   disagree, so all three stay with KI-18 in `docs/manual/KNOWN_ISSUES.md`.
+
+### Second round — 2026-10-29
+
+CodeRabbit's review of `82b93d9cd` raised four more comments; three were fixed and one answered
+with evidence.
+
+- **Fixed (Minor):** a profile refresh that changes the signed-in role no longer closes the editor
+  or discards its draft. The per-order reset now runs only when the order changes; the reload that
+  follows a role change keeps the open draft.
+- **Fixed (outside the diff):** marking an order Planned or Committed advances its version, so the
+  page now reloads the whole order (lines and version together) afterwards. Adopting only the new
+  version could pair it with lines someone else has since changed.
+- Both fixes have browser proofs; each new test failed on the previous code (all eight pass).
+- **Fixed (Major):** the rollback-only smoke chains that still called the four-argument save
+  (`smoke-order-draw-lock.sql`, `smoke-govern-invoice-order-money-lifecycle.sql`) now send the
+  order's current version when the versioned form exists, so they prove the same rules before and
+  after this migration. A disposable database run exercised both paths before and after it.
+  `smoke-item-profit-sameproduct-edit.sql` recreates the old form for a June migration, is in no
+  smoke-specs chain, and is now marked historical. `prove-payment-allocation-no-direct-writes-real-schema.mjs`
+  pins live function bodies from 2026-10-22 and fails closed when they change, by design.
+- **Refuted (Major):** requiring an idempotency key. The project contract is
+  `p_idempotency_key text DEFAULT NULL`; the page and offline replay always send a key, and a
+  key-less duplicate is refused by the version check because the first write advanced the version.

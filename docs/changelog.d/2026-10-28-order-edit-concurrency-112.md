@@ -21,3 +21,8 @@ for the coordinating session to update after the parallel tasks are reconciled.
 CodeRabbit follow-up (2026-10-29): a conflict reload that finds no order keeps the unsaved
 draft on screen, and Cancel restores the last loaded draft at once so reopening Edit early
 never shows or saves discarded edits. Two new browser proofs cover these (six scenarios pass).
+
+Second CodeRabbit round (2026-10-29): a role refresh no longer closes the editor or drops its
+draft, toggling Planned/Committed reloads the order so the next edit saves against the current
+version, and two smoke chains now send the order's version so they still run after this
+migration (eight browser scenarios pass).

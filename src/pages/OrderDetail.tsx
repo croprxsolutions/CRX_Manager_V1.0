@@ -429,6 +429,11 @@ export default function OrderDetail() {
     setConflictDialogOpen(false);
     setEditRowVersion(null);
     loadedDraftRef.current = { items: [], rowVersion: null };
+  }, [id]);
+
+  // Kept apart from the reset above: fetchOrder is also rebuilt when the signed-in role
+  // changes, and that refresh must not close the editor or discard its unsaved draft.
+  useEffect(() => {
     if (id) fetchOrder();
   }, [id, fetchOrder]);
 
@@ -781,6 +786,10 @@ export default function OrderDetail() {
       setOrder({ ...order, is_planned: newValue });
       toast('success', newValue ? 'Order marked as Planned' : 'Order marked as Committed');
       logActivity({ event: 'order_updated', description: `Order ${order.order_number} marked as ${newValue ? 'planned' : 'committed'}`, performedBy: profile.id, entityType: 'order', entityId: order.id, customerId: order.customer_id });
+      // The toggle advances the order's row_version. Reload the whole order (lines and
+      // version together) so the next edit saves against it; adopting only the new version
+      // could pair it with lines another user has since changed.
+      await fetchOrder();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'toggle_order_planned' } });
       toast('error', sanitizeError(err));

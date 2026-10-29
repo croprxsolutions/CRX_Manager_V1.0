@@ -36,17 +36,22 @@ export function holdStatePath(projectDir, sessionId) {
   return path.join(dir, `hold.${createHash("sha256").update(typed).digest("hex").slice(0, 32)}.json`);
 }
 
-// Mason wants to halt / pause / is only scoping a future session.
+// Mason tells the session to halt.
 //
-// The `(?<![-_])` / `(?![-_]|\.[A-Za-z0-9])` pairs around stop|pause exclude an
-// occurrence that is part of an IDENTIFIER rather than a word Mason typed —
-// `stop-wrap.mjs`, `stop-verify.mjs`, `hold-latch`, "non-stop". Discussing this
-// very guard by filename latched a hold on 2026-08-26 for exactly that reason.
-// This removes no vocabulary: a trailing "." (as in "please stop.") only counts
-// as an extension when a letter or digit follows it, and "/" is deliberately NOT
-// in the set so "does stop/pause still work?" keeps matching. Path forms are
-// still caught through the "-" or the ".ext".
-const HOLD_RE = /((?<!(don'?t|won'?t|never|not) )(?<!(don'?t|won'?t) ever )(?<![-_])\bstop\b(?![-_]|\.[A-Za-z0-9])|(?<!(don'?t|won'?t|never|not) )(?<!(don'?t|won'?t) ever )(?<![-_])\bpause\b(?![-_]|\.[A-Za-z0-9])|\bhold (on|up|off)\b|cancel (all |the )?background|good stopping point|not (working|building) on (it|this|that) yet|just (getting|scoping|scope|the framework|framing)|only (scoping|planning|framing)|don'?t (build|code|implement|write code|start) yet|for a (fresh|future|new) session)/i;
+// A DIRECT COMMAND only (Mason, 2026-10-29: "stop blocking on certain words like
+// stop"): a line or sentence that BEGINS with stop / pause / halt / hold on|up|off / cancel,
+// optionally after a short lead-in ("please", "ok", "wait", "no", "hey",
+// "actually", "just", "hang on"), so "stop", "STOP!!", "Please stop.", "stop the
+// deploy" and "hold off on merging" latch, while a sentence that only MENTIONS
+// stopping ("I want it to stop blocking on words", "the stop-wrap hook", "a hook
+// to stop X") does not. The scoping phrases ("just scoping", "for a new session",
+// "don't build yet") no longer latch at all. Accepted hole: a halt phrased
+// mid-sentence ("can you stop?") relies on the agent obeying it, not on this latch.
+// The `(?![-_]|\.[A-Za-z0-9])` tail still keeps `stop-wrap.mjs` from counting.
+// A new sentence counts as a fresh start too ("that looks wrong. stop now").
+// A request aimed at the agent ("I need you to stop", "can you pause") is a
+// command too; "I want it to stop blocking" (aimed at a thing) is not.
+const HOLD_RE = /(?:^|[.!?;:\]]\s+|>\s*)\s*(?:(?:please|pls|ok(?:ay)?|wait|no|hey|actually|just|hang on|whoa|guys?|then|now|so)[\s,!.:;-]+)*(?:(?:i\s+)?(?:need|want)\s+(?:you|the\s+agents?|claude|codex)\s+to\s+|(?:you|claude|codex)\s+(?:should|must|need\s+to|have\s+to)\s+|(?:can|could|would)\s+you\s+(?:please\s+)?)?(?:stop|pause|halt|hold\s+(?:on|up|off)|cancel)\b(?![-_]|\.[A-Za-z0-9])/im;
 
 // An affirmative "carry on" — not required to clear (any non-hold prompt clears),
 // but used to phrase the confirmation.

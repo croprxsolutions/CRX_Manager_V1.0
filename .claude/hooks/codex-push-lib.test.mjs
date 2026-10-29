@@ -1613,6 +1613,15 @@ assert.deepEqual(
   pushUsesTransportEnv("$env:PATHEXT='.MJS'; git push origin main"),
   ["PATHEXT"], "PowerShell executable-extension changes are in scope too",
 );
+// The bare word is prose, not a change (Mason, 2026-10-29).
+assert.deepEqual(
+  pushUsesTransportEnv(`git commit -m "key the reminder on its path" && git push origin feature/x`),
+  [], "the word path in a commit message is not an executable search-path change",
+);
+assert.deepEqual(
+  pushUsesTransportEnv("$env:Path += ';C:/relay'; git push origin main"),
+  ["Path"], "a PowerShell PATH append is still in scope",
+);
 
 const CRX_URL = "git@github.com:masonwells1/CRX_Manager_V1.0.git";
 assert.equal(
@@ -1713,6 +1722,14 @@ assert.equal(pushUsesConfigRootEnv("GIT_DIR_BACKUP=/tmp/x git push origin main")
 assert.equal(pushUsesConfigRootEnv("GIT_DIRTY=1 git push origin main"), false, "GIT_DIRTY is not GIT_DIR");
 assert.equal(pushUsesConfigRootEnv("MY_HOME=/tmp/x git push origin main"), false, "a variable ENDING in HOME is not HOME");
 assert.equal(pushUsesConfigRootEnv("GIT_DIR=/tmp/evil git push origin main"), true, "...but the real GIT_DIR still fires");
+// Prose is not a variable (Mason, 2026-10-29).
+assert.equal(pushUsesConfigRootEnv(`git commit -m "the home .claude folder" && git push origin feature/x`), false, "the word home in a commit message is not HOME");
+assert.equal(pushUsesConfigRootEnv(`$env:home = "C:/evil"; git push origin main`), true, "a PowerShell $env:home in any case still fires");
+// Luna, PR #1195: upper-case prose, and cmd's case-insensitive set.
+assert.equal(pushUsesConfigRootEnv(`git commit -m "Clean up HOME documentation" && git push origin feature/docs`), false, "HOME as a word in prose is not an override");
+assert.equal(pushUsesConfigRootEnv(`cmd /c "set git_dir=C:\\other\\.git&& git push origin main"`), true, "cmd set of git_dir in any case fires");
+assert.equal(pushUsesConfigRootEnv(`export HOME=/tmp/evil; git push origin main`), true, "an exported HOME fires");
+assert.equal(pushUsesConfigRootEnv(`git -C "$HOME/repo" push origin main`), true, "a $HOME reference in a push still fires");
 // 2026-08-05: the check denied every Linux `git -C /home/... push`, because the
 // case-insensitive bare-text match hit the `/home/` path segment. That is the
 // form this guard's own denial messages recommend, so on a web/mobile session

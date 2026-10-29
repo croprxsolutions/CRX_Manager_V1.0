@@ -84,3 +84,6 @@ docs/claude-memory/
 # Codex `codex review` function-body diff scratch (regenerated each run, never committed)
 new_fn.sql
 old_fn.sql
+
+# Impeccable design plugin: share .impeccable/config.json, keep per-developer overrides private (agreed with Taha 2026-10-29)
+.impeccable/config.local.json

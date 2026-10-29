@@ -339,9 +339,29 @@ export function checkAskCommand(cmd) {
 
 // Destructive raw SQL via psql/supabase CLI (kept as its own exported check
 // since the original file ran it as a second, independent condition).
+// A `-c`/`-f` flag beside the words used to count as a client call on its own,
+// so `grep -c TRUNCATE file` and `git log -c` were refused as a live wipe
+// (Mason, 2026-10-29: "stop blocking on ... truncate"). Now the flag counts only
+// when some command in the line is not a known search or read program. A client
+// name is matched with shell quoting removed, so `p''sql` still counts, and a
+// program named by a variable (`$P -c …`) is not a known reader, so it does too
+// (Luna, PR #1193). `git` is NOT a reader here: a `git -c alias.x=!…` alias can
+// run a client named by a variable (Sol, PR #1193), so `git log -c` beside
+// the words stays refused, as it was before.
+const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
+const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
+const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls"]);
+function sqlSegmentProgram(segment) {
+  const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
+  return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
+}
 export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");
-  if (/\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i.test(text) && /(psql|supabase\s+sql|--?c\s)/i.test(text)) {
+  if (!DESTRUCTIVE_SQL_RE.test(text)) return null;
+  const unquoted = text.replace(/["'`^\\]/g, "");
+  const flagOutsideReader = /(?:^|\s)--?[cf]\s/.test(text) &&
+    text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)));
+  if (SQL_CLIENT_RE.test(text) || SQL_CLIENT_RE.test(unquoted) || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }
   return null;

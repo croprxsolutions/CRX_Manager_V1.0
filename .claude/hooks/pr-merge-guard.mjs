@@ -157,7 +157,11 @@ if (GITHUB_MERGE_TOOL.test(toolName)) {
   // fail-closed refusals (2026-10-18; see couldReachGatedAction).
   const gated = couldReachGatedAction(scannedCommands);
   if (gated && nested.computed) deny(nestedComputedDenial("PR MERGE GATE"));
-  if (programAssembledAtRuntime(toolInput.command)) deny(nestedComputedDenial("PR MERGE GATE"));
+  // A program started from a variable (`"$CODEX" exec …`) is refused only when the
+  // command could reach a merge or GitHub call at all (Mason, 2026-10-29: accept
+  // holes over false alarms). Accepted hole: a name AND its verbs assembled
+  // entirely from variables (`$a$b pr $c$d 951`) shows no gated word and passes.
+  if (gated && programAssembledAtRuntime(toolInput.command)) deny(nestedComputedDenial("PR MERGE GATE"));
   // A COMPUTED nested command is read too: `bash -c '$(printf g)h pr …'` assembles
   // its program name inside the nested text (Codex connector, PR #956). Only when
   // computed, because the grouping split also turns `$((i+1))` into fragments.

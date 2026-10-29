@@ -407,7 +407,7 @@ unchanged head it stays valid for 24 hours (Mason, 2026-10-23), so a PR waiting 
 its review. A base that only moved forward afterwards does not void it at the merge gates: the PR may
 merge behind main (Mason, 2026-10-26). A live migration apply still needs the head's Sol
 proof under 24 hours (the migration landing gate; 30 minutes before 2026-10-29), reviewed on GitHub's
-base or on an older main the head contains when no migration has landed on main since (2026-10-29).
+current base: a branch behind main merges it in and runs Sol again before the apply.
 
 **Only on a quiet head (Mason, 2026-10-23).** A fix pushed after Sol for a Codex GitHub App or
 CodeRabbit finding voids the proof, and those two reviewers caused more than half of the commits

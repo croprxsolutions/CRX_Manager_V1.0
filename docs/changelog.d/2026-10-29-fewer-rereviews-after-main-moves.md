@@ -4,11 +4,7 @@
   so a branch behind main no longer has to merge it first; the proof records that base.
   A head that only merges main cleanly (no conflicts, no shared files, no hand edit) skips
   the wait for the Codex GitHub App; unanswered App threads still refuse.
-- `.claude/hooks/migration-landing-gate-lib.mjs`: a live apply also accepts a Sol proof of
-  the exact head reviewed on an older main, when no main commit since touched a migration (read
-  step by step from local git history, so add-then-delete and renames count; fail closed).
 - `scripts/check-doc-drift.mjs`: a stale "Last verified" date on CURRENT_STATE/KNOWN_ISSUES
   is a WARN, not a failure.
 - Docs: `.claude/commands/ship.md`, `docs/reference/agent-guardrails.md`,
-  `docs/manual/DECISION_LOG.md`. Tests in `write-codex-push-proof.test.mjs` and
-  `migration-apply-lib.test.mjs`.
+  `docs/manual/DECISION_LOG.md`. Tests in `write-codex-push-proof.test.mjs`.

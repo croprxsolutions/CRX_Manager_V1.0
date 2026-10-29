@@ -17,8 +17,7 @@
 //   * CodeRabbit's latest verdict is APPROVED on that exact head, nothing is
 //     CHANGES_REQUESTED, and the newest run of every check is green (CLEAN);
 //   * a fresh gpt-6-sol/high merge proof is bound to that head and to GitHub's
-//     real base — the same proof the merge gates require — or to an older base
-//     the head contains, when main gained no migration since (Mason, 2026-10-29).
+//     real base — the same proof the merge gates require.
 // Anything unreadable fails CLOSED. The same predicates as the merge gates are
 // imported, never re-derived.
 
@@ -59,28 +58,6 @@ function refuse(why) {
       `head. Apply from a clean checkout of the PR's branch with the migration committed, then merge right ` +
       `after. A destructive migration never applies through an agent — it is parked for Mason.`,
   };
-}
-
-// A Sol proof reviewed on an older main still covers a live apply when (1) the
-// head contains the proof's base, so the review saw exactly this PR's changes,
-// (2) GitHub's base contains it, so main only moved forward, and (3) no commit
-// on main since then touched supabase/migrations/ (Mason, 2026-10-29). (3) walks
-// main's own history one step at a time, each commit against its first parent,
-// so a migration added then removed, or renamed out of the folder, still counts
-// (Luna HIGH: a net compare hides both). It reads local git, so GitHub's base
-// must be fetched; a missing commit throws and refuses. Unreadable → false.
-export function proofBaseStillCovers({ proofBase, headSha, baseSha, gh, git }) {
-  const SHA = /^[0-9a-f]{40}$/i;
-  if (![proofBase, headSha, baseSha].every((sha) => SHA.test(String(sha || "")))) return false;
-  if (!headContainsBaseOnGitHub({ baseSha: proofBase, headSha, gh })) return false;
-  if (proofBase === baseSha) return true;
-  if (!headContainsBaseOnGitHub({ baseSha: proofBase, headSha: baseSha, gh })) return false;
-  const touched = git([
-    "log", "--first-parent", "-m", "--no-renames", "--name-only", "--format=",
-    `${proofBase}..${baseSha}`, "--", "supabase/migrations/",
-  ]);
-  if (typeof touched !== "string") return false;
-  return touched.trim() === "";
 }
 
 export function evaluateLandingGate({
@@ -274,21 +251,9 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
 
   const baseSha = String(pr?.baseRefOid || "").trim();
   if (!/^[0-9a-f]{40}$/i.test(baseSha)) return refuse(`GitHub returned an unusable base for ${number} (fail closed).`);
-  // Every fresh Sol proof of this exact head, whatever base it was reviewed on.
-  const proofs = [];
-  for (const stateDir of proofSearchDirs(dir, listWorktrees || (() => git(["worktree", "list", "--porcelain"])))) {
-    try {
-      if (!existsSync(stateDir)) continue;
-      for (const file of readdirSync(stateDir)) {
-        if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
-        let data;
-        try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
-        if (proofValid(data, head, now, String(data?.base_sha || ""), APPLY_SOL_PROOF_MAX_AGE_MS)) proofs.push(data);
-      }
-    } catch { /* an unreadable directory holds no proof — keep looking */ }
-  }
-  // Exact rule (Sol HIGH, round 7): the head contains GitHub's base and the proof
-  // was reviewed on that same base, so nothing lands that Sol did not see with it.
+  // The head must already contain that base (Sol HIGH, round 7), the same rule as
+  // both merge gates: otherwise the merge that follows lands base-only commits the
+  // Sol proof never reviewed alongside this migration.
   let headContainsBase = false;
   try {
     headContainsBase = headContainsBaseOnGitHub({ baseSha, headSha: head, gh });
@@ -296,24 +261,24 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     if (OUT(error)) throw error;
     headContainsBase = false;
   }
-  let proven = headContainsBase && proofs.some((data) => data.base_sha === baseSha);
-  // Relaxed rule (Mason, 2026-10-29, "Approve package"): main may have moved on
-  // since the review, but only if no migration landed on main in between, so the
-  // reviewed SQL still meets the same database. Anything unreadable refuses.
-  for (const data of proofs) {
-    if (proven) break;
+  if (!headContainsBase) {
+    return refuse(`${number}'s head ${head.slice(0, 12)} does not contain its base ${baseSha.slice(0, 12)}, or GitHub could not confirm it — merge origin/main into the branch, push, and re-run the checks and the Sol review.`);
+  }
+  let proven = false;
+  for (const stateDir of proofSearchDirs(dir, listWorktrees || (() => git(["worktree", "list", "--porcelain"])))) {
     try {
-      proven = proofBaseStillCovers({ proofBase: data.base_sha, headSha: head, baseSha, gh, git });
-    } catch (error) {
-      if (OUT(error)) throw error;
-    }
+      if (!existsSync(stateDir)) continue;
+      for (const file of readdirSync(stateDir)) {
+        if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
+        let data;
+        try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
+        if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)) { proven = true; break; }
+      }
+    } catch { /* an unreadable directory holds no proof — keep looking */ }
+    if (proven) break;
   }
   if (!proven) {
-    return refuse(
-      `no fresh gpt-6-sol/high proof covers ${number}'s head ${head.slice(0, 12)} on its base ${baseSha.slice(0, 12)}: ` +
-      "either none is bound to this head, or main gained a migration (or could not be checked; run `git fetch origin` first) since the review. " +
-      "Merge origin/main into the branch, push, and re-run the checks and the Sol review.",
-    );
+    return refuse(`no fresh gpt-6-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);
   }
   return { ok: true, pullRequest: pr.number, head, ...(skip ? { coderabbitSkippedBy: skip } : {}) };
 }

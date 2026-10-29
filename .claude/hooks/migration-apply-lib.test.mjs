@@ -1623,7 +1623,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     files: { totalCount: 1, nodes: [{ path: `supabase/migrations/${MIG}.sql` }] },
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
-  const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", compare = {}, migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
+  const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
@@ -1656,8 +1656,6 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       }
       if (args[0] === "api") {
         const base = pr.baseRefOid || BASE_SHA;
-        const key = `${args[1]} ${args[3]}`;
-        if (key in compare) { if (compare[key] instanceof Error) throw compare[key]; return compare[key]; }
         assert.deepEqual(args, ["api", `repos/{owner}/{repo}/compare/${base}...${HEAD_SHA}`, "--jq", ".behind_by"]);
         if (behindBy instanceof Error) throw behindBy;
         return behindBy;
@@ -1709,39 +1707,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ prError: new Error("no pull requests found") }), "could not find or read the open pull request", "no PR is refused");
   refused(gate({ pr: { state: "MERGED" } }), "is not open", "a closed or merged PR is refused");
   // Sol HIGH, round 7: the PR's head must already contain its base.
-  // Sol HIGH, round 7: a proof reviewed on GitHub's base needs a head that contains it.
-  refused(gate({ behindBy: "2\n" }), "no fresh gpt-6-sol/high proof covers", "a PR head behind main is refused");
-  refused(gate({ behindBy: new Error("HTTP 502") }), "no fresh gpt-6-sol/high proof covers", "an unanswerable compare fails closed");
-  refused(gate({ behindBy: "" }), "no fresh gpt-6-sol/high proof covers", "an empty compare answer fails closed");
+  refused(gate({ behindBy: "2\n" }), "does not contain its base", "a PR head behind main is refused");
+  refused(gate({ behindBy: new Error("HTTP 502") }), "does not contain its base", "an unanswerable compare fails closed");
+  refused(gate({ behindBy: "" }), "does not contain its base", "an empty compare answer fails closed");
   ok(gate({ behindBy: "0\n" }).ok === true, "a head that contains its base passes");
-  // Mason, 2026-10-29: a proof reviewed on an OLDER main still covers the apply when
-  // main gained no migration since, and the head contains that older base.
-  {
-    const OLD = "d".repeat(40);
-    const oldProof = path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}-older-base.json`);
-    writeFileSync(oldProof, JSON.stringify({ ...goodProof, base_sha: OLD }));
-    const c = (from, to, jq) => `repos/{owner}/{repo}/compare/${from}...${to} ${jq}`;
-    const LOG = `log --first-parent -m --no-renames --name-only --format= ${OLD}..${BASE_SHA} -- supabase/migrations/`;
-    const moved = (log, over = {}) => gate({ behindBy: "3\n", git: { [LOG]: log }, compare: {
-      [c(OLD, HEAD_SHA, ".behind_by")]: "0\n",
-      [c(OLD, BASE_SHA, ".behind_by")]: "0\n",
-      ...over,
-    } });
-    try {
-      ok(moved("\n\n").ok === true, "an older-base proof passes when no main commit since touched a migration");
-      refused(moved("supabase/migrations/20261029000000_other.sql\n"),
-        "no fresh gpt-6-sol/high proof covers", "a migration that landed on main since the review refuses");
-      refused(moved(new Error("fatal: bad revision")), "git fetch origin", "an unfetched or unreadable main history refuses");
-      refused(moved("\n", { [c(OLD, HEAD_SHA, ".behind_by")]: "1\n" }),
-        "no fresh gpt-6-sol/high proof covers", "a head that lacks the proof's base refuses");
-      refused(moved("\n", { [c(OLD, BASE_SHA, ".behind_by")]: "4\n" }),
-        "no fresh gpt-6-sol/high proof covers", "a proof base main does not contain refuses");
-      refused(moved("\n", { [c(OLD, BASE_SHA, ".behind_by")]: new Error("HTTP 502") }),
-        "no fresh gpt-6-sol/high proof covers", "an unanswerable ancestry compare refuses");
-    } finally {
-      rmSync(oldProof, { force: true });
-    }
-  }
   refused(gate({ pr: { baseRefName: "develop" } }), "does not target main", "a PR into another branch is refused");
   refused(gate({ pr: { headRefOid: "c".repeat(40) } }), "is not this checkout's HEAD", "a checkout behind or ahead of the PR head is refused");
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");

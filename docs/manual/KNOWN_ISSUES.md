@@ -1,8 +1,10 @@
 # Known Issues — what is open today
 
+**Last verified: 2026-10-29 (America/Chicago)** for KI-18 only: a live read-only catalog check confirms the quote, order, rebate-claim and blend-ticket number functions still use `current_date`. The ledger includes `20261028185500_order_edit_and_number_concurrency` at version `20261029143642`. The unapplied document-year candidate is re-stamped `20261029160300`; it does not replace `generate_ticket_number`, preserving the live concurrency repair. Other dated evidence below retains its historical scope.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
+**Last verified: 2026-10-28 (America/Chicago)** for KI-18 only: the four migrations applied live on 2026-10-28 (`20261027080000`..`20261027080300`, ledger high-water `20261028121259` at 7:17 PM Central) leave the quote and order number generators taking their year from `current_date`, so KI-18 stands; the 1.12 candidate `20261028185500` (not applied, PR #1185) keeps the same year rule for blend-ticket numbers. Earlier, **2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
 `20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
 entries name; at 7:37 AM Central that migration applied live, ledger `20261027123725`, 1068 rows, and a read-only
@@ -253,13 +255,14 @@ tiers is not built; the linkage field is not used for money today.
 **MED (safety path) / LOW · OPEN · money/UI · unassigned (fix the JobDetail one first)**
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Cosmetic. LOW.
-  **Draft-only candidate built 2026-10-28 (To-Do 12.1, owner: Codex):** migration
-  `20261028185021_document_numbers_chicago_year` and its client failure handling are verified locally,
+  **Candidate prepared for protected landing (To-Do 12.1, owner: Codex):** migration
+  `20261029160300_document_numbers_chicago_year` and its client failure handling are verified locally,
   **not applied or merged**. See [the proof record](../operations/2026-10-28-document-number-year-proof.md).
 - **Document-number capacity (LOW, deferred; owner: Codex numbering-capacity follow-up):** existing
   `lpad(...,4,'0')` in the quote/order sequences and yearly rebate counter truncates values above 9,999.
   This behavior is preserved by the 12.1 candidate and needs its own format/capacity fix with threshold
   and concurrency proof. This note does not assert the current live sequence positions.
+  Blend-ticket numbers (`generate_ticket_number`) retain the same UTC year rule; that function is outside this candidate.
 - `invoices.season` defaults to `current_season()` = UTC date, and the blend-ticket path uses it
   (`20261020210000:1050,1227`): about five hours each 30 Sept evening can stamp the next season. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
@@ -417,7 +420,7 @@ cross-check, which reads `src/types/index.ts`, cannot confirm those writes. Fix:
 `typescript-types-drift-reviewer` whether to add an interface or record the table as intentionally untyped.
 
 ### KI-85 — Four sweep fingerprints went stale when the sent-quote price lock applied
-**MED · OPEN · database/sweeps · unassigned (Mason, 2026-10-27: noted, not now; To-Do 11.12)**
+**MED · OPEN (correction written 2026-10-28 on the PR #1165 branch; not yet reviewed, merged or confirmed by a live sweep) · database/sweeps · Mason authorized the fix 2026-10-28 (To-Do 11.12)**
 The live db-invariant sweeps run after PR #1119 (2026-10-27, all 29 predicates, adjudicated `complete: true`)
 returned `ok: false` with 4 unallowlisted rows. All four functions were rewritten by `20261027040000_quote_sent_price_lock`
 (PR #1105, applied 12:37 UTC), whose PR did not update their reviewed fingerprints. The sweep after row 991 that
@@ -430,6 +433,14 @@ that needs a reading of each live body before re-pinning. Until it is fixed, **e
 same 4 rows**: compare against this list, and treat any OTHER unallowlisted row as new. Fix: read the four live bodies,
 then re-pin in `scripts/db-invariant-sweeps/allowlist.json`, the `quote-versions-rpc-owned` predicate and its test,
 through the security ship path; never re-pin a body that lost its guard. Done = a full live sweep adjudicates `ok: true`.
+2026-10-28 reading and correction (PR #1165 branch): an independent RLS review read all four live bodies and found the
+actor binding, strict actor-mismatch refusal, active-role gates, private-function EXECUTE restrictions and the
+quote-version trust-marker route intact, so these were stale fingerprints, not defects. The correction re-pins the
+`save_quote` and `convert_quote_to_order` dependency digests and the two quote-version body pins from live; the
+`convert_quote_to_order` exception also gets a second, separately reviewed entry for the candidate body of
+`20261027080400` (any active rep may convert; the actor stays bound), so the sweep is clean both before and after
+that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
+every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
 
 ---
 
@@ -473,7 +484,7 @@ authenticate proof contents. CodeRabbit's backstop was removed 2026-10-19, which
   checkout (`applied-snapshot-invalidate.mjs`); Supabase's ledger is the backstop. LOW-MED.
 - The migration-drift reviewer's overload check sees only authored history, not the live catalog
   (`.claude/agents/migration-drift-reviewer.md` CHECK 2). Deferred by Mason. MED.
-- Whole-body hash pins on the quote-version trust chain must be updated in three files together (ACCEPTED, KI-63).
+- Whole-body hash pins on the quote-version trust chain must be updated in the two live files together (the applied migration `20260826220000` keeps its own apply-time copy) (ACCEPTED, KI-63).
 
 ### KI-49 — Codex review tooling
 **HIGH (per older record), mitigated · OPEN · tooling-guards/process · wiring a hook needs Mason's approval**
@@ -538,7 +549,7 @@ catalog (#1110). Done = the chain passes on main and still fails first against 2
 | KI-60 | A permitted staff member can mint a temporary link to a private photo | Mason, option A, 2026-10-14 |
 | KI-61 | A `LOCK TABLE` in a migration does not stop an already-running call of the OLD function body | Mason 2026-09-03; both instances applied with zero activity; future migrations of that shape need a quiet rollout and a concurrency proof |
 | KI-62 | Live migration ledger has older entries with no file on `main` | Pre-existing drift, not new |
-| KI-63 | Quote-version trust chain is hash-pinned in 3 files (`quote-versions-rpc-owned.sql`, migration `20260826220000`, `quoteVersionWriteBoundary.test.ts`) | Intentional friction; a change must update all three |
+| KI-63 | Quote-version trust chain has live pins in two files (`quote-versions-rpc-owned.sql`, `quoteVersionWriteBoundary.test.ts`); migration `20260826220000` keeps its apply-time pin copy | Intentional friction; a live-pin change must update both live files, while the applied migration stays unchanged |
 | KI-64 | All agents share Mason's admin GitHub identity; the manual merge override is fenced only by command matching | Mason declined a separate non-admin credential twice (2026-09-01) |
 | KI-65 | The write-time actor-binding guard is bypassable by design limits | Capped by decision 2026-09-01; real controls are Codex review and post-apply sweeps |
 | KI-66 | `review-proof-guard` denies destructive commands that spell out a worktree path | Mason "document, don't fix" 2026-08-20; use relative paths |

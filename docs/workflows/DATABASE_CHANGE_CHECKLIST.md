@@ -154,7 +154,7 @@ The only sanctioned way to apply a migration to the live database:
    approval dropped 2026-10-19): when a fresh exact-SHA Sol review of the frozen final head is
    clean and every required check is green, the agent applies the change's NON-destructive migration
    (its GRANT/REVOKE lines routine, none widening access) through the migration-apply-guard proof gate (both reviewer proofs and a fresh content-bound
-   Sol proof, each under 30 minutes), in any session, no ask. Three kinds are Mason's: a
+   Sol proof, each under 24 hours since 2026-10-29, with live state re-checked at apply), in any session, no ask. Three kinds are Mason's: a
    migration that DELETES data (rows or data-bearing tables/columns), one that OVERWRITES
    existing rows, and one that CHANGES WHO CAN ACCESS WHAT (anything beyond routine lock-down
    lines on objects it creates). Each needs Mason's own approval of that exact file, given by

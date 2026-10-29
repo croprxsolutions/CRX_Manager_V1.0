@@ -15,7 +15,7 @@ let createdContainerId = null;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261028185021_document_numbers_chicago_year.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261029160300_document_numbers_chicago_year.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

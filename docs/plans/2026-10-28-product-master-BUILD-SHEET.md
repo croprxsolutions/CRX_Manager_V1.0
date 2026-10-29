@@ -2,6 +2,8 @@
 
 **Status: GAME PLAN, reviewed by Sol 2026-10-28. NOT STARTED.** Sol (`gpt-6-sol`, high, advisory, read-only, given this sheet, the backlog and code excerpts inline) returned 36 findings, one BLOCKER. All of them are folded in below as "Sol:" notes on each package, plus a new order in section 4. Section 6 lists the findings and what was done with each. Mason, in chat, 2026-10-28, asked for a build sheet of all the Product Master items: what "done" means for each, how to approach them, a brainstorm before coding, then a Sol review to settle the final plan before any code is written. Nothing here authorizes building. Building starts when Mason says so, one work package at a time.
 
+**Revised 2026-10-29 by the product grand plan** (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Sol-reviewed). That plan makes this sheet Stage 1 of the full product work. It adds two packages (WP-PM-14 and DM-0, section 2a below), changes seven packages (section 2a) and replaces the order in section 4. Where this sheet and the grand plan disagree, the grand plan wins.
+
 **Sources this sheet turns into work:**
 - `docs/plans/2026-10-28-product-master-setup-edits-BACKLOG.md`: the 43 items, numbered; this sheet uses the same numbers.
 - `docs/plans/2026-10-28-product-data-model-REFRESH.md`: weight per gallon and active ingredients, To-Do row 2.9.
@@ -452,6 +454,23 @@
 - **18** (return policy, full-tote-only, packaging, families): Mason, "Later".
 - **38** (EPA lookup fills new products): folded into the data model's EPA auto-fill (WP-4).
 
+## 2a. Changes from the grand plan (2026-10-29)
+
+**New packages:**
+- **WP-PM-14 · RUP "known incomplete" notice** (grand plan overlap 10). The RUP flags are known to be incomplete ("there are a lot more"). Wherever the RUP register or RUP counts are shown, a notice says they are incomplete until the flags are reviewed (DATA-7). Screen only.
+  *Done when:* the notice shows on every RUP register and count screen, checked by hand; one change removes it when DATA-7 is done.
+- **DM-0 · Data hygiene**, moved here from the weight work (grand plan overlap 9). Every product gets a form. Blank SKUs (Mason types them, no placeholders, D-R), the duplicate `9768NR` SKU (re-SKU, don't merge), three duplicate-name groups and the test row are resolved without hard deletes. The code builds review lists; the data step is Mason's.
+  *Done when:* zero blank forms; every SKU identifies one sellable; every old reference still resolves (read-only check before and after). WP-PM-10 and WP-PM-11a land only after this data step.
+
+**Changed packages:**
+- **WP-PM-5:** each option has a stable code, a timing code ("Post-Emerge" and "Post-Emergence" are both `post_emergence`) and an optional crop, so later crop and timing pairs need no relabelling.
+- **WP-PM-6a:** Mason approves each row where `unit_size` and `inventory_unit` disagree; old billed units and amounts never change; the package lists every remaining `unit_size` reader.
+- **WP-PM-6b:** basic Duplicate only. Copying ingredients, density and brands is DM-5, after those exist.
+- **WP-PM-8:** the rate help text is worded so it stays true after the rate rebuild.
+- **WP-PM-9:** no unit aliases. Each new spelling gets its exact conversion row, allowed form and container rule, added and tested before any product uses it (`validate_product_units` matches exactly).
+- **WP-PM-10:** rates are written through one function.
+- **WP-PM-11a:** a separate detail workbook file and RPC, never mixed with price approval. The price workbook's rate columns become read-only (grand plan question 2).
+
 ---
 
 ## 3. After the Product Master work: weight per gallon, then active ingredients (To-Do 2.9)
@@ -468,7 +487,7 @@ These follow `docs/plans/2026-10-28-product-data-model-REFRESH.md` and are summa
    - Admin-only cost per lb of active.
    - *Done when:* two products with the same active show comparable lb-of-active per gallon and cost per lb, checked by hand on two real labels.
 4. **DM-4 EPA auto-fill** (includes item 38).
-5. **DM-5 Copy from a sister product**, folded into WP-PM-6b's Duplicate design (Sol).
+5. **DM-5 Copy from a sister product, plus nickname:** its own package after DM-1, DM-2 and brands (grand plan overlap 7). It was folded into WP-PM-6b on 2026-10-28 and un-folded on 2026-10-29, because Duplicate ships before ingredients exist.
 
 **Sol (finding 36):** the weight and ingredient math must state:
 - exact unit factors;
@@ -484,25 +503,29 @@ Hand-check one dry and one liquid example, a missing weight, and two real labels
 
 Sol's recommended order is adopted. The change-history foundation and the database checks come before the workflows that rely on them, and the large mixed packages are split.
 
+**Revised 2026-10-29 by the grand plan (its section 5).** This order replaces the 2026-10-28 one:
+
 | Order | Package | Depends on | Database change | 💲 |
 |---|---|---|---|---|
 | 1 | WP-PM-1 Dropdowns | none | no | |
-| 2 | WP-PM-2 Pricing page | none | no (option a) | 💲 |
-| 3 | WP-PM-4 Sales sheet and list | none | no | 💲 |
-| 4 | WP-PM-12a Change-history foundation | none | yes (new table + trigger) | |
-| 5 | WP-PM-3 Turning products off | PM-12a | yes (RPC + guard) | |
-| 6 | WP-PM-8 Setup checks in the database | PM-1, PM-12a | yes (constraints) | |
-| 7 | WP-PM-9 Product forms, units, containers | Mason's list; PM-8 | yes (CHECK superset) | |
-| 8 | WP-PM-5 Use Timing | PM-1, PM-8 pattern | yes, Mason-gated grants | |
-| 9 | WP-PM-6a Unit audit + one canonical priced unit | PM-8, PM-9 | yes | 💲 |
-| 10 | WP-PM-6b New-product flow + Duplicate | PM-6a | maybe | 💲 |
-| 11 | WP-PM-7 One cost path + tier-order warning in the RPC | PM-2, PM-12a | yes (preview RPC) | 💲 |
-| 12 | WP-PM-10 Bulk import | PM-5, PM-8 | probably (import RPC) | |
-| 13 | WP-PM-11a Bulk detail upload | PM-8, PM-12a | yes (RPC) | |
-| 14 | WP-PM-11b List editing + phone layout | PM-1 | no | |
-| 15 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
-| 16 | WP-PM-13 Reorder display | none | no | |
-| then | DM-0 → DM-2 → DM-1 → DM-4 (DM-5 folded into PM-6b) | PM-6a, PM-8, PM-9 | yes | 💲 (DM-1) |
+| 2 | WP-PM-14 RUP "known incomplete" notice | none | no | |
+| 3 | WP-PM-2 Pricing page | none | no (option a) | 💲 |
+| 4 | WP-PM-4 Sales sheet and list | none | no | 💲 |
+| 5 | WP-PM-12a Change-history foundation | none | yes (new table + trigger) | |
+| 6 | WP-PM-3 Turning products off | PM-12a | yes (RPC + guard) | |
+| 7 | WP-PM-8 Setup checks in the database | PM-1, PM-12a | yes (constraints) | |
+| 8 | WP-PM-9 Product forms, units, containers | Mason's list; PM-8 | yes (CHECK superset, conversion rows) | |
+| 9 | DM-0 Data hygiene | PM-8, PM-9 | review lists; Mason's data step | |
+| 10 | WP-PM-5 Use Timing | PM-1, PM-8 pattern | yes, Mason-gated grants | |
+| 11 | WP-PM-6a Unit audit + one canonical priced unit | PM-8, PM-9 | yes | 💲 |
+| 12 | WP-PM-6b New-product flow + basic Duplicate | PM-6a | maybe | 💲 |
+| 13 | WP-PM-7 One cost path + tier-order warning in the RPC | PM-2, PM-12a | yes (preview RPC) | 💲 |
+| 14 | WP-PM-10 Bulk import | PM-5, PM-8; lands after DM-0's data step | probably (import RPC) | |
+| 15 | WP-PM-11a Detail workbook | PM-8, PM-12a; lands after DM-0's data step | yes (RPC) | |
+| 16 | WP-PM-11b List editing + phone layout | PM-1 | no | |
+| 17 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
+| 18 | WP-PM-13 Reorder display | none | no | |
+| then | Grand plan Stage 2: DM-2, DM-1, REG-1, DM-4, DM-1b, DM-5 | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1) |
 
 **Running in parallel.** Packages 1 and 4 (dropdowns, change history) touch different files, so they could run in parallel sessions. Packages 2 and 3 both touch `Products.tsx`, so build them one after the other.
 

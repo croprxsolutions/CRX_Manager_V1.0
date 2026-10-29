@@ -2,7 +2,7 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-28 (America/Chicago)** for KI-18 only: the four migrations applied live on 2026-10-28 (`20261027080000`..`20261027080300`, ledger high-water `20261028121259` at 7:17 PM Central) leave the quote and order number generators taking their year from `current_date`, so KI-18 stands; the 1.12 candidate `20261028185500` (not applied, PR #1185) keeps the same year rule for blend-ticket numbers. Earlier, **2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
+**Last verified: 2026-10-29 (America/Chicago)** for KI-12 only, re-read against `main` at `5ff1293d` and a local replay, not live (the session that applies `20261029090000` re-reads live first): its remaining direct path (an owning rep's `quotes.status` update to accepted with no order) is refused at commit by the candidate `20261029090000` (PR #1200, not applied), so KI-12 stays open until that applies, and for Q-2026-2059. Earlier, **2026-10-28 (America/Chicago)** for KI-18 only: the four migrations applied live on 2026-10-28 (`20261027080000`..`20261027080300`, ledger high-water `20261028121259` at 7:17 PM Central) leave the quote and order number generators taking their year from `current_date`, so KI-18 stands; the 1.12 candidate `20261028185500` (not applied, PR #1185) keeps the same year rule for blend-ticket numbers. Earlier, **2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
 `20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
 entries name; at 7:37 AM Central that migration applied live, ledger `20261027123725`, 1068 rows, and a read-only
@@ -200,7 +200,7 @@ QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) 
 failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
 (proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
-rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app.
+rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app. Candidate fix: `20261029090000` (PR #1200, not applied) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`).
 Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched.
 **The December pre-booking flow had the same gap** (raised by Maksym, checked in the code 2026-10-26): a
 Planned Program quote reserves its stock with holds (`create_planned_holds`), and the trigger

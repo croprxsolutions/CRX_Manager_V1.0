@@ -1971,12 +1971,21 @@ export function divergentPushLookups(scrubbed, ambient) {
 // assignment name cannot contain `-` at all, and no override spelling below puts
 // one on either side of the name, so a hyphen adjacent to the match means the
 // text is part of a path or a branch name rather than a variable.
-const CONFIG_ROOT_ENV_RE =
-  /(?<![A-Za-z0-9_/\\-])(?:HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|XDG_CONFIG_HOME|GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_CEILING_DIRECTORIES|GIT_DISCOVERY_ACROSS_FILESYSTEM)(?![A-Za-z0-9_-])/i;
+//
+// Only VARIABLE SYNTAX counts (Mason, 2026-10-29: accept holes over false
+// alarms), so "home" or "HOME" in a commit message pushed in the same command is
+// prose: an assignment `NAME=…` (also inside `env 'NAME=…'`), a POSIX reference
+// `$NAME` / `${NAME}`, and — case-insensitively, as Windows names are —
+// PowerShell's `$env:NAME` / `Env:NAME` and cmd's `set NAME=…` (Luna, PR #1195).
+const CONFIG_ROOT_ENV_NAMES = "HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|XDG_CONFIG_HOME|GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_CEILING_DIRECTORIES|GIT_DISCOVERY_ACROSS_FILESYSTEM";
+const CONFIG_ROOT_ENV_RE = new RegExp(
+  `(?<![A-Za-z0-9_/\\\\-])(?:${CONFIG_ROOT_ENV_NAMES})\\s*=|\\$\\{?(?:${CONFIG_ROOT_ENV_NAMES})(?![A-Za-z0-9_-])`);
+const CONFIG_ROOT_WINDOWS_ENV_RE = new RegExp(
+  `(?:\\$?env:|\\bset\\s+["']?)(?:${CONFIG_ROOT_ENV_NAMES})(?![A-Za-z0-9_-])`, "i");
 export function pushUsesConfigRootEnv(cmd) {
   const text = String(cmd || "");
   if (!isGitPush(text)) return false;
-  return CONFIG_ROOT_ENV_RE.test(text);
+  return CONFIG_ROOT_ENV_RE.test(text) || CONFIG_ROOT_WINDOWS_ENV_RE.test(text);
 }
 
 // The general net behind both of the specific rules above. A push command that
@@ -2098,7 +2107,10 @@ const TRANSPORT_ENV_NAMES = [
 const TRANSPORT_ENV_RE = new RegExp(
   `(?<![A-Za-z0-9_])(${TRANSPORT_ENV_NAMES.join("|")})(?![A-Za-z0-9_])`, "gi",
 );
-const EXECUTABLE_SEARCH_ENV_RE = /(?<![A-Za-z0-9_])(PATH|PATHEXT)(?![A-Za-z0-9_])/gi;
+// Only an ASSIGNMENT counts (`PATH=…`, `export PATH=…`, `$env:Path = …`,
+// `$env:PATH += …`). Matching the bare word refused every push whose commit
+// message said "path" (Mason, 2026-10-29: accept holes over false alarms).
+const EXECUTABLE_SEARCH_ENV_RE = /(?<![A-Za-z0-9_])(PATH|PATHEXT)(?=\s*\+?=(?!=))/gi;
 function transportValueIsAllowed(name, rawValue) {
   const shape = INLINE_ENV_ALLOWED.get(String(name).toUpperCase());
   if (!shape) return false;

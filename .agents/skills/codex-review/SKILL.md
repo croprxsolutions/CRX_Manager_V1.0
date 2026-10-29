@@ -406,7 +406,7 @@ the merge. The proof binds to that HEAD and to the base it reviewed, so a later 
 unchanged head it stays valid for 24 hours (Mason, 2026-10-23), so a PR waiting in the merge queue keeps
 its review. A base that only moved forward afterwards does not void it at the merge gates: the PR may
 merge behind main (Mason, 2026-10-26). A live migration apply still needs the head's Sol
-proof under 30 minutes (the migration landing gate).
+proof under 24 hours (the migration landing gate; 30 minutes before 2026-10-29).
 
 **Only on a quiet head (Mason, 2026-10-23).** A fix pushed after Sol for a Codex GitHub App or
 CodeRabbit finding voids the proof, and those two reviewers caused more than half of the commits

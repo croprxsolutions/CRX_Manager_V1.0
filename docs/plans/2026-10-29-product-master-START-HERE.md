@@ -70,7 +70,7 @@ Never: merge, mark a PR ready, push to main, apply a migration live, write live 
 - **Order:**
   1. dropdowns
   2. RUP "known incomplete" notice
-  3. "View label" link
+  3. "Search EPA labels" link
   4. pricing page
   5. sales sheet and list
   6. change history
@@ -83,8 +83,8 @@ Never: merge, mark a PR ready, push to main, apply a migration live, write live 
   13. new-product flow and basic Duplicate
   14. one cost path and the tier-order warning
   15. vendors on the product page
-  16. bulk import
-  17. setup workbook and the "Lock rates" switch
+  16. setup workbook and the "Lock rates" switch
+  17. bulk import
   18. list editing
   19. corrections to existing records
   20. reorder display

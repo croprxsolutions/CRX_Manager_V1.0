@@ -46,7 +46,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 2. **One product, many vendors.** The vendor is never part of a product's identity. A product lists every vendor it is bought from, with one preferred; a new PO suggests the preferred vendor and allows any other.
 3. **One parent record per chemical.** Each sellable size (2.5 gal, 5 lb, 10 lb, tote, Bulk) stays its own product row with its own price, SKU and stock. The values that don't change with size (chemistry, EPA data, rates, weight per gallon, category and the like) are entered once on a parent and reach every size. This moves first in Stage 2, before weight and ingredient entry.
 4. **Bulk is sold by the gallon.** One Bulk product per chemical, whatever tote it goes out in. A fixed package sold as a unit (such as a 265-gal no-return tote) stays its own size row.
-5. **A label link on every product** (Mason, same day: "add a link to the label online of every product to easily review the label once get the epa number in"). A "View label" button opens EPA's label for the product's (and each brand's) EPA number, built early in the Product Master work; the label PDF link is saved per EPA number later.
+5. **A label link on every product** (Mason, same day: "add a link to the label online of every product to easily review the label once get the epa number in"). A "Search EPA labels" button opens EPA's label search for the product's (and each brand's) EPA number, built early in the Product Master work; once the label PDF link is saved per EPA number (REG-1), it becomes "View label" and opens that label.
 6. **Biologicals store no CFU count** (Mason, same day: "biologicals dont store a CFU count, skip that that isnt registered on product"). This supersedes the August requirement that all biologicals store a CFU figure (PRD B-23).
 7. **Categories** (Mason, same day: "yes to both"): a new "Seed" category, and categories become a pick list that only an admin adds to, enforced in the database.
 8. **The rate lock can be switched by any admin** (Mason, same day: "admin"), with who, when and a reason recorded each time.
@@ -60,7 +60,7 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 
 **Decision (Mason, in chat, 2026-10-29: "1. yes, 2. yes , 3. warn, 4. staff only for now, 5. yes", answering the five questions in `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 10):**
 1. **Ranking.** The Product Master work (To-Do 2.10) and the rate rebuild (2.11) rank SHOULD, beside weight and ingredients (2.9). Comparison (2.12), use guidance (2.13) and clean-up (2.14) rank SHOULD after those. Families, the return-policy editor and product images are CAN-WAIT.
-2. **Rates leave the price spreadsheet.** From WP-PM-11a until the new rate system is live (RT-4), the price workbook's rate columns are read-only. Rates change only on the product page and through import.
+2. **Rates leave the price spreadsheet.** From WP-PM-11a until the new rate system is live (RT-4), the price workbook's rate columns are read-only. Rates change only on the product page and through import. *(Revised the same day: rates move to the setup workbook's Rates tab instead; see the entry above.)*
 3. **A required adjuvant missing from a quote warns; it never blocks** (USE-2).
 4. **Product images are staff only for now** (IMG-1): private storage, not on customer-facing sheets.
 5. **Return-policy batches (RET-1, later):** Mason approves the exact list of products and policies before any batch is applied.

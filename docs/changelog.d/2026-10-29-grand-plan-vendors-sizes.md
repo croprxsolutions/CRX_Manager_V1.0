@@ -5,10 +5,10 @@ Mason added six decisions to `docs/plans/2026-10-29-product-GRAND-PLAN.md` (over
 - **One product, many vendors:** one preferred vendor per product (WP-PM-15).
 - **One parent record per formulation:** each size stays its own row (PAR-1 and PAR-2, first in Stage 2). Label facts are kept per EPA registration.
 - **Bulk sold by the gallon:** a tote is the container, not a separate product.
-- **A "View label" link on every product:** WP-PM-16, early in Stage 1.
+- **A label link on every product:** WP-PM-16, early in Stage 1 ("Search EPA labels", becoming "View label" once the label PDF is saved).
 - **No CFU count for biologicals.**
 
-Sol (`gpt-6-sol`, high, advisory) reviewed the additions and returned 38 findings, 3 of them BLOCKERs. All 38 are folded in.
+Sol (`gpt-6-sol`, high, advisory) reviewed the additions and returned 38 findings, 3 of them BLOCKERs. A third, whole-plan Sol review of the final text returned 51 more (4 BLOCKERs). All 89 are folded in; two follow-up questions for Mason are open (a tote fill when Bulk shows too little; what a shop-filled tote costs).
 
 Updated to match:
 - the decision log;

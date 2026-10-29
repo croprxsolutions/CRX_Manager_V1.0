@@ -78,6 +78,33 @@ BEGIN
 END;
 $helper$;
 
+CREATE OR REPLACE FUNCTION pg_temp.update_order_items_smoke(
+  p_order_id uuid,
+  p_items jsonb,
+  p_performed_by uuid,
+  p_idempotency_key text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $helper$
+DECLARE
+  v_result jsonb;
+BEGIN
+  -- 20261028185500 replaced the four-argument form with one that requires the
+  -- order's current row_version. Send the version the order holds right now so
+  -- this chain proves the same edit rules before and after that migration.
+  IF to_regprocedure('public.update_order_items(uuid,jsonb,uuid,text,bigint)') IS NOT NULL THEN
+    EXECUTE
+      'SELECT public.update_order_items($1, $2, $3, $4, $5)'
+      INTO v_result
+      USING p_order_id, p_items, p_performed_by, p_idempotency_key,
+        (SELECT (to_jsonb(o)->>'row_version')::bigint FROM public.orders o WHERE o.id = p_order_id);
+    RETURN v_result;
+  END IF;
+  RETURN public.update_order_items(p_order_id, p_items, p_performed_by, p_idempotency_key);
+END;
+$helper$;
+
 DO $smoke$
 DECLARE
   v_admin uuid;
@@ -188,7 +215,7 @@ BEGIN
   -- (a) Edit the draw order's qty 200 -> 300: must be BLOCKED
   -- --------------------------------------------------------------------
   BEGIN
-    PERFORM update_order_items(v_order_a,
+    PERFORM pg_temp.update_order_items_smoke(v_order_a,
       jsonb_build_array(jsonb_build_object(
         'id', v_item_a, 'product_id', v_product,
         'price_per_unit', 10, 'total_units_needed', 300)),
@@ -213,7 +240,7 @@ BEGIN
   -- (b) Add a NEW item to the draw order: must be BLOCKED the same way
   -- --------------------------------------------------------------------
   BEGIN
-    PERFORM update_order_items(v_order_a,
+    PERFORM pg_temp.update_order_items_smoke(v_order_a,
       jsonb_build_array(
         jsonb_build_object('id', v_item_a, 'product_id', v_product,
           'price_per_unit', 10, 'total_units_needed', 200),
@@ -281,7 +308,7 @@ BEGIN
   END IF;
 
   SELECT id INTO v_item_2 FROM order_items WHERE order_id = v_o2;
-  PERFORM update_order_items(v_o2,
+  PERFORM pg_temp.update_order_items_smoke(v_o2,
     jsonb_build_array(jsonb_build_object(
       'id', v_item_2, 'product_id', v_product,
       'price_per_unit', 10, 'total_units_needed', 250)),
@@ -294,7 +321,7 @@ BEGIN
   -- (e) An item id from a different order must be rejected before the large
   -- implementation can mutate either order.
   BEGIN
-    PERFORM update_order_items(v_o2,
+    PERFORM pg_temp.update_order_items_smoke(v_o2,
       jsonb_build_array(jsonb_build_object(
         'id', v_item_a, 'product_id', v_product,
         'price_per_unit', 10, 'total_units_needed', 250)),
@@ -345,7 +372,7 @@ BEGIN
     -- recognized "this proved nothing" result and exits nonzero.
     RAISE EXCEPTION 'SMOKE_PREREQ: (f) needs a second active product costing 7.00 or less with no Main Warehouse inventory row; prove-draw-down-price-tier-real-schema.mjs seeds one, so run this chain there when the live catalog cannot supply it';
   END IF;
-  PERFORM update_order_items(v_o2,
+  PERFORM pg_temp.update_order_items_smoke(v_o2,
     jsonb_build_array(
       jsonb_build_object(
         'id', v_item_2, 'product_id', v_product,
@@ -367,7 +394,7 @@ BEGIN
     json_build_object('sub', v_inactive_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_inactive_admin::text, true);
   BEGIN
-    PERFORM update_order_items(v_o2,
+    PERFORM pg_temp.update_order_items_smoke(v_o2,
       jsonb_build_array(jsonb_build_object(
         'id', v_item_2, 'product_id', v_product,
         'price_per_unit', 10, 'total_units_needed', 240)),

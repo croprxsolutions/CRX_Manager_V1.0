@@ -59,7 +59,7 @@ on `main`. When the two differ, the stricter one wins.
 
 - Changes reach `main` only through a pull request. Required approving reviews: **0**.
 - Required checks: **`Lint, Type Check, Test, Build`**, **`SQL Migration Validation`** (both from
-  `ci.yml`) and **`Vercel`**. The older branch protection also requires its checks to be on an
+  `ci.yml`) and **`Vercel – crx-manager-v1-0`** (Vercel renamed it from `Vercel` on 2026-10-28). The older branch protection also requires its checks to be on an
   up-to-date branch.
 - No force pushes, no deleting `main`, a stale approval is dismissed when new commits arrive.
 - Bypass list: empty. Conversation resolution: not required.
@@ -110,7 +110,8 @@ outside the approved doors, and test data written into production.
 **4. Owner-control hooks (Mason's messages).** `prompt-router` runs `hold-latch-prompt` (when
 Mason says stop, pause or hold, outward actions such as push and merge are blocked until his next
 message), `owner-approval-prompt` (records his `I approve` for a parked migration),
-`coderabbit-skip-prompt` (records `skip coderabbit #<PR>`) and `ship-intent-reminder`.
+and `coderabbit-skip-prompt` (records `skip coderabbit #<PR>`). The ship reminder that
+used to fire on almost every message was removed on 2026-10-29.
 `unattended-autopilot` auto-approves routine calls overnight, only when Mason arms it.
 
 **5. Session housekeeping.** At start: `session-staleness` (schema snapshot behind migrations,

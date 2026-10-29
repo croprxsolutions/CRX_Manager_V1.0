@@ -28,3 +28,11 @@ Route Mason's plain-English requests; he should not need workflow names.
 
 - `.claude/settings.json` is the permission and hook manifest; `.claude/hooks/` is the source of truth for guard logic, which `.codex/hooks.json` runs through the portable adapter; never copy hook implementations into `.codex/`. Behavior: `docs/reference/agent-guardrails.md`. Declare any Claude/Codex hook difference in `scripts/agent-manifest-parity.mjs`.
 - After changing Claude commands, skills, hooks, permissions, agents, or helpers, run `node scripts/sync-agent-workflows.mjs --write`, `npm run test:agent-workflows`, and `npm run agent-health`.
+
+## User-Level Plugins
+
+Mason's own Claude install adds three plugins. They are not in this repo, so Taha, Codex, and cloud sessions may lack them; never rely on one for a gate.
+
+- **Context7** fetches current library docs; prefer it to memory for library or API questions.
+- **Ponytail** pushes smallest-complete changes. `AGENTS.md`, hooks, and every gate win; never drop validation, tests, or review for brevity.
+- **Impeccable** reviews UI work. CRX is an operational tool: follow `docs/workflows/UI_PATTERNS.md`, no restyles unless asked. Shared settings: `.impeccable/config.json`; `config.local.json` stays gitignored.

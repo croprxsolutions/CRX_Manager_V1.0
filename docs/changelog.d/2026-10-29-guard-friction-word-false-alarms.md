@@ -16,8 +16,8 @@ merge, push, migration-apply or secret gate.
   used to count, so `grep -c TRUNCATE file` was refused.
 - **`ship-intent-reminder.mjs`:** unwired from `prompt-router.mjs`. Its word list matched
   nearly every message and added the `/ship` text and landing policy each time; `AGENTS.md`
-  states both every session. The file stays (unwired) because the review proof guard
-  reserves deleting hook files for Mason.
+  states both every session. Mason then deleted the file himself (the review proof guard
+  reserves deleting hook files for him).
 - **`posttooluse-migration.mjs`:** the eight-step migration checklist is shown in full once
   per migration file per session; later edits of the same file get a one-line pointer.
 

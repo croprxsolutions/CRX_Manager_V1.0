@@ -916,6 +916,8 @@ for (const command of [
   'echo "x|truncate" (Set-Content .husky/pre-push "pwned")',
   'echo "x|truncate" $(Set-Content .husky/pre-push "pwned")',
   'node /tmp/write-guard.mjs "x|truncate" .husky/pre-push',
+  // Luna round 2: a quoted find action.
+  'find .husky/pre-push "-delete" | grep "x|truncate .husky/pre-push"',
   'echo "rm .husky/pre-push" | bash; rm .husky/pre-push',
 ]) {
   assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);

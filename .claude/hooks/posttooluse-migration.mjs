@@ -25,9 +25,9 @@ if (!/supabase\/migrations\/.+\.sql$/.test(fp)) {
 }
 
 const filename = path.posix.basename(fp);
-// The record keys on the migration's path below supabase/migrations, so two
-// files with one basename in different folders are not confused (Luna, PR #1193).
-const fileKey = fp.slice(fp.lastIndexOf("supabase/migrations/")).toLowerCase();
+// The record keys on the file's full path as given, so two files with one
+// basename in different folders are not confused (Luna, PR #1193).
+const fileKey = fp;
 
 // Where this session's record lives, or null when it cannot be named safely.
 // Only a plain session id names a state file.

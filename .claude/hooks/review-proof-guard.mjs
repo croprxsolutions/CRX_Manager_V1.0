@@ -1000,10 +1000,14 @@ if (shellTool) {
   // arguments, and `$`, `%`, `<`, `>` expand or redirect (Luna, PR #1193). It
   // splits outside the quotes only, and it counts only when EVERY resulting
   // segment is a bare program the fail-closed read-only allowlist vouches for and
-  // that cannot run a script it is handed (`node`, `gh` are left out), so a pipe
+  // that cannot run a script or act on a file it is handed (`node`, `gh` and
+  // `find`, whose quoted `"-delete"` slipped the action check, are left out —
+  // Luna round 2), so a pipe
   // into `bash`, `tee` or any unlisted program falls back to the old split and its
   // denial. Redirects are still judged on every view.
-  const PLAIN_READ_EXCLUDED_HEADS = new Set(["node", "gh"]);
+  // Accepted hole (Mason, 2026-10-29: "i am fine with holes"): `git` stays, so a
+  // git pager or alias ALREADY configured to write a guard file would run.
+  const PLAIN_READ_EXCLUDED_HEADS = new Set(["node", "gh", "find"]);
   const plainQuotedReadSegments = (cmd) => {
     const text = String(cmd ?? "");
     if (/['`]|\\"|\^"|\$\(|\$\{|[<>]\(/.test(text)) return null;

@@ -345,7 +345,9 @@ export function checkAskCommand(cmd) {
 // when some command in the line is not a known search or read program. A client
 // name is matched with shell quoting removed, so `p''sql` still counts, and a
 // program named by a variable (`$P -c …`) is not a known reader, so it does too
-// (Luna, PR #1193).
+// (Luna, PR #1193). Accepted hole (Mason, 2026-10-29: "i am fine with holes"):
+// a git alias set with `git -c alias.x=!…` that runs a client named by a
+// variable is not seen, because `git` counts as a reader here.
 const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
 const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
 const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "git", "cat", "head", "tail", "wc", "ls"]);

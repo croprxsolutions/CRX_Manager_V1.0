@@ -15,6 +15,9 @@ for (const name of [
   ".github/workflows/ci.yml", "scripts/write-codex-push-proof.mjs", ".husky/pre-commit", ".agents/x.md",
   "package.json", "docs/plans/CLAUDE.md", "AGENTS.md", ".coderabbit.yaml", "vercel.json", ".Claude/hooks/x.mjs",
   "docs/workflows/SAFE_DEVELOPMENT_RULES.md", "docs/reference/agent-guardrails.md", "docs/reference/gotchas.md",
+  // Sensitive app code with ordinary names, and root configuration (Sol, 2026-10-29).
+  "src/lib/db.ts", "src/contexts/AuthContext.tsx", "src/lib/pagePermissions.ts", "src/App.tsx", "src/AppPages.tsx",
+  "src/main.tsx", "src/components/auth/ProtectedRoute.tsx", "src/lib/sentry.ts", ".gitignore", "vite.config.ts", "public/sw.js",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }

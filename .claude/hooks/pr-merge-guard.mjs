@@ -643,7 +643,11 @@ function gateRequest(request) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8")); } catch { continue; }
-        if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })) {
+        // A proof of an earlier commit covers the commits after it only when those
+        // are low risk themselves (Sol, 2026-10-29); same module, same budgeted gh.
+        if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
+          && (String(data.head_sha).toLowerCase() === String(headSha).toLowerCase()
+            || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky)) {
           valid = true;
           carried = data.carried_forward === true ? data.carry : null;
           break outer;

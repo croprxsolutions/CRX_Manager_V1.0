@@ -645,12 +645,15 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
     "exactly three allow points: a valid Sol proof, the exemption, or a low-risk pull request");
   // Sol only on risky pull requests (Mason, 2026-10-29): asked after the exemption,
   // with the same budgeted gh, and its allow is guarded by its own answer.
-  const riskCall = at("solRiskOnGitHub(");
+  const riskCall = at("const risk = solRiskOnGitHub(");
   ok(riskCall > exemptionCall, "the risk check is asked only after the documentation-only exemption");
+  // An earlier-commit Sol proof covers only later commits that are low risk themselves (Sol, 2026-10-29).
+  ok(/proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(String\(data\.head_sha\)\.toLowerCase\(\) === String\(headSha\)\.toLowerCase\(\)\s*\|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\)/.test(gateRequestSource),
+    "an earlier Sol proof is accepted only when the commits after it are low risk");
   ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
     "the risk check spends the shared hard-gate budget");
   eq((guardSource.match(/\brisk\s*=/g) || []).length, 1, "`risk` is assigned exactly once, from the module's answer");
-  eq((guardSource.match(/\.risky\b/g) || []).length, 1, "`.risky` is read in exactly one place: the allow decision");
+  eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
   ok(/import \{ solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");

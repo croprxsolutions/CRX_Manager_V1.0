@@ -599,6 +599,42 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
+  // Sol once before the PR (Mason, 2026-10-29): a proof of an earlier commit covers
+  // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
+  for (const [later, expectBlocked, label] of [
+    ["src/lib/invoiceMath.ts", true, "a later money commit needs a fresh Sol review"],
+    ["src/components/Other.tsx", false, "a later low-risk commit merges on the earlier Sol review"],
+  ]) {
+    const branch = makeRepo("src/components/Label.tsx", "export const label = 'reviewed';\n");
+    writeProof(branch.repo, {
+      codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+      head_sha: branch.sha, base_sha: branch.base, timestamp: new Date().toISOString(),
+    });
+    mkdirSync(path.join(branch.repo, ...path.dirname(later).split("/")), { recursive: true });
+    writeFileSync(path.join(branch.repo, ...later.split("/")), "export const x = 1;\n", "utf8");
+    git(branch.repo, ["add", later]);
+    git(branch.repo, ["commit", "-m", "later fix"]);
+    const head = git(branch.repo, ["rev-parse", "HEAD"]);
+    const prJson = JSON.stringify({ ...JSON.parse(ordinaryPrJson), baseRefOid: branch.base, headRefOid: head });
+    const compared = [];
+    const verdict = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 5 --squash --match-head-commit ${head}` }, repoDir: branch.repo,
+      nowMs: Date.now(),
+      runGh: (args) => {
+        if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
+          compared.push(String(args[1]));
+          return JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: branch.sha, head,
+            files: [{ filename: later, previous_filename: null, status: "added", changes: 1 }] });
+        }
+        if (args.some((a) => /object\(expression/.test(String(a)))) {
+          return JSON.stringify({ data: { repository: { d0: { entries: [{ name: path.basename(later), mode: 0o100644, type: "blob" }] } } } });
+        }
+        return prJson;
+      },
+    });
+    assert.equal(verdict.blocked, expectBlocked, label);
+    assert.ok(compared.includes(`repos/{owner}/{repo}/compare/${branch.sha}...${head}`), `the later commits were compared (${later})`);
+  }
   // Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21).
   // Same merge-ready, Sol-proven PR; only the requirement answer changes.
   const withRequirement = (answer) => (args) => {
@@ -2140,16 +2176,18 @@ try {
     // Sol only on risky pull requests (Mason, 2026-10-29): the same merge-ready PR
     // with no Sol proof, now with GitHub's line counts.
     const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
-    assert.equal(mergeDocs({ compare: counted([["src/App.tsx", 40], ["src/components/Label.tsx", 10]]) }).blocked, false,
+    assert.equal(mergeDocs({ compare: counted([["src/components/customers/CustomerFacts.tsx", 40], ["src/components/Label.tsx", 10]]) }).blocked, false,
       "a small pull request of ordinary app files merges with no Sol proof");
-    assert.equal(mergeDocs({ compare: counted([["src/App.tsx", 1]]), kinds: { "src/App.tsx": { mode: 0o120000 } } }).blocked, true,
+    assert.equal(mergeDocs({ compare: counted([["src/components/customers/CustomerFacts.tsx", 1]]), kinds: { "src/components/customers/CustomerFacts.tsx": { mode: 0o120000 } } }).blocked, true,
       "a symlink at a low-risk path still needs Sol (Luna, 2026-10-29)");
     for (const [label, entries] of [
-      ["a money file", [["src/App.tsx", 5], ["src/lib/invoiceMath.ts", 5]]],
+      ["a money file", [["src/components/customers/CustomerFacts.tsx", 5], ["src/lib/invoiceMath.ts", 5]]],
       ["an inventory file", [["src/pages/Inventory.tsx", 5]]],
       ["a migration", [["supabase/migrations/20261029000000_x.sql", 5]]],
       ["a merge-gate file", [[".claude/hooks/pr-merge-guard.mjs", 5]]],
-      ["over 500 changed lines", [["src/App.tsx", 300], ["src/components/Label.tsx", 201]]],
+      ["the app route table", [["src/App.tsx", 5]]],
+      ["a login file", [["src/lib/db.ts", 5]]],
+      ["over 500 changed lines", [["src/components/customers/CustomerFacts.tsx", 300], ["src/components/Label.tsx", 201]]],
     ]) {
       const verdict = mergeDocs({ compare: counted(entries) });
       assert.equal(verdict.blocked, true, `a pull request with ${label} still needs Sol`);

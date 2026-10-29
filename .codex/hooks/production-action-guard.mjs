@@ -1009,7 +1009,7 @@ function proofRequirement(headSha, riskDescription, detail, baseSha) {
 // 2026-09-26): every merge needs the exact-SHA Sol proof, whether or not the diff
 // is classified risky. The classification still runs so the denial can say what
 // is risky, but it no longer opens an allow path of its own.
-function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authoritativeBaseSha, requireProof = false }) {
+function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authoritativeBaseSha, requireProof = false, laterChangesLowRisk = null }) {
   let headSha = sourceSha || "";
   let baseSha = "";
   try {
@@ -1129,7 +1129,10 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
         .map((f) => path.join(stateDir, f))
         .find((p) => {
           try {
-            return proofValidForMerge({ data: JSON.parse(readFileSync(p, "utf8")), headSha, nowMs, baseSha, isAncestor: isAncestorLocally });
+            const data = JSON.parse(readFileSync(p, "utf8"));
+            // The commits after the reviewed one must be low risk themselves (Sol, 2026-10-29).
+            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
+              && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
           } catch {
             return false;
           }
@@ -1345,6 +1348,8 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
     nowMs,
     runGit,
     requireProof: true,
+    laterChangesLowRisk: (proofHead, head) =>
+      !solRiskOnGitHub({ baseSha: proofHead, headSha: head, repo: request.repo, gh: (args) => runGh(args, repoDir) }).risky,
   });
   // Documentation-only exemption (Mason, 2026-10-07) — mirror of pr-merge-guard.mjs.
   // Excuses ONLY the missing-or-invalid Sol proof, after every gate above and

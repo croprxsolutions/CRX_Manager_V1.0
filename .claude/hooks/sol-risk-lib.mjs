@@ -14,7 +14,7 @@
 // every changed file to be a plain file (sol-exempt-lib's tree lookup): a symlink
 // or submodule at a harmless path can redirect code (Luna, 2026-10-29).
 
-import { isMoneyPath } from "./codex-bot-review-lib.mjs";
+import { isMoneyPath, pathWords } from "./codex-bot-review-lib.mjs";
 import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
 import { SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS, treeProblem } from "./sol-exempt-lib.mjs";
 
@@ -27,10 +27,21 @@ export const SOL_LARGE_PR_LINES = 500;
 // The documentation exemption's never lists, minus ordinary app code under src/
 // (isMoneyPath still catches its money and inventory files). Folders end in "/",
 // compared case-insensitively (Windows checks out either spelling).
-export const SOL_ALWAYS_PATHS = Object.freeze([...SOL_NEVER_EXEMPT_PATHS.filter((entry) => entry !== "src/"), "vercel.json"]);
+// public/ holds the service worker; eslint-local-rules/ holds the lint guards.
+export const SOL_ALWAYS_PATHS = Object.freeze([...SOL_NEVER_EXEMPT_PATHS.filter((entry) => entry !== "src/"), "public/", "eslint-local-rules/"]);
 
 // File names that need Sol in any folder: agent instructions and dependencies.
 export const SOL_ALWAYS_NAMES = SOL_NEVER_EXEMPT_NAMES;
+
+// App code whose name says nothing about money but which decides who can do what
+// or how the app reaches the database (Sol, 2026-10-29: "src/lib/db.ts would pass").
+// Matched like isMoneyPath: a word of the path starts with one of these.
+export const SOL_SENSITIVE_SRC_WORDS = Object.freeze([
+  "auth", "login", "password", "permission", "role", "access", "secur", "session", "protect", "admin",
+  "user", "rls", "db", "supabase", "idempot", "intent", "guard", "critical", "sentry", "route", "rpc",
+]);
+// The route table and app entry points: they wire every page and its permissions.
+export const SOL_SENSITIVE_SRC_FILES = Object.freeze(["src/app.tsx", "src/apppages.tsx", "src/main.tsx"]);
 
 // Same limit as the documentation exemption: GitHub's compare lists at most 300
 // files and says nothing when it stops.
@@ -50,6 +61,14 @@ export function solRiskPathProblem(name) {
   const base = lower.slice(lower.lastIndexOf("/") + 1);
   if (SOL_ALWAYS_NAMES.some((entry) => entry.toLowerCase() === base)) return `${show(name)} is agent instructions or dependencies`;
   if (isMoneyPath(name)) return `${show(name)} touches money, inventory or the database`;
+  // Repository-root files other than notes are build, deploy or git configuration.
+  if (!lower.includes("/") && !lower.endsWith(".md")) return `${show(name)} is repository configuration`;
+  if (lower.startsWith("src/")) {
+    const words = pathWords(name);
+    if (SOL_SENSITIVE_SRC_FILES.includes(lower) || SOL_SENSITIVE_SRC_WORDS.some((stem) => words.some((word) => word.startsWith(stem)))) {
+      return `${show(name)} touches login, permissions, data access or app wiring`;
+    }
+  }
   return null;
 }
 

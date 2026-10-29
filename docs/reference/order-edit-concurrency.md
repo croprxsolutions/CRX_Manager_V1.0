@@ -160,5 +160,5 @@ with evidence.
   retry after a lost reply replays the first receipt. Without a key, a retry that still carries
   its original expected version is refused by the version check; a caller that re-reads the new
   version and resubmits would be accepted as a second write, which is why every app caller sends
-  a key. Requiring it in this one RPC would break the shared contract and the rollback-only
-  chains that call it without one.
+  a key. Requiring it in this one RPC would break the shared contract and
+  `smoke-order-draw-lock.sql`, whose saves pass a NULL key.

@@ -891,6 +891,9 @@ for (const command of [
   "cd .claude && rm hooks/x.mjs",
   "cp /tmp/evil .claude/hooks/review-proof-guard.mjs",
   "cp /tmp/evil /c/CRX_Manager/.claude/hooks/review-proof-guard.mjs",
+  // A `..` that climbs out of the home folder gets no exemption.
+  "cp /tmp/evil ~/.claude/../../../CRX_Manager/.claude/hooks/review-proof-guard.mjs",
+  "cp /tmp/evil C:/Users/mason/.claude/../../../CRX_Manager/.husky/pre-push",
 ]) {
   assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `repo .claude still denied: ${command}`);
 }

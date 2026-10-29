@@ -224,12 +224,21 @@ const shellTool = !nativePatch && (input.command != null || input.cmd != null ||
 
 // Deny targets that enter the state dir, either directly or as a component
 // step (`cd .claude` then `cd session-state` must not assemble the cwd).
+// The user's HOME `.claude` (agent memory and personal settings) is not this
+// repository's, so entering it is not entering the review state's parent
+// (Mason, 2026-10-29: `cd /c/Users/mason/.claude && ls` was refused). Every home
+// spelling counts: `~`, `$HOME`, `%USERPROFILE%`, `C:/Users/<u>`, Git Bash's
+// `/c/Users/<u>` and `/home/<u>`. Kept inside the function: it is called before
+// this point in the file, where a top-level const is not yet initialised.
 function cdTargetEntersStateDir(target) {
+  const HOME_CLAUDE_RE = /^(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/]+)\/+\.claude$/i;
   const t = String(target || "").replace(/\\/g, "/").replace(/\/+$/, "");
   if (/\.claude\/session-state/i.test(t)) return true;
   const parts = t.split("/").filter(Boolean);
   if (parts.some((p) => /^session-state$/i.test(p))) return true;
-  return /^\.claude$/i.test(parts[parts.length - 1] || "");
+  // A `..` segment could step out of the home folder, so it gets no exemption.
+  return /^\.claude$/i.test(parts[parts.length - 1] || "") &&
+    (parts.includes("..") || !HOME_CLAUDE_RE.test(t.replace(/^["']|["']$/g, "")));
 }
 
 // Protected directory/file names the state-dir guard must recognize even when a
@@ -541,8 +550,8 @@ if (shellTool) {
   // `~/.claude` (agent memory) stays out, matching STATE_DIR_ANCESTOR_RE.
   const namesRepoClaude = (t) => {
     const p = String(t).replace(/["']/g, "").replace(/\\/g, "/");
-    return /(?:^|\/)\.claude(?:\/|$)/i.test(p) &&
-      !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:)?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p);
+    return /(?:^|\/)\.claude(?:\/|$)/i.test(p) && (/(?:^|\/)\.\.(?:\/|$)/.test(p) ||
+      !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p));
   };
   // A cd target the guard cannot read (`D=.claude/hooks; cd $D`, a glob, `%X%`)
   // counts as entering `.claude` when the command names the repo's `.claude`
@@ -657,14 +666,12 @@ if (shellTool) {
     // Staging/committing record content; they do not alter it.
     "add", "commit", "push", "worktree",
   ]);
-  // KNOWN OVER-BLOCK, pinned in the tests rather than papered over: this splits on
-  // `|` even inside quotes, so `grep -E "(a|b)" .husky/pre-push` becomes two
-  // segments and the second one's head is `b)"`, which is not allowlisted, so an
-  // ordinary read is refused. The workaround is two greps or a bracket class.
-  // Deliberately NOT fixed with a quote-aware splitter: that changes which text
-  // counts as a segment, and every mistake in that direction turns a denial into
-  // an ALLOW. Five review rounds on this file have each found a real bypass, so a
-  // false refusal is the acceptable failure and a speculative rewrite is not.
+  // This splits on `|` even inside quotes. It stays the general reading, because
+  // a quote-aware splitter changes which text counts as a segment and every
+  // mistake in that direction turns a denial into an ALLOW; five review rounds on
+  // this file each found a real bypass. The narrow exception for plain
+  // double-quoted reads (plainQuotedReadSegments, below) handles only the cases
+  // where every shell agrees on the quoting.
   const enforcementSegments = (cmd) =>
     String(cmd ?? "").split(/(?:\|\||&&|[;\r\n|&])+/).map((s) => s.trim()).filter(Boolean);
   // Resolve git's real subcommand past the global flags THAT TAKE A SEPARATE
@@ -868,7 +875,13 @@ if (shellTool) {
     // `\` → `/` first, then repeated separators collapsed, so the whole-string test
     // below and every token split out of `flat` both see the canonical path. See
     // the separator note in resolveDotSegments.
-    const flat = String(text ?? "").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+    // A path inside the user's HOME `.claude` (personal hooks, settings, memory)
+    // is not this repository's guard surface (Mason, 2026-10-29: backing up
+    // `/c/Users/mason/.claude/hooks/…` was refused). A path with a `..` segment
+    // could climb back into the repository, so it is never stripped.
+    const flat = String(text ?? "").replace(/\\/g, "/").replace(/\/{2,}/g, "/")
+      .replace(/(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/\s"']+)\/+\.claude\/[^\s"';&|<>]*/gi,
+        (m) => (/(?:^|\/)\.\.(?:\/|$)/.test(m) ? m : " "));
     if (ENFORCEMENT_SURFACE_RE.test(flat)) return true;
     return flat
       .split(/[\s"'=:;&|()<>]+/)
@@ -991,13 +1004,58 @@ if (shellTool) {
     }
     return false;
   };
+  // A PLAIN READ WITH A QUOTED `|` (Mason, 2026-10-29). enforcementSegments splits
+  // on `|` even inside quotes, so `grep -n "truncate\|TRUNCATE" .claude/hooks/x.mjs`
+  // became a segment headed `TRUNCATE`, read as the `truncate` writer, and the
+  // search was DENIED. This reading is used only where every shell in play agrees
+  // on the quoting: double quotes alone (no single quotes, backticks, escaped or
+  // caret-escaped quotes, substitutions or process substitution) and no command
+  // redefinition, nested execution or PATH change. Outside the quotes nothing may
+  // evaluate or redirect: PowerShell runs `(…)`, `@(…)`, `{…}` and `[Type]::…`
+  // arguments, and `$`, `%`, `<`, `>` expand or redirect (Luna, PR #1193). It
+  // splits outside the quotes only, and it counts only when EVERY resulting
+  // segment is a bare program the fail-closed read-only allowlist vouches for and
+  // that cannot run a script or act on a file it is handed (`node`, `gh` and
+  // `find`, whose quoted `"-delete"` slipped the action check, are left out —
+  // Luna round 2), so a pipe
+  // into `bash`, `tee` or any unlisted program falls back to the old split and its
+  // denial. Redirects are still judged on every view. `git` is left out too: an
+  // attached `-c` setting can name a pager that runs (Sol, PR #1193), and git
+  // reads of guard files rarely carry a quoted word that trips the old split.
+  const PLAIN_READ_EXCLUDED_HEADS = new Set(["node", "gh", "find", "git"]);
+  const plainQuotedReadSegments = (cmd) => {
+    const text = String(cmd ?? "");
+    if (/['`]|\\"|\^"|\$\(|\$\{|[<>]\(/.test(text)) return null;
+    if (REDEFINES_COMMANDS_RE.test(text) || NESTED_EXECUTION_RE.test(text) || COMMAND_RESOLUTION_RE.test(text)) return null;
+    const segments = [];
+    let current = "";
+    let quoted = false;
+    for (const ch of text) {
+      if (ch === "\"") quoted = !quoted;
+      if (!quoted && /[()[\]{}@$%<>^]/.test(ch)) return null;
+      if (!quoted && /[;&|\r\n]/.test(ch)) {
+        segments.push(current);
+        current = "";
+        continue;
+      }
+      current += ch;
+    }
+    if (quoted) return null;
+    segments.push(current);
+    const parts = segments.map((s) => s.trim()).filter(Boolean);
+    return parts.length > 0 && parts.every((s) => /^[\w.-]+(?:\s|$)/.test(s) &&
+      !PLAIN_READ_EXCLUDED_HEADS.has(s.split(/\s/)[0].toLowerCase()) && enforcementSegmentIsReadOnly(s))
+      ? parts
+      : null;
+  };
+  const plainRead = plainQuotedReadSegments(command) !== null;
   if (destructiveViews.some((v) =>
     redirectTargetsEnforcementSurface(v) ||
-    enforcementSegments(v).some((seg) => namesEnforcementSurface(seg) &&
-      (segmentObviouslyWrites(seg) || flagValueNamesEnforcementSurface(seg))))) {
+    (!plainRead && enforcementSegments(v).some((seg) => namesEnforcementSurface(seg) &&
+      (segmentObviouslyWrites(seg) || flagValueNamesEnforcementSurface(seg)))))) {
     deny("REVIEW PROOF GUARD: shell commands that WRITE to .husky, .github/workflows, .claude/hooks, .codex/hooks, or .coderabbit.yaml are blocked — these decide whether the commit, push, CI, and review gates run at all. Reading them is always allowed. Change one deliberately through Edit/Write.");
   }
-  if (destructiveViews.some((v) =>
+  if (!plainRead && destructiveViews.some((v) =>
     ((REDEFINES_COMMANDS_RE.test(v) || NESTED_EXECUTION_RE.test(v) || COMMAND_RESOLUTION_RE.test(v)) &&
       namesEnforcementSurface(v)) ||
     enforcementSegments(v).some((seg) =>

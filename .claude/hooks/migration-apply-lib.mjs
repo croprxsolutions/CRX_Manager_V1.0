@@ -42,14 +42,20 @@ import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
 
 export const REQUIRED_CODEX_MODEL = "gpt-6-sol";
 export const REQUIRED_CODEX_EFFORT = "high";
-export const PROOF_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+// Reviewer and Sol proofs for a NON-destructive apply last 24 hours (Mason,
+// 2026-10-29: "Yes, as Sol says" — routine migration reviews last 24 hours, with
+// fresh checks right before applying; was 30 minutes). Each proof stays bound to
+// the exact SQL, and every live check (ledger, pending set, ordering, the PR's
+// head, checks and reviews) is still read at apply time. Mason's own approval of
+// a destructive, rewriting or access-changing migration keeps its 30 minutes
+// (OWNER_APPROVAL_MAX_AGE_MS in owner-approval-lib.mjs).
+export const PROOF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const CRX_PRODUCTION_REF = "rhyzpcqhnizqbxphqdkr";
-// How current origin/main must be for the pending-set scan to trust it. Matched to
-// PROOF_MAX_AGE_MS deliberately: an apply already requires a proof minted in the
-// last 30 minutes and a live ledger read, so a fetch in the same window is one more
-// step in a sequence the operator is already performing, not a new chore.
-export const MAIN_REF_MAX_AGE_MS = PROOF_MAX_AGE_MS;
+// How current origin/main must be for the pending-set scan to trust it: 30
+// minutes, the "fresh check right before applying". scripts/apply-migration-file.mjs
+// fetches just before the gate, so this costs nothing on the normal path.
+export const MAIN_REF_MAX_AGE_MS = 30 * 60 * 1000;
 // Every git call this module makes shares one small budget. The Codex harness
 // allows this hook 5 seconds and Claude's allows 15; a hook killed mid-call emits
 // nothing, and a PreToolUse hook that emits nothing does NOT deny. Long git
@@ -960,7 +966,7 @@ export function evaluateMigrationApply({
         try { data = JSON.parse(readFileSync(full, "utf8")); } catch { continue; }
         let ageMs;
         try { ageMs = now - new Date(data.timestamp).getTime(); } catch { continue; }
-        // Age must be a real value inside [0, 30min] — a FUTURE-dated timestamp
+        // Age must be a real value inside [0, PROOF_MAX_AGE_MS] — a FUTURE-dated timestamp
         // (clock skew, typo, or a fabricated far-future stamp) must not stay
         // "fresh" forever (Codex P2 2026-07-13 round 5). NaN fails this too.
         if (!(ageMs >= 0 && ageMs <= MAX_AGE_MS)) continue;
@@ -1073,14 +1079,14 @@ export function evaluateMigrationApply({
     //     "verdict": "clean" | "ship" | "ship-with-followups",
     //     "model": "gpt-6-sol",
     //     "reasoning_effort": "high",
-    //     "timestamp": <ISO-8601, <30 min old> }
+    //     "timestamp": <ISO-8601, under 24 hours old> }
     // Write it ONLY after an ACTUAL /codex-review run on this migration this
     // session — a fabricated file violates Mason's codex-gate rule and is the
     // documented self-attestation residual (KNOWN_ISSUES §4b).
     // Searched across the same session-scoped directories as the reviewer proof
     // above, for the same reason. A candidate only WINS by satisfying
     // every criterion the single-directory version demanded — clean verdict,
-    // exact queryHash, age inside [0, 30min]; the first parseable file is kept
+    // exact queryHash, age inside [0, PROOF_MAX_AGE_MS]; the first parseable file is kept
     // only so the block message below can say which criterion failed.
     let codexProof = null;
     for (const dir of proofDirs) {
@@ -1104,7 +1110,7 @@ export function evaluateMigrationApply({
     const cvIdentityOk = codexProof
       && codexProof.model === REQUIRED_CODEX_MODEL
       && codexProof.reasoning_effort === REQUIRED_CODEX_EFFORT;
-    // Freshness = age inside [0, 30min]; a FUTURE-dated timestamp must not
+    // Freshness = age inside [0, PROOF_MAX_AGE_MS]; a FUTURE-dated timestamp must not
     // count as fresh (Codex P2 round 5 — clock skew / typo / fabrication).
     let cvFresh = false;
     try {
@@ -1114,7 +1120,7 @@ export function evaluateMigrationApply({
     if (!cvOk || !cvHashOk || !cvIdentityOk || !cvFresh) {
       return block(
         `MIGRATION APPLY GUARD: the Sol high-effort gate is not satisfied for ` +
-        `"${migName || "(unnamed)"}" (${!codexProof ? "no Codex proof file" : !cvOk ? "verdict is not clean/ship" : !cvHashOk ? "queryHash does not match the transmitted SQL" : !cvIdentityOk ? `proof must record model=${REQUIRED_CODEX_MODEL} and reasoning_effort=${REQUIRED_CODEX_EFFORT}` : "proof timestamp is not within the last 30 minutes"}). ` +
+        `"${migName || "(unnamed)"}" (${!codexProof ? "no Codex proof file" : !cvOk ? "verdict is not clean/ship" : !cvHashOk ? "queryHash does not match the transmitted SQL" : !cvIdentityOk ? `proof must record model=${REQUIRED_CODEX_MODEL} and reasoning_effort=${REQUIRED_CODEX_EFFORT}` : "proof timestamp is not within the last 24 hours"}). ` +
         `Every apply requires a fresh, content-bound Codex verdict (Mason's autonomous-landing rule, ` +
         `2026-09-26). Run: node scripts/write-apply-proofs.mjs ${migName || "<migName>"} — it runs the ` +
         `trusted Codex CLI itself and mints the content-bound proof ONLY on a CLEAN machine verdict. ` +
@@ -1224,7 +1230,7 @@ export function evaluateMigrationApply({
     `     migration whose final Sol and CodeRabbit reviews are clean applies with no per-\n` +
     `     migration ask once every proof here passes. DESTRUCTIVE migrations stay Mason's.\n` +
     `  5. Retry the apply_migration call.\n\n` +
-    `The proof file expires after 30 minutes — this catches stale reviews on long sessions.\n` +
+    `The proof file expires after 24 hours; live state is re-checked at apply time.\n` +
     `The "queryHash" above is the SHA-256 of the exact SQL being applied; it binds this proof to\n` +
     `this content. If the migration is edited after review, the hash changes and this guard blocks\n` +
     `again — re-confirm the reviewers, then update queryHash to the new value printed here.\n` +

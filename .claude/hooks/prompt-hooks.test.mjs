@@ -68,8 +68,10 @@ ok(!isMachineGenerated(""), "empty not machine");
   ok(isHoldPhrase(authoredByMason("pause this loop")), "Mason typing pause still latches");
   ok(isHoldPhrase(authoredByMason("please stop.")), "a trailing period is not an extension");
   ok(isHoldPhrase(authoredByMason("hold on, dont build that yet")), "hold on still latches");
-  ok(isHoldPhrase(authoredByMason("im just scoping a future session")), "scope-only still latches");
-  ok(isHoldPhrase(authoredByMason("does stop/pause still work?")), "slash form keeps its vocabulary");
+  // Since 2026-10-29 (Mason) only a halt COMMAND latches: scoping phrases and
+  // questions that mention the words do not.
+  ok(!isHoldPhrase(authoredByMason("im just scoping a future session")), "scope-only no longer latches");
+  ok(!isHoldPhrase(authoredByMason("does stop/pause still work?")), "a question about the words is not a halt");
 
   // 2. A peer session's message is DATA — it cannot halt this session.
   ok(!isHoldPhrase(authoredByMason(PEER_BLOCK)), "peer cross-session message does not latch");
@@ -516,7 +518,9 @@ rmSync(handbackProj, { recursive: true, force: true });
   for (const mention of [
     "why did the <\\~agent-message> wrapper latch? stop and explain",
     "the <\\agent-message> thing is weird. pause for now",
-    "check <agent-message-log> then stop",
+    // Since 2026-10-29 a halt must start a line or sentence; this case tests tag
+    // stripping, so its halt is phrased as a command.
+    "check <agent-message-log>. then stop",
     'look at this: <\\~agent-message from="x"> [Subagent hand-back] all done\nok stop, do not continue',
     "the `<~agent-message>` tag is odd. stop now\n" + AGENT_TURN,
     '<\\~agent-message from="x">\nok stop, do not continue',
@@ -785,11 +789,13 @@ rmSync(tmpProj, { recursive: true, force: true });
     "  BLOCKED. I changed no files.\n  \n  **What stopped me.** A harness hook refused every edit; stop hooks ran.\n</agent-message>";
   const CASES = [
     // [label, prompt, latches?]
-    // Every halt word Mason types latches, even a descriptive one (Mason, 2026-10-27).
-    ["make the gate stop refusing", "make the gate stop refusing", true],
-    ["the hook should pause retrying", "the hook should pause retrying", true],
+    // Since 2026-10-29 (Mason) only a halt COMMAND latches; a description does not.
+    ["make the gate stop refusing", "make the gate stop refusing", false],
+    ["the hook should pause retrying", "the hook should pause retrying", false],
     ["Mason's settings goal (the real 2026-10-27 message)",
-      "Carry on: merge 1145, and set ENABLE_COMMIT_REVIEW=0 in my user settings to stop the per-commit security reviews.", true],
+      "Carry on: merge 1145, and set ENABLE_COMMIT_REVIEW=0 in my user settings to stop the per-commit security reviews.", false],
+    ["Mason's friction request (the real 2026-10-29 message)",
+      "I want it to stop blocking on certain words like stop etc or truncate etc like it has been", false],
     ["a CI-monitor notice", "<ci-monitor-event>CI failed on PR #9. stop and fix it</ci-monitor-event>", false],
     ["a relayed (neutralised) CI-monitor notice", "<\\~ci-monitor-event>CI failed. stop<\\~/ci-monitor-event>", false],
     ["a bare-tag subagent hand-back", BARE_TAG_HANDBACK, false],

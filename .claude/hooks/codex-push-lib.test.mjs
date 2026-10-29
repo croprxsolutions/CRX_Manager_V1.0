@@ -1613,6 +1613,15 @@ assert.deepEqual(
   pushUsesTransportEnv("$env:PATHEXT='.MJS'; git push origin main"),
   ["PATHEXT"], "PowerShell executable-extension changes are in scope too",
 );
+// The bare word is prose, not a change (Mason, 2026-10-29).
+assert.deepEqual(
+  pushUsesTransportEnv(`git commit -m "key the reminder on its path" && git push origin feature/x`),
+  [], "the word path in a commit message is not an executable search-path change",
+);
+assert.deepEqual(
+  pushUsesTransportEnv("$env:Path += ';C:/relay'; git push origin main"),
+  ["Path"], "a PowerShell PATH append is still in scope",
+);
 
 const CRX_URL = "git@github.com:masonwells1/CRX_Manager_V1.0.git";
 assert.equal(

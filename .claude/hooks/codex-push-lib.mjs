@@ -2098,7 +2098,10 @@ const TRANSPORT_ENV_NAMES = [
 const TRANSPORT_ENV_RE = new RegExp(
   `(?<![A-Za-z0-9_])(${TRANSPORT_ENV_NAMES.join("|")})(?![A-Za-z0-9_])`, "gi",
 );
-const EXECUTABLE_SEARCH_ENV_RE = /(?<![A-Za-z0-9_])(PATH|PATHEXT)(?![A-Za-z0-9_])/gi;
+// Only an ASSIGNMENT counts (`PATH=…`, `export PATH=…`, `$env:Path = …`,
+// `$env:PATH += …`). Matching the bare word refused every push whose commit
+// message said "path" (Mason, 2026-10-29: accept holes over false alarms).
+const EXECUTABLE_SEARCH_ENV_RE = /(?<![A-Za-z0-9_])(PATH|PATHEXT)(?=\s*\+?=(?!=))/gi;
 function transportValueIsAllowed(name, rawValue) {
   const shape = INLINE_ENV_ALLOWED.get(String(name).toUpperCase());
   if (!shape) return false;

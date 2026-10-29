@@ -151,6 +151,7 @@ const ADMIN=id(1), REP=id(2), CUSTOMER=id(3), PRODUCT=id(4), OTHER=id(5);
 const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), SIBLING=id(14);
 const EMPTY_ORDER=id(20), EMPTY_LINE=id(21);
 const CAP_ERROR=/ORDER_INVOICE_EXCEEDS_DELIVERED/;
+const LINE_INVALID=/ORDER_INVOICE_LINE_INVALID/;
 function asUser(uid) {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
     SELECT set_config('request.jwt.claim.sub', '${uid}', true); SET LOCAL ROLE authenticated;`;
@@ -266,19 +267,19 @@ async function main() {
   refused(insertLine(INV,3,PRODUCT,null),'unlinked duplicate counts');
   refused(insertLine(SIBLING,1,OTHER,null),'added undelivered product');
   refused(`INSERT INTO public.invoice_items (invoice_id,order_item_id,description,quantity,unit_price_cents,extended_cents,cost_cents)
-    VALUES ('${SIBLING}','${LINE}','[PROVER] malformed product',100,1000,100000,0);`,'order-linked product identity is required');
+    VALUES ('${SIBLING}','${LINE}','[PROVER] malformed product',100,1000,100000,0);`,'order-linked product identity is required',LINE_INVALID);
   allowed(`INSERT INTO public.invoice_items (invoice_id,description,quantity,unit_price_cents,extended_cents,cost_cents,charge_type)
     VALUES ('${SIBLING}','[PROVER] Freight',1,1000,1000,0,'freight');`,'non-product charge still allowed');
   for (const user of [ADMIN,REP]) {
     refused(`${asUser(user)} SELECT public.save_invoice(
       jsonb_build_object('customer_id','${CUSTOMER}','order_id','${EMPTY_ORDER}','invoice_type','chemical_sale','invoice_date',CURRENT_DATE::text),
       jsonb_build_array(jsonb_build_object('description','[PROVER] untyped sale','quantity',10,'unit_price_cents',1000,'extended_cents',10000)),
-      gen_random_uuid()::text);`,'real save_invoice requires explicit non-product charge type');
+      gen_random_uuid()::text);`,'real save_invoice requires explicit non-product charge type',LINE_INVALID);
   }
   refused(`INSERT INTO public.invoice_items (invoice_id,description,quantity,unit_price_cents,extended_cents,cost_cents,charge_type)
     VALUES ('${SIBLING}','[PROVER] Freight',1,1000,1000,0,'freight');
-    UPDATE public.invoice_items SET charge_type=NULL WHERE invoice_id='${SIBLING}';`,'charge type cannot be cleared');
-  refused(insertLine(SIBLING,-1),'negative sale cannot offset billing');
+    UPDATE public.invoice_items SET charge_type=NULL WHERE invoice_id='${SIBLING}';`,'charge type cannot be cleared',LINE_INVALID);
+  refused(insertLine(SIBLING,-1),'negative sale cannot offset billing',LINE_INVALID);
   allowed(`UPDATE public.invoice_items SET quantity=3 WHERE invoice_id='${INV}';`,'lower quantity');
   allowed(`UPDATE public.invoice_items SET unit_price_cents=1100 WHERE invoice_id='${INV}';`,'price-only edit');
   refused(`ALTER TABLE public.invoice_items DISABLE TRIGGER zz_cap_order_invoice_items;

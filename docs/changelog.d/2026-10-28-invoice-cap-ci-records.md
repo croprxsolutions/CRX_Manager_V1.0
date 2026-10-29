@@ -11,6 +11,9 @@ Added an exact-branch `git.deploymentEnabled` rule in `vercel.json` for
 deployments. Unspecified branches keep Vercel's default behavior. No CI checks,
 review gates or production project settings were changed.
 
+Superseded by the 2026-10-29 restamp entry: the migration-history entry is now
+1002, CURRENT_STATE was not changed, and the `vercel.json` rule was dropped.
+
 The PR remains a draft. No merge, migration application or deployment is
 authorized by this follow-up. The previous independent Sol draft review binds
 to the earlier commit and must not be represented as reviewing these additions.

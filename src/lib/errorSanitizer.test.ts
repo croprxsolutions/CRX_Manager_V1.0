@@ -74,6 +74,11 @@ describe('sanitizeError', () => {
       .toBe('Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay');
   });
 
+  it('explains an incomplete order invoice line separately from the delivered cap', () => {
+    expect(sanitizeError('ORDER_INVOICE_LINE_INVALID: a non-product line requires a charge type'))
+      .toBe('Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line');
+  });
+
   it('explains a delivery invoice that bills beyond its delivery', () => {
     expect(sanitizeError('DELIVERY_INVOICE_EXCEEDS_DELIVERED: invoice CS-2026-0055 bills 8.0000 of Capreno, but delivery DEL-00074 allows 6'))
       .toBe('Nothing was changed. This invoice is for one delivery, so it can bill only the products and quantities that delivery delivered (invoice CS-2026-0055 bills 8.0000 of Capreno, but delivery DEL-00074 allows 6)');

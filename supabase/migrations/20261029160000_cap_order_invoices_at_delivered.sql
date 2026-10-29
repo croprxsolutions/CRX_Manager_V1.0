@@ -5,6 +5,8 @@
 -- Existing per-delivery caps, order/delivery exclusivity and split provenance remain.
 -- Quick-delivery drafts are the approved exception; their existing per-delivery cap
 -- bounds planned quantities and refuses posting before completion.
+-- Voiding or reducing a completed delivery is deliberately NOT blocked here: void_delivery
+-- keeps a billed delivery voidable and warns (posted_invoices_exist); that rule is to-do 3.5.
 -- Rollback: a new reviewed migration dropping the two zz_cap_order_* triggers and
 -- these two helpers. Existing delivery cap triggers must remain installed.
 SET LOCAL lock_timeout = '5s';
@@ -26,7 +28,7 @@ BEGIN
            SELECT 1 FROM public.order_items oi WHERE oi.id = ii.order_item_id
              AND oi.order_id = p_order_id AND oi.product_id IS NOT DISTINCT FROM ii.product_id)))
   ) THEN
-    RETURN 'Sale lines need a matching product and nonnegative quantity; non-product lines need a charge type.';
+    RETURN 'LINE_INVALID: sale lines need a matching product and nonnegative quantity; non-product lines need a charge type.';
   END IF;
   WITH allowed AS (
     SELECT di.order_item_id, di.product_id,
@@ -36,7 +38,7 @@ BEGIN
      WHERE d.order_id = p_order_id AND d.status = 'completed' AND d.deleted_at IS NULL
      GROUP BY di.order_item_id, di.product_id
   ), billed AS (
-    SELECT ii.order_item_id, ii.product_id, ii.quantity
+      SELECT ii.order_item_id, ii.product_id, round(ii.quantity, 4) AS quantity
       FROM public.invoice_items ii
       JOIN public.invoices i ON i.id = ii.invoice_id
       LEFT JOIN public.deliveries d ON d.id = i.delivery_id
@@ -92,12 +94,12 @@ BEGIN
 
   IF TG_TABLE_NAME = 'invoice_items' THEN
     IF NEW.product_id IS NULL AND NEW.charge_type IS NULL THEN
-      RAISE EXCEPTION 'ORDER_INVOICE_EXCEEDS_DELIVERED: a non-product line requires a charge type';
+      RAISE EXCEPTION 'ORDER_INVOICE_LINE_INVALID: a non-product line requires a charge type';
     END IF;
     -- A negative product quantity may not offset another sale. Credits use the
     -- governed credit-memo path. Non-product service/charge lines consume no units.
     IF NEW.product_id IS NOT NULL AND (NEW.quantity IS NULL OR NEW.quantity < 0) THEN
-      RAISE EXCEPTION 'ORDER_INVOICE_EXCEEDS_DELIVERED: product sale quantities must be nonnegative';
+      RAISE EXCEPTION 'ORDER_INVOICE_LINE_INVALID: product sale quantities must be nonnegative';
     END IF;
     IF TG_OP = 'UPDATE' THEN
       IF NEW.invoice_id = OLD.invoice_id
@@ -105,16 +107,8 @@ BEGIN
          AND NEW.order_item_id IS NOT DISTINCT FROM OLD.order_item_id
          AND NEW.quantity >= 0 THEN
         IF NEW.quantity <= OLD.quantity THEN RETURN NULL; END IF;
-        -- Preserve complete_delivery's draft trim, including an office-added
-        -- duplicate line. Finishing the delivery must work; posting rechecks all.
-        IF v_invoice.status = 'draft' AND NEW.order_item_id IS NOT NULL
-           AND NEW.quantity = (
-             SELECT sum(round(coalesce(di.quantity_delivered, 0), 4))
-               FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
-              WHERE d.id = v_invoice.delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL
-                AND di.order_item_id = NEW.order_item_id AND di.product_id = NEW.product_id) THEN
-          RETURN NULL;
-        END IF;
+        -- Every increase, including changes made during delivery completion,
+        -- is checked against the order-wide completed-delivery aggregate.
       END IF;
     END IF;
     -- Existing invoice-line writers already acquire this order lock. The query
@@ -132,6 +126,9 @@ BEGIN
   END IF;
   v_reason := public._order_invoice_overbilling(v_invoice.order_id);
   IF v_reason IS NOT NULL THEN
+    IF v_reason LIKE 'LINE_INVALID:%' THEN
+      RAISE EXCEPTION 'ORDER_INVOICE_LINE_INVALID: %', ltrim(substr(v_reason, length('LINE_INVALID:') + 1));
+    END IF;
     RAISE EXCEPTION 'ORDER_INVOICE_EXCEEDS_DELIVERED: %', v_reason;
   END IF;
   RETURN NULL;
@@ -140,14 +137,14 @@ $function$;
 ALTER FUNCTION public.enforce_order_invoice_within_delivered() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.enforce_order_invoice_within_delivered() FROM PUBLIC, anon, authenticated, service_role;
 
--- Existing whole-order drafts must be corrected deliberately before installation.
--- This migration never silently changes a saved bill. Per-delivery history keeps
--- the existing delivery cap's lifecycle rules (delivery cancellation is separate).
+-- Every active order-backed invoice is subject to the trigger's aggregate check,
+-- including invoices linked to a delivery. Correct invalid or over-cap bills
+-- deliberately before installation; this migration never changes saved bills.
 DO $preflight$
 DECLARE v_order_id uuid;
 BEGIN
   FOR v_order_id IN SELECT DISTINCT order_id FROM public.invoices
-    WHERE order_id IS NOT NULL AND delivery_id IS NULL AND invoice_type <> 'credit_memo'
+    WHERE order_id IS NOT NULL AND invoice_type <> 'credit_memo'
       AND deleted_at IS NULL AND status NOT IN ('voided', 'cancelled') LOOP
     IF public._order_invoice_overbilling(v_order_id) IS NOT NULL THEN
       RAISE EXCEPTION 'ORDER_INVOICE_CAP_PREFLIGHT: existing whole-order billing needs review';

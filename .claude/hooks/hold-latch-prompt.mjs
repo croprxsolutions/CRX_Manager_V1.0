@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// UserPromptSubmit half of the stop/pause/scope hold latch.
-//   - Mason says stop/pause/scope-only  → latch HOLD + inject a halt directive.
+// UserPromptSubmit half of the stop/pause hold latch.
+//   - Mason gives a stop/pause command   → latch HOLD + inject a halt directive.
 //   - Any other message                 → clear the latch (so it never sticks).
 // The PreToolUse half (hold-latch-guard.mjs) blocks "building" tool calls while held.
 
@@ -67,11 +67,10 @@ if (isHoldPhrase(prompt)) {
     writeFileSync(holdPath, JSON.stringify({ held: true, phrase: prompt.trim().slice(0, 200), ts: new Date().toISOString() }), "utf8");
   } catch { /* non-fatal */ }
   emit([
-    "HOLD LATCHED — Mason said stop / pause / scope-only.",
+    "HOLD LATCHED — Mason told the session to stop or pause.",
     "",
     "HALT building now: get to a clean checkpoint, write a one-paragraph plain-English progress note, and WAIT.",
-    "Do NOT keep coding, committing, migrating, or deploying. If he was only scoping a FUTURE session, your whole",
-    "deliverable is a written plan (a SCOPE.md: goal, the 2-4 files to touch, plan, open questions) — no code.",
+    "Do NOT keep coding, committing, migrating, or deploying.",
     "This overrides the auto-ship / keep-moving default. The hold clears automatically on his next instruction.",
     "(From hold-latch — build-actions are blocked until he resumes.)",
   ].join("\n"));

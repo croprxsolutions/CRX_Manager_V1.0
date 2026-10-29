@@ -877,6 +877,27 @@ for (const payload of [
   assert.match(result.stdout, /"permissionDecision":"deny"/);
 }
 
+// The user's HOME `.claude` is not this repository's (Mason, 2026-10-29).
+for (const command of [
+  "cd /c/Users/mason/.claude && ls",
+  "cd C:/Users/mason/.claude && ls hooks",
+  "cd ~/.claude && ls",
+  "cp /c/Users/mason/.claude/hooks/a.mjs /c/Users/mason/.claude/hooks-backup/",
+]) {
+  assert.doesNotMatch(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `home .claude allowed: ${command}`);
+}
+// …while the repository's own guard files stay protected.
+for (const command of [
+  "cd .claude && rm hooks/x.mjs",
+  "cp /tmp/evil .claude/hooks/review-proof-guard.mjs",
+  "cp /tmp/evil /c/CRX_Manager/.claude/hooks/review-proof-guard.mjs",
+  // A `..` that climbs out of the home folder gets no exemption.
+  "cp /tmp/evil ~/.claude/../../../CRX_Manager/.claude/hooks/review-proof-guard.mjs",
+  "cp /tmp/evil C:/Users/mason/.claude/../../../CRX_Manager/.husky/pre-push",
+]) {
+  assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `repo .claude still denied: ${command}`);
+}
+
 // FORMER OVER-BLOCK. Segment splitting is not quote-aware, so a `|` inside a
 // quoted regex splits the command and the fragment after it is read as an
 // unallowlisted command head. Until 2026-10-02 that refused this plain read;

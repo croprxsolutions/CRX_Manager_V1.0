@@ -22,8 +22,10 @@ export const PROMPT_DEDUPE_BLOCKS = [
 // ship-intent-reminder was removed (Mason, 2026-10-29): its word list matched
 // nearly every message and added the /ship text each time, while AGENTS.md
 // already routes build and ship work to .claude/commands/ship.md.
+// hold-latch-prompt was removed (Mason, 2026-10-29: "if i want to stop i just hit
+// the stop button ... lets not overcomplicate this"); hold-latch-guard is unwired
+// from both manifests with it. Agents still obey a typed stop.
 export const SHARED_PROMPT_MODULES = [
-  "./hold-latch-prompt.mjs",
   "./owner-approval-prompt.mjs",
   "./coderabbit-skip-prompt.mjs",
 ];

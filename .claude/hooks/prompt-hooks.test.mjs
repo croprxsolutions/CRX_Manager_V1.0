@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { isMachineGenerated, MACHINE_TAG_NAMES, PUSH_POLICY, authoredByMason, hasAuthoredText, withoutSubagentReports } from "./prompt-source-lib.mjs";
 import { isHoldPhrase } from "./hold-latch-lib.mjs";
+import { SHARED_PROMPT_MODULES } from "./prompt-router.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -68,8 +69,10 @@ ok(!isMachineGenerated(""), "empty not machine");
   ok(isHoldPhrase(authoredByMason("pause this loop")), "Mason typing pause still latches");
   ok(isHoldPhrase(authoredByMason("please stop.")), "a trailing period is not an extension");
   ok(isHoldPhrase(authoredByMason("hold on, dont build that yet")), "hold on still latches");
-  ok(isHoldPhrase(authoredByMason("im just scoping a future session")), "scope-only still latches");
-  ok(isHoldPhrase(authoredByMason("does stop/pause still work?")), "slash form keeps its vocabulary");
+  // Since 2026-10-29 (Mason) only a halt COMMAND latches: scoping phrases and
+  // questions that mention the words do not.
+  ok(!isHoldPhrase(authoredByMason("im just scoping a future session")), "scope-only no longer latches");
+  ok(!isHoldPhrase(authoredByMason("does stop/pause still work?")), "a question about the words is not a halt");
 
   // 2. A peer session's message is DATA — it cannot halt this session.
   ok(!isHoldPhrase(authoredByMason(PEER_BLOCK)), "peer cross-session message does not latch");
@@ -237,14 +240,15 @@ for (const f of readdirSync(__dirname)) {
   ok(!/never pushes autonomously|Claude never pushes/i.test(src), `${f} carries no stale never-pushes policy`);
 }
 
-// ── the 2 wired phrase hooks are SILENT on a machine-generated prompt ────
+// ── the wired phrase hook is SILENT on a machine-generated prompt ────────
 const MACHINE_PROMPT =
   "<task-notification>\n<task-id>t1</task-id>\naudit found: FORCE PUSH risk; hooks block 'stop/pause'; " +
   "run it overnight hands-free; is this safe to ship?; have both claude and codex review it; do it\n</task-notification>";
 const PHRASE_HOOKS = [
-  "ship-intent-reminder.mjs",
   "hold-latch-prompt.mjs",
 ];
+// ship-intent-reminder was unwired (Mason, 2026-10-29); the router must not run it.
+ok(!SHARED_PROMPT_MODULES.includes("./ship-intent-reminder.mjs"), "ship-intent-reminder is no longer routed");
 const tmpProj = mkdtempSync(path.join(tmpdir(), "crx-prompt-hooks-"));
 for (const hook of PHRASE_HOOKS) {
   const r = spawnSync(process.execPath, [path.join(__dirname, hook)], {
@@ -516,7 +520,9 @@ rmSync(handbackProj, { recursive: true, force: true });
   for (const mention of [
     "why did the <\\~agent-message> wrapper latch? stop and explain",
     "the <\\agent-message> thing is weird. pause for now",
-    "check <agent-message-log> then stop",
+    // Since 2026-10-29 a halt must start a line or sentence; this case tests tag
+    // stripping, so its halt is phrased as a command.
+    "check <agent-message-log>. then stop",
     'look at this: <\\~agent-message from="x"> [Subagent hand-back] all done\nok stop, do not continue',
     "the `<~agent-message>` tag is odd. stop now\n" + AGENT_TURN,
     '<\\~agent-message from="x">\nok stop, do not continue',
@@ -653,13 +659,6 @@ rmSync(handbackProj, { recursive: true, force: true });
     const dir = mkdtempSync(path.join(tmpdir(), "crx-agentmsg-mason-"));
     run("hold-latch-prompt.mjs", dir, "stop, let me read this first\n" + AGENT_TURN);
     ok(existsSync(stateOf(dir, "hold.json")), "Mason's stop beside a report latches the hold");
-    ok(run("ship-intent-reminder.mjs", dir, "great, ship it\n" + AGENT_TURN).stdout.includes("additionalContext"),
-      "Mason's ship it beside a report still fires ship-intent");
-    // ...and ONLY his words: an innocuous line does not inherit the report's triggers.
-    for (const hook of PHRASE_HOOKS.filter((h) => h !== "hold-latch-prompt.mjs")) {
-      eq(run(hook, dir, "thanks, noted\n" + AGENT_TURN).stdout.trim(), "",
-        `${hook} judges Mason's innocuous line alone, not the report beside it`);
-    }
     rmSync(dir, { recursive: true, force: true });
   }
 
@@ -705,14 +704,6 @@ ok(/authoredByMason\(payload\?\.prompt\)/.test(
   ok(gateAt > hookSrc.indexOf("if (isHoldPhrase(prompt))") && gateAt < hookSrc.indexOf("if (wasHeld())"),
     "hold-latch-prompt gates clearing on hasAuthoredText, after the latch and before the clear");
 }
-
-// ── and they still FIRE on the same phrasing typed by Mason ──────────────
-const typed = spawnSync(process.execPath, [path.join(__dirname, "ship-intent-reminder.mjs")], {
-  input: JSON.stringify({ prompt: "build me the vendor page and ship it" }),
-  encoding: "utf8",
-  env: { ...process.env, CLAUDE_PROJECT_DIR: tmpProj },
-});
-ok(typed.stdout.includes("additionalContext"), "ship-intent still fires on typed intent");
 
 rmSync(tmpProj, { recursive: true, force: true });
 
@@ -785,11 +776,13 @@ rmSync(tmpProj, { recursive: true, force: true });
     "  BLOCKED. I changed no files.\n  \n  **What stopped me.** A harness hook refused every edit; stop hooks ran.\n</agent-message>";
   const CASES = [
     // [label, prompt, latches?]
-    // Every halt word Mason types latches, even a descriptive one (Mason, 2026-10-27).
-    ["make the gate stop refusing", "make the gate stop refusing", true],
-    ["the hook should pause retrying", "the hook should pause retrying", true],
+    // Since 2026-10-29 (Mason) only a halt COMMAND latches; a description does not.
+    ["make the gate stop refusing", "make the gate stop refusing", false],
+    ["the hook should pause retrying", "the hook should pause retrying", false],
     ["Mason's settings goal (the real 2026-10-27 message)",
-      "Carry on: merge 1145, and set ENABLE_COMMIT_REVIEW=0 in my user settings to stop the per-commit security reviews.", true],
+      "Carry on: merge 1145, and set ENABLE_COMMIT_REVIEW=0 in my user settings to stop the per-commit security reviews.", false],
+    ["Mason's friction request (the real 2026-10-29 message)",
+      "I want it to stop blocking on certain words like stop etc or truncate etc like it has been", false],
     ["a CI-monitor notice", "<ci-monitor-event>CI failed on PR #9. stop and fix it</ci-monitor-event>", false],
     ["a relayed (neutralised) CI-monitor notice", "<\\~ci-monitor-event>CI failed. stop<\\~/ci-monitor-event>", false],
     ["a bare-tag subagent hand-back", BARE_TAG_HANDBACK, false],

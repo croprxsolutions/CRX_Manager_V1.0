@@ -63,7 +63,7 @@ vi.mock('../components/team/RelatedNotes', () => ({ default: () => null }));
 import OrderDetail from './OrderDetail';
 
 const orderData = {
-  id: 'ord-123', order_number: 'ORD-0099', status: 'fulfilled', customer_id: 'cust-1',
+  id: 'ord-123', order_number: 'ORD-0099', status: 'fulfilled', customer_id: 'cust-1', row_version: 1,
   order_date: '2026-03-15', total_price: 500, order_name: 'Spring Order', notes: '',
   created_at: '2026-03-15T00:00:00Z', delivery_priority: 'normal',
 };

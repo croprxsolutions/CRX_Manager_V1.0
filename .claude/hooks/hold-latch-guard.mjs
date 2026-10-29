@@ -33,7 +33,7 @@ if (decision === "deny") {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "HOLD is latched — Mason said stop / pause / scope-only, so outward actions (push, merge, publishing a PR, live migration apply, deploy, live SQL writes) are paused. Local work (reads, tests, edits, commits) can continue. Wait for his next message to resume (that clears the hold automatically).",
+      permissionDecisionReason: "HOLD is latched — Mason told the session to stop or pause, so outward actions (push, merge, publishing a PR, live migration apply, deploy, live SQL writes) are paused. Local work (reads, tests, edits, commits) can continue. Wait for his next message to resume (that clears the hold automatically).",
     },
   }));
   process.exit(0);
@@ -43,7 +43,7 @@ if (decision === "warn") {
   // still apply, and the Codex adapter forwards exactly this shape as a warning
   // (the same shape review-proof-guard's warnings use).
   process.stdout.write(JSON.stringify({
-    systemMessage: "⚠ HOLD is latched — a recent message read as stop / pause / scope-only. This local change is allowed, but if Mason really asked you to stop, stop now and check in. (The latch also fires on ordinary uses of the word, such as a helper's report.)",
+    systemMessage: "⚠ HOLD is latched — a recent message read as a stop or pause command. This local change is allowed, but if Mason really asked you to stop, stop now and check in.",
   }));
   process.exit(0);
 }

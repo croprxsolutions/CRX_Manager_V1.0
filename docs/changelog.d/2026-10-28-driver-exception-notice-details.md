@@ -4,7 +4,7 @@ Prepared, not deployed: a delivery completed with a driver issue creates an offi
 
 The existing form has an Other category rather than separate shortage/damage categories. Notices preserve the recorded category and explanation; delivery quantities do not establish a damaged quantity or identify a damaged line. No billing, inventory, or permission rules change. The notice is part of the completion transaction, including offline completion; a failed insert rolls back with completion, and a completion replay creates no second notice.
 
-Migration `20261028185038_driver_delivery_issue_notifications` remains unapplied. Remove its trigger and trigger function in a new migration to roll back; the frontend presentation can be reverted independently. Existing notices are not rewritten.
+Migration `20261029160100_driver_delivery_issue_notifications` remains unapplied. Remove its trigger and trigger function in a new migration to roll back; the frontend presentation can be reverted independently. Existing notices are not rewritten.
 
 Local evidence (2026-10-28): the real-schema prover returned `DRIVER_DELIVERY_ISSUE_PROOF_PASS`, including fail-first, shortage/damage explanations, missing details, no issue, access/sender checks, failure rollback, replay, a deliberately premature-trigger mutation, and actual committed notices read in a later transaction. Browser proof observed full plain-text reports in the page and bell and the bell's affected-delivery route. Focused UI/contracts passed 100 tests. The broad suite passed 6,632 tests with one missing trigger classification (fixed) and two timing failures; all three affected files then passed 102 tests on focused rerun. Type checking, lint, build, agent-workflow checks and changed-migration SQL audit passed.
 

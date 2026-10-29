@@ -131,7 +131,9 @@ if (nestedCommands.tooDeep) deny(nestedTooDeepDenial("CODEX GATE"));
 // fail-closed refusals (2026-10-18; see couldReachGatedAction). @speed-bump
 const pushGated = couldReachGatedAction([cmd, ...nestedCommands.commands]);
 if (pushGated && nestedCommands.computed) deny(nestedComputedDenial("CODEX GATE"));
-if (programAssembledAtRuntime(cmd)) deny(nestedComputedDenial("CODEX GATE"));
+// Only when the command could reach a push or GitHub call (Mason, 2026-10-29);
+// the accepted hole is the one named in pr-merge-guard.mjs.
+if (pushGated && programAssembledAtRuntime(cmd)) deny(nestedComputedDenial("CODEX GATE"));
 // A COMPUTED nested command is read too (`bash -c 'g$(printf i)t pu…'`; Codex
 // connector, PR #956). The grouping:false expansion above drops a computed inner
 // command's text, so this reads the full expansion the merge guard uses; only when

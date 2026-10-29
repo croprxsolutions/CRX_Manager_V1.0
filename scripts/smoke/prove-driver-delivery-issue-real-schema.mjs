@@ -11,7 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const reuse = process.argv.find(arg => arg.startsWith('--reuse='))?.slice('--reuse='.length);
 const name = reuse || `crx-driver-issue-${process.pid}`;
 assert.match(name, /^crx-driver-issue-\d+$/);
-const candidate = '20261028185038_driver_delivery_issue_notifications.sql';
+const candidate = '20261029160100_driver_delivery_issue_notifications.sql';
 const baseline = path.join(root, 'supabase/baselines');
 const skippedStorage = new Set(['20260914100700_customer_document_bytes_server_only.sql', '20261015230000_staff_photo_storage_access.sql', '20261016030000_staff_photo_buckets_private.sql']);
 const ledgerOnly = new Set(['20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql', '20261007150200_release_reservations_of_deleted_spring_orders.sql']);

@@ -54,7 +54,7 @@ import {
   MAX_HOOK_INPUT_LENGTH,
   readHookInputBounded,
 } from "../../.claude/hooks/codex-push-lib.mjs";
-import { stripCommentsQuoteAware } from "../../.claude/hooks/live-testdata-lib.mjs";
+import { isKnownSweepQuery, stripCommentsQuoteAware } from "../../.claude/hooks/live-testdata-lib.mjs";
 import {
   CODEX_THREADS_QUERY,
   CODEX_THREAD_PAGE_SIZE,
@@ -1724,8 +1724,21 @@ export function evaluateProductionAction({
   }
 
   if (/execute_sql$/i.test(name)) {
-    const sql = toolInput.query ?? toolInput.sql ?? "";
-    if (!isClearlyReadOnlySql(sql)) {
+    // Every SQL field present is judged, and each must be a plain string, so
+    // the text approved here is the text the connector receives (Luna,
+    // 2026-10-28).
+    const sqlFields = ["query", "sql"].filter((field) => toolInput[field] !== undefined && toolInput[field] !== null);
+    if (sqlFields.some((field) => typeof toolInput[field] !== "string")) {
+      return denied("Codex only permits execute_sql with its SQL given as plain text.");
+    }
+    const statements = sqlFields.length ? sqlFields.map((field) => toolInput[field]) : [""];
+    // A db-invariant sweep packet reads catalog built-ins the generic check does
+    // not know, so it is admitted only when isKnownSweepQuery (the Claude SQL
+    // guard's recognizer) matches it exactly: the generated envelope, a
+    // predicate whose fingerprint is pinned in that protected file under the
+    // same name, and plain contract keys. Any edit to the body, name or keys
+    // falls back to the generic check.
+    if (!statements.every((sql) => isClearlyReadOnlySql(sql) || isKnownSweepQuery(sql))) {
       return denied("Codex only permits clearly read-only SQL. Live data and schema changes remain blocked.");
     }
   }

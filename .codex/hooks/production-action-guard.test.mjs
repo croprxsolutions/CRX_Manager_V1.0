@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -26,6 +26,8 @@ import {
   unrecognizedCommandWord,
   unrecognizedProtectedHarnessAccess,
 } from "./production-action-guard.mjs";
+import { renderSweepQuery } from "../../.claude/hooks/live-testdata-lib.mjs";
+import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-match.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -198,6 +200,165 @@ try {
 
   assert.equal(evaluateProductionAction({ toolName: "mcp__supabase__execute_sql", toolInput: { query: "select 1" } }).blocked, false);
   assert.equal(evaluateProductionAction({ toolName: "mcp__supabase__execute_sql", toolInput: { query: "delete from invoices" } }).blocked, true);
+
+  // db-invariant sweep packets (2026-10-28): the generic check refused most of
+  // them because their catalog queries use built-ins it does not list, so the
+  // guard also admits an exact isKnownSweepQuery match. Every packet the runner
+  // builds today must pass under every Supabase prefix, and every near miss
+  // must fall back to the generic check and stay refused.
+  {
+    const sweepRoot = new URL("../../scripts/db-invariant-sweeps/", import.meta.url);
+    const allowlist = JSON.parse(readFileSync(new URL("allowlist.json", sweepRoot), "utf8"));
+    const predicates = readdirSync(new URL("predicates/", sweepRoot)).filter((file) => file.endsWith(".sql")).sort();
+    const packets = predicates.map((file) => {
+      const name = file.slice(0, -4);
+      const sql = readFileSync(new URL(`predicates/${file}`, sweepRoot), "utf8");
+      return { name, sql, query: buildSweepQuery({ name, sql }, allowlist.entries.filter((entry) => entry.predicate === name)) };
+    });
+    assert.ok(packets.length >= 29, "sanity: every current predicate produced a packet");
+    assert.ok(
+      packets.filter(({ query }) => !isClearlyReadOnlySql(query)).length > 0,
+      "sanity: some packets need the sweep recognizer (the generic check alone refuses them)"
+    );
+    const sweepSql = (query, toolName = "mcp__supabase__execute_sql") =>
+      evaluateProductionAction({ toolName, toolInput: { query } }).blocked;
+    // The recognizer treats CRLF and LF copies as the same packet. That is only
+    // sound while no predicate has a line break inside a quoted literal, where
+    // the two forms would carry different values (Luna, 2026-10-28). Comments
+    // are skipped; a new predicate that breaks this fails here. A backslash
+    // escapes the next character in an E'...' string (Luna round 3). Predicates
+    // are written for standard_conforming_strings on, the database default, and
+    // already depend on it (return-credit-intent-binding uses ESCAPE '\'), so
+    // plain strings are scanned under that reading only.
+    const literalWithLineBreak = (text, backslashEverywhere) => {
+      for (let i = 0; i < text.length;) {
+        if (text.startsWith("--", i)) { const eol = text.indexOf("\n", i); i = eol < 0 ? text.length : eol; continue; }
+        if (text.startsWith("/*", i)) {
+          // PostgreSQL block comments nest (Luna round 4).
+          let depth = 1;
+          for (i += 2; i < text.length && depth > 0;) {
+            if (text.startsWith("/*", i)) { depth++; i += 2; } else if (text.startsWith("*/", i)) { depth--; i += 2; } else i++;
+          }
+          continue;
+        }
+        // Tags may use non-ASCII letters, as in classifySql (Luna round 5).
+        const dollar = /^\$([A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/.exec(text.slice(i));
+        let end = -1;
+        if (dollar && !/[A-Za-z0-9_$\u0080-￿]/.test(text[i - 1] || "")) {
+          const close = text.indexOf(dollar[0], i + dollar[0].length);
+          end = close < 0 ? text.length : close + dollar[0].length;
+        } else if (text[i] === "'" || text[i] === "\"") {
+          const quote = text[i];
+          const escapeString = quote === "'" &&
+            (backslashEverywhere || (/[eE]/.test(text[i - 1] || "") && !/[A-Za-z0-9_$]/.test(text[i - 2] || "")));
+          let j = i + 1;
+          for (; j < text.length; j++) {
+            if (escapeString && text[j] === "\\") { j++; continue; }
+            if (text[j] === quote) {
+              if (text[j + 1] === quote) { j++; continue; }
+              break;
+            }
+          }
+          end = j + 1;
+        }
+        if (end > i) {
+          if (text.slice(i, end).includes("\n")) return i;
+          i = end;
+        } else i++;
+      }
+      return -1;
+    };
+    for (const { name, sql } of packets) {
+      const text = sql.replace(/\r\n?/g, "\n");
+      const at = literalWithLineBreak(text, false);
+      assert.equal(at, -1, `${name}: no line break inside a quoted literal (offset ${at})`);
+    }
+    // The scanner itself: each of these must be caught.
+    for (const [sample, backslashEverywhere] of [
+      ["SELECT 'a\nb'", false],
+      ["SELECT E'left\\'\nright'", false],
+      ["SELECT 'left\\'\nright'", true],
+      ["SELECT $x$a\nb$x$", false],
+      ["SELECT \"a\nb\"", false],
+      ["/* outer /* inner */ -- c */ SELECT E'left\\'\nright'", false],
+      ["SELECT $é$a\nb$é$", false],
+    ]) {
+      assert.notEqual(literalWithLineBreak(sample, backslashEverywhere), -1, `scanner catches ${JSON.stringify(sample)}`);
+    }
+    assert.equal(literalWithLineBreak("SELECT E'\\r\\n', 'x' -- it's\nFROM t", false), -1, "scanner passes one-line literals and a comment with a quote");
+    assert.equal(literalWithLineBreak("WHERE a LIKE '%\\_x' ESCAPE '\\'\n)", false), -1, "a plain string ending in a backslash ends at its quote");
+
+    for (const { name, query } of packets) {
+      for (const toolName of [
+        "mcp__supabase__execute_sql",
+        "mcp__codex_apps__supabase_execute_sql",
+        "mcp__50e15046-cf2c-49da-b8df-ceef27768f63__execute_sql",
+      ]) {
+        assert.equal(sweepSql(query, toolName), false, `${name}: its generated sweep packet is allowed via ${toolName}`);
+      }
+      // The checkout may already be CRLF, so force each form explicitly (Luna round 5).
+      const lf = query.replace(/\r\n?/g, "\n");
+      assert.equal(sweepSql(lf), false, `${name}: an LF copy of its packet is allowed`);
+      assert.equal(sweepSql(lf.replace(/\n/g, "\r\n")), false, `${name}: a CRLF copy of its packet is allowed`);
+      assert.equal(
+        evaluateProductionAction({ toolName: "mcp__supabase__execute_sql", toolInput: { sql: query } }).blocked,
+        false,
+        `${name}: the packet is judged the same when sent as the sql field`
+      );
+    }
+
+    const withKeys = packets.find(({ query }) => query.includes("= ANY(ARRAY["));
+    const recognizedOnly = packets.find(({ query }) => !isClearlyReadOnlySql(query));
+    assert.ok(withKeys && recognizedOnly, "sanity: a packet with contract keys and one only the recognizer admits");
+    const denied = (query, why) => assert.equal(sweepSql(query), true, `denied: ${why}`);
+    for (const { name, query } of [withKeys, recognizedOnly]) {
+      const other = packets.find((packet) => packet.name !== name);
+      denied(`${query}\nDELETE FROM customers;`, `${name} + an appended DELETE`);
+      denied(`${query} SELECT 1`, `${name} + a second statement`);
+      denied(`DELETE FROM customers;\n${query}`, `${name} with a DELETE in front`);
+      denied(query.replace("\n) AS v),", "\n) AS v); DELETE FROM customers; SELECT json_build_object('x', (1),"), `${name} with a DELETE spliced into the envelope`);
+      denied(query.replace(/\bWHERE\b/, "WHERE NOT"), `${name} with its predicate body altered`);
+      denied(query.replace(`'predicate', '${name}'`, `'predicate', '${other.name}'`), `${name} labelled as ${other.name}`);
+      denied(query.replace(`'predicate', '${name}'`, `'predicate', '${name}x'`), `${name} labelled with an unknown name`);
+    }
+    // An altered body that is NOT clearly read-only on its own: proves the
+    // recognizer, not the generic check, was what admitted the original.
+    const bodyStart = recognizedOnly.query.indexOf("FROM (\n") + "FROM (\n".length;
+    denied(
+      `${recognizedOnly.query.slice(0, bodyStart)} ${recognizedOnly.query.slice(bodyStart)}`,
+      `${recognizedOnly.name} with one extra space in its predicate`
+    );
+    // Contract keys must be plain identity signatures.
+    for (const key of [
+      "public.untrusted('); DELETE FROM profiles; --)",
+      "public.f(x text) '",
+      "public.f(x\\)",
+      "public.f(x text)\n; DELETE FROM customers; --",
+    ]) {
+      const query = buildSweepQuery(
+        { name: recognizedOnly.name, sql: recognizedOnly.sql },
+        [{ reviewed_contracts: { [key]: "0".repeat(32) } }]
+      );
+      denied(query, `${recognizedOnly.name} requesting the contract key ${JSON.stringify(key)}`);
+    }
+    // The real envelope around an application call or a write gets nothing.
+    denied(renderSweepQuery(recognizedOnly.name, "SELECT public.save_customer('{}'::jsonb) AS violation_key", []), "an application RPC inside the envelope");
+    denied(renderSweepQuery(recognizedOnly.name, "SELECT 1 AS violation_key FROM (DELETE FROM customers RETURNING 1) d", []), "a DELETE inside the envelope");
+    denied(renderSweepQuery(recognizedOnly.name, "SELECT pg_catalog.set_config('role', 'service_role', false) AS violation_key", []), "a set_config inside the envelope");
+    // Every SQL field is judged, and only plain strings count (Luna, 2026-10-28).
+    const fields = (toolInput) => evaluateProductionAction({ toolName: "mcp__supabase__execute_sql", toolInput }).blocked;
+    assert.equal(fields({ query: recognizedOnly.query, sql: "DELETE FROM customers" }), true, "denied: a sweep packet in query beside a write in sql");
+    assert.equal(fields({ query: "select 1", sql: "DELETE FROM customers" }), true, "denied: a plain read in query beside a write in sql");
+    assert.equal(fields({ query: "DELETE FROM customers", sql: recognizedOnly.query }), true, "denied: a write in query beside a sweep packet in sql");
+    assert.equal(fields({ query: recognizedOnly.query, sql: recognizedOnly.query }), false, "the same packet in both fields is allowed");
+    assert.equal(fields({ query: [recognizedOnly.query] }), true, "denied: a sweep packet wrapped in an array");
+    assert.equal(fields({ query: ["select 1"] }), true, "denied: a plain read wrapped in an array");
+    assert.equal(fields({ query: { toString: () => "select 1" } }), true, "denied: an object that stringifies to a read");
+    assert.equal(fields({}), true, "denied: no SQL at all");
+    denied("select public.allocate_payment('x', 100)", "an application call outside any envelope");
+    denied("update invoices set status = 'paid'", "a plain write outside any envelope");
+  }
+
   assert.equal(evaluateProductionAction({ toolName: "mcp__supabase__apply_migration" }).blocked, true);
   assert.equal(evaluateProductionAction({ toolName: "mcp__supabase__delete_branch" }).blocked, true);
 

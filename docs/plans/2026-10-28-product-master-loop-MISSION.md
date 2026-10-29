@@ -191,7 +191,7 @@ The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5
 | 12 | WP-PM-6b New-product flow + basic Duplicate 💲 | sol | PM-6a | Build only the parts that don't need the back-fill: opening the new product, missing-price refusals, basic Duplicate (no chemistry copy; that is DM-5). Otherwise PARK |
 | 13 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2 | Full: the cost-writer map first, then changes |
 | 14 | WP-PM-10 Bulk import | sol | PM-5, PM-8, DM-0 | Full, as a draft PR; rates written through one function. **Not mergeable until DM-0's data step is done** (say so in the PR) |
-| 15 | WP-PM-11a Detail workbook | sol | PM-8, PM-12a, DM-0 | Full, as a draft PR: a separate file and detail RPC; the price workbook's rate columns become read-only **only if Mason has answered grand-plan question 2 "yes"; otherwise PARK that part**. Not mergeable until DM-0's data step is done |
+| 15 | WP-PM-11a Detail workbook | sol | PM-8, PM-12a, DM-0 | Full, as a draft PR: a separate file and detail RPC; the price workbook's rate columns become read-only (Mason answered grand-plan question 2 "yes", 2026-10-29). Not mergeable until DM-0's data step is done |
 | 16 | WP-PM-11b List editing + phone layout | luna | PM-1 | Full |
 | 17 | WP-PM-12b Corrections to existing records | sol | PM-12a | The record map first. Build the "open jobs offer to update" path; posted invoices never change (Mason, 2026-10-28) |
 | 18 | WP-PM-13 Reorder display | luna | — | Full |

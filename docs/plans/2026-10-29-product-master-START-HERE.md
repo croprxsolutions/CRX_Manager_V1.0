@@ -47,7 +47,7 @@ The old branch `loop/product-master-2026-10` holds a superseded first draft of t
 3. **Auto-summarize is set for a long run.** In a `claude` terminal, run `/autocompact 800000`; it takes effect for the next session. Set it back to `300000` afterwards.
 4. **Codex has usage left.** The builder runs on Codex (`gpt-6-sol` for money and database packages, `gpt-6-luna` for screen-only ones).
 5. **Start it from the desktop app.** A session can't be started over Remote Control.
-6. **Answer the grand plan's open questions** (`docs/plans/2026-10-29-product-GRAND-PLAN.md` section 10), at least question 2: should the price spreadsheet stop editing rates while they are rebuilt? Without an answer, the loop parks that part of WP-PM-11a.
+6. **The grand plan's questions are answered** (Mason, 2026-10-29; `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 10). Check for any later changes Mason sends after reading the plan.
 
 ## 4. The prompt to paste
 

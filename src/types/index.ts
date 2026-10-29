@@ -729,6 +729,8 @@ export interface Quote {
   total_margin_pct?: number | null;
   valid_days: number;
   expires_at: string | null;
+  /** Expiry date the rep picked; null = season end. Applied at each send. */
+  chosen_expiry_date?: string | null;
   header_notes: string | null;
   footer_notes: string | null;
   season: number | null;

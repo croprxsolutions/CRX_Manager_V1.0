@@ -29,7 +29,6 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -73,7 +72,8 @@ import { notifyLargeOrder, notifyCreditLimitExceeded } from '../lib/notification
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
-import { localDatePlusDays, localToday, parseLocalDate } from '../lib/dateUtils';
+import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
+import { computeSeason, seasonEndDate } from '../utils/season';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { checkRUPCompliance } from '../lib/rupCompliance';
@@ -428,7 +428,10 @@ export default function QuoteBuilder() {
   // Whether a customer was picked since the open quote loaded (picking one and back still counts).
   const customerPickedSinceLoadRef = useRef(false);
   const [tier, setTier] = useState(1);
-  const [validDays, setValidDays] = useState(15);
+  // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
+  // applies it at each send (20261029100000).
+  const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
+  const seasonEnd = seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz())));
   const [headerNotes, setHeaderNotes] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
   const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>({
@@ -504,7 +507,7 @@ export default function QuoteBuilder() {
   // for, so an A -> B -> A navigation cannot hand quote A's retry quote B's clock.
   //
   // Only the CLOCK is frozen, never the payload. If the operator edits the quote —
-  // `valid_days` included — the fingerprint legitimately changes and the server is
+  // the expiry included — the fingerprint legitimately changes and the server is
   // right to refuse: that is a different request, not a retry.
   const saveQuoteAttemptClockRef = useRef<Map<string, { key: string; atMs: number }>>(new Map());
   const [isPlanned, setIsPlanned] = useState(false);
@@ -778,7 +781,7 @@ export default function QuoteBuilder() {
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
     setIsDirty(true);
-  }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
+  }, [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
 
   // Release initial-load dirty suppression only after React has committed the
   // complete installed snapshot. Timer/frame releases can run before that
@@ -1294,7 +1297,7 @@ export default function QuoteBuilder() {
       ? "This quote's customer could not be loaded. Refresh the page before saving."
       : null);
     setTier(q.tier);
-    setValidDays(q.valid_days);
+    setChosenExpiryDate(q.chosen_expiry_date ?? null);
     setHeaderNotes(q.header_notes || '');
     setFooterNotes(q.footer_notes || '');
     setStatus(q.status);
@@ -2151,10 +2154,9 @@ export default function QuoteBuilder() {
       total_cost: totals.totalCost,
       total_profit: totals.totalProfit,
       total_margin_pct: totals.totalMarginPct,
-      valid_days: validDays,
-      expires_at: new Date(
-        saveAttemptAtMs + validDays * 24 * 60 * 60 * 1000
-      ).toISOString(),
+      chosen_expiry_date: chosenExpiryDate,
+      // A draft shows the expiry a send would set; a send sets the real one.
+      expires_at: chosenExpiryDate ?? seasonEnd,
       header_notes: headerNotes || null,
       footer_notes: footerNotes || null,
       is_planned: isPlanned,
@@ -2594,8 +2596,7 @@ export default function QuoteBuilder() {
           customer_address: selectedCustomer?.billing_address || undefined,
           sales_rep_name: profile?.full_name || 'Sales Rep',
           created_at: new Date().toISOString(),
-          expires_at: undefined,
-          valid_days: validDays,
+          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
           tier,
           header_notes: headerNotes || undefined,
           footer_notes: footerNotes || undefined,
@@ -2880,8 +2881,7 @@ export default function QuoteBuilder() {
           customer_address: selectedCustomer?.billing_address || undefined,
           sales_rep_name: profile?.full_name || 'Sales Rep',
           created_at: new Date().toISOString(),
-          expires_at: undefined,
-          valid_days: validDays,
+          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
           tier,
           header_notes: headerNotes || undefined,
           footer_notes: footerNotes || undefined,
@@ -3001,7 +3001,6 @@ export default function QuoteBuilder() {
         // The expiry is the one this send stored (a date-only value, read as a local date).
         created_at: quoteCreatedAt || new Date().toISOString(),
         expires_at: parseLocalDate(sentExpiry).toISOString(),
-        valid_days: validDays,
         tier,
         header_notes: headerNotes || undefined,
         footer_notes: footerNotes || undefined,
@@ -4674,13 +4673,35 @@ export default function QuoteBuilder() {
               <option value={3}>Tier 3</option>
             </select>
           </div>
-          <Input
-            label="Valid Days"
-            type="number"
-            value={validDays}
-            onChange={(e) => setValidDays(parseInt(e.target.value) || 15)}
-            min={0}
-          />
+          <div>
+            <label htmlFor="quote-expires" className="block text-sm font-medium text-secondary mb-1">
+              Expires
+            </label>
+            <select
+              id="quote-expires"
+              value={chosenExpiryDate ? 'date' : 'season'}
+              onChange={(e) => setChosenExpiryDate(e.target.value === 'date' ? seasonEnd : null)}
+              className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+            >
+              <option value="season">
+                {parseLocalDate(seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (season end)
+              </option>
+              <option value="date">Pick a date</option>
+            </select>
+            {chosenExpiryDate && (
+              <input
+                type="date"
+                aria-label="Expiry date"
+                value={chosenExpiryDate}
+                min={todayInBusinessTz()}
+                onChange={(e) => setChosenExpiryDate(e.target.value || seasonEnd)}
+                className="mt-2 w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              />
+            )}
+            {status !== 'draft' && (
+              <p className="mt-1 text-xs text-secondary">A change applies when the quote is sent again.</p>
+            )}
+          </div>
           <div className="sm:col-span-2 lg:col-span-4">
             <CommissionSplitEditor
               value={commissionSplit}

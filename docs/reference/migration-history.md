@@ -4,14 +4,15 @@
 > `list_migrations` observation is at the top of this file, immediately below.
 > Do not scroll for it, and do not treat any older dated block as the latest.
 
+**Live capture — 2026-10-29 13:51 UTC (8:51 AM Central; read-only `execute_sql` on `supabase_migrations.schema_migrations`, the full ledger, row by row, after row 1000 applied for PR #1187 and before row 1001 applies for PR #1185):** 1076 rows / 1069 distinct names, `max(version)` `20261029043628` = `20261027080400_any_rep_converts_booking` (row 1000). The effective ordering high-water (each name's 14-digit stamp, else its version) is `20261027080400`, from that same row. 0 rows have an effective stamp at or after `20261028185500`, and no row is named `%order_edit_and_number_concurrency%`, so candidate `20261028185500_order_edit_and_number_concurrency` sorts strictly after every applied migration. Overloads: `pg_proc` in `public` holds exactly ONE `update_order_items` signature, `update_order_items(uuid,jsonb,uuid,text)`, which the candidate drops before creating its five-argument replacement; no three-argument `update_order_items(uuid,jsonb,uuid)` survives live. `generate_ticket_number()` exists once with no arguments; `bump_order_edit_version`, `bump_order_item_edit_version` and `assign_allocation_set_version` do not exist live; `orders.row_version` does not exist live.
+
 **Live capture — 2026-10-28 (after 7:13 AM Central; read-only `execute_sql` on `supabase_migrations.schema_migrations` after rows 996–999 applied for PR #1164):** 1075 rows, `max(version)` `20261028121259` = `20261027080300_notification_sender_recorded` (row 999). The effective ordering high-water is `20261027080300`.
 
-**Parked candidate — To-Do 1.12 (2026-10-28):** `20261028185500_order_edit_and_number_concurrency.sql`
-adds version-checked order editing and serialized ticket/allocation numbering. **Not applied; no live
-ledger row or sequence number assigned.** Local branch `codex/order-concurrency-20261028`; proof,
-review limits and future rollout/rollback: [order edit concurrency](order-edit-concurrency.md).
-Mason prohibited live apply, deploy and merge for this task. Refresh the ledger and finish the
-delivery gates before any later integration; this candidate is not evidence of a live change.
+**Pending apply — To-Do 1.12 (merged 2026-10-28 as `345198b1d`, PR #1185):** `20261028185500_order_edit_and_number_concurrency.sql`
+adds version-checked order editing and serialized ticket/allocation numbering. **Not applied yet; no live
+ledger row or sequence number assigned.** Proof, review limits and rollout/rollback:
+[order edit concurrency](order-edit-concurrency.md). Its frontend is held back on a Vercel rollback
+until this migration applies; this entry is not evidence of a live change.
 Review follow-up adds explicit save receipts, bound retry replay after later edits, and
 owner-only ticket-number generation. The future permission change needs explicit owner approval.
 

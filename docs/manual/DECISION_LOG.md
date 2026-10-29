@@ -17,8 +17,21 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 4. **Tier order.** "Tier 1 is lowest margin": prices rise from Tier 1 to Tier 3. A tier priced below the tier before it is flagged (item 36).
 5. **Return policy editor.** "Later" (item 18).
 
+**Follow-up answers (Mason, in chat, 2026-10-28, on `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` section 5: "1.yes add seed and each/unit, 2. Yes 3. Yes. 4. Yes. 5. No"):**
+6. **Product forms.** Add "seed" and "each/unit" beside liquid and dry (WP-PM-9).
+7. **Other deactivation checks.** Stock on hand, crop programs and scheduled jobs warn but allow (WP-PM-3).
+8. **Corrections.** When a product's REI/PHI or EPA number is corrected, open (unposted) jobs offer to update; posted invoices never change (WP-PM-12b).
+9. **Delivered but not invoiced.** A fully delivered order that isn't yet invoiced still blocks deactivation until it is invoiced (WP-PM-3).
+10. **Use Timing on other categories.** Only Herbicide and Foliar Fertilizer products keep a Use Timing; a category change clears it after a confirm (WP-PM-5).
+
 **Why.** These are Mason's business calls on how product setup should behave. Returns are already on the can-wait list (2026-10-22).
-**What this forbids/implies:** no auto-deactivated "needs pricing" state for new products. A warning for open quotes, never a block. Tier-order checks assume Tier 1 is cheapest. Stock on hand, crop programs and scheduled jobs weren't named for item 27; they warn, as recommended, until Mason says otherwise.
+**What this forbids/implies:**
+- No auto-deactivated "needs pricing" state for new products.
+- Open quotes, stock, crop programs and scheduled jobs warn; they never block.
+- Open orders block, including fulfilled ones not yet invoiced.
+- Tier-order checks assume Tier 1 is cheapest.
+- Posted invoices are never changed by a product correction.
+- No Use Timing value remains on a product outside those two categories.
 
 ## 2026-10-28 — Product data model: weight per gallon first, at the mixing screens; one value per generic; admin-only comparison
 

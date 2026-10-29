@@ -508,7 +508,14 @@ Sol's recommended order is adopted. The change-history foundation and the databa
 
 ## 5. Open questions
 
-**For Mason (business calls):**
+**For Mason (business calls). All five were answered 2026-10-28, each as recommended ("1.yes add seed and each/unit, 2. Yes 3. Yes. 4. Yes. 5. No"):**
+1. Add the forms **seed** and **each/unit**.
+2. Stock on hand, crop programs and scheduled jobs **warn but allow**.
+3. Open jobs **offer to update** after a correction; posted invoices never change.
+4. A fully delivered, not yet invoiced order **blocks** deactivation until it is invoiced.
+5. **No** Use Timing on other categories; changing the category clears it after a confirm.
+
+The questions as asked:
 1. **Product forms (WP-PM-9):** which forms besides liquid and dry? For example seed, biological, "each/unit" items. Recommend: seed and each, for now.
 2. **Deactivation warnings (WP-PM-3):** stock on hand, crop programs and scheduled jobs warn but don't block. Confirm.
 3. **Corrections reaching existing records (WP-PM-12, #31):** when a product's REI/PHI or EPA number is corrected, should open (unposted) jobs offer to update? Recommend yes for open jobs; posted invoices never change.

@@ -505,7 +505,15 @@ test('real .xlsx round-trip plus ProductDetail quick pricing review', async ({ p
   await page.getByLabel('New Cost').fill('91.00');
   await page.getByLabel('Change Note (optional)').fill('Minor mid-month supplier increase');
   await page.getByRole('button', { name: 'Review Cost Change' }).click();
+  // The cost note carries into the required reason; the user still names the source.
+  await expect(page.getByLabel('Reason for the change')).toHaveValue('Minor mid-month supplier increase');
+  await page.getByLabel('Source (supplier, document, date)').fill('Supplier A quote, Jul 2026');
+  await page.getByRole('button', { name: 'Preview changes' }).click();
   await expect(page.getByText('Ready for approval')).toBeVisible();
+  expect((previewRequests.at(-1) as { p_rows: Array<Record<string, unknown>> }).p_rows[0]).toMatchObject({
+    price_source: 'Supplier A quote, Jul 2026',
+    change_reason: 'Minor mid-month supplier increase',
+  });
   const productPreviewRows = page.getByLabel('Pricing preview rows');
   await expect(productPreviewRows.getByText('Margin Product')).toBeVisible();
   await expect(productPreviewRows.getByText('$91.00')).toBeVisible();
@@ -519,6 +527,9 @@ test('real .xlsx round-trip plus ProductDetail quick pricing review', async ({ p
   await page.getByLabel('Current Cost').fill('90071992547409.93');
   await page.getByLabel('Tier 1 price').fill('90071992547410.01');
   await page.getByRole('button', { name: 'Save Changes' }).click();
+  await page.getByLabel('Source (supplier, document, date)').fill('Exact-cents proof');
+  await page.getByLabel('Reason for the change').fill('Exact decimal round-trip');
+  await page.getByRole('button', { name: 'Preview changes' }).click();
   await expect(page.getByText('Ready for approval')).toBeVisible();
   const exactProductRequest = previewRequests.at(-1) as {
     p_rows: Array<{ new_cost: string; tier1_price: string }>;

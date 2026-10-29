@@ -1329,6 +1329,8 @@ export function evaluateSolPreflight({
   headPushedMs,
   readyForReviewMs = Number.NaN,
   headContainsBase,
+  cleanMergeOf = null,
+  cleanMergeThreads = null,
   nowMs = Date.now(),
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
@@ -1366,8 +1368,14 @@ export function evaluateSolPreflight({
   const quietFor = Number.isFinite(quietSince) ? nowMs - quietSince : -1;
   const runningFor = Number.isFinite(codexState?.at) ? nowMs - codexState.at : -1;
   const reviewedHere = codexState?.sha === head && codexState?.status === "completed";
+  let skippedAppWait = false;
   if (codexState === undefined || codexState?.unreadable) {
     problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
+  } else if (!reviewedHere && cleanMergeOf && (codexState?.sha === head || (codexState?.sha === cleanMergeOf && codexState?.status === "completed"))) {
+    // Mason, 2026-10-29: a clean main merge adds none of the PR's own changes, so
+    // Sol need not wait for the App to re-read it. Its threads are still checked below.
+    skippedAppWait = true;
+    notes.push(`${head.slice(0, 9)} only merges main into ${cleanMergeOf.slice(0, 9)} (no conflicts, no shared files), so Sol does not wait for the Codex GitHub App to review it again.`);
   } else if (!reviewedHere && codexState?.sha === head) {
     // Its review of THIS commit has started and not finished: wait for it, however long, until it is plainly dead.
     if (runningFor >= CODEX_APP_STALE_RUN_MS) {
@@ -1395,6 +1403,16 @@ export function evaluateSolPreflight({
       `the Codex GitHub App has ${codexThreads.unresolvedAtHead} unanswered comment(s) on this commit. ` +
       "Fix them (one push for all of them) or reply with a reason and resolve each thread, then run Sol.",
     );
+  }
+  // The skip reuses the App's review of the pre-merge commit, so its threads on that
+  // commit must be answered too: against the merge head they only read as stale (App P1, PR #1206).
+  if (skippedAppWait && cleanMergeThreads?.status === "findings-at-head") {
+    problems.push(
+      `the Codex GitHub App has ${cleanMergeThreads.unresolvedAtHead} unanswered comment(s) on ${cleanMergeOf.slice(0, 9)}, ` +
+      "the commit before the main merge. Fix them or reply with a reason and resolve each thread, then run Sol.",
+    );
+  } else if (skippedAppWait && (!cleanMergeThreads || cleanMergeThreads.status === "incomplete")) {
+    problems.push(`could not read the Codex GitHub App threads on ${cleanMergeOf.slice(0, 9)}, the commit before the main merge. Retry in a minute.`);
   }
 
   if (coderabbitOpen === null || coderabbitOpen === undefined) {
@@ -1515,6 +1533,7 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
   facts.headContainsBase = /^[0-9a-f]{40}$/i.test(String(baseSha || ""))
     ? gitOk(["merge-base", "--is-ancestor", baseSha, headSha], root)
     : null;
+  facts.cleanMergeOf = facts.headContainsBase === true ? cleanMainMergeParent(root, headSha, baseSha) : null;
   const slug = parseGithubSlug(runGit(["remote", "get-url", "origin"], { cwd: root }));
   if (!slug) return { ...facts, unreadable: "could not read the origin remote's GitHub owner and name" };
   const { owner, name } = slug;
@@ -1582,6 +1601,7 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
     // Threads read for a different head than the one Sol would review prove nothing.
     if (String(node.headRefOid || "").toLowerCase() === headSha.toLowerCase()) {
       facts.codexThreads = evaluateCodexBotReview(node);
+      if (facts.cleanMergeOf) facts.cleanMergeThreads = evaluateCodexBotReview({ ...node, headRefOid: facts.cleanMergeOf });
       facts.coderabbitOpen = coderabbitThreadCount(node);
     }
   } catch { /* left null: refuses */ }
@@ -1870,6 +1890,36 @@ function gitChangedEntries(fromRef, toRef, cwd) {
   );
   if (result.error || result.status !== 0) throw new Error("git diff failed");
   return parseRawDiff(result.stdout);
+}
+
+// The branch's pre-merge head when `headSha` is nothing but a conflict-free merge
+// of main into it: two parents, the second already in main (`baseSha` contains
+// it), a tree byte-for-byte what `git merge-tree` of the two produces (nothing
+// hand-edited), and no file changed on both sides since they split. Else null.
+export function cleanMainMergeParent(root, headSha, baseSha) {
+  if (!CARRY_SHA_RE.test(String(headSha || "")) || !CARRY_SHA_RE.test(String(baseSha || ""))) return null;
+  const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
+  if (parents.length !== 2 || !parents.every((sha) => CARRY_SHA_RE.test(sha))) return null;
+  const [branchHead, mainSide] = parents;
+  if (!gitOk(["merge-base", "--is-ancestor", mainSide, baseSha], root)) return null;
+  // Exactly one split point: with several (criss-cross), git picks one and the
+  // shared-file check below could miss an overlap (Luna MED, PR #1206).
+  const forks = runGit(["merge-base", "--all", branchHead, mainSide], { cwd: root }).split(/\s+/).filter(Boolean);
+  if (forks.length !== 1 || !CARRY_SHA_RE.test(forks[0])) return null;
+  const [fork] = forks;
+  const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", mainSide, branchHead], {
+    cwd: root, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
+  });
+  const mergedTree = String(merged.stdout || "").split(/\r?\n/)[0].trim();
+  if (merged.error || merged.status !== 0 || !CARRY_SHA_RE.test(mergedTree)) return null;
+  if (runGit(["rev-parse", `${headSha}^{tree}`], { cwd: root }) !== mergedTree) return null;
+  try {
+    const branchFiles = new Set(gitChangedEntries(fork, branchHead, root).map((entry) => entry.path));
+    if (gitChangedEntries(fork, mainSide, root).some((entry) => branchFiles.has(entry.path))) return null;
+  } catch {
+    return null;
+  }
+  return branchHead;
 }
 
 // Everything the carry needs from Git, checked. Returns { problem } or the facts.

@@ -1564,9 +1564,10 @@ export default function ProductDetail() {
               product, whose tier margins would be judged against this product's floor. */}
           {isAdmin && !isNew && id && profile && persistedProduct?.id === id && (
             // Keyed by product: moving to another product starts a fresh card, so nothing from the
-            // last product's floor, history or in-flight save carries over.
+            // last product's floor, history or in-flight save carries over. Prefixed so it never
+            // shares a key with ProductBrandsSection, its sibling in this fieldset.
             <ProductMarginFloorCard
-              key={id}
+              key={`margin-floor-${id}`}
               productId={id}
               tierMargins={[persistedProduct?.tier1_margin, persistedProduct?.tier2_margin, persistedProduct?.tier3_margin]}
               userId={profile.id}

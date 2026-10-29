@@ -2,7 +2,7 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-28 (America/Chicago)** for KI-18 only: the four migrations applied live on 2026-10-28 (`20261027080000`..`20261027080300`, ledger high-water `20261028121259` at 7:17 PM Central) leave the quote and order number generators taking their year from `current_date`, so KI-18 stands; the 1.12 candidate `20261028185500` (not applied, PR #1185) keeps the same year rule for blend-ticket numbers. Earlier, **2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
+**Last verified: 2026-10-29 (America/Chicago)** for KI-81 only, re-read against `main` at `5ff1293d` and a local replay, not live (the session that applies `20261029120000` re-reads live first): with the candidate `20261029120000` (PR #1203, not applied) a recorded price change on a sent line applies without a re-send, so the two paths KI-81 names would bill that agreed price; an unrecorded change still needs a re-send, and KI-81 stays open. Earlier, **2026-10-28 (America/Chicago)** for KI-18 only: the four migrations applied live on 2026-10-28 (`20261027080000`..`20261027080300`, ledger high-water `20261028121259` at 7:17 PM Central) leave the quote and order number generators taking their year from `current_date`, so KI-18 stands; the 1.12 candidate `20261028185500` (not applied, PR #1185) keeps the same year rule for blend-ticket numbers. Earlier, **2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
 2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
 `20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
 entries name; at 7:37 AM Central that migration applied live, ledger `20261027123725`, 1068 rows, and a read-only
@@ -289,7 +289,7 @@ orders and job lines. Two later paths read `quote_items.price_per_unit` live ins
 `_blend_quote_pick_valid_20261020`, or the first line of the job's quote section) and the field-application
 invoice (`_save_field_app_invoice_impl_20260714`, `resolve_field_app_chemical_price`, which take the first quote
 line on the field with no status, customer or deleted filter). After a revision that changed a price and was not
-re-sent, either can bill the unsent price; the field-application lookup can also take a draft, declined or deleted
+re-sent, either can bill the unsent price (with the candidate `20261029120000`, PR #1203, a price change recorded by `save_quote` is the agreed price and needs no re-send); the field-application lookup can also take a draft, declined or deleted
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved

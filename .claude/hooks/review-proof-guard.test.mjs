@@ -895,7 +895,6 @@ for (const command of [
   'grep -n "truncate\\|TRUNCATE" .claude/hooks/sql-safety.mjs .claude/hooks/bash-safety-lib.mjs | head -30',
   'grep -nE "rm|cp|mv" .husky/pre-push',
   'grep -c "tee|dd" .github/workflows/ci.yml && wc -l .claude/hooks/sql-safety.mjs',
-  'git log --oneline -5 -- .claude/hooks | grep "rm\\|truncate"',
 ]) {
   assert.equal(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `plain quoted read allowed silently: ${command}`);
 }
@@ -919,6 +918,8 @@ for (const command of [
   // Luna round 2: a quoted find action.
   'find .husky/pre-push "-delete" | grep "x|truncate .husky/pre-push"',
   'echo "rm .husky/pre-push" | bash; rm .husky/pre-push',
+  // Sol, PR #1193: git with an attached -c setting can run a pager.
+  'git -ccore.pager=rm log .husky/pre-push | grep "x|truncate .husky/pre-push"',
 ]) {
   assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);
 }

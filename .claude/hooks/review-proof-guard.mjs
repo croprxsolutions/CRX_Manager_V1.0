@@ -1004,10 +1004,10 @@ if (shellTool) {
   // `find`, whose quoted `"-delete"` slipped the action check, are left out —
   // Luna round 2), so a pipe
   // into `bash`, `tee` or any unlisted program falls back to the old split and its
-  // denial. Redirects are still judged on every view.
-  // Accepted hole (Mason, 2026-10-29: "i am fine with holes"): `git` stays, so a
-  // git pager or alias ALREADY configured to write a guard file would run.
-  const PLAIN_READ_EXCLUDED_HEADS = new Set(["node", "gh", "find"]);
+  // denial. Redirects are still judged on every view. `git` is left out too: an
+  // attached `-c` setting can name a pager that runs (Sol, PR #1193), and git
+  // reads of guard files rarely carry a quoted word that trips the old split.
+  const PLAIN_READ_EXCLUDED_HEADS = new Set(["node", "gh", "find", "git"]);
   const plainQuotedReadSegments = (cmd) => {
     const text = String(cmd ?? "");
     if (/['`]|\\"|\^"|\$\(|\$\{|[<>]\(/.test(text)) return null;

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { isMachineGenerated, MACHINE_TAG_NAMES, PUSH_POLICY, authoredByMason, hasAuthoredText, withoutSubagentReports } from "./prompt-source-lib.mjs";
 import { isHoldPhrase } from "./hold-latch-lib.mjs";
+import { SHARED_PROMPT_MODULES } from "./prompt-router.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -237,14 +238,15 @@ for (const f of readdirSync(__dirname)) {
   ok(!/never pushes autonomously|Claude never pushes/i.test(src), `${f} carries no stale never-pushes policy`);
 }
 
-// ── the 2 wired phrase hooks are SILENT on a machine-generated prompt ────
+// ── the wired phrase hook is SILENT on a machine-generated prompt ────────
 const MACHINE_PROMPT =
   "<task-notification>\n<task-id>t1</task-id>\naudit found: FORCE PUSH risk; hooks block 'stop/pause'; " +
   "run it overnight hands-free; is this safe to ship?; have both claude and codex review it; do it\n</task-notification>";
 const PHRASE_HOOKS = [
-  "ship-intent-reminder.mjs",
   "hold-latch-prompt.mjs",
 ];
+// ship-intent-reminder was unwired (Mason, 2026-10-29); the router must not run it.
+ok(!SHARED_PROMPT_MODULES.includes("./ship-intent-reminder.mjs"), "ship-intent-reminder is no longer routed");
 const tmpProj = mkdtempSync(path.join(tmpdir(), "crx-prompt-hooks-"));
 for (const hook of PHRASE_HOOKS) {
   const r = spawnSync(process.execPath, [path.join(__dirname, hook)], {
@@ -653,13 +655,6 @@ rmSync(handbackProj, { recursive: true, force: true });
     const dir = mkdtempSync(path.join(tmpdir(), "crx-agentmsg-mason-"));
     run("hold-latch-prompt.mjs", dir, "stop, let me read this first\n" + AGENT_TURN);
     ok(existsSync(stateOf(dir, "hold.json")), "Mason's stop beside a report latches the hold");
-    ok(run("ship-intent-reminder.mjs", dir, "great, ship it\n" + AGENT_TURN).stdout.includes("additionalContext"),
-      "Mason's ship it beside a report still fires ship-intent");
-    // ...and ONLY his words: an innocuous line does not inherit the report's triggers.
-    for (const hook of PHRASE_HOOKS.filter((h) => h !== "hold-latch-prompt.mjs")) {
-      eq(run(hook, dir, "thanks, noted\n" + AGENT_TURN).stdout.trim(), "",
-        `${hook} judges Mason's innocuous line alone, not the report beside it`);
-    }
     rmSync(dir, { recursive: true, force: true });
   }
 
@@ -705,14 +700,6 @@ ok(/authoredByMason\(payload\?\.prompt\)/.test(
   ok(gateAt > hookSrc.indexOf("if (isHoldPhrase(prompt))") && gateAt < hookSrc.indexOf("if (wasHeld())"),
     "hold-latch-prompt gates clearing on hasAuthoredText, after the latch and before the clear");
 }
-
-// ── and they still FIRE on the same phrasing typed by Mason ──────────────
-const typed = spawnSync(process.execPath, [path.join(__dirname, "ship-intent-reminder.mjs")], {
-  input: JSON.stringify({ prompt: "build me the vendor page and ship it" }),
-  encoding: "utf8",
-  env: { ...process.env, CLAUDE_PROJECT_DIR: tmpProj },
-});
-ok(typed.stdout.includes("additionalContext"), "ship-intent still fires on typed intent");
 
 rmSync(tmpProj, { recursive: true, force: true });
 

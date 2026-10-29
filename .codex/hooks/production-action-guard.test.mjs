@@ -90,9 +90,12 @@ function withThreadDefault(runGh) {
     return out;
   };
 }
-const requirementJson = ({ files = ["docs/readme.md"], statuses = [], head = "f".repeat(40) } = {}) => JSON.stringify({ data: { repository: { pullRequest: {
+// The money fixtures carry the needs-coderabbit label: since 2026-10-29 only the
+// label asks for a review, and the review-reading rules are exercised through it.
+const requirementJson = ({ files = ["docs/readme.md"], statuses = [], head = "f".repeat(40),
+  labels = files.includes("src/lib/invoiceMath.ts") ? ["needs-coderabbit"] : [] } = {}) => JSON.stringify({ data: { repository: { pullRequest: {
   headRefOid: head,
-  labels: { totalCount: 0, nodes: [] },
+  labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
   files: { totalCount: files.length, nodes: files.map((p) => ({ path: p })) },
   commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
 } } } });
@@ -611,6 +614,8 @@ try {
     nowMs: Date.now(), runGh: withRequirement(answer),
   });
   const crDone = (login = "coderabbitai") => [{ context: "CodeRabbit", state: "SUCCESS", description: "Review completed", creator: { login } }];
+  assert.equal(moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"], labels: [] })).blocked,
+    false, "an unlabelled money PR merges with no CodeRabbit review (Mason, 2026-10-29)");
   const unreviewed = moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }));
   assert.equal(unreviewed.blocked, true, "a money PR with no completed CodeRabbit review of its head is refused");
   assert.match(unreviewed.reason, /needs a clean CodeRabbit review of its current head/, "and the denial says why");
@@ -631,7 +636,7 @@ try {
     const reviewed = "e".repeat(40);
     const followUpAnswer = JSON.stringify({ data: { repository: { pullRequest: {
       headRefOid: ordinary.sha,
-      labels: { totalCount: 0, nodes: [] },
+      labels: { totalCount: 1, nodes: [{ name: "needs-coderabbit" }] },
       files: { totalCount: 1, nodes: [{ path: "src/lib/invoiceMath.ts" }] },
       commits: { totalCount: 2, nodes: [
         { commit: { oid: reviewed, parents: { totalCount: 1, nodes: [{ oid: "d".repeat(40) }] }, status: { contexts: crDone() } } },

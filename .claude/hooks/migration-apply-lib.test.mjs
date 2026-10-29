@@ -1608,12 +1608,14 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   };
   const crThread = (resolved) => ({ isResolved: resolved, isOutdated: true,
     comments: { totalCount: resolved ? 2 : 1, nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
-  // The money-PR CodeRabbit requirement read (Mason, 2026-10-21). A migration PR
-  // always qualifies, so the default answer is a completed CodeRabbit review.
+  // The CodeRabbit requirement read. Since 2026-10-29 only the needs-coderabbit
+  // label asks for a review, so the fixture is labelled (`labelled: false` shows
+  // an unlabelled migration PR needs none); the default answer is a completed review.
   const crDone = [{ context: "CodeRabbit", state: "SUCCESS", description: "Review completed", creator: { login: "coderabbitai" } }];
+  let labelled = true;
   const requirementAnswer = (statuses, head) => JSON.stringify({ data: { repository: { pullRequest: {
     headRefOid: head,
-    labels: { totalCount: 0, nodes: [] },
+    labels: labelled ? { totalCount: 1, nodes: [{ name: "needs-coderabbit" }] } : { totalCount: 0, nodes: [] },
     files: { totalCount: 1, nodes: [{ path: `supabase/migrations/${MIG}.sql` }] },
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
@@ -1710,8 +1712,12 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");
   // CodeRabbit is advisory since 2026-10-19 (Mason): its approval is not a landing condition.
   ok(gate({ pr: { reviews: [], reviewDecision: null } }).ok === true, "a ready PR with no CodeRabbit approval passes");
-  // A migration PR is a money PR (Mason, 2026-10-21): it needs a completed
-  // CodeRabbit review of its head before its migration applies, read fail-closed.
+  // Leaving CodeRabbit (Mason, 2026-10-29): an unlabelled migration PR needs no review.
+  labelled = false;
+  ok(gate({ crStatuses: [] }).ok === true, "an unlabelled migration PR applies with no CodeRabbit review");
+  labelled = true;
+  // A labelled PR needs a completed CodeRabbit review of its head before its
+  // migration applies, read fail-closed.
   refused(gate({ crStatuses: [] }), "needs a clean CodeRabbit review of its current head",
     "a migration PR CodeRabbit never reviewed is refused");
   refused(gate({ crStatuses: [{ ...crDone[0], description: "Review rate limited" }] }), "needs a clean CodeRabbit review",

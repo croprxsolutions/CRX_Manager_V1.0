@@ -130,14 +130,12 @@ record(/NEEDS MASON - ACTION REQUIRED[\s\S]*NEEDS MASON - DECISION REQUIRED/i.te
 // Mason, 2026-10-03: Claude dropped its pre-code approval pause and plans-then-proceeds like Codex.
 record(/Codex and Claude both proceed after a short plan without waiting for approval/i.test(agents), "plan authority stays explicit for both agents");
 record(
-  /CodeRabbit is advisory/i.test(protectedDelivery)
+  /CodeRabbit is optional/i.test(protectedDelivery)
     && /fix or refute every comment/i.test(protectedDelivery)
-    // One sentence must carry both triggers and the requirement, so dropping a trigger fails.
-    && /A PR that touches money, invoices, payments, inventory, or costs in any way, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its current head plus a clean Sol/i.test(protectedDelivery)
-    && /if its frozen, green head has none, post `@coderabbitai full review` once/i.test(protectedDelivery)
-    && /On any other PR[^.]*never post `@coderabbitai` commands/i.test(protectedDelivery)
+    && /no PR needs a CodeRabbit review, money PRs included, unless someone adds the `needs-coderabbit` label/i.test(protectedDelivery)
+    && /Never post `@coderabbitai` commands on an unlabelled PR/i.test(protectedDelivery)
     && /never ask Mason to comment, label, or click for CodeRabbit/i.test(protectedDelivery),
-  "CodeRabbit is advisory (Mason, 2026-10-19) except on money or Mason-named PRs, which need one clean full review of the current head (Mason, 2026-10-21); never ask Mason to",
+  "CodeRabbit is optional (Mason, 2026-10-29): no PR, money included, needs its review without the needs-coderabbit label; never ask Mason to",
 );
 // The detailed request rules AGENTS.md points to: timing and the one-retry cap.
 const coderabbitRules = readChecked("docs/reference/coderabbit-native-review.md");
@@ -170,7 +168,7 @@ record(/Money must resolve to exact whole cents/i.test(agents), "AGENTS.md retai
 record(/Use `src\/lib\/db\.ts` as the only Supabase client[\s\S]*assertRpcResult\(\)[\s\S]*checkMutationResult\(\)/i.test(agents), "AGENTS.md retains Supabase client and result-check requirements");
 record(/never use `--no-verify`[\s\S]*never push directly to `main`/i.test(agents), "AGENTS.md retains protected-delivery bans");
 const autonomousLandingChecks = [
-  ["a clean exact-SHA Sol review of the frozen final head", /fresh exact-SHA Sol review of the frozen final head is clean/i],
+  ["a clean Sol proof covering the PR", /a clean Sol proof covers the PR/i],
   ["no review asking for changes", /no review asks for changes/i],
   ["every required check green", /every required check is green/i],
   ["migrations limited to NON-destructive ones", /NON-destructive migration/i],
@@ -189,8 +187,8 @@ const reviewChainChecks = [
   ["never disabling a gate", /never bypass, disable, or weaken hooks/i],
   ["pinned reviewer models only", /never a newer model the gates do not yet accept/i],
   ["the Luna exit bar", /no BLOCKER or HIGH remains and every MED\/LOW is fixed, refuted with evidence, or named as a deferral/i],
-  ["a fresh exact-SHA Sol review for every merge", /Every merge into `main` requires one fresh independent \*\*Sol\*\* high-effort review of the exact candidate SHA/i],
-  ["the Sol proof binding to HEAD and base", /binds to that HEAD and the base it reviewed, so a later commit voids it/i],
+  ["a Sol review for every merge (Mason, 2026-10-29: once, before the PR)", /every merge into `main` needs one clean independent \*\*Sol\*\* high-effort review, inside 24 hours, of the PR's head or of an earlier commit on its branch/i],
+  ["Sol running before the PR opens", /\*\*Sol on the computer, before the PR opens\*\*/i],
   ["review fixes staying on the same PR", /fixes stay on the same PR/i],
 ];
 for (const [name, pattern] of reviewChainChecks) {

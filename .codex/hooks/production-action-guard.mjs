@@ -1099,7 +1099,33 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
     : contentFlagged
       ? "the main-bound diff contains money or financial-audit identifiers even though its paths look ordinary"
       : "every merge into main needs an exact-SHA Sol proof (Mason's autonomous-landing rule, 2026-09-26)";
-  const proofPath = path.join(repoDir, ".claude", "session-state", `codex-review-${headSha}.json`);
+  const isAncestorLocally = (ancestor, descendant) => {
+    try {
+      runGit(["merge-base", "--is-ancestor", ancestor, descendant], repoDir);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const stateDir = path.join(repoDir, ".claude", "session-state");
+  let proofPath = path.join(stateDir, `codex-review-${headSha}.json`);
+  // Sol runs once before the PR opens (Mason, 2026-10-29): with no proof of this
+  // head, a proof of an earlier commit on this PR's branch may count.
+  if (!existsSync(proofPath) && authoritativeBaseSha) {
+    try {
+      const earlier = readdirSync(stateDir)
+        .filter((f) => /^codex-review-[0-9a-f]{40}\.json$/i.test(f))
+        .map((f) => path.join(stateDir, f))
+        .find((p) => {
+          try {
+            return proofValidForMerge({ data: JSON.parse(readFileSync(p, "utf8")), headSha, nowMs, baseSha, isAncestor: isAncestorLocally });
+          } catch {
+            return false;
+          }
+        });
+      if (earlier) proofPath = earlier;
+    } catch { /* no state directory: the exact-head path stays and is reported missing */ }
+  }
   if (!existsSync(proofPath)) {
     return proofRequirement(headSha, riskDescription, `Missing required Sol high-effort proof: ${proofPath}`, baseSha);
   }
@@ -1113,14 +1139,6 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // A PR merge may land a head that is behind main (Mason, 2026-10-26;
   // proofValidForMerge): the proof's own base must be in the head and behind
   // GitHub's base. A direct push to main keeps the exact-base binding.
-  const isAncestorLocally = (ancestor, descendant) => {
-    try {
-      runGit(["merge-base", "--is-ancestor", ancestor, descendant], repoDir);
-      return true;
-    } catch {
-      return false;
-    }
-  };
   const proven = authoritativeBaseSha
     ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
     : proofValid(proof, headSha, nowMs, baseSha);

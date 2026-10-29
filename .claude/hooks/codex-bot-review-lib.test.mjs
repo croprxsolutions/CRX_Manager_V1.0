@@ -622,7 +622,9 @@ const crStatus = (description, { login = "coderabbitai", state = "SUCCESS", cont
   ({ context, state, description, creator: { login } });
 const commit = (oid, { parents = 1, statuses = [] } = {}) =>
   ({ commit: { oid, parents: { totalCount: parents }, status: statuses === null ? null : { contexts: statuses }, checkSuites: { totalCount: 0, nodes: [] } } });
-const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
+// Labelled by default: since 2026-10-29 only the label asks for a review, and the
+// review-reading rules below are exercised through it.
+const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [CODERABBIT_REQUIRED_LABEL], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
   headRefOid = HEAD, filesTotal = files.length } = {}) => ({
   number: 1134,
   baseRepository: { nameWithOwner: "masonwells1/CRX_Manager_V1.0" },
@@ -646,12 +648,14 @@ ok(!isMoneyPath("src/pages/Reports.paging.test.tsx") && !isMoneyPath("src/compon
 ok(isMoneyPath("src/pages/Deliveries.tsx") && isMoneyPath("src/lib/reconciliation.ts") && isMoneyPath("src/pages/ARaging.tsx")
   && isMoneyPath("src/lib/fuelSurcharge.ts") && isMoneyPath("src/pages/CycleCount.tsx") && isMoneyPath("src/lib/orderTotals.ts"),
 "plurals, camelCase pieces and joined word pairs still qualify");
-eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md", "src/components/Map.tsx"], commits: [commit(HEAD)] })).status,
+eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md", "src/components/Map.tsx"], labels: [], commits: [commit(HEAD)] })).status,
   "not-required", "a non-money PR with no label is not gated");
+eq(evaluateCodeRabbitRequirement(facts({ labels: [], commits: [commit(HEAD)] })).status,
+  "not-required", "a money PR with no label is not gated (Mason, 2026-10-29)");
+eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], labels: [], filesTotal: 250, commits: [commit(HEAD)] })).status,
+  "not-required", "a cut-short file list no longer matters without the label");
 eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], labels: [CODERABBIT_REQUIRED_LABEL], commits: [commit(HEAD)] })).status,
   "missing", "the needs-coderabbit label makes any PR qualify");
-eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], filesTotal: 250, commits: [commit(HEAD)] })).status,
-  "missing", "a cut-short file list cannot prove the PR is not a money PR");
 
 // The DENY direction: a money PR with no completed review is refused.
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD)] })).status, "missing", "no CodeRabbit status at all is missing");
@@ -852,30 +856,13 @@ eq(prOwnChangesUnchanged(null, prFiles), false, "an unreadable compare is never 
   eq(read(headGh).status, "reviewed", "a review of the head passes");
   eq(calls, 2, "…with the GraphQL read and the file list only (no compare)");
 }
-// A money file renamed to a generic name and edited still qualifies (Sol, PR #1009):
-// GraphQL reports only the new path; the REST list names the source too.
+// Money files no longer qualify a PR on their own (Mason, 2026-10-29).
 {
-  const renameFacts = { ...facts({ files: ["src/lib/math.ts"], commits: [commit(HEAD)] }), baseRefOid: BASE40 };
-  const renameGh = (rows) => (args) => (args[1] === "graphql"
-    ? JSON.stringify({ data: { repository: { pullRequest: structuredClone(renameFacts) } } })
-    : rows);
-  eq(read(renameGh("src/lib/math.ts\tsrc/lib/invoiceMath.ts\n")).status, "missing",
-    "invoiceMath.ts renamed to math.ts qualifies through its source path");
-  eq(read(renameGh("src/lib/math.ts\t\n")).status, "not-required", "CONTROL: the same generic file with no money source does not");
-  eq(read(renameGh("src/lib/math.ts\t\nsrc/lib/other.ts\t\n")).status, "missing",
-    "a REST list whose count disagrees with GitHub's total cannot prove the PR exempt");
-}
-// A PR with more than 100 files: the full list is read over REST (Luna round 6).
-{
-  const big = Array.from({ length: 150 }, (_, i) => `docs/page-${i}.md`);
-  const bigFacts = { ...facts({ files: big.slice(0, 100), filesTotal: 150, commits: [commit(HEAD)] }), baseRefOid: BASE40 };
-  const bigGh = (list) => (args) => (args[1] === "graphql"
-    ? JSON.stringify({ data: { repository: { pullRequest: structuredClone(bigFacts) } } })
-    : list.join("\n"));
-  eq(read(bigGh(big)).status, "not-required", "a 150-file docs PR is read in full and stays advisory");
-  eq(read(bigGh([...big.slice(0, 149), "src/lib/invoiceMath.ts"])).status, "missing",
-    "…but a money file on a later page still makes it qualify");
-  eq(read(bigGh(big.slice(0, 120))).status, "missing", "a full list whose count does not match stays incomplete (fail closed)");
+  const moneyFacts = { ...facts({ labels: [], commits: [commit(HEAD)] }), baseRefOid: BASE40 };
+  const moneyGh = (args) => (args[1] === "graphql"
+    ? JSON.stringify({ data: { repository: { pullRequest: structuredClone(moneyFacts) } } })
+    : "src/lib/invoiceMath.ts\t\n");
+  eq(read(moneyGh).status, "not-required", "an unlabelled money PR needs no CodeRabbit review");
 }
 
 // Budget: a call is not started unless it can finish before the deadline.
@@ -928,6 +915,12 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
         : args[1] === "graphql" ? "requirement" : "files";
       if (kind === "files") return edit(kind, out) ?? out;
       const value = JSON.parse(out);
+      // Recorded when money files qualified a PR; since 2026-10-29 only the label does.
+      const labels = kind === "requirement" ? value?.data?.repository?.pullRequest?.labels : null;
+      if (labels) {
+        labels.nodes = [...labels.nodes, { name: CODERABBIT_REQUIRED_LABEL }];
+        labels.totalCount = labels.nodes.length;
+      }
       edit(kind, value);
       return JSON.stringify(value);
     };

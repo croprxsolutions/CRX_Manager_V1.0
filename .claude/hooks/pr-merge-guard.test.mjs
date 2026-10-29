@@ -608,7 +608,7 @@ ok(
   "the proof's ancestry checks run through the budgeted hardGateGh",
 );
 ok(
-  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub\s*\}\)/.test(gateRequestSource),
+  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*prCommits\s*\}\)/.test(gateRequestSource),
   "the proof scan binds the proof to this head, GitHub's base and GitHub's ancestry answers",
 );
 ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base is no longer refused on that ground alone");
@@ -711,6 +711,18 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!check(proof({ verdict: "blocked" })), "a non-clean verdict never counts");
   ok(!check(proof({ model: "gpt-6-luna" })), "a Luna review never counts");
   ok(!check(proof({ timestamp: new Date(now - 25 * 3600_000).toISOString() })), "a proof older than 24 hours never counts");
+
+  // Sol once before the PR opens (Mason, 2026-10-29): a proof of an earlier
+  // commit on this PR's branch covers fixes pushed after it.
+  const E = "e".repeat(40);   // an earlier PR commit Sol reviewed
+  const M = "f".repeat(40);   // a commit already in main (an old PR's reviewed head)
+  const branchEdges = new Set([...edges, `${E}>${H}`, `${B0}>${E}`, `${M}>${H}`, `${M}>${B1}`, `${B0}>${M}`]);
+  const onBranch = (a, b) => branchEdges.has(`${a}>${b}`);
+  ok(check(proof({ head_sha: E }), { isAncestor: onBranch }), "a proof of an earlier commit on the branch counts");
+  ok(check(proof({ head_sha: E }), { isAncestor: onBranch, prCommits: new Set([E, H]) }), "...and through the PR's own commit list");
+  ok(!check(proof({ head_sha: E }), { isAncestor: onBranch, prCommits: new Set([H]) }), "a commit not in the PR's commit list never counts");
+  ok(!check(proof({ head_sha: M }), { isAncestor: onBranch }), "a reviewed commit already in main never covers a new branch");
+  ok(!check(proof({ head_sha: E })), "a commit the head does not contain never counts");
 }
 ok(
   /function\s+listWorktreesFromProjectDir\(\)\s*\{\s*if \(!hardGateBudget\.admit\(\)\) deny\(/.test(guardSource),

@@ -4,7 +4,7 @@
 
 **Where it came from:** items 1–2 are Mason's own, from using the product setup screen. Items 3–43 come from a read-only code review of the Products list (`src/pages/Products.tsx`), the product page (`src/pages/ProductDetail.tsx`), bulk import (`src/components/products/`) and the shared dropdown (`src/components/ui/Combobox.tsx`), checked against `main` at `5b0246530`. Re-check each item against current code before building it; line numbers drift.
 
-**Suggested order when work starts:** first the small bugs that affect daily use (2, 9, 3, 4, 5–8), then Use Timing (1 and 32), then the 💲 gaps (16, 17, 20), then everything else.
+**Build order and "done" for every item:** see `docs/plans/2026-10-28-product-master-BUILD-SHEET.md`, reviewed by Sol on 2026-10-28. It supersedes the rough order that used to be here.
 
 ## 1. Use Timing (Product Information section)
 

@@ -1,6 +1,6 @@
 # Product grand plan: product setup and the product data the rest of the app reads
 
-**Status: PLAN, 2026-10-29, reviewed by Sol the same day. NOT STARTED.** Mason, in chat, 2026-10-29: "lets work through all of these Ideas since it all goes with our grain product master work in a way and all other functions of app will use these values for rest of app to work, we need all of this setup aswell so lets fold this into a grand plan, then send it all to Sol for review and make this another phase or revalute all of this work with our product master plan we just built." Sol (`gpt-6-sol`, high, advisory, read-only) returned 56 findings, 4 of them BLOCKERs. 55 are folded in below; 1 was refuted with evidence (section 11). Nothing here authorizes building. Building starts when Mason says so.
+**Status: PLAN, 2026-10-29, reviewed by Sol the same day; Mason answered its five questions the same day (section 10). NOT STARTED.** Mason, in chat, 2026-10-29: "lets work through all of these Ideas since it all goes with our grain product master work in a way and all other functions of app will use these values for rest of app to work, we need all of this setup aswell so lets fold this into a grand plan, then send it all to Sol for review and make this another phase or revalute all of this work with our product master plan we just built." Sol (`gpt-6-sol`, high, advisory, read-only) returned 56 findings, 4 of them BLOCKERs. 55 are folded in below; 1 was refuted with evidence (section 11). Nothing here authorizes building. Building starts when Mason says so.
 
 **What this plan is.** One ordered map of all product work:
 - the October Product Master packages;
@@ -197,7 +197,7 @@ The live `validate_product_units` check matches unit spellings exactly, includin
 **Settled: there are two files with separate operations.**
 - **The price workbook** (exists today) stays the price file, through its own price RPC and approvals.
   - **Its rate columns become read-only in WP-PM-11a**, keeping D-C. Rates are then edited only on the product page and through import, until RT-4.
-  - This removes a way to edit rates in bulk (question 2).
+  - This removes a way to edit rates in bulk; Mason agreed (2026-10-29, question 2).
 - **The detail workbook** (new in WP-PM-11a) is a separate file for setup fields, with its own repeat-safe detail RPC.
   - DM-1b later adds Ingredients and Crop Uses tabs to *this* file. They are uploaded through a proposal RPC, never live (D-Z).
   - It never has writable rate columns.
@@ -458,7 +458,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
 **USE-2 · Label link and adjuvants**
 - The label comes from REG-1.
 - Each product has a required or recommended adjuvant, with its type.
-- **Behaviour is question 3.** Recommendation: warn when quoting, never block.
+- **Behaviour (Mason, 2026-10-29):** warn when quoting, never block.
 - **Done when:**
   - The label opens from the product page.
   - A product that requires COC shows the warning on a new quote line.
@@ -519,7 +519,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
 
 ### Stage 9: product images (August Phase 8, last; Sol 46, 48)
 - **IMG-1:** images copied into CRX storage, never hot-linked.
-- **Who can see them is question 4.**
+- **Staff only for now** (Mason, 2026-10-29): private storage, not on customer-facing sheets.
 - **Done when:**
   - The storage policy is enforced in the database.
   - Uploads are admin-only.
@@ -563,7 +563,7 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 - New rows **2.11** (rates), **2.12** (comparison), **2.13** (use guidance) and **2.14** (clean-up).
 - Stages 7 and 9 are added to the "Later features" list.
 
-All new rows are ranked "SHOULD, proposed", until Mason answers question 1.
+Ranked per Mason's answer to question 1 (2026-10-29).
 
 ## 10. Questions for Mason (genuine business calls)
 
@@ -573,12 +573,12 @@ All new rows are ranked "SHOULD, proposed", until Mason answers question 1.
 - per-crop rates stay parked;
 - an incomplete product is flagged, not blocked, so it can be priced straight away (2026-10-28).
 
-**Open:**
-1. **Ranking.** Recommend that Stage 1 (Product Master) and Stage 4 (rates) rank **SHOULD**, beside Stage 2, because both feed quoting. Stages 5, 6 and 8 rank SHOULD after those. Stages 7 and 9 are CAN-WAIT.
-2. **Rate editing in the price workbook.** From WP-PM-11a until the new rate system is live (RT-4), rates could be changed only on the product page and through import, not in the price spreadsheet. Recommend **yes**: it keeps rate changes in one controlled place while they're being rebuilt.
-3. **Required adjuvants (USE-2).** When a product needs an adjuvant (for example, COC) and the quote doesn't include one, should the app warn or block? Recommend **warn**.
-4. **Product images (IMG-1).** Staff only, or also on customer-facing sheets (which needs public images)? Recommend **staff only** for now.
-5. **Return-policy batch (RET-1), later.** When it is built, you approve the exact list of products and policies before any is applied. Recommend **yes**. Nothing is needed now.
+**Answered by Mason, 2026-10-29** ("1. yes, 2. yes , 3. warn, 4. staff only for now, 5. yes"; DECISION_LOG 2026-10-29). Each as recommended:
+1. **Ranking:** Stage 1 (Product Master) and Stage 4 (rates) rank **SHOULD**, beside Stage 2. Stages 5, 6 and 8 rank SHOULD after those. Stages 7 and 9 are CAN-WAIT.
+2. **Rate editing in the price workbook:** **yes**, it stops. From WP-PM-11a until RT-4, rates change only on the product page and through import.
+3. **Required adjuvants (USE-2):** **warn**, never block.
+4. **Product images (IMG-1):** **staff only** for now, in private storage.
+5. **Return-policy batch (RET-1), later:** **yes**, Mason approves the exact list before any batch applies.
 
 ## 11. Sol review record (2026-10-29)
 

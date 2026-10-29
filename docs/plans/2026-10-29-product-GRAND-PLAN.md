@@ -50,10 +50,10 @@ It doesn't replace the detailed documents. It says:
 | **2** | One parent record per formulation, then the mechanisms for weight, chemistry, EPA data and registration status | PAR-1, PAR-2, BLK-1, DM-2, DM-1, REG-1, DM-4, DM-1b | Mason 2026-10-29, refresh plan, August 1b, WP-5 and Phase 5 | 2.9 |
 | **3** | Brands: which real brand filled a generic | Brand PR B, the cancelled-registration warnings, step 2 | Brand plan | 2.8 |
 | **4** | Rates are trustworthy: low, high and recommended values, one quoting default, clean units | RT-1 to RT-4 | August Phase 2 | 2.11 |
-| **5** | Compare products by chemistry, cost and price | CMP-2 | August Phase 3 | 2.12 |
+| **5** | Compare products by chemistry, cost and price: **the Brand vs Generic page rebuilt from scratch, last** | CMP-2 | August Phase 3; Mason 2026-10-29 | 2.12 |
 | **6** | Use guidance: crop and timing pairs, adjuvants, label link, quoting notes | USE-1 to USE-3 | August Phase 4 | 2.13 |
 | **7** | Suggested groupings for leftovers, and return policy | FAM-1, RET-1 | August Phases 5 and 0b | Later (CAN-WAIT) |
-| **8** | Clean-up: retire `unit_size`, retire `ingredient_map`, the name-vs-brand check | CLN-1 to CLN-3 | August Phases 7 and 3.8, B-16 | 2.14 |
+| **8** | Clean-up: retire `unit_size`, retire `ingredient_map` once the rebuilt page replaces it, the name-vs-brand check | CLN-1 to CLN-3 | August Phases 7 and 3.8, B-16 | 2.14 |
 | **9** | Product images | IMG-1 | August Phase 8 | Later (CAN-WAIT) |
 | **Data** | Filling the catalog: Mason's and an agent's time, not code | DATA-1 to DATA-12 | Section 7 | With each stage |
 
@@ -568,7 +568,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - a conversion fraction applies only to its matching basis;
   - a blank fraction forbids a numeric conversion.
 - Fast entry and an admin cost per lb of active (CMP-1).
-- **From DM-1 on, the old Brand vs Generic page is read-only** (its writes to `ingredient_map` are turned off), so there is never a second, unsynchronised ingredient source; CLN-2 retires it later.
+- **From DM-1 on, the old Brand vs Generic page is read-only** (its writes to `ingredient_map` are turned off), so there is never a second, unsynchronised ingredient list while the new data is entered. It stays readable until it is rebuilt at the very end (Stage 5, CMP-2).
 - The D-AA identity rules: CAS is the identity; merges are queued for Mason, never automatic.
 - Same permission, audit and concurrency proofs as DM-2.
 - **Done when:**
@@ -634,7 +634,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - a non-acre default is refused;
   - a rate with no unit, an unknown unit, or a unit that doesn't fit its basis is refused, because the conversion helper today silently treats an unknown unit as factor 1;
   - low ≤ recommended ≤ high;
-  - **a house rate above the applicable registration's label maximum is refused**, with no override (using a pesticide above its label rate breaks the label); where the maximum is unknown or the units can't be compared, the row is held for review, not saved as live;
+  - **a house rate above the applicable registration's label maximum warns, never blocks** (Mason, 2026-10-29: "over label rate needs to warn not block"): saving it needs the warning acknowledged with a recorded reason, and every place the rate is used (quote line, job, applicator sheet, field app) shows an "above label rate" warning; where the maximum is unknown or the units can't be compared, the row is flagged "label maximum not checked";
   - **the allowed units for each basis are listed, with their conversion factors and rounding**: per acre (volume or weight), per 100 gallons (volume, or weight such as 17 lb/100 gal), per unit, per cwt of seed and per seed unit; each is proven with a hand-worked example.
 - RT-1 derives draft rows from today's values but **changes no reader and no old column**.
 - **Done when:**
@@ -678,7 +678,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
 
 ### Stage 5: comparison (August Phase 3; Sol 27, 35)
 - **CMP-1** (admin cost per lb of active) ships with DM-1.
-- **CMP-2 · The full tool** comes **after RT-4** (Mason, August: comparison after the rate clean-up). It covers:
+- **CMP-2 · The full tool, as a complete rebuild of the Brand vs Generic page.** Mason, 2026-10-29: "the old brand vs generic page will get completely re done once all of this work is finished." So it comes **last, after every other stage** (and so after RT-4, Mason's August rule: comparison after the rate clean-up). It reads only the new data (parents, registrations, ingredients, weights, approved rates), never `ingredient_map`. It covers:
   - search by active ingredient through the canonical ingredient;
   - a mode-of-action filter;
   - build-from-generics cost;
@@ -759,13 +759,13 @@ Pack sizes and parent records moved to Stage 2 (PAR-1, PAR-2; overlap 13). What 
   - Nothing reads `unit_size`.
   - Quote, job and crop-program totals match to the cent on a test set that includes mismatched units, open lines and old records.
 
-**CLN-2 · Retire `ingredient_map` and the old Brand vs Generic page** (after CMP-2)
+**CLN-2 · Retire `ingredient_map`** (after CMP-2's rebuilt page replaces the old one)
 - Starts from a current survey of its rows and links, and an export of its rows.
 - Updates the RLS contract test, generated types and the schema registry.
 - Dropping the table is destructive (section 3, rule 6).
 - **Done when:**
   - The replacement is verified.
-  - The page is gone, and nothing references the table.
+  - The rebuilt page is the only Brand vs Generic page, and nothing references the old table.
 
 **CLN-3 · Name-vs-brand check** (B-16)
 - **Done when:** a report lists every product name whose brands in brackets disagree with its brand rows, and changes nothing.
@@ -809,9 +809,9 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 2. **Stage 2:** PAR-1 → PAR-2 → BLK-1 → DM-2 → DM-1 → REG-1 → DM-4 → DM-1b. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
 3. **Stage 3:** brand PR B after PAR-1 is live, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
 4. **Stage 4:** RT-1 and RT-2 in either order, each on its own evidence. Then RT-3 (Mason's review), then RT-4.
-5. **Stage 5:** CMP-2 after RT-4.
+5. **Stage 5:** CMP-2, the rebuilt Brand vs Generic page, **last**: after every other stage (Mason, 2026-10-29).
 6. **Stage 6:** USE-1 (after WP-PM-5), then USE-2 (after REG-1), then USE-3.
-7. **Stage 8:** CLN-3 after brand PR B; CLN-1 after Stages 2 and 4; CLN-2 after CMP-2.
+7. **Stage 8:** CLN-3 after brand PR B; CLN-1 after Stages 2 and 4; CLN-2 right after CMP-2.
 8. **Stages 7 and 9** when Mason says so.
 9. **The rate lock** goes on when Mason finishes setup, and before RT-4.
 
@@ -856,7 +856,7 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 14. **Filling a tote when the system shows too little Bulk** (BLK-1): warn and allow, recording the shortfall for the next stock count (like deliveries), or refuse the fill? Recommend **warn and allow**, because a stock count can be wrong while the tank really has the product.
 15. **What a shop-filled tote costs** (BLK-1): its gallons at Bulk's current average cost per gallon, with nothing added for the tote itself? Recommend **yes**. A vendor-filled tote keeps the cost it was received at.
 
-**Settled without asking (compliance):** a house rate above the label's maximum is refused, with no override (RT-1), because applying above label rate breaks the label.
+**Over-label rates (Mason, 2026-10-29: "over label rate needs to warn not block"):** a house rate above the label's maximum warns with a recorded reason and is flagged wherever it's used; it is never refused (RT-1).
 
 ## 11. Sol review record (2026-10-29)
 
@@ -925,7 +925,7 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 |---|---|
 | 1, 17, 43, 45 | Build sheet wording (relabelled questions; WP-PM-1, WP-PM-8, section 3, WP-PM-11a) |
 | 2, 8 | PAR-2 leaves label facts alone; REG-1 moves and reconciles them with a reader inventory |
-| 3 | RT-1: no rate above the label maximum |
+| 3 | RT-1: a rate above the label maximum is checked, then warns (Mason chose warn over refuse) |
 | 4, 12 | RT-4: readers keep the old columns, filled by RT-4's internal step; rollback through the same step |
 | 5, 6 | Overlap 13: copy-down decided; database membership checks |
 | 7, 9 | Overlap 13 brands migration; Stage 3 after PAR-1 is live |

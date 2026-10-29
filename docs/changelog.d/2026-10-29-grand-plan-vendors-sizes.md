@@ -23,4 +23,6 @@ Mason then answered the four follow-up questions:
 - **Totes:** filled both ways, with a new recorded "fill a tote from bulk" step (BLK-1).
 - **Deposits:** totes carry no deposit.
 
+Mason's last two changes: a rate above the label maximum warns instead of being refused, and the Brand vs Generic page is rebuilt from scratch after all the other product work.
+
 Documentation only; nothing is built.

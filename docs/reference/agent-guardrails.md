@@ -474,6 +474,22 @@ one, is rejected. A missing contract is not rejected by itself: any returned vio
 allowlist entry needs that contract stays flagged. A packet with no violations and no contracts
 adjudicates as PASS.
 
+Codex's `execute_sql` gate (`.codex/hooks/production-action-guard.mjs`) uses the same recognizer
+since 2026-10-28. Its own check (`isClearlyReadOnlySql`) allows only a short list of built-in
+functions, which refused most sweep packets, so a query now passes when either check accepts it.
+Nothing was added to that function list, and a query the recognizer does not match exactly is judged
+by the unchanged read-only check alone. The gate judges every SQL field a call carries (`query` and
+`sql`) and refuses one that is not plain text. The recognizer treats CRLF and LF copies of a packet
+as the same; that holds only while no predicate has a line break inside a quoted literal (including
+an `E'...'` string with backslash escapes), and the guard test fails if one ever does. Its scan
+skips line comments and nested block comments the way PostgreSQL does.
+
+Predicates are written for `standard_conforming_strings = on` and depend on it
+(`return-credit-intent-binding` uses `ESCAPE '\'`). A read-only check on 2026-10-28 found it `on` at
+its built-in default, with no per-role or per-database override. Codex cannot change it: the gate
+refuses `SET`, `set_config` and `ALTER ... SET`, and one statement cannot change how it is itself
+parsed. The Claude SQL guard admits the same packets on the same basis.
+
 For ad-hoc SQL, the workarounds that preserve row selection are display/alias-only: give function FROM-items
 a bare alias (`unnest(x) WITH ORDINALITY AS named` yields `named.named`), alias the recursive CTE's
 columns in its anchor SELECT instead of in a column list, order character classes so `(` never

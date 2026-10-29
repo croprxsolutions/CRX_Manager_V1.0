@@ -2,7 +2,7 @@
 
 **Status: GAME PLAN, reviewed by Sol 2026-10-28. NOT STARTED.** Sol (`gpt-6-sol`, high, advisory, read-only, given this sheet, the backlog and code excerpts inline) returned 36 findings, one BLOCKER. All of them are folded in below as "Sol:" notes on each package, plus a new order in section 4. Section 6 lists the findings and what was done with each. Mason, in chat, 2026-10-28, asked for a build sheet of all the Product Master items: what "done" means for each, how to approach them, a brainstorm before coding, then a Sol review to settle the final plan before any code is written. Nothing here authorizes building. Building starts when Mason says so, one work package at a time.
 
-**Revised 2026-10-29 by the product grand plan** (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Sol-reviewed). That plan makes this sheet Stage 1 of the full product work. It adds two packages (WP-PM-14 and DM-0, section 2a below), changes seven packages (section 2a) and replaces the order in section 4. Where this sheet and the grand plan disagree, the grand plan wins.
+**Revised 2026-10-29 by the product grand plan** (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Sol-reviewed). That plan makes this sheet Stage 1 of the full product work. It adds four packages (WP-PM-14, WP-PM-16, DM-0 and WP-PM-15, section 2a below), changes seven packages (section 2a) and replaces the order in section 4. Where this sheet and the grand plan disagree, the grand plan wins.
 
 **Sources this sheet turns into work:**
 - `docs/plans/2026-10-28-product-master-setup-edits-BACKLOG.md`: the 43 items, numbered; this sheet uses the same numbers.
@@ -61,7 +61,7 @@
 - The list works with the keyboard (arrow keys, Enter, Escape).
 
 **Sol (findings 3–5):**
-- Keep free-text entry. Category, Vendor and Manufacturer accept new values typed in, so the fix must not remove that.
+- Keep free-text entry for Manufacturer. *(Revised 2026-10-29: Category becomes an admin-maintained pick list in WP-PM-8, and Vendor becomes the preferred vendor's copy in WP-PM-15; until those land, the boxes keep accepting typed values.)*
 - Define exactly what Escape (cancel the typing), Tab and blur (keep what's typed) do.
 - "Saved choice" needs its own marker, separate from the keyboard highlight. Today `aria-selected` follows the highlight (`Combobox.tsx:168`, confirmed).
 - Test scrolling separately (mouse wheel, touch, keyboard to the last option); don't assume #2 fixes it.
@@ -121,7 +121,7 @@
   Stock, crop programs and jobs warn as recommended; confirm with Mason at build time.
 - **Who sees the buttons:** reps don't see Deactivate (admin-only, matching the database).
 - **Reactivate:** inactive products can be selected, and there's a Reactivate action.
-- **Brainstorm for Sol:**
+- **Questions put to Sol (answered 2026-10-28 in the Sol notes below):**
   - Is a trigger or an RPC the better boundary?
   - Which quote statuses count as "open"?
   - Should an order line that is fully delivered but not yet invoiced count?
@@ -196,7 +196,7 @@
   - bulk import, which accepts "A; B";
   - the CSV/PDF exports.
 - **#32:** when the category changes away from Herbicide or Foliar, the page asks whether to clear the timings. Or the timings simply stay hidden but are shown in a note. Recommend: ask.
-- **Brainstorm for Sol:**
+- **Questions put to Sol (answered 2026-10-28 in the Sol notes below):**
   - A `text[]` column, or a link table?
   - How does the workbook round-trip a list?
   - Should the option list become a database CHECK or stay in the app? Recommend the app for now, since Mason may add options.
@@ -237,7 +237,7 @@
   - Trace every reader (`JobDetail.tsx`, `cropProgramHelpers.ts`, `chemCalculator.ts`, `QuoteBuilder.tsx`).
   - If they mean the same, set `unit_size` from Inventory Unit on save, and back-fill blanks by migration.
   - If they differ, show "Unit" with an explanation.
-  - **Brainstorm for Sol:** which is safer?
+  - **Question put to Sol (answered 2026-10-28, below):** which is safer?
 - **#17:** changing Inventory Unit or Product Form on a product with prices, stock or open lines shows a warning listing what is affected. It also notes that prices are not rescaled and the cost basis resets. Optionally, require a reason.
 - **#37:** "Duplicate" copies setup and compliance fields, but clears SKU, container, pricing and cost, then opens the copy.
 
@@ -260,7 +260,7 @@
 - **Duplicate product** gets a field-by-field copy list and a review screen.
   - Clear pricing, cost, SKU and size-specific fields.
   - Require confirming the EPA number, rates, RUP and intervals before the copy is used.
-  - Fold the data model's DM-5 (copy from a sister product) into this design.
+  - *(Superseded 2026-10-29: DM-5 is dropped; after PAR-1, Duplicate becomes "Add a size" or "New product".)*
 
 **Size / risk:** M. 💲. Migration likely (canonical unit). State its grants in the package plan.
 
@@ -276,7 +276,7 @@
 - **#36:** add the warning to the pricing preview, on the screen and ideally in the preview RPC so the price sheet gets it too.
   - It is a warning that must be acknowledged, not a block, matching the other price warnings.
   - Placing it in the RPC is a migration.
-- **Brainstorm for Sol:**
+- **Questions put to Sol (answered 2026-10-28 in the Sol notes below):**
   - Which cost paths can be removed without breaking `cost_history` or the cost-basis gate?
   - Does the price-sheet (0.1) acknowledgement mechanism extend to a new warning code safely?
 
@@ -323,13 +323,13 @@
   - Existing bad values are flagged, not wiped.
   - A database CHECK only after cleanup, using a `NOT VALID` constraint first.
 - **#23:** show max label rate read-only, with a link to Label Review. Add one-line help on Suggested Rate, Rate Per Acre and Max Label Rate.
-- **#24:** "This creates a new category. Did you mean Herbicide?", with near-match suggestions.
+- **#24:** "This creates a new category. Did you mean Herbicide?", with near-match suggestions. **Revised (Mason, 2026-10-29, grand plan question 10):** categories become a pick list from an admin-maintained options table, enforced in the database; a new **"Seed"** category is added; the 11 existing categories stay as they are. Vendor and manufacturer keep the near-match warning.
 
 **Done when:**
 - Each validation refuses with a clear message on the product page.
 - The list shows how many products are incomplete, and the filter lists them.
 - A badly formatted EPA number can't be saved on the product page, and existing bad ones are listed.
-- Typing "herbicde" as a category triggers the new-value warning.
+- A category not on the list can't be saved; "Seed" is on the list; typing "Syngnta" as a manufacturer triggers the near-match warning. *(Revised 2026-10-29.)*
 - A Form change asks before clearing units.
 
 **Sol (findings 26–28):**
@@ -395,7 +395,7 @@
 **Approach.**
 - **Recommend:** extend the full Excel workbook route (already reviewed for prices) to non-price details, with the same preview-and-acknowledge pattern.
 - For the list: edit one row at a time (or a page of rows), add an unsaved-changes warning, and a phone card layout.
-- **Brainstorm for Sol:** should detail changes go through the price workbook's RPC, or a separate one? A separate one is likely, to keep price approvals clean.
+- **Question put to Sol (answered 2026-10-28, below):** should detail changes go through the price workbook's RPC, or a separate one? A separate one is likely, to keep price approvals clean.
 **Done when:**
 - An admin fixes the signal word on 20 products through one upload, sees a preview of exactly those 20 changes, and confirms.
 - History shows the changes.
@@ -420,7 +420,7 @@
 - **#31:** confirm first which records copy these values.
   - Posted invoices must keep what was printed: they're regulated records.
   - Open, unposted jobs could offer "refresh from product".
-  - **Brainstorm for Sol and Mason:** which records should follow a correction?
+  - **Question put to Sol and Mason (answered 2026-10-28, below and in section 5):** which records should follow a correction?
 
 **Done when:**
 - Changing a product's signal word shows "who, when, old → new" on the product page.
@@ -462,14 +462,20 @@
 - **DM-0 · Data hygiene**, moved here from the weight work (grand plan overlap 9). Every product gets a form. Blank SKUs (Mason types them, no placeholders, D-R), the duplicate `9768NR` SKU (re-SKU, don't merge), three duplicate-name groups and the test row are resolved without hard deletes. The code builds review lists; the data step is Mason's.
   *Done when:* zero blank forms; every SKU identifies one sellable; every old reference still resolves (read-only check before and after). WP-PM-10 and WP-PM-11a land only after this data step.
 
+- **WP-PM-15 · 💲 Vendors on the product page** (grand plan overlap 12; Mason, 2026-10-29: one product, many vendors). Built on the existing `product_supplier_links` (one preferred link per product is already enforced) and `supplier_price_observations`. The product page lists every vendor the product is bought from, with item name, item number, pack and last cost (cost admin-only), and one preferred. `products.vendor` becomes a read-only copy of the preferred vendor's name, kept in step by the database on preferred change, rename and unlink; a product with links always has exactly one preferred. A new PO suggests the preferred vendor and its last cost converted to the PO's unit (none if it can't be converted), and allows any linked vendor; an unlinked vendor offers to link. Need Reordering groups by preferred vendor and shows the others' last cost. Cost stays admin-only in the database. Old POs, receipts and invoices keep their vendor. Full rules: grand plan overlap 12.
+  *Done when:* a product linked to two vendors shows both, with one preferred; changing the preferred vendor updates the product's vendor everywhere it is shown; a new PO suggests the preferred vendor and its last cost and accepts the other; a second preferred link is refused; a non-admin sees no cost; all proven in the harness and the local app.
+
+- **WP-PM-16 · "Search EPA labels" link** (becomes "View label" once REG-1 saves the label PDF) (grand plan overlap 15; Mason, 2026-10-29). Every product with an EPA number gets a "View label" button on the product page, and each brand row one for its own EPA number, opening EPA's public label search for that number (address format confirmed at build time). No EPA number shows "Add an EPA number to see the label". Screen only; Stage 2's REG-1 later saves the label PDF link.
+  *Done when:* on three real products with EPA numbers and one brand row, "Search EPA labels" opens EPA's page for that exact number; a product without a number shows the hint; nothing is written.
+
 **Changed packages:**
 - **WP-PM-5:** each option has a stable code, a timing code ("Post-Emerge" and "Post-Emergence" are both `post_emergence`) and an optional crop, so later crop and timing pairs need no relabelling.
 - **WP-PM-6a:** Mason approves each row where `unit_size` and `inventory_unit` disagree; old billed units and amounts never change; the package lists every remaining `unit_size` reader.
-- **WP-PM-6b:** basic Duplicate only. Copying ingredients, density and brands is DM-5, after those exist.
-- **WP-PM-8:** the rate help text is worded so it stays true after the rate rebuild.
+- **WP-PM-6b:** basic Duplicate only. After PAR-1 (Stage 2), Duplicate becomes "Add a size" or "New product" (grand plan overlap 13). DM-5 is dropped. **Missing prices (Sol, 2026-10-29):** because new products stay active, the package proves in the harness that a product with no price is refused, by name, on a quote line, a job line, an order line, a blend ticket, the field app and the price sheet export, and that a real $0.00 price is told apart from a missing one.
+- **WP-PM-8:** the rate help text is worded so it stays true after the rate rebuild. Categories become a pick list with "Seed" (grand plan overlap 16). **Each new `NOT VALID` check lists the existing rows it would catch** (a later edit to such a row must fix that field too), with a correction path, before it is applied.
 - **WP-PM-9:** no unit aliases. Each new spelling gets its exact conversion row, allowed form and container rule, added and tested before any product uses it (`validate_product_units` matches exactly).
 - **WP-PM-10:** rates are written through one function.
-- **WP-PM-11a:** a separate detail workbook file and RPC, never mixed with price approval. The price workbook's rate columns become read-only (grand plan question 2).
+- **WP-PM-11a · the setup workbook** (grand plan overlaps 5 and 11; Mason, 2026-10-29): one file, separate from the price workbook, with Setup, Rates and Vendors tabs (Stage 2 adds Ingredients and Weights; Stage 6 adds Crop Uses). Each tab has its own repeat-safe RPC and a preview; nothing saves until confirmed. Rates are editable here during setup, through the one rate-writing function, and the price workbook's rate columns become read-only. A **"Lock rates"** switch locks the live rates in the database, whatever route writes them (drafts from the later rate rebuild stay editable); switching it is logged with a reason, and any admin may switch it, with a reason (Mason, 2026-10-29). The one exception while locked is a dedicated one-product admin correction with a reason, expected version and retry key. Confirmation is per tab; a stale row is refused by name. Full rules: grand plan overlap 11. *Added to Done when:* with the lock off, a Rates-tab upload changes 20 rates after the preview; with it on, the same upload, an import and a list edit are each refused; an admin's single-product edit with a reason still works and is logged.
 
 ---
 
@@ -477,17 +483,17 @@
 
 These follow `docs/plans/2026-10-28-product-data-model-REFRESH.md` and are summarized here so the full order is in one place. Each is its own PR with its own "done when" in that plan.
 
-1. **DM-0 Data hygiene.** Every product gets a `product_form`; EPA formats are checked. This overlaps WP-PM-8 and 9, so do it with them.
+1. **DM-0 Data hygiene.** *Moved into Stage 1 (section 2a and section 4, order 10).*
 2. **DM-2 Weight per gallon.**
    - Liquids store lb/gal, and dry packages net weight.
    - The **loader worksheet and blend ticket** show weight; a missing weight is refused by name.
    - *Done when:* a test blend with three liquids shows each product's weight and the total, matching a hand calculation, and a product with no weight is refused by name.
 3. **DM-1 Active ingredients.**
-   - Actives and strength per product, with a fast entry screen.
+   - Actives and strength per parent record (grand plan PAR-1), with a fast entry screen.
    - Admin-only cost per lb of active.
    - *Done when:* two products with the same active show comparable lb-of-active per gallon and cost per lb, checked by hand on two real labels.
 4. **DM-4 EPA auto-fill** (includes item 38).
-5. **DM-5 Copy from a sister product, plus nickname:** its own package after DM-1, DM-2 and brands (grand plan overlap 7). It was folded into WP-PM-6b on 2026-10-28 and un-folded on 2026-10-29, because Duplicate ships before ingredients exist.
+5. **DM-5 Copy from a sister product: dropped (2026-10-29).** One parent record per chemical (grand plan PAR-1, first in Stage 2) holds the shared values for every size, so nothing needs copying; the nickname moved to PAR-1.
 
 **Sol (finding 36):** the weight and ingredient math must state:
 - exact unit factors;
@@ -509,23 +515,25 @@ Sol's recommended order is adopted. The change-history foundation and the databa
 |---|---|---|---|---|
 | 1 | WP-PM-1 Dropdowns | none | no | |
 | 2 | WP-PM-14 RUP "known incomplete" notice | none | no | |
-| 3 | WP-PM-2 Pricing page | none | no (option a) | 💲 |
-| 4 | WP-PM-4 Sales sheet and list | none | no | 💲 |
-| 5 | WP-PM-12a Change-history foundation | none | yes (new table + trigger) | |
-| 6 | WP-PM-3 Turning products off | PM-12a | yes (RPC + guard) | |
-| 7 | WP-PM-8 Setup checks in the database | PM-1, PM-12a | yes (constraints) | |
-| 8 | WP-PM-9 Product forms, units, containers | Mason's list; PM-8 | yes (CHECK superset, conversion rows) | |
-| 9 | DM-0 Data hygiene | PM-8, PM-9 | review lists; Mason's data step | |
-| 10 | WP-PM-5 Use Timing | PM-1, PM-8 pattern | yes, Mason-gated grants | |
-| 11 | WP-PM-6a Unit audit + one canonical priced unit | PM-8, PM-9 | yes | 💲 |
-| 12 | WP-PM-6b New-product flow + basic Duplicate | PM-6a | maybe | 💲 |
-| 13 | WP-PM-7 One cost path + tier-order warning in the RPC | PM-2, PM-12a | yes (preview RPC) | 💲 |
-| 14 | WP-PM-10 Bulk import | PM-5, PM-8; lands after DM-0's data step | probably (import RPC) | |
-| 15 | WP-PM-11a Detail workbook | PM-8, PM-12a; lands after DM-0's data step | yes (RPC) | |
-| 16 | WP-PM-11b List editing + phone layout | PM-1 | no | |
-| 17 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
-| 18 | WP-PM-13 Reorder display | none | no | |
-| then | Grand plan Stage 2: DM-2, DM-1, REG-1, DM-4, DM-1b, DM-5 | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1) |
+| 3 | WP-PM-16 "Search EPA labels" link | none | no | |
+| 4 | WP-PM-2 Pricing page | none | no (option a) | 💲 |
+| 5 | WP-PM-4 Sales sheet and list | none | no | 💲 |
+| 6 | WP-PM-12a Change-history foundation | none | yes (new table + trigger) | |
+| 7 | WP-PM-3 Turning products off | PM-12a | yes (RPC + guard) | |
+| 8 | WP-PM-8 Setup checks in the database | PM-1, PM-12a | yes (constraints) | |
+| 9 | WP-PM-9 Product forms, units, containers | Mason's list; PM-8 | yes (CHECK superset, conversion rows) | |
+| 10 | DM-0 Data hygiene | PM-8, PM-9 | review lists; Mason's data step | |
+| 11 | WP-PM-5 Use Timing | PM-1, PM-8 pattern | yes, Mason-gated grants | |
+| 12 | WP-PM-6a Unit audit + one canonical priced unit | PM-8, PM-9 | yes | 💲 |
+| 13 | WP-PM-6b New-product flow + basic Duplicate | PM-6a | maybe | 💲 |
+| 14 | WP-PM-7 One cost path + tier-order warning in the RPC | PM-2, PM-12a | yes (preview RPC) | 💲 |
+| 15 | WP-PM-15 Vendors on the product page | PM-7 | yes (sync trigger, preferred rule, read policies) | 💲 |
+| 16 | WP-PM-11a Setup workbook + rate lock | PM-8, PM-12a, PM-15; lands after DM-0's data step | yes (RPCs, lock setting, rate-column guard) | |
+| 17 | WP-PM-10 Bulk import | PM-5, PM-8, PM-11a (rate lock); lands after DM-0's data step | probably (import RPC) | |
+| 18 | WP-PM-11b List editing + phone layout | PM-1 | no | |
+| 19 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
+| 20 | WP-PM-13 Reorder display | none | no | |
+| then | Grand plan Stage 2: PAR-1, PAR-2, BLK-1, DM-2, DM-1, REG-1, DM-4, DM-1b | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1) |
 
 **Running in parallel.** Packages 1 and 4 (dropdowns, change history) touch different files, so they could run in parallel sessions. Packages 2 and 3 both touch `Products.tsx`, so build them one after the other.
 

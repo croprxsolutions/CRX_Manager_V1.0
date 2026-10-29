@@ -10,15 +10,13 @@
 //
 // FAIL CLOSED, like sol-exempt-lib.mjs: any GitHub failure, a comparison that is
 // not exactly base..head, a list that may be truncated, an unknown change status
-// or an unreadable line count answers "Sol required".
-//
-// shortcut: file kinds are not checked (the documentation exemption checks them),
-// so a symlink or submodule at a low-risk path counts as a small change; add
-// sol-exempt-lib's tree lookup here if such a file ever appears in this repo.
+// or an unreadable line count answers "Sol required". A low-risk answer also needs
+// every changed file to be a plain file (sol-exempt-lib's tree lookup): a symlink
+// or submodule at a harmless path can redirect code (Luna, 2026-10-29).
 
 import { isMoneyPath } from "./codex-bot-review-lib.mjs";
 import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
-import { SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS } from "./sol-exempt-lib.mjs";
+import { SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS, treeProblem } from "./sol-exempt-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
 
@@ -104,7 +102,10 @@ export function solRiskOnGitHub({ baseSha: rawBase, headSha: rawHead, repo, gh }
   if (String(answer.merge_base || "").toLowerCase() !== baseSha) return { risky: true, reason: "GitHub's comparison does not start at the pull request's base" };
   if (String(answer.head || "").toLowerCase() !== headSha) return { risky: true, reason: "GitHub's comparison does not end at the pull request's head" };
   try {
-    return classifySolRisk(answer.files);
+    const verdict = classifySolRisk(answer.files);
+    if (verdict.risky) return verdict;
+    const problem = treeProblem({ files: answer.files, baseSha, headSha, repoPath, gh });
+    return problem ? { risky: true, reason: problem } : verdict;
   } catch (error) {
     return { risky: true, reason: `GitHub's file list could not be classified (${show(String(error?.message || error))})` };
   }

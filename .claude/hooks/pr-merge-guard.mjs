@@ -618,11 +618,12 @@ function gateRequest(request) {
   const isAncestorOnGitHub = (ancestor, descendant) => {
     const key = `${ancestor}...${descendant}`;
     if (!ancestry.has(key)) {
-      let contained = false;
+      // null when GitHub could not answer, so "not in main" is never assumed (Luna, 2026-10-29).
+      let contained = null;
       try {
         contained = headContainsBaseOnGitHub({ baseSha: ancestor, headSha: descendant, repo: request.repo, gh: hardGateGh });
       } catch {
-        contained = false;
+        contained = null;
       }
       ancestry.set(key, contained);
     }

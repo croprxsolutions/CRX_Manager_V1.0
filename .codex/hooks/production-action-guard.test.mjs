@@ -2142,6 +2142,8 @@ try {
     const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
     assert.equal(mergeDocs({ compare: counted([["src/App.tsx", 40], ["src/components/Label.tsx", 10]]) }).blocked, false,
       "a small pull request of ordinary app files merges with no Sol proof");
+    assert.equal(mergeDocs({ compare: counted([["src/App.tsx", 1]]), kinds: { "src/App.tsx": { mode: 0o120000 } } }).blocked, true,
+      "a symlink at a low-risk path still needs Sol (Luna, 2026-10-29)");
     for (const [label, entries] of [
       ["a money file", [["src/App.tsx", 5], ["src/lib/invoiceMath.ts", 5]]],
       ["an inventory file", [["src/pages/Inventory.tsx", 5]]],

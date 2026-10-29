@@ -1,0 +1,3 @@
+## 2026-10-29 - Sol risk check: review fixes
+
+Luna's review of the "Sol only on risky PRs" change. A low-risk answer now also requires every changed file to be a plain file (a symlink or submodule at a harmless path still needs Sol), reusing the documentation exemption's file-kind lookup. A Sol proof of an earlier commit counts only when GitHub or git positively answers that the commit is not already in main; an unreadable answer refuses, in both merge guards. `AGENTS.md` now says the `needs-coderabbit` label makes the merge gates wait for a clean CodeRabbit review. Kept as designed: unreadable labels still require CodeRabbit, and a 250-file list still requires Sol (GitHub may have cut it short).

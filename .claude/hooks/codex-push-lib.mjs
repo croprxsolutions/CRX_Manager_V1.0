@@ -2627,8 +2627,9 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 // EARLIER commit on this PR's branch also counts, so fixes pushed after it merge
 // without another Sol run. Accepted risk: those later commits get no Sol review.
 // The reviewed commit must be one of the PR's own commits (`prCommits`, a Set of
-// lowercase SHAs) or, without that list, in the head and not already in main;
-// otherwise a merged PR's proof would cover any branch built on top of it.
+// lowercase SHAs) or, without that list, in the head; and either way not already
+// in main, otherwise a merged PR's proof would cover any branch built on top of
+// it. `isAncestor` answers null when it cannot tell; only a plain false counts here.
 export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, prCommits = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
   const proofBase = String(data?.base_sha || "");
@@ -2637,9 +2638,9 @@ export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, 
   if (!proofValid(data, proofHead, nowMs, proofBase)) return false;
   try {
     if (proofHead !== String(headSha).toLowerCase()) {
-      const onBranch = prCommits
-        ? prCommits.has(proofHead)
-        : isAncestor(proofHead, headSha) === true && isAncestor(proofHead, baseSha) !== true;
+      // Not already in main: `false` exactly, so an unreadable answer (null) refuses (Luna, 2026-10-29).
+      const onBranch = (prCommits ? prCommits.has(proofHead) : isAncestor(proofHead, headSha) === true)
+        && isAncestor(proofHead, baseSha) === false;
       // The review saw exactly that commit's own changes only if it contains its base.
       if (!onBranch || isAncestor(proofBase, proofHead) !== true) return false;
     }

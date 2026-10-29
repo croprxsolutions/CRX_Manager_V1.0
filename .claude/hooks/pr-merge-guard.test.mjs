@@ -733,6 +733,12 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(check(proof({ head_sha: E }), { isAncestor: onBranch, prCommits: new Set([E, H]) }), "...and through the PR's own commit list");
   ok(!check(proof({ head_sha: E }), { isAncestor: onBranch, prCommits: new Set([H]) }), "a commit not in the PR's commit list never counts");
   ok(!check(proof({ head_sha: M }), { isAncestor: onBranch }), "a reviewed commit already in main never covers a new branch");
+  // Luna, 2026-10-29: the commit list alone is not enough, and "cannot tell" is not "not in main".
+  ok(!check(proof({ head_sha: M }), { isAncestor: onBranch, prCommits: new Set([M, H]) }),
+    "a listed PR commit that is already in main never counts");
+  const unsure = (a, b) => (a === E && b === B1 ? null : onBranch(a, b));
+  ok(!check(proof({ head_sha: E }), { isAncestor: unsure }), "an unreadable 'is it in main?' answer refuses");
+  ok(!check(proof({ head_sha: E }), { isAncestor: unsure, prCommits: new Set([E, H]) }), "...through the commit list too");
   ok(!check(proof({ head_sha: E })), "a commit the head does not contain never counts");
 }
 ok(

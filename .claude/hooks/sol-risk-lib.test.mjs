@@ -38,12 +38,24 @@ check("unreadable answers need Sol", () => {
 const BASE = "a".repeat(40);
 const HEAD = "b".repeat(40);
 const answer = (over = {}) => JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: BASE, head: HEAD, files: [file("src/components/Label.tsx")], ...over });
-const ask = (stdout, extra = {}) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0", gh: () => { if (stdout instanceof Error) throw stdout; return stdout; }, ...extra });
+// GraphQL file-kind lookup, at the head (d0) and the base (d1): src/components
+// holds Label.tsx as a plain file, or as `kind`.
+const tree = (kind = { mode: 0o100644, type: "blob" }) => {
+  const folder = { entries: [{ name: "Label.tsx", ...kind }] };
+  return JSON.stringify({ data: { repository: { d0: folder, d1: folder } } });
+};
+const ask = (stdout, extra = {}, kinds = tree()) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
+  gh: (args) => { if (args[1] === "graphql") return kinds; if (stdout instanceof Error) throw stdout; return stdout; }, ...extra });
 
 check("a clean base..head comparison of a UI file is low risk", () => assert.equal(ask(answer()).risky, false));
+check("a symlink, submodule or unreadable file kind at a low-risk path needs Sol", () => {
+  assert.equal(ask(answer(), {}, tree({ mode: 0o120000, type: "blob" })).risky, true);
+  assert.equal(ask(answer(), {}, tree({ mode: 0o160000, type: "commit" })).risky, true);
+  assert.equal(ask(answer(), {}, "not json").risky, true);
+});
 check("the comparison is fetched for exactly base...head", () => {
   let seen;
-  solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "o/r", gh: (args) => { seen = args; return answer(); } });
+  solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "o/r", gh: (args) => { seen ??= args; return answer(); } });
   assert.equal(seen[1], `repos/o/r/compare/${BASE}...${HEAD}`);
 });
 check("GitHub failures and mismatched comparisons need Sol", () => {

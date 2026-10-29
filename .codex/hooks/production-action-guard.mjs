@@ -1107,8 +1107,9 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
     try {
       runGit(["merge-base", "--is-ancestor", ancestor, descendant], repoDir);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // Exit 1 is git's "no"; any other failure is "cannot tell" (Luna, 2026-10-29).
+      return error?.status === 1 ? false : null;
     }
   };
   const stateDir = path.join(repoDir, ".claude", "session-state");

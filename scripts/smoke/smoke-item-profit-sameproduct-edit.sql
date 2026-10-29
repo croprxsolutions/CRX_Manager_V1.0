@@ -10,8 +10,7 @@
 -- DO block exercises it, then RAISE 'SMOKE_PASS_ROLLBACK' aborts — rolling back the
 -- function redefinition AND every fixture. Zero prod footprint. Run as a SINGLE
 -- execute_sql call. "SMOKE_PASS_ROLLBACK" = pass; any other error = real failure.
--- After the migration is applied, the CREATE OR REPLACE is idempotent so this file
--- still serves as a post-apply smoke.
+-- It served as a post-apply smoke for that June migration only.
 -- HISTORICAL ONLY once 20261028185500_order_edit_and_number_concurrency is applied:
 -- that migration drops this four-argument form for one that requires the order's
 -- row_version, so recreating it here would test a function production no longer

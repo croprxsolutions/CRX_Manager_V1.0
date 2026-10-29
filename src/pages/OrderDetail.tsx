@@ -1473,6 +1473,8 @@ export default function OrderDetail() {
                   variant="secondary"
                   icon={<Pencil className="w-4 h-4" />}
                   showChevron={false}
+                  // Wait for the planned toggle's reload, or the editor would open on the pre-toggle version.
+                  disabled={togglingPlanned}
                   onClick={() => { setEditing(true); }}
                 >
                   Edit Order

@@ -154,9 +154,15 @@ test('a conflict reload that finds no order keeps the unsaved draft on screen', 
 test('marking the order planned refreshes the version the next edit saves against', async ({ page }) => {
   const state = backend(); const errors = await isolate(page, state); await openEditor(page);
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Edit Order' })).toBeEnabled();
+  // Another editor changed the line before the toggle; the reload must bring that line with the version.
+  state.quantity = 12; state.orderReadDelayMs = 1500;
   await page.getByTitle('Click to mark as Planned').click();
+  await expect(page.getByRole('button', { name: 'Edit Order' })).toBeDisabled();
   await expect(page.getByTitle('Click to mark as Committed')).toBeEnabled();
+  state.orderReadDelayMs = 0;
   await page.getByRole('button', { name: 'Edit Order' }).click();
+  await expect(qtyInput(page)).toHaveValue('12');
   await qtyInput(page).fill('15');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
@@ -180,7 +186,11 @@ test('a role refresh while editing keeps the editor and its unsaved draft', asyn
   await orderReread;
   await expect(page.getByRole('button', { name: 'Save Changes' })).toBeVisible();
   await expect(qtyInput(page)).toHaveValue('16');
-  expect(errors).toEqual([]);
+  // The kept draft still saves against the version it was loaded with.
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
+  expect(state.saves.map((r) => r.p_expected_row_version)).toEqual([7]);
+  expect(state.quantity).toBe(16); expect(errors).toEqual([]);
 });
 
 test('a missing version fails the read closed and sends no save', async ({ page }) => {

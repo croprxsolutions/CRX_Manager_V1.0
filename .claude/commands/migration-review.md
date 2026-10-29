@@ -30,7 +30,7 @@ The workflow runs `rls-security-reviewer` + `migration-drift-reviewer` + `typesc
    there is no way to stamp a proof without that run (a BLOCKERS or failed run mints
    nothing; fix the findings or park the migration).
    IMPORTANT: the migration name must substring-match the `name` you will pass to
-   `apply_migration`, or the guard won't match the proof. Proofs expire after 30 minutes.
+   `apply_migration`, or the guard won't match the proof. Proofs expire after 24 hours (Mason, 2026-10-29; live state is re-checked at apply).
    If the migration is edited after stamping, the hash no longer matches — re-run the
    review, then re-stamp.
 2. Tell Mason it's clean, list any MED/LOW findings as FYI (not blockers), and list the `refutedBlockers` so he can see what was checked and dismissed.

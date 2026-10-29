@@ -582,8 +582,14 @@ denies(
 // ── CHECK 4: reviewer proof ─────────────────────────────────────────────────
 denies(evaluate(fixture({ proof: null })), "without subagent review proof",
   "no reviewer proof at all");
-denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(-31 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH } })),
-  "without subagent review proof", "reviewer proof older than 30 minutes");
+denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(-25 * 60 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH } })),
+  "without subagent review proof", "reviewer proof older than 24 hours");
+// The 24-hour window is real, not just a looser refusal (Luna, PR #1196): two-hour-old
+// reviewer and Sol proofs, refused under the old 30 minutes, are accepted.
+allows(evaluate(fixture({
+  proof: { migration: MIG, timestamp: iso(-2 * 60 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH },
+  codexProof: { ...goodCodex, timestamp: iso(-2 * 60 * 60 * 1000) },
+})), "two-hour-old reviewer and Sol apply proofs are accepted (Mason, 2026-10-29)");
 denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(60 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH } })),
   "without subagent review proof", "FUTURE-dated reviewer proof is not 'fresh forever'");
 denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(0), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "blockers", queryHash: HASH } })),
@@ -611,8 +617,8 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
     "Sol high-effort gate", `${label}: a non-Sol Codex proof is refused`);
   denies(evaluate(fixture({ autopilot, codexProof: { ...goodCodex, reasoning_effort: "medium" } })),
     "Sol high-effort gate", `${label}: the wrong reasoning effort is refused`);
-  denies(evaluate(fixture({ autopilot, codexProof: { ...goodCodex, timestamp: iso(-31 * 60 * 1000) } })),
-    "Sol high-effort gate", `${label}: a stale (>30 min) Codex proof is refused`);
+  denies(evaluate(fixture({ autopilot, codexProof: { ...goodCodex, timestamp: iso(-25 * 60 * 60 * 1000) } })),
+    "Sol high-effort gate", `${label}: a stale (>24 h) Codex proof is refused`);
   denies(evaluate(fixture({ autopilot, codexProof: { ...goodCodex, timestamp: iso(60 * 60 * 1000) } })),
     "Sol high-effort gate", `${label}: a FUTURE-dated Codex proof is refused`);
   denies(
@@ -663,7 +669,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, model:
   "Sol high-effort gate", "armed run refuses the wrong Codex model");
 denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, reasoning_effort: "medium" } })),
   "Sol high-effort gate", "armed run refuses the wrong reasoning effort");
-denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timestamp: iso(-31 * 60 * 1000) } })),
+denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timestamp: iso(-25 * 60 * 60 * 1000) } })),
   "Sol high-effort gate", "armed run refuses a stale Codex proof");
 denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timestamp: iso(60 * 60 * 1000) } })),
   "Sol high-effort gate", "armed run refuses a FUTURE-dated Codex proof");
@@ -1794,8 +1800,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     JSON.stringify({ ...goodProof, model: "gpt-6-luna" }));
   refused(gate(), "no fresh gpt-6-sol/high proof", "a non-Sol proof is refused");
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`),
-    JSON.stringify({ ...goodProof, timestamp: new Date(Date.now() - 31 * 60_000).toISOString() }));
-  refused(gate(), "no fresh gpt-6-sol/high proof", "a stale proof is refused");
+    JSON.stringify({ ...goodProof, timestamp: new Date(Date.now() - 2 * 60 * 60_000).toISOString() }));
+  ok(gate().ok === true, "a two-hour-old exact-head Sol proof still passes the apply gate (Mason, 2026-10-29)");
+  writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`),
+    JSON.stringify({ ...goodProof, timestamp: new Date(Date.now() - 25 * 60 * 60_000).toISOString() }));
+  refused(gate(), "no fresh gpt-6-sol/high proof", "a proof older than 24 hours is refused");
 }
 
 // ── OWNER APPROVAL (Mason, 2026-09-29): his Windows Hello signature lets a parked

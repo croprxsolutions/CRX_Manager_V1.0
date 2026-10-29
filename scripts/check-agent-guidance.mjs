@@ -174,8 +174,9 @@ const autonomousLandingChecks = [
   ["migrations limited to NON-destructive ones", /NON-destructive migration/i],
   ["access changes limited to routine grants (Mason, 2026-09-26)", /routine grants only/i],
   ["the migration-apply-guard proof gate", /migration-apply-guard proof gate/i],
-  ["both reviewer proofs and a fresh Sol proof", /both reviewer proofs and a fresh content-bound Sol proof/i],
-  ["30-minute proof freshness", /under 30 minutes/i],
+  ["both reviewer proofs and a content-bound Sol proof", /both reviewer proofs and a content-bound Sol proof/i],
+  // 24 hours since Mason's 2026-10-29 decision (was 30 minutes); live state is re-checked at apply.
+  ["24-hour proof freshness with live re-checks", /under 24 hours, with the ledger, pending set and PR state re-checked live at apply time/i],
   ["enforcement by the gates, not prose", /merge and apply gates enforce it/i],
 ];
 for (const [name, pattern] of autonomousLandingChecks) {

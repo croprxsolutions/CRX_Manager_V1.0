@@ -313,6 +313,27 @@ try {
 console.log("Wrappability: no transaction control, nothing non-transactional — safe to wrap.");
 console.log("");
 
+// ── FRESH VIEW OF MAIN ─────────────────────────────────────────────────────
+// The review proofs may now be up to 24 hours old (Mason, 2026-10-29), so the
+// pending-set check must see GitHub's main as it is NOW. Fetch here, where there
+// is time, rather than refusing a stale ref; the gate below still refuses if this
+// fetch failed and the last one is over 30 minutes old. It only REFRESHES an
+// existing origin/main: creating one in a CI checkout (a shallow clone with no
+// such ref) changed what later tests in the same job saw (PR #1196).
+{
+  const gitOpts = { cwd: process.cwd(), encoding: "utf8", windowsHide: true };
+  const hasOriginMain = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"],
+    { ...gitOpts, timeout: 10_000 }).status === 0;
+  if (hasOriginMain) {
+    const fetched = spawnSync("git", ["fetch", "--quiet", "origin", "main"], { ...gitOpts, timeout: 60_000 });
+    console.log(fetched.status === 0
+      ? "Fetched origin: the pending-set check sees current main."
+      : `Could not fetch origin (${(fetched.stderr || fetched.error?.message || "unknown").trim()}); the gate judges the last fetch.`);
+  } else {
+    console.log("No origin/main here to refresh; the gate judges what is present.");
+  }
+}
+
 // ── THE GATE ───────────────────────────────────────────────────────────────
 // Identical rule book to the PreToolUse hook. A throw here is a refusal, never
 // a pass: the gate being in an unknown state is exactly when not to transmit.

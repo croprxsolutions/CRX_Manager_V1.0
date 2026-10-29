@@ -17,7 +17,7 @@ function chainable(resolveWith: unknown = { data: [], error: null }) {
   const self = () => builder;
   const methods = [
     'select','insert','update','upsert','delete',
-    'eq','neq','gt','gte','lt','lte','like','ilike','is','in','or','not','match',
+    'eq','neq','gt','gte','lt','lte','like','ilike','regexIMatch','is','in','or','not','match',
     'order','limit','range','single','maybeSingle',
     'csv','explain',
   ];
@@ -122,16 +122,16 @@ describe('BulkOrderImport', () => {
     expect(screen.queryByRole('button', { name: /import 1 order/i })).not.toBeInTheDocument();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
-  it('matches percent, underscore, and backslash in customer names literally', async () => {
+  it('matches asterisk, percent, underscore, backslash and regex characters in customer names literally', async () => {
     const customerQuery = chainable({ data: { id: 'customer-literal' }, error: null });
     const original = mocks.from.getMockImplementation()!;
     mocks.from.mockImplementation((table: string) => table === 'customers' ? customerQuery : original(table));
     const { container } = render(<BulkOrderImport {...defaultProps} />);
-    await parseCsvFile(container, 'order_number,customer_name,product_name,quantity,price_per_unit\nO-LITERAL,Farm_1%\\East,SKU-B,1,20');
+    await parseCsvFile(container, 'order_number,customer_name,product_name,quantity,price_per_unit\nO-LITERAL,Farm*_1%\\East.(North)+?,SKU-B,1,20');
     await screen.findByText(/O-LITERAL/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({ p_customer_id: 'customer-literal' })));
-    expect(customerQuery.ilike).toHaveBeenCalledWith('farm_name', 'Farm\\_1\\%\\\\East');
+    expect(customerQuery.regexIMatch).toHaveBeenCalledWith('farm_name', '^Farm\\*_1%\\\\East\\.\\(North\\)\\+\\?$');
   });
 
   it('excludes only the order with an invalid status and preserves an unrelated order', async () => {
@@ -222,7 +222,7 @@ describe('BulkOrderImport', () => {
       p_total_price: 25,
       p_items: [expect.objectContaining({ product_id: 'product-quoted', product_name: 'Mix, "A"', total_units_needed: 2, price_per_unit: 12.5, notes: 'Line one\r\nLine two' })],
     })));
-    expect(customerQuery.ilike).toHaveBeenCalledWith('farm_name', 'Wells, "Family" Farms');
+    expect(customerQuery.regexIMatch).toHaveBeenCalledWith('farm_name', '^Wells, "Family" Farms$');
   });
 
   it.each(['O-BAD,"Unclosed,Roundup,2,20', 'O-BAD,Wells,Farm,Roundup,2,20'])('blocks malformed CSV before import: %s', async (row) => {

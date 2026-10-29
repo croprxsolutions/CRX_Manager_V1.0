@@ -420,7 +420,7 @@ export default function BulkOrderImport({
         const { data: customer, error: custError } = await supabase
           .from('customers')
           .select('id')
-          .ilike('farm_name', order.customer_name.replace(/[\\%_]/g, (char) => `\\${char}`))
+          .regexIMatch('farm_name', `^${order.customer_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
           .maybeSingle();
 
         if (custError) {

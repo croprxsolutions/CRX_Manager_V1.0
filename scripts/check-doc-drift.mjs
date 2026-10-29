@@ -124,7 +124,9 @@ for (const doc of manualDocs) {
     stamped ? "PASS" : "FAIL");
 }
 
-// HARD freshness gate (2026-07-16 scaffolding review): the two docs that describe
+// Freshness WARNING (2026-07-16 scaffolding review; a warning, not a failure, since
+// Mason 2026-10-29: a stale stamp blocked unrelated PRs far more than it caught
+// drift, and the date is only a promise anyway). The two docs that describe
 // LIVE state must not claim a "Last verified" date OLDER than the newest migration
 // on disk, capped at today's America/Chicago calendar date. A future stamp cannot
 // truthfully force a future verification claim before that business date arrives;
@@ -149,7 +151,7 @@ for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const stampDate = `${m[1]}${m[2]}${m[3]}`; // YYYYMMDD
   const fresh = !freshnessDate || stampDate >= freshnessDate;
   row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
-    fresh ? "PASS" : "FAIL",
+    fresh ? "PASS" : "WARN",
     fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
 }
 

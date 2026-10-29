@@ -933,6 +933,17 @@ function clearCodexPushProof({ root, headSha }) {
 // accepts, bypassing review entirely.
 export const GUARDED_BASE = "origin/main";
 
+// The exact commit a full review is pinned to: where this head last met
+// origin/main (`git merge-base`), so origin/main...HEAD is exactly this branch's
+// own changes. That is origin/main itself when the head contains it; when main
+// has moved on, the branch no longer has to merge it before Sol (Mason,
+// 2026-10-29), and the merge gate accepts a proof whose base the head contains
+// (Mason, 2026-10-26). Git derives it; no caller can choose it. "" = unreadable.
+export function reviewBaseFor(root, headSha) {
+  const base = runGit(["merge-base", GUARDED_BASE, headSha], { cwd: root });
+  return /^[0-9a-f]{40}$/i.test(base) ? base : "";
+}
+
 // Fixed review prompt. `codex review --base` can't carry a prompt (so it can't be
 // told to emit a machine verdict), so we drive `codex exec` with these fixed
 // INSTRUCTIONS instead. The base is hard-pinned into the prompt; the branch diff
@@ -1329,15 +1340,14 @@ export function evaluateSolPreflight({
   headPushedMs,
   readyForReviewMs = Number.NaN,
   headContainsBase,
+  cleanMergeOf = null,
   nowMs = Date.now(),
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
   const problems = [];
   const notes = [];
-  // Sol reviews against the local origin/main, a ref every worktree shares, so a
-  // peer's fetch can move it past this branch. A clean review of a head that
-  // lacks its base can neither merge (GitHub: BEHIND) nor be carried forward, so
-  // it would be paid for again (#1075 paid five times, 2026-10-23).
+  // run() passes the merge-base of origin/main and HEAD (reviewBaseFor), which the
+  // head always contains, so this only refuses an unreadable or hand-passed base.
   if (headContainsBase === false) {
     problems.push(
       "this branch does not contain the latest main this checkout knows about (origin/main). Run " +
@@ -1370,6 +1380,10 @@ export function evaluateSolPreflight({
   const reviewedHere = codexState?.sha === head && codexState?.status === "completed";
   if (codexState === undefined || codexState?.unreadable) {
     problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
+  } else if (!reviewedHere && cleanMergeOf && (codexState?.sha === head || (codexState?.sha === cleanMergeOf && codexState?.status === "completed"))) {
+    // Mason, 2026-10-29: a clean main merge adds none of the PR's own changes, so
+    // Sol need not wait for the App to re-read it. Its threads are still checked below.
+    notes.push(`${head.slice(0, 9)} only merges main into ${cleanMergeOf.slice(0, 9)} (no conflicts, no shared files), so Sol does not wait for the Codex GitHub App to review it again.`);
   } else if (!reviewedHere && codexState?.sha === head) {
     // Its review of THIS commit has started and not finished: wait for it, however long, until it is plainly dead.
     if (runningFor >= CODEX_APP_STALE_RUN_MS) {
@@ -1517,6 +1531,7 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
   facts.headContainsBase = /^[0-9a-f]{40}$/i.test(String(baseSha || ""))
     ? gitOk(["merge-base", "--is-ancestor", baseSha, headSha], root)
     : null;
+  facts.cleanMergeOf = facts.headContainsBase === true ? cleanMainMergeParent(root, headSha, baseSha) : null;
   const slug = parseGithubSlug(runGit(["remote", "get-url", "origin"], { cwd: root }));
   if (!slug) return { ...facts, unreadable: "could not read the origin remote's GitHub owner and name" };
   const { owner, name } = slug;
@@ -1874,6 +1889,33 @@ function gitChangedEntries(fromRef, toRef, cwd) {
   return parseRawDiff(result.stdout);
 }
 
+// The branch's pre-merge head when `headSha` is nothing but a conflict-free merge
+// of main into it: two parents, the second already in main (`baseSha` contains
+// it), a tree byte-for-byte what `git merge-tree` of the two produces (nothing
+// hand-edited), and no file changed on both sides since they split. Else null.
+export function cleanMainMergeParent(root, headSha, baseSha) {
+  if (!CARRY_SHA_RE.test(String(headSha || "")) || !CARRY_SHA_RE.test(String(baseSha || ""))) return null;
+  const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
+  if (parents.length !== 2 || !parents.every((sha) => CARRY_SHA_RE.test(sha))) return null;
+  const [branchHead, mainSide] = parents;
+  if (!gitOk(["merge-base", "--is-ancestor", mainSide, baseSha], root)) return null;
+  const fork = runGit(["merge-base", branchHead, mainSide], { cwd: root });
+  if (!CARRY_SHA_RE.test(fork)) return null;
+  const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", mainSide, branchHead], {
+    cwd: root, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
+  });
+  const mergedTree = String(merged.stdout || "").split(/\r?\n/)[0].trim();
+  if (merged.error || merged.status !== 0 || !CARRY_SHA_RE.test(mergedTree)) return null;
+  if (runGit(["rev-parse", `${headSha}^{tree}`], { cwd: root }) !== mergedTree) return null;
+  try {
+    const branchFiles = new Set(gitChangedEntries(fork, branchHead, root).map((entry) => entry.path));
+    if (gitChangedEntries(fork, mainSide, root).some((entry) => branchFiles.has(entry.path))) return null;
+  } catch {
+    return null;
+  }
+  return branchHead;
+}
+
 // Everything the carry needs from Git, checked. Returns { problem } or the facts.
 function resolveCarry(root, nowMs) {
   const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
@@ -2180,10 +2222,11 @@ export function run(argv = process.argv.slice(2)) {
       `[dry-run] Sandbox-startup fallback: ${fallbackBin || "none found (a sandbox startup failure fails closed)"}\n`,
     );
     process.stdout.write(`[dry-run] Command: codex ${args.slice(0, -1).join(" ")} <review-prompt>\n`);
-    process.stdout.write(`[dry-run] Review base (pinned): ${GUARDED_BASE}\n`);
     process.stdout.write(`[dry-run] Would mint proof at: ${codexPushProofPath(root, "<HEAD>")}\n`);
     const head = runGit(["rev-parse", "HEAD"], { cwd: root });
-    const preflight = solPreflight(root, head, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
+    const dryBase = reviewBaseFor(root, head);
+    process.stdout.write(`[dry-run] Review base (pinned): merge-base of ${GUARDED_BASE} and HEAD = ${dryBase || "unreadable"}\n`);
+    const preflight = solPreflight(root, head, dryBase);
     process.stdout.write(
       `[dry-run] Sol pre-flight for ${head.slice(0, 12)}: ${preflight.ok ? "would run" : "would REFUSE"}\n` +
       `${preflightReport(preflight)}\n`,
@@ -2203,7 +2246,7 @@ export function run(argv = process.argv.slice(2)) {
   // session committed / checked out, or edits appeared), the review no longer
   // describes HEAD — revoke, never mint.
   const headBefore = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseBefore = runGit(["rev-parse", GUARDED_BASE], { cwd: root });
+  const baseBefore = reviewBaseFor(root, headBefore);
   const cleanBefore = worktreeIsClean(root);
   if (!cleanBefore) {
     process.stderr.write("The push-proof reviewer requires a clean worktree before building its sanitized snapshot.\n");
@@ -2240,7 +2283,7 @@ export function run(argv = process.argv.slice(2)) {
   try {
     reviewWorkspace = createSanitizedReviewWorkspace({
       sourceRoot: root,
-      baseRef: GUARDED_BASE,
+      baseRef: baseBefore,
       candidateRef: headBefore,
     });
     if (reviewWorkspace.baseSha !== baseBefore || reviewWorkspace.headSha !== headBefore) {
@@ -2296,16 +2339,17 @@ export function run(argv = process.argv.slice(2)) {
   }
 
   const headAfter = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseAfter = runGit(["rev-parse", GUARDED_BASE], { cwd: root });
+  const baseAfter = reviewBaseFor(root, headAfter);
   const cleanAfter = worktreeIsClean(root);
   const verdict = codexReviewProofVerdict({ status: result.status, stdout: result.stdout });
 
   // Both status reads must SUCCEED and be clean, and HEAD must be an unchanged
   // 40-hex sha. A failed git status (STATUS_UNAVAILABLE sentinel) makes
   // worktreeIsClean false, so it can never be mistaken for a clean tree.
-  // origin/main must also be an unchanged 40-hex sha: the proof records the base
-  // it was reviewed against, and if the base shifted mid-review the review no
-  // longer describes origin/main...HEAD, so mint nothing.
+  // The review base (merge-base of origin/main and HEAD) must also be an unchanged
+  // 40-hex sha: the proof records the base it was reviewed against, and if it
+  // shifted mid-review the review no longer describes origin/main...HEAD, so mint
+  // nothing. A fetch that only moves main forward past the branch leaves it as is.
   const contextStable =
     headAfter &&
     headAfter === headBefore &&

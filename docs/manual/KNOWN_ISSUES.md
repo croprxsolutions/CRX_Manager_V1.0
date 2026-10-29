@@ -293,12 +293,15 @@ re-sent, either can bill the unsent price; the field-application lookup can also
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved
-**LOW · OPEN (found 2026-10-27, Sol review of PR #1105) · money (display only) · unassigned**
+**LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
 After Save, `src/pages/QuoteBuilder.tsx` records a new line's saved id and stored price but does not load the
 cost the database recorded for that line (`quote_items.cost_at_quote_cents`). If the product's cost changed after
 the page loaded, the Cost, Profit and Margin shown to an admin can differ from the saved figures until the page is
 reloaded. Saved prices, costs and totals are correct; PDFs never show cost. Fix: refresh each saved line's recorded
 cost after a save, and prove it on the live screen.
+The fix re-reads each saved line's recorded cost (and, for a line whose cost moved, the product's cost
+today) through `get_admin_cost_fields` after an admin's save, without marking the quote changed; proven on a
+local replay's screen (a new line added after its product's cost rose shows the recorded cost after Save).
 
 ---
 

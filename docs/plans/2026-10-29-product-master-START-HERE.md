@@ -12,7 +12,7 @@
 |---|---|---|
 | **The grand plan (2026-10-29)** | `docs/plans/2026-10-29-product-GRAND-PLAN.md` | All product work in one order: this Product Master work is Stage 1; weight, chemistry, brands, rates, comparison, use guidance, families, clean-up and images follow. Sol-reviewed; it revised the build sheet's order |
 | The 43 items | `docs/plans/2026-10-28-product-master-setup-edits-BACKLOG.md` | What's wrong or missing on product setup: Mason's requests (items 1–2) and the review's findings (items 3–43) |
-| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 18 work packages (16 on 2026-10-28, plus WP-PM-14 and DM-0 from the grand plan; see its section 2a): approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
+| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 20 work packages (16 on 2026-10-28, plus WP-PM-14, WP-PM-16, DM-0 and WP-PM-15 from the grand plan; see its section 2a): approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
 | **The build loop** | `docs/plans/2026-10-28-product-master-loop-MISSION.md` | How a session builds it: Codex builds, Claude checks and proves, one draft PR per package, nothing merged or applied live. Passes `node scripts/validate-mission-doc.mjs` |
 | Weight per gallon and active ingredients | `docs/plans/2026-10-28-product-data-model-REFRESH.md` | The larger feature that follows (To-Do row 2.9), refreshed from the August plan |
 | Mason's decisions | `docs/manual/DECISION_LOG.md`, the three 2026-10-28 entries (Product Master backlog; product data model) | Every business answer, so the build needs no owner input |
@@ -70,22 +70,24 @@ Never: merge, mark a PR ready, push to main, apply a migration live, write live 
 - **Order:**
   1. dropdowns
   2. RUP "known incomplete" notice
-  3. pricing page
-  4. sales sheet and list
-  5. change history
-  6. turning products off safely
-  7. setup checks in the database
-  8. forms, units and containers
-  9. data clean-up review lists (forms, SKUs, duplicates)
-  10. Use Timing
-  11. the Unit audit
-  12. new-product flow and basic Duplicate
-  13. one cost path and the tier-order warning
-  14. bulk import
-  15. detail workbook
-  16. list editing
-  17. corrections to existing records
-  18. reorder display
+  3. "Search EPA labels" link
+  4. pricing page
+  5. sales sheet and list
+  6. change history
+  7. turning products off safely
+  8. setup checks in the database
+  9. forms, units and containers
+  10. data clean-up review lists (forms, SKUs, duplicates)
+  11. Use Timing
+  12. the Unit audit
+  13. new-product flow and basic Duplicate
+  14. one cost path and the tier-order warning
+  15. vendors on the product page
+  16. setup workbook and the "Lock rates" switch
+  17. bulk import
+  18. list editing
+  19. corrections to existing records
+  20. reorder display
 - **Pace:** an 8-hour run will probably finish 6–10 packages properly; the rest queue for another run.
 - **Parked for Mason:**
   - the Unit back-fill: Sol's BLOCKER, so audit only, and Mason sees the mismatch list first;

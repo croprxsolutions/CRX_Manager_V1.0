@@ -17,3 +17,7 @@ execution aborted without a complete verdict; live sweeps and final Sol remain b
 Verification commands, scope limits, future rollout and rollback are documented in
 `docs/reference/order-edit-concurrency.md`. Shared to-do/status files are intentionally left
 for the coordinating session to update after the parallel tasks are reconciled.
+
+CodeRabbit follow-up (2026-10-29): a conflict reload that finds no order keeps the unsaved
+draft on screen, and Cancel restores the last loaded draft at once so reopening Edit early
+never shows or saves discarded edits. Two new browser proofs cover these (six scenarios pass).

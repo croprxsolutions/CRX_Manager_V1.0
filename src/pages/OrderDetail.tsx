@@ -142,6 +142,9 @@ export default function OrderDetail() {
   const [orderConflict, setOrderConflict] = useState(false);
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [editItems, setEditItems] = useState<OrderItem[]>([]);
+  // The last fully loaded draft and its version. Cancel restores it at once, so re-entering
+  // edit mode before the follow-up reload lands never shows (or saves) the discarded edits.
+  const loadedDraftRef = useRef<{ items: OrderItem[]; rowVersion: number | null }>({ items: [], rowVersion: null });
   const [newItems, setNewItems] = useState<NewOrderItem[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -388,7 +391,11 @@ export default function OrderDetail() {
         setCustNames(names);
       } else {
         // A read that found no order (not a failed one) says "Order not found", never the
-        // previous order this page was showing.
+        // previous order this page was showing. A conflict reload keeps the unsaved editor
+        // instead, so its draft can still be copied; Cancel leaves it.
+        if (reloadDraft && editingRef.current) {
+          return failLoad(new Error('The order is no longer available to reload.'));
+        }
         setOrder(null);
       }
       if (isStale()) return false;
@@ -397,8 +404,9 @@ export default function OrderDetail() {
       if (orderData && (!editingRef.current || reloadDraft)) {
         // Adopt a new draft/token only after the complete load succeeds. A failed
         // recovery must never replace the unsaved editor with a partial snapshot.
+        loadedDraftRef.current = { items: draftItems, rowVersion: readRowVersion(orderData.row_version) };
         setEditItems(draftItems.map((i) => ({ ...i })));
-        setEditRowVersion(readRowVersion(orderData.row_version));
+        setEditRowVersion(loadedDraftRef.current.rowVersion);
       }
       return orderData !== null;
     } catch (err: unknown) {
@@ -420,6 +428,7 @@ export default function OrderDetail() {
     setOrderConflict(false);
     setConflictDialogOpen(false);
     setEditRowVersion(null);
+    loadedDraftRef.current = { items: [], rowVersion: null };
     if (id) fetchOrder();
   }, [id, fetchOrder]);
 
@@ -1434,7 +1443,14 @@ export default function OrderDetail() {
         <div className="flex gap-2 flex-wrap">
           {editing ? (
             <>
-              <Button variant="ghost" icon={<X className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => { setEditing(false); setNewItems([]); void fetchOrder(); }}>
+              <Button variant="ghost" icon={<X className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => {
+                const loaded = loadedDraftRef.current;
+                setEditItems(loaded.items.map((i) => ({ ...i })));
+                setEditRowVersion(loaded.rowVersion);
+                setEditing(false);
+                setNewItems([]);
+                void fetchOrder();
+              }}>
                 Cancel
               </Button>
               <Button icon={<Save className="w-4 h-4" />} onClick={handleSaveEdits} loading={saving}>

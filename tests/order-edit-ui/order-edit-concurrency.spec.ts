@@ -16,7 +16,7 @@ function session() {
 }
 type Request = { p_order_id: string; p_expected_row_version: number; p_idempotency_key: string; p_items: { total_units_needed: number }[] };
 function backend() {
-  return { version: 7, quantity: 10, failRead: false, missingVersion: false, loseReply: false, saves: [] as Request[], receipts: new Map<string, { order_id: string; row_version: number; success: boolean }>() };
+  return { version: 7, quantity: 10, failRead: false, missingVersion: false, missingOrder: false, orderReadDelayMs: 0, loseReply: false, saves: [] as Request[], receipts: new Map<string, { order_id: string; row_version: number; success: boolean }>() };
 }
 async function isolate(page: Page, state: ReturnType<typeof backend>) {
   const errors: string[] = [];
@@ -32,6 +32,8 @@ async function isolate(page: Page, state: ReturnType<typeof backend>) {
     if (url.pathname === '/rest/v1/profiles') return json({ id: ACTOR, email: user.email, full_name: 'Order Proof Admin', role: 'admin', is_active: true, denied_pages: [] });
     if (url.pathname === '/rest/v1/orders') {
       if (state.failRead) return json({ message: 'controlled failed order read' }, 500);
+      if (state.orderReadDelayMs) await new Promise((resolve) => setTimeout(resolve, state.orderReadDelayMs));
+      if (state.missingOrder) return json(null);
       return json({ id: ORDER, order_number: 'ORD-LOCAL-1', customer_id: CUSTOMER, status: 'confirmed', order_date: '2026-10-28',
         created_at: '2026-10-28T00:00:00Z', row_version: state.missingVersion ? null : state.version, total_price: state.quantity * 20,
         pricing_status: 'priced', commission_split: null, is_planned: false, booking_draw: false, deleted_at: null });
@@ -118,6 +120,34 @@ test(`a lost save response retries the same request${laterEdit ? ' after another
   expect(state.quantity).toBe(laterEdit ? 19 : 16); expect(errors).toEqual([]);
 });
 }
+
+test('cancel discards the draft even when Edit is reopened before the reload lands', async ({ page }) => {
+  const state = backend(); const errors = await isolate(page, state); await openEditor(page);
+  await qtyInput(page).fill('16');
+  state.orderReadDelayMs = 3000;
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Order' }).click();
+  await expect(qtyInput(page)).toHaveValue('10');
+  state.orderReadDelayMs = 0;
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
+  expect(state.saves.map((r) => r.p_items[0].total_units_needed)).toEqual([10]);
+  expect(state.quantity).toBe(10); expect(errors).toEqual([]);
+});
+
+test('a conflict reload that finds no order keeps the unsaved draft on screen', async ({ page }) => {
+  const state = backend(); const errors = await isolate(page, state); await openEditor(page);
+  await qtyInput(page).fill('17');
+  state.version = 8;
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.getByRole('button', { name: 'Reload Order' })).toBeVisible();
+  state.missingOrder = true;
+  await page.getByRole('button', { name: 'Reload Order' }).click();
+  await expect(page.getByText(/Reload could not finish/)).toBeVisible();
+  await expect(page.getByText('Order not found')).toHaveCount(0);
+  await expect(qtyInput(page)).toHaveValue('17');
+  expect(state.saves).toHaveLength(1); expect(errors).toEqual([]);
+});
 
 test('a missing version fails the read closed and sends no save', async ({ page }) => {
   const state = backend(); state.missingVersion = true; await isolate(page, state);

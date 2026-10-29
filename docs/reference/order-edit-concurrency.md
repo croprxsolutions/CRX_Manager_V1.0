@@ -112,3 +112,25 @@ The unpublished local branch was refreshed onto `origin/main` at `9b7150416`. Up
 changes include planning documentation and CI/final-review tooling; product code and
 SQL in this candidate were unchanged by the rebases. Scoped security and drift reviews are clear;
 the final local agent-workflow test suite also passed.
+
+## CodeRabbit review — 2026-10-29
+
+CodeRabbit's full review of `33f9b0a15` raised four comments; two were fixed and two answered with evidence.
+
+- **Fixed (Major):** a conflict reload that finds no order now keeps the unsaved editor and its
+  draft on screen ("Reload could not finish") instead of replacing the page with "Order not
+  found". Cancel still leaves the editor.
+- **Fixed (Minor):** Cancel now restores the last loaded draft and version at once, so reopening
+  Edit before the follow-up reload lands never shows or saves the discarded edits. After a
+  successful save, an early reopen already fails closed: the save advanced the version, so the
+  stale draft is refused with the conflict dialog.
+- Both fixes have browser proofs in `tests/order-edit-ui/order-edit-concurrency.spec.ts`; each
+  new test failed on the previous code and passes now (all six scenarios pass).
+- **Refuted (Minor):** binding the below-cost approval reason into the replay request. A replay
+  writes nothing: it returns the receipt of the write that was already approved and audited, and
+  only that actor's exact edit under the same key can reach it. Line-level below-cost enforcement
+  runs on every written line. Excluding the reason lets a retry after a lost reply replay instead
+  of being refused, which is the intended design.
+- **Deferred (Minor):** blend-ticket numbers take their year from the database (UTC) date. The
+  quote and order number generators use the same rule; changing one alone would make them
+  disagree, so all three stay with KI-18 in `docs/manual/KNOWN_ISSUES.md`.

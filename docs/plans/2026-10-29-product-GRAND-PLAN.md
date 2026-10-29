@@ -1,6 +1,6 @@
 # Product grand plan: product setup and the product data the rest of the app reads
 
-**Status: PLAN, 2026-10-29, reviewed by Sol the same day; Mason answered its five questions the same day (section 10). NOT STARTED.** Mason, in chat, 2026-10-29: "lets work through all of these Ideas since it all goes with our grain product master work in a way and all other functions of app will use these values for rest of app to work, we need all of this setup aswell so lets fold this into a grand plan, then send it all to Sol for review and make this another phase or revalute all of this work with our product master plan we just built." Sol (`gpt-6-sol`, high, advisory, read-only) returned 56 findings, 4 of them BLOCKERs. 55 are folded in below; 1 was refuted with evidence (section 11). Nothing here authorizes building. Building starts when Mason says so.
+**Status: PLAN, 2026-10-29, reviewed by Sol the same day. Mason answered its five questions the same day, then added the setup spreadsheet, vendors, one parent record per chemical, bulk by the gallon and a label link, and dropped CFU counts (overlaps 11 to 15; second Sol review in section 11). NOT STARTED.** Mason, in chat, 2026-10-29: "lets work through all of these Ideas since it all goes with our grain product master work in a way and all other functions of app will use these values for rest of app to work, we need all of this setup aswell so lets fold this into a grand plan, then send it all to Sol for review and make this another phase or revalute all of this work with our product master plan we just built." Sol (`gpt-6-sol`, high, advisory, read-only) returned 56 findings, 4 of them BLOCKERs. 55 are folded in below; 1 was refuted with evidence (section 11). Nothing here authorizes building. Building starts when Mason says so.
 
 **What this plan is.** One ordered map of all product work:
 - the October Product Master packages;
@@ -46,16 +46,16 @@ It doesn't replace the detailed documents. It says:
 
 | Stage | Purpose | Packages | Source | To-Do row |
 |---|---|---|---|---|
-| **1** | Product setup works and is checked by the database | WP-PM-1 to WP-PM-14, plus DM-0 | Build sheet | 2.10 |
-| **2** | The mechanisms for weight, chemistry, EPA data and registration status | DM-2, DM-1, REG-1, DM-4, DM-1b, DM-5 | Refresh plan, August 1b and WP-5 | 2.9 |
+| **1** | Product setup works and is checked by the database; the setup spreadsheet; vendors on the product page; a label link | WP-PM-1 to WP-PM-16, plus DM-0 | Build sheet | 2.10 |
+| **2** | One parent record per chemical, then the mechanisms for weight, chemistry, EPA data and registration status | PAR-1, PAR-2, DM-2, DM-1, REG-1, DM-4, DM-1b | Mason 2026-10-29, refresh plan, August 1b, WP-5 and Phase 5 | 2.9 |
 | **3** | Brands: which real brand filled a generic | Brand PR B, the cancelled-registration warnings, step 2 | Brand plan | 2.8 |
 | **4** | Rates are trustworthy: low, high and recommended values, one quoting default, clean units | RT-1 to RT-4 | August Phase 2 | 2.11 |
 | **5** | Compare products by chemistry, cost and price | CMP-2 | August Phase 3 | 2.12 |
 | **6** | Use guidance: crop and timing pairs, adjuvants, label link, quoting notes | USE-1 to USE-3 | August Phase 4 | 2.13 |
-| **7** | Families, pack sizes and return policy | FAM-1, FAM-2, RET-1 | August Phases 5 and 0b | Later (CAN-WAIT) |
+| **7** | Suggested groupings for leftovers, and return policy | FAM-1, RET-1 | August Phases 5 and 0b | Later (CAN-WAIT) |
 | **8** | Clean-up: retire `unit_size`, retire `ingredient_map`, the name-vs-brand check | CLN-1 to CLN-3 | August Phases 7 and 3.8, B-16 | 2.14 |
 | **9** | Product images | IMG-1 | August Phase 8 | Later (CAN-WAIT) |
-| **Data** | Filling the catalog: Mason's and an agent's time, not code | DATA-1 to DATA-8 | Section 7 | With each stage |
+| **Data** | Filling the catalog: Mason's and an agent's time, not code | DATA-1 to DATA-11 | Section 7 | With each stage |
 
 Stage 1 and the Stage 2 designs are already detailed and Sol-reviewed. Stages 4 to 9 are designed here at "approach and done when" level. Each gets a full build-sheet treatment, and its own Sol review, before it is built.
 
@@ -109,6 +109,11 @@ From a read-only check of `main` on 2026-10-29. Re-check each at build time.
 - `BrandVsGeneric.tsx` reads `ingredient_map`, and can insert, update and delete in it. Sales reps can open it.
 - Cost is loaded and shown for admins only (`withAdminCosts`, `isAdmin`). The database also refuses cost reads for non-admins.
 
+**Vendors and pack sizes** (read-only live check, 2026-10-29)
+- `products.vendor` is one text field: the default vendor. A new purchase order pre-fills it but accepts any vendor (`NewPurchaseOrder.tsx:168`), and "Need Reordering" groups by it (`InventoryPage.tsx:1502`).
+- `product_supplier_links` already links one product to many vendors, each with the vendor's item name, item number, pack and unit conversion, and an `is_preferred` flag. The database allows at most one confirmed, active preferred link per product (`uq_product_supplier_links_preferred`, `20260718225511`). Vendor costs are kept per vendor in `supplier_price_observations`. Only the Supplier Pricing page uses them; only 10 links exist live, across 10 products. 13 vendors exist.
+- Each sellable size is its own product row today. 134 product names contain "Bulk" and 56 rows are totes. `product_families` (0 rows) and `products.product_family_id` (unused) exist.
+
 **Returns**
 - `return_policy` has four values: 21 products are `no_return`, 2 are `returnable`, and the rest are `unknown`.
 - The return guard is active. There is no editor.
@@ -157,7 +162,7 @@ Every package in Stages 2 to 9 inherits all 11 rules in build sheet section 1 (`
 
 ## 4. Re-evaluation: where the August phases and the October packages overlap
 
-Folding the plans together found ten places where two plans would build the same thing twice, or where one would undo the other. Each is settled below.
+Folding the plans together found ten places where two plans would build the same thing twice, or where one would undo the other (overlaps 1 to 10). Mason's additions the same day are overlaps 11 to 15. Each is settled below.
 
 ### 1. Use Timing vs crop and timing pairs (WP-PM-5, USE-1; Sol 7, 8, 40)
 "Post-Emerge Corn" is a crop and a timing written as one label.
@@ -196,11 +201,10 @@ The live `validate_product_units` check matches unit spellings exactly, includin
 ### 5. Workbooks: price, detail and chemistry proposals (WP-PM-11a, DM-1b; Sol 15 to 19)
 **Settled: there are two files with separate operations.**
 - **The price workbook** (exists today) stays the price file, through its own price RPC and approvals.
-  - **Its rate columns become read-only in WP-PM-11a**, keeping D-C. Rates are then edited only on the product page and through import, until RT-4.
-  - This removes a way to edit rates in bulk; Mason agreed (2026-10-29, question 2).
-- **The detail workbook** (new in WP-PM-11a) is a separate file for setup fields, with its own repeat-safe detail RPC.
+  - **Its rate columns become read-only in WP-PM-11a**, keeping D-C. Rates move to the setup workbook's Rates tab (overlap 11), so there is one spreadsheet place for rates.
+- **The setup workbook** (new in WP-PM-11a; called "detail workbook" before overlap 11) is a separate file for everything except prices, with one repeat-safe RPC per tab.
   - DM-1b later adds Ingredients and Crop Uses tabs to *this* file. They are uploaded through a proposal RPC, never live (D-Z).
-  - It never has writable rate columns.
+  - Its Rates tab writes only through the one rate-writing function (overlap 6), and obeys the rate lock (overlap 11).
 - The previews can share screen code; the operations never mix price approval with detail changes.
 
 **DM-1b also carries August's workbook rules:**
@@ -224,6 +228,8 @@ The live `validate_product_units` check matches unit spellings exactly, includin
   Its sibling rule: same formulation, same safener and same manufacturer, never `sourcing_tier` (D-X).
 - DM-5 also carries the searchable **nickname** (August PRD 1.15; Sol 56): stored with its permissions, and searched on Products and in the QuoteBuilder picker.
 - FAM-1 derives families; it adds no copy path.
+
+**Superseded in part by overlap 13 (Mason, 2026-10-29):** with one parent record per chemical, shared values are entered once on the parent and reach every size, so DM-5's copy step is no longer needed and is dropped. The nickname moves to PAR-1. WP-PM-6b's basic Duplicate stays.
 
 ### 8. EPA registration status and the label link (REG-1, USE-2, Stage 3; Sol 5, 20 to 22)
 A generic has several EPA numbers, one per brand row.
@@ -266,6 +272,190 @@ The RUP count is known wrong ("there are a lot more").
 
 ---
 
+### 11. Setting up from a spreadsheet, then locking rates (WP-PM-11a, WP-PM-10, RT-1 to RT-4; Mason, 2026-10-29; Sol round 2: 2, 4 to 9, 11, 32)
+Mason: "allow rates and everything to be adjusted from spreadsheet to help our initial setup ... i can edit that sheet to lock those rates once we get done." This replaces his earlier answer to question 2 (section 10).
+
+**One setup workbook (WP-PM-11a)**, separate from the price workbook:
+- **Tabs:** Setup fields, Rates, and Vendors. Stage 2 adds Ingredients, Weights and Crop Uses.
+- **Uploading:** every upload shows a preview of each change, and nothing saves until it's confirmed.
+- **Confirming:** confirmation is **per tab**. The result screen shows exactly which rows saved.
+- **Stale rows:** a row changed by someone else since the download is refused with its name, so an old spreadsheet can't overwrite newer work.
+- **Grouping:** a workbook downloaded before products were grouped into parents (PAR-2) is refused as a whole.
+- **Per tab:** each tab has its own repeat-safe RPC, with a retry key and admin check, so price approval and setup changes never mix.
+
+**Rates have three states, and the lock is about the live ones:**
+- **Live:** what quotes, jobs and the field app use today.
+  - **Before RT-1:** today's `products` rate fields are the live rates.
+  - **After RT-4:** the approved quoting rows in `product_rates` are the live rates.
+- **Draft and approved:** RT-1's `product_rates` rows before they go live.
+  - Drafts stay editable in the Rates tab during Mason's review (RT-3), **even while the lock is on**, because they aren't used anywhere yet.
+  - An approved row can be changed only by going back to draft and being approved again.
+
+**The "Lock rates" switch locks the live rates:**
+- **Enforced in the database, not just on screen.** Every way of writing a live rate is refused while it is on, through a check that runs on the rate columns themselves:
+  - today's `products` rate columns, through any route: spreadsheet, import, list, product page, the price workbook, direct table writes, `LabelDataQuality`;
+  - and, after RT-4, the live `product_rates` rows.
+- **The full list of write routes** is made from the code and the database when WP-PM-11a is built, and each route is proven refused.
+- **No race with an upload:** switching the lock and writing a rate take turns on the same lock record. An upload that started before the switch can't save after it.
+- **Who can switch it:** question 11. Every switch records who, when and a reason. The log shows any period it was off, and every rate change made in that period.
+- **The one exception while locked** is a dedicated admin correction operation:
+  - one product at a time;
+  - with a required reason;
+  - with the product's expected version, so a stale correction is refused;
+  - with a retry key;
+  - never in a batch, never as a direct table write.
+
+  It is logged like any rate change.
+
+**Order:**
+- Setup and review happen with the lock off.
+- Mason turns it on when setup is done.
+- RT-3's review runs on drafts, so it is unaffected.
+- RT-4 promotes approved rows to live, one parent at a time.
+
+**Rollback copy.** The snapshot RT-4 takes of the old live rates is never written again after it is taken. Only RT-4's own internal step keeps the old columns matched to the new live rows; the lock refuses everything else.
+
+**After PAR-1**, house rates belong to the parent record (overlap 13), so the Rates tab and the quoting default have one row per parent, and every size uses it.
+- **When sizes disagree:** if sizes entered rates separately before grouping and they disagree, PAR-2 can't group them until Mason picks one value.
+
+### 12. One product, many vendors (WP-PM-15; Mason, 2026-10-29; Sol round 2: 22 to 26, 36)
+Mason: "a lot of chemical we normally go through Wells Ag Supply but I also order from other companies ... same exact product ... I do not want multiple of same chemicals just to segregate vendors."
+
+**Settled:** the vendor is never part of a product's identity. **New package WP-PM-15**, built on the existing `product_supplier_links` and `supplier_price_observations`:
+
+**Product page**
+- A **Vendors section** lists every vendor the product is bought from: the vendor's item name, item number, pack and last cost.
+- Linking goes through the existing `upsert_product_supplier_link`, brought up to the retry-key rule (section 3, rule 4) if it isn't already.
+
+**Preferred vendor**
+- **A product with any active vendor link has exactly one preferred.** The database already allows at most one.
+  - WP-PM-15 adds the other half: deactivating or unlinking the preferred vendor is refused until another is chosen. A product with no links has no preferred vendor and shows "No vendor".
+- **The vendor record is authoritative, not the name.** `products.vendor` (text) becomes a read-only display copy of the preferred vendor's name, kept in step by the database:
+  - when the preferred vendor changes;
+  - when the vendor is renamed;
+  - when the link is deactivated or removed.
+- A direct edit of the text is refused.
+
+**Readers to check, each with its expected behaviour:**
+- the new-PO pre-fill (`NewPurchaseOrder.tsx`);
+- Need Reordering grouping (`InventoryPage.tsx`);
+- the receiving vendor filter (`QuickReceivePanel.tsx`);
+- bulk PO import (`BulkPOImport.tsx`);
+- the field app and job lines (`FieldAppChemicalEntry.tsx`, `JobDetail.tsx`).
+
+Current suggestions follow the new preferred vendor. **Historical POs, receipts and invoices keep the vendor recorded at the time** and are never rewritten.
+
+**Purchase orders and reordering**
+- **A new purchase order** suggests the preferred vendor and its last cost, and any linked vendor can be chosen. Typing an unlinked vendor offers to link it.
+- **The suggested cost is converted to the PO's unit** using that vendor link's pack conversion, and shows its date and source.
+  - If it can't be converted (no conversion on the link), no cost is suggested rather than a wrong one.
+- **Need Reordering** groups by preferred vendor and shows the other vendors' last cost beside it.
+
+**Cost visibility:** cost is admin-only **in the database**: the read policies on links, observations and the RPC responses, tested by a non-admin's direct requests, not only the screen.
+
+### 13. One parent record per chemical, with each size as its own row (PAR-1, PAR-2; Mason, 2026-10-29; Sol round 2: 3, 10, 12 to 21, 35, 37)
+Mason: "some chemical comes in different container sizes ... dry some are 5lb some are 10lb, liquid generally is 2.5 if package but bulk size changes on totes."
+
+**Settled:**
+- **Each sellable size stays its own product row**, with the same product ID it has today, because price, SKU, stock and reorder point differ by size. Quotes, orders, invoices and inventory keep working.
+- **A parent record** sits above the size rows. It is a **new table**, not the old empty `product_families` table: Stage 7's suggested groupings mean something different, and keep that table.
+
+**A parent is one exact formulation, not just "the same chemical".** These are always separate parents:
+- a different strength or formulation type;
+- a different safener;
+- a different label (generic registration);
+- a different quality tier: `Gen Liberty` and `Gen Liberty: Higher Quality` (D-O, D-X).
+
+**Where each value lives** (Sol: label facts follow the EPA number, not the parent):
+
+| Level | Values | Entered |
+|---|---|---|
+| **Parent** (the formulation) | Category, Use Timing, active ingredients and strength, weight per gallon (liquids), formulation type and safener, house rates and the quoting default, nickname, and the list of EPA registrations it carries | Once per formulation |
+| **Registration** (each EPA number: the generic's own and each brand's; REG-1) | Signal word, RUP, REI/PHI, label maximum rates, registration status, label link, manufacturer of that brand | Once per EPA number |
+| **Size** (each product row) | SKU, container size and unit, **net weight for a dry package** (a 5-lb and a 10-lb bag differ), prices, cost, stock, reorder point, vendor links, return policy and any container charge | Once per size |
+
+**Which label facts appear on a sale or RUP record:**
+- **Today:** the generic's own registration.
+- **Once the delivered brand is recorded (Stage 3):** the delivered brand's registration.
+
+Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn't touch them.
+
+**How sizes see the parent's values: decided in PAR-1's own design review, against these rules:**
+- Sol prefers sizes **reading through** to the parent. **Copying** the values down to each size row keeps the 93 rate readers unchanged, but stores one fact many times.
+- **Either way:**
+  - a parent edit is **one** recorded change (who, when, old and new) with its effect on each size traceable, and all-or-nothing;
+  - it uses its own version number, so it never collides with the `pricing_version` check on price edits;
+  - editing a shared value on a size row is refused, naming the parent;
+  - the change-history trigger (WP-PM-12a) records it once, without repeating entries or looping.
+- **Permissions:** PAR-1's plan lists every grant, revoke and trigger privilege before its migration is applied. Any change to existing `products` permissions needs Mason's `I approve` (section 3, rule 2).
+
+**Duplicate after PAR-1** asks which one you mean:
+- **"Add a size"**: a new row under the same parent, sharing everything at parent and registration level;
+- **"New product"**: a new parent, with the formulation fields to confirm.
+
+**Brands** (`product_brands`, one list per size row today) move up with registrations to the parent. So brand PR B is built **after** PAR-1's design is settled (Stage 3).
+
+**Where chemistry comes from (D-Z), decided per registration:**
+- If **any** registration on a parent has a usable EPA number, the chemistry comes only through EPA proposals.
+- Clearing the generic's own number doesn't make the parent eligible for spreadsheet chemistry while a brand registration remains.
+
+**PAR-2 groups the existing ~600 rows:**
+- The app builds a **fixed, versioned proposal** of groups from name, EPA number and manufacturer. These are suggestions only, since EPA data is known to be incomplete.
+- **What Mason sees for each group:**
+  - its members;
+  - every field where they disagree;
+  - the value that will result.
+- **Approval:** a field where members disagree can't be approved until Mason picks the value. A group or a batch is approved as shown, and a proposal that changed since he saw it is refused.
+- **What grouping never changes:**
+  - product IDs;
+  - units;
+  - stock, or any old order, invoice or ledger row.
+- **Proof:**
+  - a read-only baseline of representative quotes, jobs, invoices and inventory balances is captured first;
+  - the same reads are compared in the harness after grouping;
+  - references and balances match, not just row counts.
+
+**Order:** PAR-1 and PAR-2 come first in Stage 2, before weight and ingredients, so that data is typed once per formulation, not once per size. This brings forward August Phase 5's pack-size half and replaces DM-5's copy step (overlap 7).
+
+### 14. Bulk is sold by the gallon (DM-0, PAR-2; Mason, 2026-10-29; Sol round 2: 28 to 31)
+**Settled:**
+- Each formulation has **one Bulk product sold by the gallon**: a size row under its parent, whatever tote it goes out in. 134 rows already have "Bulk" in their name.
+- **The tote is the container, not the product.** A tote's size changing never creates a new product.
+- **A fixed package sold as a unit** (for example, a 265-gal no-return tote) stays its own size row, as today.
+
+**Before any change:** the 56 tote rows and the Bulk rows are audited, read-only:
+- their units, prices and stock;
+- every open order, PO and job that uses them.
+
+**Mason marks each tote row** as either a real fixed package or a duplicate of the Bulk row.
+- No quantity is converted without his approval of that conversion.
+- Money and inventory totals are compared before and after, in the harness.
+
+**Delivery records the quantity per brand** (Stage 3), whatever the container. Container or lot tracking is never a prerequisite (August R-5).
+
+**Business facts needed from Mason** (questions 12 and 13):
+- whether fixed totes are filled from the bulk supply (one stock pool) or arrive pre-filled;
+- how tote deposits and returns work.
+
+Return policy and any container charge stay on the sellable size, never on the parent.
+
+### 15. A label link on every product (WP-PM-16, REG-1, USE-2; Mason, 2026-10-29)
+Mason: "add a link to the label online of every product to easily review the label once get the epa number in."
+
+**Today:** the EPA lookup already finds a product's latest label PDF (`supabase/functions/epa-lookup/logic.ts`, `latestLabelPdfUrl`). But the product page shows that link only right after a lookup is run (`ProductDetail.tsx:1146`), and it is never saved.
+
+**Settled:**
+- **WP-PM-16 (Stage 1, early, screen only):**
+  - Every product with an EPA number gets a **"View label"** button on the product page, and each brand row gets one for its own EPA number.
+  - It opens EPA's public label search for that number, which needs nothing stored. The exact address format is confirmed at build time.
+  - A product with no EPA number shows "Add an EPA number to see the label".
+  - After a lookup, the latest label PDF also opens directly, as today.
+- **REG-1 (Stage 2)** then saves the latest label PDF link and its date for each EPA number, so "View label" opens the PDF itself. USE-2 reads it from there.
+- **Done when (WP-PM-16):**
+  - On three real products with EPA numbers and one brand row, "View label" opens EPA's page for that exact number.
+  - A product without a number shows the hint.
+  - Nothing is written to the database.
+
 ## 5. Stage 1: Product Master
 
 The build sheet's packages, in its section 4 order, with these changes from section 4 above. They are copied into the build sheet in the same change as this plan:
@@ -274,29 +464,52 @@ The build sheet's packages, in its section 4 order, with these changes from sect
 |---|---|---|
 | 1 | WP-PM-1 Dropdowns | none |
 | 2 | **WP-PM-14 RUP "known incomplete" notice** (new, small, no database change) | overlap 10 |
-| 3 | WP-PM-2 💲 Pricing page | none |
-| 4 | WP-PM-4 💲 Sales sheet and list | none |
-| 5 | WP-PM-12a Change history | none |
-| 6 | WP-PM-3 Turning products off | none |
-| 7 | WP-PM-8 Setup checks | rate help text stays true after RT-1 (overlap 4) |
-| 8 | WP-PM-9 Forms, units, containers | no aliases; conversion row, form and container rule per new spelling, tested first (overlap 3) |
-| 9 | **DM-0 Data hygiene** (moved here) | overlap 9; Mason's SKU and duplicate step |
-| 10 | WP-PM-5 Use Timing | option codes, timing codes, optional crop (overlap 1) |
-| 11 | WP-PM-6a 💲 Unit audit | per-row approval by Mason; history preserved; lists the remaining `unit_size` readers (overlap 2) |
-| 12 | WP-PM-6b 💲 New-product flow and basic Duplicate | the chemistry copy moves to DM-5 (overlap 7) |
-| 13 | WP-PM-7 💲 One cost path and the tier-order warning | none |
-| 14 | WP-PM-10 Bulk import | one rate-writing function; merges after DM-0's data step (overlaps 6, 9) |
-| 15 | WP-PM-11a Detail workbook | a separate file and RPC; price workbook rate columns become read-only; merges after DM-0's data step (overlaps 5, 9) |
-| 16 | WP-PM-11b List editing | none |
-| 17 | WP-PM-12b Corrections | none |
-| 18 | WP-PM-13 Reorder display | none |
+| 3 | **WP-PM-16 "View label" link** (new, small, no database change) | overlap 15 |
+| 4 | WP-PM-2 💲 Pricing page | none |
+| 5 | WP-PM-4 💲 Sales sheet and list | none |
+| 6 | WP-PM-12a Change history | none |
+| 7 | WP-PM-3 Turning products off | none |
+| 8 | WP-PM-8 Setup checks | rate help text stays true after RT-1 (overlap 4) |
+| 9 | WP-PM-9 Forms, units, containers | no aliases; conversion row, form and container rule per new spelling, tested first (overlap 3) |
+| 10 | **DM-0 Data hygiene** (moved here) | overlap 9; Mason's SKU and duplicate step, plus the vendor-split and tote review (overlaps 12, 14) |
+| 11 | WP-PM-5 Use Timing | option codes, timing codes, optional crop (overlap 1) |
+| 12 | WP-PM-6a 💲 Unit audit | per-row approval by Mason; history preserved; lists the remaining `unit_size` readers (overlap 2) |
+| 13 | WP-PM-6b 💲 New-product flow and basic Duplicate | no chemistry copy (DM-5 dropped); after PAR-1, Duplicate becomes "Add a size" or "New product" (overlaps 7, 13) |
+| 14 | WP-PM-7 💲 One cost path and the tier-order warning | none |
+| 15 | **WP-PM-15 💲 Vendors on the product page** (new) | overlap 12; uses the existing supplier links |
+| 16 | WP-PM-10 Bulk import | one rate-writing function; obeys the rate lock; merges after DM-0's data step (overlaps 6, 9, 11) |
+| 17 | WP-PM-11a **Setup workbook** | one file with Setup, Rates and Vendors tabs; the "Lock rates" switch; price workbook rate columns become read-only; merges after DM-0's data step (overlaps 5, 9, 11) |
+| 18 | WP-PM-11b List editing | none |
+| 19 | WP-PM-12b Corrections | none |
+| 20 | WP-PM-13 Reorder display | none |
 
 The overnight loop (`docs/plans/2026-10-28-product-master-loop-MISSION.md`) runs Stage 1 only, in this order. DM-0's data step parks for Mason.
 
 ## 6. Stages 2 to 9
 
-### Stage 2: weight, chemistry, EPA data (To-Do 2.9). Mason's order: weight first.
-Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Catalog coverage is tracked in section 7.
+### Stage 2: parent records, then weight, chemistry, EPA data (To-Do 2.9). Mason's order: weight before chemistry.
+Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Catalog coverage is tracked in section 7. From PAR-1 on, formulation values (weight per gallon, ingredients, house rates) live on the parent, label facts live on each EPA registration (REG-1), and size values stay on each row (overlap 13's table).
+
+**PAR-1 · Parent record per formulation, plus nickname** (overlap 13; August PRD 1.15)
+- **Done when (in the harness):**
+  - A liquid parent with a 2.5-gal jug, a fixed 265-gal tote and a Bulk size: changing its category, Use Timing or house rate on the parent changes it for all three sizes in one recorded change.
+  - A dry parent with a 5-lb and a 10-lb bag: each keeps its own net weight.
+  - Editing a parent-level value on one size row is refused, naming the parent.
+  - A size's own price, SKU and stock change without touching its siblings, and a price edit's `pricing_version` check is unaffected by a parent edit made at the same time.
+  - Two people editing the same parent: the second, stale edit is refused.
+  - The change history shows one entry per parent edit, with each size's effect traceable.
+  - "Add a size" and "New product" each create what they say.
+  - Typing "Generic Callisto" finds the product on Products and in the quote picker.
+  - A non-admin edit and a direct table write are refused, and a repeated request with the same retry key writes once.
+
+**PAR-2 · Grouping existing products into parents** (overlap 13; DATA-9)
+- **Done when (in the harness, against a copy of the live structure and data):**
+  - The app proposes groups, and nothing is grouped until Mason approves a group or batch as shown.
+  - `Gen Liberty` and `Gen Liberty: Higher Quality`, and a safened and an unsafened product, are never proposed as one group.
+  - A group whose sizes disagree on a parent-level value (for example, two different house rates or REIs) can't be approved until Mason picks the value.
+  - A proposal that changed after Mason saw it is refused.
+  - The read-only baseline (representative quotes, jobs, invoices and inventory balances) matches after grouping, references and balances included.
+  - Every product ID still exists and still resolves on old records.
 
 **DM-2 · Weight per gallon and dry net weight** (refresh plan; August WP-2, D-B, D-M; Sol 30 to 32)
 - **Scope:**
@@ -318,7 +531,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - ingredient rows with strength and basis;
   - mode-of-action rows;
   - full fertilizer analysis, with oxide vs elemental kept apart and convertible;
-  - biological CFU units;
+  - biologicals store no strength: their CFU count isn't on the registered label (Mason, 2026-10-29), so a biological's ingredient record is optional and never compared;
   - "unknown" concentration kept apart from zero;
   - formulation type and safener.
 - **D-A's three rules:**
@@ -331,7 +544,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
 - **Done when:**
   - Two products with the same active show comparable lb of active per gallon and cost per lb, hand-checked on two real labels.
   - A salt, an acid-equivalent, an oxide/elemental and an isomer case each convert or refuse as D-A says.
-  - A biological saves a CFU figure.
+  - A biological saves with no strength and is left out of every comparison.
 
 **REG-1 · Registration status per EPA number** (overlap 8)
 - **Done when:**
@@ -356,15 +569,10 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - A product with a usable EPA number has its workbook chemistry refused by name.
   - A repeated upload with the same retry key writes once.
 
-**DM-5 · Copy from a sibling, plus nickname** (overlap 7)
-- **Done when:**
-  - A copy from a matching sibling moves ingredients, density and brands in one step.
-  - A copy to a sibling with a different formulation or safener is refused.
-  - A stale version on either product refuses the whole copy.
-  - Typing "Generic Callisto" finds the product on Products and in the quote picker.
+**DM-5 · dropped (2026-10-29).** Parent records (PAR-1) replace copying between sizes; the nickname moved to PAR-1 (overlaps 7, 13).
 
 ### Stage 3: brands (To-Do 2.8, its own plan)
-Brand step 1 is partly live: the `product_brands` list and the Brands section. Next is **brand PR B**: pick the delivered brand, print its EPA number, and keep RUP records per brand. It can run beside Stage 2, but not at the same time as a package editing `ProductDetail.tsx`.
+Brand step 1 is partly live: the `product_brands` list and the Brands section. Next is **brand PR B**: pick the delivered brand, print its EPA number, and keep RUP records per brand. **PAR-1 moves brands up to the parent (overlap 13), so PR B is built after PAR-1's design is settled**, against that structure, and not at the same time as a package editing `ProductDetail.tsx`.
 
 **Carried forward from August WP-3 (Sol 6)** into PR B's acceptance:
 - a brand must be picked at receiving and delivery when the product has brands;
@@ -402,15 +610,17 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - Each step is checked in the harness, with the recovery path run once.
 
 **RT-3 · Mason's rate review** (2.6, 2.10; Sol 26)
-- Each draft row is approved or corrected by Mason, with who and when recorded, and its source text kept (`suggested_rate`).
+- Each draft row is approved or corrected by Mason, with who and when recorded, and its source text kept (`suggested_rate`). Mason reviews in the setup workbook's Rates tab (overlap 11): download, correct, upload, confirm the preview. Drafts stay editable while the live-rate lock is on.
 - An unapproved row can't be promoted.
 - **Done when:**
   - Every row has a recorded decision, including all 37 per-100-gal rows.
   - Representative quote, application and seed-treatment products show the expected quantities in the harness.
 
 **RT-4 · Cut-over** (2.3, 2.4b, 2.9, 2.9a, D-F; overlap 6)
-- **The flag:** a read switch, `product_rate_source_mode`, per product for a pilot first.
-- **Rollback:** the old values are preserved as a frozen copy, so `legacy` mode reads them, not a mirror of the new values.
+- **Before it starts:** the "Lock rates" switch is on (overlap 11).
+- **The key:** the quoting default and the cut-over are per **parent** (PAR-1), so all sizes of a formulation switch together; no size is left on old rates while a sibling is on new ones.
+- **The flag:** a read switch, `product_rate_source_mode`, per parent for a pilot first.
+- **Rollback:** the old values are copied once into a snapshot that is never written again, so `legacy` mode reads them, not a mirror of the new values.
 - **After the pilot is watched:**
   - the old columns become a trigger-kept copy of the approved default;
   - direct app writes are revoked (Mason-gated);
@@ -418,7 +628,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - the field app's invented `'oz'` is removed.
 - **Done when:**
   - A pilot product reads its approved rate.
-  - Flipping it back restores the exact old reading.
+  - Flipping it back restores the exact old reading, and a correction made after cut-over doesn't change the snapshot.
   - A product with only a per-unit rate auto-fills blank on a quote.
   - A direct column write fails.
   - Every writer listed in the re-audit is proven.
@@ -456,7 +666,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - A category change clears them after a confirm (Mason, 2026-10-28).
 
 **USE-2 · Label link and adjuvants**
-- The label comes from REG-1.
+- The label link exists from Stage 1 (WP-PM-16); REG-1 saves the PDF link per EPA number.
 - Each product has a required or recommended adjuvant, with its type.
 - **Behaviour (Mason, 2026-10-29):** warn when quoting, never block.
 - **Done when:**
@@ -470,9 +680,11 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - After an approved batch, a new quote line uses the new note.
   - Existing quotes keep theirs.
 
-### Stage 7: families, pack sizes and returns (Mason: return policy "Later"; Sol 35 to 39)
-**FAM-1 · Families**
-- Families are derived from DM-1's specific ingredient rows and strength, plus the shared parent EPA registration.
+### Stage 7: suggested groupings and returns (Mason: return policy "Later"; Sol 35 to 39)
+Pack sizes and parent records moved to Stage 2 (PAR-1, PAR-2; overlap 13). What remains here:
+
+**FAM-1 · Suggested groupings for ungrouped products**
+- For products PAR-2 left ungrouped, groupings are suggested from DM-1's specific ingredient rows and strength, plus the shared parent EPA registration.
 - Each family is *proposed*, and only approved ones are written.
 - **Excluded or flagged:**
   - products with no ingredients are left out;
@@ -483,10 +695,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - The app proposes families, and nothing is written until approved.
   - A bulk row and a 2.5-gal row with different densities are flagged, not averaged.
 
-**FAM-2 · Pack sizes join their family**
-- **Done when:**
-  - A new size made with Duplicate is *proposed* for the family, and joins only on approval.
-  - A mismatched sibling is refused.
+**FAM-2 · moved:** a new size is added under its parent record in PAR-1.
 
 **RET-1 · Return-policy editor**
 - Four values: returnable, no return, not applicable, unknown.
@@ -541,24 +750,30 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 | DATA-6 | Label REI/PHI and max label rate | most products | EPA label drafts, reviewed | With DM-4 |
 | DATA-7 | RUP flags | count known wrong | EPA data and review; then WP-PM-14's notice comes off | With DM-4 |
 | DATA-8 | Return policies, reorder points, margin floors | about 581 unknown policies; 0 of 595 reorder points | Mason | Later; reorder points and floors are already To-Do 0.2 and 0.8 |
+| DATA-9 | Grouping sizes under parent records | about 600 rows; the app proposes groups | Mason approves each group | PAR-2 |
+| DATA-10 | Same-chemical rows split by vendor or tote: keep, or merge into one row | 56 tote rows; vendor-split rows from DM-0's list | Mason, in DM-0's review list (no hard deletes; each merge is approved with its stock, open orders, vendor links and price history mapped to the kept row, and stock moved by a recorded adjustment) | DM-0 (Stage 1) |
+| DATA-11 | Vendor links for each product | 10 links exist | Mason, in the setup workbook's Vendors tab | After WP-PM-15 and WP-PM-11a |
+
+**Type shared values once:** house rates, chemistry and weight per gallon are best entered after PAR-2, on the parent (once per formulation), and label facts once per EPA registration (REG-1), never once per size. Setup and clean-up of size rows (DATA-1, DATA-10, DATA-11) can start in Stage 1.
 
 **Order of entry (D-Y):** a ranked worklist from real orders and deliveries, refreshed when entry starts (Sol 54). Top sellers come first; the long tail is tracked after.
 
 ## 8. Full order across stages
 
-1. **Stage 1** in section 5's order (19 packages, including DM-0).
-2. **Stage 2:** DM-2 → DM-1 → REG-1 → DM-4 → DM-1b → DM-5. Data: DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
-3. **Stage 3:** brand PR B beside Stage 2, with care over shared files; the warnings after REG-1.
+1. **Stage 1** in section 5's order (20 packages: WP-PM-1 to WP-PM-16 and DM-0). Data: DATA-1 and DATA-10 (DM-0's review list), then DATA-11; rates in the setup workbook only if Mason wants them before parents exist (PAR-2 then asks him to settle any sizes that disagree).
+2. **Stage 2:** PAR-1 → PAR-2 → DM-2 → DM-1 → REG-1 → DM-4 → DM-1b. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
+3. **Stage 3:** brand PR B after PAR-1's design is settled, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
 4. **Stage 4:** RT-1 and RT-2 in either order, each on its own evidence. Then RT-3 (Mason's review), then RT-4.
 5. **Stage 5:** CMP-2 after RT-4.
 6. **Stage 6:** USE-1 (after WP-PM-5), then USE-2 (after REG-1), then USE-3.
 7. **Stage 8:** CLN-3 after brand PR B; CLN-1 after Stages 2 and 4; CLN-2 after CMP-2.
 8. **Stages 7 and 9** when Mason says so.
+9. **The rate lock** goes on when Mason finishes setup, and before RT-4.
 
 ## 9. To-Do list changes made with this plan
 
 - New row **2.10** (Stage 1, Product Master).
-- **2.9** (Stage 2) gains REG-1, DM-1b and DM-5.
+- **2.9** (Stage 2) gains PAR-1, PAR-2, REG-1 and DM-1b (DM-5 dropped).
 - **2.8** (Stage 3) gains the carried-forward brand requirements, and points to REG-1 for the warnings.
 - New rows **2.11** (rates), **2.12** (comparison), **2.13** (use guidance) and **2.14** (clean-up).
 - Stages 7 and 9 are added to the "Later features" list.
@@ -575,10 +790,22 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 
 **Answered by Mason, 2026-10-29** ("1. yes, 2. yes , 3. warn, 4. staff only for now, 5. yes"; DECISION_LOG 2026-10-29). Each as recommended:
 1. **Ranking:** Stage 1 (Product Master) and Stage 4 (rates) rank **SHOULD**, beside Stage 2. Stages 5, 6 and 8 rank SHOULD after those. Stages 7 and 9 are CAN-WAIT.
-2. **Rate editing in the price workbook:** **yes**, it stops. From WP-PM-11a until RT-4, rates change only on the product page and through import.
+2. **Rate editing in the price workbook:** **yes**, it stops. *Revised the same day:* rates move to the setup workbook's Rates tab and stay editable there until Mason turns on the rate lock (overlap 11).
 3. **Required adjuvants (USE-2):** **warn**, never block.
 4. **Product images (IMG-1):** **staff only** for now, in private storage.
 5. **Return-policy batch (RET-1), later:** **yes**, Mason approves the exact list before any batch applies.
+
+**Answered by Mason, 2026-10-29, second set** ("1. yes, 2. yes, 3. yes, 4. yes"; DECISION_LOG 2026-10-29):
+6. **Setup by spreadsheet, then lock:** yes (overlap 11).
+7. **One product, many vendors, one preferred:** yes (overlap 12).
+8. **One parent record per chemical, sizes as their own rows, moved early:** yes (overlap 13).
+9. **Bulk sold by the gallon, whatever the tote:** yes (overlap 14).
+
+**Open, suggested 2026-10-29, not yet answered:**
+10. **Categories.** Today there are 11 (Herbicide, Fungicide, Insecticide, Liquid Fertilizer, Foliar Fertilizer, Adjuvant, Seed Treatment, Dry Water Soluble Fertilizer, Other, Biological, Nitrogen Stabilizer). The box takes any typed text. Recommend: add a **"Seed"** category beside the new seed form, and lock categories to an admin-maintained list (like the Use Timing options). WP-PM-8 builds it if Mason says yes.
+11. **Who can turn the rate lock off** (overlap 11)? Recommend **only Mason's own account**, with a reason recorded each time, because the lock is his sign-off that the rates are right. (Any admin could still make a one-product correction with a reason while it's on.)
+12. **Fixed totes and bulk stock** (overlap 14): are fixed-size totes filled at your shop from your bulk supply, or do they arrive already filled from the vendor? This decides whether a tote's gallons come out of the Bulk stock count.
+13. **Tote deposits and returns** (overlap 14): do any totes carry a deposit or a charge, and come back to you or the vendor? This decides where the container charge and return rule are stored.
 
 ## 11. Sol review record (2026-10-29)
 
@@ -617,3 +844,24 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 | 52 | Stage 2 wording |
 | 53 | Overlap 10; WP-PM-14 |
 | 54 | Section 7 |
+
+### Second review (2026-10-29): Mason's additions, overlaps 11 to 14
+
+**Reviewer and run:** `gpt-6-sol`, high, advisory, read-only. It was given the diff of the additions, the full updated plan and the build sheet's sections 2a to 4. Exit 0; the tail canary was echoed; one verdict line. **38 findings: 3 BLOCKER, 25 HIGH, 9 MED, 1 LOW. All 38 accepted**, none refuted. Mason's two later changes (no CFU count; a label link, overlap 15) were added after this run, are small, and are recorded in the decision log.
+
+| Findings | Where it landed |
+|---|---|
+| 1 (BLOCKER) | DATA-10 moved to DM-0's review list; the setup workbook's Vendors tab only links vendors (DATA-11) |
+| 2 (BLOCKER), 4 to 9, 11, 32 | Overlap 11: three rate states, the lock on live rates only, database enforcement, race, unlock rule (question 11), correction operation, immutable snapshot, per-tab confirmation and stale-row refusal |
+| 3 (BLOCKER), 15, 21 | Overlap 13's table: label facts per EPA registration, net weight per size, D-Z per registration |
+| 10 | RT-4 keyed per parent |
+| 12 to 14 | Overlap 13: read-through vs copy decided in PAR-1's review against stated rules |
+| 16 | A new parent table; `product_families` left for Stage 7 |
+| 17, 18, 35, 37 | Overlap 13 (exact formulation identity) and PAR-2's proposal and baseline proof |
+| 19 | Duplicate becomes "Add a size" or "New product" |
+| 20 | Stage 3: PR B after PAR-1's design |
+| 22 to 26, 36 | Overlap 12 |
+| 27 | DATA-10: approved merges with mapping and recorded stock adjustment |
+| 28 to 31 | Overlap 14; questions 12 and 13 |
+| 33, 34 | Overlap 11 and 12 (retry keys, permissions); section 3 rules 2 to 4 apply to every new operation |
+| 38 | Section 1 and the Stage 1 table wording |

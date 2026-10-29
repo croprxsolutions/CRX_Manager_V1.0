@@ -57,7 +57,8 @@ ok(checkDangerousCommand('P=psql; $P -c "TRUNCATE customers"'), "client named by
 ok(checkDangerousCommand('docker exec db sh -c "TRUNCATE customers"'), "unknown program with -c beside TRUNCATE still blocked");
 // A search for the word is not a wipe (Mason, 2026-10-29).
 ok(!checkDangerousCommand('grep -c "TRUNCATE" supabase/migrations/x.sql'), "grep -c for TRUNCATE allowed");
-ok(!checkDangerousCommand('git log -c --grep "drop table" -- supabase'), "git log -c naming DROP TABLE allowed");
+ok(!checkDangerousCommand('git log --grep "drop table" -- supabase'), "git log naming DROP TABLE without a -c/-f flag allowed");
+ok(checkDangerousCommand(`git -c "alias.wipe=!$P --command 'TRUNCATE customers'" wipe`), "a git alias beside TRUNCATE stays refused (Sol, PR #1193)");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

@@ -345,12 +345,12 @@ export function checkAskCommand(cmd) {
 // when some command in the line is not a known search or read program. A client
 // name is matched with shell quoting removed, so `p''sql` still counts, and a
 // program named by a variable (`$P -c …`) is not a known reader, so it does too
-// (Luna, PR #1193). Accepted hole (Mason, 2026-10-29: "i am fine with holes"):
-// a git alias set with `git -c alias.x=!…` that runs a client named by a
-// variable is not seen, because `git` counts as a reader here.
+// (Luna, PR #1193). `git` is NOT a reader here: a `git -c alias.x=!…` alias can
+// run a client named by a variable (Sol, PR #1193), so `git log -c` beside
+// the words stays refused, as it was before.
 const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
 const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
-const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "git", "cat", "head", "tail", "wc", "ls"]);
+const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls"]);
 function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
   return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();

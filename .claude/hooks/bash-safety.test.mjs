@@ -50,6 +50,11 @@ ok(checkDangerousCommand("git filter-branch --force"), "filter-branch blocked");
 ok(checkDangerousCommand("rm -rf /etc"), "rm -rf /etc blocked (outside scratch allowlist)");
 ok(checkDangerousCommand("npm run nuke"), "npm run nuke blocked (literal script name)");
 ok(checkDangerousCommand('psql -c "DROP TABLE customers;"'), "psql DROP TABLE blocked");
+ok(checkDangerousCommand('psql "$DB_URL" -c "truncate customers"'), "psql TRUNCATE blocked, any case");
+ok(checkDangerousCommand('pgcli -e "DROP SCHEMA public"'), "pgcli DROP SCHEMA blocked");
+// A search for the word is not a wipe (Mason, 2026-10-29).
+ok(!checkDangerousCommand('grep -c "TRUNCATE" supabase/migrations/x.sql'), "grep -c for TRUNCATE allowed");
+ok(!checkDangerousCommand('git log -c --grep "drop table" -- supabase'), "git log -c naming DROP TABLE allowed");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

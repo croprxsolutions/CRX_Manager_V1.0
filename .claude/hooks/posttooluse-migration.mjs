@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 // PostToolUse migration reminder.
 // Reads the actual file path from the tool payload — no hallucinated filenames.
+//
+// The full checklist is shown once per migration file per session; later edits
+// of the same file get a one-line pointer back to it (Mason, 2026-10-29: the
+// eight steps were repeated on every edit). Any doubt about the record — no
+// session id, an unreadable or unwritable state file — shows the full list.
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 let payload;
@@ -19,7 +24,30 @@ if (!/supabase\/migrations\/.+\.sql$/.test(fp)) {
 
 const filename = path.posix.basename(fp);
 
-const reason = `MIGRATION SAFETY CHECK — You just created/edited ${filename}.
+// True when this session has already been shown the full checklist for this
+// file; records it otherwise. Only a plain session id names a state file.
+function alreadyReminded() {
+  const sessionId = payload?.session_id;
+  if (typeof sessionId !== "string" || !/^[a-z0-9_-]{1,128}$/i.test(sessionId)) return false;
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || payload?.cwd || process.cwd();
+  const dir = path.join(projectDir, ".claude", "session-state");
+  const file = path.join(dir, `migration-reminder-${sessionId.toLowerCase()}.json`);
+  let seen = [];
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    if (Array.isArray(parsed?.files)) seen = parsed.files.filter((f) => typeof f === "string");
+  } catch { /* no record yet */ }
+  if (seen.includes(filename)) return true;
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ files: [...seen, filename] }));
+  } catch { /* cannot record: the full list shows again next time */ }
+  return false;
+}
+
+const reason = alreadyReminded()
+  ? `MIGRATION SAFETY CHECK — ${filename} edited again. The full checklist shown on its first edit this session still applies: types, typecheck, the parallel reviewers before any apply, and the DB invariant sweeps after it.`
+  : `MIGRATION SAFETY CHECK — You just created/edited ${filename}.
 
 Before continuing, you MUST:
 1. Update src/types/index.ts to match any schema changes

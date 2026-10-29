@@ -31,12 +31,10 @@ function run(script, payload, { surface = "claude", projectDir } = {}) {
   return result.stdout.trim() ? JSON.parse(result.stdout) : null;
 }
 
-const promptCases = [
-  ["implement this fix", "Ship-It reminder"],
-];
-for (const [prompt, marker] of promptCases) {
-  const output = run(PROMPT, { prompt });
-  ok(output?.hookSpecificOutput?.additionalContext.includes(marker), `prompt router preserves ${marker}`);
+// The ship reminder is gone (Mason, 2026-10-29): an ordinary build request adds no context.
+{
+  const output = run(PROMPT, { prompt: "implement this fix" }, { projectDir: mkdtempSync(path.join(os.tmpdir(), "crx-router-ship-")) });
+  ok(!output?.hookSpecificOutput?.additionalContext?.includes("Ship-It reminder"), "prompt router no longer adds the Ship-It reminder");
 }
 // Unwired 2026-10-02 (Mason): these prompts no longer inject their reminders.
 for (const [prompt, marker] of [
@@ -49,11 +47,12 @@ for (const [prompt, marker] of [
   ok(!String(output?.hookSpecificOutput?.additionalContext || "").includes(marker), `prompt router no longer injects ${marker}`);
 }
 
-// The landing policy is stated once per turn.
+// The landing policy is no longer injected per prompt: it lived only in the ship
+// reminder, removed 2026-10-29, and AGENTS.md (loaded every session) states it.
+// The dedupe helper stays for any future module that embeds it.
 {
-  const shipOnly = run(PROMPT, { prompt: "implement this fix" });
-  eq((shipOnly?.hookSpecificOutput?.additionalContext.match(/LANDING POLICY: Mason's autonomous-landing rule/g) || []).length, 1, "a single reminder still carries the full policy");
-  ok(!shipOnly?.hookSpecificOutput?.additionalContext.includes("as stated above"), "nothing is replaced when the policy appears once");
+  const shipOnly = run(PROMPT, { prompt: "implement this fix" }, { projectDir: mkdtempSync(path.join(os.tmpdir(), "crx-router-policy-")) });
+  ok(!String(shipOnly?.hookSpecificOutput?.additionalContext || "").includes("LANDING POLICY"), "an ordinary prompt no longer carries the landing policy");
   // Pure helper, mutation-pinned: only an exact whole-block repeat is replaced.
   eq(dedupeContextBlocks(["A\n\nPOLICY\n\nB", "C\n\nPOLICY"], [{ text: "POLICY", replacement: "P2" }]), ["A\n\nPOLICY\n\nB", "C\n\nP2"], "second occurrence replaced, first kept");
   eq(dedupeContextBlocks(["POLICY-ish", "POLICY"], [{ text: "POLICY", replacement: "P2" }]), ["POLICY-ish", "P2"], "a superstring counts as carrying the block (exact substring match)");
@@ -99,6 +98,21 @@ try {
   ok(output?.hookSpecificOutput?.additionalContext.includes("MIGRATION SAFETY CHECK"), "migration reminder text is preserved as context");
   ok(existsSync(path.join(temp, ".claude", "session-state", "SESSION-HEARTBEAT")), "Claude PostToolUse router preserves heartbeat");
 
+  // Full checklist once per file per session, then a one-line pointer (Mason, 2026-10-29).
+  const migEdit = (file, session_id) => run(POST, {
+    session_id,
+    tool_name: "Edit",
+    tool_input: { file_path: path.join(temp, "supabase", "migrations", file) },
+  }, { projectDir: temp })?.hookSpecificOutput?.additionalContext || "";
+  ok(migEdit("20260827000001_once.sql", "sess-a").includes("Before continuing, you MUST"), "first edit of a file shows the full checklist");
+  const again = migEdit("20260827000001_once.sql", "sess-a");
+  ok(again.includes("edited again") && !again.includes("Before continuing, you MUST"), "second edit of the same file shows the one-line pointer");
+  ok(migEdit("20260827000002_other.sql", "sess-a").includes("Before continuing, you MUST"), "a different file gets its own full checklist");
+  ok(migEdit("20260827000001_once.sql", "sess-b").includes("Before continuing, you MUST"), "another session gets the full checklist again");
+  ok(run(POST, { tool_name: "Edit", tool_input: { file_path: path.join(temp, "supabase", "migrations", "20260827000001_once.sql") } },
+    { projectDir: temp })?.hookSpecificOutput?.additionalContext.includes("Before continuing, you MUST"),
+  "no session id always shows the full checklist");
+
   const stateDir = path.join(temp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(path.join(stateDir, "applied-migrations.json"), "{}\n");
@@ -120,8 +134,8 @@ try {
   rmSync(temp, { recursive: true, force: true });
 }
 
-eq(promptModulesFor("codex").length, 4, "Codex prompt router has four shared modules (ship reminder, hold latch, owner-approval reply, CodeRabbit skip)");
-eq(promptModulesFor("claude").length, 4, "Claude prompt router has no Claude-only modules");
+eq(promptModulesFor("codex").length, 3, "Codex prompt router has three shared modules (hold latch, owner-approval reply, CodeRabbit skip)");
+eq(promptModulesFor("claude").length, 3, "Claude prompt router has no Claude-only modules");
 eq(postToolModulesFor({ tool_name: "Edit" }, "claude"), ["./posttooluse-migration.mjs", "./eslint-autofix.mjs", "./session-heartbeat.mjs"], "write/edit path is explicit");
 eq(postToolModulesFor({ tool_name: "mcp__supabase__apply_migration" }, "codex"), ["./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs"], "Codex apply path is explicit");
 

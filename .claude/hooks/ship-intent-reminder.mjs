@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// UNWIRED (Mason, 2026-10-29): prompt-router.mjs no longer runs this module, so
+// nothing executes it. Kept only because the review proof guard reserves deleting
+// hook files for Mason; delete it with `git rm .claude/hooks/ship-intent-reminder.mjs`.
+//
 // UserPromptSubmit hook for CRX Manager.
 // Mason (zero coding experience) should never have to type a slash command. When he
 // expresses intent to BUILD / FIX / SHIP / PUSH / "go live" / "do it", this hook

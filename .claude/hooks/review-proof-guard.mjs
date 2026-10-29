@@ -657,14 +657,12 @@ if (shellTool) {
     // Staging/committing record content; they do not alter it.
     "add", "commit", "push", "worktree",
   ]);
-  // KNOWN OVER-BLOCK, pinned in the tests rather than papered over: this splits on
-  // `|` even inside quotes, so `grep -E "(a|b)" .husky/pre-push` becomes two
-  // segments and the second one's head is `b)"`, which is not allowlisted, so an
-  // ordinary read is refused. The workaround is two greps or a bracket class.
-  // Deliberately NOT fixed with a quote-aware splitter: that changes which text
-  // counts as a segment, and every mistake in that direction turns a denial into
-  // an ALLOW. Five review rounds on this file have each found a real bypass, so a
-  // false refusal is the acceptable failure and a speculative rewrite is not.
+  // This splits on `|` even inside quotes. It stays the general reading, because
+  // a quote-aware splitter changes which text counts as a segment and every
+  // mistake in that direction turns a denial into an ALLOW; five review rounds on
+  // this file each found a real bypass. The narrow exception for plain
+  // double-quoted reads (plainQuotedReadSegments, below) handles only the cases
+  // where every shell agrees on the quoting.
   const enforcementSegments = (cmd) =>
     String(cmd ?? "").split(/(?:\|\||&&|[;\r\n|&])+/).map((s) => s.trim()).filter(Boolean);
   // Resolve git's real subcommand past the global flags THAT TAKE A SEPARATE
@@ -991,13 +989,48 @@ if (shellTool) {
     }
     return false;
   };
+  // A PLAIN READ WITH A QUOTED `|` (Mason, 2026-10-29). enforcementSegments splits
+  // on `|` even inside quotes, so `grep -n "truncate\|TRUNCATE" .claude/hooks/x.mjs`
+  // became a segment headed `TRUNCATE`, read as the `truncate` writer, and the
+  // search was DENIED. This reading is used only where every shell in play agrees
+  // on the quoting: double quotes alone (no single quotes, backticks, escaped or
+  // caret-escaped quotes, substitutions or process substitution) and no command
+  // redefinition, nested execution or PATH change. It splits outside the quotes
+  // only, and it counts only when EVERY resulting segment is a bare program the
+  // fail-closed read-only allowlist vouches for, so a pipe into `bash`, `tee` or
+  // any unlisted program falls back to the old split and its denial. Redirects are
+  // still judged on every view.
+  const plainQuotedReadSegments = (cmd) => {
+    const text = String(cmd ?? "");
+    if (/['`]|\\"|\^"|\$\(|\$\{|[<>]\(/.test(text)) return null;
+    if (REDEFINES_COMMANDS_RE.test(text) || NESTED_EXECUTION_RE.test(text) || COMMAND_RESOLUTION_RE.test(text)) return null;
+    const segments = [];
+    let current = "";
+    let quoted = false;
+    for (const ch of text) {
+      if (ch === "\"") quoted = !quoted;
+      if (!quoted && /[;&|\r\n]/.test(ch)) {
+        segments.push(current);
+        current = "";
+        continue;
+      }
+      current += ch;
+    }
+    if (quoted) return null;
+    segments.push(current);
+    const parts = segments.map((s) => s.trim()).filter(Boolean);
+    return parts.length > 0 && parts.every((s) => /^[\w.-]+(?:\s|$)/.test(s) && enforcementSegmentIsReadOnly(s))
+      ? parts
+      : null;
+  };
+  const plainRead = plainQuotedReadSegments(command) !== null;
   if (destructiveViews.some((v) =>
     redirectTargetsEnforcementSurface(v) ||
-    enforcementSegments(v).some((seg) => namesEnforcementSurface(seg) &&
-      (segmentObviouslyWrites(seg) || flagValueNamesEnforcementSurface(seg))))) {
+    (!plainRead && enforcementSegments(v).some((seg) => namesEnforcementSurface(seg) &&
+      (segmentObviouslyWrites(seg) || flagValueNamesEnforcementSurface(seg)))))) {
     deny("REVIEW PROOF GUARD: shell commands that WRITE to .husky, .github/workflows, .claude/hooks, .codex/hooks, or .coderabbit.yaml are blocked — these decide whether the commit, push, CI, and review gates run at all. Reading them is always allowed. Change one deliberately through Edit/Write.");
   }
-  if (destructiveViews.some((v) =>
+  if (!plainRead && destructiveViews.some((v) =>
     ((REDEFINES_COMMANDS_RE.test(v) || NESTED_EXECUTION_RE.test(v) || COMMAND_RESOLUTION_RE.test(v)) &&
       namesEnforcementSurface(v)) ||
     enforcementSegments(v).some((seg) =>

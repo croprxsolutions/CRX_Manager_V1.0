@@ -886,6 +886,42 @@ for (const payload of [
   assert.equal(result.status, 0);
   assert.doesNotMatch(result.stdout, /permissionDecision/);
 }
+
+// A QUOTED `|` IN A PLAIN READ (Mason, 2026-10-29). The fragment after the `|`
+// used to be read as a command head, so a search for the word `truncate` was
+// DENIED as the `truncate` writer. Plain double-quoted reads are now split
+// outside the quotes: allowed, and with no warning.
+for (const command of [
+  'grep -n "truncate\\|TRUNCATE" .claude/hooks/sql-safety.mjs .claude/hooks/bash-safety-lib.mjs | head -30',
+  'grep -nE "rm|cp|mv" .husky/pre-push',
+  'grep -c "tee|dd" .github/workflows/ci.yml && wc -l .claude/hooks/sql-safety.mjs',
+  'git log --oneline -5 -- .claude/hooks | grep "rm\\|truncate"',
+]) {
+  assert.equal(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `plain quoted read allowed silently: ${command}`);
+}
+// …while a real write, or any doubt about the quoting, keeps the old split and
+// its denial: a pipe into a writer or a shell, a writer in its own segment,
+// single quotes (where shells disagree), a quoted command name, a substitution,
+// a redefinition, and a redirect.
+for (const command of [
+  'grep "x|y" .husky/pre-push | truncate -s 0 .husky/pre-push',
+  'grep "x" .claude/hooks/a.mjs; truncate -s 0 .claude/hooks/a.mjs',
+  'echo "a|b" | tee .husky/pre-push',
+  'grep \'"\' .husky/x | truncate -s 0 .husky/pre-push \'"\'',
+  'grep "a|b" x; "truncate" -s 0 .husky/pre-push',
+  'tr"uncate" -s 0 .husky/pre-push',
+  'grep "a|b" .husky/pre-push > .github/workflows/ci.yml',
+  'echo "rm .husky/pre-push" | bash; rm .husky/pre-push',
+]) {
+  assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);
+}
+// A substitution inside quotes still falls back to the old reading, so it is at
+// least WARNED (as before this change), never silently trusted as a plain read.
+for (const command of [
+  'grep "$(truncate -s 0 .husky/pre-push)" x',
+]) {
+  assert.notEqual(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `not trusted as a plain read: ${command}`);
+}
 // …while the bracket-class form of the same read is allowed, which is the
 // documented workaround. CodeRabbit, PR #530: this assertion used to pass a plain
 // literal (`grep -E typecheck …`) that contains neither a bracket class nor the

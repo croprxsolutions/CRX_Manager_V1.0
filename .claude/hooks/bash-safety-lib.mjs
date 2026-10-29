@@ -339,9 +339,12 @@ export function checkAskCommand(cmd) {
 
 // Destructive raw SQL via psql/supabase CLI (kept as its own exported check
 // since the original file ran it as a second, independent condition).
+// It needs a database client in the command. A bare `-c` used to count as one,
+// so `grep -c TRUNCATE file` and `codex exec -c …` beside the word were refused
+// as a live wipe (Mason, 2026-10-29: "stop blocking on ... truncate").
 export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");
-  if (/\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i.test(text) && /(psql|supabase\s+sql|--?c\s)/i.test(text)) {
+  if (/\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i.test(text) && /\b(?:psql|pgcli)\b|supabase\s+sql/i.test(text)) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }
   return null;

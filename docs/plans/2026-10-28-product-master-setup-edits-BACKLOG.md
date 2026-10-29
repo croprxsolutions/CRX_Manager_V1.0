@@ -12,7 +12,7 @@
   - Today the field holds one value. Allowing several means a database change (a migration), plus updates to bulk import and the pricing workbook export, which also read this field.
 - **1b. New options:** Post-Emerge Corn, Post-Emerge Soybeans, Pre-Emerge.
   - Options today (Herbicide): Post-Emergence, Pre-Emerge Corn, Pre-Emerge Soybean, Volunteer Corn, Range/Pasture/Turf. Foliar Fertilizer shows only "Foliar".
-  - To settle at build time: keep the generic "Post-Emergence", or replace it with the two crop-specific ones? Products already saved with the old value would need moving over.
+  - **Decided (Mason, 2026-10-28: "Keep it"):** keep the generic "Post-Emergence" option alongside the new ones. No existing products are moved.
 - **1c. Bug: the dropdown won't scroll**, so the lower options can't be reached or clicked. May partly be caused by item 2.
 
 ## 2. Bug: dropdown boxes show only the current choice
@@ -45,16 +45,21 @@ The agent read the code only and did not click through the app. ✅ = I re-check
 ### Gaps
 - **16. 💲 ✅ "Unit" can't be set on the product page, but job and crop-program price math uses it (M).** Products created in the app have none. "Unit" and "Inventory Unit" also overlap, which is confusing.
 - **17. 💲 Changing a priced, stocked product's inventory unit gives no warning (M).** Prices don't rescale, and the cost basis quietly resets.
-- **18. Return policy, full-tote-only, packaging variant and product family can't be set in the app (DB).** 581 products show "Return: unknown".
+- **18. Return policy, full-tote-only, packaging variant and product family can't be set in the app (DB).** 581 products show "Return: unknown". **Decided (Mason, 2026-10-28: "Later"):** wait. Returns are on the can-wait list.
 - **19. Nothing catches duplicate products (S as a warning).** Re-importing a CSV doubles the catalog.
-- **20. 💲 ✅ After creating a product you land back on the list (S),** and it's already sellable before it has a price (M if we add a "needs pricing" step).
+- **20. 💲 ✅ After creating a product you land back on the list (S),** and it's already sellable before it has a price. **Decided (Mason, 2026-10-28: "No allow to price"):**
+  - New products do not start turned off.
+  - Make pricing easy right away instead: after Create Product, open the new product so it can be priced at once. Enabling pricing on the create screen itself is a build-time choice.
 - **21. Only the name is required; there's no "incomplete setup" flag or filter (S).**
 - **22. The product's EPA number isn't format-checked (S),** though the brand form's is. About half of stored EPA numbers are already known to be wrong.
 - **23. Max label rate can't be seen or edited on the product page (S).** Suggested Rate, Rate Per Acre and max label rate overlap with no explanation.
 - **24. Category, Vendor and Manufacturer are free text, so typos create new groups (S warning / DB managed lists).**
 - **25. The list has no Active/Inactive filter (S).** Search skips EPA and manufacturer, and there are no RUP, signal word or unit columns.
 - **26. Inactive products can't be selected, so there's no bulk Reactivate (S).**
-- **27. Deactivating only checks open POs (M).** It ignores open quotes, orders, stock on hand, crop programs and scheduled jobs.
+- **27. Deactivating only checks open POs (M).** It ignores open quotes, orders, stock on hand, crop programs and scheduled jobs. **Decided (Mason, 2026-10-28: "Block open orders warn on quotes"):**
+  - **Block** deactivation while there are open orders. Open purchase orders already block.
+  - **Warn** (but allow) for open quotes.
+  - Stock on hand, crop programs and scheduled jobs weren't named. Warn for those too, as recommended, and confirm with Mason when building.
 - **28. No way to bulk-update details of existing products (M).** Fixes go one product page at a time.
 - **29. Bulk import can't set RUP, signal word, REI/PHI or notes, and there's no template file (S).**
 - **30. The history says only "Product updated", not what changed or who changed it (M).**
@@ -65,7 +70,7 @@ The agent read the code only and did not click through the app. ✅ = I re-check
 ### Enhancements
 - **34. 💲 One way to change cost instead of four, and ask for the reason once (S–M).**
 - **35. 💲 A pick list for the price-change "source" instead of retyping it each time (S).**
-- **36. 💲 Warn when tier prices are out of order (S).** For example, Tier 2 above Tier 1.
+- **36. 💲 Warn when tier prices are out of order (S).** **Decided (Mason, 2026-10-28: "Tier 1 is lowest margin"):** Tier 1 has the lowest margin (lowest price), then Tier 2, then Tier 3. Warn when Tier 2 is priced below Tier 1, or Tier 3 below Tier 2.
 - **37. A "Duplicate product" button for the same chemical in another size (S–M).**
 - **38. EPA lookup could fill in a new product's blank fields (S–M).**
 - **39. List edit mode turns all ~600 rows into edit boxes at once (M),** with no unsaved-changes warning and a poor phone layout.

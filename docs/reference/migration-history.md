@@ -4,7 +4,7 @@
 
 | Row | Version | Description |
 |---:|---|---|
-| 1004 | 20261029160200 | **NOT APPLIED.** `20261029160200_chicago_payment_business_date.sql` resolves omitted payment dates and the payment/prepay season from America/Chicago after replay. Marked date intent enforces request matching while unmarked v1 and bare cached results remain compatible. Re-stamped after the live ordering high-water `20261028185500`. Protected landing requires clean reviews, checks and apply proofs. Rollback: a reviewed forward migration preserving all retry entries; never rewrite payment rows. |
+| 1004 | 20261029160200 | **LOCAL CANDIDATE — NOT APPLIED.** `20261029160200_chicago_payment_business_date.sql` (authored as `20261028175551`; SQL sha256 `91119fc1759d66785f25cc4fc0bc7cdb97a4dd4a9990a65fa85802dbc837f553`) resolves omitted payment dates and the payment/prepay season from America/Chicago after replay. Marked date intent enforces request matching while unmarked v1 and bare cached results remain compatible. Re-stamped after the live ordering high-water `20261028185500`. Protected landing requires clean reviews, checks and apply proofs. Rollback: a reviewed forward migration preserving all retry entries; never rewrite payment rows. If the function is ever reverted within 24 hours of apply, retries of undated payments made on new keys fail safely with `IDEMPOTENCY_ARGUMENT_MISMATCH` (no double payment). |
 
 > **LATEST LIVE EVIDENCE (read this first).** The most recent read-only
 > `list_migrations` observation is at the top of this file, immediately below.

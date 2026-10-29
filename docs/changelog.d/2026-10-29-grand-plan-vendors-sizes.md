@@ -17,6 +17,10 @@ Updated to match:
 - START HERE;
 - the To-Do list.
 
-Four questions for Mason are open: categories, who may unlock rates, how fixed totes are stocked, and tote deposits.
+Mason then answered the four follow-up questions:
+- **Categories:** a "Seed" category is added, and the category list becomes admin-maintained.
+- **Rate lock:** any admin may switch it, with a reason.
+- **Totes:** filled both ways, with a new recorded "fill a tote from bulk" step (BLK-1).
+- **Deposits:** totes carry no deposit.
 
 Documentation only; nothing is built.

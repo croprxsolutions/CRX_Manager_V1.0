@@ -47,7 +47,7 @@ It doesn't replace the detailed documents. It says:
 | Stage | Purpose | Packages | Source | To-Do row |
 |---|---|---|---|---|
 | **1** | Product setup works and is checked by the database; the setup spreadsheet; vendors on the product page; a label link | WP-PM-1 to WP-PM-16, plus DM-0 | Build sheet | 2.10 |
-| **2** | One parent record per chemical, then the mechanisms for weight, chemistry, EPA data and registration status | PAR-1, PAR-2, DM-2, DM-1, REG-1, DM-4, DM-1b | Mason 2026-10-29, refresh plan, August 1b, WP-5 and Phase 5 | 2.9 |
+| **2** | One parent record per formulation, then the mechanisms for weight, chemistry, EPA data and registration status | PAR-1, PAR-2, BLK-1, DM-2, DM-1, REG-1, DM-4, DM-1b | Mason 2026-10-29, refresh plan, August 1b, WP-5 and Phase 5 | 2.9 |
 | **3** | Brands: which real brand filled a generic | Brand PR B, the cancelled-registration warnings, step 2 | Brand plan | 2.8 |
 | **4** | Rates are trustworthy: low, high and recommended values, one quoting default, clean units | RT-1 to RT-4 | August Phase 2 | 2.11 |
 | **5** | Compare products by chemistry, cost and price | CMP-2 | August Phase 3 | 2.12 |
@@ -297,7 +297,7 @@ Mason: "allow rates and everything to be adjusted from spreadsheet to help our i
   - and, after RT-4, the live `product_rates` rows.
 - **The full list of write routes** is made from the code and the database when WP-PM-11a is built, and each route is proven refused.
 - **No race with an upload:** switching the lock and writing a rate take turns on the same lock record. An upload that started before the switch can't save after it.
-- **Who can switch it:** question 11. Every switch records who, when and a reason. The log shows any period it was off, and every rate change made in that period.
+- **Who can switch it:** any admin (Mason, 2026-10-29, question 11). Every switch records who, when and a reason. The log shows any period it was off, and every rate change made in that period.
 - **The one exception while locked** is a dedicated admin correction operation:
   - one product at a time;
   - with a required reason;
@@ -433,11 +433,20 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
 
 **Delivery records the quantity per brand** (Stage 3), whatever the container. Container or lot tracking is never a prerequisite (August R-5).
 
-**Business facts needed from Mason** (questions 12 and 13):
-- whether fixed totes are filled from the bulk supply (one stock pool) or arrive pre-filled;
-- how tote deposits and returns work.
+**Totes are filled both ways** (Mason, 2026-10-29, question 12: "both"):
+- **Arriving already filled** from the vendor: received as that tote size, like any package.
+- **Filled at the shop from bulk:** a new recorded stock step, **BLK-1 "Fill a tote from bulk"** (Stage 2, after PAR-2, which links each tote size to its Bulk row):
+  - it takes the tote's gallons out of the Bulk stock and adds one tote to the tote's stock, in one step;
+  - it's a database operation with a retry key and a recorded who and when;
+  - a shortfall in Bulk stock warns but doesn't block, matching the stock-shortage rule for deliveries (To-Do 2.6);
+  - it's reversible only by a recorded opposite step.
 
-Return policy and any container charge stay on the sellable size, never on the parent.
+  *Done when (in the harness):*
+  - filling a 265-gal tote from a Bulk stock of 1,000 gal leaves 735 gal and one more tote, and a repeat with the same retry key changes nothing;
+  - a fill from 200 gal warns and records the shortfall;
+  - stock value moves with the gallons, to the cent.
+
+**No tote deposits or container charges** (Mason, 2026-10-29, question 13: "no they dont"), so nothing is stored for them. Return policy stays on the sellable size, never on the parent.
 
 ### 15. A label link on every product (WP-PM-16, REG-1, USE-2; Mason, 2026-10-29)
 Mason: "add a link to the label online of every product to easily review the label once get the epa number in."
@@ -761,7 +770,7 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 ## 8. Full order across stages
 
 1. **Stage 1** in section 5's order (20 packages: WP-PM-1 to WP-PM-16 and DM-0). Data: DATA-1 and DATA-10 (DM-0's review list), then DATA-11; rates in the setup workbook only if Mason wants them before parents exist (PAR-2 then asks him to settle any sizes that disagree).
-2. **Stage 2:** PAR-1 → PAR-2 → DM-2 → DM-1 → REG-1 → DM-4 → DM-1b. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
+2. **Stage 2:** PAR-1 → PAR-2 → BLK-1 → DM-2 → DM-1 → REG-1 → DM-4 → DM-1b. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
 3. **Stage 3:** brand PR B after PAR-1's design is settled, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
 4. **Stage 4:** RT-1 and RT-2 in either order, each on its own evidence. Then RT-3 (Mason's review), then RT-4.
 5. **Stage 5:** CMP-2 after RT-4.
@@ -801,11 +810,11 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 8. **One parent record per chemical, sizes as their own rows, moved early:** yes (overlap 13).
 9. **Bulk sold by the gallon, whatever the tote:** yes (overlap 14).
 
-**Open, suggested 2026-10-29, not yet answered:**
-10. **Categories.** Today there are 11 (Herbicide, Fungicide, Insecticide, Liquid Fertilizer, Foliar Fertilizer, Adjuvant, Seed Treatment, Dry Water Soluble Fertilizer, Other, Biological, Nitrogen Stabilizer). The box takes any typed text. Recommend: add a **"Seed"** category beside the new seed form, and lock categories to an admin-maintained list (like the Use Timing options). WP-PM-8 builds it if Mason says yes.
-11. **Who can turn the rate lock off** (overlap 11)? Recommend **only Mason's own account**, with a reason recorded each time, because the lock is his sign-off that the rates are right. (Any admin could still make a one-product correction with a reason while it's on.)
-12. **Fixed totes and bulk stock** (overlap 14): are fixed-size totes filled at your shop from your bulk supply, or do they arrive already filled from the vendor? This decides whether a tote's gallons come out of the Bulk stock count.
-13. **Tote deposits and returns** (overlap 14): do any totes carry a deposit or a charge, and come back to you or the vendor? This decides where the container charge and return rule are stored.
+**Answered by Mason, 2026-10-29, third set** ("10. yes to both, 11. admin, 12. both, 13. no they dont"; DECISION_LOG 2026-10-29):
+10. **Categories.** Today there are 11 (Herbicide, Fungicide, Insecticide, Liquid Fertilizer, Foliar Fertilizer, Adjuvant, Seed Treatment, Dry Water Soluble Fertilizer, Other, Biological, Nitrogen Stabilizer). The box takes any typed text. Recommend: add a **"Seed"** category beside the new seed form, and lock categories to an admin-maintained list (like the Use Timing options). **Answer: yes to both.** WP-PM-8 adds the "Seed" category and turns the category box into a pick list from an admin-maintained options table, enforced in the database (existing categories kept as they are).
+11. **Who can turn the rate lock off** (overlap 11)? Recommended only Mason's own account. **Answer: any admin**, with who, when and a reason recorded each time.
+12. **Fixed totes and bulk stock** (overlap 14): are fixed-size totes filled at your shop from your bulk supply, or do they arrive already filled from the vendor? **Answer: both.** Vendor-filled totes are received as packages; shop-filled totes use BLK-1 (overlap 14).
+13. **Tote deposits and returns** (overlap 14): do any totes carry a deposit or a charge, and come back to you or the vendor? **Answer: no.** No deposit or container charge is stored.
 
 ## 11. Sol review record (2026-10-29)
 

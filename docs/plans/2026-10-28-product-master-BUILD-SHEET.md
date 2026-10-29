@@ -323,7 +323,7 @@
   - Existing bad values are flagged, not wiped.
   - A database CHECK only after cleanup, using a `NOT VALID` constraint first.
 - **#23:** show max label rate read-only, with a link to Label Review. Add one-line help on Suggested Rate, Rate Per Acre and Max Label Rate.
-- **#24:** "This creates a new category. Did you mean Herbicide?", with near-match suggestions.
+- **#24:** "This creates a new category. Did you mean Herbicide?", with near-match suggestions. **Revised (Mason, 2026-10-29, grand plan question 10):** categories become a pick list from an admin-maintained options table, enforced in the database; a new **"Seed"** category is added; the 11 existing categories stay as they are. Vendor and manufacturer keep the near-match warning.
 
 **Done when:**
 - Each validation refuses with a clear message on the product page.
@@ -533,7 +533,7 @@ Sol's recommended order is adopted. The change-history foundation and the databa
 | 18 | WP-PM-11b List editing + phone layout | PM-1 | no | |
 | 19 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
 | 20 | WP-PM-13 Reorder display | none | no | |
-| then | Grand plan Stage 2: PAR-1, PAR-2, DM-2, DM-1, REG-1, DM-4, DM-1b | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1) |
+| then | Grand plan Stage 2: PAR-1, PAR-2, BLK-1, DM-2, DM-1, REG-1, DM-4, DM-1b | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1) |
 
 **Running in parallel.** Packages 1 and 4 (dropdowns, change history) touch different files, so they could run in parallel sessions. Packages 2 and 3 both touch `Products.tsx`, so build them one after the other.
 

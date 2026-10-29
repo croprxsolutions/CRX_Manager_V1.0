@@ -156,7 +156,7 @@ test('marking the order planned refreshes the version the next edit saves agains
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Edit Order' })).toBeEnabled();
   // Another editor changed the line before the toggle; the reload must bring that line with the version.
-  state.quantity = 12; state.orderReadDelayMs = 1500;
+  state.quantity = 12; state.version = 8; state.orderReadDelayMs = 1500;
   await page.getByTitle('Click to mark as Planned').click();
   await expect(page.getByRole('button', { name: 'Edit Order' })).toBeDisabled();
   await expect(page.getByTitle('Click to mark as Committed')).toBeEnabled();
@@ -166,14 +166,15 @@ test('marking the order planned refreshes the version the next edit saves agains
   await qtyInput(page).fill('15');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
-  expect(state.saves.map((r) => r.p_expected_row_version)).toEqual([8]);
+  expect(state.saves.map((r) => r.p_expected_row_version)).toEqual([9]);
   expect(state.quantity).toBe(15); expect(errors).toEqual([]);
 });
 
 test('a role refresh while editing keeps the editor and its unsaved draft', async ({ page, context }) => {
   const state = backend(); const errors = await isolate(page, state); await openEditor(page);
   await qtyInput(page).fill('16');
-  state.role = 'sales_rep';
+  // Another editor saves first, then the role changes; the refresh must not pair the draft with version 8.
+  state.quantity = 19; state.version = 8; state.role = 'sales_rep';
   // Signing in again in another tab re-confirms the same user here (SIGNED_IN), which reloads
   // the profile; the new role rebuilds the page's loader and it reads the order again.
   const orderReread = page.waitForResponse((r) => r.url().includes('/rest/v1/orders'));
@@ -186,11 +187,13 @@ test('a role refresh while editing keeps the editor and its unsaved draft', asyn
   await orderReread;
   await expect(page.getByRole('button', { name: 'Save Changes' })).toBeVisible();
   await expect(qtyInput(page)).toHaveValue('16');
-  // The kept draft still saves against the version it was loaded with.
+  // The kept draft still saves against the version it was loaded with, so the other
+  // editor's change is caught as a conflict instead of being overwritten.
   await page.getByRole('button', { name: 'Save Changes' }).click();
-  await expect(page.getByRole('button', { name: 'Edit Order' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reload Order' })).toBeVisible();
+  await expect(qtyInput(page)).toHaveValue('16');
   expect(state.saves.map((r) => r.p_expected_row_version)).toEqual([7]);
-  expect(state.quantity).toBe(16); expect(errors).toEqual([]);
+  expect(state.quantity).toBe(19); expect(errors).toEqual([]);
 });
 
 test('a missing version fails the read closed and sends no save', async ({ page }) => {

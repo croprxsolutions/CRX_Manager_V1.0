@@ -156,7 +156,9 @@ with evidence.
   smoke-specs chain, and is now marked historical. `prove-payment-allocation-no-direct-writes-real-schema.mjs`
   pins live function bodies from 2026-10-22 and fails closed when they change, by design.
 - **Refuted (Major):** requiring an idempotency key. The project contract is
-  `p_idempotency_key text DEFAULT NULL`, and the page and offline replay always send a key. A
-  key-less retry that still carries its original expected version is refused by the version
-  check, because the first write advanced the version. A key-less caller that re-reads the new
-  version and submits again is making a new edit, which the key could not tell apart either.
+  `p_idempotency_key text DEFAULT NULL`, and the page and offline replay always send a key, so a
+  retry after a lost reply replays the first receipt. Without a key, a retry that still carries
+  its original expected version is refused by the version check; a caller that re-reads the new
+  version and resubmits would be accepted as a second write, which is why every app caller sends
+  a key. Requiring it in this one RPC would break the shared contract and the rollback-only
+  chains that call it without one.

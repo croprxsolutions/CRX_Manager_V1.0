@@ -38,15 +38,20 @@ function ok(c, m) { assert.ok(c, m); pass++; }
 function eq(a, b, m) { assert.equal(a, b, m); pass++; }
 
 // ── hold-latch ───────────────────────────────────────────────────────────
-ok(isHoldPhrase("lets just stop here, cancel all background work"), "stop+cancel");
-ok(isHoldPhrase("pause this loop"), "pause");
-ok(isHoldPhrase("im just scoping a future session, dont build yet"), "scope-only");
-ok(!isHoldPhrase("build me the invoices page"), "normal build is not a hold");
-// Every halt word Mason types latches, even phrased as a description (Mason, 2026-10-27:
-// PR #1152 dropped the descriptive-word guessing; only machine and helper text is ignored).
+// A halt COMMAND latches: a line that begins with the halt word, optionally after a
+// short lead-in (Mason, 2026-10-29: "stop blocking on certain words like stop").
+for (const p of ["stop", "STOP!!", "Stop.", "please stop.", "stop the deploy", "pause this loop",
+  "hold off on merging", "hold on, dont build that yet", "ok stop, cancel all background work",
+  "wait, stop", "cancel that", "halt", "thanks for the report\nstop now"]) {
+  ok(isHoldPhrase(p), `a halt command latches: ${JSON.stringify(p)}`);
+}
+// A sentence that only MENTIONS stopping, and the old scoping phrases, do not.
 for (const p of ["make the gate stop refusing", "the hook should pause retrying",
-  "set ENABLE_COMMIT_REVIEW=0 in my user settings to stop the per-commit security reviews"]) {
-  ok(isHoldPhrase(p), `a typed halt word latches: ${p}`);
+  "I want it to stop blocking on certain words like stop etc",
+  "set ENABLE_COMMIT_REVIEW=0 in my user settings to stop the per-commit security reviews",
+  "im just scoping a future session, dont build yet", "lets just stop here", "build me the invoices page",
+  "going to bed, don't stop", "the stop-wrap hook"]) {
+  ok(!isHoldPhrase(p), `a mention is not a halt: ${JSON.stringify(p)}`);
 }
 // Per-session hold files (2026-10-27): only a MISSING id shares hold.json.
 eq(path.basename(holdStatePath("p", undefined)), "hold.json", "no session id → hold.json");

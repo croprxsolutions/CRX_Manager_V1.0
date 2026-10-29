@@ -877,6 +877,24 @@ for (const payload of [
   assert.match(result.stdout, /"permissionDecision":"deny"/);
 }
 
+// The user's HOME `.claude` is not this repository's (Mason, 2026-10-29).
+for (const command of [
+  "cd /c/Users/mason/.claude && ls",
+  "cd C:/Users/mason/.claude && ls hooks",
+  "cd ~/.claude && ls",
+  "cp /c/Users/mason/.claude/hooks/a.mjs /c/Users/mason/.claude/hooks-backup/",
+]) {
+  assert.doesNotMatch(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `home .claude allowed: ${command}`);
+}
+// …while the repository's own guard files stay protected.
+for (const command of [
+  "cd .claude && rm hooks/x.mjs",
+  "cp /tmp/evil .claude/hooks/review-proof-guard.mjs",
+  "cp /tmp/evil /c/CRX_Manager/.claude/hooks/review-proof-guard.mjs",
+]) {
+  assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `repo .claude still denied: ${command}`);
+}
+
 // FORMER OVER-BLOCK. Segment splitting is not quote-aware, so a `|` inside a
 // quoted regex splits the command and the fragment after it is read as an
 // unallowlisted command head. Until 2026-10-02 that refused this plain read;
@@ -885,6 +903,50 @@ for (const payload of [
   const result = run({ tool_name: "Bash", tool_input: { command: 'grep -E "(typecheck|build)" .husky/pre-push' } });
   assert.equal(result.status, 0);
   assert.doesNotMatch(result.stdout, /permissionDecision/);
+}
+
+// A QUOTED `|` IN A PLAIN READ (Mason, 2026-10-29). The fragment after the `|`
+// used to be read as a command head, so a search for the word `truncate` was
+// DENIED as the `truncate` writer. Plain double-quoted reads are now split
+// outside the quotes: allowed, and with no warning.
+for (const command of [
+  'grep -n "truncate\\|TRUNCATE" .claude/hooks/sql-safety.mjs .claude/hooks/bash-safety-lib.mjs | head -30',
+  'grep -nE "rm|cp|mv" .husky/pre-push',
+  'grep -c "tee|dd" .github/workflows/ci.yml && wc -l .claude/hooks/sql-safety.mjs',
+]) {
+  assert.equal(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `plain quoted read allowed silently: ${command}`);
+}
+// …while a real write, or any doubt about the quoting, keeps the old split and
+// its denial: a pipe into a writer or a shell, a writer in its own segment,
+// single quotes (where shells disagree), a quoted command name, a substitution,
+// a redefinition, and a redirect.
+for (const command of [
+  'grep "x|y" .husky/pre-push | truncate -s 0 .husky/pre-push',
+  'grep "x" .claude/hooks/a.mjs; truncate -s 0 .claude/hooks/a.mjs',
+  'echo "a|b" | tee .husky/pre-push',
+  'grep \'"\' .husky/x | truncate -s 0 .husky/pre-push \'"\'',
+  'grep "a|b" x; "truncate" -s 0 .husky/pre-push',
+  'tr"uncate" -s 0 .husky/pre-push',
+  'grep "a|b" .husky/pre-push > .github/workflows/ci.yml',
+  // Luna, PR #1193: PowerShell evaluates these arguments, and node runs any script.
+  'echo "x|truncate" @(Set-Content .husky/pre-push "pwned")',
+  'echo "x|truncate" (Set-Content .husky/pre-push "pwned")',
+  'echo "x|truncate" $(Set-Content .husky/pre-push "pwned")',
+  'node /tmp/write-guard.mjs "x|truncate" .husky/pre-push',
+  // Luna round 2: a quoted find action.
+  'find .husky/pre-push "-delete" | grep "x|truncate .husky/pre-push"',
+  'echo "rm .husky/pre-push" | bash; rm .husky/pre-push',
+  // Sol, PR #1193: git with an attached -c setting can run a pager.
+  'git -ccore.pager=rm log .husky/pre-push | grep "x|truncate .husky/pre-push"',
+]) {
+  assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);
+}
+// A substitution inside quotes still falls back to the old reading, so it is at
+// least WARNED (as before this change), never silently trusted as a plain read.
+for (const command of [
+  'grep "$(truncate -s 0 .husky/pre-push)" x',
+]) {
+  assert.notEqual(run({ tool_name: "Bash", tool_input: { command } }).stdout, "", `not trusted as a plain read: ${command}`);
 }
 // …while the bracket-class form of the same read is allowed, which is the
 // documented workaround. CodeRabbit, PR #530: this assertion used to pass a plain

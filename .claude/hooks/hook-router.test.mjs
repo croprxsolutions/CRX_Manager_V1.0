@@ -112,6 +112,9 @@ try {
   ok(run(POST, { tool_name: "Edit", tool_input: { file_path: path.join(temp, "supabase", "migrations", "20260827000001_once.sql") } },
     { projectDir: temp })?.hookSpecificOutput?.additionalContext.includes("Before continuing, you MUST"),
   "no session id always shows the full checklist");
+  // Same basename in another folder is a different file (Luna, PR #1193).
+  ok(migEdit(path.join("nested", "20260827000001_once.sql"), "sess-a").includes("Before continuing, you MUST"),
+    "a same-named file in another migrations folder gets its own full checklist");
 
   const stateDir = path.join(temp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });

@@ -6,6 +6,8 @@
 // of the same file get a one-line pointer back to it (Mason, 2026-10-29: the
 // eight steps were repeated on every edit). Any doubt about the record — no
 // session id, an unreadable or unwritable state file — shows the full list.
+// The record is written only AFTER the reminder is emitted, so a crash in
+// between repeats the checklist rather than losing it (Luna, PR #1193).
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -23,29 +25,39 @@ if (!/supabase\/migrations\/.+\.sql$/.test(fp)) {
 }
 
 const filename = path.posix.basename(fp);
+// The record keys on the migration's path below supabase/migrations, so two
+// files with one basename in different folders are not confused (Luna, PR #1193).
+const fileKey = fp.slice(fp.lastIndexOf("supabase/migrations/")).toLowerCase();
 
-// True when this session has already been shown the full checklist for this
-// file; records it otherwise. Only a plain session id names a state file.
-function alreadyReminded() {
-  const sessionId = payload?.session_id;
-  if (typeof sessionId !== "string" || !/^[a-z0-9_-]{1,128}$/i.test(sessionId)) return false;
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || payload?.cwd || process.cwd();
-  const dir = path.join(projectDir, ".claude", "session-state");
-  const file = path.join(dir, `migration-reminder-${sessionId.toLowerCase()}.json`);
-  let seen = [];
+// Where this session's record lives, or null when it cannot be named safely.
+// Only a plain session id names a state file.
+function recordPath() {
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
-    if (Array.isArray(parsed?.files)) seen = parsed.files.filter((f) => typeof f === "string");
-  } catch { /* no record yet */ }
-  if (seen.includes(filename)) return true;
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify({ files: [...seen, filename] }));
-  } catch { /* cannot record: the full list shows again next time */ }
-  return false;
+    const sessionId = payload?.session_id;
+    if (typeof sessionId !== "string" || !/^[a-z0-9_-]{1,128}$/i.test(sessionId)) return null;
+    const projectDir = process.env.CLAUDE_PROJECT_DIR || payload?.cwd || process.cwd();
+    if (typeof projectDir !== "string" || !projectDir) return null;
+    return path.join(projectDir, ".claude", "session-state", `migration-reminder-${sessionId.toLowerCase()}.json`);
+  } catch {
+    return null;
+  }
 }
 
-const reason = alreadyReminded()
+function readSeen(file) {
+  if (!file) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    return Array.isArray(parsed?.files) ? parsed.files.filter((f) => typeof f === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+const record = recordPath();
+const seen = readSeen(record);
+const alreadyReminded = seen.includes(fileKey);
+
+const reason = alreadyReminded
   ? `MIGRATION SAFETY CHECK — ${filename} edited again. The full checklist shown on its first edit this session still applies: types, typecheck, the parallel reviewers before any apply, and the DB invariant sweeps after it.`
   : `MIGRATION SAFETY CHECK — You just created/edited ${filename}.
 
@@ -73,3 +85,10 @@ Do NOT proceed to other tasks until these steps are complete.`;
 process.stdout.write(JSON.stringify({
   hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: reason },
 }));
+
+if (record && !alreadyReminded) {
+  try {
+    mkdirSync(path.dirname(record), { recursive: true });
+    writeFileSync(record, JSON.stringify({ files: [...seen, fileKey] }));
+  } catch { /* cannot record: the full list shows again next time */ }
+}

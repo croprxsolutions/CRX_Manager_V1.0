@@ -995,11 +995,15 @@ if (shellTool) {
   // search was DENIED. This reading is used only where every shell in play agrees
   // on the quoting: double quotes alone (no single quotes, backticks, escaped or
   // caret-escaped quotes, substitutions or process substitution) and no command
-  // redefinition, nested execution or PATH change. It splits outside the quotes
-  // only, and it counts only when EVERY resulting segment is a bare program the
-  // fail-closed read-only allowlist vouches for, so a pipe into `bash`, `tee` or
-  // any unlisted program falls back to the old split and its denial. Redirects are
-  // still judged on every view.
+  // redefinition, nested execution or PATH change. Outside the quotes nothing may
+  // evaluate or redirect: PowerShell runs `(…)`, `@(…)`, `{…}` and `[Type]::…`
+  // arguments, and `$`, `%`, `<`, `>` expand or redirect (Luna, PR #1193). It
+  // splits outside the quotes only, and it counts only when EVERY resulting
+  // segment is a bare program the fail-closed read-only allowlist vouches for and
+  // that cannot run a script it is handed (`node`, `gh` are left out), so a pipe
+  // into `bash`, `tee` or any unlisted program falls back to the old split and its
+  // denial. Redirects are still judged on every view.
+  const PLAIN_READ_EXCLUDED_HEADS = new Set(["node", "gh"]);
   const plainQuotedReadSegments = (cmd) => {
     const text = String(cmd ?? "");
     if (/['`]|\\"|\^"|\$\(|\$\{|[<>]\(/.test(text)) return null;
@@ -1009,6 +1013,7 @@ if (shellTool) {
     let quoted = false;
     for (const ch of text) {
       if (ch === "\"") quoted = !quoted;
+      if (!quoted && /[()[\]{}@$%<>^]/.test(ch)) return null;
       if (!quoted && /[;&|\r\n]/.test(ch)) {
         segments.push(current);
         current = "";
@@ -1019,7 +1024,8 @@ if (shellTool) {
     if (quoted) return null;
     segments.push(current);
     const parts = segments.map((s) => s.trim()).filter(Boolean);
-    return parts.length > 0 && parts.every((s) => /^[\w.-]+(?:\s|$)/.test(s) && enforcementSegmentIsReadOnly(s))
+    return parts.length > 0 && parts.every((s) => /^[\w.-]+(?:\s|$)/.test(s) &&
+      !PLAIN_READ_EXCLUDED_HEADS.has(s.split(/\s/)[0].toLowerCase()) && enforcementSegmentIsReadOnly(s))
       ? parts
       : null;
   };

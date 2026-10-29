@@ -52,6 +52,9 @@ ok(checkDangerousCommand("npm run nuke"), "npm run nuke blocked (literal script 
 ok(checkDangerousCommand('psql -c "DROP TABLE customers;"'), "psql DROP TABLE blocked");
 ok(checkDangerousCommand('psql "$DB_URL" -c "truncate customers"'), "psql TRUNCATE blocked, any case");
 ok(checkDangerousCommand('pgcli -e "DROP SCHEMA public"'), "pgcli DROP SCHEMA blocked");
+ok(checkDangerousCommand(`p''sql -c "TRUNCATE customers"`), "quote-split client name still blocked (Luna, PR #1193)");
+ok(checkDangerousCommand('P=psql; $P -c "TRUNCATE customers"'), "client named by a variable still blocked");
+ok(checkDangerousCommand('docker exec db sh -c "TRUNCATE customers"'), "unknown program with -c beside TRUNCATE still blocked");
 // A search for the word is not a wipe (Mason, 2026-10-29).
 ok(!checkDangerousCommand('grep -c "TRUNCATE" supabase/migrations/x.sql'), "grep -c for TRUNCATE allowed");
 ok(!checkDangerousCommand('git log -c --grep "drop table" -- supabase'), "git log -c naming DROP TABLE allowed");

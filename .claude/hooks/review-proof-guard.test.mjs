@@ -911,6 +911,11 @@ for (const command of [
   'grep "a|b" x; "truncate" -s 0 .husky/pre-push',
   'tr"uncate" -s 0 .husky/pre-push',
   'grep "a|b" .husky/pre-push > .github/workflows/ci.yml',
+  // Luna, PR #1193: PowerShell evaluates these arguments, and node runs any script.
+  'echo "x|truncate" @(Set-Content .husky/pre-push "pwned")',
+  'echo "x|truncate" (Set-Content .husky/pre-push "pwned")',
+  'echo "x|truncate" $(Set-Content .husky/pre-push "pwned")',
+  'node /tmp/write-guard.mjs "x|truncate" .husky/pre-push',
   'echo "rm .husky/pre-push" | bash; rm .husky/pre-push',
 ]) {
   assert.match(run({ tool_name: "Bash", tool_input: { command } }).stdout, /"permissionDecision":"deny"/, `still denied: ${command}`);

@@ -236,7 +236,9 @@ function cdTargetEntersStateDir(target) {
   if (/\.claude\/session-state/i.test(t)) return true;
   const parts = t.split("/").filter(Boolean);
   if (parts.some((p) => /^session-state$/i.test(p))) return true;
-  return /^\.claude$/i.test(parts[parts.length - 1] || "") && !HOME_CLAUDE_RE.test(t.replace(/^["']|["']$/g, ""));
+  // A `..` segment could step out of the home folder, so it gets no exemption.
+  return /^\.claude$/i.test(parts[parts.length - 1] || "") &&
+    (parts.includes("..") || !HOME_CLAUDE_RE.test(t.replace(/^["']|["']$/g, "")));
 }
 
 // Protected directory/file names the state-dir guard must recognize even when a
@@ -548,8 +550,8 @@ if (shellTool) {
   // `~/.claude` (agent memory) stays out, matching STATE_DIR_ANCESTOR_RE.
   const namesRepoClaude = (t) => {
     const p = String(t).replace(/["']/g, "").replace(/\\/g, "/");
-    return /(?:^|\/)\.claude(?:\/|$)/i.test(p) &&
-      !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p);
+    return /(?:^|\/)\.claude(?:\/|$)/i.test(p) && (/(?:^|\/)\.\.(?:\/|$)/.test(p) ||
+      !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p));
   };
   // A cd target the guard cannot read (`D=.claude/hooks; cd $D`, a glob, `%X%`)
   // counts as entering `.claude` when the command names the repo's `.claude`
@@ -875,9 +877,11 @@ if (shellTool) {
     // the separator note in resolveDotSegments.
     // A path inside the user's HOME `.claude` (personal hooks, settings, memory)
     // is not this repository's guard surface (Mason, 2026-10-29: backing up
-    // `/c/Users/mason/.claude/hooks/…` was refused).
+    // `/c/Users/mason/.claude/hooks/…` was refused). A path with a `..` segment
+    // could climb back into the repository, so it is never stripped.
     const flat = String(text ?? "").replace(/\\/g, "/").replace(/\/{2,}/g, "/")
-      .replace(/(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/\s"']+)\/+\.claude\/[^\s"';&|<>]*/gi, " ");
+      .replace(/(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/\s"']+)\/+\.claude\/[^\s"';&|<>]*/gi,
+        (m) => (/(?:^|\/)\.\.(?:\/|$)/.test(m) ? m : " "));
     if (ENFORCEMENT_SURFACE_RE.test(flat)) return true;
     return flat
       .split(/[\s"'=:;&|()<>]+/)

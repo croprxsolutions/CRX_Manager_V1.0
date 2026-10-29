@@ -837,8 +837,12 @@ ok(!/riskyFiles|contentIsRisky/i.test(gateRequestSource),
 // before every other gate ran.
 eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 3,
   "exactly three allow points (the Sol proof, the documentation-only exemption, a low-risk pull request), all behind the proof scan");
-ok(gateRequestSource.indexOf("advisoryQueue.push(request)") > gateRequestSource.indexOf("proofValid(data, headSha"),
-  "the first allow point comes after the exact-head Sol proof validated");
+{
+  // Pinned to text that exists, so a moved allow point cannot pass against -1 (Luna, 2026-10-29).
+  const proofCheckAt = gateRequestSource.indexOf("proofValidForMerge({ data, headSha");
+  ok(proofCheckAt > 0 && gateRequestSource.indexOf("advisoryQueue.push(request)") > proofCheckAt,
+    "the first allow point comes after the Sol proof check");
+}
 
 // ── every agent merge pins the checked head (Sol HIGH, 2026-09-26) ───────────
 // A push landing between this gate's checks and GitHub's merge would otherwise

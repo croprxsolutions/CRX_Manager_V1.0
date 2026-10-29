@@ -8,7 +8,8 @@
 //   * merge into main → allowed only under Mason's autonomous-landing rule
 //     (2026-09-26; CodeRabbit approval dropped 2026-10-19): the newest run of every
 //     check is green with mergeStateStatus CLEAN, and a fresh gpt-6-sol/high
-//     Codex proof is bound to that head and GitHub's real base (minted only by
+//     Codex proof is bound to that head, or to an earlier commit on the PR's own
+//     branch not yet in main (Mason, 2026-10-29), and GitHub's real base (minted only by
 //     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Only a risky
 //     diff needs the proof (sol-risk-lib.mjs, Mason 2026-10-29); a
 //     documentation-only one never does (sol-exempt-lib.mjs, Mason 2026-10-07);

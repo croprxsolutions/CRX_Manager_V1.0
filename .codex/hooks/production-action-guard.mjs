@@ -1109,7 +1109,13 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
       return true;
     } catch (error) {
       // Exit 1 is git's "no"; any other failure is "cannot tell" (Luna, 2026-10-29).
-      return error?.status === 1 ? false : null;
+      if (error?.status !== 1) return null;
+      // A shallow clone can say "no" for history it cut off, so its "no" cannot tell either.
+      try {
+        return String(runGit(["rev-parse", "--is-shallow-repository"], repoDir)).trim() === "false" ? false : null;
+      } catch {
+        return null;
+      }
     }
   };
   const stateDir = path.join(repoDir, ".claude", "session-state");

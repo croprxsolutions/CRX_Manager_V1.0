@@ -584,6 +584,12 @@ denies(evaluate(fixture({ proof: null })), "without subagent review proof",
   "no reviewer proof at all");
 denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(-25 * 60 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH } })),
   "without subagent review proof", "reviewer proof older than 24 hours");
+// The 24-hour window is real, not just a looser refusal (Luna, PR #1196): two-hour-old
+// reviewer and Sol proofs, refused under the old 30 minutes, are accepted.
+allows(evaluate(fixture({
+  proof: { migration: MIG, timestamp: iso(-2 * 60 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH },
+  codexProof: { ...goodCodex, timestamp: iso(-2 * 60 * 60 * 1000) },
+})), "two-hour-old reviewer and Sol apply proofs are accepted (Mason, 2026-10-29)");
 denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(60 * 60 * 1000), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: HASH } })),
   "without subagent review proof", "FUTURE-dated reviewer proof is not 'fresh forever'");
 denies(evaluate(fixture({ proof: { migration: MIG, timestamp: iso(0), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "blockers", queryHash: HASH } })),

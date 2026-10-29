@@ -72,11 +72,11 @@ for (const [prompt, marker] of [
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "crx-hook-router-"));
 try {
-  let output = run(PROMPT, { prompt: "pause now" }, { projectDir: temp });
-  ok(output?.hookSpecificOutput?.additionalContext.includes("HOLD LATCHED"), "hold rule remains stateful and visible");
-  ok(existsSync(path.join(temp, ".claude", "session-state", "hold.json")), "hold router writes the shared latch when no session_id arrives");
-  run(PROMPT, { prompt: "pause now", session_id: "router-1" }, { projectDir: temp });
-  ok(existsSync(path.join(temp, ".claude", "session-state", "hold-router-1.json")), "hold router writes the session's own latch");
+  // The stop-word hold latch was removed (Mason, 2026-10-29: "if i want to stop i
+  // just hit the stop button"): a typed stop adds no context and writes no latch.
+  let output = run(PROMPT, { prompt: "pause now", session_id: "router-1" }, { projectDir: temp });
+  ok(!String(output?.hookSpecificOutput?.additionalContext || "").includes("HOLD LATCHED"), "a typed stop no longer latches a hold");
+  ok(!existsSync(path.join(temp, ".claude", "session-state", "hold-router-1.json")), "no hold file is written");
 
   // The autopilot reminder was unwired on 2026-10-02 (Mason), so a hands-free
   // request neither reminds nor writes the OVERNIGHT-INTENT flag that used to
@@ -120,8 +120,15 @@ try {
   rmSync(temp, { recursive: true, force: true });
 }
 
-eq(promptModulesFor("codex").length, 4, "Codex prompt router has four shared modules (ship reminder, hold latch, owner-approval reply, CodeRabbit skip)");
-eq(promptModulesFor("claude").length, 4, "Claude prompt router has no Claude-only modules");
+eq(promptModulesFor("codex").length, 3, "Codex prompt router has three shared modules (ship reminder, owner-approval reply, CodeRabbit skip)");
+eq(promptModulesFor("claude").length, 3, "Claude prompt router has no Claude-only modules");
+ok(!promptModulesFor("claude").includes("./hold-latch-prompt.mjs"), "the hold latch is not routed (Mason, 2026-10-29)");
+{
+  const claudeSettings = readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8");
+  const codexHooks = readFileSync(path.join(ROOT, ".codex", "hooks.json"), "utf8");
+  ok(!claudeSettings.includes("hold-latch-guard.mjs") && !codexHooks.includes("hold-latch-guard.mjs"),
+    "the hold-latch guard is wired in neither manifest");
+}
 eq(postToolModulesFor({ tool_name: "Edit" }, "claude"), ["./posttooluse-migration.mjs", "./eslint-autofix.mjs", "./session-heartbeat.mjs"], "write/edit path is explicit");
 eq(postToolModulesFor({ tool_name: "mcp__supabase__apply_migration" }, "codex"), ["./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs"], "Codex apply path is explicit");
 

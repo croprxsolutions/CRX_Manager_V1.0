@@ -11,6 +11,9 @@ import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import RecordVersionConflictDialog from '../components/ui/RecordVersionConflictDialog';
+import { readRowVersion } from '../lib/recordVersionConcurrency';
+import { readOrderEditSnapshot } from '../lib/orderEditSnapshot';
 import Input from '../components/ui/Input';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
@@ -44,7 +47,7 @@ import { validateInventoryPositionShape } from '../lib/inventoryPositionValidato
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
-import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, ORDER_COLUMNS, ORDER_ITEM_COLUMNS, PRODUCT_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
+import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
 
 /** Temporary new item (not yet saved to DB — has no real id) */
@@ -68,7 +71,7 @@ export default function OrderDetail() {
   const { toast } = useToast();
   const { role, profile } = useAuth();
   const { runWithBelowCostApproval } = useBelowCostApproval();
-  const updateOrderIdem = useIdempotencyKey('update_order_items', profile?.id || '');
+  const updateOrderIdem = useIdempotencyKey('update_order_items', profile?.id || '', id ?? '');
   const voidOrderIdem = useIdempotencyKey('void_order', profile?.id || '');
   // F1: scoped by order id. This component does NOT remount when the route id
   // changes (App.tsx renders it without a key, the effects are keyed on [id], and
@@ -133,7 +136,15 @@ export default function OrderDetail() {
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
+  const editingRef = useRef(false);
+  useEffect(() => { editingRef.current = editing; }, [editing]);
+  const [editRowVersion, setEditRowVersion] = useState<number | null>(null);
+  const [orderConflict, setOrderConflict] = useState(false);
+  const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [editItems, setEditItems] = useState<OrderItem[]>([]);
+  // The last fully loaded draft and its version. Cancel restores it at once, so re-entering
+  // edit mode before the follow-up reload lands never shows (or saves) the discarded edits.
+  const loadedDraftRef = useRef<{ items: OrderItem[]; rowVersion: number | null }>({ items: [], rowVersion: null });
   const [newItems, setNewItems] = useState<NewOrderItem[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -185,7 +196,7 @@ export default function OrderDetail() {
   // order to return quantity to the booking, then draw again.
   const canEdit = (role === 'admin' || role === 'sales_rep') && order?.status !== 'fulfilled' && order?.status !== 'cancelled' && order?.status !== 'partially_fulfilled' && !order?.booking_draw && !itemCostsFailed;
 
-  const fetchOrder = useCallback(async () => {
+  const fetchOrder = useCallback(async (reloadDraft = false): Promise<boolean> => {
     // Stale-route guard (M6): on rapid order-to-order navigation an older in-flight
     // fetch must not render the previous order's items/invoices/deliveries. Only the newest
     // fetch may install state either, so an older cost-less load cannot overwrite an admin's
@@ -196,10 +207,13 @@ export default function OrderDetail() {
     // loaded" with Try again. It must not show "Order not found", $0 invoiced, or re-offer
     // Create Invoice for an order whose invoices could not be read (To-Do 10.5).
     const failLoad = (err: unknown) => {
-      if (isStale()) return;
+      if (isStale()) return false;
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_order' } });
-      setLoadFailed(true);
+      if (editingRef.current) {
+        toast('error', 'This order could not be checked, try again. Your unsaved edits are still available.');
+      } else setLoadFailed(true);
       setLoading(false);
+      return false;
     };
     const readFailed = (result: { data: unknown; error: unknown }, what: string) => {
       const err = result.error ?? (Array.isArray(result.data) ? null : new Error(`The order's ${what} read returned no list`));
@@ -207,65 +221,38 @@ export default function OrderDetail() {
       failLoad(err);
       return true;
     };
+    let draftItems: OrderItem[] = [];
     try {
-      const { data: orderRow, error: orderError } = await supabase
-        .from('orders')
-        .select(ORDER_COLUMNS)
-        .eq('id', id!)
-        .maybeSingle();
-      if (orderError) return failLoad(orderError);
-      // Cost is admin-only (Mason, 2026-10-15).
-      let orderData = orderRow as Order | null;
-      try {
-        orderData = await withAdminCost('orders', orderData, isAdmin);
-      } catch (err) {
-        Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_order_costs' } });
-        toast('error', 'Failed to load order cost. Please refresh.');
-      }
-
-      if (isStale()) return;
+      const snapshot = await readOrderEditSnapshot(id!, isAdmin);
+      if (isStale()) return false;
+      const orderData = snapshot.order;
       if (orderData) {
         setOrder(orderData);
+        for (const [error, context] of [[snapshot.orderCostError, 'load_order_costs'], [snapshot.itemCostError, 'load_order_item_costs']] as const) {
+          if (error) Sentry.captureException(error, { tags: { source: 'fetch', action: context } });
+        }
+        if (snapshot.orderCostError) toast('error', 'Failed to load order cost. Please refresh.');
+        if (snapshot.itemCostError) toast('error', 'Failed to load order item costs. Please refresh.');
+        if (reloadDraft && snapshot.itemCostError) return failLoad(snapshot.itemCostError);
 
         // Fetch parent quote for transaction thread
         if (orderData.quote_id) {
           const { data: qData } = await supabase
             .from('quotes').select('id, quote_number')
             .eq('id', orderData.quote_id).maybeSingle();
-          if (isStale()) return;
+          if (isStale()) return false;
           setParentQuote(qData as { id: string; quote_number: string } | null);
         } else { setParentQuote(null); }
 
-        const { data: custData, error: custError } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('id', orderData.customer_id)
-          .maybeSingle();
-        // Every order has a customer: a failed or empty read is a failed load, not a page
-        // whose actions run without the customer.
+        const { data: custData, error: custError } = await supabase.from('customers')
+          .select('*').eq('id', orderData.customer_id).maybeSingle();
         if (custError || !custData) return failLoad(custError ?? new Error("The order's customer read returned no row"));
-        if (isStale()) return;
+        if (isStale()) return false;
         setCustomer(custData as Customer | null);
-
-        const itemsRes = await supabase
-          .from('order_items')
-          .select(ORDER_ITEM_COLUMNS)
-          .eq('order_id', id!)
-          .order('section_name');
-        if (readFailed(itemsRes, 'line items')) return;
-        let itemsList = itemsRes.data as OrderItem[];
-        let costsFailed = false;
-        try {
-          itemsList = await withAdminCosts('order_items', itemsList, isAdmin);
-        } catch (err) {
-          Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_order_item_costs' } });
-          toast('error', 'Failed to load order item costs. Please refresh.');
-          costsFailed = true;
-        }
-        if (isStale()) return;
-        setItemCostsFailed(costsFailed);
+        const itemsList = snapshot.items;
+        setItemCostsFailed(Boolean(snapshot.itemCostError));
         setItems(itemsList);
-        setEditItems(itemsList.map((i) => ({ ...i })));
+        draftItems = itemsList;
         // Ship-now/price-later (#2): seed price inputs from each pending line's tier snapshot.
         setPriceInputs(Object.fromEntries(
           itemsList.filter((i) => i.pricing_pending).map((i) => [i.id, i.suggested_price != null ? String(i.suggested_price) : ''])
@@ -276,7 +263,7 @@ export default function OrderDetail() {
           .from('blend_ticket_to_order_items')
           .select('blend_ticket_id, blend_ticket:blend_tickets(id, ticket_number, ticket_date, order_link_status, payment_status)')
           .eq('order_id', id!);
-        if (isStale()) return;
+        if (isStale()) return false;
         // Deduplicate by blend_ticket_id
         const uniqueTickets = new Map<string, { id: string; ticket_number: string; ticket_date: string | null; order_link_status: string | null; payment_status: string | null }>();
         ((btLinks || []) as unknown as Array<{ blend_ticket_id: string; blend_ticket: { id: string; ticket_number: string; ticket_date: string | null; order_link_status: string | null; payment_status: string | null } | null }>).forEach((link) => {
@@ -293,7 +280,7 @@ export default function OrderDetail() {
           .select('*')
           .eq('order_id', id!)
           .order('scheduled_date');
-        if (readFailed(deliveryRes, 'deliveries')) return;
+        if (readFailed(deliveryRes, 'deliveries')) return false;
         const deliveryData = deliveryRes.data as Delivery[];
         const deliveryDriverIds = [...new Set(
           deliveryData
@@ -311,7 +298,7 @@ export default function OrderDetail() {
             .catch(() => ({ data: null }));
           (Array.isArray(driverData) ? driverData : []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) deliveryDriverMap[p.id] = p.full_name ?? ''; });
         }
-        if (isStale()) return;
+        if (isStale()) return false;
         setDeliveries(
           deliveryData.map((d: Delivery) => ({
             ...d,
@@ -327,8 +314,8 @@ export default function OrderDetail() {
           .eq('order_id', id!)
           .not('status', 'in', '("voided","cancelled")')
           .order('invoice_number');
-        if (readFailed(invoiceRes, 'invoices')) return;
-        if (isStale()) return;
+        if (readFailed(invoiceRes, 'invoices')) return false;
+        if (isStale()) return false;
         setInvoices(invoiceRes.data as Invoice[]);
 
         // Load order shares (who is billed what share of this order)
@@ -337,8 +324,8 @@ export default function OrderDetail() {
           .select('*')
           .eq('order_id', id!)
           .order('sort_order');
-        if (readFailed(shareRes, 'shares')) return;
-        if (isStale()) return;
+        if (readFailed(shareRes, 'shares')) return false;
+        if (isStale()) return false;
         setShares(shareRes.data as OrderShare[]);
 
         // Field/acre split: existing per-line allocations for this order, the active fields to pick
@@ -352,7 +339,7 @@ export default function OrderDetail() {
           .eq('order_items.order_id', id!)
           .order('id')
           .range(from, to)));
-        if (isStale()) return;
+        if (isStale()) return false;
         setAllocations(((allocData || []) as unknown as (OrderItemFieldAllocation & { order_items?: unknown })[])
           .map(({ order_items: _oi, ...a }) => a as OrderItemFieldAllocation));
 
@@ -370,7 +357,7 @@ export default function OrderDetail() {
             .order('id')
             .range(from, to))),
         ]);
-        if (isStale()) return;
+        if (isStale()) return false;
         // Names for just the customers the preview can show (this order's customer + field owners).
         // No active filter: an inactive field owner still shows by name. (customers has no
         // deleted_at column; filtering on it made this query 400.)
@@ -386,7 +373,7 @@ export default function OrderDetail() {
           .in('id', idChunk)
           .order('id')
           .range(from, to)));
-        if (isStale()) return;
+        if (isStale()) return false;
         const allocLoadErrors = [allocError, fieldsRes.error, fbdRes.error, custRes.error].filter((e) => e != null);
         for (const err of allocLoadErrors) {
           Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_field_split_lookups_for_order' } });
@@ -404,14 +391,26 @@ export default function OrderDetail() {
         setCustNames(names);
       } else {
         // A read that found no order (not a failed one) says "Order not found", never the
-        // previous order this page was showing.
+        // previous order this page was showing. A conflict reload keeps the unsaved editor
+        // instead, so its draft can still be copied; Cancel leaves it.
+        if (reloadDraft && editingRef.current) {
+          return failLoad(new Error('The order is no longer available to reload.'));
+        }
         setOrder(null);
       }
-      if (isStale()) return;
+      if (isStale()) return false;
       setLoadFailed(false);
       setLoading(false);
+      if (orderData && (!editingRef.current || reloadDraft)) {
+        // Adopt a new draft/token only after the complete load succeeds. A failed
+        // recovery must never replace the unsaved editor with a partial snapshot.
+        loadedDraftRef.current = { items: draftItems, rowVersion: readRowVersion(orderData.row_version) };
+        setEditItems(draftItems.map((i) => ({ ...i })));
+        setEditRowVersion(loadedDraftRef.current.rowVersion);
+      }
+      return orderData !== null;
     } catch (err: unknown) {
-      failLoad(err);
+      return failLoad(err);
     }
   }, [id, toast, isAdmin]);
 
@@ -423,6 +422,18 @@ export default function OrderDetail() {
 
   useEffect(() => {
     activeOrderIdRef.current = id;
+    editingRef.current = false;
+    setEditing(false);
+    setNewItems([]);
+    setOrderConflict(false);
+    setConflictDialogOpen(false);
+    setEditRowVersion(null);
+    loadedDraftRef.current = { items: [], rowVersion: null };
+  }, [id]);
+
+  // Kept apart from the reset above: fetchOrder is also rebuilt when the signed-in role
+  // changes, and that refresh must not close the editor or discard its unsaved draft.
+  useEffect(() => {
     if (id) fetchOrder();
   }, [id, fetchOrder]);
 
@@ -667,6 +678,12 @@ export default function OrderDetail() {
 
   const handleSaveEdits = async () => {
     if (!profile) return;
+    if (orderConflict || editRowVersion === null) {
+      setOrderConflict(true);
+      setConflictDialogOpen(true);
+      return;
+    }
+    const savingOrderId = id;
     await runCriticalAction({
       action: async () => {
         // Build payload: existing items (with id) + new items (without id)
@@ -700,9 +717,19 @@ export default function OrderDetail() {
           p_items: itemsPayload,
           p_performed_by: profile.id,
           p_idempotency_key: idemKey,
+          p_expected_row_version: editRowVersion,
         }, reason)));
 
+        if (activeOrderIdRef.current !== savingOrderId) return;
         if (error) {
+          if (hasRpcCode(error, RpcErrorCodes.ORDER_STALE_WRITE)
+            || hasRpcCode(error, RpcErrorCodes.ORDER_EXPECTED_VERSION_REQUIRED)
+            || hasRpcCode(error, RpcErrorCodes.IDEMPOTENCY_PAYLOAD_CONFLICT)
+            || getIdempotencyBindingRejection(error)) {
+            setOrderConflict(true);
+            setConflictDialogOpen(true);
+            return;
+          }
           // Server-side backstop for the hidden Edit button: a draw-created
           // order's items are locked to the booking ledger (Codex r2 HIGH).
           if (hasRpcCode(error, RpcErrorCodes.BOOKING_DRAW_ORDER_LOCKED)) {
@@ -715,6 +742,11 @@ export default function OrderDetail() {
           throw error;
         }
         assertRpcResult(data, 'update_order_items');
+        const receipt = data as { order_id?: unknown; row_version?: unknown; success?: unknown };
+        if (receipt.order_id !== savingOrderId || receipt.success !== true
+          || readRowVersion(receipt.row_version) === null) {
+          throw new Error('The order save could not be confirmed. Your edits are still available; try again.');
+        }
 
         updateOrderIdem.resetKey();
         const addedCount = newPayload.length;
@@ -727,6 +759,17 @@ export default function OrderDetail() {
       setLoading: setSaving,
       sentryTag: 'save_order_edits',
     });
+  };
+
+  const reloadConflictingOrder = async () => {
+    const reloaded = await fetchOrder(true);
+    if (!reloaded) return false;
+    updateOrderIdem.resetKey();
+    setOrderConflict(false);
+    setConflictDialogOpen(false);
+    setEditing(false);
+    setNewItems([]);
+    return true;
   };
 
   const handleTogglePlanned = async () => {
@@ -743,6 +786,10 @@ export default function OrderDetail() {
       setOrder({ ...order, is_planned: newValue });
       toast('success', newValue ? 'Order marked as Planned' : 'Order marked as Committed');
       logActivity({ event: 'order_updated', description: `Order ${order.order_number} marked as ${newValue ? 'planned' : 'committed'}`, performedBy: profile.id, entityType: 'order', entityId: order.id, customerId: order.customer_id });
+      // The toggle advances the order's row_version. Reload the whole order (lines and
+      // version together) so the next edit saves against it; adopting only the new version
+      // could pair it with lines another user has since changed.
+      await fetchOrder();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'toggle_order_planned' } });
       toast('error', sanitizeError(err));
@@ -1377,6 +1424,18 @@ export default function OrderDetail() {
         { label: 'Orders', href: '/orders' },
         { label: order?.order_number || 'Order' },
       ]} />
+      <RecordVersionConflictDialog
+        open={conflictDialogOpen}
+        entityLabel="order"
+        onKeepEditing={() => setConflictDialogOpen(false)}
+        onReload={reloadConflictingOrder}
+      />
+      {editing && orderConflict && (
+        <Card>
+          <p role="status">This order needs a refresh before saving. Your unsaved edits are still shown. Copy anything you want to keep, then reload and reconcile with the saved order.</p>
+          <Button variant="secondary" onClick={() => setConflictDialogOpen(true)}>Review reload options</Button>
+        </Card>
+      )}
       <TransactionThread
         quoteId={parentQuote?.id}
         quoteNumber={parentQuote?.quote_number}
@@ -1393,7 +1452,14 @@ export default function OrderDetail() {
         <div className="flex gap-2 flex-wrap">
           {editing ? (
             <>
-              <Button variant="ghost" icon={<X className="w-4 h-4" />} showChevron={false} onClick={() => { setEditing(false); setEditItems(items.map((i) => ({ ...i }))); setNewItems([]); }}>
+              <Button variant="ghost" icon={<X className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => {
+                const loaded = loadedDraftRef.current;
+                setEditItems(loaded.items.map((i) => ({ ...i })));
+                setEditRowVersion(loaded.rowVersion);
+                setEditing(false);
+                setNewItems([]);
+                void fetchOrder();
+              }}>
                 Cancel
               </Button>
               <Button icon={<Save className="w-4 h-4" />} onClick={handleSaveEdits} loading={saving}>
@@ -1407,7 +1473,9 @@ export default function OrderDetail() {
                   variant="secondary"
                   icon={<Pencil className="w-4 h-4" />}
                   showChevron={false}
-                  onClick={() => { updateOrderIdem.resetKey(); setEditing(true); }}
+                  // Wait for the planned toggle's reload, or the editor would open on the pre-toggle version.
+                  disabled={togglingPlanned}
+                  onClick={() => { setEditing(true); }}
                 >
                   Edit Order
                 </Button>
@@ -1888,6 +1956,7 @@ export default function OrderDetail() {
                               <input
                                 type="number"
                                 value={ppu}
+                                disabled={saving}
                                 onChange={(e) => updateEditItem(item.id, 'price_per_unit', Number(e.target.value))}
                                 className="w-24 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                                 step="0.01"
@@ -1901,6 +1970,7 @@ export default function OrderDetail() {
                               <input
                                 type="number"
                                 value={units}
+                                disabled={saving}
                                 onChange={(e) => updateEditItem(item.id, 'total_units_needed', Number(e.target.value))}
                                 className="w-20 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                               />
@@ -1925,6 +1995,7 @@ export default function OrderDetail() {
                             <td className="px-4 py-3">
                               <button
                                 onClick={() => handleDeleteItem(item.id)}
+                                disabled={saving}
                                 className="text-red-400 hover:text-red-600"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1951,6 +2022,7 @@ export default function OrderDetail() {
                           <input
                             type="number"
                             value={ni.price_per_unit}
+                            disabled={saving}
                             onChange={(e) => updateNewItem(ni._tempKey, 'price_per_unit', Number(e.target.value))}
                             className="w-24 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                             step="0.01"
@@ -1960,6 +2032,7 @@ export default function OrderDetail() {
                           <input
                             type="number"
                             value={ni.total_units_needed || ''}
+                            disabled={saving}
                             onChange={(e) => updateNewItem(ni._tempKey, 'total_units_needed', Number(e.target.value))}
                             className="w-20 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                             placeholder="Qty"
@@ -1973,6 +2046,7 @@ export default function OrderDetail() {
                         <td className="px-4 py-3">
                           <button
                             onClick={() => removeNewItem(ni._tempKey)}
+                            disabled={saving}
                             className="text-red-400 hover:text-red-600"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -1986,6 +2060,7 @@ export default function OrderDetail() {
                         <button
                           type="button"
                           onClick={() => { setShowProductModal(true); setProductSearch(''); }}
+                          disabled={saving}
                           className="flex items-center gap-2 text-sm text-crx-green hover:text-crx-green/80 font-medium transition-colors"
                         >
                           <Plus className="w-4 h-4" />

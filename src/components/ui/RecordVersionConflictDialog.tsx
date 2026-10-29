@@ -3,14 +3,14 @@ import ConfirmModal from './ConfirmModal';
 
 interface RecordVersionConflictDialogProps {
   open: boolean;
-  entityLabel: 'quote' | 'customer';
+  entityLabel: 'quote' | 'customer' | 'order';
   onKeepEditing: () => void;
   onReload: () => Promise<boolean>;
 }
 
 /** Shared fail-closed UI; it never retries or merges a stale payload. */
 export default function RecordVersionConflictDialog({ open, entityLabel, onKeepEditing, onReload }: RecordVersionConflictDialogProps) {
-  const label = entityLabel === 'quote' ? 'Quote' : 'Customer';
+  const label = entityLabel === 'quote' ? 'Quote' : entityLabel === 'order' ? 'Order' : 'Customer';
   const [reloading, setReloading] = useState(false);
   const [reloadFailed, setReloadFailed] = useState(false);
 

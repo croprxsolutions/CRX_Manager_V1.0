@@ -6889,6 +6889,7 @@ export type Database = {
       }
       orders: {
         Row: {
+          row_version: number
           booking_draw: boolean
           commission_split: Json | null
           created_at: string
@@ -15668,6 +15669,7 @@ export type Database = {
       }
       update_order_items: {
         Args: {
+          p_expected_row_version?: number
           p_idempotency_key?: string
           p_items: Json
           p_order_id: string

@@ -6,6 +6,15 @@
 
 **Live capture — 2026-10-28 (after 7:13 AM Central; read-only `execute_sql` on `supabase_migrations.schema_migrations` after rows 996–999 applied for PR #1164):** 1075 rows, `max(version)` `20261028121259` = `20261027080300_notification_sender_recorded` (row 999). The effective ordering high-water is `20261027080300`.
 
+**Parked candidate — To-Do 1.12 (2026-10-28):** `20261028185500_order_edit_and_number_concurrency.sql`
+adds version-checked order editing and serialized ticket/allocation numbering. **Not applied; no live
+ledger row or sequence number assigned.** Local branch `codex/order-concurrency-20261028`; proof,
+review limits and future rollout/rollback: [order edit concurrency](order-edit-concurrency.md).
+Mason prohibited live apply, deploy and merge for this task. Refresh the ledger and finish the
+delivery gates before any later integration; this candidate is not evidence of a live change.
+Review follow-up adds explicit save receipts, bound retry replay after later edits, and
+owner-only ticket-number generation. The future permission change needs explicit owner approval.
+
 **Live capture — 2026-10-28 03:44 UTC (10:44 PM Central 2026-10-27; read-only `execute_sql` on `supabase_migrations.schema_migrations`, the full ledger, row by row, before rows 996–999 apply for PR #1164):** 1071 rows, `max(version)` `20261027185937` = `20261027070000_email_type_purchase_order` (row 995). The effective ordering high-water (each name's 14-digit stamp, else its version) is `20261027070000`. No live row is named `20261027080%`, so rows 996–999 (`20261027080000`–`20261027080300`) are all strictly greater and apply next, in that order.
 
 **Live capture — 2026-10-27 12:37 UTC (7:37 AM Central; the apply script's read-only ledger refresh after row 992 applied for PR #1105, re-read by the CRX Coordinator):** 1068 rows, `max(version)` `20261027123725` = `20261027040000_quote_sent_price_lock` (row 992). The effective ordering high-water is `20261027040000`.

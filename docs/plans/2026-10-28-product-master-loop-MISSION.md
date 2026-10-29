@@ -171,29 +171,33 @@ Use Codex for building ("I have a lot of codex usage left").
    - Security fixes follow the public-repo write-up rule in AGENTS.md: say what changes, never how to exploit the old behaviour.
 6. **Ledger.** Append: package · status (DRAFTED / PARKED / REFUTED) · branch · PR # · builder tier and rounds · Luna verdict · reviewer results · migration timestamp + routine/Mason-gated · the PROOF line · the owed checks. Commit and push the ledger on the loop branch.
 
-## 5. Work queue (the build sheet's §4 order)
+## 5. Work queue (the build sheet's §4 order, as revised by the grand plan 2026-10-29)
+
+The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5 (Sol review, 2026-10-29): WP-PM-14 and DM-0 were added, and the per-package changes there are part of each package's scope.
 
 | # | Package | Builder | Stacks on | Tonight's scope |
 |---|---|---|---|---|
 | 1 | WP-PM-1 Dropdowns | luna | — | Full |
-| 2 | WP-PM-2 Pricing page 💲 | sol | — | Full (option a, no migration) |
-| 3 | WP-PM-4 Sales sheet + list 💲 | sol | PM-2 (both touch `Products.tsx`) | Full |
-| 4 | WP-PM-12a Change-history foundation | sol | — | Full (migration + harness proof) |
-| 5 | WP-PM-3 Turning products off | sol | PM-12a | Full (RPC + guard + harness proof incl. the race) |
-| 6 | WP-PM-8 Setup checks in the database | sol | PM-12a | Full; read-only live count of bad rows for the `NOT VALID` cleanup list |
-| 7 | WP-PM-9 Forms seed + each/unit, units, containers | sol | PM-8 | Full |
-| 8 | WP-PM-5 Use Timing | sol (migration) → luna (screen) | PM-8 | Full; migration marked Mason-gated (grants on `products`) |
-| 9 | WP-PM-6a Unit audit | sol | PM-9 | **Audit + proposal only.** A read-only live count of `unit_size` vs `inventory_unit`, with mismatches listed by product id and name, and a canonical-unit design with its harness proof. **No back-fill. PARK the back-fill for Mason** (Sol BLOCKER 20) |
-| 10 | WP-PM-6b New-product flow + Duplicate 💲 | sol | PM-6a | Build only the parts that don't need the back-fill: opening the new product, missing-price refusals, Duplicate. Otherwise PARK |
-| 11 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2 | Full: the cost-writer map first, then changes |
-| 12 | WP-PM-10 Bulk import | sol | PM-5, PM-8 | Full |
-| 13 | WP-PM-11a Bulk detail upload | sol | PM-8, PM-12a | Full |
-| 14 | WP-PM-11b List editing + phone layout | luna | PM-1 | Full |
-| 15 | WP-PM-12b Corrections to existing records | sol | PM-12a | The record map first. Build the "open jobs offer to update" path; posted invoices never change (Mason, 2026-10-28) |
-| 16 | WP-PM-13 Reorder display | luna | — | Full |
+| 2 | WP-PM-14 RUP "known incomplete" notice | luna | — | Full (screen only, no migration) |
+| 3 | WP-PM-2 Pricing page 💲 | sol | — | Full (option a, no migration) |
+| 4 | WP-PM-4 Sales sheet + list 💲 | sol | PM-2 (both touch `Products.tsx`) | Full |
+| 5 | WP-PM-12a Change-history foundation | sol | — | Full (migration + harness proof) |
+| 6 | WP-PM-3 Turning products off | sol | PM-12a | Full (RPC + guard + harness proof incl. the race) |
+| 7 | WP-PM-8 Setup checks in the database | sol | PM-12a | Full; read-only live count of bad rows for the `NOT VALID` cleanup list; rate help text worded to stay true after the rate rebuild |
+| 8 | WP-PM-9 Forms seed + each/unit, units, containers | sol | PM-8 | Full; no unit aliases; each new spelling gets its conversion row, allowed form and container rule, tested before use |
+| 9 | DM-0 Data hygiene | sol | PM-8, PM-9 | **Review lists only:** blank forms (with a proposed form each), blank SKUs, the duplicate `9768NR` SKU, duplicate-name groups and the test row, from a read-only live count. **No data changes. PARK the data step for Mason** (he types the SKUs, D-R) |
+| 10 | WP-PM-5 Use Timing | sol (migration) → luna (screen) | PM-8 | Full; options table with option code, timing code and optional crop; migration marked Mason-gated (grants on `products`) |
+| 11 | WP-PM-6a Unit audit | sol | PM-9 | **Audit + proposal only.** A read-only live count of `unit_size` vs `inventory_unit`, with mismatches listed by product id and name for Mason's per-row approval, a canonical-unit design with its harness proof, and the list of remaining `unit_size` readers. **No back-fill. PARK the back-fill for Mason** (Sol BLOCKER 20) |
+| 12 | WP-PM-6b New-product flow + basic Duplicate 💲 | sol | PM-6a | Build only the parts that don't need the back-fill: opening the new product, missing-price refusals, basic Duplicate (no chemistry copy; that is DM-5). Otherwise PARK |
+| 13 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2 | Full: the cost-writer map first, then changes |
+| 14 | WP-PM-10 Bulk import | sol | PM-5, PM-8, DM-0 | Full, as a draft PR; rates written through one function. **Not mergeable until DM-0's data step is done** (say so in the PR) |
+| 15 | WP-PM-11a Detail workbook | sol | PM-8, PM-12a, DM-0 | Full, as a draft PR: a separate file and detail RPC; the price workbook's rate columns become read-only **only if Mason has answered grand-plan question 2 "yes"; otherwise PARK that part**. Not mergeable until DM-0's data step is done |
+| 16 | WP-PM-11b List editing + phone layout | luna | PM-1 | Full |
+| 17 | WP-PM-12b Corrections to existing records | sol | PM-12a | The record map first. Build the "open jobs offer to update" path; posted invoices never change (Mason, 2026-10-28) |
+| 18 | WP-PM-13 Reorder display | luna | — | Full |
 
 **Out of scope tonight:**
-- the weight-per-gallon and ingredient work (DM-*, To-Do 2.9);
+- the weight-per-gallon and ingredient work (DM-1, DM-2, DM-4, DM-1b, DM-5, REG-1; To-Do 2.9) and grand-plan Stages 3 to 9;
 - item 18, the return policy (Mason: "Later").
 
 **If time is short:** finish fewer packages properly rather than more of them half-done. The order above is the priority.

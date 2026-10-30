@@ -209,7 +209,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     try { skip = findCodeRabbitSkip({ dirs: where, sessionId, pullRequest, now }); } catch { skip = null; }
   }
   if (coderabbitReview.status === "missing" && !skip) {
-    return refuse(`${number} needs a clean CodeRabbit review of its current head before its migration applies, because ${coderabbitReview.why}. Post "@coderabbitai full review" once (docs/reference/coderabbit-native-review.md), answer its threads, then re-run.`);
+    return refuse(`${number} needs a completed CodeRabbit review before its migration applies, because ${coderabbitReview.why}. Post "@coderabbitai full review" once (docs/reference/coderabbit-native-review.md), answer its threads, then re-run.`);
   }
   // CodeRabbit is advisory (2026-10-19), but its unanswered threads block the
   // merge gates, so they block an apply too — otherwise production could take a

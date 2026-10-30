@@ -1,5 +1,10 @@
 # CodeRabbit native review requests
 
+> **Overrides everything below where they differ (Mason, 2026-10-30).** No PR needs CodeRabbit unless it carries the
+> `needs-coderabbit` label; then one completed review on any commit of the PR satisfies the gates, and a later commit
+> needs no new one. Only an open thread on code that has not changed holds a merge: an outdated or resolved thread
+> does not, and no reply is required. Sol is needed only for a change on `docs/reference/sol-required-paths.md`.
+
 > **Current rule: CodeRabbit is advisory (Mason, 2026-10-19, "cut coderabbit volume").**
 > `.coderabbit.yaml` sets `request_changes_workflow: false` (CodeRabbit never submits `APPROVED`
 > or `CHANGES_REQUESTED`; it only comments) and, **since 2026-10-21, `auto_review.enabled: false`**
@@ -236,10 +241,9 @@ newest run of every reported check is green with `mergeStateStatus` CLEAN, the
 aggregate `reviewDecision` is not `CHANGES_REQUESTED`, the head contains GitHub's
 real base, the merge is pinned with `--match-head-commit`, and the Sol proof is
 bound to that head and to GitHub's real base. `--auto` and `--admin` are refused.
-The one exception to the Sol proof is a documentation-only change as defined in
-`docs/reference/sol-exempt-paths.md` (Mason, 2026-10-07): the gates read the PR's
-file list and accept it without the proof, with every other condition still
-required. Until 2026-10-19 the gates also required CodeRabbit's latest verdict to
+A change off `docs/reference/sol-required-paths.md` (Mason, 2026-10-30) needs no
+Sol proof: the gates read the PR's file list themselves, with every other
+condition still required. Until 2026-10-19 the gates also required CodeRabbit's latest verdict to
 be `APPROVED` on the exact `headRefOid` (`coderabbitApprovedHead`, since deleted).
 
 Three plumbing changes made that loop possible without a person:

@@ -43,6 +43,16 @@ function withThreadDefault(runGh) {
       } catch { /* not meta — fall through */ }
       return JSON.stringify({ number: 1, url: "https://github.com/fixture/repo/pull/1" });
     }
+    // The teammate comment read: default to none, unless the fixture answered it.
+    if (Array.isArray(args) && args[0] === "api" && args[1] === "graphql" && args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))) {
+      try {
+        if (JSON.parse(out)?.data?.repository?.pullRequest?.comments) return out;
+      } catch { /* not comment data — fall through to the default */ }
+      const empty = { pageInfo: { hasPreviousPage: false }, nodes: [] };
+      return JSON.stringify({ data: { repository: { pullRequest: {
+        author: { login: "masonwells1" }, comments: empty, reviews: empty, reviewThreads: empty,
+      } } } });
+    }
     if (Array.isArray(args) && args[0] === "api" && args[1] === "graphql" && args.some((a) => /reviewThreads/.test(String(a)))) {
       try {
         const pr = JSON.parse(out)?.data?.repository?.pullRequest;
@@ -573,6 +583,64 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
+  // A teammate's comment is the only thing wrong with this otherwise mergeable PR.
+  const teammateAnswer = (comments) => (args) => (
+    args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
+      ? JSON.stringify({ data: { repository: { pullRequest: {
+        author: { login: "masonwells1" },
+        comments: { pageInfo: { hasPreviousPage: false }, nodes: comments },
+        reviews: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+        reviewThreads: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+      } } } })
+      : ordinaryPrJson
+  );
+  const tahaLink = "https://github.com/o/r/pull/5#issuecomment-12";
+  const tahaComment = { author: { __typename: "User", login: "TahaKhanAbdalli" }, url: tahaLink, body: "Review (Taha): one blocking case" };
+  const unanswered = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: teammateAnswer([tahaComment]),
+  });
+  assert.equal(unanswered.blocked, true, "an unanswered teammate comment refuses the merge");
+  assert.match(unanswered.reason, /@tahakhanabdalli: https:[^\n]*issuecomment-12/);
+  assert.equal(evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: teammateAnswer([tahaComment, {
+      author: { __typename: "User", login: "masonwells1" }, url: "https://github.com/o/r/pull/5#issuecomment-13", body: `${tahaLink} fixed`,
+    }]),
+  }).blocked, false, "an answer linking the comment clears it");
+  const unreadableComments = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: (args) => {
+      if (args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))) throw new Error("graphql down");
+      return ordinaryPrJson;
+    },
+  });
+  assert.equal(unreadableComments.blocked, true, "a failed comment read refuses the merge");
+  assert.match(unreadableComments.reason, /could not read this pull request's comments/);
+  const partialComments = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: (args) => {
+      const out = teammateAnswer([])(args);
+      return out === ordinaryPrJson ? out : JSON.stringify({ ...JSON.parse(out), errors: [{ message: "body unavailable" }] });
+    },
+  });
+  assert.equal(partialComments.blocked, true, "a comment read carrying GraphQL errors refuses the merge");
+  assert.match(partialComments.reason, /could not read this pull request's comments/);
+  const cutOffComments = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: (args) => (
+      args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
+        ? JSON.stringify({ data: { repository: { pullRequest: {
+          author: { login: "masonwells1" },
+          comments: { pageInfo: { hasPreviousPage: true }, nodes: [] },
+          reviews: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+          reviewThreads: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+        } } } })
+        : ordinaryPrJson
+    ),
+  });
+  assert.equal(cutOffComments.blocked, true, "a comment list too long to read refuses the merge");
+  assert.match(cutOffComments.reason, /more comments than the gate reads at once/);
   // Sol once before the PR (Mason, 2026-10-29): a proof of an earlier commit covers
   // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
   for (const [later, expectBlocked, label] of [
@@ -1124,7 +1192,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 20, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 21, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // session-context-reminder writes the rules every later Codex session starts from,
   // so Codex may not edit it either.
   for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {
@@ -2296,7 +2364,10 @@ try {
       }
       if (Array.isArray(args) && args.includes("graphql")) {
         return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: risky.sha,
-          reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } } });
+          author: { login: "masonwells1" },
+          comments: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+          reviews: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+          reviewThreads: { pageInfo: { hasPreviousPage: false, hasNextPage: false, endCursor: null }, nodes: [] } } } } });
       }
       if (isAdvisoryMetaCall(args)) return advisoryMetaJson;
       return mainPrJson;
@@ -2364,7 +2435,8 @@ try {
     runGh: chainedControlGh,
   });
   assert.equal(chainedControlVerdict.blocked, false, "CONTROL: two clean merges are allowed");
-  assert.equal(chainedControlAttempts, 2, "CONTROL: the advisory runs once per merge AFTER both cleared their hard gates — deferred, not dropped");
+  // Two reads per merge: the review threads, then the teammate comments.
+  assert.equal(chainedControlAttempts, 4, "CONTROL: the advisory runs once per merge AFTER both cleared their hard gates — deferred, not dropped");
 
   // ── round 6: ONE request, gated once, however many readings name it ────────
   // splitCommandSegments returns a UNION of readings, so any command carrying a
@@ -2379,7 +2451,7 @@ try {
     if (Array.isArray(args) && args.includes("graphql")) {
       // Count the thread lookup (one per advisory run); the money-PR requirement
       // read that follows it (2026-10-21) falls to the default answer.
-      if (args.some((a) => /reviewThreads/.test(String(a)))) dedupeAdvisoryAttempts += 1;
+      if (args.some((a) => /reviewThreads\(first/.test(String(a)))) dedupeAdvisoryAttempts += 1;
       return NO_THREADS_JSON; // a complete, empty read (a failed one denies since 2026-10-19)
     }
     if (isAdvisoryMetaCall(args)) return advisoryMetaJson;

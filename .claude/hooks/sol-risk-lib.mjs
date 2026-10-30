@@ -80,6 +80,7 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   ".claude/hooks/autopilot-lib.mjs",
   ".claude/hooks/changelog-entry-lib.mjs",
   ".claude/hooks/coderabbit-skip-lib.mjs",
+  ".claude/hooks/teammate-comments-lib.mjs",
   ".claude/hooks/edit-splice-lib.mjs",
   ".claude/hooks/generated-column-check.mjs",
   ".claude/hooks/grant-change-guard.mjs",

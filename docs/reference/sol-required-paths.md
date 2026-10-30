@@ -51,7 +51,7 @@ Folders end in `/`. The match ignores case, from the repository root.
 `.claude/hooks/codex-push-lib.mjs`, `.claude/hooks/merge-guard-launcher.mjs`,
 `.claude/hooks/pr-merge-guard.mjs`, `.claude/hooks/review-proof-guard.mjs`,
 `.claude/hooks/sol-risk-lib.mjs`, `scripts/write-codex-push-proof.mjs`, `.claude/hooks/app-repo-identity.mjs`,
-`.claude/hooks/coderabbit-skip-lib.mjs`, `.claude/hooks/read-only-search-lib.mjs`,
+`.claude/hooks/coderabbit-skip-lib.mjs`, `.claude/hooks/teammate-comments-lib.mjs`, `.claude/hooks/read-only-search-lib.mjs`,
 `.claude/hooks/session-context-reminder.mjs`, `.claude/hooks/autopilot-lib.mjs`,
 `.claude/hooks/changelog-entry-lib.mjs`, `scripts/run-claude-review.mjs`, `scripts/overnight-codex-gate.mjs`
 

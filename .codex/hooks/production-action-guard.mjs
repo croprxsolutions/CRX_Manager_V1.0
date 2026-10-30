@@ -59,6 +59,12 @@ import {
   evaluateCodexBotReview,
   readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
+import {
+  readTeammateComments,
+  teammateCommentsDenial,
+  teammateCommentsTruncatedDenial,
+  teammateCommentsUnreadableDenial,
+} from "../../.claude/hooks/teammate-comments-lib.mjs";
 import { solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -116,7 +122,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // merge needs Sol at all.
 // `session-context-reminder` joined 2026-10-30: not imported, but its output is the
 // rules every later Codex session starts from.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity|session-context-reminder)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|teammate-comments-lib|read-only-search-lib|app-repo-identity|session-context-reminder)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -132,6 +138,7 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   ".claude/hooks/live-testdata-lib.mjs",
   ".claude/hooks/sol-risk-lib.mjs",
   ".claude/hooks/coderabbit-skip-lib.mjs",
+  ".claude/hooks/teammate-comments-lib.mjs",
   ".claude/hooks/read-only-search-lib.mjs",
   // Imported by codex-push-lib and coderabbit-skip-lib, so it loads at guard
   // startup too (Codex App P1 on #1149).
@@ -810,6 +817,7 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
   let coderabbitOpen = null; // null = not read completely → fail closed below
   let coderabbitReview = null; // null = not read → fail closed below
   let reviewedPr = null; // the PR number GitHub answered for, which a skip waiver must name
+  let teammates = null; // null = not read → fail closed below
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -846,6 +854,9 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
         // A waiver covers this repository's PRs only (Codex App P2 on #1035).
         reviewedPr = skipPullRequestFor(meta.url, meta.number);
       }
+      teammates = readTeammateComments((args) => runGh(args, repoDir), {
+        owner: slug[1], name: slug[2], number: meta.number, deadlineMs, now: clock,
+      });
     }
   } catch {
     codexVerdict = null; // never a deny
@@ -858,6 +869,11 @@ function codexAppAdvisory({ request, repoDir, runGh, clock = () => Date.now(), d
   if (coderabbitOpen > 0) {
     return denied(coderabbitFindingsDenial("CODEX PRODUCTION GATE", request.selector, coderabbitOpen));
   }
+  if (!teammates) return denied(teammateCommentsUnreadableDenial("CODEX PRODUCTION GATE", request.selector));
+  if (teammates.comments.length > 0) {
+    return denied(teammateCommentsDenial("CODEX PRODUCTION GATE", request.selector, teammates.comments));
+  }
+  if (teammates.truncated) return denied(teammateCommentsTruncatedDenial("CODEX PRODUCTION GATE", request.selector));
   if (!coderabbitReview || coderabbitReview.status === "unreadable") {
     return denied(coderabbitRequirementUnreadableDenial("CODEX PRODUCTION GATE", request.selector, coderabbitReview?.why));
   }

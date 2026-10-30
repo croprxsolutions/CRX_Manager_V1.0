@@ -752,6 +752,12 @@ ok(/coderabbitReview = verdict;\s*(?:\/\/[^\n]*\n\s*)*reviewedPr = skipPullReque
 ok(/gh\(args, REQUIREMENT_CALL_TIMEOUT_MS\)\)\?\.data\?\.repository\?\.pullRequest/.test(guardSource)
   && /\{ deadlineMs: deadlineMs - REQUIREMENT_CALL_TIMEOUT_MS \}/.test(guardSource),
   "the Claude guard's thread walk uses the short call cap and stops while a capped call still fits the budget");
+// The teammate-comment rule (Mason, 2026-10-30): an unread answer and an unanswered
+// comment both refuse; the rule itself is tested in teammate-comments-lib.test.mjs.
+ok(/if \(!teammates\) deny\(teammateCommentsUnreadableDenial/.test(guardSource)
+  && /if \(teammates\.comments\.length > 0\) \{\s*deny\(teammateCommentsDenial/.test(guardSource)
+  && /if \(teammates\.truncated\) deny\(teammateCommentsTruncatedDenial/.test(guardSource),
+  "the Claude guard refuses on an unread, unanswered or cut-off teammate comment list");
 // Codex App P1 on #1009: the completion status is read BEFORE the threads, in
 // every gate, so a review finishing mid-check cannot pair with a stale thread list.
 {

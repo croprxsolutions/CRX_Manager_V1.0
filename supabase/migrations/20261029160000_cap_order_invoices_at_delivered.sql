@@ -194,6 +194,12 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  -- Completed deliveries leave the allowance only through the governed void/cancel flow.
+  IF OLD.status = 'completed' AND OLD.deleted_at IS NULL AND OLD.order_id IS NOT NULL
+     AND (NEW.deleted_at IS NOT NULL OR NEW.order_id IS DISTINCT FROM OLD.order_id) THEN
+    RAISE EXCEPTION 'DELIVERY_COMPLETED_SOURCE_IMMUTABLE: void delivery % before removing or reassigning it', OLD.delivery_number
+      USING ERRCODE = 'P0001';
+  END IF;
   BEGIN
     PERFORM 1 FROM public.invoices i
      WHERE i.invoice_type <> 'credit_memo'
@@ -226,9 +232,11 @@ REVOKE ALL ON FUNCTION public.enforce_delivery_void_needs_invoice_void() FROM PU
 
 DROP TRIGGER IF EXISTS zz_delivery_void_needs_invoice_void ON public.deliveries;
 CREATE TRIGGER zz_delivery_void_needs_invoice_void
-  BEFORE UPDATE OF status ON public.deliveries
+  BEFORE UPDATE OF status, deleted_at, order_id ON public.deliveries
   FOR EACH ROW
-  WHEN (NEW.status IN ('voided', 'cancelled') AND OLD.status NOT IN ('voided', 'cancelled'))
+  WHEN ((NEW.status IN ('voided', 'cancelled') AND OLD.status NOT IN ('voided', 'cancelled'))
+     OR (OLD.status = 'completed' AND OLD.deleted_at IS NULL AND OLD.order_id IS NOT NULL
+         AND (NEW.deleted_at IS NOT NULL OR NEW.order_id IS DISTINCT FROM OLD.order_id)))
   EXECUTE FUNCTION public.enforce_delivery_void_needs_invoice_void();
 
 DO $postflight$

@@ -239,6 +239,10 @@ function scheduledDelivery(invoiceStatus,link='self') {
 }
 function invoiceFirst() {
   const post=`RESET ROLE; UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}';`;
+  for (const user of [ADMIN,REP]) {
+    refused(`${asUser(user)} UPDATE public.deliveries SET deleted_at=now() WHERE id='${DELIVERY}';`,'a completed delivery must be voided before removal',/DELIVERY_COMPLETED_SOURCE_IMMUTABLE/);
+    refused(`${asUser(user)} UPDATE public.deliveries SET order_id='${EMPTY_ORDER}' WHERE id='${DELIVERY}';`,'a completed delivery cannot be reassigned',/DELIVERY_COMPLETED_SOURCE_IMMUTABLE/);
+  }
   refused(`${post} ${voidDelivery()}`,'void_delivery refuses while an order-level posted invoice is active',POSTED_REFUSAL);
   refused(`${post} ${asUser(ADMIN)} SELECT public.cancel_delivery('${DELIVERY}','[PROVER] invoice-first proof',NULL,gen_random_uuid()::text);`,'cancel_delivery refuses a completed delivery while a posted invoice is active',POSTED_REFUSAL);
   for (const status of ['paid','overdue']) {

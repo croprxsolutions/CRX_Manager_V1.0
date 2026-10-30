@@ -515,11 +515,10 @@ ok(
 // after the request loop drains the queue. Since Mason's autonomous-landing rule
 // (2026-09-26) every main merge needs the exact-SHA Sol proof, so there is ONE
 // allow point, behind that proof — the old non-risky allow point, which returned
-// before the proof section, is gone. Mason's documentation-only exemption
-// (2026-10-07) adds the second and last: reached only when the proof scan found
-// nothing, and only off the Sol list (sol-risk-lib.mjs). Mason's "Sol only
-// on risky PRs" (2026-10-29) adds the third, right after it (sol-risk-lib.mjs).
-// The pins are: exactly three pushes, all after every hard gate and the proof
+// before the proof section, is gone. Mason's "Sol only on risky PRs" (2026-10-29)
+// adds the second and last: reached only when the proof scan found nothing, and
+// only off the Sol list (sol-risk-lib.mjs).
+// The pins are: exactly two pushes, all after every hard gate and the proof
 // section; the one call site sits after the loop.
 const claudeQueuePushes = [...guardSource.matchAll(/advisoryQueue\.push\(request\);/g)].map((m) => m.index);
 const claudeAdvisoryCalls = [...guardSource.matchAll(/codexAdvisory\(request, advisoryDeadlineMs\);/g)].map((m) => m.index);
@@ -528,8 +527,8 @@ const claudeProofAt = guardSource.indexOf("every main merge → require the fres
 const claudeRequestLoopAt = guardSource.indexOf("for (const request of requests) gateRequest(request);");
 eq(
   claudeQueuePushes.length,
-  3,
-  "the Claude guard has exactly THREE allow points — the Sol proof, the documentation-only exemption and a low-risk pull request; a fourth would be a merge path that skips all three",
+  2,
+  "the Claude guard has exactly TWO allow points — the Sol proof and a pull request off the Sol list; a third would be a merge path that skips both",
 );
 eq(
   claudeAdvisoryCalls.length,

@@ -43,7 +43,7 @@ jobs:
     name: Post the failed production deploy to Slack
     if: >-
       contains(fromJSON('["failure","error"]'), github.event.state) &&
-      startsWith(github.event.context, 'Vercel') &&
+      startsWith(github.event.context, 'Vercel – crx-manager-v1-0') &&
       contains(github.event.branches.*.name, 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -55,6 +55,6 @@ jobs:
           TARGET_URL: ${{ github.event.target_url }}
         run: |
           title=${COMMIT_MESSAGE%%$'\n'*}
-          text=$(printf ':red_circle: *Production deploy failed on Vercel*\n%s\n<%s|Open the deploy>' "${title//[<>*_~\`:]/}" "$TARGET_URL")
+          text=$(printf ':red_circle: *Production deploy failed on Vercel*\n%s\n<%s|Open the deploy>' "${title//[<>*_~\`:]/}" "${TARGET_URL//[<>|]/}")
           jq -n --arg text "$text" '{text: $text}' |
             curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

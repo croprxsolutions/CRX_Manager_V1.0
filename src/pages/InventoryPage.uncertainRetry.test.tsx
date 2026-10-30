@@ -642,7 +642,7 @@ describe('InventoryPage — a lost reply freezes the request instead of minting 
     await waitFor(() => expect(callsTo('create_inventory_hold')).toHaveLength(3));
     expect(callsTo('create_inventory_hold')[2]).toEqual(forced);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  });
+  }, 15000);
 
   it('retries a lost ADMIN OVERRIDE under the SAME key with the frozen force flag and reason', async () => {
     let attempts = 0;

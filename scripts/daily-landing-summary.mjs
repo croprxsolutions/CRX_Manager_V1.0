@@ -188,6 +188,19 @@ export function buildSummary({ now, hours, merged, changes, landedMigrations, wa
   return lines.join("\n");
 }
 
+// The Slack copy for #crx-alerts (Mason, 2026-10-29): Slack bold is *x*, not **x**,
+// and the open security-warning counts ride along. null = this token could not read them.
+export function slackText(summary, security, repo) {
+  const shown = (count) => (count === null ? "could not check" : String(count));
+  const open = (security.dependabot ?? 0) + (security.codeScanning ?? 0);
+  return [
+    summary.replace(/\*\*(.+?)\*\*/g, "*$1*"),
+    "",
+    `${open ? ":warning: " : ""}*Security warnings open:* Dependabot ${shown(security.dependabot)}, ` +
+      `code scanning ${shown(security.codeScanning)} — <https://github.com/${repo}/security|review them>`,
+  ].join("\n");
+}
+
 function readArgs(argv) {
   const hoursIndex = argv.indexOf("--hours");
   const hours = hoursIndex >= 0 ? Number(argv[hoursIndex + 1]) : 24;
@@ -195,7 +208,7 @@ function readArgs(argv) {
   return { hours, post: argv.includes("--post") };
 }
 
-function main() {
+async function main() {
   const { hours, post } = readArgs(process.argv.slice(2));
   const repo = process.env.GITHUB_REPOSITORY || DEFAULT_REPO;
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -246,11 +259,26 @@ function main() {
   }
   gh(["issue", "comment", String(issueNumber), "--repo", repo, "--body", summary]);
   process.stdout.write(`Posted the daily landing summary to issue #${issueNumber}.\n`);
+
+  const webhook = process.env.SLACK_WEBHOOK_URL;
+  if (!webhook) return;
+  const openAlerts = (kind) => {
+    try { return JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${repo}/${kind}/alerts?state=open&per_page=100`])).flat().length; }
+    catch { return null; }
+  };
+  const security = { dependabot: openAlerts("dependabot"), codeScanning: openAlerts("code-scanning") };
+  const response = await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: slackText(summary, security, repo) }),
+  });
+  if (!response.ok) throw new Error(`Slack post failed: HTTP ${response.status}`);
+  process.stdout.write("Posted the daily landing summary to Slack.\n");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { main(); } catch (error) {
+  main().catch((error) => {
     process.stderr.write(`daily-landing-summary: ${error?.message || error}\n`);
     process.exit(1);
-  }
+  });
 }

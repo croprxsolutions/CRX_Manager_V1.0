@@ -12,8 +12,8 @@ const ORG = "crop-rx-solutions";
 const PROJECT_ID = "4510932858175488";
 const ISSUES_PAGE = `https://${ORG}.sentry.io/issues/`;
 const WORKFLOW = "sentry-slack-alerts.yml";
-// shortcut: reads one page and links to Sentry if it is full, raise this if 25 new errors in 30 minutes ever happens.
-const LIMIT = 25;
+const PAGE_SIZE = 100;
+const SHOWN = 25;
 // Sentry can list an issue slightly after it was first seen, so each run reads up
 // to 10 minutes before it started. Both ends come from run start times, so one
 // run's window begins exactly where the last successful run's ended.
@@ -39,22 +39,26 @@ export function issueQuery({ since, until }) {
   return `is:unresolved issue.priority:high firstSeen:>=${since} firstSeen:<${until}`;
 }
 
-// Error titles can quote the data that caused them, and #crx-alerts must not carry customer contact details.
-export function safeTitle(title) {
-  const redacted = String(title ?? "")
-    .replace(/[^\s<>"']+@[^\s<>"']+/g, "(email)")
-    .replace(/\+?\d(?:[\s().-]*\d){6,}/g, "(number)");
-  return plainText(redacted).replace(/&/g, "&amp;");
+// Sentry's next-page link, from its Link header. It always sends one; results="true" says it leads somewhere.
+export function nextPage(link) {
+  return /<([^>]+)>; rel="next"; results="true"/.exec(link ?? "")?.[1] ?? null;
+}
+
+// Error titles can quote the data that caused them, and #crx-alerts must not carry
+// customer details, so a message names only the error's type, never its text.
+function errorType(issue) {
+  const type = issue.metadata?.type;
+  return /^[A-Za-z][\w.]{0,60}$/.test(type ?? "") ? type : "Error";
 }
 
 export function slackText(issues) {
   const count = issues.length;
-  const lines = issues.map((issue) => {
+  const lines = issues.slice(0, SHOWN).map((issue) => {
     const link = `${ISSUES_PAGE}${encodeURIComponent(issue.shortId)}`;
     const users = Number(issue.userCount) || 0;
-    return `<${link}|${plainText(issue.shortId)}> ${safeTitle(issue.title)} (${users} ${users === 1 ? "user" : "users"})`;
+    return `<${link}|${plainText(issue.shortId)}> ${errorType(issue)} (${users} ${users === 1 ? "user" : "users"})`;
   });
-  const more = count >= LIMIT ? `\n<${ISSUES_PAGE}|There may be more in Sentry>` : "";
+  const more = count > SHOWN ? `\n<${ISSUES_PAGE}|${count - SHOWN} more in Sentry>` : "";
   return `:rotating_light: *${count} new Sentry ${count === 1 ? "error" : "errors"}*\n${lines.join("\n")}${more}`;
 }
 
@@ -70,12 +74,16 @@ async function main() {
   // Failing here keeps the last good run as the starting point, so no errors are skipped.
   if (!token || !webhook) throw new Error("SENTRY_ALERTS_TOKEN and SLACK_ALERTS_WEBHOOK_URL must both be set");
   const window = issueWindow({ ...runTimes(repo), lookbackHours: readLookback(hours) });
-  const url = `https://us.sentry.io/api/0/organizations/${ORG}/issues/?${new URLSearchParams({
-    project: PROJECT_ID, query: issueQuery(window), limit: String(LIMIT),
+  let url = `https://us.sentry.io/api/0/organizations/${ORG}/issues/?${new URLSearchParams({
+    project: PROJECT_ID, query: issueQuery(window), limit: String(PAGE_SIZE),
   })}`;
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) throw new Error(`Sentry read failed: HTTP ${response.status}`);
-  const issues = await response.json();
+  const issues = [];
+  while (url) {
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) throw new Error(`Sentry read failed: HTTP ${response.status}`);
+    issues.push(...await response.json());
+    url = nextPage(response.headers.get("link"));
+  }
   process.stdout.write(`${issues.length} new high-priority issue(s) from ${window.since} to ${window.until}.\n`);
   if (!issues.length) return;
 

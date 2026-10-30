@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tests for the Sentry alert's pure parts. The Sentry and Slack calls are proven by a real run.
 import assert from "node:assert/strict";
-import { issueQuery, issueWindow, readLookback, safeTitle, slackText } from "./sentry-slack-alerts.mjs";
+import { issueQuery, issueWindow, nextPage, readLookback, slackText } from "./sentry-slack-alerts.mjs";
 
 // ── windows join up, so an issue is neither missed nor posted twice ─────────
 const runAt = "2026-10-30T12:40:00Z";
@@ -25,21 +25,24 @@ for (const bad of ["-1", "abc", "9999"]) assert.throws(() => readLookback(bad), 
 const query = issueQuery({ since: "A", until: "B" });
 assert.ok(query.includes("issue.priority:high") && query.includes("firstSeen:>=A") && query.includes("firstSeen:<B"));
 
-// ── error text is data, never Slack markup or customer contact details ─────
-const one = slackText([{ shortId: "CRX-MANAGER-1H", title: "boom <!channel> | *x*\nsecond line", userCount: 1 }]);
-assert.ok(one.startsWith(":rotating_light: *1 new Sentry error*\n"));
-assert.ok(one.includes("<https://crop-rx-solutions.sentry.io/issues/CRX-MANAGER-1H|CRX-MANAGER-1H>"));
-assert.ok(one.includes("(1 user)"));
-assert.ok(!one.includes("<!channel>"), "an error title cannot ping the channel");
-assert.equal(one.split("\n").length, 2, "an error title cannot add lines");
-assert.equal(safeTitle("x &lt;!channel&gt;"), "x &amp;lt;!channel&amp;gt;", "an encoded ping stays plain text");
-assert.equal(safeTitle("no user pat.smith+a@example.com found"), "no user (email) found");
-assert.equal(safeTitle("bad phone +1 (555) 010-1234 given"), "bad phone (number) given");
-assert.equal(safeTitle("call 555-1234 now"), "call (number) now", "a local phone number is covered");
-assert.equal(safeTitle("Error 500 at step 12"), "Error 500 at step 12", "short numbers stay readable");
+// ── every page is read, so a burst of errors is not lost ──────────────────
+const lastPage = '<https://x/?cursor=a>; rel="previous"; results="false", <https://x/?cursor=b>; rel="next"; results="false"';
+const morePages = '<https://x/?cursor=a>; rel="previous"; results="false", <https://x/?cursor=b>; rel="next"; results="true"';
+assert.equal(nextPage(morePages), "https://x/?cursor=b");
+assert.equal(nextPage(lastPage), null);
+assert.equal(nextPage(null), null);
 
-const many = slackText(Array.from({ length: 25 }, (_, index) => ({ shortId: `X-${index}`, title: "e", userCount: "2" })));
-assert.ok(many.includes("*25 new Sentry errors*") && many.includes("(2 users)"));
-assert.ok(many.includes("There may be more in Sentry"), "a full page says there may be more");
+// ── a message carries no error text, so no customer details ────────────────
+const title = "no user pat.smith@example.com at 12 Elm St <!channel>";
+const one = slackText([{ shortId: "CRX-MANAGER-1H", title, metadata: { type: "EvalError", value: title }, userCount: 1 }]);
+assert.equal(one, ":rotating_light: *1 new Sentry error*\n<https://crop-rx-solutions.sentry.io/issues/CRX-MANAGER-1H|CRX-MANAGER-1H> EvalError (1 user)");
+const sneaky = slackText([{ shortId: "X-1", metadata: { type: "pat.smith@example.com <!channel>" }, userCount: 0 }]);
+assert.ok(sneaky.includes("X-1> Error (0 users)"), "a type that is not a plain class name is not shown");
+assert.ok(slackText([{ shortId: "X-1", title: "failLoad" }]).includes("X-1> Error (0 users)"), "no type falls back to Error");
+
+const many = slackText(Array.from({ length: 30 }, (_, index) => ({ shortId: `X-${index}`, userCount: "2" })));
+assert.ok(many.includes("*30 new Sentry errors*") && many.includes("(2 users)"));
+assert.equal(many.split("\n").length, 27, "heading, 25 errors, and a link for the rest");
+assert.ok(many.includes("|5 more in Sentry>"));
 
 console.log("sentry-slack-alerts tests passed");

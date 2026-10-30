@@ -2,7 +2,7 @@
 // Tests for the daily landing summary's pure parts (Mason's autonomous-landing
 // rule, 2026-09-26). The GitHub/git reads are exercised by a real dry run.
 import assert from "node:assert/strict";
-import { applyRecords, buildSummary, changelogHeading, collectApplies, migrationName, plainText, waitingReasons } from "./daily-landing-summary.mjs";
+import { applyRecords, buildSummary, changelogHeading, collectApplies, migrationName, plainText, slackText, waitingReasons } from "./daily-landing-summary.mjs";
 
 let pass = 0;
 const ok = (value, message) => { assert.ok(value, message); pass += 1; };
@@ -106,5 +106,12 @@ ok(/cannot\s+double-check the live database/.test(summary), "the footer says whe
 const quiet = buildSummary({ now: Date.now(), hours: 24, merged: [], changes: [], landedMigrations: [], waiting: [] });
 ok(quiet.includes("Nothing merged.") && quiet.includes("None recorded.") && quiet.includes("Nothing needs you today."),
   "a quiet day says so in plain words");
+
+// ── Slack copy ──────────────────────────────────────────────────────────────
+const slack = slackText(quiet, { dependabot: 1, codeScanning: null }, "o/r");
+ok(!slack.includes("**") && slack.includes("*Went live (merged): 0*"), "Slack copy uses Slack bold");
+ok(slack.includes(":warning: *Security warnings open:* Dependabot 1, code scanning could not check"),
+  "open warnings are flagged and an unreadable count says so");
+ok(!slackText(quiet, { dependabot: 0, codeScanning: 0 }, "o/r").includes(":warning:"), "no warnings → no flag");
 
 console.log(`daily-landing-summary: ${pass} assertions passed`);

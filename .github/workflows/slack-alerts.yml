@@ -1,9 +1,10 @@
 name: Slack failure alerts
 
-# Mason, 2026-10-29: #crx-alerts gets failures and serious issues only. The
-# GitHub Slack app cannot filter to failures, so it was unsubscribed and this
-# posts instead, only when a check or scheduled job fails on main, or when a
-# production Vercel deploy fails.
+# Mason, 2026-10-29/30: #crx-alerts gets failures and serious issues only:
+# a failed check on main or on a PR that is ready for review, production
+# deploys that fail and failed preview deploys. Draft PRs never post.
+# The GitHub Slack app cannot filter to failures, so it was unsubscribed and this
+# posts instead.
 # Needs the SLACK_ALERTS_WEBHOOK_URL secret (a Slack incoming webhook for #crx-alerts).
 on:
   workflow_run:
@@ -22,39 +23,65 @@ jobs:
     name: Post the failure to Slack
     if: >-
       contains(fromJSON('["failure","timed_out","startup_failure"]'), github.event.workflow_run.conclusion) &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.event != 'pull_request'
+      ((github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event != 'pull_request') ||
+       (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      pull-requests: read
     steps:
       - name: Post to Slack
         # Run metadata goes through env and jq, never into the script text.
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK_URL }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_TITLE: ${{ github.event.workflow_run.display_title }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
-          text=$(printf ':red_circle: *%s failed on main*\n%s\n<%s|Open the run>' "$RUN_NAME" "${RUN_TITLE//[<>*_~\`:]/}" "$RUN_URL")
+          where='on main'
+          if [ "$RUN_EVENT" = pull_request ]; then
+            # Draft PRs are work in progress; only ready ones are worth an alert.
+            draft=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .draft) || draft=unknown
+            if [ "$draft" != false ]; then echo "PR #$PR_NUMBER is a draft (or unreadable), no alert."; exit 0; fi
+            where="on PR #$PR_NUMBER"
+          fi
+          text=$(printf ':red_circle: *%s failed %s*\n%s\n<%s|Open the run>' "$RUN_NAME" "$where" "${RUN_TITLE//[<>*_~\`:]/}" "$RUN_URL")
           jq -n --arg text "$text" '{text: $text}' |
             curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
 
   vercel:
-    name: Post the failed production deploy to Slack
+    name: Post the failed deploy to Slack
     if: >-
       contains(fromJSON('["failure","error"]'), github.event.state) &&
-      startsWith(github.event.context, 'Vercel – crx-manager-v1-0') &&
-      contains(github.event.branches.*.name, 'main')
+      startsWith(github.event.context, 'Vercel – crx-manager-v1-0')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Post to Slack
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.sha }}
+          ON_MAIN: ${{ contains(github.event.branches.*.name, 'main') }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK_URL }}
           COMMIT_MESSAGE: ${{ github.event.commit.commit.message }}
           TARGET_URL: ${{ github.event.target_url }}
         run: |
+          kind=Production
+          if [ "$ON_MAIN" != true ]; then
+            kind=Preview
+            # A preview belongs to a PR; skip it while every PR it belongs to is a draft.
+            ready=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[] | select(.state == "open" and .draft == false)] | length') || ready=0
+            if [ "$ready" = 0 ]; then echo "No ready PR for $SHA, no alert."; exit 0; fi
+          fi
           title=${COMMIT_MESSAGE%%$'\n'*}
-          text=$(printf ':red_circle: *Production deploy failed on Vercel*\n%s\n<%s|Open the deploy>' "${title//[<>*_~\`:]/}" "${TARGET_URL//[<>|]/}")
+          text=$(printf ':red_circle: *%s deploy failed on Vercel*\n%s\n<%s|Open the deploy>' "$kind" "${title//[<>*_~\`:]/}" "${TARGET_URL//[<>|]/}")
           jq -n --arg text "$text" '{text: $text}' |
             curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

@@ -1204,24 +1204,29 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     }
   }, REPO_SWEEP_TIMEOUT_MS);
 
-  it('the create-invoice click path no longer mints a key per click', () => {
-    // FAIL-CLOSED (Codex MEDIUM, F1): the first version sliced on unchecked indexOf
-    // results, so renaming or deleting the handler produced an empty string that
-    // trivially passed. Both offsets are now asserted to exist.
+  it('the split-invoice action retains its key until the verified reply', () => {
     const src = readFileSync('src/pages/OrderDetail.tsx', 'utf8').replace(/\r\n/g, '\n');
-    const start = src.indexOf('const onCreateInvoiceClick');
-    expect(start, 'onCreateInvoiceClick handler not found — did it get renamed?').toBeGreaterThan(-1);
+    const start = src.indexOf('const handleCreateInvoice');
+    expect(start, 'handleCreateInvoice handler not found — did it get renamed?').toBeGreaterThan(-1);
     const rest = src.slice(start);
     const end = rest.indexOf('\n  };');
-    expect(end, 'could not find the end of onCreateInvoiceClick').toBeGreaterThan(-1);
-    expect(rest.slice(0, end)).not.toMatch(/createInvoiceIdem\.resetKey\(\)/);
+    expect(end, 'could not find the end of handleCreateInvoice').toBeGreaterThan(-1);
+    const handler = rest.slice(0, end);
+    const call = handler.indexOf("supabase.rpc('create_split_invoices_from_order'");
+    const verified = handler.indexOf("assertRpcResult<string[]>(data, 'create_split_invoices_from_order')");
+    const reset = handler.indexOf('splitInvoiceIdem.resetKey()');
+    expect(call).toBeGreaterThan(-1);
+    expect(verified).toBeGreaterThan(call);
+    expect(reset).toBeGreaterThan(verified);
+    expect(src).not.toContain("supabase.rpc('create_invoice_from_order'");
+    expect(src).not.toContain('const createInvoiceIdem');
   });
 
   /**
    * Found by driving the real screen, not by the sweep: reordering the post-RPC reset
    * is not enough when a BUTTON retires the key before the RPC runs. Both RPCs below
    * take a payload that cannot vary between attempts — cancel_order takes only
-   * (p_order_id, p_performed_by, p_idempotency_key) and create_invoice_from_order only
+   * (p_order_id, p_performed_by, p_idempotency_key) and create_split_invoices_from_order only
    * (p_order_id, p_salesman_id, p_invoice_type, p_idempotency_key) — so reopening
    * either dialog is the SAME intent and must reuse the key.
    *
@@ -1239,7 +1244,6 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
    */
   const FIXED_PAYLOAD_KEYS: Array<[string, string]> = [
     ['cancelOrderIdem', 'cancel_order'],
-    ['createInvoiceIdem', 'create_invoice_from_order'],
     ['splitInvoiceIdem', 'create_split_invoices_from_order'],
     ['consolidateIdem', 'consolidate_draft_invoices'],
   ];

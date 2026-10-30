@@ -55,7 +55,7 @@ import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
-import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
+import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import { catalogPricePerAcre, getQuoteTierPrice, validateCommissionSplits } from '../lib/quoteCalc';
@@ -623,6 +623,9 @@ export default function QuoteBuilder() {
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
   const suppressDirtyUntilReloadSettlesRef = useRef(false);
+  // Set just before an update the page makes itself (KI-82: a saved line's recorded cost), so the
+  // next sections change does not mark the just-saved quote as changed.
+  const skipNextDirtyRef = useRef(false);
   const initialLoadGenerationRef = useRef(0);
   const [installedLoadGeneration, setInstalledLoadGeneration] = useState(0);
   // Saved quote_items id (and the product it was saved with) per on-screen line,
@@ -777,6 +780,10 @@ export default function QuoteBuilder() {
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
+    if (skipNextDirtyRef.current) {
+      skipNextDirtyRef.current = false;
+      return;
+    }
     setIsDirty(true);
   }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
 
@@ -2019,6 +2026,67 @@ export default function QuoteBuilder() {
     };
   }, [sections]);
 
+  // KI-82: after a save, show an admin the cost the database recorded for each saved line. A new
+  // line, or one switched to another product, is stamped at today's cost, which may have moved since
+  // this page loaded. Display only: the saved prices, costs and totals are already right.
+  const refreshSavedLineCosts = async (sessionChanged: () => boolean) => {
+    const saved = savedLineIdsRef.current;
+    let costs: Awaited<ReturnType<typeof fetchAdminCostFields>>;
+    try {
+      costs = await fetchAdminCostFields('quote_items', [...saved.values()].map((line) => line.id));
+    } catch (err) {
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'refresh_saved_line_costs' } });
+      toast('warning', 'The quote was saved, but its cost figures could not be refreshed. Reload the quote to see them.');
+      return;
+    }
+    // The operator moved to another quote while this read was in flight: leave that one alone.
+    if (sessionChanged()) return;
+    const recordedCost = (key: string) => {
+      const line = saved.get(key);
+      const cost = line ? costs.get(line.id)?.current_cost : undefined;
+      return line && typeof cost === 'number' ? { line, cost } : null;
+    };
+    const differs = (item: LocalItem) => {
+      const recorded = recordedCost(item._key);
+      return recorded != null && !samePrice(recorded.cost, item.current_cost);
+    };
+    const stale = sections.flatMap((sec) => sec.items).filter(differs);
+    if (stale.length === 0) return;
+    // Such a line was stamped at today's cost, so the product's cost has moved since this page
+    // loaded: re-read it too, or the line would show a stale "today" cost beside the recorded one.
+    let productCosts: Awaited<ReturnType<typeof fetchAdminCostFields>> = new Map();
+    try {
+      productCosts = await fetchAdminCostFields('products', stale.map((item) => item.product_id));
+    } catch (err) {
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'refresh_saved_line_product_costs' } });
+    }
+    if (sessionChanged()) return;
+    const todayCost = (productId: string) => {
+      const cost = productCosts.get(productId)?.current_cost;
+      return typeof cost === 'number' ? cost : null;
+    };
+    setProducts((prev) => prev.map((product) => {
+      const cost = todayCost(product.id);
+      return cost != null ? { ...product, current_cost: cost } : product;
+    }));
+    skipNextDirtyRef.current = true;
+    setSections((prev) => prev.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => {
+        const recorded = recordedCost(item._key);
+        if (!recorded || !differs(item)) return item;
+        const cost = todayCost(item.product_id);
+        // A line carries its own copy of the product, which shows its "today" cost.
+        const product = item.product && cost != null ? { ...item.product, current_cost: cost } : item.product;
+        return recalcItem({
+          ...item,
+          product,
+          quoted_cost: { rowId: recorded.line.id, productId: recorded.line.productId, cost: recorded.cost },
+        }, tier);
+      }),
+    })));
+  };
+
   const saveQuote = async (newStatus?: QuoteStatus): Promise<string | null> => {
     // Fail closed when the loaded quote is not the quote the URL names. The
     // skeleton normally hides the form for the whole transition, but a load that
@@ -2450,6 +2518,9 @@ export default function QuoteBuilder() {
         setStaleSaveOpen(true);
         toast('warning', `The quote was saved, but ${repricedCount} priced at today's catalog price, which changed since this page loaded. Reload the quote to see the saved prices before sending it.`);
         return null;
+      }
+      if (isAdmin && savedLineIdsRef.current.size > 0) {
+        await refreshSavedLineCosts(editingSessionChanged);
       }
       return savedQuoteId;
     } catch (err: unknown) {

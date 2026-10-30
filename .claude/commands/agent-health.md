@@ -13,6 +13,7 @@ Use this when Mason asks whether the agents, hooks, handoff workflow, direct rev
 - PR comment helper exists.
 - Claude CLI is reachable, and its auth status (a logged-out Claude CLI is a WARN).
 - Codex CLI is reachable through the version-hashed OpenAI binary path, and its login status (a logged-out Codex CLI is a FAIL).
+- Every project hook in `.codex/hooks.json` is listed by the live Codex app server for its event and matcher, enabled and trusted (read-only, no model call; a hook new on an unmerged branch reads as missing until it lands).
 - GitHub auth is reachable when the GitHub CLI is available.
 - Optional CLI warnings for Vercel and Supabase.
 - Schema/doc/session staleness warnings.

@@ -644,7 +644,7 @@ function gateRequest(request) {
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8")); } catch { continue; }
         // A proof of an earlier commit covers the commits after it only when those
-        // are low risk themselves (Sol, 2026-10-29); same module, same budgeted gh.
+        // are notes only (Sol, 2026-10-29); same module, same budgeted gh.
         if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
           && (String(data.head_sha).toLowerCase() === String(headSha).toLowerCase()
             || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky)) {
@@ -685,12 +685,12 @@ function gateRequest(request) {
     return;
   }
 
-  // ── Sol only on risky pull requests (Mason, 2026-10-29) ────────────────────
+  // ── Notes-only pull requests skip Sol (Mason, 2026-10-29) ───────────────────
   // Same placement and budget as the exemption above; any failure is "risky".
   const risk = solRiskOnGitHub({ baseSha, headSha, repo: request.repo, gh: hardGateGh });
   if (!risk.risky) {
     process.stderr.write(
-      `SOL NOT REQUIRED: low-risk pull request (${risk.reason}; Mason, 2026-10-29). ` +
+      `SOL NOT REQUIRED: notes-only pull request (${risk.reason}; Mason, 2026-10-29). ` +
       `Head ${String(headSha).slice(0, 12)} has every check green.\n`,
     );
     advisoryQueue.push(request);
@@ -699,7 +699,7 @@ function gateRequest(request) {
 
   deny(
     `PR MERGE GATE: this merge into main needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
-    `(Sol is required on money, inventory, database, merge-machinery or large pull requests; Mason, 2026-10-29). ` +
+    `(Sol is required on any code change or large pull request; only notes skip it; Mason, 2026-10-29). ` +
     `None was found, and the documentation-only exemption does not apply: ${exemption.reason}.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +

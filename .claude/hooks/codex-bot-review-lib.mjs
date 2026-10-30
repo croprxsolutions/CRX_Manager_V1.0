@@ -435,7 +435,7 @@ export const MONEY_PATH_WORDS = Object.freeze([
   "calculator",
 ]);
 
-export function pathWords(path) {
+function pathWords(path) {
   const words = String(path)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")

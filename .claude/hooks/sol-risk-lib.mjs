@@ -1,12 +1,13 @@
-// SOL ONLY ON RISKY PULL REQUESTS (Mason, 2026-10-29: "Auto on risky PRs").
+// SOL ON EVERY CODE CHANGE; NOTES SKIP IT (Mason, 2026-10-29).
 //
 // Both merge guards (.claude/hooks/pr-merge-guard.mjs and
 // .codex/hooks/production-action-guard.mjs) ask this module only after the Sol
 // proof is missing AND the documentation-only exemption (sol-exempt-lib.mjs) did
-// not apply. A pull request still needs Sol when it touches money, inventory or
-// database files (isMoneyPath), the review and merge machinery (the lists below),
-// or changes more than SOL_LARGE_PR_LINES lines. Everything else merges on green
-// checks; anyone can still ask for Sol by hand.
+// not apply. A pull request may skip Sol only when every changed file is a notes
+// file (`.md`) outside the agent rule documents and review machinery (the lists
+// below), and it changes at most SOL_LARGE_PR_LINES lines. Guessing which code is
+// "safe" from names or content kept missing real risks (Sol, four rounds on
+// 2026-10-29), so any code, configuration or asset change needs Sol.
 //
 // FAIL CLOSED, like sol-exempt-lib.mjs: any GitHub failure, a comparison that is
 // not exactly base..head, a list that may be truncated, an unknown change status
@@ -14,34 +15,19 @@
 // every changed file to be a plain file (sol-exempt-lib's tree lookup): a symlink
 // or submodule at a harmless path can redirect code (Luna, 2026-10-29).
 
-import { isMoneyPath, pathWords } from "./codex-bot-review-lib.mjs";
-import { ghApiRepoPath, riskyContentMatches, sanitizeForMessage } from "./codex-push-lib.mjs";
+import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
 import { SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS, treeProblem } from "./sol-exempt-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
 
 export const SOL_LARGE_PR_LINES = 500;
 
-// The review and merge machinery and the rule documents agents follow always need
-// Sol: a change there can loosen the very gates that decide whether Sol is needed.
-// The documentation exemption's never lists, minus ordinary app code under src/
-// (isMoneyPath still catches its money and inventory files). Folders end in "/",
-// compared case-insensitively (Windows checks out either spelling).
-// public/ holds the service worker; eslint-local-rules/ holds the lint guards.
-export const SOL_ALWAYS_PATHS = Object.freeze([...SOL_NEVER_EXEMPT_PATHS.filter((entry) => entry !== "src/"), "public/", "eslint-local-rules/"]);
-
-// File names that need Sol in any folder: agent instructions and dependencies.
+// Notes under these folders, and notes with these names, are agent rules or review
+// machinery: a change there can loosen the very gates that decide whether Sol is
+// needed. The documentation exemption's never lists; folders end in "/", compared
+// case-insensitively (Windows checks out either spelling).
+export const SOL_ALWAYS_PATHS = SOL_NEVER_EXEMPT_PATHS;
 export const SOL_ALWAYS_NAMES = SOL_NEVER_EXEMPT_NAMES;
-
-// App code whose name says nothing about money but which decides who can do what
-// or how the app reaches the database (Sol, 2026-10-29: "src/lib/db.ts would pass").
-// Matched like isMoneyPath: a word of the path starts with one of these.
-export const SOL_SENSITIVE_SRC_WORDS = Object.freeze([
-  "auth", "login", "password", "permission", "role", "access", "secur", "session", "protect", "admin",
-  "user", "rls", "db", "supabase", "idempot", "intent", "guard", "critical", "sentry", "route", "rpc",
-]);
-// The route table and app entry points: they wire every page and its permissions.
-export const SOL_SENSITIVE_SRC_FILES = Object.freeze(["src/app.tsx", "src/apppages.tsx", "src/main.tsx"]);
 
 // Same limit as the documentation exemption: GitHub's compare lists at most 300
 // files and says nothing when it stops.
@@ -56,19 +42,11 @@ export function solRiskPathProblem(name) {
   const lower = name.replace(/\\/g, "/").toLowerCase();
   for (const entry of SOL_ALWAYS_PATHS) {
     const rule = entry.toLowerCase();
-    if (rule.endsWith("/") ? lower.startsWith(rule) : lower === rule) return `${show(name)} is review/merge machinery or an agent rule document (${entry})`;
+    if (rule.endsWith("/") ? lower.startsWith(rule) : lower === rule) return `${show(name)} is in a path that always needs Sol (${entry})`;
   }
   const base = lower.slice(lower.lastIndexOf("/") + 1);
   if (SOL_ALWAYS_NAMES.some((entry) => entry.toLowerCase() === base)) return `${show(name)} is agent instructions or dependencies`;
-  if (isMoneyPath(name)) return `${show(name)} touches money, inventory or the database`;
-  // Repository-root files other than notes are build, deploy or git configuration.
-  if (!lower.includes("/") && !lower.endsWith(".md")) return `${show(name)} is repository configuration`;
-  if (lower.startsWith("src/")) {
-    const words = pathWords(name);
-    if (SOL_SENSITIVE_SRC_FILES.includes(lower) || SOL_SENSITIVE_SRC_WORDS.some((stem) => words.some((word) => word.startsWith(stem)))) {
-      return `${show(name)} touches login, permissions, data access or app wiring`;
-    }
-  }
+  if (!lower.endsWith(".md")) return `${show(name)} is code, configuration or an asset, not a notes file`;
   return null;
 }
 
@@ -92,7 +70,7 @@ export function classifySolRisk(files) {
     }
   }
   if (lines > SOL_LARGE_PR_LINES) return { risky: true, reason: `it changes ${lines} lines, over the ${SOL_LARGE_PR_LINES}-line limit` };
-  return { risky: false, reason: `${files.length} file(s), ${lines} changed line(s), none touching money, inventory, the database or the merge machinery` };
+  return { risky: false, reason: `${files.length} file(s), ${lines} changed line(s), notes only` };
 }
 
 export const SOL_RISK_COMPARE_JQ =
@@ -124,14 +102,7 @@ export function solRiskOnGitHub({ baseSha: rawBase, headSha: rawHead, repo, gh }
     const verdict = classifySolRisk(answer.files);
     if (verdict.risky) return verdict;
     const problem = treeProblem({ files: answer.files, baseSha, headSha, repoPath, gh });
-    if (problem) return { risky: true, reason: problem };
-    // File names alone miss money or permission logic in an ordinarily named file
-    // (Sol, 2026-10-29): scan the diff text with the push gate's content patterns.
-    const diff = String(gh(["api", "-H", "Accept: application/vnd.github.diff", `${repoPath}/compare/${baseSha}...${headSha}`]));
-    if (!/^diff --git /m.test(diff)) return { risky: true, reason: "GitHub's diff could not be read" };
-    const flagged = riskyContentMatches(diff).find(({ file }) => !/\.md$/i.test(String(file)));
-    if (flagged) return { risky: true, reason: `${show(flagged.file)} changes code that looks like money, inventory, permissions or data writes (${show(flagged.tokens.map(({ token }) => token).join(", "))})` };
-    return verdict;
+    return problem ? { risky: true, reason: problem } : verdict;
   } catch (error) {
     return { risky: true, reason: `GitHub's file list could not be classified (${show(String(error?.message || error))})` };
   }

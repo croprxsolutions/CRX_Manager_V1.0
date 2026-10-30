@@ -6,75 +6,52 @@ let passed = 0;
 const check = (name, fn) => { fn(); passed += 1; console.log(`ok - ${name}`); };
 const file = (filename, changes = 10, extra = {}) => ({ filename, status: "modified", changes, ...extra });
 
-check("ordinary UI files are low risk", () => {
-  assert.equal(classifySolRisk([file("src/components/Label.tsx"), file("docs/reference/x.md")]).risky, false);
+check("notes files are low risk", () => {
+  assert.equal(classifySolRisk([file("docs/plans/product.md"), file("docs/reference/x.md"), file("README.md")]).risky, false);
 });
 for (const name of [
-  "src/lib/invoiceMath.ts", "src/pages/Inventory.tsx", "supabase/migrations/20261029_x.sql",
-  "supabase/functions/send-email/index.ts", ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/x.mjs",
-  ".github/workflows/ci.yml", "scripts/write-codex-push-proof.mjs", ".husky/pre-commit", ".agents/x.md",
-  "package.json", "docs/plans/CLAUDE.md", "AGENTS.md", ".coderabbit.yaml", "vercel.json", ".Claude/hooks/x.mjs",
+  // Any code, configuration or asset (Sol, 2026-10-29: name and content rules kept missing real risks).
+  "src/components/Label.tsx", "src/lib/units.ts", "src/lib/db.ts", "src/App.tsx", "public/sw.js", "vite.config.ts",
+  ".gitignore", "src/lib/invoiceMath.ts", "supabase/migrations/20261029_x.sql", "supabase/functions/send-email/index.ts",
+  "docs/plans/diagram.png", "docs/plans/data.json",
+  // Agent rules and review machinery, even as notes.
+  ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/x.mjs", ".github/workflows/ci.yml", "scripts/write-codex-push-proof.mjs",
+  ".husky/pre-commit", ".agents/x.md", "package.json", "docs/plans/CLAUDE.md", "AGENTS.md", ".coderabbit.yaml", ".Claude/hooks/x.md",
   "docs/workflows/SAFE_DEVELOPMENT_RULES.md", "docs/reference/agent-guardrails.md", "docs/reference/gotchas.md",
-  // Sensitive app code with ordinary names, and root configuration (Sol, 2026-10-29).
-  "src/lib/db.ts", "src/contexts/AuthContext.tsx", "src/lib/pagePermissions.ts", "src/App.tsx", "src/AppPages.tsx",
-  "src/main.tsx", "src/components/auth/ProtectedRoute.tsx", "src/lib/sentry.ts", ".gitignore", "vite.config.ts", "public/sw.js",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }
-check("a rename out of a money file needs Sol", () => {
-  assert.equal(classifySolRisk([file("src/components/Thing.tsx", 2, { status: "renamed", previous_filename: "src/lib/invoiceMath.ts" })]).risky, true);
+check("a rename out of a code file needs Sol", () => {
+  assert.equal(classifySolRisk([file("docs/plans/x.md", 2, { status: "renamed", previous_filename: "src/lib/invoiceMath.ts" })]).risky, true);
 });
 check("a rename with no old name needs Sol", () => {
-  assert.equal(classifySolRisk([file("src/components/Thing.tsx", 2, { status: "renamed" })]).risky, true);
+  assert.equal(classifySolRisk([file("docs/plans/x.md", 2, { status: "renamed" })]).risky, true);
 });
 check(`exactly ${SOL_LARGE_PR_LINES} lines is low risk, one more needs Sol`, () => {
-  assert.equal(classifySolRisk([file("src/a.tsx", 300), file("src/b.tsx", 200)]).risky, false);
-  assert.equal(classifySolRisk([file("src/a.tsx", 300), file("src/b.tsx", 201)]).risky, true);
+  assert.equal(classifySolRisk([file("docs/a.md", 300), file("docs/b.md", 200)]).risky, false);
+  assert.equal(classifySolRisk([file("docs/a.md", 300), file("docs/b.md", 201)]).risky, true);
 });
 check("unreadable answers need Sol", () => {
-  for (const files of [null, [], [null], [file("src/a.tsx", 1, { changes: undefined })], [file("src/a.tsx", 1, { status: "changed" })],
-    Array.from({ length: SOL_RISK_MAX_FILES }, (_, i) => file(`src/f${i}.tsx`, 0))]) {
+  for (const files of [null, [], [null], [file("docs/a.md", 1, { changes: undefined })], [file("docs/a.md", 1, { status: "changed" })],
+    Array.from({ length: SOL_RISK_MAX_FILES }, (_, i) => file(`docs/f${i}.md`, 0))]) {
     assert.equal(classifySolRisk(files).risky, true);
   }
 });
 
 const BASE = "a".repeat(40);
 const HEAD = "b".repeat(40);
-const answer = (over = {}) => JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: BASE, head: HEAD, files: [file("src/components/Label.tsx")], ...over });
-// GraphQL file-kind lookup, at the head (d0) and the base (d1): src/components
-// holds Label.tsx as a plain file, or as `kind`.
+const answer = (over = {}) => JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: BASE, head: HEAD, files: [file("docs/plans/note.md")], ...over });
+// GraphQL file-kind lookup, at the head (d0) and the base (d1): docs/plans holds
+// note.md as a plain file, or as `kind`.
 const tree = (kind = { mode: 0o100644, type: "blob" }) => {
-  const folder = { entries: [{ name: "Label.tsx", ...kind }] };
+  const folder = { entries: [{ name: "note.md", ...kind }] };
   return JSON.stringify({ data: { repository: { d0: folder, d1: folder } } });
 };
-const diffOf = (name, added) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old\n+${added}\n`;
-const LABEL_DIFF = diffOf("src/components/Label.tsx", "export const label = 'Ready';");
-const ask = (stdout, extra = {}, kinds = tree(), diff = LABEL_DIFF) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
-  gh: (args) => {
-    if (args[1] === "graphql") return kinds;
-    if (args.includes("Accept: application/vnd.github.diff")) { if (diff instanceof Error) throw diff; return diff; }
-    if (stdout instanceof Error) throw stdout; return stdout;
-  }, ...extra });
+const ask = (stdout, extra = {}, kinds = tree()) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
+  gh: (args) => { if (args[1] === "graphql") return kinds; if (stdout instanceof Error) throw stdout; return stdout; }, ...extra });
 
-check("a clean base..head comparison of a UI file is low risk", () => assert.equal(ask(answer()).risky, false));
-// Sol, 2026-10-29: an ordinarily named file can still carry money or permission logic.
-check("money, permission or data-write code in an ordinary file needs Sol", () => {
-  for (const added of ["const total_cents = a + b;", "if (role === 'admin') show();", "await db.from('x').update(row);",
-    "const price = 5;", "await supabase.rpc('apply_prepay');"]) {
-    assert.equal(ask(answer(), {}, tree(), diffOf("src/components/Label.tsx", added)).risky, true, added);
-  }
-});
-check("money words in a notes file do not need Sol", () => {
-  const files = [file("src/components/Label.tsx"), file("docs/plans/x.md")];
-  const diff = LABEL_DIFF + diffOf("docs/plans/x.md", "Inventory price total: track the role of each rep.");
-  const folder = { entries: [{ name: "Label.tsx", mode: 0o100644, type: "blob" }, { name: "x.md", mode: 0o100644, type: "blob" }] };
-  const kinds = JSON.stringify({ data: { repository: { d0: folder, d1: folder, d2: folder, d3: folder } } });
-  assert.equal(ask(answer({ files }), {}, kinds, diff).risky, false);
-});
-check("an unreadable or failed diff needs Sol", () => {
-  for (const diff of ["", "not a diff", new Error("406 too large")]) assert.equal(ask(answer(), {}, tree(), diff).risky, true);
-});
-check("a symlink, submodule or unreadable file kind at a low-risk path needs Sol", () => {
+check("a clean base..head comparison of a notes file is low risk", () => assert.equal(ask(answer()).risky, false));
+check("a symlink, submodule or unreadable file kind at a notes path needs Sol", () => {
   assert.equal(ask(answer(), {}, tree({ mode: 0o120000, type: "blob" })).risky, true);
   assert.equal(ask(answer(), {}, tree({ mode: 0o160000, type: "commit" })).risky, true);
   assert.equal(ask(answer(), {}, "not json").risky, true);

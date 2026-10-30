@@ -603,7 +603,7 @@ try {
   // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
   for (const [later, expectBlocked, label] of [
     ["src/lib/invoiceMath.ts", true, "a later money commit needs a fresh Sol review"],
-    ["src/components/Other.tsx", false, "a later low-risk commit merges on the earlier Sol review"],
+    ["notes/later.md", false, "a later notes-only commit merges on the earlier Sol review"],
   ]) {
     const branch = makeRepo("src/components/Label.tsx", "export const label = 'reviewed';\n");
     writeProof(branch.repo, {
@@ -621,9 +621,6 @@ try {
       toolName: "PowerShell", toolInput: { command: `gh pr merge 5 --squash --match-head-commit ${head}` }, repoDir: branch.repo,
       nowMs: Date.now(),
       runGh: (args) => {
-        if (args.includes("Accept: application/vnd.github.diff")) {
-          return `diff --git a/${later} b/${later}\n--- /dev/null\n+++ b/${later}\n@@ -0,0 +1 @@\n+export const x = 1;\n`;
-        }
         if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
           compared.push(String(args[1]));
           return JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: branch.sha, head,
@@ -2096,12 +2093,8 @@ try {
     // file and old name as a plain file (mode 100644) unless `kinds` says
     // otherwise; a `<sha>:<path>` key sets the kind at that commit only. Records
     // every gh call so the test can see the comparison was asked for.
-    const ghFor = (pr, compare, calls = [], kinds = {}, diff = null) => (args) => {
+    const ghFor = (pr, compare, calls = [], kinds = {}) => (args) => {
       calls.push(args);
-      if (args.includes("Accept: application/vnd.github.diff")) {
-        return diff ?? (compare?.files || []).map(({ filename }) =>
-          `diff --git a/${filename} b/${filename}\n--- a/${filename}\n+++ b/${filename}\n@@ -1 +1 @@\n-old\n+export const label = "ready";\n`).join("");
-      }
       if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
         if (compare instanceof Error) throw compare;
         return JSON.stringify(compare);
@@ -2120,13 +2113,13 @@ try {
       }
       return JSON.stringify(pr);
     };
-    const mergeDocs = ({ pr = docsPr, compare = compareOf(["docs/plans/2026-10-07-note.md"]), pin = docsPin, calls, kinds, diff } = {}) =>
+    const mergeDocs = ({ pr = docsPr, compare = compareOf(["docs/plans/2026-10-07-note.md"]), pin = docsPin, calls, kinds } = {}) =>
       evaluateProductionAction({
         toolName: "PowerShell",
         toolInput: { command: `gh pr merge 870 --squash${pin}` },
         repoDir: docs.repo,
         nowMs: now,
-        runGh: ghFor(pr, compare, calls, kinds, diff),
+        runGh: ghFor(pr, compare, calls, kinds),
       });
 
     const calls = [];
@@ -2180,25 +2173,22 @@ try {
     assert.equal(mergeDocs({ compare: compareOf(["docs/plans/2026-10-07-note.md"], { head: docs.base }) }).blocked, true,
       "a comparison that does not end at the PR's head needs Sol");
 
-    // Sol only on risky pull requests (Mason, 2026-10-29): the same merge-ready PR
-    // with no Sol proof, now with GitHub's line counts.
+    // Sol on every code change; notes skip it (Mason, 2026-10-29): the same
+    // merge-ready PR with no Sol proof, now with GitHub's line counts.
     const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
-    assert.equal(mergeDocs({ compare: counted([["src/components/customers/CustomerFacts.tsx", 40], ["src/components/Label.tsx", 10]]) }).blocked, false,
-      "a small pull request of ordinary app files merges with no Sol proof");
-    // Sol, 2026-10-29: money logic in an ordinarily named file still needs Sol.
-    assert.equal(mergeDocs({ compare: counted([["src/components/Label.tsx", 2]]),
-      diff: "diff --git a/src/components/Label.tsx b/src/components/Label.tsx\n--- a/src/components/Label.tsx\n+++ b/src/components/Label.tsx\n@@ -1 +1 @@\n-old\n+const total_cents = a + b;\n" }).blocked, true,
-      "cents arithmetic in an ordinary app file still needs Sol");
-    assert.equal(mergeDocs({ compare: counted([["src/components/customers/CustomerFacts.tsx", 1]]), kinds: { "src/components/customers/CustomerFacts.tsx": { mode: 0o120000 } } }).blocked, true,
-      "a symlink at a low-risk path still needs Sol (Luna, 2026-10-29)");
+    assert.equal(mergeDocs({ compare: counted([["notes/plan.md", 40], ["notes/todo.md", 10]]) }).blocked, false,
+      "a small notes-only pull request merges with no Sol proof");
+    assert.equal(mergeDocs({ compare: counted([["notes/todo.md", 1]]), kinds: { "notes/todo.md": { mode: 0o120000 } } }).blocked, true,
+      "a symlink at a notes path still needs Sol (Luna, 2026-10-29)");
     for (const [label, entries] of [
-      ["a money file", [["src/components/customers/CustomerFacts.tsx", 5], ["src/lib/invoiceMath.ts", 5]]],
+      ["an ordinary app file", [["notes/todo.md", 5], ["src/components/Label.tsx", 5]]],
+      ["a money file", [["notes/todo.md", 5], ["src/lib/invoiceMath.ts", 5]]],
       ["an inventory file", [["src/pages/Inventory.tsx", 5]]],
       ["a migration", [["supabase/migrations/20261029000000_x.sql", 5]]],
       ["a merge-gate file", [[".claude/hooks/pr-merge-guard.mjs", 5]]],
       ["the app route table", [["src/App.tsx", 5]]],
       ["a login file", [["src/lib/db.ts", 5]]],
-      ["over 500 changed lines", [["src/components/customers/CustomerFacts.tsx", 300], ["src/components/Label.tsx", 201]]],
+      ["over 500 changed lines", [["notes/plan.md", 300], ["notes/todo.md", 201]]],
     ]) {
       const verdict = mergeDocs({ compare: counted(entries) });
       assert.equal(verdict.blocked, true, `a pull request with ${label} still needs Sol`);

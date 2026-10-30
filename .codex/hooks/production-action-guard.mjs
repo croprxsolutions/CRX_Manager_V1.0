@@ -1130,7 +1130,7 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
         .find((p) => {
           try {
             const data = JSON.parse(readFileSync(p, "utf8"));
-            // The commits after the reviewed one must be low risk themselves (Sol, 2026-10-29).
+            // The commits after the reviewed one must be notes only (Sol, 2026-10-29).
             return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
               && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
           } catch {
@@ -1363,7 +1363,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
       gh: (args) => runGh(args, repoDir),
     });
     if (exemption.exempt) return { blocked: false, advisoryRequest: request };
-    // Sol only on risky pull requests (Mason, 2026-10-29) — mirror of pr-merge-guard.mjs.
+    // Notes-only pull requests skip Sol (Mason, 2026-10-29) — mirror of pr-merge-guard.mjs.
     const risk = solRiskOnGitHub({
       baseSha: pullRequest.baseRefOid,
       headSha: pullRequest.headRefOid,
@@ -1372,8 +1372,8 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
     });
     if (!risk.risky) return { blocked: false, advisoryRequest: request };
     return denied(
-      `${mainVerdict.reason}\n\nSol is required because ${risk.reason} (money, inventory, database, merge-machinery ` +
-      `or large pull requests need Sol; Mason, 2026-10-29). The documentation-only exemption does not apply: ${exemption.reason}.`,
+      `${mainVerdict.reason}\n\nSol is required because ${risk.reason} (any code change or large pull request ` +
+      `needs Sol; only notes skip it; Mason, 2026-10-29). The documentation-only exemption does not apply: ${exemption.reason}.`,
     );
   }
   if (mainVerdict.blocked) return mainVerdict;

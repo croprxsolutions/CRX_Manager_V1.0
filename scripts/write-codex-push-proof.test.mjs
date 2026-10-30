@@ -1427,6 +1427,8 @@ function collisionPromptSkipsWork(prompt) {
     }
   }
   assert.deepEqual(check({}), { ok: true, problems: [], notes: [] }, "preflight: a quiet head runs Sol");
+  assert.equal(check({ pr: null }).ok, true, "preflight: no PR yet runs Sol (before the PR opens, Mason 2026-10-29)");
+  assert.equal(check({ pr: null, headContainsBase: false }).ok, false, "preflight: ...but still needs the head to contain origin/main");
   {
     const preMerge = "c".repeat(40);
     const fresh = { codexState: { sha: preMerge, status: "completed" }, headPushedMs: now - 60_000 };
@@ -1448,7 +1450,6 @@ function collisionPromptSkipsWork(prompt) {
     assert.equal(check({ ...mergeReviewed, cleanMergeThreads: { status: "findings-at-head", unresolvedAtHead: 1 } }).ok, false, "clean merge: an App review of the merge does not excuse unanswered pre-merge threads");
     assert.equal(check({ ...mergeReviewed, cleanMergeThreads: { status: "clean-at-head" } }).ok, true, "clean merge: an App review of the merge with answered pre-merge threads runs");
   }
-  assert.match(check({ pr: null }).problems.join(" "), /no open pull request/, "preflight: no PR refuses");
   assert.match(check({ pr: { number: 1, draft: true } }).problems.join(" "), /still a draft/, "preflight: a draft refuses");
   assert.match(check({ codexState: null }).problems.join(" "), /has not finished reviewing f6adfe82a/, "preflight: no App review of a new head refuses");
   assert.match(check({ codexState: { sha: "b".repeat(40), status: "completed" } }).problems.join(" "), /has not finished/, "preflight: an App review of an OLDER commit does not count");

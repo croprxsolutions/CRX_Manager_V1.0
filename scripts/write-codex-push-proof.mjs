@@ -1349,11 +1349,9 @@ export function evaluateSolPreflight({
     problems.push("could not check that this branch contains origin/main. Retry in a minute.");
   }
   if (!pr) {
-    problems.push(
-      "no open pull request has this exact commit as its head. Push the branch, open the PR (as a draft), " +
-      "and run Sol only after it is marked ready.",
-    );
-    return { ok: false, problems, notes };
+    // Sol runs once, before the PR opens (Mason, 2026-10-29); later fixes need no new Sol run.
+    notes.push("no pull request has this commit as its head yet: Sol reviews it before the PR opens (Mason, 2026-10-29).");
+    return { ok: problems.length === 0, problems, notes };
   }
   if (pr.ambiguous) {
     problems.push(`more than one open pull request (${pr.ambiguous.map((n) => `#${n}`).join(", ")}) has this commit as its head. Close the extra one, then run Sol.`);

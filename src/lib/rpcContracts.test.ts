@@ -3029,6 +3029,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * pruned on 2026-10-22, when that migration applied live.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  _notify_driver_delivery_issue:
+    'trigger-only office notice on the completion status transition; the parent completion receipt owns replay safety, notification failure rolls back the transaction, and direct app EXECUTE is revoked',
   _close_undelivered_order_remainder_20260718:
     'preserved internal cancel-remainder impl (Phase 1a closeout); the required-key public cancel_order wrapper owns idempotency and every application-role EXECUTE is revoked',
   _post_deleted_delivery_recovery_invoice_20260719:
@@ -3074,8 +3076,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   auto_expire_quotes: 'service-role maintenance sets only currently-expirable quote statuses',
   bump_cycle_count_item_revision:
     'trigger-only cycle-count revision bump; it is SECURITY DEFINER with all application-role EXECUTE revoked and the item-write transaction owns its atomicity',
-  bump_order_item_edit_version:
-    'trigger-only order version bump; direct application-role EXECUTE is revoked and the parent line-write transaction owns atomicity',
+  enforce_delivery_void_needs_invoice_void:
+    'trigger-only invoice-first delivery guard; direct application-role EXECUTE is revoked and the idempotent parent delivery RPC owns the transaction',
   check_idempotency: 'idempotency infrastructure helper; mutation only purges an expired key',
   check_idempotency_intent:
     'idempotency infrastructure helper (Section 07 gauntlet finding 2); mutation only purges an expired key, and it raises rather than replays when the actor or request fingerprint differs; direct client EXECUTE is revoked',

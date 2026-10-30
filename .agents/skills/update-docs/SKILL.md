@@ -57,10 +57,20 @@ that the migration was written. To state whether it is live, check the live data
 observed. If you did not check, write the row with the status left explicitly unknown rather
 than guessing — a fabricated "applied" row is worse than a blank one.
 
-The title tracks the **latest/high-water documentation sequence** as `(latest entry N)`, not a row
-count and not the number of SQL files on disk. Update N to the maximum sequence in the table. The
-metrics legitimately differ because sequences can be skipped or reused and because a written,
-rolled-back, or superseded migration need not have a live counterpart.
+Every migration needs exactly **one** table row whose second cell is its version: `check:docs`
+fails a migration from 2026-09-15 on with no row or with two. Update a row's status in place;
+never add a second row for the same migration. The file merges with git's union driver
+(2026-10-29), so if a main merge leaves two versions of one row or line, reconcile them into one.
+The title carries no count. Give a new row the next number, but refer to migrations by version or
+file name, since two PRs can take the same number. A new live capture goes at the top with its UTC
+time; captures may sit in any order, so the newest timestamp is the latest evidence.
+
+**Manual docs' "Last verified" line** (`docs/manual/*.md`) is one short line, at most 200
+characters: the date (America/Chicago) and the scope you re-checked, e.g. "for the migration ledger
+only". `check:docs` fails a longer line or a second one. The evidence of what you read goes in your
+PR's `docs/changelog.d/` note, never on the stamp line. Bump the date only after re-reading the doc
+against live state. In `DECISION_LOG.md`, correct or reverse a decision with a NEW entry that names
+the one it supersedes; do not rewrite an old entry's rule, and do not bump its stamp for a new entry.
 
 ## Step 4: Check pages-routes.md
 

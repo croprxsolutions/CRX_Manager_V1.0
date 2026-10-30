@@ -1,10 +1,9 @@
 # Known Issues — what is open today
 
-**Last verified: 2026-10-29 (America/Chicago)** for KI-18 only: a live read-only catalog check confirms the quote, order, rebate-claim and blend-ticket number functions still use `current_date`. The ledger includes `20261028185500_order_edit_and_number_concurrency` at version `20261029143642`. The unapplied document-year candidate is re-stamped `20261029160300`; it does not replace `generate_ticket_number`, preserving the live concurrency repair. Other dated evidence below retains its historical scope.
+**Last verified: 2026-10-29 (America/Chicago)** for KI-18 only; see the timestamped live evidence and unapplied candidate entry in `docs/reference/migration-history.md`.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-28 (America/Chicago)** for KI-18 only; the rest of the file 2026-10-25 (`main` at `c65b7b351`).
 Every "applied live" statement not re-read since is the older record's claim, marked as such. Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything

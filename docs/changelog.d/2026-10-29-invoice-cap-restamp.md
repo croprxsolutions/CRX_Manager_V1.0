@@ -23,9 +23,9 @@ The fractional-tolerance and quick-draft completion notes below are superseded b
 - Review round 1 (security, drift, compliance, 2026-10-29): fixed the unposted gap and
   the post-versus-cancel race above, the screen message, and the offline queue check;
   the proof now voids invoices through the real `void_invoice` RPC and covers unposted,
-  paid, overdue and the concurrent cancel. Deferred, with owners: direct edits of a
-  completed delivery's soft-delete or order link by an admin or rep bypass the status
-  trigger (pre-existing; owner Claude, follow-up PR); `batch_cancel_deliveries`
+  paid, overdue and the concurrent cancel. The source-identity deferral is closed by
+  [the completed-delivery source guard](2026-10-29-completed-delivery-source-guard.md).
+  Deferred: `batch_cancel_deliveries`
   aborts as a whole when one delivery is blocked (acceptable, retry after voiding); the
   stale "posted invoice needs review" toasts on the delivery screen are now unreachable
   for completed deliveries (cleanup follow-up).

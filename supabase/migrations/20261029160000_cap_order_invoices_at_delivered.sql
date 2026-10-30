@@ -292,7 +292,7 @@ BEGIN
        WHERE n.nspname='public' AND p.proname='_create_split_invoices_from_order_provenance_impl_20260719') <> 1
      OR NOT EXISTS (
        SELECT 1 FROM pg_proc p WHERE p.oid=to_regprocedure('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)')
-         AND md5(p.prosrc) IN ('ccde51261dd8c5270b6dbd24f28981bd','141b26d15133656e1c09bda75be52cc4')
+         AND md5(p.prosrc) IN ('ccde51261dd8c5270b6dbd24f28981bd','8ba3059541ebe47678897f6770636b2f')
          AND p.proowner='postgres'::regrole AND p.prosecdef
          AND p.prorettype='uuid[]'::regtype AND p.provolatile='v' AND NOT p.proisstrict AND p.proparallel='u'
          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
@@ -397,12 +397,11 @@ BEGIN
     RAISE EXCEPTION 'Cannot create an order-level invoice for order % — it has % active delivery(ies); invoices are created per delivery on completion. Cancel/void those deliveries first to bill the whole order manually.', v_order.order_number, v_delivery_count;
   END IF;
 
-  -- U7 SAFE-SCOPE (#43, refined R3 P2): this engine bills the WHOLE order (off
-  -- order_items.total_price). Block ONLY the partial-delivery-in-progress case — a
-  -- delivery has COMPLETED but product still remains — where whole-order billing would
-  -- bill undelivered product. A PRE-delivery order (no completed delivery) can still be
-  -- invoiced up front (invoice-on-order, like create_invoice_from_order), and a fully
-  -- delivered order passes. (Per-delivery split billing would be a larger redesign.)
+  -- U7 SAFE-SCOPE (#43, refined R3 P2): this engine bills whole-order totals.
+  -- This guard rejects partial delivery; the invoice-line cap separately rejects
+  -- positive product quantities before delivery. Non-product and zero-quantity
+  -- lines consume no product allowance. Fully delivered orders pass.
+  -- Per-delivery split billing remains a separate redesign.
   IF EXISTS (SELECT 1 FROM deliveries WHERE order_id = p_order_id AND status = 'completed')
      AND EXISTS (SELECT 1 FROM order_items WHERE order_id = p_order_id AND COALESCE(quantity_remaining, 0) > 0) THEN
     RAISE EXCEPTION 'Order % is partially delivered — split invoicing bills the whole order and would bill undelivered product. Finish delivering (or void the open deliveries) first.', v_order.order_number;
@@ -634,7 +633,7 @@ BEGIN
        WHERE n.nspname='public' AND p.proname='_create_split_invoices_from_order_provenance_impl_20260719') <> 1
      OR NOT EXISTS (
        SELECT 1 FROM pg_proc p WHERE p.oid=to_regprocedure('public._create_split_invoices_from_order_provenance_impl_20260719(uuid,uuid,text,text)')
-         AND md5(p.prosrc) IN ('141b26d15133656e1c09bda75be52cc4')
+         AND md5(p.prosrc) IN ('8ba3059541ebe47678897f6770636b2f')
          AND p.proowner='postgres'::regrole AND p.prosecdef
          AND p.prorettype='uuid[]'::regtype AND p.provolatile='v' AND NOT p.proisstrict AND p.proparallel='u'
          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

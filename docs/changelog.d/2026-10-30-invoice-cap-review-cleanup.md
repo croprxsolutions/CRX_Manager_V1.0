@@ -4,3 +4,4 @@
 - Removed the unreachable single-invoice branch and pre-delivery warning from Order Detail. The visible split-invoice action retains its allocation freshness checks, retry key, RPC result validation, and error handling.
 - Regenerated the workflow map so it no longer draws the retired Order Detail invoice call.
 - Updated the source guards to check the retained split action's verified-result-before-key-reset ordering and to reject reintroducing the retired single-invoice call.
+- Kept pre-change verification local; the committed prover exercises the candidate safeguards after installation.

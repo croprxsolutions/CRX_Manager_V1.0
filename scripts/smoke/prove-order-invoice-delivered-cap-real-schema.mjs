@@ -322,7 +322,6 @@ async function main() {
   if(process.env.CRX_PROVER_BUILD_ONLY==='1') {console.log(`[built] ${NAME}`);return;}
   if (!process.argv.includes('--after')) {
     seed();
-    allowed(`${asUser(ADMIN)} SELECT public.create_invoice_from_order('${EMPTY_ORDER}','${ADMIN}','chemical_sale','before-cap');`,'BEFORE: undelivered order reproduces gap');
   } else {
     psql(`${asUser(ADMIN)} RESET ROLE;
       DELETE FROM public.invoice_items WHERE invoice_id='${SIBLING}';

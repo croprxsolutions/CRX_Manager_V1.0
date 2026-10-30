@@ -3335,12 +3335,12 @@ export function ghApiIsResolveReviewThreadOnly(command) {
 // A plain-text reply on a pull-request review comment (Mason, 2026-10-30): Codex
 // may answer a review the same way Claude can. Only POST to .../pulls/<n>/comments/
 // <id>/replies with `-f`/`--raw-field` body text. `-F`, `--field` and `--input` are
-// refused because they can upload a local file, and any `$` or backtick is refused,
-// even inside quotes, because it could paste a secret into a public comment.
+// refused because they can upload a local file, and any `$`, backtick or `%` is
+// refused, even inside quotes, because it could paste a secret into a public comment.
 const REVIEW_REPLY_ENDPOINT_RE = /^\/?repos\/[^/\s]+\/[^/\s]+\/pulls\/\d+\/comments\/\d+\/replies$/;
 export function ghApiIsReviewThreadReply(command) {
   const raw = String(command || "");
-  if (/[$`]/.test(raw)) return false;
+  if (/[$`%]/.test(raw)) return false;
   const words = splitShellArgv(raw);
   if (!/^gh(?:\.exe)?$/i.test(words[0] || "") || words[1] !== "api") return false;
   let endpoint = "";

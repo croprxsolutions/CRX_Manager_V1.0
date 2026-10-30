@@ -1665,7 +1665,8 @@ function plainDocEntry(entry) {
     && REGULAR_OR_ABSENT_MODES.has(String(entry.newMode))
     && !(entry.oldMode === "000000" && entry.newMode === "000000")
     && !isHotPath(entry.path)
-    && NOTES_FILE_RE.test(entry.path);
+    && NOTES_FILE_RE.test(entry.path)
+    && !/(?:\/(?:AGENTS|CLAUDE)|-prompt)\.md$/i.test(entry.path);
 }
 export function planCarryForward({ prFiles: rawPr = [], mainFiles: rawMain = [] } = {}) {
   const prEntries = rawPr.map(changedEntry);

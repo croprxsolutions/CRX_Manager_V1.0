@@ -42,6 +42,7 @@ Folders end in `/`. The match ignores case, from the repository root.
 `public/sw-doctor.js`, `.gitmodules`, `scripts/vercel-ignore-build.sh`, `scripts/classify-ci-scope.mjs`
 
 **Hook wiring:** `.claude/settings.json`, `.claude/settings.local.json`, `.codex/hooks.json`,
+`.claude/hooks/hook-router-runtime.mjs`, `.claude/hooks/posttool-router.mjs`, `.claude/hooks/prompt-router.mjs`,
 `.codex/hooks/codex-hook-adapter.mjs`
 
 **Merge, push and review gates:** `.codex/hooks/production-action-guard.mjs`,

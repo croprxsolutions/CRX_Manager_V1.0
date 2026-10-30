@@ -64,7 +64,7 @@ BEGIN
       VALUES('delivery-signatures',v_path,v_driver::text,'{"size":1000,"mimetype":"image/png"}');
     v_notes := CASE v_i WHEN 1 THEN 'Shortage: only 3 GL on truck.'
       WHEN 2 THEN E'Damage: Atrazine container leaking.\n<img src=x onerror=alert(1)>'
-      WHEN 3 THEN '   ' WHEN 5 THEN 'Damage: cap broken; office please review.'
+      WHEN 3 THEN E' \t\n ' WHEN 5 THEN 'Damage: cap broken; office please review.'
       WHEN 11 THEN '  ' || repeat('Long explanation ',150) || ' END  ' ELSE NULL END;
     v_delivered := CASE WHEN v_i=1 THEN 3 ELSE 5 END;
     v_issue_type := CASE WHEN v_i=4 THEN NULL WHEN v_i<=5 THEN 'other'

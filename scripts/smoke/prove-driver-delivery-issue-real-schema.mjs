@@ -8,8 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const reuse = process.argv.find(arg => arg.startsWith('--reuse='))?.slice('--reuse='.length);
-const name = reuse || `crx-driver-issue-${process.pid}`;
+assert(!process.argv.some(arg => arg.startsWith('--reuse=')), 'Reusing a container is not supported');
+const name = `crx-driver-issue-${process.pid}`;
+let created = false;
 assert.match(name, /^crx-driver-issue-\d+$/);
 const candidate = '20261029160100_driver_delivery_issue_notifications.sql';
 const baseline = path.join(root, 'supabase/baselines');
@@ -34,6 +35,7 @@ function installAuthUid() {
 }
 function build() {
   docker(['run','-d','--name',name,'--network','none','--tmpfs','/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m','-e','POSTGRES_PASSWORD=postgres','public.ecr.aws/supabase/postgres:17.6.1.143']);
+  created = true;
   for (let i = 0; ; i++) {
     // The image first runs an init-only socket server; wait for the final TCP server.
     if (docker(['exec',name,'pg_isready','-h','127.0.0.1','-U','postgres'], undefined, true).status === 0) break;
@@ -84,19 +86,13 @@ function build() {
 }
 
 try {
-  if (reuse) {
-    assert.equal(docker(['inspect','--format','{{.HostConfig.NetworkMode}}',name]).stdout.trim(),'none');
-    console.log(`Reusing own isolated container ${name}`);
-  } else {
-    console.log(`Building own isolated container ${name}`);
-    build();
-  }
+  console.log(`Building own isolated container ${name}`);
+  build();
   sql(`ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
     CREATE TABLE IF NOT EXISTS auth.refresh_tokens(id bigserial PRIMARY KEY,user_id varchar(255));
     CREATE TABLE IF NOT EXISTS auth.sessions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid);
     GRANT ALL ON auth.refresh_tokens,auth.sessions TO postgres;`, 'supabase_admin');
-  // A reused container may contain the prior run's candidate/mutated trigger. Reset
-  // only our own two objects before the fail-first matrix, never any shared function.
+  // Reset only the candidate's own objects before the fail-first matrix.
   sql('DROP TRIGGER IF EXISTS driver_delivery_issue_notice ON public.deliveries; DROP FUNCTION IF EXISTS public._notify_driver_delivery_issue();');
   const chain = read('scripts/smoke/smoke-driver-delivery-issue.sql');
   const before = sql(chain,'postgres',true);
@@ -114,7 +110,7 @@ try {
   const mutation = sql(chain,'postgres',true);
   assert.match(mutation.stderr,/SMOKE_FAIL: shortage quantities/,mutation.stderr);
   console.log('MUTATION: premature notice reads stale quantities; regression catches it.');
-  // Reused runs retain active office recipients, so count distinct deliveries rather than recipients.
+  // Count distinct deliveries rather than recipients.
   const countReportedDeliveries = () => Number(sql("SELECT count(DISTINCT related_entity_id) FROM public.notifications WHERE notification_type='delivery_issue_reported';").stdout.trim());
   const reportedBefore = countReportedDeliveries();
   sql(`BEGIN;\n${read(`supabase/migrations/${candidate}`)}\nCOMMIT;`);
@@ -124,5 +120,5 @@ try {
   console.log('DRIVER_DELIVERY_ISSUE_PROOF_PASS');
 } finally {
   if (process.argv.includes('--keep-container')) console.log(`Kept own isolated container ${name}`);
-  else docker(['rm','-f',name],undefined,true);
+  else if (created) docker(['rm','-f',name],undefined,true);
 }

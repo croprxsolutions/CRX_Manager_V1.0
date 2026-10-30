@@ -45,7 +45,8 @@ BEGIN
     CASE WHEN v_delivery.order_number IS NOT NULL THEN ' (Order ' || v_delivery.order_number || ')'
       ELSE ' (Order not recorded)' END ||
     E'\nReported issue: ' || v_type ||
-    E'\nDriver explanation: ' || COALESCE(NULLIF(left(btrim(v_delivery.issue_notes), 2000), ''), 'Not provided') ||
+    E'\nDriver explanation: ' || CASE WHEN v_delivery.issue_notes IS NULL OR v_delivery.issue_notes ~ '^[[:space:]]*$'
+      THEN 'Not provided' ELSE left(btrim(v_delivery.issue_notes), 2000) END ||
     E'\nDelivery lines (damage amounts and affected lines are only as described by the driver):\n' ||
     COALESCE(v_lines, 'No delivery lines recorded');
 

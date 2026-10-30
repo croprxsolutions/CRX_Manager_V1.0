@@ -387,7 +387,7 @@ Grower portal; OCR auto-fill of re-entry/pre-harvest intervals (held back as a c
 items (photo/signature persistence, idempotent email replay) and a real-phone offline test (MED, UNVERIFIED).
 
 ### KI-83 — The `idempotency_keys` table has no TypeScript type
-**LOW · OPEN (found 2026-10-27, migration-drift review of `20261027040000`; predates it) · database · unassigned**
+**LOW · FIX IN REVIEW (Taha, branch `taha/idempotency-keys-type`; found 2026-10-27, migration-drift review of `20261027040000`; predates it) · database**
 `idempotency_keys` is the internal table where database functions record a retry key and its saved answer, so a
 repeated request returns the first result instead of acting twice. Many functions write to it (including the
 quote save re-emitted by `20261027040000`), and every column they write is in `.claude/schema-registry.json` and in
@@ -396,6 +396,8 @@ for it. Two screens read one column of it directly (`QuickDeliveryModal.tsx` and
 `request_fingerprint` exists), so nothing is broken; the gap only means the migration review's TypeScript
 cross-check, which reads `src/types/index.ts`, cannot confirm those writes. Fix: confirm with the
 `typescript-types-drift-reviewer` whether to add an interface or record the table as intentionally untyped.
+The fix adds `IdempotencyKey` to `src/types/index.ts` with the eight registry columns, as that reviewer's
+CHECK 1 asks for every table a screen reads with `.from(...)`.
 
 ### KI-85 — Four sweep fingerprints went stale when the sent-quote price lock applied
 **MED · OPEN (correction written 2026-10-28 on the PR #1165 branch; not yet reviewed, merged or confirmed by a live sweep) · database/sweeps · Mason authorized the fix 2026-10-28 (To-Do 11.12)**

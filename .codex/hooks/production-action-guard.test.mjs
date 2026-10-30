@@ -1366,7 +1366,21 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 20, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 21, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  // session-context-reminder writes the rules every later Codex session starts from,
+  // so Codex may not edit it either.
+  for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {
+    for (const toolName of ["Write", "Edit"]) {
+      assert.equal(evaluateProductionAction({ toolName, toolInput: { file_path: file } }).blocked, true,
+        `Codex may not ${toolName} the startup reminder: ${file}`);
+    }
+    assert.equal(evaluateProductionAction({ toolName: "apply_patch", toolInput: `*** Begin Patch\n*** Update File: ${file}\n@@\n-a\n+b\n*** End Patch` }).blocked, true,
+      `nor patch it: ${file}`);
+  }
+  assert.equal(evaluateProductionAction({ toolName: "PowerShell", toolInput: { command: "Set-Content .claude/hooks/session-context-reminder.mjs -Value ''" } }).blocked, true,
+    "nor overwrite the startup reminder from the shell");
+  assert.equal(evaluateProductionAction({ toolName: "Write", toolInput: { file_path: ".claude/hooks/session-context-reminder.test.mjs" } }).blocked, false,
+    "the reminder's test stays editable");
   // app-repo-identity decides which repository the push gate and the CodeRabbit
   // waiver treat as the app repo, and loads at startup through codex-push-lib
   // (Codex App P1 on #1149): Codex may not edit it.
@@ -4404,6 +4418,98 @@ try {
     );
     console.log(`TRANSCRIPT BASEOID: non-SHA base blocked=${notASha.blocked}; guidance names exact base=true`);
   }
+
+  // A double-quoted search pattern is data, not a pipeline: the harness audit of
+  // 2026-10-30 saw the batched read below refused, naming `SessionStart` as a
+  // command. Each one must now pass the whole gate.
+  for (const command of [
+    'rg -n "SubagentStart|PreCompact|PostCompact|SessionStart" .codex/hooks.json',
+    'Get-Content package.json; rg -n "SubagentStart|PreCompact|PostCompact|SessionStart" .codex/hooks.json',
+    'Get-Content package.json; Get-Content .codex/hooks.json; rg -n "harness|parity|codex|hook|agent" package.json',
+    'Get-Content package.json; rg -n "needs review|was skipped" .codex/hooks.json',
+    'Get-Content README.md; grep -n "a;b" .codex/hooks.json',
+    'Get-Content package.json; rg -n "^a|^b" package.json',
+    'Get-Content README.md; Get-Content package.json | Select-String "a|b"',
+    "Get-Content README.md; rg -e 'end$' -e 'start$' package.json",
+  ]) {
+    const verdict = evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } });
+    assert.equal(verdict.blocked, false, `a batched read must not be refused: ${command} -> ${verdict.reason}`);
+  }
+  // Named limits, pinned so a change here is a decision: a single-quoted alternation
+  // near a protected name stays refused (no hook input says which shell runs it, and
+  // cmd.exe would run each piece), and a `\"` or a comment anywhere turns the
+  // double-quoted exception off. The forms in the list above are the alternatives.
+  for (const [command, alternative] of [
+    ["rg -n 'harness|parity|codex|hook|agent' package.json", 'rg -n "harness|parity|codex|hook|agent" package.json'],
+    ["Get-Content README.md; grep -n 'a;b' .codex/hooks.json", 'Get-Content README.md; grep -n "a;b" .codex/hooks.json'],
+    ['Get-Content package.json; rg -n "a\\"|agent" package.json', 'Get-Content package.json; rg -n "a|agent" package.json'],
+    ['Get-Content package.json; rg -n "a|agent" package.json # he said hi', 'Get-Content package.json; rg -n "a|agent" package.json'],
+  ]) {
+    assert.equal(evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } }).blocked, true, `named limit changed: ${command}`);
+    const verdict = evaluateProductionAction({ toolName: "PowerShell", toolInput: { command: alternative } });
+    assert.equal(verdict.blocked, false, `the documented alternative must pass: ${alternative} -> ${verdict.reason}`);
+  }
+  // The same quoting must buy no write. Every form here reaches a protected file
+  // in at least one shell the guard cannot rule out, or hands it to a writer.
+  for (const command of [
+    "rg 'a|b' package.json | tee .codex/hooks.json",
+    "rg 'a|b' package.json; tee .codex/hooks.json",
+    "rg 'a|b' .codex/hooks.json | xargs tee",
+    'rg "a|b" .codex/hooks.json | xargs tee',
+    // cmd.exe does not treat `'` as a quote, so these are real pipelines there.
+    "rg 'x | tee .codex/hooks.json | rg y'",
+    "rg 'a|tee .codex/hooks.json 'b",
+    "rg 'a b|tee x' package.json",
+    // A one-word piece is an interpreter with no arguments, which executes its stdin.
+    // Classified here only; none of these strings is ever run.
+    "rg 'a|lua|b' .codex/hooks.json",
+    "rg 'a|tclsh|b' package.json",
+    "Get-Content README.md; rg 'a|lua|b' package.json",
+    "rg 'a|bash|b' README.md",
+    "rg 'a|python|b' package.json",
+    // A `"` in single quotes re-pairs cmd.exe's double quotes, and %X% can hold one.
+    `rg '"' "a|lua|b" package.json`,
+    'rg "a|%X%|b" package.json',
+    // cmd.exe's `^"` leaves the quote unopened; PowerShell's `\"` closes it.
+    'rg ^"a|tee .codex/hooks.json|b" x',
+    'rg "a\\"|tee .codex/hooks.json',
+    // Expansions stay live inside double quotes, and cmd.exe expands %X% anywhere.
+    'rg "a|$(tee .codex/hooks.json)" package.json',
+    'rg "a|`tee .codex/hooks.json`" package.json',
+    "rg 'a|%X%|b' package.json",
+    "rg 'a|b>package.json|c' x",
+    "rg 'a|b' .codex/hooks.json > .codex/hooks.json",
+    // Not a search: the exception must not reach these.
+    "tee 'a|b' .codex/hooks.json",
+    "python 'a|b' package.json",
+    "tee 'a b|rg x' 'c|d' .codex/hooks.json",
+    `bash -c "rg 'a|b' x; tee 'c|d' .codex/hooks.json"`,
+    "rg 'a|tee' .codex/hooks.json | bash",
+  ]) {
+    const verdict = evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } });
+    assert.equal(verdict.blocked, true, `quoting must not hide a write: ${command}`);
+  }
+  // Each form makes at least one shell pair quotes differently from a left-to-right
+  // scan, so the separators must stay separators. Classified here only; none of these
+  // strings is ever run.
+  const quotePairingWrites = [
+    'rg "$(echo ")"; tee .codex/hooks.json; echo "(")"',
+    'rg "$(echo ")"; tee .codex/./hooks.json; echo "(")"',
+    'rg "$(echo ")"; Tee-Object (Join-Path .codex hooks.json); echo "(")"',
+    'rg foo # "\nrg bar; tee .codex/./hooks.json # "',
+    'rg %X%"a|tee .codex/hooks.json|b"',
+    'rg "a|tee .codex/hooks.json|b"%X%',
+    'rg --% "a|tee .codex/hooks.json|b"',
+    'rg !x"a|tee .codex/hooks.json|b"',
+    'rg a <<E\n"\nE\nrg b; tee .codex/./hooks.json\nrg c <<E\n"\nE',
+    'rg x @"\n"\n"@; tee .codex/./hooks.json; rg "y"',
+    // cmd.exe reads line by line: a comment word hides the quote, and a quote never
+    // survives a line end, and a caret at a line end escapes the next line's quote.
+    'rem "\nrg bar; tee .codex/./hooks.json & rem "',
+    'rg "a\nrg b|tee .codex/./hooks.json"',
+    'rg ^\n"a|tee .codex/hooks.json|b"',
+  ].filter((command) => !evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } }).blocked);
+  assert.deepEqual(quotePairingWrites, [], "syntax that changes quote pairing must keep every separator");
 
   console.log(`TRANSCRIPT DENY (no proof): exit=${deniedProcess.status} stdout=${deniedProcess.stdout}`);
   console.log(`TRANSCRIPT ALLOW (valid wrapper-shaped proof): exit=${allowedProcess.status} stdout=${JSON.stringify(allowedProcess.stdout)}`);

@@ -471,9 +471,20 @@ authenticate proof contents. CodeRabbit's backstop was removed 2026-10-19, which
 Running raw `codex review <scope>` from the repo root self-recurses, kills its own process and exits 0, which can
 record a false "clean" review; the wrapper `node scripts/write-codex-push-proof.mjs` avoids it, nothing blocks the
 raw form. Also: the Codex `/import` feature writes corrupted `source-command-*` adapters (commit blocker fixed,
-importer cannot be turned off; Mason: keep visible, do not delete); `sync-agent-workflows.mjs` has thirteen
+importer cannot be turned off; since 2026-10-30 the sync warning names `--archive-imported`, which moves them to a
+restorable archive, and a later import can bring new copies back; deferred, not solved: an external filesystem change
+during archive creation can leave an empty directory after a rejected operation. Existing file content is retained,
+and the destination is fixed under shared Git storage); `sync-agent-workflows.mjs` has thirteen
 recorded limitations (lexical-only containment, junction/symlink and path-case edge cases; Mason: record, don't
-patch); the guard-claim ratchet misses claims inside template strings and files outside the hook folders.
+patch); the guard-claim ratchet misses claims inside template strings and files outside the hook folders. Codex can
+show two Stop prompts on one stop (Mason's global reminder plus the project proof check); they check different
+things, and removing the duplicate needs a separate change to the global hook. Codex's guard still refuses a
+single-quoted search alternation near a protected file (use double quotes or separate simple reads), and a batched
+double-quoted search when the command holds shell syntax that could change how quotes pair, such as `$`, `%`, `!`, a
+comment or `\"`, even when harmless (the guard's scan is deliberately conservative, not a parser; the full list is in
+`docs/reference/agent-guardrails.md`; drop the comment or run the reads separately). Deferred, not solved: this change
+does not establish source-content integrity for every shared hook. Runtime trust status and the guard's explicit
+protected-file list are separate checks; scripts outside that list do not gain its write protection.
 
 ### KI-50 — Cloud (web/mobile) sessions cannot push or back up memory
 **MED · ACCEPTED · tooling-guards · Mason (2026-08-04: leave as is)**

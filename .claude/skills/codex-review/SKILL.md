@@ -417,7 +417,7 @@ can neither merge nor be carried forward, so `git merge origin/main` again, push
 non-draft PR has this exact commit as its head;
 the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
 ago with none, or the commit only merges main cleanly with no shared files: then the App's finished review of
-the pre-merge head is enough (once the App starts on the merge, Sol waits for it), and its threads on the pre-merge head must be
+the pre-merge head is enough (once the App starts on the merge, Sol waits for it to finish, or an hour with no update), and its threads on the pre-merge head must be
 answered too; Mason, 2026-10-29); no Codex App thread on this commit and no CodeRabbit thread on the PR is unanswered;
 CodeRabbit is not reviewing it; and a money or Mason-named PR has CodeRabbit's completed review (or
 Mason's `skip coderabbit #<PR>` waiver, from any session — the merging session must still hold it).

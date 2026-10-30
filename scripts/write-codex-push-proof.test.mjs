@@ -1443,6 +1443,10 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(preMergeThread.problems.join(" "), /commit before the main merge/, "clean merge: and names that commit");
     assert.equal(check({ ...fresh, cleanMergeOf: preMerge }).ok, false, "clean merge: unread pre-merge threads refuse");
     assert.equal(check({ ...fresh, cleanMergeOf: preMerge, cleanMergeThreads: { status: "incomplete" } }).ok, false, "clean merge: a partial read of pre-merge threads refuses");
+    // Luna MED on #1213: the App re-reviewed the merge itself, but a thread on the pre-merge commit is unanswered.
+    const mergeReviewed = { codexState: { sha: head, status: "completed" }, headPushedMs: now - 60_000, cleanMergeOf: preMerge, codexThreads: { status: "stale" } };
+    assert.equal(check({ ...mergeReviewed, cleanMergeThreads: { status: "findings-at-head", unresolvedAtHead: 1 } }).ok, false, "clean merge: an App review of the merge does not excuse unanswered pre-merge threads");
+    assert.equal(check({ ...mergeReviewed, cleanMergeThreads: { status: "clean-at-head" } }).ok, true, "clean merge: an App review of the merge with answered pre-merge threads runs");
   }
   assert.match(check({ pr: null }).problems.join(" "), /no open pull request/, "preflight: no PR refuses");
   assert.match(check({ pr: { number: 1, draft: true } }).problems.join(" "), /still a draft/, "preflight: a draft refuses");

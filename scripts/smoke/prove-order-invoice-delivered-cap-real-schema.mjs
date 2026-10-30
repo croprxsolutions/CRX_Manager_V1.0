@@ -257,6 +257,8 @@ function invoiceFirst() {
   // Luna round 2: detaching an invoice from its order must not slip past the cap, and a completed
   // delivery cannot be voided by a bare status write at all, so no draft can be left behind that way.
   refused(`RESET ROLE; UPDATE public.invoices SET order_id=NULL WHERE id='${INV}';`,'an existing order invoice cannot be detached from its order (pre-existing guard)',/INVOICE_ORDER_IMMUTABLE/);
+  refused(`${asUser(ADMIN)} UPDATE public.invoices SET invoice_type='credit_memo' WHERE id='${INV}';`,'an app admin cannot rewrite an invoice type directly',/permission denied for table invoices/);
+  refused(save(INV,4,ADMIN).replace("'invoice_type',i.invoice_type", "'invoice_type','credit_memo'"),'save_invoice refuses sale-to-credit conversion',/CREDIT_MEMO_VIA_SAVE_INVOICE/);
   refused(`RESET ROLE; UPDATE public.deliveries SET status='voided' WHERE id='${DELIVERY}';
     UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}';`,'a completed delivery cannot be voided by a direct status write (only void_delivery, which cancels drafts)',/Invalid delivery status transition/);
   allowed(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER zz_delivery_void_needs_invoice_void;

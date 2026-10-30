@@ -39,13 +39,15 @@ export function subtractAllowlist(predicateName, rows, entries, functionContract
     return !entries.some((entry) => {
       if (entry.predicate !== predicateName) return false;
       if (entry.violation_key !== row.violation_key) return false;
-      const bound = ACTOR_PREDICATES.has(entry.predicate) ||
+      const actorBound = ACTOR_PREDICATES.has(entry.predicate) ||
         Object.hasOwn(row, 'suspect_param') ||
-        Object.hasOwn(entry, 'suspect_param') || Object.hasOwn(entry, 'reviewed_contracts');
+        Object.hasOwn(entry, 'suspect_param');
+      const bound = actorBound || Object.hasOwn(entry, 'reviewed_contracts');
       if (!bound) return true; // Unchanged non-actor/data baselines retain their existing contract.
       const reviewed = entry.reviewed_contracts;
-      if (typeof entry.suspect_param !== 'string' || entry.suspect_param.length === 0 ||
-          row.suspect_param !== entry.suspect_param || !contracts || !reviewed ||
+      if (actorBound && (typeof entry.suspect_param !== 'string' || entry.suspect_param.length === 0 ||
+          row.suspect_param !== entry.suspect_param)) return false;
+      if (!contracts || !reviewed ||
           typeof reviewed !== 'object' || Array.isArray(reviewed)) return false;
       const pins = Object.entries(reviewed);
       // A dependency-only pin or an unpinned identity source is not a reviewed function contract.

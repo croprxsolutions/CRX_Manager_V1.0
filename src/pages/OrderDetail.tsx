@@ -76,22 +76,20 @@ export default function OrderDetail() {
   // F1: scoped by order id. This component does NOT remount when the route id
   // changes (App.tsx renders it without a key, the effects are keyed on [id], and
   // activeOrderIdRef exists precisely to guard the stale in-flight fetch), so the
-  // hook's key map survives an order-to-order navigation. These three actions no
+  // hook's key map survives an order-to-order navigation. These actions no
   // longer retire their key on click, so without the scope an ambiguous result on
   // order A could replay A's receipt after the user navigated to order B —
   // reporting B cancelled without cancelling it, or opening A's invoice. Scoping
   // keeps retry-under-the-same-key for the SAME order while minting a fresh key
   // per order.
   const cancelOrderIdem = useIdempotencyKey('cancel_order', profile?.id || '', id ?? '');
-  const createInvoiceIdem = useIdempotencyKey('create_invoice_from_order', profile?.id || '', id ?? '');
   const priceOrderIdem = useIdempotencyKey('price_order', profile?.id || '');
   // F1 (CodeRabbit): consolidate_draft_invoices sends only (p_order_id, p_performed_by,
   // p_idempotency_key), so the route id is the WHOLE of what a retry can vary. The key is
   // retained across an ambiguous reply, and this page does not remount between orders, so
   // without this scope order A's cached receipt could replay against order B.
   const consolidateIdem = useIdempotencyKey('consolidate_draft_invoices', profile?.id || '', id ?? '');
-  // F1: order-scoped for the same reason as cancelOrderIdem / createInvoiceIdem —
-  // this is the other half of the Create Invoice click path.
+  // Keep retries scoped to the order, as for cancellation.
   const splitInvoiceIdem = useIdempotencyKey('create_split_invoices_from_order', profile?.id || '', id ?? '');
   // Latest order id the route is showing — older in-flight fetches bail (M6 stale guard).
   const activeOrderIdRef = useRef<string | undefined>(undefined);
@@ -161,7 +159,6 @@ export default function OrderDetail() {
 
   // Create invoice
   const [creatingInvoice, setCreatingInvoice] = useState(false);
-  const [invoiceWarnOpen, setInvoiceWarnOpen] = useState(false);
 
   // Status change
   const [changingStatus, setChangingStatus] = useState(false);
@@ -1103,7 +1100,6 @@ export default function OrderDetail() {
 
   const handleCreateInvoice = async () => {
     if (!profile || !id) return;
-    setInvoiceWarnOpen(false);
     await runCriticalAction({
       action: async () => {
         // The billing path must follow the order's real field split. A failed or stale
@@ -1126,88 +1122,32 @@ export default function OrderDetail() {
         if (typeof allocCheck.count !== 'number' || (allocCheck.count > 0) !== hasAllocations) {
           throw new Error("The order's field split changed since this page loaded. Refresh the page before creating the invoice.");
         }
-        // Field/acre split: when the order's lines have field allocations, generate one draft
-        // invoice per field-owner (billed by acres) instead of a single order-level invoice. The
-        // RPC itself falls back to a single invoice when there are no allocations, but we branch
-        // here so the un-split path keeps its exact existing behavior + idempotency key.
-        if (hasAllocations) {
-          const splitKey = splitInvoiceIdem.getKey();
-          const { data, error } = await supabase.rpc('create_split_invoices_from_order', {
-            p_order_id: id,
-            p_salesman_id: profile.id,
-            p_invoice_type: 'chemical_sale',
-            p_idempotency_key: splitKey,
-          });
-          if (error) throw error;
-          const ids = assertRpcResult<string[]>(data, 'create_split_invoices_from_order');
-          splitInvoiceIdem.resetKey();
-          if (!ids || ids.length === 0) {
-            throw new Error('No split invoices were generated — the order has no billable (positive) amount allocated to a customer.');
-          }
-          navigate(`/invoices/${ids[0]}`);
-          return;
-        }
-        const invoiceKey = createInvoiceIdem.getKey();
-        const { data, error } = await supabase.rpc('create_invoice_from_order', {
+        const splitKey = splitInvoiceIdem.getKey();
+        const { data, error } = await supabase.rpc('create_split_invoices_from_order', {
           p_order_id: id,
           p_salesman_id: profile.id,
-          p_idempotency_key: invoiceKey,
+          p_invoice_type: 'chemical_sale',
+          p_idempotency_key: splitKey,
         });
         if (error) throw error;
-        const invoiceId = assertRpcResult<string>(data, 'create_invoice_from_order');
-        createInvoiceIdem.resetKey();
-        navigate(`/invoices/${invoiceId}`);
+        const ids = assertRpcResult<string[]>(data, 'create_split_invoices_from_order');
+        splitInvoiceIdem.resetKey();
+        if (!ids || ids.length === 0) {
+          throw new Error('No split invoices were generated — the order has no billable (positive) amount allocated to a customer.');
+        }
+        navigate(`/invoices/${ids[0]}`);
       },
       toast,
-      successMessage: hasAllocations
-        ? `Split invoices created${splitPreview ? ` (${splitPreview.length} customer${splitPreview.length !== 1 ? 's' : ''})` : ''}`
-        : 'Draft invoice created',
+      successMessage: `Split invoices created${splitPreview ? ` (${splitPreview.length} customer${splitPreview.length !== 1 ? 's' : ''})` : ''}`,
       setLoading: setCreatingInvoice,
-      sentryTag: hasAllocations ? 'create_split_invoices_from_order' : 'create_invoice_from_order',
+      sentryTag: 'create_split_invoices_from_order',
     });
   };
 
-  // Wave A.3 / audit finding P1-1: gate Create Invoice when a delivery is
-  // already scheduled or in flight. Creating an invoice from the order at
-  // that point uses the originally-ordered quantities, but a partial delivery
-  // would only patch an invoice it created itself (auto-invoice path matches
-  // on invoices.delivery_id). The result is a manual draft frozen at the
-  // ordered quantities while the customer was billed for less.
   const hasActiveInvoice = invoices.some((inv) => activeInvoiceCoversOrder(inv, order?.id ?? ''));
   const hasPendingDelivery = deliveries.some(
     (d) => d.status === 'scheduled' || d.status === 'in_progress'
   );
-  // W5 (sell-side #4): any non-cancelled/voided delivery means the order is billed
-  // per-delivery — create_invoice_from_order now hard-rejects an order-level invoice
-  // in that case, so don't even offer the "Create Invoice" button.
-  const hasActiveDelivery = deliveries.some(
-    (d) => d.status !== 'cancelled' && d.status !== 'voided'
-  );
-
-  const onCreateInvoiceClick = () => {
-    // F1 click-level repair: do NOT retire the key here.
-    //
-    // The previous comment claimed "date/notes vary" per attempt, but neither RPC on
-    // this path accepts a date or a note: create_invoice_from_order takes only
-    // (p_order_id, p_salesman_id, p_invoice_type, p_idempotency_key) and
-    // create_split_invoices_from_order the same shape. Every field is fixed for this
-    // screen, so two clicks are always the SAME intent — never a new one.
-    //
-    // Minting a fresh key per click therefore bought nothing and cost duplicate
-    // protection: after an ambiguous reply (server committed, response lost or the
-    // payload failed assertRpcResult) the user's natural retry travelled under a new
-    // key, so the server could not replay and issued a SECOND invoice. Holding the key
-    // lets create_invoice_from_order return the original invoice id instead.
-    //
-    // The key is retired after assertRpcResult confirms the reply (see
-    // handleCreateInvoice), which is what makes a later, genuinely new invoice a new
-    // intent.
-    if (hasPendingDelivery) {
-      setInvoiceWarnOpen(true);
-      return;
-    }
-    handleCreateInvoice();
-  };
 
   // #4 billing cockpit: post every draft/unposted invoice on this order in one
   // action. Standalone invoices post independently; split siblings post as one
@@ -1485,23 +1425,11 @@ export default function OrderDetail() {
                   Booking draw — items locked
                 </span>
               )}
-              {order.status !== 'cancelled' && order.status !== 'fulfilled' && !hasActiveInvoice && !hasActiveDelivery && (<>
-                <Button
-                  variant="secondary"
-                  icon={<FileText className="w-4 h-4" />}
-                  showChevron={false}
-                  onClick={onCreateInvoiceClick}
-                  loading={creatingInvoice}
-                >
-                  Create Invoice
-                </Button>
-                <HelpTip
-                  text={hasPendingDelivery
-                    ? "A delivery is already scheduled. The recommended path is to wait for the driver to complete the delivery — an invoice will be created automatically with the actual delivered quantities. Clicking this opens a warning."
-                    : "Generates a draft invoice from the order. It stays in draft until you review and post it — nothing is sent to the customer yet."}
-                  className="ml-1"
-                />
-              </>)}
+              {order.status !== 'fulfilled' && order.status !== 'cancelled' && order.status !== 'voided' && (
+                <span className="text-xs text-secondary self-center">
+                  Product invoices are created after delivery. Record advance payments as prepay.
+                </span>
+              )}
               {/* U7 SAFE-SCOPE: a delivered field/acre-allocated order that should be split-billed
                   per owner (complete_delivery skipped the mono-bill auto-draft to avoid over-billing
                   undelivered quantity). Gate on the DERIVABLE state, not the needs_split_billing
@@ -1516,7 +1444,7 @@ export default function OrderDetail() {
                   variant="secondary"
                   icon={<FileText className="w-4 h-4" />}
                   showChevron={false}
-                  onClick={onCreateInvoiceClick}
+                  onClick={handleCreateInvoice}
                   loading={creatingInvoice}
                 >
                   Create Split Invoices
@@ -2483,23 +2411,6 @@ export default function OrderDetail() {
         variant="warning"
         confirmLabel={order?.status === 'partially_fulfilled' ? 'Cancel Remaining' : 'Cancel Order'}
         loading={changingStatus}
-      />
-
-      <ConfirmModal
-        open={invoiceWarnOpen}
-        onClose={() => setInvoiceWarnOpen(false)}
-        onConfirm={handleCreateInvoice}
-        title="Create invoice before delivery completes?"
-        message={
-          'A delivery is already scheduled or in progress for this order. ' +
-          'Creating an invoice now will lock in the originally-ordered quantities. ' +
-          'If the driver delivers a partial load, this manual invoice will NOT auto-update — ' +
-          'the customer would be over-billed for the difference. ' +
-          'Recommended: wait for the delivery to complete and the invoice will be created automatically with the actual delivered quantities.'
-        }
-        variant="warning"
-        confirmLabel="Create Anyway"
-        loading={creatingInvoice}
       />
 
       <QuickTaskModal

@@ -2,14 +2,19 @@ name: Slack failure alerts
 
 # Mason, 2026-10-29: #crx-alerts gets failures and serious issues only. The
 # GitHub Slack app cannot filter to failures, so it was unsubscribed and this
-# posts instead, only when a check or scheduled job fails on main.
+# posts instead, only when a check or scheduled job fails on main, or when a
+# production Vercel deploy fails.
 # Needs the SLACK_ALERTS_WEBHOOK_URL secret (a Slack incoming webhook for #crx-alerts).
 on:
   workflow_run:
     workflows:
       - "CI -- Lint, Type Check, Test, Build"
       - "Daily landing summary"
+      - "Sentry error alerts"
     types: [completed]
+  # Vercel reports each deploy as a commit status. The status event always runs
+  # this file from main, so a pull request cannot change it.
+  status:
 
 permissions: {}
 
@@ -32,5 +37,25 @@ jobs:
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           text=$(printf ':red_circle: *%s failed on main*\n%s\n<%s|Open the run>' "$RUN_NAME" "${RUN_TITLE//[<>*_~\`:]/}" "$RUN_URL")
+          jq -n --arg text "$text" '{text: $text}' |
+            curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
+
+  vercel:
+    name: Post the failed production deploy to Slack
+    if: >-
+      contains(fromJSON('["failure","error"]'), github.event.state) &&
+      startsWith(github.event.context, 'Vercel – crx-manager-v1-0') &&
+      contains(github.event.branches.*.name, 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK_URL }}
+          COMMIT_MESSAGE: ${{ github.event.commit.commit.message }}
+          TARGET_URL: ${{ github.event.target_url }}
+        run: |
+          title=${COMMIT_MESSAGE%%$'\n'*}
+          text=$(printf ':red_circle: *Production deploy failed on Vercel*\n%s\n<%s|Open the deploy>' "${title//[<>*_~\`:]/}" "${TARGET_URL//[<>|]/}")
           jq -n --arg text "$text" '{text: $text}' |
             curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

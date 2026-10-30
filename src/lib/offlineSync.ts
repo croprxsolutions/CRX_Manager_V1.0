@@ -2,7 +2,7 @@
  * Offline Sync Service — Processes the offline queue when connection returns.
  * Maps stored operations to actual Supabase RPC calls.
  */
-import { supabase, assertRpcResult } from './db';
+import { supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from './db';
 import { Sentry } from './sentry';
 import type { Database } from '../types/supabase';
 import { withBelowCostReason, type BelowCostApprovalRunner } from './belowCostApproval';
@@ -341,7 +341,9 @@ function isPermanentFailure(message: string): boolean {
   return normalized.includes('no longer exists')
     || normalized.includes('unknown offline operation')
     || normalized.includes('not authorized')
-    || normalized.includes('must be in_progress');
+    || normalized.includes('must be in_progress')
+    // A person must void the invoice first; automatic retries cannot clear it.
+    || hasRpcCode(message, RpcErrorCodes.DELIVERY_HAS_POSTED_INVOICE);
 }
 
 /**

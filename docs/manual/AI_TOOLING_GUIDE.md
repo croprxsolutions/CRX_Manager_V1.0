@@ -119,7 +119,9 @@ missing backup), `worktree-awareness` (other sessions working), `worktree-cleanu
 worktrees), `session-snapshot`, `session-heartbeat`, `session-context-reminder`. At the end of a turn:
 `stop-wrap` (uncommitted files, unapplied migrations, undeployed functions). Codex also runs
 `stop-verify` (refuses "done" until the change was actually run and observed); Claude's wiring of
-it was dropped on 2026-10-27 because Mason's global verify-before-stop hook does the same job. After a tool call:
+it was dropped on 2026-10-27 because Mason's global verify-before-stop hook does the same job. Mason's
+Codex install has a global hook too, but the two are complementary: it reminds once and reads no proof,
+`stop-verify` checks for proof, and both can prompt on the same stop. After a tool call:
 `posttool-router`, `eslint-autofix`, `registry-freshness`, `applied-snapshot-invalidate`.
 
 Files ending in `-lib.mjs` hold the shared logic; files ending in `.test.mjs` are their tests and run
@@ -168,7 +170,9 @@ domains or ownership.
 - **Do not delete, reset or force-push someone else's branch or worktree.** An agent may own it.
   `node scripts/fleet-status.mjs` (or asking an agent for `/fleet`) lists who is working where.
 - **Never stage `.claude/session-state/`, `.codex/session-state/` or `.agents/skills/source-command-*`.**
-  These are per-machine state and harness output.
+  These are per-machine state and harness output. If the sync check warns about `source-command-*` folders,
+  preview moving them to a restorable archive with `node scripts/sync-agent-workflows.mjs --archive-imported`,
+  then add `--confirm`. Nothing is deleted: they go to `.git/crx-archive/imported-skills/` with a restore map.
 - **Changelog:** every change adds its own `docs/changelog.d/<YYYY-MM-DD>-<slug>.md`. A commit that
   touches agent tooling or adds a migration is refused by the pre-commit hook without one.
 - **Migrations:** new files only, never edit an applied one; Row Level Security and policies in the
@@ -310,8 +314,9 @@ Never get past a gate with `--no-verify`, `--admin`, `--auto`, a hand-written pr
 autopilot flag or a merge from the GitHub website. If a gate is wrong, change the gate through a
 reviewed PR (next section).
 
-`npm run agent-health` checks that the agent tooling is wired correctly. Known open problems are in
-`docs/manual/KNOWN_ISSUES.md`.
+`npm run agent-health` checks that the agent tooling is wired correctly, including whether Codex would
+really run each project hook (it fails on a missing, disabled or untrusted hook; on a branch with a new
+hook, that hook reads as missing until it lands). Known open problems are in `docs/manual/KNOWN_ISSUES.md`.
 
 ## Asking for a policy change
 

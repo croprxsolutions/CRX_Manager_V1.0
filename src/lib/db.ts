@@ -205,6 +205,10 @@ export const RpcErrorCodes = {
   ORDER_INVOICE_TERMINAL: 'ORDER_INVOICE_TERMINAL',
   // create_invoice_from_order — the order is split across fields; bill it per field owner
   ORDER_HAS_FIELD_SPLIT: 'ORDER_HAS_FIELD_SPLIT',
+  ORDER_INVOICE_EXCEEDS_DELIVERED: 'ORDER_INVOICE_EXCEEDS_DELIVERED',
+  ORDER_INVOICE_LINE_INVALID: 'ORDER_INVOICE_LINE_INVALID',
+  // void_delivery / cancel_delivery — void the delivery's posted invoice first
+  DELIVERY_HAS_POSTED_INVOICE: 'DELIVERY_HAS_POSTED_INVOICE',
   ORDER_LIFECYCLE_BUSY_RETRY: 'ORDER_LIFECYCLE_BUSY_RETRY',
   // price_order (sell-side roadmap #2 v2)
   INVALID_PRICE: 'INVALID_PRICE',

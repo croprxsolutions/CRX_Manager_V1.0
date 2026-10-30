@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-10-28",
+    "generated_at": "2026-10-30",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261028121259",
+    "migrations_high_water": "20261029143642",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -456,6 +456,8 @@
       "20261027080100_number_generators_active_signed_in_only",
       "20261027080200_commission_split_admin_only",
       "20261027080300_notification_sender_recorded",
+      "20261027080400_any_rep_converts_booking",
+      "20261028185500_order_edit_and_number_concurrency",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -5748,7 +5750,8 @@
         "updated_at",
         "is_planned",
         "booking_draw",
-        "pricing_status"
+        "pricing_status",
+        "row_version"
       ]
     },
     "payments": {
@@ -8159,7 +8162,8 @@
       "pricing_status",
       "pricing_reminder_sent_at",
       "pricing_escalation_sent_at",
-      "needs_split_billing"
+      "needs_split_billing",
+      "row_version"
     ],
     "payments": [
       "id",

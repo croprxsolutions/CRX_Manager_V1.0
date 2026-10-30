@@ -254,6 +254,11 @@ function invoiceFirst() {
   allowed(`${scheduledDelivery('posted')} RESET ROLE; UPDATE public.invoices SET status='voided', posted_at=coalesce(posted_at,now()), void_reason='[PROVER] invoice first' WHERE id='${SCHED_INV}'; ${cancelScheduled()}`,'cancel_delivery proceeds once its invoice is voided');
   allowed(`${scheduledDelivery('posted','none')} ${cancelScheduled()}`,'cancel of a never-completed delivery ignores an unlinked order-level posted invoice');
   allowed(`${scheduledDelivery('posted','other')} ${cancelScheduled()}`,'cancel ignores a posted invoice linked to a different delivery');
+  // Luna round 2: detaching an invoice from its order must not slip past the cap, and a completed
+  // delivery cannot be voided by a bare status write at all, so no draft can be left behind that way.
+  refused(`RESET ROLE; UPDATE public.invoices SET order_id=NULL WHERE id='${INV}';`,'an existing order invoice cannot be detached from its order (pre-existing guard)',/INVOICE_ORDER_IMMUTABLE/);
+  refused(`RESET ROLE; UPDATE public.deliveries SET status='voided' WHERE id='${DELIVERY}';
+    UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}';`,'a completed delivery cannot be voided by a direct status write (only void_delivery, which cancels drafts)',/Invalid delivery status transition/);
   allowed(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER zz_delivery_void_needs_invoice_void;
     UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}'; ${voidDelivery()}`,'MUTATION: disabling the delivery trigger permits void with a posted invoice');
 }

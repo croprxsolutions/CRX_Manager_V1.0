@@ -12,7 +12,7 @@
 |---|---|---|
 | **The grand plan (2026-10-29)** | `docs/plans/2026-10-29-product-GRAND-PLAN.md` | All product work in one order: this Product Master work is Stage 1; weight, chemistry, brands, rates, comparison, use guidance, families, clean-up and images follow. Sol-reviewed; it revised the build sheet's order |
 | The 43 items | `docs/plans/2026-10-28-product-master-setup-edits-BACKLOG.md` | What's wrong or missing on product setup: Mason's requests (items 1–2) and the review's findings (items 3–43) |
-| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 20 work packages (16 on 2026-10-28, plus WP-PM-14, WP-PM-16, DM-0 and WP-PM-15 from the grand plan; see its section 2a): approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
+| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 21 queue entries, including both halves of WP-PM-15: approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
 | **The build loop** | `docs/plans/2026-10-28-product-master-loop-MISSION.md` | How a session builds it: Codex builds, Claude checks and proves, one draft PR per package, nothing merged or applied live. Passes `node scripts/validate-mission-doc.mjs` |
 | Weight per gallon and active ingredients | `docs/plans/2026-10-28-product-data-model-REFRESH.md` | The larger feature that follows (To-Do row 2.9), refreshed from the August plan |
 | Mason's decisions | `docs/manual/DECISION_LOG.md`, the three 2026-10-28 entries (Product Master backlog; product data model) | Every business answer, so the build needs no owner input |
@@ -91,6 +91,8 @@ Never: merge, mark a PR ready, push to main, apply a migration live, write live 
 - **Pace:** an 8-hour run will probably finish 6–10 packages properly; the rest queue for another run.
 - **Parked for Mason:**
   - the Unit back-fill: Sol's BLOCKER, so audit only, and Mason sees the mismatch list first;
-  - the data clean-up itself: Mason types the missing SKUs and approves each fix. Bulk import and the detail workbook stay as draft PRs until it is done;
+  - the data clean-up itself: Mason types the missing SKUs and approves each fix. Dependent packages may be parked until their prerequisites are available and the data step is done;
+  - the vendor-link review and live data transition before the preferred-vendor copy rule is enabled;
+  - average purchase-cost tracking for shop-filled totes until the separate inventory-costing foundation has been reviewed, approved where required and activated; the quantity-only first release is planned after PAR-2;
   - any migration that changes grants on `products`, which needs his `I approve`.
-- **The morning report** lists, per package: the PR, the proof, what's still owed (Mason's click-through on the preview, the Sol merge gate, CodeRabbit for money packages) and a suggested merge order.
+- **The morning report** lists, per package: the PR, the proof, what's still owed (including real app proof and applicable Sol gate), and a suggested merge order. CodeRabbit is required only when labeled.

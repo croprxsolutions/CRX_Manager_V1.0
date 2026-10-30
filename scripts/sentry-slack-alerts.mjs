@@ -11,22 +11,40 @@ import { plainText } from "./daily-landing-summary.mjs";
 const ORG = "crop-rx-solutions";
 const PROJECT_ID = "4510932858175488";
 const ISSUES_PAGE = `https://${ORG}.sentry.io/issues/`;
+const WORKFLOW = "sentry-slack-alerts.yml";
+// shortcut: reads one page and links to Sentry if it is full, raise this if 25 new errors in 30 minutes ever happens.
 const LIMIT = 25;
-// Sentry can list an issue slightly after it was first seen. Reading a window that
-// ends 10 minutes ago, starting where the last one ended, avoids gaps and repeats.
+// Sentry can list an issue slightly after it was first seen, so each run reads up
+// to 10 minutes before it started. Both ends come from run start times, so one
+// run's window begins exactly where the last successful run's ended.
 const LAG_MS = 10 * 60_000;
 const DEFAULT_WINDOW_MS = 30 * 60_000;
 
-export function issueWindow({ now, lastRunAt, lookbackHours }) {
-  const until = now - LAG_MS;
+export function issueWindow({ runAt, lastRunAt, lookbackHours }) {
+  const until = Date.parse(runAt) - LAG_MS;
   const since = lookbackHours ? until - lookbackHours * 3600_000
     : lastRunAt ? Date.parse(lastRunAt) - LAG_MS
     : until - DEFAULT_WINDOW_MS;
   return { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
 }
 
+export function readLookback(value) {
+  if (!value) return 0;
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 14) throw new Error("lookback_hours must be a number of hours up to 336");
+  return hours;
+}
+
 export function issueQuery({ since, until }) {
   return `is:unresolved issue.priority:high firstSeen:>=${since} firstSeen:<${until}`;
+}
+
+// Error titles can quote the data that caused them, and #crx-alerts must not carry customer contact details.
+export function safeTitle(title) {
+  const redacted = String(title ?? "")
+    .replace(/[^\s<>"']+@[^\s<>"']+/g, "(email)")
+    .replace(/\+?\d(?:[\s().-]*\d){6,}/g, "(number)");
+  return plainText(redacted).replace(/&/g, "&amp;");
 }
 
 export function slackText(issues) {
@@ -34,26 +52,24 @@ export function slackText(issues) {
   const lines = issues.map((issue) => {
     const link = `${ISSUES_PAGE}${encodeURIComponent(issue.shortId)}`;
     const users = Number(issue.userCount) || 0;
-    return `<${link}|${plainText(issue.shortId)}> ${plainText(issue.title)} (${users} ${users === 1 ? "user" : "users"})`;
+    return `<${link}|${plainText(issue.shortId)}> ${safeTitle(issue.title)} (${users} ${users === 1 ? "user" : "users"})`;
   });
   const more = count >= LIMIT ? `\n<${ISSUES_PAGE}|There may be more in Sentry>` : "";
   return `:rotating_light: *${count} new Sentry ${count === 1 ? "error" : "errors"}*\n${lines.join("\n")}${more}`;
 }
 
-function lastSuccessfulRun(repo) {
-  const runs = JSON.parse(execFileSync("gh", ["run", "list", "--repo", repo, "--workflow", "sentry-slack-alerts.yml",
-    "--status", "success", "--limit", "1", "--json", "createdAt"], { encoding: "utf8" }));
-  return runs[0]?.createdAt ?? null;
+function runTimes(repo) {
+  const gh = (args) => JSON.parse(execFileSync("gh", ["run", ...args, "--repo", repo, "--json", "createdAt"], { encoding: "utf8" }));
+  const runAt = gh(["view", process.env.GITHUB_RUN_ID]).createdAt;
+  const lastRunAt = gh(["list", "--workflow", WORKFLOW, "--status", "success", "--limit", "1"])[0]?.createdAt ?? null;
+  return { runAt, lastRunAt };
 }
 
 async function main() {
   const { SENTRY_TOKEN: token, SLACK_WEBHOOK_URL: webhook, GITHUB_REPOSITORY: repo, LOOKBACK_HOURS: hours } = process.env;
-  if (!token) {
-    process.stdout.write("SENTRY_TOKEN is not set; nothing to check.\n");
-    return;
-  }
-  const lookbackHours = Number(hours) || 0;
-  const window = issueWindow({ now: Date.now(), lastRunAt: lookbackHours ? null : lastSuccessfulRun(repo), lookbackHours });
+  // Failing here keeps the last good run as the starting point, so no errors are skipped.
+  if (!token || !webhook) throw new Error("SENTRY_ALERTS_TOKEN and SLACK_ALERTS_WEBHOOK_URL must both be set");
+  const window = issueWindow({ ...runTimes(repo), lookbackHours: readLookback(hours) });
   const url = `https://us.sentry.io/api/0/organizations/${ORG}/issues/?${new URLSearchParams({
     project: PROJECT_ID, query: issueQuery(window), limit: String(LIMIT),
   })}`;

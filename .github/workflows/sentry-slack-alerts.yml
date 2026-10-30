@@ -3,14 +3,14 @@ name: Sentry error alerts
 # Mason, 2026-10-30: new high-priority Sentry errors go to #crx-alerts. Sentry's
 # Slack connection needs a paid plan, so this checks Sentry every 30 minutes.
 # Needs SENTRY_ALERTS_TOKEN (a read-only Sentry internal integration token) and
-# SLACK_ALERTS_WEBHOOK_URL. Without the token it does nothing.
+# SLACK_ALERTS_WEBHOOK_URL.
 on:
   schedule:
     - cron: '7,37 * * * *'
   workflow_dispatch:
     inputs:
       lookback_hours:
-        description: Read this many hours back instead of since the last run
+        description: Re-read this many hours instead of since the last run (posts them again)
         required: false
 
 permissions:
@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:

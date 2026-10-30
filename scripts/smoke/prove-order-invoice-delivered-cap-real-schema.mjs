@@ -334,6 +334,10 @@ async function main() {
   applied=apply('candidate.sql'); assert.equal(applied.status,0,applied.output);
   for(const user of [ADMIN,REP]) {
     refused(`${asUser(user)} SELECT public.create_invoice_from_order('${EMPTY_ORDER}','${user}','chemical_sale',gen_random_uuid()::text);`,'undelivered order RPC');
+    refused(`${asUser(user)} SELECT public.save_invoice(
+      jsonb_build_object('customer_id','${CUSTOMER}','order_id','${EMPTY_ORDER}','invoice_type','chemical_sale','invoice_date',CURRENT_DATE::text),
+      jsonb_build_array(jsonb_build_object('order_item_id','${EMPTY_LINE}','product_id','${PRODUCT}','description','[PROVER] tiny undelivered sale',
+        'quantity',0.0009,'unit_price_cents',1000000,'extended_cents',900)),gen_random_uuid()::text);`,'save_invoice permits no positive quantity when nothing was delivered');
     allowed(save(INV,4,user),'real save_invoice keeps delivered quantity');
     refused(save(INV,7,user),'real save_invoice refuses excess quantity');
   }
@@ -343,6 +347,15 @@ async function main() {
   refused(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.002 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'rounding slack does not allow a real excess');
   refused(insertLine(INV,3,PRODUCT,null),'unlinked duplicate counts');
   refused(insertLine(SIBLING,1,OTHER,null),'added undelivered product');
+  refused(insertLine(SIBLING,0.0009,OTHER,null),'rounding slack never creates an undelivered product allowance');
+  refused(`INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id)
+    VALUES ('${id(18)}','PROVER-TINY-ZERO','${EMPTY_ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}');
+    ALTER TABLE public.invoice_items DISABLE TRIGGER zz_cap_order_invoice_items;
+    ${insertLine(id(18),0.0009,PRODUCT,EMPTY_LINE)}
+    ALTER TABLE public.invoice_items ENABLE TRIGGER zz_cap_order_invoice_items;
+    UPDATE public.invoices SET total_amount_cents=1 WHERE id='${id(18)}';
+    ${asUser(ADMIN)} SELECT public.post_invoice('${id(18)}',public.invoice_postable_version(v),gen_random_uuid()::text)
+      FROM public.invoices_postable v WHERE v.id='${id(18)}';`,'posting rejects a tiny imported sale with no delivered allowance');
   refused(`INSERT INTO public.invoice_items (invoice_id,order_item_id,description,quantity,unit_price_cents,extended_cents,cost_cents)
     VALUES ('${SIBLING}','${LINE}','[PROVER] malformed product',100,1000,100000,0);`,'order-linked product identity is required',LINE_INVALID);
   allowed(`INSERT INTO public.invoice_items (invoice_id,description,quantity,unit_price_cents,extended_cents,cost_cents,charge_type)

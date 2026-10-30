@@ -65,7 +65,9 @@ BEGIN
   )
   SELECT * INTO v_bad FROM (
     SELECT * FROM over_line UNION ALL SELECT * FROM over_product
-  ) quantities WHERE billed_qty >= allowed_qty + 0.001 ORDER BY product_id LIMIT 1;  -- field splits round shares to 4 places (0.6667 x 3 = 2.0001)
+  ) quantities WHERE (allowed_qty <= 0 AND billed_qty > 0)
+                  OR billed_qty >= allowed_qty + 0.001
+  ORDER BY product_id LIMIT 1;  -- field splits round shares to 4 places (0.6667 x 3 = 2.0001)
   IF FOUND THEN
     RETURN format('Product billing totals %s units; completed deliveries allow %s. Refresh the invoice and bill only delivered goods.',
                   v_bad.billed_qty, v_bad.allowed_qty);

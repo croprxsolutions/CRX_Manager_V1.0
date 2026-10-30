@@ -2,11 +2,6 @@
 
 **Last verified:** 2026-10-29 for the invoice-cap checks only; other evidence retains its stated dates.
 
-PR #1174 (order-wide delivered cap, not yet applied): once applied, `void_delivery` and `cancel_delivery`
-refuse a delivery that still has an active invoice (owner decision 2026-10-29: void the invoice first). The live
-evidence is in `docs/changelog.d/2026-10-29-invoice-cap-restamp.md`. Earlier reconciliation and individual issue
-dates below retain their original scope; this is not a fresh full security audit.
-
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
 **Earlier verification: 2026-10-28 (America/Chicago)** for KI-18 only; the rest of the file 2026-10-25 (`main` at `c65b7b351`).

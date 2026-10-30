@@ -18,6 +18,7 @@ DECLARE
   v_result jsonb;
   v_again jsonb;
   v_message text;
+  v_title text;
   v_stock numeric;
   v_count int;
   v_i int;
@@ -111,13 +112,17 @@ BEGIN
     RESET ROLE;
     IF (SELECT quantity_available FROM public.inventory WHERE product_id=v_product AND location='Main Warehouse') <> v_stock-v_delivered
       THEN RAISE EXCEPTION 'SMOKE_FAIL: replay or retry changed stock twice'; END IF;
-    SELECT count(*),min(message) INTO v_count,v_message FROM public.notifications
+    SELECT count(*),min(message),min(title) INTO v_count,v_message,v_title FROM public.notifications
       WHERE related_entity_id=v_d AND notification_type='delivery_issue_reported' AND user_id=v_admin;
     IF v_i=4 THEN
       IF v_count<>0 THEN RAISE EXCEPTION 'SMOKE_FAIL: no-issue completion created report'; END IF;
       CONTINUE;
     END IF;
     IF v_count<>1 THEN RAISE EXCEPTION 'SMOKE_FAIL: shortage notice missing or duplicated (%)',v_count; END IF;
+    IF v_title IS DISTINCT FROM 'Delivery issue: ' || v_issue_label || ' — ' ||
+      (SELECT delivery_number FROM public.deliveries WHERE id=v_d) THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: notice title must describe the delivery issue neutrally';
+    END IF;
     IF v_i=11 AND position(E'\nDriver explanation: ' || left(btrim(v_notes),2000) || E'\nDelivery lines (' in v_message)=0 THEN
       RAISE EXCEPTION 'SMOKE_FAIL: explanation must be trimmed to exactly 2000 characters';
     END IF;

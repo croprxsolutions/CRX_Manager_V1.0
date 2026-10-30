@@ -7,7 +7,7 @@ const H = vi.hoisted(() => ({ message: '', type: 'delivery_issue_reported' }));
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   return { ...actual, supabase: { from: () => buildInMemoryQuery([{
-    id: 'report-1', user_id: 'office', notification_type: H.type, title: 'Driver issue: Other — DEL-007',
+    id: 'report-1', user_id: 'office', notification_type: H.type, title: 'Delivery issue: Other — DEL-007',
     message: H.message, is_read: true, created_at: '2026-10-28T15:00:00Z',
     related_entity_type: 'delivery', related_entity_id: 'delivery-7',
   }]) } };
@@ -33,6 +33,7 @@ describe('driver report in office notification surfaces', () => {
       </Routes></MemoryRouter>);
       if (panel) fireEvent.click(await screen.findByTitle('Notifications'));
       const report = await screen.findByText(/Driver explanation: Damage: cap broken/);
+      expect(await screen.findByText('Delivery issue: Other — DEL-007')).toBeInTheDocument();
       expect(report.textContent).toBe(H.message);
       expect(report).not.toHaveClass('line-clamp-2');
       expect(report).toHaveClass('whitespace-pre-wrap');

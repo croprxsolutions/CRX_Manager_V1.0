@@ -55,7 +55,7 @@ BEGIN
   INSERT INTO public.notifications (
     user_id, title, message, notification_type, related_entity_type, related_entity_id, created_by
   )
-  SELECT id, 'Driver issue: ' || v_type || ' — ' || v_delivery.delivery_number,
+  SELECT id, 'Delivery issue: ' || v_type || ' — ' || v_delivery.delivery_number,
     v_message, 'delivery_issue_reported', 'delivery', NEW.id, auth.uid()
   FROM public.profiles WHERE role = 'admin' AND is_active = true;
   RETURN NULL;

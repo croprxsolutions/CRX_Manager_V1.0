@@ -1,8 +1,10 @@
 # Known Issues — what is open today
 
+**Last verified:** 2026-10-29 for the invoice-cap checks only; other evidence retains its stated dates.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-28 (America/Chicago)** for KI-18 only; the rest of the file 2026-10-25 (`main` at `c65b7b351`).
+**Earlier verification: 2026-10-28 (America/Chicago)** for KI-18 only; the rest of the file 2026-10-25 (`main` at `c65b7b351`).
 Every "applied live" statement not re-read since is the older record's claim, marked as such. Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
@@ -629,13 +631,15 @@ OrderDetail.
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the
   source invoice can be hard-deleted or re-saved.
-- Whole-order invoice quantities and unit prices are not capped server-side (MED). Voiding a delivery whose invoice
-  is posted leaves the invoice active; the office must issue a credit memo (MED). Removing a product from a
+- Whole-order invoice quantities and unit prices are not capped server-side (MED; quantities change when PR #1174 applies). Voiding a delivery whose invoice
+  is posted leaves the invoice active (MED; changes when PR #1174 applies: the delivery then cannot be voided until the invoice is voided). Removing a product from a
   scheduled delivery can leave its drafted invoice unpostable, and lowering a quantity leaves the draft over the
   delivery quantity until staff edit it (MED). Freezing a soft-deleted order can block cancelling or voiding its
   completed delivery (reversal needs a reviewed migration) (LOW). Draft invoice CS-2026-0055 is deliberately left
   (the other delivery was billed in Chem Man) (LOW). Integrity checks page by offset, so concurrent inserts or
   deletes can make a run miss or repeat a row (LOW, accepted).
+
+- PR #1174 also preserves physical quick-delivery and follow-up completion while an edited draft needs correction; posting still rechecks the whole bill. Its split generator conserves each source quantity exactly, and the order-line and product caps have no fractional tolerance.
 
 ### KI-77 — Lists, UI and CRM details (extends KI-26, KI-30, KI-32, KI-41)
 **MED/LOW · OPEN · UI/database**

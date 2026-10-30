@@ -13,6 +13,8 @@ vi.mock('./db', () => ({
     rpc: (...args: unknown[]) => mockRpc(...args),
     from: (...args: unknown[]) => mockFrom(...args),
   },
+  hasRpcCode: (err: unknown, code: string) => String((err as { message?: string } | null)?.message ?? err).includes(code),
+  RpcErrorCodes: { DELIVERY_HAS_POSTED_INVOICE: 'DELIVERY_HAS_POSTED_INVOICE' },
   assertRpcResult: <T,>(data: unknown, rpcName: string): T => {
     if (data === null || data === undefined) {
       throw new Error(`${rpcName} returned no data — operation may have been denied`);

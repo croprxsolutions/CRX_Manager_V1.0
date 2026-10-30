@@ -3074,8 +3074,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   auto_expire_quotes: 'service-role maintenance sets only currently-expirable quote statuses',
   bump_cycle_count_item_revision:
     'trigger-only cycle-count revision bump; it is SECURITY DEFINER with all application-role EXECUTE revoked and the item-write transaction owns its atomicity',
-  bump_order_item_edit_version:
-    'trigger-only order version bump; direct application-role EXECUTE is revoked and the parent line-write transaction owns atomicity',
+  enforce_delivery_void_needs_invoice_void:
+    'trigger-only invoice-first delivery guard; direct application-role EXECUTE is revoked and the idempotent parent delivery RPC owns the transaction',
   check_idempotency: 'idempotency infrastructure helper; mutation only purges an expired key',
   check_idempotency_intent:
     'idempotency infrastructure helper (Section 07 gauntlet finding 2); mutation only purges an expired key, and it raises rather than replays when the actor or request fingerprint differs; direct client EXECUTE is revoked',

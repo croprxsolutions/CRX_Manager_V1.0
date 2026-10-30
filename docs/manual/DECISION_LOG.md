@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-10-30: "I approve fix them all", on the harness audit).** The Codex importer's `.agents/skills/source-command-*` folders move out of the active skills folder with `node scripts/sync-agent-workflows.mjs --archive-imported --confirm`, into `.git/crx-archive/imported-skills/` with a restore map. This supersedes the 2026-09-02 "keep them visible, do not delete them" call recorded in `scripts/sync-agent-workflows.mjs`.
 **Why.** Codex discovers those folders beside the real skills, and the old copies point at paths that do not exist and carry superseded ship rules. An archive keeps them recoverable without leaving them where an agent can pick them up.
 **What this forbids/implies:** never delete these folders by hand or add a blanket ignore. A folder that git tracks, that the generator owns, or that holds a link stays put and is reported. The importer cannot be turned off, so new copies get the same warning.
+## 2026-10-29 — A delivery cannot be voided or cancelled while its invoice is active (void the invoice first)
+
+**Decision (Mason, in chat, 2026-10-29: option A, "Require voiding the invoice first").** An active posted, paid or overdue invoice must be voided before the delivery behind it can be voided or cancelled. An unposted invoice (posted, then reversed) also blocks a void; a draft invoice never blocks. Enforced in PostgreSQL by trigger `zz_delivery_void_needs_invoice_void` in PR #1174's migration, not only on the screen.
+**Why.** The order-wide delivered cap (to-do 3.2) must not be undone by an admin void that leaves billing above the delivered quantity. Mason chose the simple office rule over building automatic credits.
+**What this forbids/implies:** the automatic-credit design in to-do 3.5 is not built and is superseded for now; do not add a silent credit or auto-void of a posted invoice inside `void_delivery` or `cancel_delivery`. Superseding it needs a new entry.
 
 ## 2026-10-29 — Shared logs merge themselves; manual-doc stamps are one short line
 

@@ -98,6 +98,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
+  [/^ORDER_INVOICE_EXCEEDS_DELIVERED\b/,
+   'Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay'],
+  [/^ORDER_INVOICE_LINE_INVALID\b/,
+   'Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line'],
+  // enforce_delivery_void_needs_invoice_void: a delivery with an active posted invoice cannot be voided or cancelled
+  [/^DELIVERY_HAS_POSTED_INVOICE\b/,
+   'Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,

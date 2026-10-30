@@ -10,9 +10,8 @@
 //     check is green with mergeStateStatus CLEAN, and a fresh gpt-6-sol/high
 //     Codex proof is bound to that head, or to an earlier commit on the PR's own
 //     branch not yet in main (Mason, 2026-10-29), and GitHub's real base (minted only by
-//     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Only a risky
-//     diff needs the proof (sol-risk-lib.mjs, Mason 2026-10-29); a
-//     documentation-only one never does (sol-exempt-lib.mjs, Mason 2026-10-07);
+//     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Only a diff
+//     touching the Sol list needs the proof (sol-risk-lib.mjs, Mason 2026-10-30);
 //   * `--auto` into main → denied, because it lands later-pushed commits after
 //     this gate has run (Codex round-4 finding);
 //   * `--admin`, CHANGES_REQUESTED, GraphQL mergePullRequest, raw REST merges and
@@ -33,17 +32,7 @@ import {
   createHardGateBudget,
   expandNestedCommands,
   ghApiMergeRequest,
-  commandFedToInterpreter,
-  commandFedToInterpreterDenial,
-  couldReachGatedAction,
-  programAssembledAtRuntime,
-  nestedProgramNameGlued,
-  inlineCodeReachesGatedAction,
-  ghCommandUnreadableDenial,
-  ghCommandUnreadableIn,
-  ghHiddenByShellComposition,
   mentionsMergePullRequest,
-  nestedComputedDenial,
   rawMergeEndpointCount,
   nestedTooDeepDenial,
   hardGateBudgetDenial,
@@ -70,7 +59,6 @@ import {
   evaluateCodexBotReview,
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
-import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
 import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -155,27 +143,6 @@ if (GITHUB_MERGE_TOOL.test(toolName)) {
   }
   if (nested.tooDeep) deny(nestedTooDeepDenial("PR MERGE GATE"));
   const scannedCommands = [toolInput.command, ...nested.commands];
-  // Only a command that could reach a merge or a GitHub call gets the two
-  // fail-closed refusals (2026-10-18; see couldReachGatedAction).
-  const gated = couldReachGatedAction(scannedCommands);
-  if (gated && nested.computed) deny(nestedComputedDenial("PR MERGE GATE"));
-  // A program started from a variable (`"$CODEX" exec …`) is refused only when the
-  // command could reach a merge or GitHub call at all (Mason, 2026-10-29: accept
-  // holes over false alarms). Accepted hole: a name AND its verbs assembled
-  // entirely from variables (`$a$b pr $c$d 951`) shows no gated word and passes.
-  if (gated && programAssembledAtRuntime(toolInput.command)) deny(nestedComputedDenial("PR MERGE GATE"));
-  // A COMPUTED nested command is read too: `bash -c '$(printf g)h pr …'` assembles
-  // its program name inside the nested text (Codex connector, PR #956). Only when
-  // computed, because the grouping split also turns `$((i+1))` into fragments.
-  if (nested.computed && nested.commands.some((text) => nestedProgramNameGlued(text))) {
-    deny(nestedComputedDenial("PR MERGE GATE"));
-  }
-  if (scannedCommands.some((text) => inlineCodeReachesGatedAction(text))) {
-    deny(commandFedToInterpreterDenial("PR MERGE GATE"));
-  }
-  if (gated && scannedCommands.some((text) => commandFedToInterpreter(text))) {
-    deny(commandFedToInterpreterDenial("PR MERGE GATE"));
-  }
   for (const scanned of scannedCommands) collectMergeRequests(scanned);
 }
 if (requests.length === 0) passthrough();
@@ -183,17 +150,6 @@ if (requests.length === 0) passthrough();
 // Collects every merge request one command's text carries, denying on any
 // unresolvable form. Called for the command itself and for each nested command.
 function collectMergeRequests(scanned) {
-  // Refused before the segment scan, not analysed: a PowerShell backtick or a
-  // cmd.exe caret is consumed before gh sees the word, so ``gh pr me`rge 1
-  // --admin`` is an ordinary administrator merge that ghMergeRequest reads as an
-  // unknown word and this whole loop skips (Codex sol, 2026-09-08, finding 3).
-  // Same helper and same reasoning as the push side's composition refusal.
-  // A gh alias or extension expands into a command this scan never sees.
-  const unreadableGh = ghCommandUnreadableIn(scanned);
-  if (unreadableGh) deny(ghCommandUnreadableDenial("PR MERGE GATE", unreadableGh));
-  if (ghHiddenByShellComposition(scanned)) {
-    deny("PR MERGE GATE: a PowerShell backtick or cmd.exe caret escape changes which gh command this runs (for example ``gh pr me`rge 1`` or `gh api --met^hod=PUT …/merge`). The gate reads command text, so analysing a spelling the shell rewrites would not prove the subcommand or the HTTP method. Write the gh command plainly: `gh pr merge <number> …`.");
-  }
   // A single `&` separates commands too — POSIX backgrounds the left side, cmd
   // runs it first, and either way BOTH run. Without it `gh pr merge 1 & gh pr
   // merge 2` was one segment and only the first merge was resolved
@@ -374,9 +330,7 @@ function listWorktreesFromProjectDir() {
 // refused. Every caller therefore invokes this only after its hard denials have
 // had their chance, at a point where the alternative is returning ALLOW anyway.
 // Do not move it earlier "so the reader sees it first".
-// 15s since 2026-10-26 (was 12s): a minor-follow-up CodeRabbit check adds two or
-// three reads (codex-bot-review-lib.mjs, readMinorFollowUp). The launcher still
-// denies a merge if the guard runs past its own deadline.
+// The launcher denies a merge if the guard runs past its own deadline.
 const CODEX_ADVISORY_BUDGET_MS = 15_000;
 
 // DEFERRED PAST EVERY MERGE IN THE COMMAND (Codex round 8, SEC-001). Running
@@ -643,8 +597,8 @@ function gateRequest(request) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8")); } catch { continue; }
-        // A proof of an earlier commit covers the commits after it only when those
-        // are notes only (Sol, 2026-10-29); same module, same budgeted gh.
+        // A proof of an earlier commit covers the commits after it unless those
+        // touch the Sol list; same module, same budgeted gh.
         if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
           && (String(data.head_sha).toLowerCase() === String(headSha).toLowerCase()
             || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky)) {
@@ -669,28 +623,13 @@ function gateRequest(request) {
     return;
   }
 
-  // ── documentation-only exemption (Mason, 2026-10-07) ───────────────────────
-  // No proof was found. A pull request whose every changed file is documentation
-  // on the allow-list in sol-exempt-lib.mjs merges without one. Asked only HERE,
-  // after the review-objection check, the green pipeline and the head pin have
-  // all passed. It spends the same budgeted gh, and any
-  // failure inside it answers "Sol required".
-  const exemption = solExemptionOnGitHub({ baseSha, headSha, repo: request.repo, gh: hardGateGh });
-  if (exemption.exempt) {
-    process.stderr.write(
-      `SOL EXEMPTION: ${exemption.reason} (docs/reference/sol-exempt-paths.md, Mason 2026-10-07), so this ` +
-      `merge needs no Sol proof. Head ${String(headSha).slice(0, 12)} has every check green.\n`,
-    );
-    advisoryQueue.push(request);
-    return;
-  }
-
-  // ── Notes-only pull requests skip Sol (Mason, 2026-10-29) ───────────────────
-  // Same placement and budget as the exemption above; any failure is "risky".
+  // ── Sol covers the listed files only (Mason, 2026-10-30) ───────────────────
+  // No proof was found. Asked only HERE, after the review-objection check, the green
+  // pipeline and the head pin have all passed; any failure is "risky".
   const risk = solRiskOnGitHub({ baseSha, headSha, repo: request.repo, gh: hardGateGh });
   if (!risk.risky) {
     process.stderr.write(
-      `SOL NOT REQUIRED: notes-only pull request (${risk.reason}; Mason, 2026-10-29). ` +
+      `SOL NOT REQUIRED: ${risk.reason} (docs/reference/sol-required-paths.md; Mason, 2026-10-30). ` +
       `Head ${String(headSha).slice(0, 12)} has every check green.\n`,
     );
     advisoryQueue.push(request);
@@ -699,8 +638,7 @@ function gateRequest(request) {
 
   deny(
     `PR MERGE GATE: this merge into main needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
-    `(Sol is required on any code change or large pull request; only notes skip it; Mason, 2026-10-29). ` +
-    `None was found, and the documentation-only exemption does not apply: ${exemption.reason}.\n\n` +
+    `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
     `  2. \`git fetch origin\` and merge origin/main into the branch if the head does not contain it (GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +

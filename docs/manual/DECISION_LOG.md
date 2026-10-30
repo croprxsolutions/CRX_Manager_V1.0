@@ -10,6 +10,19 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-30 — The agent harness is cut back; a short keep list stays
+
+**Decision (Mason, in chat, 2026-10-30: "I want less strict rules so if we need to remove alot of guardrails etc I am fine with some risk, our harness has gotten way to strict and is causing more work than efficiency"; then "Approve the list").**
+1. **CodeRabbit threads:** an outdated thread no longer holds a merge, and a resolved thread needs no reply.
+2. **Codex may reply on review threads** in plain text (`ghApiIsReviewThreadReply`).
+3. **One CodeRabbit review is enough** on a `needs-coderabbit` PR; a later commit needs no new one.
+4. **Sol covers only risky files:** money, inventory, the database, logins, dependencies, deployment, and the files that enforce the keep list, including everything Codex is barred from editing (`docs/reference/sol-required-paths.md`; all of `src/pages/` is on it, because a page's name does not show what it calls). This supersedes the 2026-10-07 documentation exemption and the 2026-10-29 "any code change" rule.
+5. **The shell-spelling checks are gone** from the push, merge and Codex production guards; plain spellings still fire. Accepted risk: a push or merge hidden in computed text or inline code passes the local guard, and only GitHub's `protect-main` ruleset stops it. Codex can also change guard files through shell commands the plain check does not recognise; those files still need Sol to merge.
+6. **`ship.md` and `agent-guardrails.md` are shortened** to current rules.
+
+**Why.** The checks had grown past their value: each new spelling cost review rounds and blocked ordinary work, while GitHub's ruleset (no bypass actors) and CI are the real wall.
+**What this forbids/implies:** the keep list in `AGENTS.md` stays: secret protection, no force-push, no direct push to `main`, no `--admin` merges, CI and status checks, the destructive-migration approval, the migration-apply proof gate, and the database rules for money and inventory. Do not rebuild the removed spelling checks without a real incident.
+
 ## 2026-10-30 — Stale imported skills are archived, not kept in the active folder
 
 **Decision (Mason, in chat, 2026-10-30: "I approve fix them all", on the harness audit).** The Codex importer's `.agents/skills/source-command-*` folders move out of the active skills folder with `node scripts/sync-agent-workflows.mjs --archive-imported --confirm`, into `.git/crx-archive/imported-skills/` with a restore map. This supersedes the 2026-09-02 "keep them visible, do not delete them" call recorded in `scripts/sync-agent-workflows.mjs`.

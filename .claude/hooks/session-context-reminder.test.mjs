@@ -38,7 +38,7 @@ assert.match(startup, /each destructive migration.*current approval immediately 
 assert.match(startup, /NON-destructive migration and the merge need no ask once the exact-SHA Sol proof is clean and checks are green/);
 assert.match(startup, /CodeRabbit is advisory/);
 // The documentation-only exception (Mason, 2026-10-07) travels with it.
-assert.match(startup, /A documentation-only change as defined in docs\/reference\/sol-exempt-paths\.md needs no Sol proof/);
+assert.match(startup, /A change touching no file on docs\/reference\/sol-required-paths\.md needs no Sol proof/);
 assert.doesNotMatch(startup, /armed hands-free migration path waives/);
 // Keep the full rulebook task-routed instead of injecting it into every session.
 assert.doesNotMatch(startup, /SAFE_DEVELOPMENT_RULES/);

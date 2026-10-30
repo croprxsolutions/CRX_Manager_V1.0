@@ -26,7 +26,7 @@ independent, and it is the one that guards money.
 | Round | Tier | Path | Mints a gate proof? |
 |---|---|---|---|
 | Every iterating review round | `gpt-6-luna` / `xhigh` | Step 3A (advisory) | **No** |
-| Final gate — EVERY change before it merges into `main` (Mason, 2026-09-26; before that only risky diffs), once Luna is clean and the head is frozen with checks green (CodeRabbit is advisory since 2026-10-19); the one exception is a documentation-only change as defined in `docs/reference/sol-exempt-paths.md` (Mason, 2026-10-07) | `gpt-6-sol` / `high` | Step 3B (`write-codex-push-proof.mjs`) | Yes |
+| Final gate — a change on `docs/reference/sol-required-paths.md` (Mason, 2026-10-30), once Luna is clean, before the PR opens | `gpt-6-sol` / `high` | Step 3B (`write-codex-push-proof.mjs`) | Yes |
 | Genuinely complex work where Luna is plainly out of its depth | `gpt-6-sol` / `high` early | Step 3A form with the Sol pin | No |
 
 The escape hatch in row 3 is a judgment call the agent may make on its own, but it must state the
@@ -439,7 +439,7 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and one side is plain documentation
-  (the `docs/reference/sol-exempt-paths.md` definition, which excludes every rule file, and only regular non-executable files: a symlink, submodule or executable named `*.md` is not documentation) — no model
+  (notes-folder `.md` files only, which excludes every rule file, and only regular non-executable files: a symlink, submodule or executable named `*.md` is not documentation) — no model
   call — OR a focused Sol collision check returns CLEAN. Two code or configuration changes always
   get the check, even in different files (Mason, 2026-10-21). The check centres on the interaction,
   starting from the database, guard, CI, dependency and rule files (`CARRY_HOT_PATHS`), and counts
@@ -450,11 +450,8 @@ Anything else refuses, and the full Step 3B review above is the answer. The carr
 after the original full review at the root of its chain (it can never outlive that review). Every
 merge gate accepts it on the same head/base/age terms.
 
-**The one exception: skip Step 3B for a documentation-only change** as defined in
-`docs/reference/sol-exempt-paths.md` (Mason, 2026-10-07). Both merge gates read the PR's real file
-list and accept it without a Sol proof once every check is green on the exact head (merge pinned
-with `--match-head-commit`, head containing its base). Run Step 3B only if a gate refuses saying "documentation-only exemption does not
-apply"; any other refusal names its own failing condition, which Sol cannot fix, so fix that.
+**Skip Step 3B for a change off `docs/reference/sol-required-paths.md`** (Mason, 2026-10-30): both
+merge gates read the PR's real file list and accept it on green checks.
 
 > ### ⛔ `codex review <scope>` SELF-RECURSES IN THIS REPO — use the wrapper
 >

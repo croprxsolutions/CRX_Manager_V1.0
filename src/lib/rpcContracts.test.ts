@@ -3029,6 +3029,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * pruned on 2026-10-22, when that migration applied live.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  _notify_driver_delivery_issue:
+    'trigger-only office notice on the completion status transition; the parent completion receipt owns replay safety, notification failure rolls back the transaction, and direct app EXECUTE is revoked',
   _close_undelivered_order_remainder_20260718:
     'preserved internal cancel-remainder impl (Phase 1a closeout); the required-key public cancel_order wrapper owns idempotency and every application-role EXECUTE is revoked',
   _post_deleted_delivery_recovery_invoice_20260719:

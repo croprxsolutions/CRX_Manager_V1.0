@@ -268,7 +268,7 @@ export default function NotificationsPanel() {
                       !notification.is_read ? 'bg-blue-50/50' : ''
                     }`}
                     onClick={() => handleNotificationClick(notification)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNotificationClick(notification); } }}
+                    onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNotificationClick(notification); } }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">

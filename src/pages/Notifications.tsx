@@ -182,9 +182,12 @@ export default function Notifications() {
           {notifications.map((n) => (
             <Card
               key={n.id}
+              role="button"
+              tabIndex={0}
               hover
               className={`cursor-pointer ${!n.is_read ? 'border-crx-green/30 bg-crx-green-tint/30' : ''}`}
               onClick={() => markAsRead(n)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); markAsRead(n); } }}
             >
               <div className="flex items-start gap-3">
                 <div

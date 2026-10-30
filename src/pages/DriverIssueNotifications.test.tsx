@@ -47,4 +47,25 @@ describe('driver report in office notification surfaces', () => {
     render(<MemoryRouter><Notifications /></MemoryRouter>);
     expect(await screen.findByText(H.message)).toHaveClass('line-clamp-2');
   });
+  it('opens a full-page notification with Enter', async () => {
+    H.type = 'delivery_issue_reported';
+    H.message = 'Driver report';
+    render(<MemoryRouter><Routes>
+      <Route path="/" element={<Notifications />} />
+      <Route path="/deliveries/delivery-7" element={<p>Correct delivery opened</p>} />
+    </Routes></MemoryRouter>);
+    fireEvent.keyDown(await screen.findByText(H.message), { key: 'Enter' });
+    expect(await screen.findByText('Correct delivery opened')).toBeInTheDocument();
+  });
+  it.each(['Enter', ' '])('does not open a notice when nested Delete receives %s', async (key) => {
+    H.type = 'delivery_issue_reported';
+    H.message = 'Driver report';
+    render(<MemoryRouter><Routes>
+      <Route path="/" element={<NotificationsPanel />} />
+      <Route path="/deliveries/delivery-7" element={<p>Correct delivery opened</p>} />
+    </Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByTitle('Notifications'));
+    fireEvent.keyDown(await screen.findByTitle('Delete'), { key });
+    expect(screen.queryByText('Correct delivery opened')).not.toBeInTheDocument();
+  });
 });

@@ -6,8 +6,9 @@ It still needs every required check green and no review asking for changes. (Unt
 2026-10-19 it also needed CodeRabbit APPROVED on the exact head; CodeRabbit is advisory
 now and skips `docs(` PRs, so a documentation-only PR may merge with no outside review.)
 The head must still be pinned with `--match-head-commit` and contain its base. Every
-other change still needs the fresh exact-SHA Sol review, run last (`AGENTS.md`,
-"Safety and Protected Delivery").
+other change needs one clean Sol review, run once before the PR opens, of its head or
+of an earlier commit on its branch (Mason, 2026-10-29); later commits outside these
+folders need Sol again (`AGENTS.md`, "Safety and Protected Delivery").
 
 The merge guards enforce this in code. Both `.claude/hooks/pr-merge-guard.mjs` and
 `.codex/hooks/production-action-guard.mjs` call `.claude/hooks/sol-exempt-lib.mjs`.

@@ -21,6 +21,7 @@ import {
   coderabbitReviewInProgress,
   coderabbitCheckRunInProgress,
   evaluateSolPreflight,
+  cleanMainMergeParent,
   readSolPreflightFacts,
   openPullsAtHead,
   headPushedAt,
@@ -1364,12 +1365,91 @@ function collisionPromptSkipsWork(prompt) {
       assert.equal(readSolPreflightFacts(repo, branchHead, movedMain).headContainsBase, false, "preflight: real git sees the head lacks the moved main");
       assert.equal(readSolPreflightFacts(repo, movedMain, branchHead).headContainsBase, true, "preflight: real git sees a head that contains its base");
       assert.equal(readSolPreflightFacts(repo, branchHead, "").headContainsBase, null, "preflight: no base sha is unreadable");
+      // The clean-merge exception refuses a criss-cross too (Luna MED). Branch commit B0 is
+      // dated later than main's Mc, so plain merge-base picks B0 and the branch's deletion of
+      // Mc's file would look like no shared change.
+      {
+        const at = (date, ...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], {
+          cwd: repo, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        }).trim();
+        at("2026-01-01T00:00:00Z", "checkout", "-q", "-b", "cx-main", branchHead);
+        writeFileSync(path.join(repo, "guard.txt"), "guard\n");
+        at("2026-01-02T00:00:00Z", "add", ".");
+        at("2026-01-02T00:00:00Z", "commit", "-qm", "Mc");
+        const mc = git("rev-parse", "HEAD");
+        at("2026-01-01T00:00:00Z", "checkout", "-q", "-b", "cx-branch", branchHead);
+        writeFileSync(path.join(repo, "feat.txt"), "feat\n");
+        at("2026-01-05T00:00:00Z", "add", ".");
+        at("2026-01-05T00:00:00Z", "commit", "-qm", "B0");
+        const b0 = git("rev-parse", "HEAD");
+        at("2026-01-06T00:00:00Z", "checkout", "-q", "cx-main");
+        at("2026-01-06T00:00:00Z", "merge", "-q", "--no-edit", b0);
+        const mainTip = git("rev-parse", "HEAD");
+        at("2026-01-07T00:00:00Z", "checkout", "-q", "cx-branch");
+        at("2026-01-07T00:00:00Z", "merge", "-q", "--no-edit", mc);
+        at("2026-01-07T00:00:00Z", "rm", "-q", "guard.txt");
+        at("2026-01-07T00:00:00Z", "commit", "-qm", "drop guard");
+        const branchTip = git("rev-parse", "HEAD");
+        assert.equal(git("merge-base", "--all", branchTip, mainTip).split(/\s+/).length, 2, "criss-cross fixture: two merge-bases");
+        assert.equal(git("merge-base", branchTip, mainTip), b0, "criss-cross fixture: plain merge-base picks the later-dated B0");
+        at("2026-01-08T00:00:00Z", "merge", "-q", "--no-edit", mainTip);
+        assert.equal(cleanMainMergeParent(repo, git("rev-parse", "HEAD"), mainTip), null, "clean merge: a criss-cross merge is not treated as clean");
+        git("checkout", "-q", "main");
+        git("update-ref", "refs/remotes/origin/main", movedMain);
+        git("checkout", "-q", "main");
+      }
+
+      // A clean main merge (no shared files) names the pre-merge head; a shared file or a
+      // hand edit does not.
+      git("checkout", "-q", "-b", "feature", branchHead);
+      writeFileSync(path.join(repo, "b.txt"), "pr\n");
+      git("add", ".");
+      git("commit", "-qm", "pr");
+      const prHead = git("rev-parse", "HEAD");
+      git("merge", "-q", "--no-edit", movedMain);
+      const cleanMerge = git("rev-parse", "HEAD");
+      assert.equal(cleanMainMergeParent(repo, cleanMerge, movedMain), prHead, "clean merge: a conflict-free main merge with no shared files is recognized");
+      assert.equal(readSolPreflightFacts(repo, cleanMerge, movedMain).cleanMergeOf, prHead, "clean merge: the pre-flight reads it");
+      assert.equal(cleanMainMergeParent(repo, prHead, movedMain), null, "clean merge: an ordinary commit is not one");
+      git("reset", "-q", "--hard", prHead);
+      git("merge", "-q", "--no-edit", "--no-commit", movedMain);
+      writeFileSync(path.join(repo, "b.txt"), "pr plus a hand edit\n");
+      git("add", ".");
+      git("commit", "-qm", "merge with edit");
+      assert.equal(cleanMainMergeParent(repo, git("rev-parse", "HEAD"), movedMain), null, "clean merge: a hand-edited merge is not one");
+      git("reset", "-q", "--hard", prHead);
+      writeFileSync(path.join(repo, "a.txt"), "main moved\n");
+      git("commit", "-qam", "pr touches main's file too");
+      git("merge", "-q", "--no-edit", movedMain);
+      assert.equal(cleanMainMergeParent(repo, git("rev-parse", "HEAD"), movedMain), null, "clean merge: a file changed on both sides is not one");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
   }
   assert.deepEqual(check({}), { ok: true, problems: [], notes: [] }, "preflight: a quiet head runs Sol");
-  assert.match(check({ pr: null }).problems.join(" "), /no open pull request/, "preflight: no PR refuses");
+  assert.equal(check({ pr: null }).ok, true, "preflight: no PR yet runs Sol (before the PR opens, Mason 2026-10-29)");
+  assert.equal(check({ pr: null, headContainsBase: false }).ok, false, "preflight: ...but still needs the head to contain origin/main");
+  {
+    const preMerge = "c".repeat(40);
+    const fresh = { codexState: { sha: preMerge, status: "completed" }, headPushedMs: now - 60_000 };
+    assert.equal(check(fresh).ok, false, "clean merge: without the fact, a fresh head still waits for the App");
+    const skipped = check({ ...fresh, cleanMergeOf: preMerge, cleanMergeThreads: { status: "none" } });
+    assert.equal(skipped.ok, true, "clean merge: the App's finished review of the pre-merge head is enough");
+    assert.match(skipped.notes.join(" "), /only merges main/, "clean merge: and says why");
+    assert.equal(check({ cleanMergeOf: preMerge, cleanMergeThreads: { status: "clean-at-head" }, codexState: { sha: head, status: "in_progress", at: now }, headPushedMs: now - 60_000 }).ok, false, "clean merge: an App run already started on the merge is waited for (no finished review to reuse)");
+    assert.equal(check({ cleanMergeOf: preMerge, codexState: { sha: "d".repeat(40), status: "completed" }, headPushedMs: now - 60_000 }).ok, false, "clean merge: an App review of some other commit still waits");
+    assert.equal(check({ ...fresh, cleanMergeOf: preMerge, codexThreads: { status: "findings-at-head", unresolvedAtHead: 1 } }).ok, false, "clean merge: unanswered App findings still refuse");
+    // App P1 on #1206: a thread on the pre-merge commit reads as stale at the merge head.
+    const preMergeThread = check({ ...fresh, cleanMergeOf: preMerge, codexThreads: { status: "stale" }, cleanMergeThreads: { status: "findings-at-head", unresolvedAtHead: 1 } });
+    assert.equal(preMergeThread.ok, false, "clean merge: an unanswered App thread on the pre-merge commit refuses");
+    assert.match(preMergeThread.problems.join(" "), /commit before the main merge/, "clean merge: and names that commit");
+    assert.equal(check({ ...fresh, cleanMergeOf: preMerge }).ok, false, "clean merge: unread pre-merge threads refuse");
+    assert.equal(check({ ...fresh, cleanMergeOf: preMerge, cleanMergeThreads: { status: "incomplete" } }).ok, false, "clean merge: a partial read of pre-merge threads refuses");
+    // Luna MED on #1213: the App re-reviewed the merge itself, but a thread on the pre-merge commit is unanswered.
+    const mergeReviewed = { codexState: { sha: head, status: "completed" }, headPushedMs: now - 60_000, cleanMergeOf: preMerge, codexThreads: { status: "stale" } };
+    assert.equal(check({ ...mergeReviewed, cleanMergeThreads: { status: "findings-at-head", unresolvedAtHead: 1 } }).ok, false, "clean merge: an App review of the merge does not excuse unanswered pre-merge threads");
+    assert.equal(check({ ...mergeReviewed, cleanMergeThreads: { status: "clean-at-head" } }).ok, true, "clean merge: an App review of the merge with answered pre-merge threads runs");
+  }
   assert.match(check({ pr: { number: 1, draft: true } }).problems.join(" "), /still a draft/, "preflight: a draft refuses");
   assert.match(check({ codexState: null }).problems.join(" "), /has not finished reviewing f6adfe82a/, "preflight: no App review of a new head refuses");
   assert.match(check({ codexState: { sha: "b".repeat(40), status: "completed" } }).problems.join(" "), /has not finished/, "preflight: an App review of an OLDER commit does not count");

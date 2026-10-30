@@ -150,7 +150,7 @@ This gate runs the Codex *review* automatically; it never pushes or merges by it
 
 ## Step 7 — Docs + commit (on the branch)
 
-Update the docs the change touched: `docs/reference/migration-history.md`, `rpc-functions.md`, `pages-routes.md`, `database-schema.md`, a NEW `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` entry, and the relevant workflow doc as applicable. Write the changelog entry as its own file rather than appending to `docs/CHANGELOG.md`: that file is 15k+ lines and every parallel session lands in it, so appending is what makes concurrent shipping collide. Do not add volatile counts to AGENTS.md or CLAUDE.md.
+Update the docs the change touched: `docs/reference/migration-history.md`, `rpc-functions.md`, `pages-routes.md`, `database-schema.md`, a NEW `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` entry (it also holds the evidence for any manual-doc "Last verified" date you bump; the stamp line stays one short line), and the relevant workflow doc as applicable. Write the changelog entry as its own file rather than appending to `docs/CHANGELOG.md`: that file is 15k+ lines and every parallel session lands in it, so appending is what makes concurrent shipping collide. Do not add volatile counts to AGENTS.md or CLAUDE.md.
 
 Before committing, run `node scripts/check-doc-drift.mjs` — fix any drift it reports (stale counts, missing migration-history rows) rather than committing around it.
 

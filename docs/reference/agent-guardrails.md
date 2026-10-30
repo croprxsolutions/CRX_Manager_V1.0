@@ -4,6 +4,9 @@
 > automated safety net; `CLAUDE.md` keeps only a short summary + a pointer here. Regenerate the schema registry the
 > hooks read after schema changes: run the `regen-schema-registry` live-introspection skill.
 >
+> **Overrides older text below (Mason, 2026-10-29).** CodeRabbit is optional: no PR needs a CodeRabbit review, money PRs included, unless it carries the `needs-coderabbit` label. Sol runs once, before the PR opens, on any change outside the notes folders; an earlier-commit Sol proof covers later commits only when they stay inside the notes folders (`.claude/hooks/sol-risk-lib.mjs`). `AGENTS.md` "Safety and Protected Delivery" is authoritative. Where this page says money PRs need CodeRabbit, the
+> merge gates classify "risky" diffs by money paths or content, or Sol must review the exact head last, this rule wins.
+>
 > **Review tier vs. gate identity (2026-09-20; re-pinned to the GPT-6 class 2026-09-23).** Everyday iterating review
 > runs on `gpt-6-luna` at xhigh and is
 > advisory — it mints no proof and touches no proof artifact. Every review-proof identity check documented below is

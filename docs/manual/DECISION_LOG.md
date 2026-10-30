@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-30 — Record tote-fill quantities before average purchase-cost tracking
+
+**Decision (Mason, in chat, 2026-10-30):** Mason said bulk chemical pricing is tote pricing and deferred to the recommendation. Record shop-fill quantities first; add average purchase-cost tracking after the separate costing foundation is reviewed and activated. This sequences the 2026-10-29 tote-cost decision; it does not cancel it.
+**Why.** Staff can record bulk-to-tote stock movements without waiting for the larger costing project. Sale pricing and actual purchase cost are distinct.
+**What this forbids/implies:** never claim the quantity-only step tracks purchase cost, alter catalog costs to force matching valuations, or silently hide a catalog-value difference. See `docs/plans/2026-10-29-product-GRAND-PLAN.md` overlap 14 for the safeguards and remaining approvals.
+
 ## 2026-10-30 — Stale imported skills are archived, not kept in the active folder
 
 **Decision (Mason, in chat, 2026-10-30: "I approve fix them all", on the harness audit).** The Codex importer's `.agents/skills/source-command-*` folders move out of the active skills folder with `node scripts/sync-agent-workflows.mjs --archive-imported --confirm`, into `.git/crx-archive/imported-skills/` with a restore map. This supersedes the 2026-09-02 "keep them visible, do not delete them" call recorded in `scripts/sync-agent-workflows.mjs`.

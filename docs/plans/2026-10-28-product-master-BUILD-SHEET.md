@@ -22,15 +22,15 @@
 
 ## 1. Rules for every work package
 
-1. **One work package = one pull request**, delivered through `.claude/commands/ship.md`: Luna rounds, checks green, Sol last on the exact head, then merge. Plain documentation is the only exception.
-2. **💲 packages** need a clean CodeRabbit review of the current head as well as Sol (AGENTS.md).
+1. **One work package normally means one pull request**, delivered through the current `.claude/commands/ship.md` gates. WP-PM-15 is explicitly split into a proposal-tool PR and a later cutover PR so its review can happen before the cutover. Other splits follow the mission's package-splitting rule.
+2. **💲 packages** follow the current Sol and review gates in AGENTS.md and `ship.md`; CodeRabbit is required only with the `needs-coderabbit` label.
 3. **Business rules live in the database.** If a rule must never be broken ("you can't deactivate a product with open orders"), the database enforces it, not just the screen (AGENTS.md hard rule). Those packages carry a migration.
 4. **Migrations:** each one is new and comes with a rollback plan. One that adds grants or revokes on `products`, or changes an existing table's policy, needs Mason's `I approve` before it is applied (refresh plan §4 item 2). Nothing destructive is planned in this sheet.
 5. **"Done" means seen working,** not "tests pass" (AGENTS.md). Each package's "Done when" lists what is clicked or run and what must be seen. Tests are added as supporting proof.
 6. **Proof environment.**
    - Screen-only changes are proven in the local dev app (`npm run dev`).
-   - Database behaviour is proven in the PostgreSQL Docker harness plus a rolled-back live smoke chain, the pattern of `scripts/smoke/prove-product-brands.mjs`.
-   - **Open:** the isolated test system (Goal 6, staging) is not ready. Until it is, nothing that writes product data is tested by clicking on live. A live check is read-only, or uses a product Mason names for the test with his OK in that conversation.
+   - Database behaviour is proven in a schema-matched PostgreSQL Docker harness. A rolled-back live smoke chain is a separate live write and needs Mason's explicit current-session approval.
+   - **Open:** the isolated test system (Goal 6, staging) is not ready. Live checks are read-only unless Mason explicitly approves the exact live test in the current conversation. A named-product test requires that approval and an identified product.
 7. **Shared components:** a change to a shared component (the dropdown `Combobox`, `EditableDataTable`) is checked on every page that uses it, not just Products.
 8. **Re-verify each item against current code before building it.** Line numbers drift, and items marked ❓ are unconfirmed.
 9. **Sol: rules are enforced in the database from the start, not "later"** (findings 26, 30). Any rule that new writes must obey goes in the database in the same package as the screen change. That includes name not blank, container size > 0, rate ≥ 0, whole-number REI/PHI, and the EPA format. Existing bad rows are handled with a `NOT VALID` constraint plus a listed cleanup, so new writes are checked at once. Import, the list and the product page all hit the same rule.
@@ -96,7 +96,7 @@
 - The margin test covers typing, blur, the preview, apply and reload, on all three tiers.
 - Before relabelling "Gross Margin = Markup", check the server's calculation against a hand-worked cost and price. It may be a formula problem, not just a label. The current text is at `ProductDetail.tsx:1472`, confirmed.
 
-**Size / risk:** S. 💲, so CodeRabbit plus Sol. No database change if (a).
+**Size / risk:** S. 💲; current Sol and conditional CodeRabbit rules apply. No database change if (a).
 
 #### WP-PM-3 · Turning products off safely
 **Items:**
@@ -175,7 +175,7 @@
 - Test the Active, Inactive and All filters, plus selected-row export.
 - Include a product whose name has commas, quotes or a leading `=`, `+`, `-` or `@`, so the spreadsheet doesn't run it as a formula.
 
-**Size / risk:** S. 💲 (customer-facing prices), so CodeRabbit plus Sol. No database change.
+**Size / risk:** S. 💲 (customer-facing prices); current Sol and conditional CodeRabbit rules apply. No database change.
 
 ### Phase B: Use Timing (Mason's request)
 
@@ -463,7 +463,8 @@
   *Done when:* zero blank forms; every SKU identifies one sellable; every old reference still resolves (read-only check before and after). WP-PM-10 and WP-PM-11a land only after this data step.
 
 - **WP-PM-15 · 💲 Vendors on the product page** (grand plan overlap 12; Mason, 2026-10-29: one product, many vendors). Built on the existing `product_supplier_links` (one preferred link per product is already enforced) and `supplier_price_observations`. The product page lists every vendor the product is bought from, with item name, item number, pack and last cost (cost admin-only), and one preferred. `products.vendor` becomes a read-only copy of the preferred vendor's name, kept in step by the database on preferred change, rename and unlink; a product with links always has exactly one preferred. A new PO suggests the preferred vendor and its last cost converted to the PO's unit (none if it can't be converted), and allows any linked vendor; an unlinked vendor offers to link. Need Reordering groups by preferred vendor and shows the others' last cost. Cost stays admin-only in the database. Old POs, receipts and invoices keep their vendor. Full rules: grand plan overlap 12.
-  *Done when:* a product linked to two vendors shows both, with one preferred; changing the preferred vendor updates the product's vendor everywhere it is shown; a new PO suggests the preferred vendor and its last cost and accepts the other; a second preferred link is refused; a non-admin sees no cost; all proven in the harness and the local app.
+  **Cutover prerequisite:** split WP-PM-15 into reviewed steps: first ship the legacy-vendor proposal/review tool and compatible writers with existing vendor behavior intact; then, after DATA-11 review and the separately approved live data step, enable the copy rule in a later PR. The enforcement PR is not mergeable earlier. Because migrations apply before their app deploy, prove current and stale app writers remain safe during that interval; otherwise park enforcement until a separately reviewed compatible activation exists. This does not depend on the later workbook. Preserve unresolved legacy text and current edit routes until reviewed. Inventory and adapt every vendor writer, including the product page, new-product flow, list and bulk import; prove no data is silently lost and no supported route breaks.
+  *Done when:* a product linked to two vendors shows both, with one preferred; changing the preferred vendor updates the product's vendor everywhere it is shown; a new PO suggests the preferred vendor and its last cost and accepts the other; a second preferred link is refused; a non-admin sees no cost. Prove writes in the harness and observe the real app against an isolated database; otherwise mark app proof owed. Never save against production for this proof without Mason's explicit current-session approval.
 
 - **WP-PM-16 · "Search EPA labels" link** (becomes "View label" once REG-1 saves the label PDF) (grand plan overlap 15; Mason, 2026-10-29). Every product with an EPA number gets a "View label" button on the product page, and each brand row one for its own EPA number, opening EPA's public label search for that number (address format confirmed at build time). No EPA number shows "Add an EPA number to see the label". Screen only; Stage 2's REG-1 later saves the label PDF link.
   *Done when:* on three real products with EPA numbers and one brand row, "Search EPA labels" opens EPA's page for that exact number; a product without a number shows the hint; nothing is written.
@@ -527,13 +528,14 @@ Sol's recommended order is adopted. The change-history foundation and the databa
 | 12 | WP-PM-6a Unit audit + one canonical priced unit | PM-8, PM-9 | yes | 💲 |
 | 13 | WP-PM-6b New-product flow + basic Duplicate | PM-6a | maybe | 💲 |
 | 14 | WP-PM-7 One cost path + tier-order warning in the RPC | PM-2, PM-12a | yes (preview RPC) | 💲 |
-| 15 | WP-PM-15 Vendors on the product page | PM-7 | yes (sync trigger, preferred rule, read policies) | 💲 |
-| 16 | WP-PM-11a Setup workbook + rate lock | PM-8, PM-12a, PM-15; lands after DM-0's data step | yes (RPCs, lock setting, rate-column guard) | |
-| 17 | WP-PM-10 Bulk import | PM-5, PM-8, PM-11a (rate lock); lands after DM-0's data step | probably (import RPC) | |
+| 15a | WP-PM-15 Vendor proposals and compatible writers | PM-7 | as needed for the proposal tool; existing behavior preserved | 💲 |
+| 15b | WP-PM-15 Vendor enforcement | PM-7, PM-15a; DATA-11 review, approved data step and compatibility proof | yes (sync trigger, preferred rule, read policies) | 💲 |
+| 16 | WP-PM-11a Setup workbook + rate lock | PM-8, PM-12a, PM-15a, PM-15b; lands after DM-0's data step | yes (RPCs, lock setting, rate-column guard) | 💲 |
+| 17 | WP-PM-10 Bulk import | PM-5, PM-8, PM-11a (rate lock); lands after DM-0's data step | probably (import RPC) | 💲 |
 | 18 | WP-PM-11b List editing + phone layout | PM-1 | no | |
 | 19 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
 | 20 | WP-PM-13 Reorder display | none | no | |
-| then | Grand plan Stage 2: PAR-1, PAR-2, BLK-1, DM-2, DM-1, REG-1, DM-4, DM-1b | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1) |
+| then | Grand plan Stage 2: PAR-1, PAR-2, BLK-1a quantities, DM-2, DM-1, REG-1, DM-4, DM-1b; BLK-1b cost follows the separately reviewed costing foundation | PM-6a, PM-8, PM-9, DM-0 | yes | 💲 (DM-1, BLK-1) |
 
 **Running in parallel.** Packages 1 and 4 (dropdowns, change history) touch different files, so they could run in parallel sessions. Packages 2 and 3 both touch `Products.tsx`, so build them one after the other.
 

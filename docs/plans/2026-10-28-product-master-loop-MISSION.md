@@ -32,7 +32,7 @@ Use Codex for building ("I have a lot of codex usage left").
   - Codex implements it with `node scripts/codex-build.mjs <spec> --model <tier>`.
   - Claude reviews the diff, runs the checks, Luna review and Claude reviewer subagents, proves it, commits, pushes the branch and opens a draft PR.
   - The next cycle starts automatically when the current one is DRAFTED or PARKED. Mason is asleep, so every decision comes from this document and the build sheet.
-- **Granularity:** one package (WP-PM-n) per cycle = one branch `pm/wp-pm-<n>-<slug>` = one draft PR.
+- **Granularity:** one package (WP-PM-n) per cycle = one branch `pm/wp-pm-<n>-<slug>` = one draft PR. WP-PM-15 is split into 15a and 15b, each its own cycle, branch, ledger row and draft PR.
   - A package may span several files, but it is ONE reviewed diff.
   - If a package proves too big to review in one pass, split it into labelled sub-packages (e.g. PM-8a / PM-8b) — never half-land one.
 - **Worktree:** this loop uses two worktrees, and never edits any other.
@@ -40,9 +40,9 @@ Use Codex for building ("I have a lot of codex usage left").
   - **Build:** `C:\CRX_PMBuild`, created at Step 0, where each package branch is cut and built.
   - `git worktree list` is the source of truth; check it at Step 0.
 - **Definition of done:** the loop ends at whichever comes first:
-  - every queue package is DRAFTED or PARKED, with the ledger complete and the morning report written. *DRAFTED* means Codex-built, Claude-reviewed, checks green, proven per its "Done when", committed, branch pushed, draft PR open. *PARKED* means a plain-English reason and the next step are written down.
+  - every queue package is DRAFTED or PARKED, with the ledger complete and the morning report written. *DRAFTED* means Codex-built, Claude-reviewed, checks green, committed, branch pushed and draft PR open; each acceptance item is marked proven or owed. It is not complete or merge-ready while any required observed behavior is owed. *PARKED* means a plain-English reason and the next step are written down.
   - the hard wrap (§6);
-  - three consecutive PARKs.
+  - three consecutive unexpected failure PARKs. A package parked solely because its prerequisite is not available is recorded and skipped, but does not count toward that failure limit; independent packages continue.
 - **Delivery gate.**
   - **Pre-authorized for this run:** pushing `pm/*` and `loop/*` branches, and opening **draft** PRs against `main`.
   - **NEVER, without Mason's explicit OK in a live conversation:**
@@ -71,7 +71,7 @@ Use Codex for building ("I have a lot of codex usage left").
 | Claude reviewers | `rls-security-reviewer` + `migration-drift-reviewer` (Opus) on every migration; `compliance-reviewer` (Sonnet, high) on every package touching `src/`; `typescript-types-drift-reviewer` (Sonnet) when types change | Run in parallel after the Luna round |
 | Mechanical legwork | Sonnet subagents | Reader sweeps, grep inventories, doc syncs. **Never** ledger PROOF lines or money/RLS judgment |
 
-**No Sol ship-gate proof tonight.** The exact-SHA Sol review is the last step before a merge, so it runs when Mason chooses what to merge. Note this in each PR body.
+**Sol before a PR opens.** After Luna and required checks, commit the clean package branch and run the current Sol ship proof before pushing and opening its draft PR. A migration requires exact-head Sol; later code changes require renewed proof. Follow current `ship.md` for freshness and the notes-only exception. If the required proof cannot run, PARK the package; a draft PR is not a substitute.
 
 **Rule of thumb:** SQL that touches money or access is always Sol-built and Opus-reviewed, whatever the package's tag. If a Luna build fails twice on genuine complexity, run the third round on Sol before parking. Log the tier used per package.
 
@@ -149,7 +149,8 @@ Use Codex for building ("I have a lot of codex usage left").
 1. **Ground.**
    - Re-read the package in the build sheet (Approach, Done when, Sol notes), the backlog items, and the real current code at `origin/main`.
    - If an item is wrong against today's code, record `REFUTED-AT-IMPLEMENTATION` and skip that part.
-   - **Branch:** `git switch -c pm/wp-pm-<n>-<slug> origin/main` in `C:\CRX_PMBuild`. If the package depends on an unmerged one (§5 "stacks on"), cut it from that package's branch instead, and say so in the PR body.
+   - **Branch:** take the union of the build-sheet "Depends on" and mission "Stacks on" lists, including transitive parents. Create the package branch from `origin/main` when it has no unmerged prerequisites. If one reviewed prerequisite contains all the required parents, branch from it. Otherwise create a package-specific integration branch from `origin/main` and merge the reviewed prerequisite branches in build-sheet queue order. Record each parent SHA and PR, resolve conflicts without dropping behavior, and run the combined baseline and relevant proofs. Cut the package branch from that integration commit. A missing or unreviewed prerequisite, unresolved conflict, or failed integrated proof PARKs the dependent package; never assume a parked data step is complete. All merges here are into feature branches, never `main`.
+   - Open each package's draft PR against `main` as Mason chose. Where prerequisites are unmerged, its GitHub diff is cumulative: identify every prerequisite PR and SHA in the body and ledger, separately review the package-only diff against the integration commit, and review and test the cumulative branch too. Before any later landing, merge prerequisites in dependency order, refresh the target and proofs, and inspect the actual PR diff. Never present a cumulative diff as an independent package.
 2. **Spec, then Codex build.** Order inside a package: migration, then RPC, then proof script, then screen, then tests. Read the actual `git diff`, not Codex's summary.
 3. **Review.**
    - Read every line.
@@ -160,14 +161,14 @@ Use Codex for building ("I have a lot of codex usage left").
    - Run the targeted tests, plus the non-saving UI checks where possible.
    - Check each "Done when" bullet one by one, and mark each `proven` / `owed (why)`.
 5. **Land on the branch.**
-   - Commit with explicit paths, push the branch (plain `git push -u origin HEAD`), and open a **draft** PR against `main`.
+   - Commit with explicit paths, run the required Sol proof on the clean committed branch, then push the branch (plain `git push -u origin HEAD`) and open a **draft** PR against `main`.
    - The PR body follows `ship.md`'s format and says:
      - what changed, in plain English;
      - the "Done when" checklist with proven/owed;
      - migration: none / routine / **Mason-gated**;
-     - 💲 or not (💲 means a clean CodeRabbit review and a Sol gate are needed before merge);
+     - 💲 or not, and the current Sol gate; CodeRabbit is required only if the `needs-coderabbit` label is present;
      - "stacks on #N", if it does;
-     - "Sol exact-SHA gate not run — runs at merge time".
+     - the Sol proof and any freshness or exact-head work still required before merge.
    - Security fixes follow the public-repo write-up rule in AGENTS.md: say what changes, never how to exploit the old behaviour.
 6. **Ledger.** Append: package · status (DRAFTED / PARKED / REFUTED) · branch · PR # · builder tier and rounds · Luna verdict · reviewer results · migration timestamp + routine/Mason-gated · the PROOF line · the owed checks. Commit and push the ledger on the loop branch.
 
@@ -190,10 +191,11 @@ The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5
 | 11 | WP-PM-5 Use Timing | sol (migration) → luna (screen) | PM-8 | Full; options table with option code, timing code and optional crop; migration marked Mason-gated (grants on `products`) |
 | 12 | WP-PM-6a Unit audit | sol | PM-9 | **Audit + proposal only.** A read-only live count of `unit_size` vs `inventory_unit`, with mismatches listed by product id and name for Mason's per-row approval, a canonical-unit design with its harness proof, and the list of remaining `unit_size` readers. **No back-fill. PARK the back-fill for Mason** (Sol BLOCKER 20) |
 | 13 | WP-PM-6b New-product flow + basic Duplicate 💲 | sol | PM-6a | Build only the parts that don't need the back-fill: opening the new product, missing-price refusals, basic Duplicate (no chemistry copy; after PAR-1, shared values live on the parent record). Otherwise PARK |
-| 14 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2 | Full: the cost-writer map first, then changes |
-| 15 | WP-PM-15 Vendors on the product page 💲 | sol | PM-7 | Full (build sheet section 2a): vendor list and preferred vendor on the product page, the `products.vendor` sync, PO suggestion, Need Reordering by preferred vendor |
-| 16 | WP-PM-11a Setup workbook + rate lock | sol | PM-8, PM-12a, PM-15, DM-0 | Full, as a draft PR: one file with Setup, Rates and Vendors tabs, one RPC per tab, the "Lock rates" switch on live rates enforced in the database with the one-product correction operation (grand plan overlap 11; any admin may switch it, with a reason, Mason 2026-10-29); the price workbook's rate columns become read-only (Mason, 2026-10-29, grand plan overlap 11). Not mergeable until DM-0's data step is done |
-| 17 | WP-PM-10 Bulk import | sol | PM-5, PM-8, PM-11a (rate lock), DM-0 | Full, as a draft PR; rates written through one function and the rate lock obeyed. **Not mergeable until DM-0's data step is done** (say so in the PR) |
+| 14 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2, PM-12a | Full: the cost-writer map first, then changes; integrate and prove both prerequisites |
+| 15a | WP-PM-15 Vendor proposals and compatible writers 💲 | sol | PM-7 | Draft the proposal/review tool and compatible writers; preserve existing behavior. Missing supplier name, SKU, unit or pack remains an unresolved proposal, never a fabricated confirmed link. No live data step tonight. |
+| 15b | WP-PM-15 Vendor enforcement 💲 | sol | PM-7, PM-15a | Draft only with all prerequisites proven; enforcement cannot apply until DATA-11 is reviewed, the live data step is separately approved and verified, and old/new app compatibility is proven. |
+| 16 | WP-PM-11a Setup workbook + rate lock 💲 | sol | PM-8, PM-12a, PM-15a, PM-15b, DM-0 | Draft only when every prerequisite is present in the branch; otherwise PARK. Setup, Rates and Vendors tabs and rate lock as in overlap 11. Not mergeable until DM-0's data step is done. |
+| 17 | WP-PM-10 Bulk import 💲 | sol | PM-5, PM-8, PM-11a (rate lock), DM-0 | Draft only when every prerequisite is present; otherwise PARK. Rates use the shared writer and lock. Not mergeable until DM-0's data step is done. |
 | 18 | WP-PM-11b List editing + phone layout | luna | PM-1 | Full |
 | 19 | WP-PM-12b Corrections to existing records | sol | PM-12a | The record map first. Build the "open jobs offer to update" path; posted invoices never change (Mason, 2026-10-28) |
 | 20 | WP-PM-13 Reorder display | luna | — | Full |
@@ -207,7 +209,7 @@ The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5
 ## 6. Failure and wrap rules
 
 - **A package fails** its review after 3 build rounds → restore its files, PARK it with a reason, and move on.
-- **Three consecutive PARKs** → stop the queue and write the report.
+- **Three consecutive unexpected failure PARKs** → stop the queue and write the report. A prerequisite-only PARK is not a failure and does not count; continue to the next independent package.
 - **Codex, usage-limit or API errors** → PARK the current package file-only, commit and push what is safe, note "stalled at <package>", and write the report early. Never leave uncommitted work.
 - **Hard wrap** at **8 hours** after Step 0's start time, or when the queue empties. Run the full `npm run test` on each drafted branch you touched last, then write the morning report. Never let the report be the casualty of the deadline.
 - **Context.** Obey the run-loop marathon cap. At the cap, checkpoint the ledger and hand off to a fresh session with this same doc. Gates transfer unchanged.
@@ -215,7 +217,7 @@ The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5
 ## 7. Morning report (what Mason wakes up to)
 
 Write `docs/loops/product-master-morning-report.md` on the loop branch, push it, and also give a plain-English chat summary. Lead with **status, then ONE recommended next step**. Include:
-- **Each DRAFTED package:** its PR link; a one-line proof; what is still owed (Mason-session click-throughs, the Sol gate, CodeRabbit for 💲); migration routine or Mason-gated.
+- **Each DRAFTED package:** its PR link; a one-line proof; what is still owed (including real app proof and the applicable Sol gate); CodeRabbit only when labeled; migration routine or Mason-gated.
 - **Each PARKED package:** why, and the exact next step. PM-6a's back-fill will be here, with the mismatch list.
 - **A suggested merge order,** with stacking noted. Merging a base PR with `--delete-branch` closes the PRs stacked on it, so retarget them first.
 - **Mason-gated migrations** that will need his `I approve`.

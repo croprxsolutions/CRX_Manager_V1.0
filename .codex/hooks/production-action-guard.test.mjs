@@ -90,9 +90,12 @@ function withThreadDefault(runGh) {
     return out;
   };
 }
-const requirementJson = ({ files = ["docs/readme.md"], statuses = [], head = "f".repeat(40) } = {}) => JSON.stringify({ data: { repository: { pullRequest: {
+// The money fixtures carry the needs-coderabbit label: since 2026-10-29 only the
+// label asks for a review, and the review-reading rules are exercised through it.
+const requirementJson = ({ files = ["docs/readme.md"], statuses = [], head = "f".repeat(40),
+  labels = files.includes("src/lib/invoiceMath.ts") ? ["needs-coderabbit"] : [] } = {}) => JSON.stringify({ data: { repository: { pullRequest: {
   headRefOid: head,
-  labels: { totalCount: 0, nodes: [] },
+  labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
   files: { totalCount: files.length, nodes: files.map((p) => ({ path: p })) },
   commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
 } } } });
@@ -596,6 +599,43 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
+  // Sol once before the PR (Mason, 2026-10-29): a proof of an earlier commit covers
+  // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
+  for (const [later, expectBlocked, label] of [
+    ["src/lib/invoiceMath.ts", true, "a later money commit needs a fresh Sol review"],
+    ["docs/plans/later.md", false, "a later notes-only commit merges on the earlier Sol review"],
+    ["docs/reference/sql-canonical-patterns.md", true, "a later rule-document commit needs Sol again"],
+  ]) {
+    const branch = makeRepo("src/components/Label.tsx", "export const label = 'reviewed';\n");
+    writeProof(branch.repo, {
+      codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+      head_sha: branch.sha, base_sha: branch.base, timestamp: new Date().toISOString(),
+    });
+    mkdirSync(path.join(branch.repo, ...path.dirname(later).split("/")), { recursive: true });
+    writeFileSync(path.join(branch.repo, ...later.split("/")), "export const x = 1;\n", "utf8");
+    git(branch.repo, ["add", later]);
+    git(branch.repo, ["commit", "-m", "later fix"]);
+    const head = git(branch.repo, ["rev-parse", "HEAD"]);
+    const prJson = JSON.stringify({ ...JSON.parse(ordinaryPrJson), baseRefOid: branch.base, headRefOid: head });
+    const compared = [];
+    const verdict = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 5 --squash --match-head-commit ${head}` }, repoDir: branch.repo,
+      nowMs: Date.now(),
+      runGh: (args) => {
+        if (args[0] === "api" && /\/compare\//.test(String(args[1]))) {
+          compared.push(String(args[1]));
+          return JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: branch.sha, head,
+            files: [{ filename: later, previous_filename: null, status: "added", changes: 1 }] });
+        }
+        if (args.some((a) => /object\(expression/.test(String(a)))) {
+          return JSON.stringify({ data: { repository: { d0: { entries: [{ name: path.basename(later), mode: 0o100644, type: "blob" }] } } } });
+        }
+        return prJson;
+      },
+    });
+    assert.equal(verdict.blocked, expectBlocked, label);
+    assert.ok(compared.includes(`repos/{owner}/{repo}/compare/${branch.sha}...${head}`), `the later commits were compared (${later})`);
+  }
   // Money PRs need a completed CodeRabbit review of the head (Mason, 2026-10-21).
   // Same merge-ready, Sol-proven PR; only the requirement answer changes.
   const withRequirement = (answer) => (args) => {
@@ -611,6 +651,8 @@ try {
     nowMs: Date.now(), runGh: withRequirement(answer),
   });
   const crDone = (login = "coderabbitai") => [{ context: "CodeRabbit", state: "SUCCESS", description: "Review completed", creator: { login } }];
+  assert.equal(moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"], labels: [] })).blocked,
+    false, "an unlabelled money PR merges with no CodeRabbit review (Mason, 2026-10-29)");
   const unreviewed = moneyMerge(requirementJson({ head: ordinary.sha, files: ["src/lib/invoiceMath.ts"] }));
   assert.equal(unreviewed.blocked, true, "a money PR with no completed CodeRabbit review of its head is refused");
   assert.match(unreviewed.reason, /needs a clean CodeRabbit review of its current head/, "and the denial says why");
@@ -631,7 +673,7 @@ try {
     const reviewed = "e".repeat(40);
     const followUpAnswer = JSON.stringify({ data: { repository: { pullRequest: {
       headRefOid: ordinary.sha,
-      labels: { totalCount: 0, nodes: [] },
+      labels: { totalCount: 1, nodes: [{ name: "needs-coderabbit" }] },
       files: { totalCount: 1, nodes: [{ path: "src/lib/invoiceMath.ts" }] },
       commits: { totalCount: 2, nodes: [
         { commit: { oid: reviewed, parents: { totalCount: 1, nodes: [{ oid: "d".repeat(40) }] }, status: { contexts: crDone() } } },
@@ -1324,7 +1366,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 19, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 20, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // app-repo-identity decides which repository the push gate and the CodeRabbit
   // waiver treat as the app repo, and loads at startup through codex-push-lib
   // (Codex App P1 on #1149): Codex may not edit it.
@@ -2042,6 +2084,8 @@ try {
     };
     const compareOf = (files, overrides = {}) => ({
       status: "ahead", ahead_by: 1, behind_by: 0, merge_base: docs.base, head: docs.sha,
+      // No `changes` line count: the low-risk check (sol-risk-lib.mjs) then always
+      // answers "Sol required", so these cases test the exemption alone.
       files: files.map((filename) => ({ filename, previous_filename: null, status: "modified" })),
       ...overrides,
     });
@@ -2091,7 +2135,7 @@ try {
       ".claude/hooks/pr-merge-guard.mjs",
       ".codex/hooks/production-action-guard.mjs",
       "supabase/migrations/20261007000000_x.sql",
-      "src/App.tsx",
+      "src/lib/invoiceMath.ts",
       "package.json",
       "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
       "docs/reference/agent-guardrails.md",
@@ -2129,6 +2173,29 @@ try {
     assert.match(exBit.reason, /not a plain file at the base/, "and the refusal says the base version was not a plain file");
     assert.equal(mergeDocs({ compare: compareOf(["docs/plans/2026-10-07-note.md"], { head: docs.base }) }).blocked, true,
       "a comparison that does not end at the PR's head needs Sol");
+
+    // Sol on every code change; notes skip it (Mason, 2026-10-29): the same
+    // merge-ready PR with no Sol proof, now with GitHub's line counts.
+    const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
+    assert.equal(mergeDocs({ compare: counted([["docs/plans/plan.md", 40], ["docs/manual/todo.md", 10]]) }).blocked, false,
+      "a small notes-only pull request merges with no Sol proof");
+    assert.equal(mergeDocs({ compare: counted([["docs/plans/todo.md", 1]]), kinds: { "docs/plans/todo.md": { mode: 0o120000 } } }).blocked, true,
+      "a symlink at a notes path still needs Sol (Luna, 2026-10-29)");
+    for (const [label, entries] of [
+      ["an ordinary app file", [["docs/plans/todo.md", 5], ["src/components/Label.tsx", 5]]],
+      ["a money file", [["docs/plans/todo.md", 5], ["src/lib/invoiceMath.ts", 5]]],
+      ["a rule reference document", [["docs/plans/todo.md", 5], ["docs/reference/sql-canonical-patterns.md", 5]]],
+      ["a notes file outside the notes folders", [["notes/todo.md", 5]]],
+      ["an inventory file", [["src/pages/Inventory.tsx", 5]]],
+      ["a migration", [["supabase/migrations/20261029000000_x.sql", 5]]],
+      ["a merge-gate file", [[".claude/hooks/pr-merge-guard.mjs", 5]]],
+      ["the app route table", [["src/App.tsx", 5]]],
+      ["a login file", [["src/lib/db.ts", 5]]],
+    ]) {
+      const verdict = mergeDocs({ compare: counted(entries) });
+      assert.equal(verdict.blocked, true, `a pull request with ${label} still needs Sol`);
+      assert.match(verdict.reason, /Sol is required because/, `and the denial says why (${label})`);
+    }
 
     // The hook's time limit runs out INSIDE the exemption (Luna, round 3): the
     // comparison is slow, so the file-kind lookup after it must not start. A hook

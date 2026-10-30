@@ -608,7 +608,7 @@ ok(
   "the proof's ancestry checks run through the budgeted hardGateGh",
 );
 ok(
-  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub\s*\}\)/.test(gateRequestSource),
+  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*prCommits\s*\}\)/.test(gateRequestSource),
   "the proof scan binds the proof to this head, GitHub's base and GitHub's ancestry answers",
 );
 ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base is no longer refused on that ground alone");
@@ -641,8 +641,22 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ]) {
     ok(at(needle) > 0 && at(needle) < exemptionCall, `${gate} is checked before the exemption is asked`);
   }
-  eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 2,
-    "exactly two allow points: a valid Sol proof, or the exemption");
+  eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 3,
+    "exactly three allow points: a valid Sol proof, the exemption, or a low-risk pull request");
+  // Sol only on risky pull requests (Mason, 2026-10-29): asked after the exemption,
+  // with the same budgeted gh, and its allow is guarded by its own answer.
+  const riskCall = at("const risk = solRiskOnGitHub(");
+  ok(riskCall > exemptionCall, "the risk check is asked only after the documentation-only exemption");
+  // An earlier-commit Sol proof covers only later commits that are low risk themselves (Sol, 2026-10-29).
+  ok(/proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(String\(data\.head_sha\)\.toLowerCase\(\) === String\(headSha\)\.toLowerCase\(\)\s*\|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\)/.test(gateRequestSource),
+    "an earlier Sol proof is accepted only when the commits after it are low risk");
+  ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
+    "the risk check spends the shared hard-gate budget");
+  eq((guardSource.match(/\brisk\s*=/g) || []).length, 1, "`risk` is assigned exactly once, from the module's answer");
+  eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
+  ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
+    "the low-risk allow point is guarded by risk.risky");
+  ok(/import \{ solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   const exemptAllow = gateRequestSource.slice(exemptionCall);
   const guardedAllow = exemptAllow.match(/if \(exemption\.exempt\) \{([\s\S]{0,700}?)advisoryQueue\.push\(request\);\s*return;\s*\}/);
   ok(guardedAllow && !/\bdeny\(/.test(guardedAllow[1]) && exemptAllow.indexOf("advisoryQueue.push(request)") < exemptAllow.indexOf("deny("),
@@ -711,6 +725,24 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!check(proof({ verdict: "blocked" })), "a non-clean verdict never counts");
   ok(!check(proof({ model: "gpt-6-luna" })), "a Luna review never counts");
   ok(!check(proof({ timestamp: new Date(now - 25 * 3600_000).toISOString() })), "a proof older than 24 hours never counts");
+
+  // Sol once before the PR opens (Mason, 2026-10-29): a proof of an earlier
+  // commit on this PR's branch covers fixes pushed after it.
+  const E = "e".repeat(40);   // an earlier PR commit Sol reviewed
+  const M = "f".repeat(40);   // a commit already in main (an old PR's reviewed head)
+  const branchEdges = new Set([...edges, `${E}>${H}`, `${B0}>${E}`, `${M}>${H}`, `${M}>${B1}`, `${B0}>${M}`]);
+  const onBranch = (a, b) => branchEdges.has(`${a}>${b}`);
+  ok(check(proof({ head_sha: E }), { isAncestor: onBranch }), "a proof of an earlier commit on the branch counts");
+  ok(check(proof({ head_sha: E }), { isAncestor: onBranch, prCommits: new Set([E, H]) }), "...and through the PR's own commit list");
+  ok(!check(proof({ head_sha: E }), { isAncestor: onBranch, prCommits: new Set([H]) }), "a commit not in the PR's commit list never counts");
+  ok(!check(proof({ head_sha: M }), { isAncestor: onBranch }), "a reviewed commit already in main never covers a new branch");
+  // Luna, 2026-10-29: the commit list alone is not enough, and "cannot tell" is not "not in main".
+  ok(!check(proof({ head_sha: M }), { isAncestor: onBranch, prCommits: new Set([M, H]) }),
+    "a listed PR commit that is already in main never counts");
+  const unsure = (a, b) => (a === E && b === B1 ? null : onBranch(a, b));
+  ok(!check(proof({ head_sha: E }), { isAncestor: unsure }), "an unreadable 'is it in main?' answer refuses");
+  ok(!check(proof({ head_sha: E }), { isAncestor: unsure, prCommits: new Set([E, H]) }), "...through the commit list too");
+  ok(!check(proof({ head_sha: E })), "a commit the head does not contain never counts");
 }
 ok(
   /function\s+listWorktreesFromProjectDir\(\)\s*\{\s*if \(!hardGateBudget\.admit\(\)\) deny\(/.test(guardSource),
@@ -800,15 +832,20 @@ ok(/gh\(args, REQUIREMENT_CALL_TIMEOUT_MS\)\)\?\.data\?\.repository\?\.pullReque
 }
 ok(/if\s*\(\s*!pullRequestChecksGreen\(\s*pr\s*\)\s*\)\s*\{\s*deny\(/.test(gateRequestSource),
   "the green-pipeline denial is unconditional (no --auto exemption left)");
-ok(!/riskyFiles|contentIsRisky|advisoryQueue\.push\(request\);\s*return;\s*\}\s*\/\/[^\n]*risky/i.test(gateRequestSource),
-  "no risky/non-risky split survives: there is no allow point before the Sol proof check");
-// Two allow points since Mason's documentation-only exemption (2026-10-07): a
-// valid Sol proof, or — only when there is none — the exemption. Both sit behind
-// the proof scan, so neither can be reached before every other gate ran.
-eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 2,
-  "exactly two allow points (the Sol proof, then the documentation-only exemption), both behind the proof scan");
-ok(gateRequestSource.indexOf("advisoryQueue.push(request)") > gateRequestSource.indexOf("proofValid(data, headSha"),
-  "the first allow point comes after the exact-head Sol proof validated");
+ok(!/riskyFiles|contentIsRisky/i.test(gateRequestSource),
+  "no hand-rolled risky/non-risky split: only sol-risk-lib.mjs decides it");
+// Three allow points: a valid Sol proof, then — only when there is none — the
+// documentation-only exemption (Mason, 2026-10-07), then a low-risk pull request
+// (Mason, 2026-10-29). All sit behind the proof scan, so none can be reached
+// before every other gate ran.
+eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 3,
+  "exactly three allow points (the Sol proof, the documentation-only exemption, a low-risk pull request), all behind the proof scan");
+{
+  // Pinned to text that exists, so a moved allow point cannot pass against -1 (Luna, 2026-10-29).
+  const proofCheckAt = gateRequestSource.indexOf("proofValidForMerge({ data, headSha");
+  ok(proofCheckAt > 0 && gateRequestSource.indexOf("advisoryQueue.push(request)") > proofCheckAt,
+    "the first allow point comes after the Sol proof check");
+}
 
 // ── every agent merge pins the checked head (Sol HIGH, 2026-09-26) ───────────
 // A push landing between this gate's checks and GitHub's merge would otherwise

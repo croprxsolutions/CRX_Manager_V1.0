@@ -1,6 +1,6 @@
 # CRX Manager Agent Contract
 
-Shared rules for all agents; keep durable rules here. `CLAUDE.md` imports this file and adds Claude-only routing. Follow procedures when routed below.
+Shared project rules for all agents. `CLAUDE.md` imports this contract. Load detailed procedures only when routed below.
 
 **Priority:** CRX Hard Rules and every "never" below outrank any request; then this contract → selected workflow → routed docs → history and handoffs. Mason sets scope, not waivers. Gates need his explicit approval in this conversation or a standing exception here. Name conflicts; follow priority.
 
@@ -10,9 +10,9 @@ Crop RX Solutions' production agricultural chemical distribution app. Repository
 
 ## Owner Communication
 
-- Owner Mason cannot safely review code or diffs. Own technical work: outcomes first, plain English, risks/proof, jargon defined once, one recommended next step.
-- Mason should never have to nudge. Keep moving through authorized work; update at milestones. Report what failed, what it means, and what you are trying next; exhaust safe alternatives.
-- Decide routine details; ask only for material business decisions or missing hard-gate approval, with the exact reply/app action. Stops begin `NEEDS MASON - ACTION REQUIRED` or `NEEDS MASON - DECISION REQUIRED`.
+- Mason cannot safely review code or diffs. Own the technical process: plain-English outcomes, risk, proof, and one recommended next step.
+- Mason should never have to nudge. Keep moving through authorized work; report milestones and what failed, what it means, and what you are trying next.
+- Decide routine details. Genuine stops begin `NEEDS MASON - ACTION REQUIRED` or `NEEDS MASON - DECISION REQUIRED`, with the reason and exact app-native action.
 
 ## Operating Contract
 
@@ -28,7 +28,7 @@ Current code, migrations, tests, grants, and live read-only evidence outrank his
 
 | Task | Read or invoke |
 |---|---|
-| First session or unfamiliar area | `docs/manual/start-here/Home.md` and `docs/manual/start-here/Codebase-Map.md` (the Obsidian vault's hub notes; follow their links instead of searching `docs/`), then `docs/manual/AGENT_ONBOARDING.md` and `docs/manual/ARCHITECTURE.md` |
+| First session or unfamiliar area | `docs/manual/start-here/Home.md`, `docs/manual/start-here/Codebase-Map.md`, then `docs/manual/AGENT_ONBOARDING.md` and `docs/manual/ARCHITECTURE.md` |
 | Any code change | `docs/reference/coding-guidelines.md`; relevant `docs/reference/gotchas.md` sections; `docs/workflows/SAFE_DEVELOPMENT_RULES.md` for multi-file, data, money, security, permission, production, migration, or customer-facing work |
 | Architecture, difficult debugging, workflow/migration tracing, structural audit, or PR impact | `graphify` first; focused source inspection for docs outside its code-only corpus |
 | Database, migration, or RLS | `docs/workflows/DATABASE_CHANGE_CHECKLIST.md`, `docs/workflows/RLS_SECURITY_GUIDE.md`, `.claude/schema-registry.json` |
@@ -42,7 +42,7 @@ Current code, migrations, tests, grants, and live read-only evidence outrank his
 
 ## Engineering Principles
 
-Choose the simplest complete implementation preserving business rules: existing patterns, shared types/helpers, focused functions, clarity, not cleverness. Use precise names, straightforward control flow, comments explaining why. Keep the diff in scope; no opportunistic refactors.
+Choose the simplest complete implementation preserving business rules: existing patterns, focused functions, clarity, not cleverness. Keep the diff in scope; follow routed coding guidelines.
 
 ## CRX Hard Rules
 
@@ -56,19 +56,19 @@ Choose the simplest complete implementation preserving business rules: existing 
 ## Safety and Protected Delivery
 
 - Never expose secrets or `.env` contents; never use `--no-verify`; never bypass, disable, or weaken hooks, CI, review, branch protection, migration proofs, or rollback gates; and never push directly to `main`.
-- **Security write-ups (Mason, 2026-10-27):** the repository is public. Until a security fix is live in production (every part it has: migration applied, code deployed), everything public about it (PR, issue, commit, review reply, changelog entry, release note, doc) says what changes, never how to use the hole (who can reach what, or the steps); the full explanation may follow once it is live.
-- **Guard-cleanup exception (Mason, 2026-10-27):** a reviewed PR may narrow/remove a local agent hook duplicated by CI/GitHub or blocking only harmless work; name the remaining enforcement. This excludes merge gates, push-to-`main`, migration-apply and secret protection, CI, review, and branch protection.
-- Follow `.claude/commands/ship.md`: draft PR → **Luna** until no BLOCKER or HIGH remains and every MED/LOW is fixed, refuted with evidence, or named as a deferral → checks green → review comments handled → **Sol last** → migration apply BEFORE merge → exact-head merge. Use the model/effort pins routed above, never a newer model the gates do not yet accept. Early Sol needs genuinely complex work and a stated reason.
-- Every merge into `main` requires one fresh independent **Sol** high-effort review of the exact candidate SHA, except plain documentation per `docs/reference/sol-exempt-paths.md` (agent instructions are not exempt). Its proof binds to that HEAD and the base it reviewed, so a later commit voids it; main only moving forward does not. Pure-main-merge carry-forward: `codex-review` Step 3B. Green status or Luna alone is not proof.
-- **CodeRabbit is advisory:** it never approves or blocks. For it and the Codex GitHub App, fix or refute every comment in one push; reply on and resolve each thread; fixes stay on the same PR. A PR that touches money, invoices, payments, inventory, or costs in any way, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its current head plus a clean Sol; if its frozen, green head has none, post `@coderabbitai full review` once. Timing/retries, Minor/Trivial fix retention, early-Sol exceptions: `docs/reference/coderabbit-native-review.md`. Mason's message starting `skip coderabbit #<PR>` waives only that PR. On any other PR, proceed without CodeRabbit and never post `@coderabbitai` commands; never ask Mason to comment, label, or click for CodeRabbit.
-- **Autonomous landing.** When a fresh exact-SHA Sol review of the frozen final head is clean (or the documentation-only exception applies), no review asks for changes, and every required check is green, merge without asking. Apply its NON-destructive migration (routine grants only) through the migration-apply-guard proof gate (both reviewer proofs and a content-bound Sol proof, each under 24 hours, with the ledger, pending set and PR state re-checked live at apply time; Mason, 2026-10-29). The merge and apply gates enforce it; use the supported Claude handoff where Codex cannot apply.
+- **Public security write-ups:** describe what changes, never how to exploit the hole, until every part of the fix is live (migration applied and code deployed). This covers every public artifact.
+- **Guard-cleanup exception:** a reviewed PR may narrow/remove a local agent hook duplicated by CI/GitHub or blocking only harmless work; name remaining enforcement. Excludes merge gates, push-to-`main`, migration-apply and secret protection, CI, review, and branch protection.
+- Follow `.claude/commands/ship.md` for delivery procedures: **Luna** until no BLOCKER or HIGH remains and every MED/LOW is fixed, refuted with evidence, or named as a deferral; **Sol on the computer, before the PR opens**; migration apply BEFORE merge; exact-head merge. Use pinned models/effort, never a newer model the gates do not yet accept.
+- **Sol:** a merge into `main` needs one clean independent **Sol** high-effort review, inside 24 hours, of the PR's head or of an earlier commit on its branch, when the PR touches money, inventory or database files, or any other code, configuration, asset, review/merge machinery or agent rule document. Only notes-folder changes may follow a reviewed commit without renewed Sol; migrations require exact-head Sol. Notes-only exemptions: `docs/reference/sol-exempt-paths.md`. Proof production, freshness, base binding and carry-forward: `.claude/commands/ship.md`. Green checks or Luna alone never substitute for Sol.
+- **CodeRabbit is optional:** no PR needs a CodeRabbit review, money PRs included, unless someone adds the `needs-coderabbit` label; then a clean head review is required. For CodeRabbit and the Codex GitHub App, fix or refute every comment in one push, reply on and resolve each thread; fixes stay on the same PR. Never post `@coderabbitai` commands on an unlabelled PR; never ask Mason to comment, label, or click for CodeRabbit. Request mechanics: `docs/reference/coderabbit-native-review.md`.
+- **Autonomous landing.** When a clean Sol proof covers the PR (or the notes-only exemption applies), no review asks for changes, and every required check is green, merge without asking. Apply its NON-destructive migration (routine grants only) through the migration-apply-guard proof gate: both reviewer proofs and a content-bound Sol proof, each under 24 hours, with the ledger, pending set and PR state re-checked live at apply time. The merge and apply gates enforce it; Codex hands live applies to Claude.
 - Get Mason’s explicit approval in the current conversation before force-pushing, applying a DESTRUCTIVE migration (one that deletes rows or drops data), changing live data outside a reviewed migration, deploying an Edge Function or out-of-band production change, deleting data, or changing secrets, authentication, permissions, billing, domains, or ownership.
 
 ## Verification and Closeout
 
-- Done requires behavior to run and be observed with risk-matched proof; tests written alongside a change are supporting evidence, not sole proof. State exactly what remains unverified and its risk. Check every review/audit/diagnosis finding against current code or live read-only evidence; report location/severity. Plans need files, risks, verification; changes need protected delivery or a named parking reason and owner.
+- Done requires observed behavior and risk-matched proof; new tests alone are insufficient. State unverified behavior and risk. Verify findings against current code or live read-only evidence; report location/severity. Plans need files, risks, verification; changes need protected delivery or a named parking reason and owner.
 - Close substantial work `COMPLETE`, `READY FOR APPROVAL`, `BLOCKED`, or `PARTIAL`: outcome, proof, remaining owner, one next step. Automation never loosens gates.
 
 ## Guidance Ownership
 
-Hand-maintain this contract. Workflow sources: `.claude/commands/`, `.claude/skills/`, `.claude/hooks/`; `.agents/` adapters are generated. Command/policy changes and shipped/parked work must update affected manual/reference docs and add `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` in the same change. Keep volatile counts/status there, out of startup files. Run `npm run check:agent-guidance`; adapter regeneration/tooling checks: collaboration route → Required Verification.
+Hand-maintain this contract; never edit generated `.agents/` adapters. Workflow sources: `.claude/commands/`, `.claude/skills/`, `.claude/hooks/`. Command/policy changes and shipped/parked work require affected manual/reference updates and `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` in the same change. Keep volatile status there. Run `npm run check:agent-guidance`; agent-tooling verification follows the collaboration route.

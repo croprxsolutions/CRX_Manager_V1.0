@@ -1029,6 +1029,11 @@ export function urlIsGuardedApp(url) {
 const PUSH_OPTS_WITH_VALUE = new Set([
   "--receive-pack", "--exec", "--repo", "-o", "--push-option", "--recurse-submodules",
 ]);
+// Git accepts any shortened long option (`--recurse-submodule`), so read the full name.
+function fullPushOption(option) {
+  if (!option.startsWith("--") || option.length < 3) return option;
+  return [...PUSH_OPTS_WITH_VALUE].find((name) => name.startsWith(option)) ?? option;
+}
 // Value-taking short options of `git push`. Only `-o` (`--push-option`) takes one.
 const PUSH_VALUE_SHORTS = "o";
 
@@ -1127,7 +1132,7 @@ export function pushDestinationToken(cmd) {
     if (token === "--") return tokens[i + 1] ?? repoOpt;
     if (!token.startsWith("-")) return token;
     const eq = token.indexOf("=");
-    const bare = eq === -1 ? token : token.slice(0, eq);
+    const bare = fullPushOption(eq === -1 ? token : token.slice(0, eq));
     if (bare === "--repo") {
       const value = eq === -1 ? tokens[i + 1] : token.slice(eq + 1);
       if (repoOpt === null && value) repoOpt = value;

@@ -22,7 +22,7 @@ for (const name of [
   ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/codex-push-lib.mjs", ".claude/hooks/env-guard.mjs", ".claude/hooks/migration-apply-lib.mjs",
   ".claude/hooks/sol-risk-lib.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs", "scripts/write-apply-proofs-lib.mjs",
   "src/App.tsx", "src/appPages.tsx", "src/pages/MonthEndClose.tsx", "src/lib/offlineSync.ts", "src/components/receiving/ReceiveForm.tsx", "vite.config.ts", "index.html", ".npmrc", "tools/x/.npmrc", "deno.lock",
-  ".claude/settings.local.json", ".claude/agents/rls-security-reviewer.md", ".claude/hooks/live-testdata-lib.mjs", ".claude/hooks/migration-access-lib.mjs", "scripts/classify-ci-scope.mjs",
+  ".claude/settings.local.json", ".claude/agents/rls-security-reviewer.md", ".claude/hooks/live-testdata-lib.mjs", ".claude/hooks/migration-access-lib.mjs", "scripts/classify-ci-scope.mjs", "scripts/verify-schema-baseline.mjs", "scripts/check-agent-guidance.mjs",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }

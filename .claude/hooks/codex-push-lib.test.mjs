@@ -1103,6 +1103,16 @@ assert.equal(
   "the attached form consumes nothing extra",
 );
 assert.equal(
+  pushDestinationToken(`git push --recurse-submodule no ${CRX_URL} HEAD:main`),
+  CRX_URL,
+  "a shortened option name still consumes its value",
+);
+assert.equal(
+  pushDestinationToken(`git push --rep ${CRX_URL} other HEAD:main`),
+  "other",
+  "a shortened --repo still consumes its value",
+);
+assert.equal(
   pushDestinationToken(`git push -uo ci.skip ${CRX_URL} HEAD:main`),
   CRX_URL,
   "a bundled short form hiding -o still consumes its value",

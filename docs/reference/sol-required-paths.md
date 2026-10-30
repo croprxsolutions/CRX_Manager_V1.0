@@ -64,6 +64,8 @@ Folders end in `/`. The match ignores case, from the repository root.
 `.claude/hooks/owner-approval-prompt.mjs`, `.claude/hooks/rls-on-new-tables.mjs`,
 `.claude/hooks/sql-safety.mjs`, `scripts/apply-migration-file.mjs`,
 `scripts/check-migration-hard-rules.mjs`, `scripts/owner-approve-migration.mjs`,
+`scripts/verify-schema-baseline.mjs`, `scripts/verify-deps.mjs`, `scripts/check-agent-guidance.mjs`,
+`scripts/check-supplier-pricing-phase3-private-artifacts.mjs`,
 `scripts/validate-sql-migrations.sh`, `scripts/write-apply-proofs.mjs`,
 `scripts/write-apply-proofs-lib.mjs`, `.claude/agents/migration-drift-reviewer.md`,
 `.claude/agents/rls-security-reviewer.md`, `.claude/hooks/live-testdata-guard.mjs`,

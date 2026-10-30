@@ -31,6 +31,6 @@ jobs:
           RUN_TITLE: ${{ github.event.workflow_run.display_title }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
-          text=$(printf ':red_circle: *%s failed on main*\n%s\n<%s|Open the run>' "$RUN_NAME" "${RUN_TITLE//[<>]/}" "$RUN_URL")
+          text=$(printf ':red_circle: *%s failed on main*\n%s\n<%s|Open the run>' "$RUN_NAME" "${RUN_TITLE//[<>*_~\`:]/}" "$RUN_URL")
           jq -n --arg text "$text" '{text: $text}' |
             curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

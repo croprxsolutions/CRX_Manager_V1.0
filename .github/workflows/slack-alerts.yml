@@ -10,6 +10,7 @@ on:
     workflows:
       - "CI -- Lint, Type Check, Test, Build"
       - "Daily landing summary"
+      - "Sentry error alerts"
     types: [completed]
   # Vercel reports each deploy as a commit status. The status event always runs
   # this file from main, so a pull request cannot change it.

@@ -1,0 +1,42 @@
+name: Sentry error alerts
+
+# Mason, 2026-10-30: new high-priority Sentry errors go to #crx-alerts. Sentry's
+# Slack connection needs a paid plan, so this checks Sentry every 30 minutes.
+# Needs SENTRY_ALERTS_TOKEN (a read-only Sentry internal integration token) and
+# SLACK_ALERTS_WEBHOOK_URL. Without the token it does nothing.
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: Read this many hours back instead of since the last run
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: sentry-error-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check Sentry for new errors
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - name: Post new errors to Slack
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENTRY_TOKEN: ${{ secrets.SENTRY_ALERTS_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK_URL }}
+          LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+        run: node scripts/sentry-slack-alerts.mjs

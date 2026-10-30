@@ -628,18 +628,21 @@ describe('InventoryPage — a lost reply freezes the request instead of minting 
     const forceDialog = await screen.findByRole('dialog', { name: /force-create hold/i });
     fireEvent.change(within(forceDialog).getByLabelText(/reason/i), { target: { value: 'physical stock confirmed' } });
     fireEvent.click(within(forceDialog).getByRole('button', { name: /force-create hold/i }));
-    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('warning', expect.stringContaining('hold was saved once')));
+    // The refusal, override dialog and confirmed save take over 1s on a busy CI runner (failed there 2026-10-27).
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('warning', expect.stringContaining('hold was saved once')), { timeout: 5000 });
     expect(mocks.toast.mock.calls.filter(([kind]) => kind === 'success' || kind === 'error')).toEqual([]);
     const frozenDialog = screen.getByRole('dialog', { name: /^create.*hold$/i });
     expect(frozenDialog).toBeInTheDocument();
     const forced = callsTo('create_inventory_hold')[1];
     expect(forced).toMatchObject({ p_force: true, p_force_reason: 'physical stock confirmed' });
     cleanupSpy?.mockRestore();
-    fireEvent.click(within(frozenDialog).getByRole('button', { name: /retry exact hold/i }));
+    const retryHold = within(frozenDialog).getByRole('button', { name: /retry exact hold/i });
+    await waitFor(() => expect(retryHold).toBeEnabled());
+    fireEvent.click(retryHold);
     await waitFor(() => expect(callsTo('create_inventory_hold')).toHaveLength(3));
     expect(callsTo('create_inventory_hold')[2]).toEqual(forced);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  });
+  }, 15000);
 
   it('retries a lost ADMIN OVERRIDE under the SAME key with the frozen force flag and reason', async () => {
     let attempts = 0;

@@ -275,6 +275,7 @@ vi.mock('../lib/orderConfirmedEmail', () => ({ sendOrderConfirmedEmail: mockSend
 vi.mock('../lib/dateUtils', () => ({
   localDatePlusDays: vi.fn(() => '2026-04-15'),
   localToday: vi.fn(() => '2026-03-16'),
+  todayInBusinessTz: vi.fn(() => '2026-03-16'),
   parseLocalDate: (dateStr: string) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
@@ -1916,6 +1917,70 @@ describe('QuoteBuilder', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  // Item 9 (Mason 2026-10-26/27): a booking runs to season end (Sept 30) unless the rep picks a
+  // date. The database applies the pick at each send; the screen sends it with every save.
+  describe('expiry: season end or a picked date', () => {
+    function serveDraft(overrides: Record<string, unknown>) {
+      const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+      const served = { ...quote, ...overrides };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? served
+          : table === 'quote_sections' ? [section]
+          : table === 'quote_items' ? [item]
+          : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [product]
+          : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation(() => Promise.resolve({ data: { quote_id: served.id, row_version: 8 }, error: null }));
+      return served;
+    }
+    async function saveDraftPayload() {
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => {
+        expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(1);
+      });
+      const [, args] = mockRpc.mock.calls.find(([name]) => name === 'save_quote')!;
+      return (args as { p_quote_payload: Record<string, unknown> }).p_quote_payload;
+    }
+
+    it('keeps a picked date and sends it as the expiry', async () => {
+      const quote = serveDraft({ chosen_expiry_date: '2026-12-15' });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save Draft');
+
+      expect(screen.getByLabelText('Expires')).toHaveValue('date');
+      expect(screen.getByLabelText('Expiry date')).toHaveValue('2026-12-15');
+      const payload = await saveDraftPayload();
+      expect(payload.chosen_expiry_date).toBe('2026-12-15');
+      expect(payload.expires_at).toBe('2026-12-15');
+    });
+
+    it('switching to season end clears the pick and shows Sept 30', async () => {
+      const quote = serveDraft({ chosen_expiry_date: '2026-12-15' });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save Draft');
+
+      fireEvent.change(screen.getByLabelText('Expires'), { target: { value: 'season' } });
+      expect(screen.queryByLabelText('Expiry date')).not.toBeInTheDocument();
+      // "Today" is pinned to 2026-03-16 above: season 2026, which ends Sept 30, 2026.
+      expect(screen.getByRole('option', { name: 'Sep 30, 2026 (season end)' })).toBeInTheDocument();
+      const payload = await saveDraftPayload();
+      expect(payload.chosen_expiry_date).toBeNull();
+      expect(payload.expires_at).toBe('2026-09-30');
+      expect(payload).not.toHaveProperty('valid_days');
+    });
+
+    it('a quote with no pick opens on season end', async () => {
+      const quote = serveDraft({ chosen_expiry_date: null });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save Draft');
+
+      expect(screen.getByLabelText('Expires')).toHaveValue('season');
+      expect((await saveDraftPayload()).chosen_expiry_date).toBeNull();
+    });
   });
 
   /**

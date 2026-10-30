@@ -18,20 +18,21 @@
 --   3. _assert_quote_prices_as_sent: a line the customer was sent (same line id and product) also
 --      passes when its price equals its latest recorded change.
 --   Every other line of the two re-emitted functions is their current body, extracted from a
---   replayed database on main 91487a92 (pinned below; the preflight refuses any drift).
+--   replayed database on main 1567b768 plus 20261029100000 (pinned below; the preflight refuses any drift).
 --
 -- NOT CHANGED: how save_quote prices a line (a sent line still keeps its stored price unless the
 --   rep sets a manual price or picks today's price); a new line, a changed customer, a price that
 --   changed any other way, or a version written before line ids still needs a re-send; owner-only
 --   editing; the below-cost admin approval; grants on both functions. No rows change.
 --
--- CONFLICT NOTE: 20261029100000 (season-end expiry) also re-emits _save_quote_below_cost_impl_
---   20260810. Whichever lands second is regenerated on the other's body and re-pinned.
+-- CONFLICT NOTE: 20261029100000 (season-end expiry, PR #1201) also re-emits _save_quote_below_cost_
+--   impl_20260810. It lands first; this file was regenerated on its body (2026-10-31) and re-pinned,
+--   so this migration must be applied after 20261029100000.
 --
 -- ROLLBACK (its own reviewed migration): re-emit both functions from the pinned pre-image, then
 --   DROP TABLE public.quote_price_changes (destructive: needs Mason's yes).
 --
--- ORDERING: apply after every older pending migration.
+-- ORDERING: apply after every older pending migration, including 20261029100000 (PR #1201).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -57,7 +58,7 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('_save_quote_below_cost_impl_20260810', 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)',
-          '40ca472ad197a2ca42ad991f8ecc7f75', true, ARRAY['postgres']),
+          'cef92527a26f50ba4c55ef4a4ed810ab', true, ARRAY['postgres']),
         ('_assert_quote_prices_as_sent', 'public._assert_quote_prices_as_sent(uuid)',
           '5a0391efa6a8141dc8ba9b86c31ae38b', false, ARRAY['postgres'])
       ) AS pin(fn, sig, body_md5, secdef, execs)
@@ -391,7 +392,7 @@ BEGIN
     INSERT INTO quotes (
       id, quote_number, customer_id, created_by, tier, status,
       commission_split, total_price, total_cost, total_profit, total_margin_pct,
-      valid_days, expires_at, header_notes, footer_notes, is_planned, created_at, updated_at
+      valid_days, expires_at, chosen_expiry_date, header_notes, footer_notes, is_planned, created_at, updated_at
     ) VALUES (
       gen_random_uuid(),
       p_quote_payload->>'quote_number',
@@ -403,6 +404,8 @@ BEGIN
       0, 0, 0, 0,
       COALESCE((p_quote_payload->>'valid_days')::int, 15),
       COALESCE((p_quote_payload->>'expires_at')::date, current_date + 15),
+      -- SEASON END (20261029100000): the date the rep picked; NULL = season end.
+      (p_quote_payload->>'chosen_expiry_date')::date,
       p_quote_payload->>'header_notes',
       p_quote_payload->>'footer_notes',
       COALESCE((p_quote_payload->>'is_planned')::boolean, false),
@@ -801,6 +804,10 @@ BEGIN
     -- PRICE LOCK: editing a sent quote keeps its expiry; only a send sets a new one.
     expires_at = CASE WHEN v_price_locked THEN expires_at
       ELSE COALESCE((p_quote_payload->>'expires_at')::date, expires_at) END,
+    -- SEASON END (20261029100000): a key sent as null clears the pick (back to season end);
+    -- a missing key keeps it. It takes effect at the next send.
+    chosen_expiry_date = CASE WHEN p_quote_payload ? 'chosen_expiry_date'
+      THEN (p_quote_payload->>'chosen_expiry_date')::date ELSE chosen_expiry_date END,
     header_notes = p_quote_payload->>'header_notes',
     footer_notes = p_quote_payload->>'footer_notes',
     is_planned = COALESCE((p_quote_payload->>'is_planned')::boolean, is_planned),

@@ -49,7 +49,6 @@ function makeQuoteData(overrides: Record<string, unknown> = {}) {
     sales_rep_name: 'Mason Wells',
     created_at: '2026-03-01',
     expires_at: '2026-04-01',
-    valid_days: 30,
     tier: 1,
     header_notes: 'Spring application package',
     footer_notes: 'Prices valid for 30 days',

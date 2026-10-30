@@ -32,7 +32,7 @@ describe('20261029120000 booking price override', () => {
 
   it('re-emits only the two pinned functions, inside one transaction', () => {
     expect(code.match(/CREATE OR REPLACE FUNCTION/g)).toHaveLength(2);
-    expect(code).toContain("'40ca472ad197a2ca42ad991f8ecc7f75'");
+    expect(code).toContain("'cef92527a26f50ba4c55ef4a4ed810ab'");
     expect(code).toContain("'5a0391efa6a8141dc8ba9b86c31ae38b'");
     expect(code).toContain('DO $preflight$');
     expect(code).toContain('DO $postflight$');

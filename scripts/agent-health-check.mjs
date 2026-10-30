@@ -109,7 +109,7 @@ function runCommand(name, command, args, options = {}) {
   }
 }
 
-function resolveNewestCodexBinary(root = ROOT) {
+export function resolveNewestCodexBinary() {
   const base = path.join(
     process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Local"),
     "OpenAI",
@@ -124,8 +124,7 @@ function resolveNewestCodexBinary(root = ROOT) {
     dirs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
     return dirs[0] || null;
   } catch {
-    const fallback = path.join(root, "codex.exe");
-    return existsSync(fallback) ? fallback : null;
+    return null;
   }
 }
 

@@ -473,7 +473,11 @@ patch); the guard-claim ratchet misses claims inside template strings and files 
 show two Stop prompts on one stop (Mason's global reminder plus the project proof check); they check different
 things, and removing the duplicate needs a separate change to the global hook. Codex's guard still refuses a
 single-quoted search alternation near a protected file (use double quotes or separate simple reads), and a batched
-double-quoted search when the command holds a `\"`, even in a PowerShell comment (write it without `\"` or drop it).
+double-quoted search when the command holds shell syntax that could change how quotes pair, such as `$`, `%`, `!`, a
+comment or `\"`, even when harmless (the guard's scan is deliberately conservative, not a parser; the full list is in
+`docs/reference/agent-guardrails.md`; drop the comment or run the reads separately). Deferred, not solved: this change
+does not establish source-content integrity for every shared hook. Runtime trust status and the guard's explicit
+protected-file list are separate checks; scripts outside that list do not gain its write protection.
 
 ### KI-50 — Cloud (web/mobile) sessions cannot push or back up memory
 **MED · ACCEPTED · tooling-guards · Mason (2026-08-04: leave as is)**

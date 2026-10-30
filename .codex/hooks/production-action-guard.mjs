@@ -125,7 +125,9 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // which shell commands skip the checks below as plain searches.
 // `sol-risk-lib` joined 2026-10-29: imported at startup, and it decides whether a
 // merge needs Sol at all.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|sol-risk-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+// `session-context-reminder` joined 2026-10-30: not imported, but its output is the
+// rules every later Codex session starts from.
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|sol-risk-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity|session-context-reminder)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -146,6 +148,7 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   // Imported by codex-push-lib and coderabbit-skip-lib, so it loads at guard
   // startup too (Codex App P1 on #1149).
   ".claude/hooks/app-repo-identity.mjs",
+  ".claude/hooks/session-context-reminder.mjs",
   ".codex/hooks/production-action-guard.mjs",
   ".codex/hooks/codex-hook-adapter.mjs",
   "scripts/run-claude-review.mjs",
@@ -689,9 +692,18 @@ export const CHANGES_DIRECTORY_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|
 // still counts as named and a following `| xargs tee` is still examined. The search is
 // judged from the text outside quotes only, so a separator inside an earlier quoted
 // argument cannot make a `tee` look like a search.
+// The whole exception rests on the quote pairing below matching every shell's, and a
+// left-to-right scan is no parser. So anything that can re-pair quotes turns it off for
+// the whole command, wherever it sits: an expansion (`"$( … )"` nests quotes, cmd.exe's
+// %X% can hold one, and `--%` is caught by its `%`), a comment, a here-document or
+// here-string, cmd.exe's caret before a quote (even across a line end), and a quote pair
+// spanning a line end, because cmd.exe reads line by line. shortcut: a batched read with
+// any of those, even a harmless `# note`, can stay falsely refused; separate the reads.
+// Upgrade only with a parser every shell agrees on.
 const PATTERN_SEARCH_HEADS = new Set(["rg", "grep", "egrep", "fgrep", "findstr", "select-string", "sls"]);
+const QUOTE_PAIRING_UNSAFE_RE = /\^\s*["']|[$%!#]|<<|@["']/;
 function searchPatternSeparatorsRemoved(command) {
-  if (/\^["']/.test(command)) return command;
+  if (QUOTE_PAIRING_UNSAFE_RE.test(command)) return command;
   // Only the text added since the last span is scanned: a hook killed at its time
   // limit allows the command, so this must stay linear on adversarial quoting.
   let scanned = 0;
@@ -701,11 +713,8 @@ function searchPatternSeparatorsRemoved(command) {
     const pieces = unquotedBefore.slice(scanned).split(/&&?|\|\|?|;|\r?\n/);
     scanned = unquotedBefore.length;
     if (pieces.length > 1 || !head) head = shellSegmentWords(pieces.pop())[0];
-    if (span[0] === "'") {
-      pairingDiffers ||= span.includes('"');
-      return span;
-    }
-    if (!PATTERN_SEARCH_HEADS.has(normalizeShellHead(head)) || /[$%!]/.test(span)) return span;
+    pairingDiffers ||= /[\r\n]/.test(span) || (span[0] === "'" && span.includes('"'));
+    if (span[0] === "'" || !PATTERN_SEARCH_HEADS.has(normalizeShellHead(head))) return span;
     return span.replace(/&&|\|\|?|;/g, " ");
   });
   return pairingDiffers ? command : rewritten;
@@ -750,9 +759,9 @@ export function unrecognizedProtectedHarnessAccess(command, workdir = "") {
 // the others do not). A backslash elsewhere (`C:\Program Files`) is plain text.
 // Single-quoted text is stepped over unchanged, so a `"` inside it never opens
 // a span (`Tee-Object '"' (Join-Path a b) '"'` keeps its subexpression visible).
-// shortcut: the `\"` check reads the whole text, so a `\"` in a harmless PowerShell
-// comment also leaves it as written and a batched search can still be refused; write
-// the comment without `\"` or drop it. Upgrade only with a parser every shell agrees on.
+// shortcut: the `\"` check reads the whole text, so a `\"` that is harmless in PowerShell
+// also leaves it as written and a batched search can still be refused; drop the `\"`.
+// Upgrade only with a parser every shell agrees on.
 export function literalDoubleQuotedTextBlanked(segment, rewriteSpan = (span) => (span[0] === '"' && !/[$%!]/.test(span) ? '""' : span)) {
   const text = String(segment || "");
   if (/\\["']|[`‘’‚‛“”„]/.test(text)) return text;

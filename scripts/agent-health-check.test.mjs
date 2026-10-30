@@ -33,6 +33,7 @@ import {
   compareCodexHooks,
   compareSyncedFiles,
   probeCodexHooks,
+  resolveNewestCodexBinary,
   summarizeChecks,
 } from "./agent-health-check.mjs";
 import { clearWorktreeOverride } from "./install-git-hooks.mjs";
@@ -626,6 +627,23 @@ try {
     const unspawnable = await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: () => { throw new Error("EACCES C:\\Users\\private"); }, timeoutMs: 2000 });
     assert.equal(unspawnable.error, "codex app-server could not start");
     assert.match((await probeCodexHooks("C:/repo", { codex: null })).error, /binary not found/);
+  }
+
+  // Only the installed Codex folder may supply the binary: a `codex.exe` in the repository
+  // is repository content, and this check starts whatever it resolves to.
+  {
+    const repository = path.join(root, "planted-binary");
+    mkdirSync(repository);
+    writeFileSync(path.join(repository, "codex.exe"), "");
+    const savedLocalAppData = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = path.join(root, "no-codex-install");
+    try {
+      assert.equal(resolveNewestCodexBinary(repository), null);
+      assert.equal(resolveNewestCodexBinary(), null, "with no install there is no binary, whatever the repository holds");
+    } finally {
+      if (savedLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = savedLocalAppData;
+    }
   }
 } finally {
   rmSync(root, { recursive: true, force: true });

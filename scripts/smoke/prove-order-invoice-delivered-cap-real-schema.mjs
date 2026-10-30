@@ -252,7 +252,11 @@ function invoiceFirst() {
   const unposted=`RESET ROLE; UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}'; ${asUser(ADMIN)} SELECT public.unpost_invoice('${INV}','${ADMIN}',gen_random_uuid()::text);`;
   refused(`${unposted} ${voidDelivery()}`,'void_delivery refuses while a reversed (unposted) invoice is still active',POSTED_REFUSAL);
   allowed(`${unposted} ${asUser(ADMIN)} SELECT public.cancel_delivery('${DELIVERY}','[PROVER] invoice-first proof',NULL,gen_random_uuid()::text);`,'cancel_delivery still cancels an unposted invoice itself');
-  allowed(voidDelivery(),'void_delivery still proceeds with only draft invoices (they are cancelled)');
+  allowed(`${voidDelivery()} RESET ROLE; DO $$ BEGIN
+    IF (SELECT count(*) FROM public.invoices WHERE id IN ('${INV}','${SIBLING}')
+          AND status IN ('cancelled','voided')) <> 2 THEN
+      RAISE EXCEPTION 'PROOF_FAIL: order-level drafts stayed active after void_delivery';
+    END IF; END $$;`,'void_delivery still proceeds with only draft invoices (they are cancelled)');
   allowed(`${scheduledDelivery('draft')} ${cancelScheduled()}`,'cancel_delivery proceeds with only its own draft invoice');
   refused(`${scheduledDelivery('posted')} ${cancelScheduled()}`,'cancel_delivery refuses while its posted invoice is active',POSTED_REFUSAL);
   allowed(`${scheduledDelivery('posted')} RESET ROLE; UPDATE public.invoices SET status='voided', posted_at=coalesce(posted_at,now()), void_reason='[PROVER] invoice first' WHERE id='${SCHED_INV}'; ${cancelScheduled()}`,'cancel_delivery proceeds once its invoice is voided');

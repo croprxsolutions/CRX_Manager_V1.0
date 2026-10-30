@@ -1,5 +1,7 @@
 ## 2026-10-29 — Invoice delivered-cap migration re-stamped (PR #1174)
 
+The fractional-tolerance and quick-draft completion notes below are superseded by [the final quantity rules](2026-10-30-invoice-delivery-edge-cases.md).
+
 - Brought PR #1174 up to date with main. Its migration is renamed from
   `20261028175633_cap_order_invoices_at_delivered` to
   `20261029160000_cap_order_invoices_at_delivered`, because

@@ -1,5 +1,7 @@
 ## 2026-10-29 - Invoice cap: review round 3 (cancel of an unfinished delivery locks order-level drafts)
 
+The fractional-tolerance deferral below is superseded by [the final quantity rules](2026-10-30-invoice-delivery-edge-cases.md).
+
 - Cancelling a delivery that never completed now also locks the order's whole-order draft
   and unposted invoices, so an invoice being posted at that moment cannot be overwritten
   to "cancelled" by the cancel. They still only block a delivery that was completed.

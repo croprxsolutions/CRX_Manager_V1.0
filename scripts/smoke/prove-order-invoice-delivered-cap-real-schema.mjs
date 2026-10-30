@@ -342,8 +342,9 @@ async function main() {
   }
   allowed(insertLine(SIBLING,2),'second invoice uses remainder');
   refused(insertLine(SIBLING,3),'sibling invoices exceed delivered total');
-  allowed(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.0005 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'rounding slack: 4-place split shares may exceed delivered by under 0.001');
-  refused(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.002 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'rounding slack does not allow a real excess');
+  refused(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.0001 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'even one stored quantity tick above delivered is refused');
+  refused(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.0005 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'fractional excess never creates extra sale allowance');
+  refused(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.002 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'larger quantity excess is refused');
   refused(insertLine(INV,3,PRODUCT,null),'unlinked duplicate counts');
   refused(insertLine(SIBLING,1,OTHER,null),'added undelivered product');
   refused(insertLine(SIBLING,0.0009,OTHER,null),'rounding slack never creates an undelivered product allowance');
@@ -379,7 +380,17 @@ async function main() {
   refused(`UPDATE public.invoices SET deleted_at=now() WHERE id='${SIBLING}'; ${insertLine(SIBLING,3)}
     UPDATE public.invoices SET deleted_at=NULL WHERE id='${SIBLING}';`,'restore rechecks aggregate');
   allowed(`ALTER TABLE public.invoice_items DISABLE TRIGGER zz_cap_order_invoice_items; ${insertLine(SIBLING,3)}`,'MUTATION: disabling item trigger permits excess');
-  allowed(lf(path.join(ROOT,'scripts/smoke/smoke-order-invoice-delivered-cap-pipeline.sql')),'full split, return-credit and quick-delivery pipeline');
+  const pipeline=probe(lf(path.join(ROOT,'scripts/smoke/smoke-order-invoice-delivered-cap-pipeline.sql')));
+  assert.ok(!pipeline.ok,'pipeline must roll back');
+  const pipelinePass=/^ERROR:[ \t]+SMOKE_PASS_ROLLBACK\r?$/m;
+  assert.doesNotMatch('ERROR: a failure merely mentioning SMOKE_PASS_ROLLBACK',pipelinePass);
+  assert.doesNotMatch('ERROR:\nSMOKE_PASS_ROLLBACK',pipelinePass);
+  assert.match(pipeline.error,pipelinePass);
+  console.log('[allowed] full split, return-credit and quick-delivery pipeline');
+  allowed(lf(path.join(ROOT,'scripts/smoke/smoke-order-invoice-cap-edited-quick.sql')),'edited quick draft records physical completion and remains unpostable until corrected');
+  allowed(lf(path.join(ROOT,'scripts/smoke/smoke-order-invoice-cap-split-rounding.sql')),'repeated split lines conserve source quantity without permitting extra billing');
+  allowed(lf(path.join(ROOT,'scripts/smoke/smoke-order-invoice-cap-fragment-precision.sql')),'fragmented deliveries aggregate before applying invoice quantity precision');
+  allowed(lf(path.join(ROOT,'scripts/smoke/smoke-order-invoice-cap-delivery-precision.sql')),'delivery invoices retain their own stored document precision without extra allowance');
   await race(); console.log('ORDER_INVOICE_DELIVERED_CAP_PROOF_PASS');
 }
 try {await main();} finally {if(!KEEP) docker(['rm','-f',NAME],{allowFailure:true}); else console.log(`[kept] ${NAME}`);}

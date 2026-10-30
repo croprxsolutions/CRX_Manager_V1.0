@@ -14,13 +14,20 @@ describe('20261029160000 order invoice delivered cap', () => {
     expect(preflight).not.toContain('delivery_id IS NULL');
   });
 
-  it('checks every invoice line increase against order-wide quantities without a timing exception', () => {
+  it('conserves split quantities and only permits an exact draft completion adjustment', () => {
     expect(sql).not.toContain('transaction_timestamp() - interval');
-    expect(sql).toContain('Every increase, including changes made during delivery completion');
+    expect(sql).toContain("NEW.order_item_id IS NOT NULL AND v_invoice.status = 'draft' AND NEW.quantity = (");
+    expect(sql).toContain('d.order_id = v_invoice.order_id AND d.is_quick_delivery');
+    expect(sql).toContain("d.status = 'completed' AND d.deleted_at IS NULL");
     expect(sql).toContain('v_reason := public._order_invoice_overbilling(v_invoice.order_id)');
-    expect(sql).toContain('round(ii.quantity, 4) AS quantity');
-    // field splits round shares to 4 places, so 0.6667 x 3 may exceed 2 by 0.0001
-    expect(sql).toContain('billed_qty >= allowed_qty + 0.001');
+    expect(sql).toContain('ii.quantity AS quantity');
+    expect(sql).toContain('SELECT per_delivery FROM invoice_mode');
+    expect(sql).toContain('THEN sum(round(coalesce(di.quantity_delivered, 0), 4))');
+    expect(sql).toContain('ELSE round(sum(coalesce(di.quantity_delivered, 0)), 4) END AS qty');
+    expect(sql).toContain('billed_qty > allowed_qty');
+    expect(sql).not.toContain('allowed_qty + 0.001');
+    expect(sql).toContain('SPLIT_QUANTITY_RECONCILIATION_FAILED');
+    expect(sql).not.toContain('line_rounding AS');
   });
 
   it('requires the posted invoice to be voided before its delivery is voided or cancelled', () => {

@@ -628,6 +628,8 @@ OrderDetail.
   (the other delivery was billed in Chem Man) (LOW). Integrity checks page by offset, so concurrent inserts or
   deletes can make a run miss or repeat a row (LOW, accepted).
 
+- PR #1174 also preserves physical quick-delivery completion while an edited draft needs correction; posting still rechecks the whole bill. Its split generator conserves each source quantity without increasing the product cap's tolerance.
+
 ### KI-77 — Lists, UI and CRM details (extends KI-26, KI-30, KI-32, KI-41)
 **MED/LOW · OPEN · UI/database**
 Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,

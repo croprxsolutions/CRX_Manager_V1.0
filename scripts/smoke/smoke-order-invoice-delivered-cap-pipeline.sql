@@ -114,5 +114,6 @@ BEGIN
     RAISE EXCEPTION 'PROOF_FAIL: completed quick delivery invoice must post';
   END IF;
   RAISE NOTICE 'PIPELINE_PASS: upfront and partial splits refused; full split posts; landlord return credited; short quick delivery posts only actual units';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
 END;
 $proof$;

@@ -8,10 +8,11 @@
 //   * merge into main → allowed only under Mason's autonomous-landing rule
 //     (2026-09-26; CodeRabbit approval dropped 2026-10-19): the newest run of every
 //     check is green with mergeStateStatus CLEAN, and a fresh gpt-6-sol/high
-//     Codex proof is bound to that head and GitHub's real base (minted only by
-//     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Every diff
-//     needs the proof, except a documentation-only one as defined in
-//     sol-exempt-lib.mjs (Mason, 2026-10-07);
+//     Codex proof is bound to that head, or to an earlier commit on the PR's own
+//     branch not yet in main (Mason, 2026-10-29), and GitHub's real base (minted only by
+//     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Only a risky
+//     diff needs the proof (sol-risk-lib.mjs, Mason 2026-10-29); a
+//     documentation-only one never does (sol-exempt-lib.mjs, Mason 2026-10-07);
 //   * `--auto` into main → denied, because it lands later-pushed commits after
 //     this gate has run (Codex round-4 finding);
 //   * `--admin`, CHANGES_REQUESTED, GraphQL mergePullRequest, raw REST merges and
@@ -70,6 +71,7 @@ import {
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
+import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -509,7 +511,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest");
+    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -617,17 +619,20 @@ function gateRequest(request) {
   const isAncestorOnGitHub = (ancestor, descendant) => {
     const key = `${ancestor}...${descendant}`;
     if (!ancestry.has(key)) {
-      let contained = false;
+      // null when GitHub could not answer, so "not in main" is never assumed (Luna, 2026-10-29).
+      let contained = null;
       try {
         contained = headContainsBaseOnGitHub({ baseSha: ancestor, headSha: descendant, repo: request.repo, gh: hardGateGh });
       } catch {
-        contained = false;
+        contained = null;
       }
       ancestry.set(key, contained);
     }
     return ancestry.get(key);
   };
 
+  // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
+  const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
   let valid = false;
   let carried = null;
   outer:
@@ -638,7 +643,11 @@ function gateRequest(request) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8")); } catch { continue; }
-        if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub })) {
+        // A proof of an earlier commit covers the commits after it only when those
+        // are notes only (Sol, 2026-10-29); same module, same budgeted gh.
+        if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
+          && (String(data.head_sha).toLowerCase() === String(headSha).toLowerCase()
+            || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky)) {
           valid = true;
           carried = data.carried_forward === true ? data.carry : null;
           break outer;
@@ -676,10 +685,22 @@ function gateRequest(request) {
     return;
   }
 
+  // ── Notes-only pull requests skip Sol (Mason, 2026-10-29) ───────────────────
+  // Same placement and budget as the exemption above; any failure is "risky".
+  const risk = solRiskOnGitHub({ baseSha, headSha, repo: request.repo, gh: hardGateGh });
+  if (!risk.risky) {
+    process.stderr.write(
+      `SOL NOT REQUIRED: notes-only pull request (${risk.reason}; Mason, 2026-10-29). ` +
+      `Head ${String(headSha).slice(0, 12)} has every check green.\n`,
+    );
+    advisoryQueue.push(request);
+    return;
+  }
+
   deny(
-    `PR MERGE GATE: every merge into main needs a fresh gpt-6-sol/high Codex proof bound to this exact ` +
-    `head and a base the head contains (Mason's autonomous-landing rule, 2026-09-26). None was found, and the ` +
-    `documentation-only exemption does not apply: ${exemption.reason}.\n\n` +
+    `PR MERGE GATE: this merge into main needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
+    `(Sol is required on any code change or large pull request; only notes skip it; Mason, 2026-10-29). ` +
+    `None was found, and the documentation-only exemption does not apply: ${exemption.reason}.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
     `  2. \`git fetch origin\` and merge origin/main into the branch if the head does not contain it (GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +

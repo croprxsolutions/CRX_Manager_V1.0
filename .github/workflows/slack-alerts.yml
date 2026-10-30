@@ -1,0 +1,36 @@
+name: Slack failure alerts
+
+# Mason, 2026-10-29: #crx-alerts gets failures and serious issues only. The
+# GitHub Slack app cannot filter to failures, so it was unsubscribed and this
+# posts instead, only when a check or scheduled job fails on main.
+# Needs the SLACK_ALERTS_WEBHOOK_URL secret (a Slack incoming webhook for #crx-alerts).
+on:
+  workflow_run:
+    workflows:
+      - "CI -- Lint, Type Check, Test, Build"
+      - "Daily landing summary"
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  alert:
+    name: Post the failure to Slack
+    if: >-
+      contains(fromJSON('["failure","timed_out","startup_failure"]'), github.event.workflow_run.conclusion) &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post to Slack
+        # Run metadata goes through env and jq, never into the script text.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERTS_WEBHOOK_URL }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          text=$(printf ':red_circle: *%s failed on main*\n%s\n<%s|Open the run>' "$RUN_NAME" "${RUN_TITLE//[<>]/}" "$RUN_URL")
+          jq -n --arg text "$text" '{text: $text}' |
+            curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

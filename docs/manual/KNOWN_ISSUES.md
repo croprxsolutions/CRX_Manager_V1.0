@@ -2,15 +2,10 @@
 
 **Last verified:** 2026-10-29 for the invoice-cap checks only; other evidence retains its stated dates.
 
-Targeted live checks: the migration ledger's latest row is version `20261029143642`,
-authored stem `20261028185500_order_edit_and_number_concurrency`. The order
-invoice delivered-cap migration for PR #1174 is absent. Its widened read-only
-preflight covered 11 distinct orders with active order-backed non-credit
-invoices: zero aggregate over-cap orders and zero invalid, untyped, or mismatched
-lines. Once applied, `void_delivery` and `cancel_delivery` refuse a delivery that
-still has an active posted invoice (owner decision 2026-10-29: void the invoice first;
-the automatic-credit design in to-do 3.5 is not built). No live writes ran. Earlier reconciliation and individual issue dates below
-retain their original scope; this is not a fresh full security audit.
+PR #1174 (order-wide delivered cap, not yet applied): once applied, `void_delivery` and `cancel_delivery`
+refuse a delivery that still has an active invoice (owner decision 2026-10-29: void the invoice first). The live
+evidence is in `docs/changelog.d/2026-10-29-invoice-cap-restamp.md`. Earlier reconciliation and individual issue
+dates below retain their original scope; this is not a fresh full security audit.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
@@ -630,8 +625,8 @@ OrderDetail.
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the
   source invoice can be hard-deleted or re-saved.
-- Whole-order invoice quantities and unit prices are not capped server-side (MED). Voiding a delivery whose invoice
-  is posted leaves the invoice active; the office must issue a credit memo (MED). Removing a product from a
+- Whole-order invoice quantities and unit prices are not capped server-side (MED; quantities change when PR #1174 applies). Voiding a delivery whose invoice
+  is posted leaves the invoice active (MED; changes when PR #1174 applies: the delivery then cannot be voided until the invoice is voided). Removing a product from a
   scheduled delivery can leave its drafted invoice unpostable, and lowering a quantity leaves the draft over the
   delivery quantity until staff edit it (MED). Freezing a soft-deleted order can block cancelling or voiding its
   completed delivery (reversal needs a reviewed migration) (LOW). Draft invoice CS-2026-0055 is deliberately left

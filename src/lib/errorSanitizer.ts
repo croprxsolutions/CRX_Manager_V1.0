@@ -104,7 +104,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line'],
   // enforce_delivery_void_needs_invoice_void: a delivery with an active posted invoice cannot be voided or cancelled
   [/^DELIVERY_HAS_POSTED_INVOICE\b/,
-   'Nothing was changed. This delivery has a posted invoice. Void that invoice first, then void or cancel the delivery'],
+   'Nothing was changed. This delivery, or its order, has an active posted, paid or overdue invoice. Void that invoice first, then void or cancel the delivery'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,

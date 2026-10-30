@@ -1,8 +1,8 @@
 ## 2026-10-28 - Parked order-wide delivered quantity cap (to-do 3.2)
 
 Local implementation; not merged, applied or deployed. Mason requested separate
-implementations without merging. Shared to-do/current-state/decision files are
-intentionally untouched during parallel work.
+implementations without merging. (Superseded 2026-10-29: the landing round also
+edited the to-do, known-issues and decision files; see the restamp note.)
 
 - New migration `20261029160000_cap_order_invoices_at_delivered` adds an immediate
   order-wide product quantity check alongside the existing per-delivery checks.
@@ -45,7 +45,8 @@ session ended at `20261027080300_notification_sender_recorded` (apply version
 or cleared for a later apply by that observation.
 
 Rollback path: a separately reviewed migration removes only the new order cap's
-two triggers and two private helpers. Existing delivery caps remain installed.
+three triggers and three private helpers (the two order-cap triggers and the
+invoice-first delivery trigger). Existing delivery caps remain installed.
 No existing rows, permissions on existing objects, or money values are rewritten.
 
 Navigation evidence: Graphify built at `a3423a81`; query

@@ -76,7 +76,7 @@ describe('sanitizeError', () => {
 
   it('tells the user to void the posted invoice before voiding or cancelling its delivery', () => {
     expect(sanitizeError('DELIVERY_HAS_POSTED_INVOICE: void the posted invoice for delivery D-1 before voiding or cancelling it'))
-      .toBe('Nothing was changed. This delivery has a posted invoice. Void that invoice first, then void or cancel the delivery');
+      .toBe('Nothing was changed. This delivery, or its order, has an active posted, paid or overdue invoice. Void that invoice first, then void or cancel the delivery');
   });
 
   it('explains an incomplete order invoice line separately from the delivered cap', () => {

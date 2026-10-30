@@ -14,7 +14,7 @@
 -- zz_delivery_void_needs_invoice_void trigger and these three helpers. Existing
 -- delivery cap triggers must remain installed.
 SET LOCAL lock_timeout = '5s';
-LOCK TABLE public.invoices, public.invoice_items IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE public.invoices, public.invoice_items, public.deliveries IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE OR REPLACE FUNCTION public._order_invoice_overbilling(p_order_id uuid)
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER
@@ -177,25 +177,41 @@ CREATE TRIGGER zz_cap_order_invoice_header
 -- Invoice-first rule. Runs inside void_delivery / cancel_delivery (and any other writer)
 -- the moment a delivery becomes voided or cancelled, so the refusal is in PostgreSQL, not
 -- only in the screen. The whole call rolls back, including any inventory it had restored.
+-- Blocking invoices: posted, paid or overdue. An unposted invoice (posted, then reversed)
+-- also blocks a VOID, because void_delivery cancels only drafts and would leave it billing
+-- units that are no longer delivered; cancel_delivery cancels unposted invoices itself.
 -- A completed delivery being voided reduces delivered quantity, so an order-level invoice
 -- (no delivery link, the legacy shape) also blocks it; a delivery that never completed
 -- reduces nothing, so only invoices linked to that delivery block its cancellation.
+-- The candidate invoices are row-locked first (NOWAIT): a post running at the same moment
+-- either finished before this check (and blocks) or must wait, then finds the delivery
+-- no longer completed and is refused by the per-delivery cap.
 CREATE OR REPLACE FUNCTION public.enforce_delivery_void_needs_invoice_void()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
-  IF NEW.order_id IS NULL THEN
-    RETURN NEW;
-  END IF;
+  BEGIN
+    PERFORM 1 FROM public.invoices i
+     WHERE i.order_id = NEW.order_id AND i.invoice_type <> 'credit_memo'
+       AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
+       AND (i.delivery_id = NEW.id
+            OR (OLD.status = 'completed' AND i.delivery_id IS NULL))
+     FOR UPDATE NOWAIT;
+  EXCEPTION WHEN lock_not_available THEN
+    RAISE EXCEPTION 'ORDER_LIFECYCLE_BUSY_RETRY: an invoice for delivery % is being changed; retry in a moment', NEW.delivery_number
+      USING ERRCODE = 'P0001';
+  END;
   IF EXISTS (
     SELECT 1 FROM public.invoices i
      WHERE i.order_id = NEW.order_id AND i.invoice_type <> 'credit_memo'
-       AND i.deleted_at IS NULL AND i.status IN ('posted', 'paid', 'overdue')
+       AND i.deleted_at IS NULL
+       AND (i.status IN ('posted', 'paid', 'overdue')
+            OR (NEW.status = 'voided' AND i.status = 'unposted'))
        AND (i.delivery_id = NEW.id
             OR (OLD.status = 'completed' AND i.delivery_id IS NULL))
   ) THEN
-    RAISE EXCEPTION 'DELIVERY_HAS_POSTED_INVOICE: void the posted invoice for delivery % before voiding or cancelling it', NEW.delivery_number
+    RAISE EXCEPTION 'DELIVERY_HAS_POSTED_INVOICE: void the active invoice for delivery % (or its order) before voiding or cancelling it', NEW.delivery_number
       USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;

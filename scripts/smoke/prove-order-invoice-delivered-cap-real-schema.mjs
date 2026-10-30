@@ -244,7 +244,10 @@ function invoiceFirst() {
   for (const status of ['paid','overdue']) {
     refused(`RESET ROLE; UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}'; UPDATE public.invoices SET status='${status}' WHERE id='${INV}'; ${voidDelivery()}`,`void_delivery refuses a ${status} invoice`,POSTED_REFUSAL);
   }
-  allowed(`${post} RESET ROLE; UPDATE public.invoices SET status='voided', posted_at=coalesce(posted_at,now()), void_reason='[PROVER] invoice first' WHERE id='${INV}'; ${voidDelivery()}`,'void_delivery proceeds once the invoice is voided');
+  allowed(`${post} ${asUser(ADMIN)} SELECT public.void_invoice('${INV}','[PROVER] invoice first',gen_random_uuid()::text); ${voidDelivery()}`,'void_delivery proceeds once the real void_invoice RPC has voided the invoice');
+  const unposted=`RESET ROLE; UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}'; ${asUser(ADMIN)} SELECT public.unpost_invoice('${INV}','${ADMIN}',gen_random_uuid()::text);`;
+  refused(`${unposted} ${voidDelivery()}`,'void_delivery refuses while a reversed (unposted) invoice is still active',POSTED_REFUSAL);
+  allowed(`${unposted} ${asUser(ADMIN)} SELECT public.cancel_delivery('${DELIVERY}','[PROVER] invoice-first proof',NULL,gen_random_uuid()::text);`,'cancel_delivery still cancels an unposted invoice itself');
   allowed(voidDelivery(),'void_delivery still proceeds with only draft invoices (they are cancelled)');
   allowed(`${scheduledDelivery('draft')} ${cancelScheduled()}`,'cancel_delivery proceeds with only its own draft invoice');
   refused(`${scheduledDelivery('posted')} ${cancelScheduled()}`,'cancel_delivery refuses while its posted invoice is active',POSTED_REFUSAL);
@@ -282,6 +285,15 @@ async function race() {
   refused(save(SIBLING,3,REP),'racing save retry sees committed reservation');
   assert.equal(scalar(`SELECT sum(ii.quantity) FROM public.invoice_items ii JOIN public.invoices i ON i.id=ii.invoice_id WHERE i.order_id='${ORDER}';`),'5.0000');
   console.log('[race] concurrent real save_invoice calls cannot overbill; retry is capped');
+
+  // A cancel that meets an invoice being changed at the same moment must not slip past the
+  // invoice-first check: the candidate invoice rows are locked NOWAIT and the call retries.
+  const holder=run(`BEGIN; UPDATE public.invoices SET updated_at=now() WHERE id='${INV}'; SELECT 'A_READY'; SELECT pg_sleep(3); COMMIT;`);
+  for(let i=0;!holder.out().includes('A_READY');i++) { assert.ok(i<300,'invoice holder never reached overlap'); await new Promise((resolve)=>setTimeout(resolve,100)); }
+  const canceller=run(`BEGIN; ${asUser(ADMIN)} SELECT public.cancel_delivery('${DELIVERY}','[PROVER] concurrent',NULL,gen_random_uuid()::text); COMMIT;`);
+  const [hr,cr]=await Promise.all([holder.done,canceller.done]); assert.equal(hr.code,0,hr.err); assert.notEqual(cr.code,0);
+  assert.match(cr.err,/ORDER_LIFECYCLE_BUSY_RETRY/);
+  console.log('[race] cancel against an invoice being changed asks for a retry instead of passing the check');
 }
 async function main() {
   if(!REUSE) buildContainer();

@@ -21,6 +21,9 @@
 > "edit to an already-applied migration" error check no longer blocks; the mandatory exact-SHA Sol
 > review of any migration change and the CI migration check remain.
 >
+> **Superseded (Mason, 2026-10-29: leaving CodeRabbit).** CodeRabbit is optional: no PR needs a CodeRabbit review, money PRs included, unless it carries the `needs-coderabbit` label. Sol runs once, before the PR opens, on any change outside the notes folders; an earlier-commit Sol proof covers later commits only when they stay inside the notes folders (`.claude/hooks/sol-risk-lib.mjs`). `AGENTS.md` "Safety and Protected Delivery" is authoritative. The exception below now applies
+> only to a PR with the `needs-coderabbit` label; the merge gates no longer add money PRs by their files.
+>
 > **Exception: money PRs and PRs Mason names need a clean CodeRabbit review (Mason, 2026-10-21).**
 > A PR qualifies when it touches money, invoices, payments, inventory, or costs in any way (code,
 > database, or workflow; when unsure, it qualifies), or when Mason asks the session for a

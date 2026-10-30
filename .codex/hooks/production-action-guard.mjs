@@ -69,6 +69,7 @@ import {
   readCodeRabbitRequirement,
 } from "../../.claude/hooks/codex-bot-review-lib.mjs";
 import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
+import { solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 
@@ -122,7 +123,9 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // decides whether Mason waived a money PR's CodeRabbit review (Codex App P1, #1035).
 // `read-only-search-lib` joined 2026-10-27: imported at startup, and it decides
 // which shell commands skip the checks below as plain searches.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+// `sol-risk-lib` joined 2026-10-29: imported at startup, and it decides whether a
+// merge needs Sol at all.
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|sol-risk-lib|coderabbit-skip-lib|read-only-search-lib|app-repo-identity)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -137,6 +140,7 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   ".claude/hooks/review-proof-guard.mjs",
   ".claude/hooks/live-testdata-lib.mjs",
   ".claude/hooks/sol-exempt-lib.mjs",
+  ".claude/hooks/sol-risk-lib.mjs",
   ".claude/hooks/coderabbit-skip-lib.mjs",
   ".claude/hooks/read-only-search-lib.mjs",
   // Imported by codex-push-lib and coderabbit-skip-lib, so it loads at guard
@@ -1005,7 +1009,7 @@ function proofRequirement(headSha, riskDescription, detail, baseSha) {
 // 2026-09-26): every merge needs the exact-SHA Sol proof, whether or not the diff
 // is classified risky. The classification still runs so the denial can say what
 // is risky, but it no longer opens an allow path of its own.
-function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authoritativeBaseSha, requireProof = false }) {
+function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authoritativeBaseSha, requireProof = false, laterChangesLowRisk = null }) {
   let headSha = sourceSha || "";
   let baseSha = "";
   try {
@@ -1099,7 +1103,43 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
     : contentFlagged
       ? "the main-bound diff contains money or financial-audit identifiers even though its paths look ordinary"
       : "every merge into main needs an exact-SHA Sol proof (Mason's autonomous-landing rule, 2026-09-26)";
-  const proofPath = path.join(repoDir, ".claude", "session-state", `codex-review-${headSha}.json`);
+  const isAncestorLocally = (ancestor, descendant) => {
+    try {
+      runGit(["merge-base", "--is-ancestor", ancestor, descendant], repoDir);
+      return true;
+    } catch (error) {
+      // Exit 1 is git's "no"; any other failure is "cannot tell" (Luna, 2026-10-29).
+      if (error?.status !== 1) return null;
+      // A shallow clone can say "no" for history it cut off, so its "no" cannot tell either.
+      try {
+        return String(runGit(["rev-parse", "--is-shallow-repository"], repoDir)).trim() === "false" ? false : null;
+      } catch {
+        return null;
+      }
+    }
+  };
+  const stateDir = path.join(repoDir, ".claude", "session-state");
+  let proofPath = path.join(stateDir, `codex-review-${headSha}.json`);
+  // Sol runs once before the PR opens (Mason, 2026-10-29): with no proof of this
+  // head, a proof of an earlier commit on this PR's branch may count.
+  if (!existsSync(proofPath) && authoritativeBaseSha) {
+    try {
+      const earlier = readdirSync(stateDir)
+        .filter((f) => /^codex-review-[0-9a-f]{40}\.json$/i.test(f))
+        .map((f) => path.join(stateDir, f))
+        .find((p) => {
+          try {
+            const data = JSON.parse(readFileSync(p, "utf8"));
+            // The commits after the reviewed one must be notes only (Sol, 2026-10-29).
+            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
+              && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
+          } catch {
+            return false;
+          }
+        });
+      if (earlier) proofPath = earlier;
+    } catch { /* no state directory: the exact-head path stays and is reported missing */ }
+  }
   if (!existsSync(proofPath)) {
     return proofRequirement(headSha, riskDescription, `Missing required Sol high-effort proof: ${proofPath}`, baseSha);
   }
@@ -1113,14 +1153,6 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // A PR merge may land a head that is behind main (Mason, 2026-10-26;
   // proofValidForMerge): the proof's own base must be in the head and behind
   // GitHub's base. A direct push to main keeps the exact-base binding.
-  const isAncestorLocally = (ancestor, descendant) => {
-    try {
-      runGit(["merge-base", "--is-ancestor", ancestor, descendant], repoDir);
-      return true;
-    } catch {
-      return false;
-    }
-  };
   const proven = authoritativeBaseSha
     ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
     : proofValid(proof, headSha, nowMs, baseSha);
@@ -1316,6 +1348,8 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
     nowMs,
     runGit,
     requireProof: true,
+    laterChangesLowRisk: (proofHead, head) =>
+      !solRiskOnGitHub({ baseSha: proofHead, headSha: head, repo: request.repo, gh: (args) => runGh(args, repoDir) }).risky,
   });
   // Documentation-only exemption (Mason, 2026-10-07) — mirror of pr-merge-guard.mjs.
   // Excuses ONLY the missing-or-invalid Sol proof, after every gate above and
@@ -1329,7 +1363,18 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
       gh: (args) => runGh(args, repoDir),
     });
     if (exemption.exempt) return { blocked: false, advisoryRequest: request };
-    return denied(`${mainVerdict.reason}\n\nThe documentation-only exemption does not apply: ${exemption.reason}.`);
+    // Notes-only pull requests skip Sol (Mason, 2026-10-29) — mirror of pr-merge-guard.mjs.
+    const risk = solRiskOnGitHub({
+      baseSha: pullRequest.baseRefOid,
+      headSha: pullRequest.headRefOid,
+      repo: request.repo,
+      gh: (args) => runGh(args, repoDir),
+    });
+    if (!risk.risky) return { blocked: false, advisoryRequest: request };
+    return denied(
+      `${mainVerdict.reason}\n\nSol is required because ${risk.reason} (any code change or large pull request ` +
+      `needs Sol; only notes skip it; Mason, 2026-10-29). The documentation-only exemption does not apply: ${exemption.reason}.`,
+    );
   }
   if (mainVerdict.blocked) return mainVerdict;
 

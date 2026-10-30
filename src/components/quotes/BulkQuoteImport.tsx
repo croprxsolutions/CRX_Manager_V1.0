@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { parseQuoteOrderCsv, parseQuoteOrderCsvNumber, QuoteOrderCsvError } from '../../lib/quoteOrderCsv';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -14,6 +15,8 @@ import { withAdminCosts } from '../../lib/costFields';
 import { logActivity } from '../../lib/activityLogger';
 import type { Json } from '../../types/supabase';
 import { resolveExactProductIdentity } from '../../lib/productIdentityResolver';
+import { isWholeCentPurchaseOrderCost, purchaseOrderUnitCostCents } from '../../lib/purchaseOrderMoney';
+import { quoteImportAmounts } from '../../lib/quoteImportMath';
 
 interface BulkQuoteImportProps {
   open: boolean;
@@ -81,13 +84,17 @@ const escapeIlikePattern = (value: string): string =>
 const normalizeUnitName = (unit?: string | null): string =>
   unit?.toLowerCase().trim() ?? '';
 
-const toMoneyCents = (value: number | null | undefined): bigint =>
-  BigInt(Math.round((value ?? 0) * 100));
+const checkedCents = (value: number): bigint => {
+  if (!Number.isSafeInteger(value)) throw new Error('Imported money exceeds the supported whole-cent range. Reduce the values and retry.');
+  return BigInt(value);
+};
 
-const centsToDollars = (cents: bigint): number => Number(cents) / 100;
+const toMoneyCents = (value: number | null | undefined): bigint => {
+  if (value != null && !Number.isFinite(value)) throw new Error('Imported money must be finite. Correct the values and retry.');
+  return checkedCents(purchaseOrderUnitCostCents(value ?? 0));
+};
 
-const multiplyCentsByQuantity = (unitCents: bigint, quantity: number): bigint =>
-  BigInt(Math.round(Number(unitCents) * quantity));
+const centsToDollars = (cents: bigint): number => Number(checkedCents(Number(cents))) / 100;
 
 const stableStringify = (value: unknown): string => {
   if (value === undefined || value === null) return 'null';
@@ -236,23 +243,6 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
     return null;
   };
 
-  const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return { headers: [], rows: [] };
-
-    const headers = lines[0].split(',').map((h) => h.trim());
-    const rows: string[][] = [];
-
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map((c) => c.trim());
-      if (cols.length > 0 && cols[0]) {
-        rows.push(cols);
-      }
-    }
-
-    return { headers, rows };
-  };
-
   const parseWithVisionOCR = async (file: File): Promise<{ valid: ParsedQuoteItem[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> }> => {
     const result = await processDocumentWithOCR(file, 'quote_list');
 
@@ -308,6 +298,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
   const handleParse = async () => {
     if (!file) return;
+    setValidation(null);
     setParsing(true);
 
     try {
@@ -320,7 +311,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       }
 
       const text = await file.text();
-      const { headers, rows } = parseCSV(text);
+      const { headers, rows, rowNumbers } = parseQuoteOrderCsv(text);
 
       if (rows.length === 0) {
         toast('error', 'No valid data found in file');
@@ -353,6 +344,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       rows.forEach((cols, idx) => {
         const item: Partial<ParsedQuoteItem> = {};
         const rowData: Record<string, string> = {};
+        const invalidNumbers: string[] = [];
 
         cols.forEach((value, colIdx) => {
           const field = fieldMapping[colIdx];
@@ -377,19 +369,26 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               field === 'oz_per_acre' ||
               field === 'actual_rate'
             ) {
-              const num = parseFloat(value);
-              if (!isNaN(num)) {
+              const num = parseQuoteOrderCsvNumber(value);
+              if (value && (!Number.isFinite(num) || num < 0 || (field === 'price_per_unit' && !isWholeCentPurchaseOrderCost(num)))) {
+                invalidNumbers.push(field);
+              } else if (value) {
                 item[field] = num;
               }
             } else if (field === 'tier') {
-              const tier = parseInt(value);
+              const tier = parseQuoteOrderCsvNumber(value);
               if ([1, 2, 3].includes(tier)) {
                 item[field] = tier;
+              } else if (value) {
+                invalidNumbers.push(field);
               }
             } else if (field === 'valid_days') {
-              const days = parseInt(value);
-              if (!isNaN(days) && days > 0) {
+              const days = parseQuoteOrderCsvNumber(value);
+              const expiry = new Date(Date.now() + days * 86400000);
+              if (Number.isInteger(days) && days > 0 && Number.isFinite(expiry.getTime()) && expiry.getUTCFullYear() <= 9999) {
                 item[field] = days;
+              } else if (value) {
+                invalidNumbers.push(field);
               }
             }
           }
@@ -398,9 +397,18 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
         const normalizedStatus = item.status?.toLowerCase().trim();
         if (normalizedStatus) item.status = normalizedStatus;
 
+        if (invalidNumbers.length > 0) {
+          invalid.push({
+            row: rowNumbers[idx],
+            error: `Invalid numeric fields: ${invalidNumbers.join(', ')}. Use plain numbers without thousands separators, negative values, or lost digits; prices must have no more than two decimal places, tier must be 1, 2, or 3, and valid_days must produce an expiry no later than year 9999.`,
+            data: rowData,
+          });
+          return;
+        }
+
         if (!item.quote_number || !item.customer_farm_name || !item.product_name) {
           invalid.push({
-            row: idx + 2,
+            row: rowNumbers[idx],
             error: 'Missing required fields (quote_number, customer_farm_name, or product_name)',
             data: rowData,
           });
@@ -409,22 +417,24 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
         if (item.status && !IMPORTABLE_QUOTE_STATUSES.has(item.status)) {
           invalid.push({
-            row: idx + 2,
+            row: rowNumbers[idx],
             error: 'Unsupported status. Bulk quote imports may only create draft quotes.',
             data: rowData,
           });
           return;
         }
 
-        validRows.push({ row: idx + 2, item: item as ParsedQuoteItem, data: rowData });
+        validRows.push({ row: rowNumbers[idx], item: item as ParsedQuoteItem, data: rowData });
       });
 
       setValidation(rejectPartiallyInvalidQuoteGroups(validRows, invalid));
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
-        extra: { context: 'BulkQuoteImport.parseCSVFile' },
-      });
-      toast('error', 'Failed to parse file. Please ensure it is a valid CSV.');
+      if (!(error instanceof QuoteOrderCsvError)) {
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+          extra: { context: 'BulkQuoteImport.parseCSVFile' },
+        });
+      }
+      toast('error', error instanceof QuoteOrderCsvError ? error.message : 'Failed to parse file. Please ensure it is a valid CSV.');
     }
     setParsing(false);
   };
@@ -604,18 +614,19 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               if (actualRate !== null && (!rateConv || rateConv.factor_oz <= 0)) {
                 throw new Error(`Unsupported rate unit "${rateUnit || 'blank'}" for product ${item.product_name}`);
               }
-              const oz_per_acre = actualRate !== null ? actualRate * rateConv!.factor_oz : 0;
-
               const conv = inventoryUnit
                 ? unitConversions.find((c: { unit: string; factor_oz: number }) => normalizeUnitName(c.unit) === normalizeUnitName(inventoryUnit))
                 : null;
-              if (acres > 0 && oz_per_acre > 0 && (!conv || conv.factor_oz <= 0)) {
+              if (acres > 0 && (actualRate ?? 0) > 0 && (!conv || conv.factor_oz <= 0)) {
                 throw new Error(`Unsupported inventory unit "${inventoryUnit || 'blank'}" for product ${item.product_name}`);
               }
               const conversionFactor = conv?.factor_oz ?? 1;
-              const total_units_needed = acres && oz_per_acre ? (acres * oz_per_acre) / conversionFactor : 0;
-              const lineTotalPriceCents = multiplyCentsByQuantity(pricePerUnitCents, total_units_needed);
-              const lineTotalCostCents = multiplyCentsByQuantity(currentCostCents, total_units_needed);
+              const amounts = quoteImportAmounts({ acres, rate: actualRate ?? 0, rateFactor: rateConv?.factor_oz ?? 1,
+                inventoryFactor: conversionFactor, priceCents: pricePerUnitCents, costCents: currentCostCents });
+              const oz_per_acre = amounts.ouncesPerAcre;
+              const total_units_needed = amounts.totalUnits;
+              const lineTotalPriceCents = amounts.priceCents;
+              const lineTotalCostCents = amounts.costCents;
               const profitCents = lineTotalPriceCents - lineTotalCostCents;
               const total_price = centsToDollars(lineTotalPriceCents);
               const profit = centsToDollars(profitCents);
@@ -791,6 +802,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
               section_name, acres, price_per_unit, oz_per_acre, actual_rate, rate_unit, notes, tier (1-3),
               status (draft), valid_days, header_notes, footer_notes
             </p>
+            <p className="text-xs text-gray-500 mt-2">Prices must have no more than two decimal places. A quote with an invalid row is excluded in full.</p>
           </div>
         </div>
 

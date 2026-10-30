@@ -577,15 +577,10 @@ export function evaluateCodeRabbitRequirement(pullRequest) {
   const labelTotal = pullRequest?.labels?.totalCount;
   const labelled = labels.some((label) => String(label?.name || "").trim().toLowerCase() === CODERABBIT_REQUIRED_LABEL)
     || !(Number.isInteger(labelTotal) && labelTotal <= labels.length);
-  const moneyFile = files.map((file) => file?.path).find(isMoneyPath);
-  // A file list that may be cut short cannot prove the PR is not a money PR.
-  const total = pullRequest?.files?.totalCount;
-  const filesComplete = Number.isInteger(total) && total <= files.length;
-  let why = "";
-  if (labelled) why = `it carries the "${CODERABBIT_REQUIRED_LABEL}" label (or its labels could not all be read)`;
-  else if (moneyFile) why = `it changes money, invoice, payment, inventory or cost files (e.g. ${moneyFile})`;
-  else if (!filesComplete) why = "its changed-file list could not be read completely";
-  else return { status: "not-required", why: "", headOid, reviewedOid: "" };
+  // Money files no longer force a review (Mason, 2026-10-29: leaving CodeRabbit);
+  // only the label asks for one.
+  if (!labelled) return { status: "not-required", why: "", headOid, reviewedOid: "" };
+  const why = `it carries the "${CODERABBIT_REQUIRED_LABEL}" label (or its labels could not all be read)`;
 
   const list = commits.map((node) => node?.commit);
   if (list.length === 0 || String(list[list.length - 1]?.oid || "").trim().toLowerCase() !== headOid) {

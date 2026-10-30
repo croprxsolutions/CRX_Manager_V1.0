@@ -1,8 +1,9 @@
-# Migration History (latest entry 1004)
+# Migration History
 
-> **LATEST LIVE EVIDENCE (read this first).** The most recent read-only
-> `list_migrations` observation is at the top of this file, immediately below.
-> Do not scroll for it, and do not treat any older dated block as the latest.
+> **LATEST LIVE EVIDENCE (read this first).** Read-only `list_migrations` observations sit at
+> the top of this file. Two PRs can add one at the same time and git keeps both in either order,
+> so compare their UTC timestamps; the newest timestamp is the latest evidence. Refer to a
+> migration by its version or file name, not its row number: two PRs can give a new row the same number.
 
 **Live capture — 2026-10-29 14:36 UTC (9:36 AM Central; the apply script's read-only ledger refresh after row 1001 applied for PR #1185, then a read-only catalog check):** 1077 rows, `max(version)` `20261029143642` = `20261028185500_order_edit_and_number_concurrency` (row 1001). The effective ordering high-water is `20261028185500`.
 

@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 
 import {
+  constants as fsConstants,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeEol } from "./normalize-eol.mjs";
@@ -237,9 +242,9 @@ function ownGitDir() {
   return cachedGitDir;
 }
 
-function git(args) {
+function git(args, checkout = ROOT) {
   const env = gitEnvironment(process.env, { commonDir: ownGitDir() });
-  return spawnSync("git", ["-C", ROOT, ...args], { encoding: "utf8", env });
+  return spawnSync("git", ["-C", checkout, ...args], { encoding: "utf8", env });
 }
 
 export function writeExpected(expected, targetRoot = TARGET_ROOT) {
@@ -311,6 +316,11 @@ export function writeExpected(expected, targetRoot = TARGET_ROOT) {
 // Mason's 2026-09-02 decision: keep them VISIBLE, do not delete them. So they are
 // reported on every run and excluded from the pass/fail verdict — foreign litter,
 // not drift in a file we generate.
+//
+// Mason's 2026-10-30 approval changes what happens next: Codex discovers these
+// beside the real skills, so the stale copies can be picked up. --archive-imported
+// moves them out of the active directories into a verified archive; nothing here
+// deletes them outright, and the same exemption below decides what may be moved.
 //
 // Classify by REGION, not by an enumeration of the 24 names: any path under a
 // `skills/<importer-prefixed-dir>/` that this generator does not itself produce.
@@ -390,12 +400,12 @@ export function classifyExtras(extraRelativePaths, options = {}) {
 //
 // An empty result with `known: true` is a real answer - nothing is tracked yet -
 // and still allows the exemption.
-function gitKnownTargetPaths(targetRoot = TARGET_ROOT) {
-  const rel = unix(path.relative(ROOT, targetRoot)) || ".agents";
+function gitKnownTargetPaths(targetRoot = TARGET_ROOT, checkout = ROOT) {
+  const rel = unix(path.relative(checkout, targetRoot)) || ".agents";
   const out = new Set();
   let known = true;
   for (const args of [["ls-files", "-z", "--", rel], ["diff", "--cached", "--name-only", "-z", "--", rel]]) {
-    const r = git(args);
+    const r = git(args, checkout);
     if (r.status !== 0) { known = false; continue; }
     if (!r.stdout) continue;
     for (const line of r.stdout.split("\0")) {
@@ -405,6 +415,208 @@ function gitKnownTargetPaths(targetRoot = TARGET_ROOT) {
     }
   }
   return { paths: [...out], known };
+}
+
+const sha256 = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
+
+function isInside(parent, child) {
+  const relative = path.relative(parent, child);
+  return !relative || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+// Where `candidate` would really land: its nearest existing ancestor with links resolved,
+// plus the part that does not exist yet.
+function resolvedDestination(candidate) {
+  let existing = candidate;
+  while (!existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
+  return path.join(realpathSync(existing), path.relative(existing, candidate));
+}
+
+// The plain files and folders under `dir`, and anything that is neither. A link is
+// listed rather than followed: copying through one would archive a file from
+// somewhere else, and the delete that follows must only ever see real folders.
+function plainTree(dir) {
+  const files = [];
+  const dirs = [];
+  const links = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const nested = plainTree(full);
+      files.push(...nested.files);
+      dirs.push(full, ...nested.dirs);
+      links.push(...nested.links);
+    } else if (entry.isFile()) files.push(full);
+    else links.push(full);
+  }
+  return { files, dirs, links };
+}
+
+const relativeDirs = (sourceRoot, dirs) => dirs.map((dir) => unix(path.relative(sourceRoot, dir))).sort();
+
+// Choose which importer folders may move. The rule is the --check exemption
+// (classifyExtras), so a folder this generator owns, a tracked or staged file, or an
+// unknown tracking state keeps the folder in place. One tracked file holds back its
+// whole folder: splitting a folder would leave half of it in the active directory.
+function planImportedSkillArchive({ targetRoot, expectedKeys, trackedPaths, trackingKnown }) {
+  const skillsRoot = path.join(targetRoot, "skills");
+  const prior = previousManifest(targetRoot);
+  const walked = new Map();
+  for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
+    if (!importerDirOf(`skills/${entry.name}/`)) continue;
+    const dir = path.join(skillsRoot, entry.name);
+    walked.set(entry.name, entry.isDirectory() ? plainTree(dir) : { files: [], dirs: [], links: [dir] });
+  }
+  const relativePaths = [...walked.values()].flatMap(({ files }) =>
+    files.map((file) => unix(path.relative(targetRoot, file))));
+  const { extras, foreignDirs } = classifyExtras(relativePaths, {
+    expectedKeys,
+    previouslyManaged: prior.managed,
+    trackedPaths,
+    trackingKnown: trackingKnown && prior.known,
+  });
+  // trackedPaths as well: a tracked file deleted from disk still marks its folder.
+  const held = new Set([...extras, ...trackedPaths].map((relative) => relative.split("/")[1]));
+  const move = [];
+  const refused = [];
+  for (const [name, { files, dirs, links }] of walked) {
+    if (links.length > 0) refused.push({ name, reason: "it is, or contains, a link or special file" });
+    else if (files.length === 0) refused.push({ name, reason: "it holds no files" });
+    else if (!trackingKnown || !prior.known) refused.push({ name, reason: "git or generated-manifest.json could not say who owns it" });
+    else if (held.has(name) || !foreignDirs.includes(name)) refused.push({ name, reason: "it is tracked, staged, or owned by this generator" });
+    else move.push({ name, files, dirs });
+  }
+  return { skillsRoot, move, refused };
+}
+
+// Move importer folders out of the active skills directory into `archiveRoot`, with
+// a restore map. Nothing leaves the active directory until every copy has been hashed
+// against its source and the map is on disk, and a source that changed meanwhile stops
+// the run before its folder is moved. Without `confirm` this only reports.
+export function archiveImportedSkills({
+  checkoutRoot,
+  archiveRoot,
+  expectedKeys = [],
+  trackedPaths = [],
+  trackingKnown = true,
+  confirm = false,
+  stamp = new Date().toISOString().replace(/[:.]/g, "-"),
+}) {
+  const realCheckout = realpathSync(checkoutRoot);
+  const targetRoot = path.join(realCheckout, ".agents");
+  const skillsRoot = path.join(targetRoot, "skills");
+  if (!existsSync(skillsRoot) || !existsSync(path.join(targetRoot, "generated-manifest.json"))) {
+    throw new Error(`${realCheckout} has no generated .agents/ directory, so it is not a synced CRX checkout. Nothing was moved.`);
+  }
+  // A linked `.agents` or `skills` folder would aim the move at another checkout.
+  if (path.relative(skillsRoot, realpathSync(skillsRoot)) !== "") {
+    throw new Error(`${skillsRoot} is reached through a link, so it is not this checkout's own skills directory. Nothing was moved.`);
+  }
+  const activeDirs = [targetRoot, path.join(realCheckout, ".claude", "skills")];
+  const assertOutsideActiveDirs = (candidate) => {
+    if (activeDirs.some((active) => isInside(active, candidate))) {
+      throw new Error(`The archive ${candidate} would sit inside an active skills tree, where Codex would still find it. Nothing was moved.`);
+    }
+  };
+  assertOutsideActiveDirs(path.resolve(archiveRoot));
+  assertOutsideActiveDirs(resolvedDestination(path.resolve(archiveRoot)));
+  const { move, refused } = planImportedSkillArchive({ targetRoot, expectedKeys, trackedPaths, trackingKnown });
+  const archiveDir = path.join(path.resolve(archiveRoot), stamp);
+  const planned = move.map(({ name, files }) => ({ name, fileCount: files.length }));
+  if (!confirm || move.length === 0) return { archiveDir, moved: [], planned, refused };
+
+  mkdirSync(path.resolve(archiveRoot), { recursive: true });
+  assertOutsideActiveDirs(realpathSync(archiveRoot));
+  // Not recursive: an existing folder is a collision with an earlier archive.
+  mkdirSync(archiveDir);
+  mkdirSync(path.join(archiveDir, "originals"));
+  const entries = [];
+  for (const { name, files, dirs } of move) {
+    const sourceRoot = path.join(skillsRoot, name);
+    const directories = relativeDirs(sourceRoot, dirs);
+    for (const directory of directories) mkdirSync(path.join(archiveDir, "skills", name, directory), { recursive: true });
+    const manifestFiles = [];
+    for (const source of files) {
+      const relative = unix(path.relative(sourceRoot, source));
+      const target = path.join(archiveDir, "skills", name, relative);
+      mkdirSync(path.dirname(target), { recursive: true });
+      copyFileSync(source, target, fsConstants.COPYFILE_EXCL);
+      const hash = sha256(source);
+      if (sha256(target) !== hash) throw new Error(`The archived copy of ${source} does not match it. Nothing was removed; the partial archive is at ${archiveDir}.`);
+      manifestFiles.push({ path: relative, sha256: hash });
+    }
+    entries.push({ originalPath: `.agents/skills/${name}`, archivedPath: `skills/${name}`, originalBackupPath: `originals/${name}`, directories, files: manifestFiles });
+  }
+  writeFileSync(path.join(archiveDir, "restore-map.json"), `${JSON.stringify({
+    version: 1,
+    createdAt: new Date().toISOString(),
+    checkout: unix(realCheckout),
+    restore: "Copy each archivedPath back to originalPath under the checkout, including empty folders, then compare every file with its sha256 and confirm every listed directory exists.",
+    originals: "archivedPath is the verified snapshot. originalBackupPath is the original folder itself, including any late writes or open-handle changes, and is present only after that folder's move succeeded; if it is absent, the folder is still at originalPath. Do not delete it.",
+    entries,
+  }, null, 2)}\n`, { flag: "wx" });
+
+  const moved = [];
+  for (const entry of entries) {
+    const sourceRoot = path.join(realCheckout, ...entry.originalPath.split("/"));
+    const { files, dirs, links } = plainTree(sourceRoot);
+    const unchanged = links.length === 0
+      && JSON.stringify(relativeDirs(sourceRoot, dirs)) === JSON.stringify(entry.directories)
+      && files.length === entry.files.length
+      && entry.files.every((file) => {
+        const source = path.join(sourceRoot, ...file.path.split("/"));
+        return existsSync(source) && sha256(source) === file.sha256;
+      });
+    if (!isInside(skillsRoot, sourceRoot) || !unchanged) {
+      throw new Error(`${entry.originalPath} changed while it was being archived, so it was left in place. Already moved: ${moved.length}. Archive: ${archiveDir}.`);
+    }
+    // Renamed, never deleted: a write that lands after the check above stays with the
+    // folder. No copy fallback, because a rename across volumes cannot be atomic.
+    try {
+      renameSync(sourceRoot, path.join(archiveDir, ...entry.originalBackupPath.split("/")));
+    } catch (error) {
+      throw new Error(`${entry.originalPath} could not be moved in one step (${error.code}), so it was left in place with its verified copy kept. Already moved: ${moved.length}. Archive: ${archiveDir}.`, { cause: error });
+    }
+    moved.push(entry.originalPath);
+  }
+  return { archiveDir, moved, planned, refused };
+}
+
+// The checkout the operator is standing in, not the one this script file lives in,
+// so a reviewed copy of the script can act on another worktree of the same repository.
+function activeCheckout(cwd = process.cwd()) {
+  const result = spawnSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { encoding: "utf8", env: gitEnvironment() });
+  const [checkoutRoot, commonDir] = String(result.stdout || "").split(/\r?\n/);
+  if (result.status !== 0 || !checkoutRoot || !commonDir) {
+    throw new Error(`${cwd} is not inside a git checkout, so there is no active .agents/ to archive from.`);
+  }
+  return { checkoutRoot, commonDir };
+}
+
+// Archives live in the shared git directory: outside every worktree's active tree,
+// never tracked or scanned, and kept when a worktree is removed.
+function runImportedSkillArchive(expected, confirm) {
+  const { checkoutRoot, commonDir } = activeCheckout();
+  const targetRoot = path.join(checkoutRoot, ".agents");
+  const gitKnown = gitKnownTargetPaths(targetRoot, checkoutRoot);
+  const result = archiveImportedSkills({
+    checkoutRoot,
+    archiveRoot: path.join(commonDir, "crx-archive", "imported-skills"),
+    expectedKeys: [...expected.keys()],
+    trackedPaths: gitKnown.paths,
+    trackingKnown: gitKnown.known,
+    confirm,
+  });
+  for (const { name, reason } of result.refused) console.log(`KEPT ${name}: ${reason}.`);
+  if (confirm) {
+    console.log(result.moved.length > 0
+      ? `Archived ${result.moved.length} imported skill folder(s) from ${checkoutRoot} to ${result.archiveDir}; restore-map.json lists every file and its hash.`
+      : `Nothing to archive in ${checkoutRoot}.`);
+  } else {
+    for (const { name, fileCount } of result.planned) console.log(`WOULD ARCHIVE ${name} (${fileCount} file(s))`);
+    console.log(`DRY RUN: nothing changed. ${result.planned.length} folder(s) in ${checkoutRoot} would move to ${result.archiveDir}. Add --confirm to move them.`);
+  }
+  if (result.refused.length > 0) process.exitCode = 1;
 }
 
 function checkExpected(expected) {
@@ -458,8 +670,8 @@ function checkExpected(expected) {
   // the litter visible through `npm run agent-health` too. Its PASS matcher is
   // `/^PASS - \d+ .../m`, which still finds the verdict line below.
   if (foreignDirs.length > 0) {
-    console.log(`WARNING: ignoring ${foreignDirs.length} foreign .agents/skills/source-command-*/ director${foreignDirs.length === 1 ? "y" : "ies"} written by the Codex CLI /import feature - not generated here, safe to delete by hand.`);
-    console.log(`  Their text is mangled (claude -> Codex), so references like .Codex/hooks/ are broken. They are neither checked nor synced.`);
+    console.log(`WARNING: ignoring ${foreignDirs.length} foreign .agents/skills/source-command-*/ director${foreignDirs.length === 1 ? "y" : "ies"} written by the Codex CLI /import feature - preview moving them to the recoverable archive with: node scripts/sync-agent-workflows.mjs --archive-imported`);
+    console.log(`  Their text is mangled (claude -> Codex), so references like .Codex/hooks/ are broken, and Codex can still discover them. They are neither checked nor synced. Add --confirm to the command above to move them.`);
     for (const name of foreignDirs) console.log(`  - skills/${name}/`);
   }
   if (mismatches.length > 0) {
@@ -496,8 +708,15 @@ if (isEntryPoint(process.argv[1], import.meta.url)) {
   const expected = buildExpected();
   if (mode === "--write") writeExpected(expected);
   else if (mode === "--check") checkExpected(expected);
-  else {
-    console.error("Usage: node scripts/sync-agent-workflows.mjs --write|--check");
+  else if (mode === "--archive-imported") {
+    try {
+      runImportedSkillArchive(expected, process.argv.includes("--confirm"));
+    } catch (error) {
+      console.error(`FAIL ${error.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.error("Usage: node scripts/sync-agent-workflows.mjs --write|--check|--archive-imported [--confirm]");
     process.exit(2);
   }
 }

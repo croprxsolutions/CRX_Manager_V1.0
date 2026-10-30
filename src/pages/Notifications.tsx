@@ -182,9 +182,12 @@ export default function Notifications() {
           {notifications.map((n) => (
             <Card
               key={n.id}
+              role="button"
+              tabIndex={0}
               hover
               className={`cursor-pointer ${!n.is_read ? 'border-crx-green/30 bg-crx-green-tint/30' : ''}`}
               onClick={() => markAsRead(n)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); markAsRead(n); } }}
             >
               <div className="flex items-start gap-3">
                 <div
@@ -203,7 +206,7 @@ export default function Notifications() {
                       <span className="w-2 h-2 rounded-full bg-crx-green shrink-0" />
                     )}
                   </div>
-                  <p className="text-xs text-secondary mt-0.5 line-clamp-2">{n.message}</p>
+                  <p className={`text-xs text-secondary mt-0.5 ${n.notification_type === 'delivery_issue_reported' ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>{n.message}</p>
                   {n.sender_name && <p className="text-xs text-secondary mt-0.5">From {n.sender_name}</p>}
                   <p className="text-xs text-gray-400 mt-1">
                     {new Date(n.created_at).toLocaleString()}

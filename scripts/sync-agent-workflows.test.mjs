@@ -12,13 +12,17 @@
 // directory and never touches the real .agents/** tree.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs, { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  archiveImportedSkills,
   classifyExtras,
   commandTitle,
   gitEnvironment,
@@ -665,6 +669,366 @@ try {
     const parked = readFileSync(path.join(commandsRoot, "parked.md"), "utf8");
     assert.doesNotMatch(parked, /^---\r?\n/, "parked.md must not carry model/effort frontmatter");
     assert.equal(commandTitle(parked, "parked"), "Parked");
+  }
+
+  // --archive-imported moves Codex importer output out of the active skills directory
+  // into a verified, restorable archive, and refuses anything it cannot prove is
+  // importer litter. Junctions stand in for symlinks: they need no Windows privilege.
+  {
+    const sandbox = path.join(targetRoot, "archive");
+    let run = 0;
+    const freshCheckout = () => {
+      const checkoutRoot = path.join(sandbox, `checkout-${run += 1}`);
+      mkdirSync(path.join(checkoutRoot, ".agents", "skills"), { recursive: true });
+      writeFileSync(path.join(checkoutRoot, ".agents", "generated-manifest.json"), JSON.stringify({ version: 1, managed: [] }));
+      return checkoutRoot;
+    };
+    const addSkill = (checkoutRoot, name, body = `# ${name}\n`) => {
+      const dir = path.join(checkoutRoot, ".agents", "skills", name);
+      mkdirSync(path.join(dir, "agents"), { recursive: true });
+      writeFileSync(path.join(dir, "SKILL.md"), body);
+      writeFileSync(path.join(dir, "agents", "openai.yaml"), `name: ${name}\n`);
+      return dir;
+    };
+    const fingerprint = (root) => readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        const full = path.join(entry.parentPath, entry.name);
+        return `${path.relative(root, full)}:${createHash("sha256").update(readFileSync(full)).digest("hex")}`;
+      })
+      .sort();
+    const fullTree = (root) => readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `${path.relative(root, path.join(entry.parentPath, entry.name))}${path.sep}`)
+      .concat(fingerprint(root))
+      .sort();
+    const refusedNames = (result) => result.refused.map(({ name }) => name).sort();
+
+    // Preview: names the work, and writes nothing anywhere.
+    {
+      const checkoutRoot = freshCheckout();
+      addSkill(checkoutRoot, "source-command-ship");
+      addSkill(checkoutRoot, "ship");
+      const archiveRoot = path.join(sandbox, "preview-archive");
+      const before = fingerprint(checkoutRoot);
+      const result = archiveImportedSkills({ checkoutRoot, archiveRoot });
+      assert.deepEqual(result.planned, [{ name: "source-command-ship", fileCount: 2 }]);
+      assert.deepEqual(result.moved, []);
+      assert.deepEqual(fingerprint(checkoutRoot), before, "a preview must not change the checkout");
+      assert.equal(existsSync(archiveRoot), false, "a preview must not create the archive");
+    }
+
+    // A real move: importer folders leave, everything else stays, and the restore map
+    // holds a hash taken independently here for every byte that moved.
+    {
+      const checkoutRoot = freshCheckout();
+      const source = addSkill(checkoutRoot, "source-command-ship", "old ship\r\nsecond line\n");
+      const originalHashes = fingerprint(source);
+      const canonical = addSkill(checkoutRoot, "ship");
+      const archiveRoot = path.join(sandbox, "real-archive");
+      const result = archiveImportedSkills({ checkoutRoot, archiveRoot, confirm: true, stamp: "first" });
+      assert.deepEqual(result.moved, [".agents/skills/source-command-ship"]);
+      assert.equal(existsSync(source), false, "the importer folder must leave the active directory");
+      assert.equal(existsSync(path.join(canonical, "SKILL.md")), true, "a canonical skill must stay");
+      const archived = path.join(archiveRoot, "first", "skills", "source-command-ship");
+      assert.deepEqual(fingerprint(archived), originalHashes, "the archive must hold the exact bytes");
+      assert.equal(readFileSync(path.join(archived, "SKILL.md"), "utf8"), "old ship\r\nsecond line\n");
+      const map = JSON.parse(readFileSync(path.join(archiveRoot, "first", "restore-map.json"), "utf8"));
+      assert.equal(map.entries[0].originalPath, ".agents/skills/source-command-ship");
+      assert.equal(map.entries[0].archivedPath, "skills/source-command-ship");
+      assert.deepEqual(
+        map.entries[0].files.map((file) => `${path.normalize(file.path)}:${file.sha256}`).sort(),
+        originalHashes,
+        "the restore map must record every file and its hash",
+      );
+      assert.match(map.restore, /archivedPath back to originalPath/);
+    }
+
+    // Empty folders are part of the tree: archived, listed in the restore map, and
+    // back in place after following the map's restore instruction.
+    {
+      const checkoutRoot = freshCheckout();
+      const source = addSkill(checkoutRoot, "source-command-ship");
+      mkdirSync(path.join(source, "assets", "empty", "deeper"), { recursive: true });
+      mkdirSync(path.join(source, "notes"));
+      const before = fullTree(source);
+      const archiveRoot = path.join(sandbox, "empty-dirs-archive");
+      archiveImportedSkills({ checkoutRoot, archiveRoot, confirm: true, stamp: "dirs" });
+      assert.equal(existsSync(source), false);
+      const map = JSON.parse(readFileSync(path.join(archiveRoot, "dirs", "restore-map.json"), "utf8"));
+      assert.deepEqual(map.entries[0].directories, ["agents", "assets", "assets/empty", "assets/empty/deeper", "notes"]);
+      const archived = path.join(archiveRoot, "dirs", map.entries[0].archivedPath);
+      assert.deepEqual(fullTree(archived), before, "the archive must hold the exact tree");
+      cpSync(archived, path.join(checkoutRoot, map.entries[0].originalPath), { recursive: true });
+      assert.deepEqual(fullTree(source), before, "a restore must give the exact tree back");
+
+      // A folder that appears while files are being copied keeps the source in place.
+      const late = freshCheckout();
+      const lateSource = addSkill(late, "source-command-ship");
+      const realCopy = fs.copyFileSync;
+      fs.copyFileSync = (...args) => {
+        mkdirSync(path.join(lateSource, "late", "empty"), { recursive: true });
+        return realCopy(...args);
+      };
+      syncBuiltinESMExports();
+      try {
+        assert.throws(() => archiveImportedSkills({ checkoutRoot: late, archiveRoot: path.join(sandbox, "late-archive"), confirm: true }), /changed while it was being archived/);
+      } finally {
+        fs.copyFileSync = realCopy;
+        syncBuiltinESMExports();
+      }
+      assert.equal(existsSync(path.join(lateSource, "late", "empty")), true, "a late empty folder must not be lost");
+
+      // A file written after the last check, right before the rename, is not in the
+      // verified snapshot, and it survives with the original folder in the archive.
+      const lastMoment = freshCheckout();
+      const lastSource = addSkill(lastMoment, "source-command-ship");
+      const lastBefore = fullTree(lastSource);
+      const lastArchive = path.join(sandbox, "last-moment-archive");
+      const realRename = fs.renameSync;
+      fs.renameSync = (...args) => {
+        writeFileSync(path.join(lastSource, "late.md"), "written at the last moment\n");
+        return realRename(...args);
+      };
+      syncBuiltinESMExports();
+      let lastResult;
+      try {
+        lastResult = archiveImportedSkills({ checkoutRoot: lastMoment, archiveRoot: lastArchive, confirm: true, stamp: "last" });
+      } finally {
+        fs.renameSync = realRename;
+        syncBuiltinESMExports();
+      }
+      assert.deepEqual(lastResult.moved, [".agents/skills/source-command-ship"]);
+      assert.equal(existsSync(lastSource), false, "the active skill path must be gone");
+      const lastMap = JSON.parse(readFileSync(path.join(lastArchive, "last", "restore-map.json"), "utf8"));
+      assert.equal(lastMap.entries[0].originalBackupPath, "originals/source-command-ship");
+      assert.match(lastMap.originals, /present only after that folder's move succeeded/);
+      const retained = path.join(lastArchive, "last", lastMap.entries[0].originalBackupPath);
+      assert.equal(readFileSync(path.join(retained, "late.md"), "utf8"), "written at the last moment\n");
+      assert.deepEqual(fullTree(retained).filter((entry) => !entry.startsWith("late.md:")), lastBefore, "the original tree must stay recoverable");
+      assert.deepEqual(fullTree(path.join(lastArchive, "last", lastMap.entries[0].archivedPath)), lastBefore, "the snapshot holds what was verified");
+
+      // A rename that cannot be atomic stops the run: no copy-and-delete fallback, the
+      // moved folder is retained, and the map's backup path exists only for that one.
+      const acrossVolumes = freshCheckout();
+      const pair = ["source-command-a", "source-command-b"].map((name) => addSkill(acrossVolumes, name));
+      const pairTrees = pair.map(fullTree);
+      const volumeArchive = path.join(sandbox, "volume-archive");
+      let renames = 0;
+      fs.renameSync = (...args) => {
+        renames += 1;
+        if (renames === 2) throw Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" });
+        return realRename(...args);
+      };
+      syncBuiltinESMExports();
+      try {
+        assert.throws(() => archiveImportedSkills({ checkoutRoot: acrossVolumes, archiveRoot: volumeArchive, confirm: true, stamp: "volume" }), /could not be moved in one step \(EXDEV\)/);
+      } finally {
+        fs.renameSync = realRename;
+        syncBuiltinESMExports();
+      }
+      const volumeMap = JSON.parse(readFileSync(path.join(volumeArchive, "volume", "restore-map.json"), "utf8"));
+      const states = volumeMap.entries.map((entry, index) => ({
+        active: existsSync(pair[index]),
+        retained: existsSync(path.join(volumeArchive, "volume", entry.originalBackupPath)),
+      }));
+      assert.deepEqual(states.map(({ active }) => active).sort(), [false, true], "exactly one folder moved");
+      assert.ok(states.every(({ active, retained }) => active !== retained), "a folder is in one place, and the map's backup path exists only after its move");
+      volumeMap.entries.forEach((entry, index) => {
+        assert.deepEqual(fullTree(path.join(volumeArchive, "volume", entry.archivedPath)), pairTrees[index], "the verified copy must be kept");
+        const place = states[index].active ? pair[index] : path.join(volumeArchive, "volume", entry.originalBackupPath);
+        assert.deepEqual(fullTree(place), pairTrees[index], "the original must be untouched wherever it is");
+      });
+    }
+
+    // Ownership: tracked, staged-then-deleted, generated now, generated at the last
+    // sync, and unknown tracking each keep the folder in place.
+    {
+      const checkoutRoot = freshCheckout();
+      addSkill(checkoutRoot, "source-command-tracked");
+      addSkill(checkoutRoot, "source-command-deleted");
+      addSkill(checkoutRoot, "source-command-generated");
+      addSkill(checkoutRoot, "source-command-prior");
+      addSkill(checkoutRoot, "source-command-loose");
+      writeFileSync(path.join(checkoutRoot, ".agents", "generated-manifest.json"), JSON.stringify({
+        version: 1,
+        managed: ["skills/source-command-prior/SKILL.md"],
+      }));
+      const result = archiveImportedSkills({
+        checkoutRoot,
+        archiveRoot: path.join(sandbox, "ownership-archive"),
+        expectedKeys: ["skills/source-command-generated/SKILL.md"],
+        trackedPaths: ["skills/source-command-tracked/agents/openai.yaml", "skills/source-command-deleted/gone.md"],
+        confirm: true,
+      });
+      assert.deepEqual(result.moved, [".agents/skills/source-command-loose"]);
+      assert.deepEqual(refusedNames(result), [
+        "source-command-deleted",
+        "source-command-generated",
+        "source-command-prior",
+        "source-command-tracked",
+      ]);
+      assert.equal(existsSync(path.join(checkoutRoot, ".agents", "skills", "source-command-tracked", "SKILL.md")), true,
+        "one tracked file must hold back its whole folder");
+
+      const unknown = freshCheckout();
+      addSkill(unknown, "source-command-ship");
+      const blind = archiveImportedSkills({
+        checkoutRoot: unknown,
+        archiveRoot: path.join(sandbox, "unknown-archive"),
+        trackingKnown: false,
+        confirm: true,
+      });
+      assert.deepEqual(blind.moved, [], "unknown tracking must move nothing");
+      assert.deepEqual(refusedNames(blind), ["source-command-ship"]);
+      assert.match(blind.refused[0].reason, /could not say who owns it/);
+
+      const corrupt = freshCheckout();
+      addSkill(corrupt, "source-command-ship");
+      writeFileSync(path.join(corrupt, ".agents", "generated-manifest.json"), "{ not json");
+      const unreadable = archiveImportedSkills({ checkoutRoot: corrupt, archiveRoot: path.join(sandbox, "corrupt-archive"), confirm: true });
+      assert.deepEqual(unreadable.moved, [], "an unreadable manifest must move nothing");
+    }
+
+    // Links: a link inside a folder, and a folder that IS a link, are reported and
+    // kept, and the target behind the link stays whole.
+    {
+      const checkoutRoot = freshCheckout();
+      const outside = path.join(sandbox, "outside-target");
+      mkdirSync(outside, { recursive: true });
+      writeFileSync(path.join(outside, "precious.md"), "do not move\n");
+      symlinkSync(outside, path.join(addSkill(checkoutRoot, "source-command-nested"), "linked"), "junction");
+      symlinkSync(outside, path.join(checkoutRoot, ".agents", "skills", "source-command-whole"), "junction");
+      const result = archiveImportedSkills({ checkoutRoot, archiveRoot: path.join(sandbox, "link-archive"), confirm: true });
+      assert.deepEqual(result.moved, []);
+      assert.deepEqual(refusedNames(result), ["source-command-nested", "source-command-whole"]);
+      assert.equal(readFileSync(path.join(outside, "precious.md"), "utf8"), "do not move\n");
+      assert.equal(existsSync(path.join(checkoutRoot, ".agents", "skills", "source-command-nested", "SKILL.md")), true);
+    }
+
+    // Containment: an archive Codex or Claude would still scan is refused, as is a
+    // linked skills directory, which would aim the move at another checkout.
+    {
+      const checkoutRoot = freshCheckout();
+      const source = addSkill(checkoutRoot, "source-command-ship");
+      for (const archiveRoot of [
+        path.join(checkoutRoot, ".agents", "skills", "archive"),
+        path.join(checkoutRoot, ".agents", "archive"),
+        path.join(checkoutRoot, ".claude", "skills", "archive"),
+        // A leading ".." in a folder's name is not a step up out of the tree.
+        path.join(checkoutRoot, ".claude", "skills", "..archive"),
+      ]) {
+        assert.throws(() => archiveImportedSkills({ checkoutRoot, archiveRoot, confirm: true }), /inside an active skills tree/);
+        assert.equal(existsSync(archiveRoot), false, `${archiveRoot} must not be created`);
+      }
+      assert.equal(existsSync(path.join(source, "SKILL.md")), true);
+
+      // A true sibling with the same kind of name is outside, so a preview accepts it.
+      const sibling = path.join(checkoutRoot, ".claude", "..skills-archive");
+      assert.deepEqual(archiveImportedSkills({ checkoutRoot, archiveRoot: sibling }).refused, []);
+      assert.equal(existsSync(sibling), false, "a preview must not create the archive");
+
+      // An archive root that only reaches the active tree through a link.
+      const viaLink = path.join(sandbox, "link-into-agents");
+      symlinkSync(path.join(checkoutRoot, ".agents"), viaLink, "junction");
+      assert.throws(() => archiveImportedSkills({ checkoutRoot, archiveRoot: viaLink, confirm: true }), /inside an active skills tree/);
+      assert.equal(existsSync(path.join(source, "SKILL.md")), true);
+
+      // A new path that crosses an existing link into the active tree is refused before
+      // any folder is made there, in a preview as well as a real run.
+      for (const [active, into] of [[path.join(checkoutRoot, ".agents", "skills"), "link-into-skills"], [path.join(checkoutRoot, ".claude", "skills"), "link-into-claude-skills"]]) {
+        mkdirSync(active, { recursive: true });
+        const link = path.join(sandbox, into);
+        symlinkSync(active, link, "junction");
+        const before = readdirSync(active);
+        for (const confirm of [false, true]) {
+          assert.throws(() => archiveImportedSkills({ checkoutRoot, archiveRoot: path.join(link, "new", "deep"), confirm }), /inside an active skills tree/);
+        }
+        assert.deepEqual(readdirSync(active), before, "no folder may be created through the link");
+      }
+
+      // A link with nothing behind it cannot be followed by mkdir into the active tree.
+      const dangling = path.join(sandbox, "dangling-archive");
+      symlinkSync(path.join(checkoutRoot, ".claude", "skills", "not-yet"), dangling, "junction");
+      assert.throws(() => archiveImportedSkills({ checkoutRoot, archiveRoot: path.join(dangling, "new"), confirm: true }), /ENOENT/);
+      assert.equal(existsSync(path.join(checkoutRoot, ".claude", "skills", "not-yet")), false);
+      assert.equal(existsSync(path.join(source, "SKILL.md")), true);
+
+      // A link that appears after the first check is caught by the check after mkdir.
+      const raced = path.join(sandbox, "raced-link");
+      const racedArchive = path.join(raced, "new");
+      const realMkdir = fs.mkdirSync;
+      fs.mkdirSync = (target, ...rest) => {
+        if (target === racedArchive) symlinkSync(path.join(checkoutRoot, ".claude", "skills"), raced, "junction");
+        return realMkdir(target, ...rest);
+      };
+      syncBuiltinESMExports();
+      try {
+        assert.throws(() => archiveImportedSkills({ checkoutRoot, archiveRoot: racedArchive, confirm: true }), /inside an active skills tree/);
+      } finally {
+        fs.mkdirSync = realMkdir;
+        syncBuiltinESMExports();
+      }
+      assert.equal(existsSync(path.join(source, "SKILL.md")), true);
+
+      const linkedCheckout = path.join(sandbox, "linked-checkout");
+      mkdirSync(linkedCheckout);
+      symlinkSync(path.join(checkoutRoot, ".agents"), path.join(linkedCheckout, ".agents"), "junction");
+      assert.throws(() => archiveImportedSkills({ checkoutRoot: linkedCheckout, archiveRoot: path.join(sandbox, "linked-archive"), confirm: true }), /through a link/);
+      assert.equal(existsSync(path.join(source, "SKILL.md")), true);
+
+      const notSynced = path.join(sandbox, "not-synced");
+      mkdirSync(path.join(notSynced, ".agents", "skills", "source-command-mine"), { recursive: true });
+      assert.throws(() => archiveImportedSkills({ checkoutRoot: notSynced, archiveRoot: path.join(sandbox, "foreign-archive"), confirm: true }), /not a synced CRX checkout/);
+    }
+
+    // Collision: reusing an archive folder fails before anything is copied or removed.
+    {
+      const checkoutRoot = freshCheckout();
+      const source = addSkill(checkoutRoot, "source-command-ship");
+      const archiveRoot = path.join(sandbox, "collision-archive");
+      mkdirSync(path.join(archiveRoot, "taken"), { recursive: true });
+      assert.throws(() => archiveImportedSkills({ checkoutRoot, archiveRoot, confirm: true, stamp: "taken" }), /EEXIST/);
+      assert.equal(existsSync(path.join(source, "SKILL.md")), true, "a collision must leave the source in place");
+      assert.deepEqual(readdirSync(path.join(archiveRoot, "taken")), [], "a collision must not write into the earlier archive");
+    }
+
+    // The CLI acts on the checkout it is run from, not the one holding this script, and
+    // resolves a linked worktree's archive to the shared git directory.
+    {
+      const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "sync-agent-workflows.mjs");
+      const repo = path.join(sandbox, "cli-repo");
+      const worktree = path.join(sandbox, "cli-worktree");
+      mkdirSync(path.join(repo, ".agents", "skills"), { recursive: true });
+      const inRepo = (...args) => {
+        const result = spawnSync("git", ["-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid", ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      writeFileSync(path.join(repo, ".agents", "generated-manifest.json"), JSON.stringify({ version: 1, managed: [] }));
+      addSkill(repo, "source-command-tracked");
+      inRepo("init", "-q");
+      inRepo("add", "--", ".agents");
+      inRepo("commit", "-q", "-m", "seed");
+      inRepo("worktree", "add", "-q", worktree);
+      addSkill(worktree, "source-command-ship");
+      const cli = (...args) => spawnSync(process.execPath, [scriptPath, "--archive-imported", ...args], { cwd: worktree, encoding: "utf8" });
+
+      const preview = cli();
+      assert.equal(preview.status, 1, preview.stdout + preview.stderr);
+      assert.match(preview.stdout, /KEPT source-command-tracked: it is tracked, staged, or owned/);
+      assert.match(preview.stdout, /WOULD ARCHIVE source-command-ship \(2 file\(s\)\)/);
+      assert.match(preview.stdout, /DRY RUN: nothing changed/);
+      assert.equal(existsSync(path.join(worktree, ".agents", "skills", "source-command-ship", "SKILL.md")), true);
+      assert.equal(existsSync(path.join(repo, ".git", "crx-archive")), false);
+
+      const confirmed = cli("--confirm");
+      assert.match(confirmed.stdout, /Archived 1 imported skill folder/);
+      assert.equal(existsSync(path.join(worktree, ".agents", "skills", "source-command-ship")), false);
+      assert.equal(existsSync(path.join(worktree, ".agents", "skills", "source-command-tracked", "SKILL.md")), true);
+      const stamps = readdirSync(path.join(repo, ".git", "crx-archive", "imported-skills"));
+      assert.equal(stamps.length, 1, "the archive must land in the shared git directory");
+      assert.equal(existsSync(path.join(repo, ".git", "crx-archive", "imported-skills", stamps[0], "restore-map.json")), true);
+    }
   }
 } finally {
   rmSync(targetRoot, { recursive: true, force: true });

@@ -62,6 +62,16 @@ function withThreadDefault(runGh) {
       } catch { /* not meta — fall through */ }
       return JSON.stringify({ number: 1, url: "https://github.com/fixture/repo/pull/1" });
     }
+    // The teammate comment read: default to none, unless the fixture answered it.
+    if (Array.isArray(args) && args[0] === "api" && args[1] === "graphql" && args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))) {
+      try {
+        if (JSON.parse(out)?.data?.repository?.pullRequest?.comments) return out;
+      } catch { /* not comment data — fall through to the default */ }
+      const empty = { pageInfo: { hasPreviousPage: false }, nodes: [] };
+      return JSON.stringify({ data: { repository: { pullRequest: {
+        author: { login: "masonwells1" }, comments: empty, reviews: empty, reviewThreads: empty,
+      } } } });
+    }
     if (Array.isArray(args) && args[0] === "api" && args[1] === "graphql" && args.some((a) => /reviewThreads/.test(String(a)))) {
       try {
         const pr = JSON.parse(out)?.data?.repository?.pullRequest;
@@ -599,6 +609,64 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
+  // A teammate's comment is the only thing wrong with this otherwise mergeable PR.
+  const teammateAnswer = (comments) => (args) => (
+    args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
+      ? JSON.stringify({ data: { repository: { pullRequest: {
+        author: { login: "masonwells1" },
+        comments: { pageInfo: { hasPreviousPage: false }, nodes: comments },
+        reviews: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+        reviewThreads: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+      } } } })
+      : ordinaryPrJson
+  );
+  const tahaLink = "https://github.com/o/r/pull/5#issuecomment-12";
+  const tahaComment = { author: { __typename: "User", login: "TahaKhanAbdalli" }, url: tahaLink, body: "Review (Taha): one blocking case" };
+  const unanswered = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: teammateAnswer([tahaComment]),
+  });
+  assert.equal(unanswered.blocked, true, "an unanswered teammate comment refuses the merge");
+  assert.match(unanswered.reason, /@tahakhanabdalli: https:[^\n]*issuecomment-12/);
+  assert.equal(evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: teammateAnswer([tahaComment, {
+      author: { __typename: "User", login: "masonwells1" }, url: "https://github.com/o/r/pull/5#issuecomment-13", body: `${tahaLink} fixed`,
+    }]),
+  }).blocked, false, "an answer linking the comment clears it");
+  const unreadableComments = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: (args) => {
+      if (args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))) throw new Error("graphql down");
+      return ordinaryPrJson;
+    },
+  });
+  assert.equal(unreadableComments.blocked, true, "a failed comment read refuses the merge");
+  assert.match(unreadableComments.reason, /could not read this pull request's comments/);
+  const partialComments = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: (args) => {
+      const out = teammateAnswer([])(args);
+      return out === ordinaryPrJson ? out : JSON.stringify({ ...JSON.parse(out), errors: [{ message: "body unavailable" }] });
+    },
+  });
+  assert.equal(partialComments.blocked, true, "a comment read carrying GraphQL errors refuses the merge");
+  assert.match(partialComments.reason, /could not read this pull request's comments/);
+  const cutOffComments = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: (args) => (
+      args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
+        ? JSON.stringify({ data: { repository: { pullRequest: {
+          author: { login: "masonwells1" },
+          comments: { pageInfo: { hasPreviousPage: true }, nodes: [] },
+          reviews: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+          reviewThreads: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+        } } } })
+        : ordinaryPrJson
+    ),
+  });
+  assert.equal(cutOffComments.blocked, true, "a comment list too long to read refuses the merge");
+  assert.match(cutOffComments.reason, /more comments than the gate reads at once/);
   // Sol once before the PR (Mason, 2026-10-29): a proof of an earlier commit covers
   // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
   for (const [later, expectBlocked, label] of [
@@ -1366,7 +1434,21 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 20, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 22, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  // session-context-reminder writes the rules every later Codex session starts from,
+  // so Codex may not edit it either.
+  for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {
+    for (const toolName of ["Write", "Edit"]) {
+      assert.equal(evaluateProductionAction({ toolName, toolInput: { file_path: file } }).blocked, true,
+        `Codex may not ${toolName} the startup reminder: ${file}`);
+    }
+    assert.equal(evaluateProductionAction({ toolName: "apply_patch", toolInput: `*** Begin Patch\n*** Update File: ${file}\n@@\n-a\n+b\n*** End Patch` }).blocked, true,
+      `nor patch it: ${file}`);
+  }
+  assert.equal(evaluateProductionAction({ toolName: "PowerShell", toolInput: { command: "Set-Content .claude/hooks/session-context-reminder.mjs -Value ''" } }).blocked, true,
+    "nor overwrite the startup reminder from the shell");
+  assert.equal(evaluateProductionAction({ toolName: "Write", toolInput: { file_path: ".claude/hooks/session-context-reminder.test.mjs" } }).blocked, false,
+    "the reminder's test stays editable");
   // app-repo-identity decides which repository the push gate and the CodeRabbit
   // waiver treat as the app repo, and loads at startup through codex-push-lib
   // (Codex App P1 on #1149): Codex may not edit it.
@@ -2755,7 +2837,10 @@ try {
       }
       if (Array.isArray(args) && args.includes("graphql")) {
         return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: risky.sha,
-          reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } } });
+          author: { login: "masonwells1" },
+          comments: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+          reviews: { pageInfo: { hasPreviousPage: false }, nodes: [] },
+          reviewThreads: { pageInfo: { hasPreviousPage: false, hasNextPage: false, endCursor: null }, nodes: [] } } } } });
       }
       if (isAdvisoryMetaCall(args)) return advisoryMetaJson;
       return mainPrJson;
@@ -2823,7 +2908,8 @@ try {
     runGh: chainedControlGh,
   });
   assert.equal(chainedControlVerdict.blocked, false, "CONTROL: two clean merges are allowed");
-  assert.equal(chainedControlAttempts, 2, "CONTROL: the advisory runs once per merge AFTER both cleared their hard gates — deferred, not dropped");
+  // Two reads per merge: the review threads, then the teammate comments.
+  assert.equal(chainedControlAttempts, 4, "CONTROL: the advisory runs once per merge AFTER both cleared their hard gates — deferred, not dropped");
 
   // ── round 6: ONE request, gated once, however many readings name it ────────
   // splitCommandSegments returns a UNION of readings, so any command carrying a
@@ -2838,7 +2924,7 @@ try {
     if (Array.isArray(args) && args.includes("graphql")) {
       // Count the thread lookup (one per advisory run); the money-PR requirement
       // read that follows it (2026-10-21) falls to the default answer.
-      if (args.some((a) => /reviewThreads/.test(String(a)))) dedupeAdvisoryAttempts += 1;
+      if (args.some((a) => /reviewThreads\(first/.test(String(a)))) dedupeAdvisoryAttempts += 1;
       return NO_THREADS_JSON; // a complete, empty read (a failed one denies since 2026-10-19)
     }
     if (isAdvisoryMetaCall(args)) return advisoryMetaJson;
@@ -4404,6 +4490,98 @@ try {
     );
     console.log(`TRANSCRIPT BASEOID: non-SHA base blocked=${notASha.blocked}; guidance names exact base=true`);
   }
+
+  // A double-quoted search pattern is data, not a pipeline: the harness audit of
+  // 2026-10-30 saw the batched read below refused, naming `SessionStart` as a
+  // command. Each one must now pass the whole gate.
+  for (const command of [
+    'rg -n "SubagentStart|PreCompact|PostCompact|SessionStart" .codex/hooks.json',
+    'Get-Content package.json; rg -n "SubagentStart|PreCompact|PostCompact|SessionStart" .codex/hooks.json',
+    'Get-Content package.json; Get-Content .codex/hooks.json; rg -n "harness|parity|codex|hook|agent" package.json',
+    'Get-Content package.json; rg -n "needs review|was skipped" .codex/hooks.json',
+    'Get-Content README.md; grep -n "a;b" .codex/hooks.json',
+    'Get-Content package.json; rg -n "^a|^b" package.json',
+    'Get-Content README.md; Get-Content package.json | Select-String "a|b"',
+    "Get-Content README.md; rg -e 'end$' -e 'start$' package.json",
+  ]) {
+    const verdict = evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } });
+    assert.equal(verdict.blocked, false, `a batched read must not be refused: ${command} -> ${verdict.reason}`);
+  }
+  // Named limits, pinned so a change here is a decision: a single-quoted alternation
+  // near a protected name stays refused (no hook input says which shell runs it, and
+  // cmd.exe would run each piece), and a `\"` or a comment anywhere turns the
+  // double-quoted exception off. The forms in the list above are the alternatives.
+  for (const [command, alternative] of [
+    ["rg -n 'harness|parity|codex|hook|agent' package.json", 'rg -n "harness|parity|codex|hook|agent" package.json'],
+    ["Get-Content README.md; grep -n 'a;b' .codex/hooks.json", 'Get-Content README.md; grep -n "a;b" .codex/hooks.json'],
+    ['Get-Content package.json; rg -n "a\\"|agent" package.json', 'Get-Content package.json; rg -n "a|agent" package.json'],
+    ['Get-Content package.json; rg -n "a|agent" package.json # he said hi', 'Get-Content package.json; rg -n "a|agent" package.json'],
+  ]) {
+    assert.equal(evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } }).blocked, true, `named limit changed: ${command}`);
+    const verdict = evaluateProductionAction({ toolName: "PowerShell", toolInput: { command: alternative } });
+    assert.equal(verdict.blocked, false, `the documented alternative must pass: ${alternative} -> ${verdict.reason}`);
+  }
+  // The same quoting must buy no write. Every form here reaches a protected file
+  // in at least one shell the guard cannot rule out, or hands it to a writer.
+  for (const command of [
+    "rg 'a|b' package.json | tee .codex/hooks.json",
+    "rg 'a|b' package.json; tee .codex/hooks.json",
+    "rg 'a|b' .codex/hooks.json | xargs tee",
+    'rg "a|b" .codex/hooks.json | xargs tee',
+    // cmd.exe does not treat `'` as a quote, so these are real pipelines there.
+    "rg 'x | tee .codex/hooks.json | rg y'",
+    "rg 'a|tee .codex/hooks.json 'b",
+    "rg 'a b|tee x' package.json",
+    // A one-word piece is an interpreter with no arguments, which executes its stdin.
+    // Classified here only; none of these strings is ever run.
+    "rg 'a|lua|b' .codex/hooks.json",
+    "rg 'a|tclsh|b' package.json",
+    "Get-Content README.md; rg 'a|lua|b' package.json",
+    "rg 'a|bash|b' README.md",
+    "rg 'a|python|b' package.json",
+    // A `"` in single quotes re-pairs cmd.exe's double quotes, and %X% can hold one.
+    `rg '"' "a|lua|b" package.json`,
+    'rg "a|%X%|b" package.json',
+    // cmd.exe's `^"` leaves the quote unopened; PowerShell's `\"` closes it.
+    'rg ^"a|tee .codex/hooks.json|b" x',
+    'rg "a\\"|tee .codex/hooks.json',
+    // Expansions stay live inside double quotes, and cmd.exe expands %X% anywhere.
+    'rg "a|$(tee .codex/hooks.json)" package.json',
+    'rg "a|`tee .codex/hooks.json`" package.json',
+    "rg 'a|%X%|b' package.json",
+    "rg 'a|b>package.json|c' x",
+    "rg 'a|b' .codex/hooks.json > .codex/hooks.json",
+    // Not a search: the exception must not reach these.
+    "tee 'a|b' .codex/hooks.json",
+    "python 'a|b' package.json",
+    "tee 'a b|rg x' 'c|d' .codex/hooks.json",
+    `bash -c "rg 'a|b' x; tee 'c|d' .codex/hooks.json"`,
+    "rg 'a|tee' .codex/hooks.json | bash",
+  ]) {
+    const verdict = evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } });
+    assert.equal(verdict.blocked, true, `quoting must not hide a write: ${command}`);
+  }
+  // Each form makes at least one shell pair quotes differently from a left-to-right
+  // scan, so the separators must stay separators. Classified here only; none of these
+  // strings is ever run.
+  const quotePairingWrites = [
+    'rg "$(echo ")"; tee .codex/hooks.json; echo "(")"',
+    'rg "$(echo ")"; tee .codex/./hooks.json; echo "(")"',
+    'rg "$(echo ")"; Tee-Object (Join-Path .codex hooks.json); echo "(")"',
+    'rg foo # "\nrg bar; tee .codex/./hooks.json # "',
+    'rg %X%"a|tee .codex/hooks.json|b"',
+    'rg "a|tee .codex/hooks.json|b"%X%',
+    'rg --% "a|tee .codex/hooks.json|b"',
+    'rg !x"a|tee .codex/hooks.json|b"',
+    'rg a <<E\n"\nE\nrg b; tee .codex/./hooks.json\nrg c <<E\n"\nE',
+    'rg x @"\n"\n"@; tee .codex/./hooks.json; rg "y"',
+    // cmd.exe reads line by line: a comment word hides the quote, and a quote never
+    // survives a line end, and a caret at a line end escapes the next line's quote.
+    'rem "\nrg bar; tee .codex/./hooks.json & rem "',
+    'rg "a\nrg b|tee .codex/./hooks.json"',
+    'rg ^\n"a|tee .codex/hooks.json|b"',
+  ].filter((command) => !evaluateProductionAction({ toolName: "PowerShell", toolInput: { command } }).blocked);
+  assert.deepEqual(quotePairingWrites, [], "syntax that changes quote pairing must keep every separator");
 
   console.log(`TRANSCRIPT DENY (no proof): exit=${deniedProcess.status} stdout=${deniedProcess.stdout}`);
   console.log(`TRANSCRIPT ALLOW (valid wrapper-shaped proof): exit=${allowedProcess.status} stdout=${JSON.stringify(allowedProcess.stdout)}`);

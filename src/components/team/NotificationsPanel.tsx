@@ -162,6 +162,10 @@ export default function NotificationsPanel() {
     if (notification.related_entity_type === 'team_note' && notification.related_entity_id) {
       setIsOpen(false);
       navigate(`/team-board?note=${notification.related_entity_id}`);
+    } else if (notification.notification_type === 'delivery_issue_reported'
+      && notification.related_entity_type === 'delivery' && notification.related_entity_id) {
+      setIsOpen(false);
+      navigate(`/deliveries/${notification.related_entity_id}`);
     }
   };
 
@@ -264,7 +268,7 @@ export default function NotificationsPanel() {
                       !notification.is_read ? 'bg-blue-50/50' : ''
                     }`}
                     onClick={() => handleNotificationClick(notification)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNotificationClick(notification); } }}
+                    onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNotificationClick(notification); } }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
@@ -276,7 +280,7 @@ export default function NotificationsPanel() {
                             {notification.title}
                           </p>
                         </div>
-                        <p className="text-xs text-secondary mt-1 line-clamp-2">
+                        <p className={`text-xs text-secondary mt-1 ${notification.notification_type === 'delivery_issue_reported' ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>
                           {notification.message}
                         </p>
                         {notification.sender_name && (

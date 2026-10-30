@@ -28,6 +28,11 @@
 > main commits no review or CI run saw together with it. Wherever a block below says "the head containing
 > GitHub's real base" or "base containment" for a Sol-proven merge, read this rule instead.
 >
+> **A teammate's PR comment needs an answer (Mason, 2026-10-30).** Both merge gates refuse while a human other than
+> the PR's author and `masonwells1` has a comment, review or thread reply with no comment from a different human
+> containing its link (`.claude/hooks/teammate-comments-lib.mjs`). A failed read refuses and the agent retries; a list
+> over 100 comments refuses and needs Mason's decision. A merge outside the local hooks, such as GitHub's button, skips this.
+>
 > **CodeRabbit is advisory (Mason, 2026-10-19, "cut coderabbit volume") — amends both blocks below.** The merge
 > gates (`pr-merge-guard.mjs`, the Codex `production-action-guard.mjs`) and the migration landing gate
 > (`migration-landing-gate-lib.mjs`) no longer require CodeRabbit `APPROVED` on the exact head; the helper

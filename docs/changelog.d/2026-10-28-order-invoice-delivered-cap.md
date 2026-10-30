@@ -11,7 +11,7 @@ intentionally untouched during parallel work.
 - Return credits remain supported and do not authorize a second sale of the same
   delivered units. A new physical delivery supplies any replacement sale allowance.
 - Quick-delivery drafts retain their approved planned-quantity exception; posting
-  still requires completion. Delivery cancellation/void automation (3.5), partial
+  still requires completion. Delivery cancellation/void credit automation (3.5), partial
   split billing (4.1-4.3), and application-only caps (5.3) are separate work.
 - The Order page no longer offers an invoice action before fulfillment. It explains
   delivery-first billing and prepay; delivered field-split billing stays available.

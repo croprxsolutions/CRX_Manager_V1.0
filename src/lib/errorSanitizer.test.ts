@@ -74,6 +74,11 @@ describe('sanitizeError', () => {
       .toBe('Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay');
   });
 
+  it('tells the user to void the posted invoice before voiding or cancelling its delivery', () => {
+    expect(sanitizeError('DELIVERY_HAS_POSTED_INVOICE: void the posted invoice for delivery D-1 before voiding or cancelling it'))
+      .toBe('Nothing was changed. This delivery has a posted invoice. Void that invoice first, then void or cancel the delivery');
+  });
+
   it('explains an incomplete order invoice line separately from the delivered cap', () => {
     expect(sanitizeError('ORDER_INVOICE_LINE_INVALID: a non-product line requires a charge type'))
       .toBe('Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line');

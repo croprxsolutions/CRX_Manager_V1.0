@@ -5,10 +5,14 @@
 -- Existing per-delivery caps, order/delivery exclusivity and split provenance remain.
 -- Quick-delivery drafts are the approved exception; their existing per-delivery cap
 -- bounds planned quantities and refuses posting before completion.
--- Voiding or reducing a completed delivery is deliberately NOT blocked here: void_delivery
--- keeps a billed delivery voidable and warns (posted_invoices_exist); that rule is to-do 3.5.
--- Rollback: a new reviewed migration dropping the two zz_cap_order_* triggers and
--- these two helpers. Existing delivery cap triggers must remain installed.
+-- Owner decision (Mason, 2026-10-29): an active posted invoice must be voided before the
+-- delivery behind it can be voided or cancelled, so voiding a delivery can never strand
+-- an order billed above what was delivered. A draft invoice never blocks (void_delivery
+-- and cancel_delivery cancel their own drafts); a cancelled delivery that never completed
+-- changes no delivered quantity, so only invoices tied to that delivery block it.
+-- Rollback: a new reviewed migration dropping the two zz_cap_order_* triggers, the
+-- zz_delivery_void_needs_invoice_void trigger and these three helpers. Existing
+-- delivery cap triggers must remain installed.
 SET LOCAL lock_timeout = '5s';
 LOCK TABLE public.invoices, public.invoice_items IN SHARE ROW EXCLUSIVE MODE;
 
@@ -61,7 +65,7 @@ BEGIN
   )
   SELECT * INTO v_bad FROM (
     SELECT * FROM over_line UNION ALL SELECT * FROM over_product
-  ) quantities WHERE billed_qty > allowed_qty ORDER BY product_id LIMIT 1;
+  ) quantities WHERE billed_qty > allowed_qty + 0.001 ORDER BY product_id LIMIT 1;  -- field splits round shares to 4 places (0.6667 x 3 = 2.0001)
   IF FOUND THEN
     RETURN format('Product billing totals %s units; completed deliveries allow %s. Refresh the invoice and bill only delivered goods.',
                   v_bad.billed_qty, v_bad.allowed_qty);
@@ -170,6 +174,43 @@ CREATE TRIGGER zz_cap_order_invoice_header
           OR (NEW.status IN ('posted', 'paid', 'overdue') AND OLD.status IN ('draft', 'unposted'))))
   EXECUTE FUNCTION public.enforce_order_invoice_within_delivered();
 
+-- Invoice-first rule. Runs inside void_delivery / cancel_delivery (and any other writer)
+-- the moment a delivery becomes voided or cancelled, so the refusal is in PostgreSQL, not
+-- only in the screen. The whole call rolls back, including any inventory it had restored.
+-- A completed delivery being voided reduces delivered quantity, so an order-level invoice
+-- (no delivery link, the legacy shape) also blocks it; a delivery that never completed
+-- reduces nothing, so only invoices linked to that delivery block its cancellation.
+CREATE OR REPLACE FUNCTION public.enforce_delivery_void_needs_invoice_void()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.order_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.invoices i
+     WHERE i.order_id = NEW.order_id AND i.invoice_type <> 'credit_memo'
+       AND i.deleted_at IS NULL AND i.status IN ('posted', 'paid', 'overdue')
+       AND (i.delivery_id = NEW.id
+            OR (OLD.status = 'completed' AND i.delivery_id IS NULL))
+  ) THEN
+    RAISE EXCEPTION 'DELIVERY_HAS_POSTED_INVOICE: void the posted invoice for delivery % before voiding or cancelling it', NEW.delivery_number
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.enforce_delivery_void_needs_invoice_void() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.enforce_delivery_void_needs_invoice_void() FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS zz_delivery_void_needs_invoice_void ON public.deliveries;
+CREATE TRIGGER zz_delivery_void_needs_invoice_void
+  BEFORE UPDATE OF status ON public.deliveries
+  FOR EACH ROW
+  WHEN (NEW.status IN ('voided', 'cancelled') AND OLD.status NOT IN ('voided', 'cancelled'))
+  EXECUTE FUNCTION public.enforce_delivery_void_needs_invoice_void();
+
 DO $postflight$
 BEGIN
   IF (SELECT count(*) FROM pg_trigger WHERE tgname IN ('zz_cap_order_invoice_items', 'zz_cap_order_invoice_header')
@@ -177,10 +218,17 @@ BEGIN
        AND tgenabled = 'O' AND NOT tgdeferrable) <> 2 THEN
     RAISE EXCEPTION 'ORDER_INVOICE_CAP_POSTFLIGHT: immediate cap triggers must be enabled';
   END IF;
+  IF (SELECT count(*) FROM pg_trigger WHERE tgname = 'zz_delivery_void_needs_invoice_void'
+       AND tgrelid = 'public.deliveries'::regclass
+       AND tgfoid = 'public.enforce_delivery_void_needs_invoice_void()'::regprocedure
+       AND tgenabled = 'O' AND NOT tgdeferrable) <> 1 THEN
+    RAISE EXCEPTION 'ORDER_INVOICE_CAP_POSTFLIGHT: invoice-first delivery trigger must be enabled';
+  END IF;
   IF EXISTS (
     SELECT 1 FROM unnest(ARRAY['anon','authenticated','service_role']) AS roles(name)
      WHERE has_function_privilege(name, 'public._order_invoice_overbilling(uuid)', 'EXECUTE')
         OR has_function_privilege(name, 'public.enforce_order_invoice_within_delivered()', 'EXECUTE')
+        OR has_function_privilege(name, 'public.enforce_delivery_void_needs_invoice_void()', 'EXECUTE')
   ) THEN
     RAISE EXCEPTION 'ORDER_INVOICE_CAP_POSTFLIGHT: helpers must remain private';
   END IF;

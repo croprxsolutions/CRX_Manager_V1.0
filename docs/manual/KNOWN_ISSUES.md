@@ -1,18 +1,20 @@
 # Known Issues — what is open today
 
-**Last verified: 2026-10-29 (America/Chicago)** for the following targeted live
-checks only. The migration ledger's latest row is version `20261029143642`,
+**Last verified:** 2026-10-29 for the invoice-cap checks only; other evidence retains its stated dates.
+
+Targeted live checks: the migration ledger's latest row is version `20261029143642`,
 authored stem `20261028185500_order_edit_and_number_concurrency`. The order
 invoice delivered-cap migration for PR #1174 is absent. Its widened read-only
 preflight covered 11 distinct orders with active order-backed non-credit
 invoices: zero aggregate over-cap orders and zero invalid, untyped, or mismatched
-lines. Once applied, the cap still leaves `void_delivery` and `cancel_delivery`
-unchanged: a billed completed delivery stays voidable (to-do 3.5). No live writes ran. Earlier reconciliation and individual issue dates below
+lines. Once applied, `void_delivery` and `cancel_delivery` refuse a delivery that
+still has an active posted invoice (owner decision 2026-10-29: void the invoice first;
+the automatic-credit design in to-do 3.5 is not built). No live writes ran. Earlier reconciliation and individual issue dates below
 retain their original scope; this is not a fresh full security audit.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-28 (America/Chicago)** for KI-18 only; the rest of the file 2026-10-25 (`main` at `c65b7b351`).
+**Earlier verification: 2026-10-28 (America/Chicago)** for KI-18 only; the rest of the file 2026-10-25 (`main` at `c65b7b351`).
 Every "applied live" statement not re-read since is the older record's claim, marked as such. Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything

@@ -19,11 +19,19 @@ describe('20261029160000 order invoice delivered cap', () => {
     expect(sql).toContain('Every increase, including changes made during delivery completion');
     expect(sql).toContain('v_reason := public._order_invoice_overbilling(v_invoice.order_id)');
     expect(sql).toContain('round(ii.quantity, 4) AS quantity');
+    // field splits round shares to 4 places, so 0.6667 x 3 may exceed 2 by 0.0001
+    expect(sql).toContain('billed_qty > allowed_qty + 0.001');
   });
 
-  it('leaves void_delivery and cancel_delivery alone (to-do 3.5)', () => {
+  it('requires the posted invoice to be voided before its delivery is voided or cancelled', () => {
+    const trigger = sql.slice(sql.indexOf('CREATE TRIGGER zz_delivery_void_needs_invoice_void'));
+    // BEFORE the status change, so cancel_delivery cancelling its own draft invoice first is never rolled back
+    expect(trigger).toMatch(/BEFORE UPDATE OF status ON public\.deliveries/);
+    expect(trigger).toContain("NEW.status IN ('voided', 'cancelled')");
+    expect(sql).toContain("i.status IN ('posted', 'paid', 'overdue')");
+    expect(sql).not.toMatch(/i\.status IN \([^)]*'draft'/);
+    expect(sql).toContain('DELIVERY_HAS_POSTED_INVOICE');
     expect(sql).not.toMatch(/CREATE TRIGGER \S+\s+AFTER[^;]*ON public\.(deliveries|delivery_items)/);
-    expect(sql).not.toContain('delivery reduction');
   });
 
   it('reports malformed invoice lines separately from over-delivery', () => {

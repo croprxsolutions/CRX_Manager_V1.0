@@ -213,6 +213,47 @@ function seed() {
       ('${SIBLING}','PROVER-ORDER-I2','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}');
     ${insertLine(INV,4)} UPDATE public.invoices SET total_amount_cents=4000 WHERE id='${INV}'; COMMIT;`);
 }
+// Owner decision 2026-10-29: a delivery with an active posted invoice cannot be voided or
+// cancelled until that invoice is voided. Every case runs inside a rolled-back probe.
+const SCHED=id(15), SCHED_INV=id(16), OTHER_DELIVERY=id(17);
+const POSTED_REFUSAL=/DELIVERY_HAS_POSTED_INVOICE/;
+function voidDelivery(uid=ADMIN) {
+  return `${asUser(uid)} SELECT public.void_delivery('${DELIVERY}','[PROVER] invoice-first proof',NULL,gen_random_uuid()::text);`;
+}
+function cancelScheduled(uid=ADMIN) {
+  return `${asUser(uid)} SELECT public.cancel_delivery('${SCHED}','[PROVER] invoice-first proof',NULL,gen_random_uuid()::text);`;
+}
+// Cancel cases use the empty order: the main order already carries whole-order invoices,
+// which the existing overlap guard would refuse beside a delivery-linked invoice.
+function scheduledDelivery(invoiceStatus,link='self') {
+  const target = link==='self' ? SCHED : link==='other' ? OTHER_DELIVERY : null;
+  return `RESET ROLE;
+    INSERT INTO public.deliveries (id,delivery_number,order_id,customer_id,status,scheduled_date,created_by)
+      VALUES ('${SCHED}','PROVER-CAP-SCHEDULED','${EMPTY_ORDER}','${CUSTOMER}','scheduled',CURRENT_DATE,'${ADMIN}'),
+             ('${OTHER_DELIVERY}','PROVER-CAP-OTHER','${EMPTY_ORDER}','${CUSTOMER}','scheduled',CURRENT_DATE,'${ADMIN}');
+    INSERT INTO public.invoices (id,invoice_number,order_id,delivery_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,posted_at)
+      VALUES ('${SCHED_INV}','PROVER-ORDER-I3','${EMPTY_ORDER}',${target ? `'${target}'` : 'NULL'},'${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',NULL);
+    ${invoiceStatus==='draft' ? '' : `ALTER TABLE public.invoices DISABLE TRIGGER zz_cap_delivery_invoice_header; -- legacy shape: posted before completion
+      UPDATE public.invoices SET status='${invoiceStatus}', posted_at=now() WHERE id='${SCHED_INV}';
+      ALTER TABLE public.invoices ENABLE TRIGGER zz_cap_delivery_invoice_header;`}`;
+}
+function invoiceFirst() {
+  const post=`RESET ROLE; UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}';`;
+  refused(`${post} ${voidDelivery()}`,'void_delivery refuses while an order-level posted invoice is active',POSTED_REFUSAL);
+  refused(`${post} ${asUser(ADMIN)} SELECT public.cancel_delivery('${DELIVERY}','[PROVER] invoice-first proof',NULL,gen_random_uuid()::text);`,'cancel_delivery refuses a completed delivery while a posted invoice is active',POSTED_REFUSAL);
+  for (const status of ['paid','overdue']) {
+    refused(`RESET ROLE; UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}'; UPDATE public.invoices SET status='${status}' WHERE id='${INV}'; ${voidDelivery()}`,`void_delivery refuses a ${status} invoice`,POSTED_REFUSAL);
+  }
+  allowed(`${post} RESET ROLE; UPDATE public.invoices SET status='voided', posted_at=coalesce(posted_at,now()), void_reason='[PROVER] invoice first' WHERE id='${INV}'; ${voidDelivery()}`,'void_delivery proceeds once the invoice is voided');
+  allowed(voidDelivery(),'void_delivery still proceeds with only draft invoices (they are cancelled)');
+  allowed(`${scheduledDelivery('draft')} ${cancelScheduled()}`,'cancel_delivery proceeds with only its own draft invoice');
+  refused(`${scheduledDelivery('posted')} ${cancelScheduled()}`,'cancel_delivery refuses while its posted invoice is active',POSTED_REFUSAL);
+  allowed(`${scheduledDelivery('posted')} RESET ROLE; UPDATE public.invoices SET status='voided', posted_at=coalesce(posted_at,now()), void_reason='[PROVER] invoice first' WHERE id='${SCHED_INV}'; ${cancelScheduled()}`,'cancel_delivery proceeds once its invoice is voided');
+  allowed(`${scheduledDelivery('posted','none')} ${cancelScheduled()}`,'cancel of a never-completed delivery ignores an unlinked order-level posted invoice');
+  allowed(`${scheduledDelivery('posted','other')} ${cancelScheduled()}`,'cancel ignores a posted invoice linked to a different delivery');
+  allowed(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER zz_delivery_void_needs_invoice_void;
+    UPDATE public.invoices SET status='posted', posted_at=now() WHERE id='${INV}'; ${voidDelivery()}`,'MUTATION: disabling the delivery trigger permits void with a posted invoice');
+}
 async function race() {
   const run=(sql)=>{
     const child=spawn('docker',[...psqlArgs(),'-A','-t'],{cwd:ROOT}); let out='',err='';
@@ -264,6 +305,8 @@ async function main() {
   }
   allowed(insertLine(SIBLING,2),'second invoice uses remainder');
   refused(insertLine(SIBLING,3),'sibling invoices exceed delivered total');
+  allowed(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.0005 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'rounding slack: 4-place split shares may exceed delivered by under 0.001');
+  refused(`${insertLine(SIBLING,2)} UPDATE public.invoice_items SET quantity=2.002 WHERE invoice_id='${SIBLING}' AND product_id='${PRODUCT}';`,'rounding slack does not allow a real excess');
   refused(insertLine(INV,3,PRODUCT,null),'unlinked duplicate counts');
   refused(insertLine(SIBLING,1,OTHER,null),'added undelivered product');
   refused(`INSERT INTO public.invoice_items (invoice_id,order_item_id,description,quantity,unit_price_cents,extended_cents,cost_cents)
@@ -282,6 +325,7 @@ async function main() {
   refused(insertLine(SIBLING,-1),'negative sale cannot offset billing',LINE_INVALID);
   allowed(`UPDATE public.invoice_items SET quantity=3 WHERE invoice_id='${INV}';`,'lower quantity');
   allowed(`UPDATE public.invoice_items SET unit_price_cents=1100 WHERE invoice_id='${INV}';`,'price-only edit');
+  invoiceFirst();
   refused(`ALTER TABLE public.invoice_items DISABLE TRIGGER zz_cap_order_invoice_items;
     ${insertLine(SIBLING,3)} ALTER TABLE public.invoice_items ENABLE TRIGGER zz_cap_order_invoice_items;
     ${asUser(ADMIN)} SELECT public.post_invoice('${SIBLING}',public.invoice_postable_version(v),gen_random_uuid()::text)

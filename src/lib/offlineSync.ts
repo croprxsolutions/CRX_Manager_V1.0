@@ -341,7 +341,9 @@ function isPermanentFailure(message: string): boolean {
   return normalized.includes('no longer exists')
     || normalized.includes('unknown offline operation')
     || normalized.includes('not authorized')
-    || normalized.includes('must be in_progress');
+    || normalized.includes('must be in_progress')
+    // A person must void the delivery's posted invoice first; retrying cannot succeed.
+    || normalized.includes('delivery_has_posted_invoice');
 }
 
 /**

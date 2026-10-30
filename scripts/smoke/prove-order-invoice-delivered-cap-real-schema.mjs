@@ -299,6 +299,17 @@ async function race() {
   const [hr,cr]=await Promise.all([holder.done,canceller.done]); assert.equal(hr.code,0,hr.err); assert.notEqual(cr.code,0);
   assert.match(cr.err,/ORDER_LIFECYCLE_BUSY_RETRY/);
   console.log('[race] cancel against an invoice being changed asks for a retry instead of passing the check');
+
+  // Same for a delivery that never completed: a whole-order draft invoice being posted at that
+  // moment must be locked too, because cancel_delivery cancels it without rechecking its status.
+  psql(scheduledDelivery('draft','none'));
+  const holder2=run(`BEGIN; UPDATE public.invoices SET updated_at=now() WHERE id='${SCHED_INV}'; SELECT 'A_READY'; SELECT pg_sleep(3); COMMIT;`);
+  for(let i=0;!holder2.out().includes('A_READY');i++) { assert.ok(i<300,'order-level invoice holder never reached overlap'); await new Promise((resolve)=>setTimeout(resolve,100)); }
+  const canceller2=run(`BEGIN; ${cancelScheduled()} COMMIT;`);
+  const [hr2,cr2]=await Promise.all([holder2.done,canceller2.done]); assert.equal(hr2.code,0,hr2.err); assert.notEqual(cr2.code,0);
+  assert.match(cr2.err,/ORDER_LIFECYCLE_BUSY_RETRY/);
+  allowed(cancelScheduled(),'cancel of a never-completed delivery succeeds once nothing holds the order-level draft');
+  console.log('[race] cancel of a never-completed delivery waits for an order-level invoice being changed');
 }
 async function main() {
   if(!REUSE) buildContainer();

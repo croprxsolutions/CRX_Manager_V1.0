@@ -186,6 +186,9 @@ CREATE TRIGGER zz_cap_order_invoice_header
 -- The candidate invoices are row-locked first (NOWAIT): a post running at the same moment
 -- either finished before this check (and blocks) or must wait, then finds the delivery
 -- no longer completed and is refused by the per-delivery cap.
+-- Whole-order draft and unposted invoices are locked even when the delivery never completed:
+-- cancel_delivery cancels them without rechecking their status, so a post racing that cancel
+-- must not be overwritten. They only BLOCK when the delivery was completed.
 CREATE OR REPLACE FUNCTION public.enforce_delivery_void_needs_invoice_void()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -196,7 +199,8 @@ BEGIN
      WHERE i.invoice_type <> 'credit_memo'
        AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
        AND (i.delivery_id = NEW.id
-            OR (OLD.status = 'completed' AND i.delivery_id IS NULL AND i.order_id = NEW.order_id))
+            OR (i.delivery_id IS NULL AND i.order_id = NEW.order_id
+                AND (OLD.status = 'completed' OR i.status IN ('draft', 'unposted'))))
      FOR UPDATE NOWAIT;
   EXCEPTION WHEN lock_not_available THEN
     RAISE EXCEPTION 'ORDER_LIFECYCLE_BUSY_RETRY: an invoice for delivery % is being changed; retry in a moment', NEW.delivery_number

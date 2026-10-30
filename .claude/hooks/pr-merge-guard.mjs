@@ -70,6 +70,12 @@ import {
   evaluateCodexBotReview,
   readCodeRabbitRequirement,
 } from "./codex-bot-review-lib.mjs";
+import {
+  readTeammateComments,
+  teammateCommentsDenial,
+  teammateCommentsTruncatedDenial,
+  teammateCommentsUnreadableDenial,
+} from "./teammate-comments-lib.mjs";
 import { solExemptionOnGitHub } from "./sol-exempt-lib.mjs";
 import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
@@ -391,6 +397,7 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
   let coderabbitOpen = null; // null = not read completely → fail closed below
   let coderabbitReview = null; // null = not read → fail closed below
   let reviewedPr = null; // the PR number GitHub answered for, which a skip waiver must name
+  let teammates = null; // null = not read → fail closed below
   try {
     const metaArgs = ["pr", "view"];
     if (request.selector) metaArgs.push(String(request.selector));
@@ -433,6 +440,9 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
         // A waiver covers this repository's PRs only (Codex App P2 on #1035).
         reviewedPr = skipPullRequestFor(meta.url, meta.number);
       }
+      teammates = readTeammateComments((args) => gh(args, REQUIREMENT_CALL_TIMEOUT_MS), {
+        owner: slug[1], name: slug[2], number: meta.number, deadlineMs: deadlineMs - REQUIREMENT_CALL_TIMEOUT_MS,
+      });
     }
   } catch {
     codexVerdict = null; // notice below; never a deny
@@ -448,6 +458,11 @@ function codexAdvisory(request, deadlineMs = Date.now() + CODEX_ADVISORY_BUDGET_
   if (coderabbitOpen > 0) {
     deny(coderabbitFindingsDenial("PR MERGE GATE", request.selector, coderabbitOpen));
   }
+  if (!teammates) deny(teammateCommentsUnreadableDenial("PR MERGE GATE", request.selector));
+  if (teammates.comments.length > 0) {
+    deny(teammateCommentsDenial("PR MERGE GATE", request.selector, teammates.comments));
+  }
+  if (teammates.truncated) deny(teammateCommentsTruncatedDenial("PR MERGE GATE", request.selector));
   // A money PR (or one carrying the needs-coderabbit label) needs a completed
   // CodeRabbit review of its head; an unreadable answer refuses.
   if (!coderabbitReview || coderabbitReview.status === "unreadable") {

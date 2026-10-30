@@ -22,6 +22,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Why.** The checks had grown past their value: each new spelling cost review rounds and blocked ordinary work, while GitHub's ruleset (no bypass actors) and CI are the real wall.
 **What this forbids/implies:** the keep list in `AGENTS.md` stays: secret protection, no force-push, no direct push to `main`, no `--admin` merges, CI and status checks, the destructive-migration approval, the migration-apply proof gate, and the database rules for money and inventory. Do not rebuild the removed spelling checks without a real incident.
+## 2026-10-30 — Record tote-fill quantities before average purchase-cost tracking
+
+**Decision (Mason, in chat, 2026-10-30):** Mason said bulk chemical pricing is tote pricing and deferred to the recommendation. Record shop-fill quantities first; add average purchase-cost tracking after the separate costing foundation is reviewed and activated. This sequences the 2026-10-29 tote-cost decision; it does not cancel it.
+**Why.** Staff can record bulk-to-tote stock movements without waiting for the larger costing project. Sale pricing and actual purchase cost are distinct.
+**What this forbids/implies:** never claim the quantity-only step tracks purchase cost, alter catalog costs to force matching valuations, or silently hide a catalog-value difference. See `docs/plans/2026-10-29-product-GRAND-PLAN.md` overlap 14 for the safeguards and remaining approvals.
 
 ## 2026-10-30 — Stale imported skills are archived, not kept in the active folder
 

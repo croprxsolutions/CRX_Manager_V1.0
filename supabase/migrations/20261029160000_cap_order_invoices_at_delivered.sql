@@ -65,7 +65,7 @@ BEGIN
   )
   SELECT * INTO v_bad FROM (
     SELECT * FROM over_line UNION ALL SELECT * FROM over_product
-  ) quantities WHERE billed_qty > allowed_qty + 0.001 ORDER BY product_id LIMIT 1;  -- field splits round shares to 4 places (0.6667 x 3 = 2.0001)
+  ) quantities WHERE billed_qty >= allowed_qty + 0.001 ORDER BY product_id LIMIT 1;  -- field splits round shares to 4 places (0.6667 x 3 = 2.0001)
   IF FOUND THEN
     RETURN format('Product billing totals %s units; completed deliveries allow %s. Refresh the invoice and bill only delivered goods.',
                   v_bad.billed_qty, v_bad.allowed_qty);
@@ -193,10 +193,10 @@ AS $function$
 BEGIN
   BEGIN
     PERFORM 1 FROM public.invoices i
-     WHERE i.order_id = NEW.order_id AND i.invoice_type <> 'credit_memo'
+     WHERE i.invoice_type <> 'credit_memo'
        AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
        AND (i.delivery_id = NEW.id
-            OR (OLD.status = 'completed' AND i.delivery_id IS NULL))
+            OR (OLD.status = 'completed' AND i.delivery_id IS NULL AND i.order_id = NEW.order_id))
      FOR UPDATE NOWAIT;
   EXCEPTION WHEN lock_not_available THEN
     RAISE EXCEPTION 'ORDER_LIFECYCLE_BUSY_RETRY: an invoice for delivery % is being changed; retry in a moment', NEW.delivery_number
@@ -204,12 +204,12 @@ BEGIN
   END;
   IF EXISTS (
     SELECT 1 FROM public.invoices i
-     WHERE i.order_id = NEW.order_id AND i.invoice_type <> 'credit_memo'
+     WHERE i.invoice_type <> 'credit_memo'
        AND i.deleted_at IS NULL
        AND (i.status IN ('posted', 'paid', 'overdue')
             OR (NEW.status = 'voided' AND i.status = 'unposted'))
        AND (i.delivery_id = NEW.id
-            OR (OLD.status = 'completed' AND i.delivery_id IS NULL))
+            OR (OLD.status = 'completed' AND i.delivery_id IS NULL AND i.order_id = NEW.order_id))
   ) THEN
     RAISE EXCEPTION 'DELIVERY_HAS_POSTED_INVOICE: void the active invoice for delivery % (or its order) before voiding or cancelling it', NEW.delivery_number
       USING ERRCODE = 'P0001';

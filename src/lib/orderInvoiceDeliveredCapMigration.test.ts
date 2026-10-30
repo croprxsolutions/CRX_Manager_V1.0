@@ -20,7 +20,7 @@ describe('20261029160000 order invoice delivered cap', () => {
     expect(sql).toContain('v_reason := public._order_invoice_overbilling(v_invoice.order_id)');
     expect(sql).toContain('round(ii.quantity, 4) AS quantity');
     // field splits round shares to 4 places, so 0.6667 x 3 may exceed 2 by 0.0001
-    expect(sql).toContain('billed_qty > allowed_qty + 0.001');
+    expect(sql).toContain('billed_qty >= allowed_qty + 0.001');
   });
 
   it('requires the posted invoice to be voided before its delivery is voided or cancelled', () => {

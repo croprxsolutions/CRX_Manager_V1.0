@@ -1434,7 +1434,7 @@ function collisionPromptSkipsWork(prompt) {
     const skipped = check({ ...fresh, cleanMergeOf: preMerge, cleanMergeThreads: { status: "none" } });
     assert.equal(skipped.ok, true, "clean merge: the App's finished review of the pre-merge head is enough");
     assert.match(skipped.notes.join(" "), /only merges main/, "clean merge: and says why");
-    assert.equal(check({ cleanMergeOf: preMerge, cleanMergeThreads: { status: "clean-at-head" }, codexState: { sha: head, status: "in_progress", at: now }, headPushedMs: now - 60_000 }).ok, true, "clean merge: an App run on the merge itself is not waited for");
+    assert.equal(check({ cleanMergeOf: preMerge, cleanMergeThreads: { status: "clean-at-head" }, codexState: { sha: head, status: "in_progress", at: now }, headPushedMs: now - 60_000 }).ok, false, "clean merge: an App run already started on the merge is waited for (no finished review to reuse)");
     assert.equal(check({ cleanMergeOf: preMerge, codexState: { sha: "d".repeat(40), status: "completed" }, headPushedMs: now - 60_000 }).ok, false, "clean merge: an App review of some other commit still waits");
     assert.equal(check({ ...fresh, cleanMergeOf: preMerge, codexThreads: { status: "findings-at-head", unresolvedAtHead: 1 } }).ok, false, "clean merge: unanswered App findings still refuse");
     // App P1 on #1206: a thread on the pre-merge commit reads as stale at the merge head.

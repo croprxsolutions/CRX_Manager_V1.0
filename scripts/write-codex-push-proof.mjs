@@ -1373,9 +1373,11 @@ export function evaluateSolPreflight({
   let skippedAppWait = false;
   if (codexState === undefined || codexState?.unreadable) {
     problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
-  } else if (!reviewedHere && cleanMergeOf && (codexState?.sha === head || (codexState?.sha === cleanMergeOf && codexState?.status === "completed"))) {
+  } else if (!reviewedHere && cleanMergeOf && codexState?.sha === cleanMergeOf && codexState?.status === "completed") {
     // Mason, 2026-10-29: a clean main merge adds none of the PR's own changes, so
     // Sol need not wait for the App to re-read it. Its threads are still checked below.
+    // Only a FINISHED review of the pre-merge commit counts: once the App has started on
+    // the merge itself, the branch below waits for it (Sol MED on #1206).
     skippedAppWait = true;
     notes.push(`${head.slice(0, 9)} only merges main into ${cleanMergeOf.slice(0, 9)} (no conflicts, no shared files), so Sol does not wait for the Codex GitHub App to review it again.`);
   } else if (!reviewedHere && codexState?.sha === head) {

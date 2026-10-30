@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
       return chainable({ data: dataByTable[table] ?? [], error: null });
     }),
     rpc: vi.fn((_name: string, _args: Record<string, unknown>) => Promise.resolve({ data: { quote_id: 'quote-1' }, error: null })),
+    toast: vi.fn(),
     assertRpcResult: vi.fn((data: unknown) => data),
     logActivity: vi.fn(() => Promise.resolve()),
   };
@@ -65,7 +66,7 @@ vi.mock('../../lib/documentOCR', () => ({
 }));
 
 vi.mock('../ui/Toast', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mocks.toast }),
 }));
 
 import BulkQuoteImport from './BulkQuoteImport';
@@ -88,6 +89,130 @@ describe('BulkQuoteImport', () => {
   it('renders when open', () => {
     render(<BulkQuoteImport {...defaultProps} />);
     expect(screen.getByText(/bulk quote/i)).toBeInTheDocument();
+  });
+
+  it('imports quoted customer, product and section names with mapped numeric cells intact', async () => {
+    mocks.from.mockImplementation((table: string) => {
+      const dataByTable: Record<string, unknown[]> = {
+        customers: [{ id: 'customer-quoted', farm_name: 'Wells, "Family" Farms' }],
+        products: [{ id: 'product-quoted', product_name: 'Mix, "A"', sku: 'MIX-A', inventory_unit: 'Gallon', is_active: true }],
+        unit_conversions: [{ unit: 'oz', factor_oz: 1 }, { unit: 'Gallon', factor_oz: 128 }],
+      };
+      return mocks.chainable({ data: dataByTable[table] ?? [], error: null });
+    });
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = '\uFEFF"Quote",Farm,Group,Item,Acreage,Unit Price,oz/acre,Notes\r\nQ-QUOTED,"Wells, ""Family"" Farms","Spring, East","Mix, ""A""",10,12.50,32,"Line one\r\nLine two"\r\n';
+    const file = new File([csv], 'quoted.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-QUOTED/);
+    expect(screen.getByText(/Wells, "Family" Farms/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+      p_quote_payload: expect.objectContaining({ customer_id: 'customer-quoted' }),
+      p_sections: [expect.objectContaining({
+        section_name: 'Spring, East',
+        items: [expect.objectContaining({ product_id: 'product-quoted', acres: 10, price_per_unit: 12.5, actual_rate: 32, notes: 'Line one\r\nLine two' })],
+      })],
+    })));
+  });
+
+  it.each(['Q-BAD,"Unclosed,Roundup', 'Q-BAD,Wells,Farm,Roundup'])('blocks malformed CSV before import: %s', async (row) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name\n${row}`;
+    const file = new File([csv], 'bad.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringMatching(/CSV line 2:.*Correct the file/)));
+    expect(screen.queryByRole('button', { name: /import \d+ quote/i })).not.toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['price_per_unit', '1,200.00'],
+    ['price_per_unit', '20 dollars'],
+    ['acres', '1,200'],
+    ['actual_rate', '32oz'],
+    ['tier', '1,000'],
+    ['valid_days', '15 days'],
+    ['price_per_unit', '0x10'],
+    ['tier', '0x2'],
+    ['valid_days', '0xF'],
+    ['price_per_unit', '0b10'],
+    ['price_per_unit', '0o10'],
+    ['price_per_unit', '1e-999'],
+    ['price_per_unit', '1.0000000000000001'],
+    ['acres', '9007199254740993'],
+    ['actual_rate', '-1'],
+    ['price_per_unit', '-20'],
+    ['price_per_unit', '1e308'],
+    ['valid_days', '100000001'],
+    ['valid_days', '3000000'], ['valid_days', '0'], ['valid_days', '1.5'],
+    ['tier', '0'], ['tier', '1.5'],
+  ])('rejects partial numeric conversion for %s=%s', async (field, value) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name,${field}\nQ-NUMBER,North Farm,Roundup,"${value}"`;
+    const file = new File([csv], 'numeric.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(/Invalid numeric fields:/)).toHaveTextContent(field);
+    expect(screen.getByText(/Use plain numbers without thousands separators/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(['1.005', '0.145', '0.105'])('rejects sub-cent quote price %s before import', async (price) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name,acres,oz_per_acre,price_per_unit\nQ-CENTS,North Farm,Roundup,1,128,${price}`;
+    const file = new File([csv], 'cents.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(/prices must have no more than two decimal places/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([['.145', '128', '1', .15], ['.7', '384', '3.35', 7.04]])('rounds exact derived quantity for %s acres', async (acres, rate, price, expected) => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = `quote_number,customer_farm_name,product_name,acres,oz_per_acre,price_per_unit\nQ-FRACTION,North Farm,Roundup,${acres},${rate},${price}`;
+    const file = new File([csv], 'fraction.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-FRACTION/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+      p_quote_payload: expect.objectContaining({ total_price: expected }),
+    })));
+  });
+
+  it('blocks unsafe quote money before save_quote', async () => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const csv = 'quote_number,customer_farm_name,product_name,acres,oz_per_acre,price_per_unit\nQ-RANGE,North Farm,Roundup,1e4,128,1e12';
+    const file = new File([csv], 'range.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText(/Q-RANGE/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    expect(await screen.findByText(/Imported money exceeds/)).toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+  });
+
+  it('blocks sibling rows of a quote when one numeric price is invalid, including column aliases', async () => {
+    const csv = 'Quote,Farm,Item,Unit Price\nQ-PARTIAL,North Farm,Roundup,20\nQ-PARTIAL,North Farm,Roundup,1.005';
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const file = new File([csv], 'group-numeric.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(/has another invalid row/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('does not render when closed', () => {

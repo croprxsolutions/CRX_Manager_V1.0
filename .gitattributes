@@ -285,3 +285,12 @@ scripts/smoke/prove-invoice-season-follows-invoice-date.mjs text eol=lf
 supabase/migrations/20260911120000_bind_adjust_inventory_receipt_to_intent.sql text eol=lf
 scripts/smoke/smoke-adjust-inventory-intent-binding.sql text eol=lf
 scripts/smoke/prove-adjust-inventory-intent-binding-real-schema.mjs text eol=lf
+
+# Append-style logs merge with git's built-in union driver (Mason, 2026-10-29): when
+# two PRs add rows, captures or decisions at the same spot, git keeps both instead of
+# stopping on a conflict (73 of 73 real conflicted main merges replayed clean). Union
+# also keeps both versions of a line edited on both sides; check-doc-drift fails a
+# migration with two table rows or a doc with two "Last verified" lines, so that case
+# is reconciled by hand. Edited-in-place docs (KNOWN_ISSUES, CURRENT_STATE) stay normal.
+docs/reference/migration-history.md merge=union
+docs/manual/DECISION_LOG.md         merge=union

@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-30 — Stale imported skills are archived, not kept in the active folder
+
+**Decision (Mason, in chat, 2026-10-30: "I approve fix them all", on the harness audit).** The Codex importer's `.agents/skills/source-command-*` folders move out of the active skills folder with `node scripts/sync-agent-workflows.mjs --archive-imported --confirm`, into `.git/crx-archive/imported-skills/` with a restore map. This supersedes the 2026-09-02 "keep them visible, do not delete them" call recorded in `scripts/sync-agent-workflows.mjs`.
+**Why.** Codex discovers those folders beside the real skills, and the old copies point at paths that do not exist and carry superseded ship rules. An archive keeps them recoverable without leaving them where an agent can pick them up.
+**What this forbids/implies:** never delete these folders by hand or add a blanket ignore. A folder that git tracks, that the generator owns, or that holds a link stays put and is reported. The importer cannot be turned off, so new copies get the same warning.
+
 ## 2026-10-29 — Shared logs merge themselves; manual-doc stamps are one short line
 
 **Decision (Mason, in chat, 2026-10-29: "Approve package", whose item 1 included fixing the shared-doc clashes; then "Yes continue all planned work till all merged").** `docs/reference/migration-history.md` and this file merge with git's built-in union driver: when two PRs add rows, captures or entries at the same spot, git keeps both. The history title drops its "(latest entry N)" count. Every manual doc's "Last verified" line is one line of at most 200 characters (date and scope); the evidence goes in the PR's `docs/changelog.d/` note, and the old evidence paragraphs moved word for word to `docs/manual/archive/verification-notes-2026-10.md`.

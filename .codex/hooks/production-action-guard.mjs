@@ -672,8 +672,46 @@ export const CHANGES_DIRECTORY_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|
 // mutating half an earlier round pinned it to name. Their quoted-`;`/`|` splits
 // are a pre-existing over-split (shorter segments, so fail-safe here) and are
 // named as still-open rather than half-fixed.
+//
+// The one exception is a search's double-quoted pattern: a batched
+// `rg -n "a|agent" package.json` was cut at the `|`, and `agent" package.json` was
+// refused as a command naming a protected file (Mason's harness audit, 2026-10-30).
+// The separator is only taken out of the text for a segment that really is a search,
+// and only where it is data to every shell: double quotes are literal under the same
+// test as above, unless cmd.exe's `^"` leaves the quote unopened. Single quotes get no
+// such exception. cmd.exe does not treat `'` as a quote, so every piece after a
+// separator would run there, even one word (an interpreter with no arguments executes
+// its stdin), and nothing in the hook payload says which shell will run the command.
+// A `"` inside single quotes also changes how cmd.exe pairs the quotes after it, so
+// that command stays as written. shortcut: `rg 'a|b' package.json` stays a false
+// refusal, use double quotes or separate simple reads; upgrade only if Codex ever
+// reports the shell. The rest of the text is left in place, so a protected path
+// still counts as named and a following `| xargs tee` is still examined. The search is
+// judged from the text outside quotes only, so a separator inside an earlier quoted
+// argument cannot make a `tee` look like a search.
+const PATTERN_SEARCH_HEADS = new Set(["rg", "grep", "egrep", "fgrep", "findstr", "select-string", "sls"]);
+function searchPatternSeparatorsRemoved(command) {
+  if (/\^["']/.test(command)) return command;
+  // Only the text added since the last span is scanned: a hook killed at its time
+  // limit allows the command, so this must stay linear on adversarial quoting.
+  let scanned = 0;
+  let head = "";
+  let pairingDiffers = false;
+  const rewritten = literalDoubleQuotedTextBlanked(command, (span, unquotedBefore) => {
+    const pieces = unquotedBefore.slice(scanned).split(/&&?|\|\|?|;|\r?\n/);
+    scanned = unquotedBefore.length;
+    if (pieces.length > 1 || !head) head = shellSegmentWords(pieces.pop())[0];
+    if (span[0] === "'") {
+      pairingDiffers ||= span.includes('"');
+      return span;
+    }
+    if (!PATTERN_SEARCH_HEADS.has(normalizeShellHead(head)) || /[$%!]/.test(span)) return span;
+    return span.replace(/&&|\|\|?|;/g, " ");
+  });
+  return pairingDiffers ? command : rewritten;
+}
 function shellSegments(command) {
-  return String(command || "").split(/(?:&&|\|\|?|;|\r?\n)/).map((s) => s.trim()).filter(Boolean);
+  return searchPatternSeparatorsRemoved(String(command || "")).split(/(?:&&|\|\|?|;|\r?\n)/).map((s) => s.trim()).filter(Boolean);
 }
 function segmentHeadIsExecutor(segment) {
   const { head } = shellSegmentHead(segment);
@@ -712,17 +750,21 @@ export function unrecognizedProtectedHarnessAccess(command, workdir = "") {
 // the others do not). A backslash elsewhere (`C:\Program Files`) is plain text.
 // Single-quoted text is stepped over unchanged, so a `"` inside it never opens
 // a span (`Tee-Object '"' (Join-Path a b) '"'` keeps its subexpression visible).
-export function literalDoubleQuotedTextBlanked(segment) {
+// shortcut: the `\"` check reads the whole text, so a `\"` in a harmless PowerShell
+// comment also leaves it as written and a batched search can still be refused; write
+// the comment without `\"` or drop it. Upgrade only with a parser every shell agrees on.
+export function literalDoubleQuotedTextBlanked(segment, rewriteSpan = (span) => (span[0] === '"' && !/[$%!]/.test(span) ? '""' : span)) {
   const text = String(segment || "");
   if (/\\["']|[`‘’‚‛“”„]/.test(text)) return text;
   let out = "";
+  let unquoted = "";
   for (let i = 0; i < text.length; i++) {
     const quote = text[i];
-    if (quote !== "'" && quote !== '"') { out += quote; continue; }
+    if (quote !== "'" && quote !== '"') { out += quote; unquoted += quote; continue; }
     const close = text.indexOf(quote, i + 1);
     if (close < 0) return text; // unbalanced: leave the whole segment as written
-    const span = text.slice(i, close + 1);
-    out += quote === '"' && !/[$%!]/.test(span) ? '""' : span;
+    out += rewriteSpan(text.slice(i, close + 1), unquoted);
+    unquoted += "''";
     i = close;
   }
   return out;

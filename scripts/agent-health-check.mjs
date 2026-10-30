@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { accessSync, constants as fsConstants, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -176,6 +176,162 @@ export function checkCodexAuth(runner) {
   return check("FAIL", "Codex CLI auth", `${note.trim()} — run \`codex login\``);
 }
 
+const APP_SERVER_TIMEOUT_MS = 15_000;
+const APP_SERVER_OUTPUT_LIMIT = 4 * 1024 * 1024;
+
+// Ask the Codex app server which hooks it would really run for `cwd`. Only two requests
+// are sent, `initialize` and `hooks/list`: neither changes config or trust, and neither
+// calls a model. The initialize result carries account paths, so nothing from it is
+// kept, and server error text is reduced to its numeric code before it can be printed.
+//
+// stdin stays open until the answer arrives: the server drops a pending request at EOF.
+// Every way out goes through finish(), which ends only the child started here.
+export function probeCodexHooks(cwd, {
+  codex = resolveNewestCodexBinary(),
+  spawnChild = spawn,
+  timeoutMs = APP_SERVER_TIMEOUT_MS,
+} = {}) {
+  return new Promise((resolve) => {
+    if (!codex) {
+      resolve({ error: "newest OpenAI Codex binary not found" });
+      return;
+    }
+    let child;
+    let timer;
+    let settled = false;
+    let pending = "";
+    let received = 0;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child?.stdin?.end();
+      child?.kill();
+      resolve(result);
+    };
+    const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    const handle = (message) => {
+      if (message?.id !== 1 && message?.id !== 2) return;
+      if (message.error) {
+        const code = Number.isInteger(message.error.code) ? message.error.code : "unknown";
+        finish({ error: `${message.id === 1 ? "initialize" : "hooks/list"} returned error code ${code}` });
+      } else if (message.id === 1) {
+        send({ method: "initialized" });
+        send({ id: 2, method: "hooks/list", params: { cwds: [cwd] } });
+      } else {
+        const entry = message.result?.data?.find((item) => typeof item?.cwd === "string"
+          && path.resolve(item.cwd).toLowerCase() === path.resolve(cwd).toLowerCase());
+        finish(Array.isArray(entry?.hooks) ? { entry } : { error: "hooks/list answer had no hook list" });
+      }
+    };
+    timer = setTimeout(() => finish({ error: `no answer from codex app-server within ${timeoutMs / 1000}s` }), timeoutMs);
+    try {
+      child = spawnChild(codex, ["app-server"], {
+        cwd,
+        stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
+        env: scratchHookEnvironment(cwd),
+      });
+    } catch {
+      finish({ error: "codex app-server could not start" });
+      return;
+    }
+    child.on("error", () => finish({ error: "codex app-server could not start" }));
+    child.on("exit", () => finish({ error: "codex app-server exited before answering" }));
+    child.stdin.on("error", () => finish({ error: "codex app-server closed its input before answering" }));
+    child.stdout.on("data", (chunk) => {
+      received += chunk.length;
+      if (received > APP_SERVER_OUTPUT_LIMIT) {
+        finish({ error: "codex app-server sent more output than a hook list needs" });
+        return;
+      }
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop();
+      for (const line of lines) {
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue; // The server also logs here; only a matching response id is an answer.
+        }
+        handle(message);
+      }
+    });
+    send({
+      id: 1,
+      method: "initialize",
+      params: { clientInfo: { name: "crx-agent-health", version: "1" }, capabilities: { experimentalApi: true } },
+    });
+  });
+}
+
+// One line per hook .codex/hooks.json registers, as the live list names it.
+function requiredCodexHooks(hooksJson) {
+  return Object.entries(hooksJson?.hooks || {}).flatMap(([event, groups]) =>
+    (groups || []).flatMap((group) => (group.hooks || [])
+      .filter((hook) => hook.type === "command")
+      .map((hook) => ({
+        eventName: `${event[0].toLowerCase()}${event.slice(1)}`,
+        commands: [hook.command, hook.commandWindows],
+        matcher: group.matcher,
+        label: `${event} ${String(hook.command).match(/[\w.-]+\.mjs/g)?.pop() ?? "command"}`,
+      }))));
+}
+
+const normalizedMatcher = (matcher) => matcher === undefined || matcher === null || matcher === "" ? "*" : matcher;
+
+// A hook only protects anything if Codex would run it, and Codex silently skips a hook
+// that is new, changed since it was trusted, or switched off. Comparing the manifest to
+// the live list catches that; the manifest parity check above cannot.
+//
+// Codex CLI 0.165 answers for a linked worktree from the main checkout's hooks file, so
+// a hook new on a branch reads as missing until it lands there and is trusted. That is
+// the truth about what Codex would run in that worktree.
+export function compareCodexHooks(hooksJson, entry) {
+  if (!Array.isArray(entry?.hooks)) return check("FAIL", "Codex runtime hooks", "hooks/list answer had no hook list");
+  const required = requiredCodexHooks(hooksJson);
+  const project = entry.hooks.filter((hook) => hook.source === "project");
+  const problems = { missing: [], disabled: [], untrusted: [] };
+  for (const { eventName, commands, matcher, label } of required) {
+    const live = project.filter((hook) => hook.eventName === eventName && commands.includes(hook.command)
+      && normalizedMatcher(hook.matcher) === normalizedMatcher(matcher));
+    if (live.length === 0) problems.missing.push(label);
+    else if (!live.some((hook) => hook.enabled === true)) problems.disabled.push(label);
+    else if (!live.some((hook) => hook.enabled === true && hook.trustStatus === "trusted")) problems.untrusted.push(label);
+  }
+  const globalStop = entry.hooks.filter((hook) => hook.source === "user" && hook.eventName === "stop"
+    && String(hook.command).includes("global-verify-before-stop"));
+  const globalStopRuns = globalStop.some((hook) => hook.enabled === true && hook.trustStatus === "trusted");
+  const globalNote = globalStop.length === 0 ? "no global Stop verify hook"
+    : globalStopRuns ? "global Stop verify hook active"
+    : "global Stop verify hook installed but will not run";
+  const reported = (entry.errors?.length ?? 0) + (entry.warnings?.length ?? 0);
+  const found = Object.entries(problems)
+    .filter(([, labels]) => labels.length > 0)
+    .map(([problem, labels]) => `${problem}: ${labels.join(", ")}`);
+  if (entry.errors?.length > 0) found.push(`${entry.errors.length} hook load error(s) reported by Codex`);
+  const name = "Codex runtime hooks";
+  if (required.length === 0) return check("FAIL", name, ".codex/hooks.json registers no command hooks to compare");
+  if (found.length > 0) {
+    return check("FAIL", name, `${required.length - problems.missing.length - problems.disabled.length - problems.untrusted.length}/${required.length} required hooks would run; ${found.join("; ")}; ${globalNote}. Open Codex in this project and trust the hooks; a worktree of an unmerged branch stays short until its hooks land.`);
+  }
+  // The generic global reminder and the project proof check have different guarantees.
+  const status = reported > 0 || (globalStop.length > 0 && !globalStopRuns) ? "WARN" : "PASS";
+  return check(status, name, `${required.length}/${required.length} required hooks enabled and trusted; ${globalNote}${reported > 0 ? `; ${reported} warning(s) from Codex` : ""}`);
+}
+
+export async function checkCodexRuntimeHooks(root, hooksJson, probe = probeCodexHooks) {
+  try {
+    const { entry, error } = await probe(root);
+    return error
+      ? check("FAIL", "Codex runtime hooks", `could not read the live hook list: ${error}`)
+      : compareCodexHooks(hooksJson, entry);
+  } catch {
+    return check("FAIL", "Codex runtime hooks", "could not read the live hook list: runtime probe failed");
+  }
+}
+
 // Delegate to `claude auth status` (machine-readable JSON: {"loggedIn":true,...}). It reads
 // the keychain/credentials/env the CLI actually uses, so it can't be fooled by a malformed
 // credentials file. Logged-out is a WARN, not FAIL: non-interactive `claude -p` (used by
@@ -321,7 +477,7 @@ export function summarizeChecks(checks) {
   };
 }
 
-function buildHealthChecks(root = ROOT) {
+async function buildHealthChecks(root = ROOT) {
   const requiredFiles = [
     ".claude/commands/claude-review.md",
     ".claude/skills/claude-review/SKILL.md",
@@ -359,7 +515,8 @@ function buildHealthChecks(root = ROOT) {
     ]),
   ];
 
-  checks.push(checkCodexHookPortability(readJsonIfPresent(path.join(root, ".codex", "hooks.json"))));
+  const codexHooks = readJsonIfPresent(path.join(root, ".codex", "hooks.json"));
+  checks.push(checkCodexHookPortability(codexHooks));
   checks.push(checkGitHooksInstalled(root));
   checks.push(runCommand("Agent workflow sync", process.execPath, [path.join(ROOT, "scripts", "sync-agent-workflows.mjs"), "--check"], { shell: false }));
   checks.push(runCommand("Agent guidance", process.execPath, [path.join(ROOT, "scripts", "check-agent-guidance.mjs")], { shell: false }));
@@ -368,6 +525,7 @@ function buildHealthChecks(root = ROOT) {
   checks.push(checkClaudeAuth());
   checks.push(checkCodexCli());
   checks.push(checkCodexAuth());
+  checks.push(await checkCodexRuntimeHooks(root, codexHooks));
   checks.push(runCommand("GitHub auth", "gh", ["auth", "status"], { warn: true }));
   checks.push(runCommand("Vercel CLI", "vercel", ["--version"], { warn: true }));
   checks.push(runCommand("Supabase CLI", "supabase", ["--version"], { warn: true }));
@@ -376,8 +534,8 @@ function buildHealthChecks(root = ROOT) {
   return checks;
 }
 
-function main() {
-  const checks = buildHealthChecks(ROOT);
+async function main() {
+  const checks = await buildHealthChecks(ROOT);
   const summary = summarizeChecks(checks);
 
   console.log("agent-health-check");
@@ -395,5 +553,5 @@ function main() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  await main();
 }

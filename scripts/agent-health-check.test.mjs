@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,9 +27,12 @@ import {
   checkCodexAuth,
   checkBranchStaleness,
   checkCodexHookPortability,
+  checkCodexRuntimeHooks,
   checkFilesPresent,
   checkGitHooksInstalled,
+  compareCodexHooks,
   compareSyncedFiles,
+  probeCodexHooks,
   summarizeChecks,
 } from "./agent-health-check.mjs";
 import { clearWorktreeOverride } from "./install-git-hooks.mjs";
@@ -452,6 +456,177 @@ try {
   const spawnFailure = clearWorktreeOverride(() => ({ error: new Error("spawn git ENOENT") }));
   assert.equal(spawnFailure.cleared, false);
   assert.match(spawnFailure.reason, /ENOENT/);
+
+  // Live hook inventory: the manifest only says what is registered; these prove the
+  // check reports what Codex would really run. Commands are built to match the real
+  // manifest shape, and the Windows spelling is what Codex lists on Windows.
+  {
+    const hook = (script) => ({
+      type: "command",
+      command: `node "$(git rev-parse --show-toplevel)/.codex/hooks/codex-hook-adapter.mjs" ".claude/hooks/${script}"`,
+      commandWindows: `powershell -Command "node (Join-Path (git rev-parse --show-toplevel) '.codex/hooks/codex-hook-adapter.mjs') '.claude/hooks/${script}'"`,
+    });
+    const manifest = {
+      hooks: {
+        PreToolUse: [{ matcher: "*", hooks: [hook("sql-safety.mjs")] }],
+        SessionStart: [{ hooks: [hook("session-context-reminder.mjs")] }],
+      },
+    };
+    const live = (eventName, script, overrides = {}) => ({
+      eventName,
+      command: hook(script).commandWindows,
+      source: "project",
+      enabled: true,
+      trustStatus: "trusted",
+      ...overrides,
+    });
+    const globalStop = (overrides = {}) => ({
+      eventName: "stop",
+      command: 'node "C:\\home\\.codex\\hooks\\global-verify-before-stop.mjs"',
+      source: "user",
+      enabled: true,
+      trustStatus: "trusted",
+      ...overrides,
+    });
+    const clean = [live("preToolUse", "sql-safety.mjs"), live("sessionStart", "session-context-reminder.mjs")];
+
+    const pass = compareCodexHooks(manifest, { hooks: [...clean, globalStop()], warnings: [], errors: [] });
+    assert.equal(pass.status, "PASS");
+    assert.match(pass.note, /2\/2 required hooks enabled and trusted; global Stop verify hook active/);
+    assert.match(compareCodexHooks(manifest, { hooks: clean }).note, /no global Stop verify hook/, "machines without the global hook still pass");
+    assert.equal(compareCodexHooks(manifest, { hooks: clean }).status, "PASS");
+
+    // POSIX spelling, for a machine where Codex lists `command`.
+    const posix = clean.map((item, index) => ({ ...item, command: [hook("sql-safety.mjs"), hook("session-context-reminder.mjs")][index].command }));
+    assert.equal(compareCodexHooks(manifest, { hooks: posix }).status, "PASS");
+
+    const missing = compareCodexHooks(manifest, { hooks: clean.slice(0, 1) });
+    assert.equal(missing.status, "FAIL");
+    assert.match(missing.note, /1\/2 required hooks would run; missing: SessionStart session-context-reminder\.mjs/);
+
+    const disabled = compareCodexHooks(manifest, { hooks: [clean[0], { ...clean[1], enabled: false }] });
+    assert.equal(disabled.status, "FAIL");
+    assert.match(disabled.note, /disabled: SessionStart session-context-reminder\.mjs/);
+
+    const untrusted = compareCodexHooks(manifest, { hooks: [{ ...clean[0], trustStatus: "untrusted" }, clean[1]] });
+    assert.equal(untrusted.status, "FAIL");
+    assert.match(untrusted.note, /untrusted: PreToolUse sql-safety\.mjs/);
+
+    // The same script somewhere else does not count: a different event, or a user
+    // hook that happens to share the command, is not this project's registration.
+    assert.equal(compareCodexHooks(manifest, { hooks: [clean[0], { ...clean[1], eventName: "stop" }] }).status, "FAIL");
+    assert.equal(compareCodexHooks(manifest, { hooks: [clean[0], { ...clean[1], source: "user" }] }).status, "FAIL");
+    assert.equal(compareCodexHooks(manifest, { hooks: [{ ...clean[0], matcher: "Read" }, clean[1]] }).status, "FAIL",
+      "the same command with narrower tool coverage is not the configured hook");
+    assert.equal(compareCodexHooks(manifest, { hooks: [{ ...clean[0], matcher: "*" }, clean[1]] }).status, "PASS");
+    assert.equal(compareCodexHooks(manifest, null).status, "FAIL");
+
+    const hookError = compareCodexHooks(manifest, { hooks: clean, errors: [{ path: "x" }] });
+    assert.equal(hookError.status, "FAIL");
+    assert.match(hookError.note, /1 hook load error/);
+    assert.equal(compareCodexHooks(manifest, { hooks: clean, warnings: ["x"] }).status, "WARN");
+    assert.equal(compareCodexHooks({ hooks: {} }, { hooks: clean }).status, "FAIL", "an empty manifest must not read as all present");
+
+    // Installed but not running: report the lost global reminder explicitly.
+    const inactive = compareCodexHooks(manifest, { hooks: [...clean, globalStop({ trustStatus: "untrusted" })] });
+    assert.equal(inactive.status, "WARN");
+    assert.match(inactive.note, /installed but will not run/);
+
+    const failed = await checkCodexRuntimeHooks("C:/repo", manifest, async () => ({ error: "no answer from codex app-server within 15s" }));
+    assert.equal(failed.status, "FAIL");
+    assert.match(failed.note, /could not read the live hook list: no answer/);
+    assert.equal((await checkCodexRuntimeHooks("C:/repo", manifest, async () => ({ entry: { hooks: clean } }))).status, "PASS");
+    assert.equal((await checkCodexRuntimeHooks("C:/repo", manifest, async () => { throw new Error("private diagnostic"); })).status, "FAIL");
+
+    // The protocol itself, against a scripted child. `script` answers each request
+    // written to stdin; returning nothing leaves the request unanswered.
+    const fakeServer = (script) => {
+      const calls = { sent: [], ended: 0, killed: 0, spawnArgs: null };
+      const spawnChild = (command, args, options) => {
+        calls.spawnArgs = { command, args, options };
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stdin = new EventEmitter();
+        child.stdin.write = (text) => {
+          const message = JSON.parse(text);
+          calls.sent.push(message);
+          for (const line of script(message, calls) ?? []) setImmediate(() => child.stdout.emit("data", Buffer.from(line)));
+        };
+        child.stdin.end = () => { calls.ended += 1; };
+        child.kill = () => { calls.killed += 1; };
+        return child;
+      };
+      return { calls, spawnChild };
+    };
+    const server = (hooks = clean, id2 = null) => (message, calls) => {
+      if (message.id === 1) return [`${JSON.stringify({ id: 1, result: { codexHome: "C:\\Users\\private", userAgent: "secret-agent" } })}\n`];
+      if (message.id === 2) {
+        assert.equal(calls.ended, 0, "stdin must stay open until hooks/list is answered");
+        return [id2 ?? `${JSON.stringify({ id: 2, result: { data: [{ cwd: "C:/repo", hooks, warnings: [], errors: [] }] } })}\n`];
+      }
+      return [];
+    };
+
+    const cleanRun = fakeServer(server());
+    const answered = await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: cleanRun.spawnChild, timeoutMs: 2000 });
+    assert.equal(answered.entry.hooks.length, 2);
+    assert.deepEqual(cleanRun.calls.spawnArgs.args, ["app-server"]);
+    assert.equal(cleanRun.calls.spawnArgs.options.cwd, "C:/repo");
+    assert.deepEqual(cleanRun.calls.sent.map((message) => message.method), ["initialize", "initialized", "hooks/list"]);
+    assert.deepEqual(cleanRun.calls.sent[0].params.capabilities, { experimentalApi: true });
+    assert.equal(cleanRun.calls.sent[0].params.clientInfo.name, "crx-agent-health");
+    assert.deepEqual(cleanRun.calls.sent[2].params, { cwds: ["C:/repo"] });
+    assert.equal(cleanRun.calls.killed, 1, "the child must be ended once");
+    assert.equal(cleanRun.calls.ended, 1);
+    assert.doesNotMatch(JSON.stringify(answered), /private|secret-agent/, "the initialize result must not be kept");
+
+    // Noise and a split line: a log line between responses, and JSON cut mid-chunk.
+    const split = JSON.stringify({ id: 2, result: { data: [{ cwd: "C:/repo", hooks: clean }] } });
+    const noisy = fakeServer((message) => {
+      if (message.id === 1) return ["starting up\n", `${JSON.stringify({ method: "notice" })}\n`, `${JSON.stringify({ id: 1, result: {} })}\n`];
+      if (message.id === 2) return [split.slice(0, 20), `${split.slice(20)}\n`];
+      return [];
+    });
+    assert.equal((await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: noisy.spawnChild, timeoutMs: 2000 })).entry.hooks.length, 2);
+
+    const rejected = fakeServer(server(clean, `${JSON.stringify({ id: 2, error: { code: -32601, message: "token sk-private leaked" } })}\n`));
+    const protocolError = await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: rejected.spawnChild, timeoutMs: 2000 });
+    assert.equal(protocolError.error, "hooks/list returned error code -32601", "server error text must not be repeated");
+    assert.equal(rejected.calls.killed, 1);
+    const invalidCode = fakeServer(server(clean, `${JSON.stringify({ id: 2, error: { code: "sk-private", message: "private" } })}\n`));
+    const sanitized = await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: invalidCode.spawnChild, timeoutMs: 2000 });
+    assert.equal(sanitized.error, "hooks/list returned error code unknown");
+    assert.doesNotMatch(JSON.stringify(sanitized), /private/);
+
+    const shapeless = fakeServer(server(clean, `${JSON.stringify({ id: 2, result: { data: [] } })}\n`));
+    assert.match((await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: shapeless.spawnChild, timeoutMs: 2000 })).error, /no hook list/);
+    const wrongCwd = fakeServer(server(clean, `${JSON.stringify({ id: 2, result: { data: [{ cwd: "C:/other", hooks: clean }] } })}\n`));
+    assert.match((await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: wrongCwd.spawnChild, timeoutMs: 2000 })).error, /no hook list/);
+
+    const silent = fakeServer(() => []);
+    const timedOut = await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: silent.spawnChild, timeoutMs: 20 });
+    assert.match(timedOut.error, /no answer from codex app-server/);
+    assert.equal(silent.calls.killed, 1, "a timeout must end the child");
+
+    const exiting = fakeServer(() => []);
+    const crashed = probeCodexHooks("C:/repo", {
+      codex: "codex.exe",
+      spawnChild: (...args) => {
+        const child = exiting.spawnChild(...args);
+        setImmediate(() => child.emit("exit", 1, null));
+        return child;
+      },
+      timeoutMs: 2000,
+    });
+    assert.match((await crashed).error, /exited before answering/);
+
+    const flood = fakeServer((message) => (message.id === 1 ? ["x".repeat(5 * 1024 * 1024)] : []));
+    assert.match((await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: flood.spawnChild, timeoutMs: 2000 })).error, /more output/);
+
+    const unspawnable = await probeCodexHooks("C:/repo", { codex: "codex.exe", spawnChild: () => { throw new Error("EACCES C:\\Users\\private"); }, timeoutMs: 2000 });
+    assert.equal(unspawnable.error, "codex app-server could not start");
+    assert.match((await probeCodexHooks("C:/repo", { codex: null })).error, /binary not found/);
+  }
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

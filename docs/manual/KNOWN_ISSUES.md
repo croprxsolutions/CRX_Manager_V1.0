@@ -464,9 +464,16 @@ authenticate proof contents. CodeRabbit's backstop was removed 2026-10-19, which
 Running raw `codex review <scope>` from the repo root self-recurses, kills its own process and exits 0, which can
 record a false "clean" review; the wrapper `node scripts/write-codex-push-proof.mjs` avoids it, nothing blocks the
 raw form. Also: the Codex `/import` feature writes corrupted `source-command-*` adapters (commit blocker fixed,
-importer cannot be turned off; Mason: keep visible, do not delete); `sync-agent-workflows.mjs` has thirteen
+importer cannot be turned off; since 2026-10-30 the sync warning names `--archive-imported`, which moves them to a
+restorable archive, and a later import can bring new copies back; deferred, not solved: an external filesystem change
+during archive creation can leave an empty directory after a rejected operation. Existing file content is retained,
+and the destination is fixed under shared Git storage); `sync-agent-workflows.mjs` has thirteen
 recorded limitations (lexical-only containment, junction/symlink and path-case edge cases; Mason: record, don't
-patch); the guard-claim ratchet misses claims inside template strings and files outside the hook folders.
+patch); the guard-claim ratchet misses claims inside template strings and files outside the hook folders. Codex can
+show two Stop prompts on one stop (Mason's global reminder plus the project proof check); they check different
+things, and removing the duplicate needs a separate change to the global hook. Codex's guard still refuses a
+single-quoted search alternation near a protected file (use double quotes or separate simple reads), and a batched
+double-quoted search when the command holds a `\"`, even in a PowerShell comment (write it without `\"` or drop it).
 
 ### KI-50 — Cloud (web/mobile) sessions cannot push or back up memory
 **MED · ACCEPTED · tooling-guards · Mason (2026-08-04: leave as is)**

@@ -496,6 +496,18 @@ try {
     assert.match(pass.note, /2\/2 required hooks enabled and trusted; global Stop verify hook active/);
     assert.match(compareCodexHooks(manifest, { hooks: clean }).note, /no global Stop verify hook/, "machines without the global hook still pass");
     assert.equal(compareCodexHooks(manifest, { hooks: clean }).status, "PASS");
+    for (const command of [
+      'echo "global-verify-before-stop"',
+      'echo "node C:/home/.codex/hooks/global-verify-before-stop.mjs"',
+      'node "C:/home/.codex/hooks/global-verify-before-stop.mjs.backup"',
+      'node "C:/home/.codex/hooks/global-verify-before-stop.mjs"; echo done',
+    ]) {
+      assert.match(compareCodexHooks(manifest, { hooks: [...clean, globalStop({ command })] }).note,
+        /no global Stop verify hook/, "a mention or compound command is not the registered global script");
+    }
+    assert.match(compareCodexHooks(manifest, { hooks: [...clean,
+      globalStop({ command: 'node /home/mason/.codex/hooks/global-verify-before-stop.mjs' })] }).note,
+    /global Stop verify hook active/);
 
     // POSIX spelling, for a machine where Codex lists `command`.
     const posix = clean.map((item, index) => ({ ...item, command: [hook("sql-safety.mjs"), hook("session-context-reminder.mjs")][index].command }));

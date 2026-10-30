@@ -280,6 +280,13 @@ function requiredCodexHooks(hooksJson) {
 
 const normalizedMatcher = (matcher) => matcher === undefined || matcher === null || matcher === "" ? "*" : matcher;
 
+function isGlobalStopCommand(command) {
+  const invocation = String(command).trim().match(/^node(?:\.exe)?\s+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"';&|<>]+))$/i);
+  const script = invocation && (invocation[1] || invocation[2] || invocation[3]);
+  return !!script && !/[$%!`]/.test(script)
+    && /[\\/]\.codex[\\/]hooks[\\/]global-verify-before-stop\.mjs$/i.test(script);
+}
+
 // A hook only protects anything if Codex would run it, and Codex silently skips a hook
 // that is new, changed since it was trusted, or switched off. Comparing the manifest to
 // the live list catches that; the manifest parity check above cannot.
@@ -300,7 +307,7 @@ export function compareCodexHooks(hooksJson, entry) {
     else if (!live.some((hook) => hook.enabled === true && hook.trustStatus === "trusted")) problems.untrusted.push(label);
   }
   const globalStop = entry.hooks.filter((hook) => hook.source === "user" && hook.eventName === "stop"
-    && String(hook.command).includes("global-verify-before-stop"));
+    && isGlobalStopCommand(hook.command));
   const globalStopRuns = globalStop.some((hook) => hook.enabled === true && hook.trustStatus === "trusted");
   const globalNote = globalStop.length === 0 ? "no global Stop verify hook"
     : globalStopRuns ? "global Stop verify hook active"

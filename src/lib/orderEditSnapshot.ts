@@ -5,8 +5,7 @@ import type { Order, OrderItem } from '../types';
 
 /** Confirm separate header/line reads belong to one database version before adopting a draft. */
 export async function readOrderEditSnapshot(orderId: string, isAdmin: boolean) {
-  // Keep the editor-only candidate column out of shared lists that mirror the live registry.
-  const header = await supabase.from('orders').select(`${ORDER_COLUMNS}, row_version`).eq('id', orderId).maybeSingle();
+  const header = await supabase.from('orders').select(ORDER_COLUMNS).eq('id', orderId).maybeSingle();
   if (header.error) throw header.error;
   let order = header.data as Order | null;
   let orderCostError: unknown = null;

@@ -26,7 +26,7 @@ describe('20261029160000 order invoice delivered cap', () => {
   it('requires the posted invoice to be voided before its delivery is voided or cancelled', () => {
     const trigger = sql.slice(sql.indexOf('CREATE TRIGGER zz_delivery_void_needs_invoice_void'));
     // BEFORE the status change; drafts never block, so cancel/void cancelling their own drafts is unaffected
-    expect(trigger).toMatch(/BEFORE UPDATE OF status ON public\.deliveries/);
+    expect(trigger).toMatch(/BEFORE UPDATE OF status, deleted_at, order_id ON public\.deliveries/);
     expect(trigger).toContain("NEW.status IN ('voided', 'cancelled')");
     expect(sql).toContain("i.status IN ('posted', 'paid', 'overdue')");
     expect(sql).toContain("(NEW.status = 'voided' AND i.status = 'unposted')");

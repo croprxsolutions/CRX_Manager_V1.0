@@ -7,7 +7,7 @@ const check = (name, fn) => { fn(); passed += 1; console.log(`ok - ${name}`); };
 const file = (filename, changes = 10, extra = {}) => ({ filename, status: "modified", changes, ...extra });
 
 check("notes files are low risk", () => {
-  assert.equal(classifySolRisk([file("docs/plans/product.md"), file("docs/reference/x.md"), file("README.md")]).risky, false);
+  assert.equal(classifySolRisk([file("docs/plans/product.md"), file("docs/manual/x.md"), file("docs/changelog.d/y.md")]).risky, false);
 });
 for (const name of [
   // Any code, configuration or asset (Sol, 2026-10-29: name and content rules kept missing real risks).
@@ -18,6 +18,7 @@ for (const name of [
   ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/x.mjs", ".github/workflows/ci.yml", "scripts/write-codex-push-proof.mjs",
   ".husky/pre-commit", ".agents/x.md", "package.json", "docs/plans/CLAUDE.md", "AGENTS.md", ".coderabbit.yaml", ".Claude/hooks/x.md",
   "docs/workflows/SAFE_DEVELOPMENT_RULES.md", "docs/reference/agent-guardrails.md", "docs/reference/gotchas.md",
+  "docs/reference/sql-canonical-patterns.md", "README.md", "docs/x.md", "notes/todo.md",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }
@@ -28,8 +29,8 @@ check("a rename with no old name needs Sol", () => {
   assert.equal(classifySolRisk([file("docs/plans/x.md", 2, { status: "renamed" })]).risky, true);
 });
 check(`exactly ${SOL_LARGE_PR_LINES} lines is low risk, one more needs Sol`, () => {
-  assert.equal(classifySolRisk([file("docs/a.md", 300), file("docs/b.md", 200)]).risky, false);
-  assert.equal(classifySolRisk([file("docs/a.md", 300), file("docs/b.md", 201)]).risky, true);
+  assert.equal(classifySolRisk([file("docs/plans/a.md", 300), file("docs/plans/b.md", 200)]).risky, false);
+  assert.equal(classifySolRisk([file("docs/plans/a.md", 300), file("docs/plans/b.md", 201)]).risky, true);
 });
 check("unreadable answers need Sol", () => {
   for (const files of [null, [], [null], [file("docs/a.md", 1, { changes: undefined })], [file("docs/a.md", 1, { status: "changed" })],

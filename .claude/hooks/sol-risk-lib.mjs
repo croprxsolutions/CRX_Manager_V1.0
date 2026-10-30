@@ -16,7 +16,7 @@
 // or submodule at a harmless path can redirect code (Luna, 2026-10-29).
 
 import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
-import { SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS, treeProblem } from "./sol-exempt-lib.mjs";
+import { SOL_EXEMPT_PREFIXES, SOL_NEVER_EXEMPT_NAMES, SOL_NEVER_EXEMPT_PATHS, treeProblem } from "./sol-exempt-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
 
@@ -47,6 +47,9 @@ export function solRiskPathProblem(name) {
   const base = lower.slice(lower.lastIndexOf("/") + 1);
   if (SOL_ALWAYS_NAMES.some((entry) => entry.toLowerCase() === base)) return `${show(name)} is agent instructions or dependencies`;
   if (!lower.endsWith(".md")) return `${show(name)} is code, configuration or an asset, not a notes file`;
+  // Only the documentation exemption's notes folders: other .md files (docs/reference/,
+  // docs/workflows/, a root README) can carry rules agents follow (Sol, 2026-10-29).
+  if (!SOL_EXEMPT_PREFIXES.some((prefix) => lower.startsWith(prefix))) return `${show(name)} is outside the notes folders (${SOL_EXEMPT_PREFIXES.join(", ")})`;
   return null;
 }
 

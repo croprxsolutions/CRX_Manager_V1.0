@@ -603,7 +603,8 @@ try {
   // the commits after it only when those are low risk themselves (Sol, 2026-10-29).
   for (const [later, expectBlocked, label] of [
     ["src/lib/invoiceMath.ts", true, "a later money commit needs a fresh Sol review"],
-    ["notes/later.md", false, "a later notes-only commit merges on the earlier Sol review"],
+    ["docs/plans/later.md", false, "a later notes-only commit merges on the earlier Sol review"],
+    ["docs/reference/sql-canonical-patterns.md", true, "a later rule-document commit needs Sol again"],
   ]) {
     const branch = makeRepo("src/components/Label.tsx", "export const label = 'reviewed';\n");
     writeProof(branch.repo, {
@@ -2176,19 +2177,20 @@ try {
     // Sol on every code change; notes skip it (Mason, 2026-10-29): the same
     // merge-ready PR with no Sol proof, now with GitHub's line counts.
     const counted = (entries) => ({ ...compareOf([]), files: entries.map(([filename, changes]) => ({ filename, previous_filename: null, status: "modified", changes })) });
-    assert.equal(mergeDocs({ compare: counted([["notes/plan.md", 40], ["notes/todo.md", 10]]) }).blocked, false,
+    assert.equal(mergeDocs({ compare: counted([["docs/plans/plan.md", 40], ["docs/manual/todo.md", 10]]) }).blocked, false,
       "a small notes-only pull request merges with no Sol proof");
-    assert.equal(mergeDocs({ compare: counted([["notes/todo.md", 1]]), kinds: { "notes/todo.md": { mode: 0o120000 } } }).blocked, true,
+    assert.equal(mergeDocs({ compare: counted([["docs/plans/todo.md", 1]]), kinds: { "docs/plans/todo.md": { mode: 0o120000 } } }).blocked, true,
       "a symlink at a notes path still needs Sol (Luna, 2026-10-29)");
     for (const [label, entries] of [
-      ["an ordinary app file", [["notes/todo.md", 5], ["src/components/Label.tsx", 5]]],
-      ["a money file", [["notes/todo.md", 5], ["src/lib/invoiceMath.ts", 5]]],
+      ["an ordinary app file", [["docs/plans/todo.md", 5], ["src/components/Label.tsx", 5]]],
+      ["a money file", [["docs/plans/todo.md", 5], ["src/lib/invoiceMath.ts", 5]]],
+      ["a rule reference document", [["docs/plans/todo.md", 5], ["docs/reference/sql-canonical-patterns.md", 5]]],
+      ["a notes file outside the notes folders", [["notes/todo.md", 5]]],
       ["an inventory file", [["src/pages/Inventory.tsx", 5]]],
       ["a migration", [["supabase/migrations/20261029000000_x.sql", 5]]],
       ["a merge-gate file", [[".claude/hooks/pr-merge-guard.mjs", 5]]],
       ["the app route table", [["src/App.tsx", 5]]],
       ["a login file", [["src/lib/db.ts", 5]]],
-      ["over 500 changed lines", [["notes/plan.md", 300], ["notes/todo.md", 201]]],
     ]) {
       const verdict = mergeDocs({ compare: counted(entries) });
       assert.equal(verdict.blocked, true, `a pull request with ${label} still needs Sol`);

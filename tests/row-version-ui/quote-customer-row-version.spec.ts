@@ -11,8 +11,9 @@ function session() {
 }
 
 const profile = { id: ACTOR_ID, email: 'row-version@example.invalid', full_name: 'Row Version Admin', role: 'admin', is_active: true, denied_pages: [] };
-const quote = { id: '11111111-1111-4111-8111-111111111111', quote_number: 'RV-QUOTE-1', customer_id: '22222222-2222-4222-8222-222222222222', tier: 1, valid_days: 30, header_notes: 'Original quote note', footer_notes: '', status: 'draft', is_planned: false, commission_split: { splits: [] }, row_version: 7, created_at: '2026-07-30T00:00:00Z' };
 const customer = { id: '22222222-2222-4222-8222-222222222222', farm_name: 'Original Farm', contact_name: 'Original Contact', assigned_tier: 1, assigned_sales_rep: ACTOR_ID, is_active: true, default_commission_split: { splits: [] }, crops: [], row_version: 4 };
+// QuoteBuilder reads the quote with its customer embedded and refuses to save without it.
+const quote = { id: '11111111-1111-4111-8111-111111111111', quote_number: 'RV-QUOTE-1', customer_id: customer.id, tier: 1, valid_days: 30, header_notes: 'Original quote note', footer_notes: '', status: 'draft', is_planned: false, commission_split: { splits: [] }, row_version: 7, created_at: '2026-07-30T00:00:00Z', customer };
 const product = { id: '33333333-3333-4333-8333-333333333333', product_name: 'Proof Product', is_active: true, is_rup: false, current_cost: 6, tier1_price: 10, unit_size: 'gal', inventory_unit: 'gal' };
 const section = { id: '44444444-4444-4444-8444-444444444444', quote_id: quote.id, section_name: 'Proof section', sort_order: 0, section_notes: null, section_header_notes: null, needed_by_date: null, field_id: null };
 const item = { id: '55555555-5555-4555-8555-555555555555', quote_id: quote.id, section_id: section.id, product_id: product.id, sort_order: 0, product, calc_mode: 'units_direct', total_units_needed: 2, price_per_unit: 10, price_override: null, current_cost: 6, suggested_rate: null, actual_rate: null, rate_unit: null, oz_per_acre: null, price_per_acre: null, acres: null, unit_size: 'gal', profit: 8, total_price: 20, net_margin: 40, notes: null, price_unit: null };

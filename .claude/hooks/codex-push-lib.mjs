@@ -2622,12 +2622,28 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 // risk: the PR merges alongside newer main commits no review saw together with
 // it. `isAncestor(a, b)` answers "is commit a contained in commit b"; any throw
 // or unusable SHA answers "not covered".
-export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor }) {
+//
+// Sol runs once, before the PR opens (Mason, 2026-10-29): a clean proof of an
+// EARLIER commit on this PR's branch also counts, so fixes pushed after it merge
+// without another Sol run. Accepted risk: those later commits get no Sol review.
+// The reviewed commit must be one of the PR's own commits (`prCommits`, a Set of
+// lowercase SHAs) or, without that list, in the head; and either way not already
+// in main, otherwise a merged PR's proof would cover any branch built on top of
+// it. `isAncestor` answers null when it cannot tell; only a plain false counts here.
+export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, prCommits = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
   const proofBase = String(data?.base_sha || "");
-  if (!SHA.test(proofBase) || !SHA.test(String(headSha || "")) || !SHA.test(String(baseSha || ""))) return false;
-  if (!proofValid(data, headSha, nowMs, proofBase)) return false;
+  const proofHead = String(data?.head_sha || "").toLowerCase();
+  if (!SHA.test(proofBase) || !SHA.test(proofHead) || !SHA.test(String(headSha || "")) || !SHA.test(String(baseSha || ""))) return false;
+  if (!proofValid(data, proofHead, nowMs, proofBase)) return false;
   try {
+    if (proofHead !== String(headSha).toLowerCase()) {
+      // Not already in main: `false` exactly, so an unreadable answer (null) refuses (Luna, 2026-10-29).
+      const onBranch = (prCommits ? prCommits.has(proofHead) : isAncestor(proofHead, headSha) === true)
+        && isAncestor(proofHead, baseSha) === false;
+      // The review saw exactly that commit's own changes only if it contains its base.
+      if (!onBranch || isAncestor(proofBase, proofHead) !== true) return false;
+    }
     if (isAncestor(proofBase, headSha) !== true) return false;
     return proofBase === baseSha || isAncestor(proofBase, baseSha) === true;
   } catch {

@@ -2,26 +2,8 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-29 (America/Chicago)** for KI-81 only, re-read against `main` at `5ff1293d` and a local replay, not live (the session that applies `20261029120000` re-reads live first): with the candidate `20261029120000` (PR #1203, not applied) a recorded price change on a sent line applies without a re-send, so the two paths KI-81 names would bill that agreed price; an unrecorded change still needs a re-send, and KI-81 stays open. Earlier, **2026-10-28 (America/Chicago)** for KI-18 only: the four migrations applied live on 2026-10-28 (`20261027080000`..`20261027080300`, ledger high-water `20261028121259` at 7:17 PM Central) leave the quote and order number generators taking their year from `current_date`, so KI-18 stands; the 1.12 candidate `20261028185500` (not applied, PR #1185) keeps the same year rule for blend-ticket numbers. Earlier, **2026-10-27 (America/Chicago)** for the shipment reconciliation above and these earlier targeted checks for KI-12 and KI-81 (live function bodies and quote rows read
-2026-10-25, re-read 2026-10-26 13:33 UTC and 2026-10-27 05:06 UTC, 12:06 AM Central: the six bodies migration
-`20261027040000` pins are unchanged, no quote is sent or revised, and no migration since touches the functions these
-entries name; at 7:37 AM Central that migration applied live, ledger `20261027123725`, 1068 rows, and a read-only
-read after the apply found the save, convert, draw-down and Schedule Job bodies calling its price check); the
-migration ledger re-read by the PR #1138 session at 5:05 AM Central after its apply (1067 rows, newest
-`20261027093945` = `20261027030000_customer_credit_exposure`, row 991) and at 12:05 AM Central (newest `20261027044721`,
-then `20261027020546` = part B, consistent with KI-01 and KI-73); 2026-10-26 for KI-01 and KI-73 (row 11.4 part B, checked 9:05 PM Central,
-PR #1103): after part B (`20261026050000`, ledger `20261027020546`) applied live, the `_can_see_field` body md5,
-the field-table SELECT policies and the per-role visible-field counts were re-read live read-only (the ledger then
-had 1065 rows). PR #1114 (To-Do 0.15) re-read the `email_type` enum and
-`vendors` emails read-only on 2026-10-26 (10 values; 0 of 13 vendors with an email) for the KI-72 PO-email note;
-its row 995 `20261027070000` is not yet applied. The
-rest of the file was last verified 2026-10-25 against `main` at `c65b7b351` (code, migration files, merged PRs).
-The 2026-10-23 rewrite had no database access. The 2026-10-25 pass re-read live, read-only, at 10:52 PM Central:
-the migration ledger from `20261022000000` on (so the applied-live claims for `20261022090000`, `20261022101000`
-and `20261023090000` in KI-01, KI-02, KI-73 and KI-74 are confirmed), the KI-07 grant and search-path items, and the
-`invoice_postable_version` overload. Every other "applied live" statement below is still the older record's claim,
-marked as such. The margin-floor PR (To-Do 0.2) re-read the ledger again on 2026-10-26 (newest rows
-`20261023100000` and `20261023090000`), consistent with KI-01.
+**Last verified: 2026-10-30 (America/Chicago)** for KI-81 only (main `b252d257` + local replay, not live); KI-18 2026-10-28; the rest 2026-10-25 (`main` at `c65b7b351`).
+Every "applied live" statement not re-read since is the older record's claim, marked as such. Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
 else (fixed, merged, retired, long write-ups, the evidence trail, old section numbers like §0d, §4b, F06) is

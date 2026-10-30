@@ -1368,13 +1368,13 @@ export function evaluateSolPreflight({
   const quietFor = Number.isFinite(quietSince) ? nowMs - quietSince : -1;
   const runningFor = Number.isFinite(codexState?.at) ? nowMs - codexState.at : -1;
   const reviewedHere = codexState?.sha === head && codexState?.status === "completed";
-  let skippedAppWait = false;
   if (codexState === undefined || codexState?.unreadable) {
     problems.push(`could not read the Codex GitHub App's review summary on ${which}. Retry in a minute.`);
-  } else if (!reviewedHere && cleanMergeOf && (codexState?.sha === head || (codexState?.sha === cleanMergeOf && codexState?.status === "completed"))) {
+  } else if (!reviewedHere && cleanMergeOf && codexState?.sha === cleanMergeOf && codexState?.status === "completed") {
     // Mason, 2026-10-29: a clean main merge adds none of the PR's own changes, so
     // Sol need not wait for the App to re-read it. Its threads are still checked below.
-    skippedAppWait = true;
+    // Only a FINISHED review of the pre-merge commit counts: once the App has started on
+    // the merge itself, the branch below waits for it (Sol MED on #1206).
     notes.push(`${head.slice(0, 9)} only merges main into ${cleanMergeOf.slice(0, 9)} (no conflicts, no shared files), so Sol does not wait for the Codex GitHub App to review it again.`);
   } else if (!reviewedHere && codexState?.sha === head) {
     // Its review of THIS commit has started and not finished: wait for it, however long, until it is plainly dead.
@@ -1404,14 +1404,15 @@ export function evaluateSolPreflight({
       "Fix them (one push for all of them) or reply with a reason and resolve each thread, then run Sol.",
     );
   }
-  // The skip reuses the App's review of the pre-merge commit, so its threads on that
-  // commit must be answered too: against the merge head they only read as stale (App P1, PR #1206).
-  if (skippedAppWait && cleanMergeThreads?.status === "findings-at-head") {
+  // A clean main merge carries the PR's code from the pre-merge commit, so the App's threads on
+  // that commit must be answered whether or not the App re-reviewed the merge: against the merge
+  // head they only read as stale (App P1 on #1206, Luna MED on #1213).
+  if (cleanMergeOf && cleanMergeThreads?.status === "findings-at-head") {
     problems.push(
       `the Codex GitHub App has ${cleanMergeThreads.unresolvedAtHead} unanswered comment(s) on ${cleanMergeOf.slice(0, 9)}, ` +
       "the commit before the main merge. Fix them or reply with a reason and resolve each thread, then run Sol.",
     );
-  } else if (skippedAppWait && (!cleanMergeThreads || cleanMergeThreads.status === "incomplete")) {
+  } else if (cleanMergeOf && (!cleanMergeThreads || cleanMergeThreads.status === "incomplete")) {
     problems.push(`could not read the Codex GitHub App threads on ${cleanMergeOf.slice(0, 9)}, the commit before the main merge. Retry in a minute.`);
   }
 

@@ -67,7 +67,8 @@ time; captures may sit in any order, so the newest timestamp is the latest evide
 
 **Manual docs' "Last verified" line** (`docs/manual/*.md`) is one short line, at most 200
 characters: the date (America/Chicago) and the scope you re-checked, e.g. "for the migration ledger
-only". `check:docs` fails a longer line or a second one. The evidence of what you read goes in your
+only"; a date with no scope means the whole document was re-read. `check:docs` fails a longer line
+or a second one. The evidence of what you read goes in your
 PR's `docs/changelog.d/` note, never on the stamp line. Bump the date only after re-reading the doc
 against live state. In `DECISION_LOG.md`, correct or reverse a decision with a NEW entry that names
 the one it supersedes; do not rewrite an old entry's rule, and do not bump its stamp for a new entry.

@@ -4298,5 +4298,5 @@ business-policy call — not for routine bug fixes or ordinary feature work. Use
 Keep each entry under ~8 lines total. **Never rewrite or delete a past entry** — if a decision
 is later reversed or superseded, add a **new** entry describing the reversal, and reference the
 old entry by its date/title (e.g. "Supersedes 2026-06-14 — Prepay earmark engine SHELVED").
-Update the "Last verified" date at the top whenever you review this file, even if you add
-nothing.
+Update the "Last verified" date at the top only after re-reading the whole file; adding an
+entry alone does not change it (2026-10-29: every PR bumping it made them collide on merge).

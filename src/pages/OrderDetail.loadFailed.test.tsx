@@ -117,9 +117,11 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Order Detail', () => {
-  it('an unbilled order still offers Create Invoice (the control for the cases below)', async () => {
+  it('an undelivered order offers Schedule Delivery and explains prepay', async () => {
     open();
-    expect(await screen.findByRole('button', { name: /Create Invoice/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Schedule Delivery/ })).toBeInTheDocument();
+    expect(screen.getByText(/Product invoices are created after delivery/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
   });
 
   it.each<Mode>(['error', 'nodata', 'notlist'])(
@@ -153,7 +155,7 @@ describe('Order Detail', () => {
     expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
     H.failing.delete(table);
     tryAgain();
-    expect(await screen.findByRole('button', { name: /Create Invoice/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Schedule Delivery/ })).toBeInTheDocument();
   });
 
   it.each<Mode>(['error', 'nodata'])('a %s customer read says could not be loaded, not an order with no customer', async (mode) => {

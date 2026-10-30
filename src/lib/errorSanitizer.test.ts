@@ -69,6 +69,21 @@ describe('sanitizeError', () => {
     expect(shown).toBe('Nothing was changed. This delivery was billed outside CRX, so it cannot be moved to another order');
   });
 
+  it('explains the cumulative order delivery cap without exposing server details', () => {
+    expect(sanitizeError('ORDER_INVOICE_EXCEEDS_DELIVERED: internal detail'))
+      .toBe('Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay');
+  });
+
+  it('tells the user to void the posted invoice before voiding or cancelling its delivery', () => {
+    expect(sanitizeError('DELIVERY_HAS_POSTED_INVOICE: void the posted invoice for delivery D-1 before voiding or cancelling it'))
+      .toBe('Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery');
+  });
+
+  it('explains an incomplete order invoice line separately from the delivered cap', () => {
+    expect(sanitizeError('ORDER_INVOICE_LINE_INVALID: a non-product line requires a charge type'))
+      .toBe('Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line');
+  });
+
   it('explains a delivery invoice that bills beyond its delivery', () => {
     expect(sanitizeError('DELIVERY_INVOICE_EXCEEDS_DELIVERED: invoice CS-2026-0055 bills 8.0000 of Capreno, but delivery DEL-00074 allows 6'))
       .toBe('Nothing was changed. This invoice is for one delivery, so it can bill only the products and quantities that delivery delivered (invoice CS-2026-0055 bills 8.0000 of Capreno, but delivery DEL-00074 allows 6)');

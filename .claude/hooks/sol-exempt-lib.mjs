@@ -200,7 +200,8 @@ export function solExemptTreeQuery(folderCount) {
 // not. A file the pull request adds or keeps is read at the head; a deleted or
 // edited file, and the old name of a rename or copy, at the base, so deleting,
 // editing or moving a symlink or submodule needs Sol too.
-function treeProblem({ files, baseSha, headSha, repoPath, gh }) {
+// Also used by sol-risk-lib.mjs (Mason, 2026-10-29).
+export function treeProblem({ files, baseSha, headSha, repoPath, gh }) {
   const lookups = [];
   for (const entry of files) {
     const status = String(entry.status).toLowerCase();

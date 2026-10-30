@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 import {
   chicagoCalendarStamp,
   manualFreshnessBoundary,
-  parseLatestMigrationHistoryEntry,
+  manualStampProblems,
+  migrationIndexProblems,
+  STRICT_INDEX_FROM,
 } from "./check-doc-drift-lib.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -25,13 +27,14 @@ const app = read("src/App.tsx") + "\n" + read("src/appPages.tsx");
 const databaseSchema = read("docs/reference/database-schema.md");
 const schemaRegistry = JSON.parse(read(".claude/schema-registry.json"));
 
-const historyClaim = parseLatestMigrationHistoryEntry(history);
-const historySequences = [...history.matchAll(/^\|\s*(\d+)\s*\|\s*\d{8,14}\s*\|/gm)]
-  .map((match) => Number(match[1]));
-const latestHistorySequence = historySequences.length ? Math.max(...historySequences) : 0;
-row("migration-history latest sequence", historyClaim ?? "missing", latestHistorySequence,
-  Number(historyClaim) === latestHistorySequence ? "PASS" : "FAIL",
-  `parsed history rows: ${historySequences.length}`);
+const index = migrationIndexProblems(history,
+  migrations.map((name) => name.match(/^(\d{8,14})_/)?.[1]).filter(Boolean));
+row(`migration-history one table row per migration since ${STRICT_INDEX_FROM}`, index.checked,
+  index.checked - index.missing.length - index.duplicated.length,
+  index.missing.length === 0 && index.duplicated.length === 0 ? "PASS" : "FAIL",
+  [index.missing.length ? `no table row: ${index.missing.join(", ")}` : "",
+    index.duplicated.length ? `more than one row (reconcile into one): ${index.duplicated.join(", ")}` : ""]
+    .filter(Boolean).join("; "));
 
 const missingMigrations = migrations.filter((filename) => {
   const base = filename.replace(/\.sql$/, "");
@@ -122,6 +125,9 @@ for (const doc of manualDocs) {
   const stamped = /^\*{0,2}Last verified:?\*{0,2}\s*\d{4}-\d{2}-\d{2}/m.test(read(rel));
   row(`manual doc ${doc}`, "Last verified stamp", stamped ? "present" : "missing",
     stamped ? "PASS" : "FAIL");
+  const stampProblems = manualStampProblems(read(rel));
+  row(`manual doc ${doc} stamp line`, `one line, at most 200 characters`, stampProblems.length ? "no" : "yes",
+    stampProblems.length ? "FAIL" : "PASS", stampProblems.join("; "));
 }
 
 // HARD freshness gate (2026-07-16 scaffolding review): the two docs that describe

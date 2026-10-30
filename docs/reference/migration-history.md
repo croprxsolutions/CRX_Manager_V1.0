@@ -1,16 +1,15 @@
-# Migration History (latest entry 1004)
+# Migration History
 
-## Unapplied payment-date candidate — 2026-10-29
+> **LATEST LIVE EVIDENCE (read this first).** Read-only `list_migrations` observations sit at
+> the top of this file. Two PRs can add one at the same time and git keeps both in either order,
+> so compare their UTC timestamps; the newest timestamp is the latest evidence. Refer to a
+> migration by its version or file name, not its row number: two PRs can give a new row the same number.
+
+**Live capture — 2026-10-29 14:36 UTC (9:36 AM Central; the apply script's read-only ledger refresh after row 1001 applied for PR #1185, then a read-only catalog check):** 1077 rows, `max(version)` `20261029143642` = `20261028185500_order_edit_and_number_concurrency` (row 1001). The effective ordering high-water is `20261028185500`.
 
 | Row | Version | Description |
 |---:|---|---|
-| 1004 | 20261029160200 | **LOCAL CANDIDATE — NOT APPLIED.** `20261029160200_chicago_payment_business_date.sql` (authored as `20261028175551`; SQL sha256 `91119fc1759d66785f25cc4fc0bc7cdb97a4dd4a9990a65fa85802dbc837f553`) resolves omitted payment dates and the payment/prepay season from America/Chicago after replay. Marked date intent enforces request matching while unmarked v1 and bare cached results remain compatible. Re-stamped after the live ordering high-water `20261028185500`. Protected landing requires clean reviews, checks and apply proofs. Rollback: a reviewed forward migration preserving all retry entries; never rewrite payment rows. If the function is ever reverted within 24 hours of apply, retries of undated payments made on new keys fail safely with `IDEMPOTENCY_ARGUMENT_MISMATCH` (no double payment). |
-
-> **LATEST LIVE EVIDENCE (read this first).** The most recent read-only
-> `list_migrations` observation is at the top of this file, immediately below.
-> Do not scroll for it, and do not treat any older dated block as the latest.
-
-**Live capture — 2026-10-29 14:36 UTC (9:36 AM Central; the apply script's read-only ledger refresh after row 1001 applied for PR #1185, then a read-only catalog check):** 1077 rows, `max(version)` `20261029143642` = `20261028185500_order_edit_and_number_concurrency` (row 1001). The effective ordering high-water is `20261028185500`.
+| 1004 | 20261029160200 | **LOCAL CANDIDATE — NOT APPLIED.** PR #1179: `20261029160200_chicago_payment_business_date.sql` (authored as `20261028175551`; SQL sha256 `91119fc1759d66785f25cc4fc0bc7cdb97a4dd4a9990a65fa85802dbc837f553`). It resolves omitted payment dates from the Chicago business date and preserves retry intent; existing season assignment for explicitly backdated payment/prepay remains unchanged. |
 
 **Live capture — 2026-10-29 13:51 UTC (8:51 AM Central; read-only `execute_sql` on `supabase_migrations.schema_migrations`, the full ledger, row by row, after row 1000 applied for PR #1187 and before row 1001 applies for PR #1185):** 1076 rows / 1069 distinct names, `max(version)` `20261029043628` = `20261027080400_any_rep_converts_booking` (row 1000). The effective ordering high-water (each name's 14-digit stamp, else its version) is `20261027080400`, from that same row. 0 rows have an effective stamp at or after `20261028185500`, and no row is named `%order_edit_and_number_concurrency%`, so candidate `20261028185500_order_edit_and_number_concurrency` sorts strictly after every applied migration. Overloads: `pg_proc` in `public` holds exactly ONE `update_order_items` signature, `update_order_items(uuid,jsonb,uuid,text)`, which the candidate drops before creating its five-argument replacement; no three-argument `update_order_items(uuid,jsonb,uuid)` survives live. `generate_ticket_number()` exists once with no arguments; `bump_order_edit_version`, `bump_order_item_edit_version` and `assign_allocation_set_version` do not exist live; `orders.row_version` does not exist live.
 

@@ -21,6 +21,7 @@ describe('20261029160000 order invoice delivered cap', () => {
     expect(sql).toContain("d.status = 'completed' AND d.deleted_at IS NULL");
     expect(sql).toContain('v_reason := public._order_invoice_overbilling(v_invoice.order_id)');
     expect(sql).toContain('ii.quantity AS quantity');
+    expect(sql).toContain("OR (d.status = 'completed' AND public._delivery_invoice_overbilling(i.id) IS NOT NULL)");
     expect(sql).toContain('SELECT per_delivery FROM invoice_mode');
     expect(sql).toContain('THEN sum(round(coalesce(di.quantity_delivered, 0), 4))');
     expect(sql).toContain('ELSE round(sum(coalesce(di.quantity_delivered, 0)), 4) END AS qty');

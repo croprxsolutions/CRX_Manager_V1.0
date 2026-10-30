@@ -4,7 +4,9 @@
 -- original sale and credit remain paired, and a replacement needs another delivery.
 -- Existing per-delivery caps, order/delivery exclusivity and split provenance remain.
 -- Quick-delivery drafts are the approved exception; their existing per-delivery cap
--- bounds planned quantities and refuses posting before completion.
+-- bounds planned quantities and refuses posting before completion. A completed quick
+-- delivery's unpostable draft group cannot block another physical delivery; its own
+-- delivery cap still refuses posting until corrected.
 -- Owner decision (Mason, 2026-10-29): an active posted invoice must be voided before the
 -- delivery behind it can be voided or cancelled, so voiding a delivery can never strand
 -- an order billed above what was delivered. A draft invoice never blocks (void_delivery
@@ -60,7 +62,9 @@ BEGIN
      WHERE i.order_id = p_order_id AND i.invoice_type <> 'credit_memo'
        AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')
        AND NOT (i.status = 'draft' AND coalesce(d.is_quick_delivery, false)
-                AND d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress'))
+                AND d.deleted_at IS NULL
+                AND (d.status IN ('scheduled', 'in_progress')
+                  OR (d.status = 'completed' AND public._delivery_invoice_overbilling(i.id) IS NOT NULL)))
        AND ii.product_id IS NOT NULL
   ), over_line AS (
     SELECT b.product_id, sum(b.quantity) AS billed_qty,

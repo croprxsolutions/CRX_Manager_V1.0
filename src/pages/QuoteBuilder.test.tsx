@@ -1162,13 +1162,20 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation((name: string) => {
       if (name !== 'generate_quote_number') return Promise.resolve({ data: null, error: null });
       if (failure === 'throw') return Promise.reject(new Error('offline'));
-      return Promise.resolve({ data: failure === 'blank' ? '' : null, error: failure === 'error' ? { message: 'unavailable' } : null });
+      return Promise.resolve({ data: failure === 'blank' ? '' : null, error: failure === 'error' ? { message: 'unavailable', code: 'P0001', details: 'number allocation refused', hint: 'retry later' } : null });
     });
     renderQuoteBuilder();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate quote number. Please refresh and try again.'));
     expect(mockFrom).not.toHaveBeenCalledWith('quotes');
     expect(screen.queryByText(/^Q-\d{4}-\d+$/)).not.toBeInTheDocument();
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+    if (failure === 'error') {
+      expect(mockSentryCaptureException).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'unavailable', code: 'P0001', details: 'number allocation refused', hint: 'retry later',
+      }), { extra: expect.objectContaining({
+        context: 'generate_quote_number', code: 'P0001', details: 'number allocation refused', hint: 'retry later',
+      }) });
+    }
   });
 
   it('opens the exact receipt-proven order after a changed draw intent', async () => {

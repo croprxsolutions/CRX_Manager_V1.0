@@ -981,10 +981,11 @@ export default function QuoteBuilder() {
     setQuoteNumber('');
     try {
       const { data, error } = await supabase.rpc('generate_quote_number');
-      if (error || !data) throw new Error(error?.message ?? 'Quote number unavailable');
+      if (error) throw Object.assign(new Error(error.message), error);
+      if (!data) throw new Error('Quote number unavailable');
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
     } catch (err) {
-      Sentry.captureException(err, { extra: { context: 'generate_quote_number' } });
+      Sentry.captureException(err, { extra: { context: 'generate_quote_number', ...(err instanceof Error ? err : {}) } });
       toast('error', 'Failed to generate quote number. Please refresh and try again.');
     } finally {
       setQuoteNumberLoading(false);

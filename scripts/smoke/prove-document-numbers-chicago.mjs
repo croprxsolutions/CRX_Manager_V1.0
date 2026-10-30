@@ -52,7 +52,7 @@ const claim = key => `public.create_rebate_claim('${PROGRAM}',1,100,p_idempotenc
 const claims = `SET request.jwt.claim.sub='${ADMIN}'; SET request.jwt.claims='{"sub":"${ADMIN}"}';`;
 const managerClaims = `SET request.jwt.claim.sub='${MANAGER}'; SET request.jwt.claims='{"sub":"${MANAGER}"}';`;
 function contract() {
-  return scalar(`SELECT jsonb_agg(jsonb_build_array(oid::text,proargtypes::text,proargnames,pronargdefaults,proacl::text,proconfig,prosecdef,proowner))::text
+  return scalar(`SELECT jsonb_agg(jsonb_build_array(oid::text,proargtypes::text,proargnames,pronargdefaults,proacl::text,proconfig,prosecdef,proowner,provolatile,proisstrict,proparallel))::text
     FROM (SELECT * FROM pg_proc WHERE oid IN (${SPECS.map(([s]) => `'public.${s}'::regprocedure`).join(',')}) ORDER BY oid) p;`);
 }
 function definitions() {
@@ -141,6 +141,9 @@ async function main() {
   for (const def of fixedDefs) psql(def);
   assert.equal(contract(),before,'all contracts still preserved');
   for (const change of [
+    'ALTER FUNCTION public.generate_quote_number() IMMUTABLE;',
+    'ALTER FUNCTION public.generate_order_number() STRICT;',
+    'ALTER FUNCTION public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text) PARALLEL SAFE;',
     'ALTER FUNCTION public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text) SECURITY INVOKER;',
     'ALTER FUNCTION public.generate_quote_number() SET search_path = public, pg_temp;',
     'CREATE ROLE number_proof_owner; GRANT number_proof_owner TO postgres WITH SET TRUE; GRANT CREATE ON SCHEMA public TO number_proof_owner; ALTER FUNCTION public.generate_order_number() OWNER TO number_proof_owner;',
@@ -159,7 +162,7 @@ async function main() {
   assert.notEqual(postflightRefusal.status, 0, 'postflight refuses an incorrect emitted contract');
   assert.match(postflightRefusal.stderr, /CONTRACT_FAIL/);
   assert.equal(contract(), before, 'postflight refusal rolls back the whole migration');
-  console.log('PASS preflight/postflight refuse owner, grants, search-path and security drift');
+  console.log('PASS preflight/postflight refuse planner attributes, owner, grants, search-path and security drift');
   console.log('DOCUMENT_NUMBERS_CHICAGO_PROOF_PASS');
 }
 try { await main(); }

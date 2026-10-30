@@ -48,7 +48,8 @@ BEGIN
                    'public.generate_order_number()'::regprocedure,
                    'public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)'::regprocedure)
   LOOP
-    IF v_fn.prosecdef IS DISTINCT FROM (v_fn.proname = 'create_rebate_claim')
+    IF v_fn.provolatile <> 'v' OR v_fn.proisstrict OR v_fn.proparallel <> 'u'
+       OR v_fn.prosecdef IS DISTINCT FROM (v_fn.proname = 'create_rebate_claim')
        OR v_fn.proconfig IS DISTINCT FROM
          (CASE WHEN v_fn.proname = 'create_rebate_claim'
               THEN ARRAY['search_path=public, pg_temp'] ELSE ARRAY['search_path=public'] END)
@@ -183,7 +184,8 @@ BEGIN
                    'public.generate_order_number()'::regprocedure,
                    'public.create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)'::regprocedure)
   LOOP
-    IF v_fn.prosecdef IS DISTINCT FROM (v_fn.proname = 'create_rebate_claim')
+    IF v_fn.provolatile <> 'v' OR v_fn.proisstrict OR v_fn.proparallel <> 'u'
+       OR v_fn.prosecdef IS DISTINCT FROM (v_fn.proname = 'create_rebate_claim')
        OR v_fn.proconfig IS DISTINCT FROM
          (CASE WHEN v_fn.proname = 'create_rebate_claim'
               THEN ARRAY['search_path=public, pg_temp'] ELSE ARRAY['search_path=public'] END)

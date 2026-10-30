@@ -2918,6 +2918,53 @@ describe('QuoteBuilder', () => {
     });
   });
 
+  // Item 11a / KI-82: after Save an admin sees the cost the database recorded for each saved line,
+  // not the cost the page loaded with, and the just-saved quote is not marked as changed.
+  it('shows each saved line’s recorded cost after Save, without marking the quote changed', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'quotes' ? quote
+        : table === 'quote_sections' ? [section]
+          : table === 'quote_items' ? [item]
+            : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+              : table === 'products' ? [product]
+                : [],
+      error: null,
+    }));
+    mockRpc.mockImplementation((name: string, args?: unknown) => {
+      if (name === 'save_quote') {
+        const line = (args as { p_sections: Array<{ items: Array<{ client_key: string; price_per_unit: number }> }> }).p_sections[0].items[0];
+        return Promise.resolve({ data: {
+          quote_id: quote.id, row_version: 8,
+          item_ids: { [line.client_key]: 'item-1' },
+          item_prices: { [line.client_key]: line.price_per_unit },
+        }, error: null });
+      }
+      if (name === 'get_admin_cost_fields') {
+        // The database recorded $7.00 for the saved line, today's cost for the product; the page
+        // loaded both at $6.00.
+        const table = (args as { p_table: string }).p_table;
+        return Promise.resolve({ data: table === 'quote_items'
+          ? { 'item-1': { current_cost: 7, profit: 6, net_margin: 30, cost_at_quote_cents: 700 } }
+          : { 'product-1': { current_cost: 7 } }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    renderQuoteBuilder(quote.id);
+    await screen.findByText('$6.00');
+    await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    fireEvent.click(screen.getByText('Save Draft'));
+
+    expect(await screen.findByText('$7.00')).toBeInTheDocument();
+    // Today's cost is re-read too, so the line never shows a stale "today" beside the recorded cost.
+    expect(screen.queryByText(/today \$6\.00/)).not.toBeInTheDocument();
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('get_admin_cost_fields', { p_table: 'products', p_ids: ['product-1'] }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('get_admin_cost_fields', { p_table: 'quote_items', p_ids: ['item-1'] }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
+  });
+
   describe('sent-price lock (To-Do 1.2)', () => {
     // A revised quote whose V1 was sent at 10.00; the catalog tier 1 price is 12.00 today.
     function configureLockedQuote() {

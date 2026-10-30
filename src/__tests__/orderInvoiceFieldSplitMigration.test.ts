@@ -107,7 +107,7 @@ describe('20261022021000 order invoice refuses a field split', () => {
     expect(spec.covers).toEqual(expect.arrayContaining(['create_invoice_from_order', 'create_split_invoices_from_order']));
   });
 
-  it('shows the refusal on the Order page in plain words', () => {
+  it('shows split-invoice errors on the Order page in plain words', () => {
     // OrderDetail's Create Invoice runs through runCriticalAction, which toasts sanitizeError(err).
     const page = read('src/pages/OrderDetail.tsx');
     const start = page.indexOf('const handleCreateInvoice = async () => {');
@@ -116,8 +116,9 @@ describe('20261022021000 order invoice refuses a field split', () => {
     expect(end).toBeGreaterThan(start);
     const handler = page.slice(start, end);
     expect(handler).toContain('await runCriticalAction({');
-    const call = handler.indexOf("supabase.rpc('create_invoice_from_order', {");
+    const call = handler.indexOf("supabase.rpc('create_split_invoices_from_order', {");
     expect(call).toBeGreaterThan(-1);
+    expect(handler).not.toContain("supabase.rpc('create_invoice_from_order', {");
     // The refusal is thrown to runCriticalAction, not swallowed.
     expect(handler.indexOf('if (error) throw error;', call)).toBeGreaterThan(call);
     expect(read('src/lib/criticalAction.ts')).toContain("toast('error', sanitizeError(err));");

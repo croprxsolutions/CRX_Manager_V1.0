@@ -1,9 +1,11 @@
 # Known Issues — what is open today
 
+**Last verified:** 2026-10-30 for the quote cost-visibility rules only (main `1567b768` + local replay, not live); other evidence retains its stated dates.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**Last verified: 2026-10-30 (America/Chicago)** for the quote cost-visibility rules only (main `b252d257` + local replay, not live); KI-18 2026-10-28; the rest 2026-10-25 (`main` at `c65b7b351`).
-Every "applied live" statement not re-read since is the older record's claim, marked as such. Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
+**KI-18 verified: 2026-10-29 (America/Chicago)** for KI-18 only: read-only live function definitions confirm `generate_quote_number`, `generate_order_number`, `create_rebate_claim`, and `generate_ticket_number` still take the year from `current_date`. The live ledger includes `20261028185500_order_edit_and_number_concurrency` (version `20261029143642`); its blend-ticket generator retains the same year rule. PR #1181 is still an unapplied candidate and is not part of this check. KI-18 stands. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
+Every "applied live" statement not re-read since is the older record's claim, marked as such.
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
 else (fixed, merged, retired, long write-ups, the evidence trail, old section numbers like §0d, §4b, F06) is
@@ -275,12 +277,15 @@ re-sent, either can bill the unsent price; the field-application lookup can also
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved
-**LOW · OPEN (found 2026-10-27, Sol review of PR #1105) · money (display only) · unassigned**
+**LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
 After Save, `src/pages/QuoteBuilder.tsx` records a new line's saved id and stored price but does not load the
 cost the database recorded for that line (`quote_items.cost_at_quote_cents`). If the product's cost changed after
 the page loaded, the Cost, Profit and Margin shown to an admin can differ from the saved figures until the page is
 reloaded. Saved prices, costs and totals are correct; PDFs never show cost. Fix: refresh each saved line's recorded
 cost after a save, and prove it on the live screen.
+The fix re-reads each saved line's recorded cost (and, for a line whose cost moved, the product's cost
+today) through `get_admin_cost_fields` after an admin's save, without marking the quote changed; proven on a
+local replay's screen (a new line added after its product's cost rose shows the recorded cost after Save).
 
 ---
 
@@ -382,7 +387,7 @@ Grower portal; OCR auto-fill of re-entry/pre-harvest intervals (held back as a c
 items (photo/signature persistence, idempotent email replay) and a real-phone offline test (MED, UNVERIFIED).
 
 ### KI-83 — The `idempotency_keys` table has no TypeScript type
-**LOW · OPEN (found 2026-10-27, migration-drift review of `20261027040000`; predates it) · database · unassigned**
+**LOW · FIX IN REVIEW (Taha, branch `taha/idempotency-keys-type`; found 2026-10-27, migration-drift review of `20261027040000`; predates it) · database**
 `idempotency_keys` is the internal table where database functions record a retry key and its saved answer, so a
 repeated request returns the first result instead of acting twice. Many functions write to it (including the
 quote save re-emitted by `20261027040000`), and every column they write is in `.claude/schema-registry.json` and in
@@ -391,6 +396,8 @@ for it. Two screens read one column of it directly (`QuickDeliveryModal.tsx` and
 `request_fingerprint` exists), so nothing is broken; the gap only means the migration review's TypeScript
 cross-check, which reads `src/types/index.ts`, cannot confirm those writes. Fix: confirm with the
 `typescript-types-drift-reviewer` whether to add an interface or record the table as intentionally untyped.
+The fix adds `IdempotencyKey` to `src/types/index.ts` with the eight registry columns, as that reviewer's
+CHECK 1 asks for every table a screen reads with `.from(...)`.
 
 ### KI-85 — Four sweep fingerprints went stale when the sent-quote price lock applied
 **MED · OPEN (correction written 2026-10-28 on the PR #1165 branch; not yet reviewed, merged or confirmed by a live sweep) · database/sweeps · Mason authorized the fix 2026-10-28 (To-Do 11.12)**
@@ -464,9 +471,20 @@ authenticate proof contents. CodeRabbit's backstop was removed 2026-10-19, which
 Running raw `codex review <scope>` from the repo root self-recurses, kills its own process and exits 0, which can
 record a false "clean" review; the wrapper `node scripts/write-codex-push-proof.mjs` avoids it, nothing blocks the
 raw form. Also: the Codex `/import` feature writes corrupted `source-command-*` adapters (commit blocker fixed,
-importer cannot be turned off; Mason: keep visible, do not delete); `sync-agent-workflows.mjs` has thirteen
+importer cannot be turned off; since 2026-10-30 the sync warning names `--archive-imported`, which moves them to a
+restorable archive, and a later import can bring new copies back; deferred, not solved: an external filesystem change
+during archive creation can leave an empty directory after a rejected operation. Existing file content is retained,
+and the destination is fixed under shared Git storage); `sync-agent-workflows.mjs` has thirteen
 recorded limitations (lexical-only containment, junction/symlink and path-case edge cases; Mason: record, don't
-patch); the guard-claim ratchet misses claims inside template strings and files outside the hook folders.
+patch); the guard-claim ratchet misses claims inside template strings and files outside the hook folders. Codex can
+show two Stop prompts on one stop (Mason's global reminder plus the project proof check); they check different
+things, and removing the duplicate needs a separate change to the global hook. Codex's guard still refuses a
+single-quoted search alternation near a protected file (use double quotes or separate simple reads), and a batched
+double-quoted search when the command holds shell syntax that could change how quotes pair, such as `$`, `%`, `!`, a
+comment or `\"`, even when harmless (the guard's scan is deliberately conservative, not a parser; the full list is in
+`docs/reference/agent-guardrails.md`; drop the comment or run the reads separately). Deferred, not solved: this change
+does not establish source-content integrity for every shared hook. Runtime trust status and the guard's explicit
+protected-file list are separate checks; scripts outside that list do not gain its write protection.
 
 ### KI-50 — Cloud (web/mobile) sessions cannot push or back up memory
 **MED · ACCEPTED · tooling-guards · Mason (2026-08-04: leave as is)**
@@ -618,13 +636,15 @@ OrderDetail.
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the
   source invoice can be hard-deleted or re-saved.
-- Whole-order invoice quantities and unit prices are not capped server-side (MED). Voiding a delivery whose invoice
-  is posted leaves the invoice active; the office must issue a credit memo (MED). Removing a product from a
+- Whole-order invoice quantities and unit prices are not capped server-side (MED; quantities change when PR #1174 applies). Voiding a delivery whose invoice
+  is posted leaves the invoice active (MED; changes when PR #1174 applies: the delivery then cannot be voided until the invoice is voided). Removing a product from a
   scheduled delivery can leave its drafted invoice unpostable, and lowering a quantity leaves the draft over the
   delivery quantity until staff edit it (MED). Freezing a soft-deleted order can block cancelling or voiding its
   completed delivery (reversal needs a reviewed migration) (LOW). Draft invoice CS-2026-0055 is deliberately left
   (the other delivery was billed in Chem Man) (LOW). Integrity checks page by offset, so concurrent inserts or
   deletes can make a run miss or repeat a row (LOW, accepted).
+
+- PR #1174 also preserves physical quick-delivery and follow-up completion while an edited draft needs correction; posting still rechecks the whole bill. Its split generator conserves each source quantity exactly, and the order-line and product caps have no fractional tolerance.
 
 ### KI-77 — Lists, UI and CRM details (extends KI-26, KI-30, KI-32, KI-41)
 **MED/LOW · OPEN · UI/database**

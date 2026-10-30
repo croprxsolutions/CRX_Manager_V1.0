@@ -13,6 +13,7 @@
  *
  * Run manually : node scripts/generate-workflow-map.mjs
  * CI check     : regenerated in CI and compared after normalizing the date stamp
+ * Date stamp   : changes only when the rest of the map changes; an unchanged map is not rewritten
  * Pre-commit   : never auto-runs or stages this file; callers stage it explicitly
  */
 
@@ -838,7 +839,12 @@ function main() {
   try { html = readFileSync(HTML_OUT, 'utf8'); }
   catch { console.error(`❌ Cannot read ${HTML_OUT} — run initial generation first`); process.exit(1); }
 
-  const now = new Date().toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+  // Keep the existing date while the map's content is unchanged: a date-only
+  // rewrite on every run made the file collide between PRs (2026-10-29).
+  const before = html;
+  const today = new Date().toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+  const oldDate = (before.match(/ · Updated ([^<]+)<\/span>/) || [])[1];
+  const now = oldDate || today;
 
   // Patch stats line
   html = patch(html,
@@ -883,6 +889,12 @@ function main() {
 
   validateQuoteLifecycleCoverage(html);
 
+  // A Windows checkout holds CRLF; the patched sections are LF, so compare without line endings.
+  if (html.replace(/\r\n/g, '\n') === before.replace(/\r\n/g, '\n')) {
+    console.log('✅ docs/app-workflow-map.html unchanged (date kept)');
+    return;
+  }
+  if (oldDate) html = html.replace(` · Updated ${oldDate}</span>`, ` · Updated ${today}</span>`);
   writeFileSync(HTML_OUT, html, 'utf8');
   console.log(`✅ docs/app-workflow-map.html updated (${(html.length / 1024).toFixed(0)} KB)`);
 }

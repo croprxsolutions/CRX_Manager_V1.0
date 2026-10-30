@@ -114,10 +114,13 @@ try {
   const mutation = sql(chain,'postgres',true);
   assert.match(mutation.stderr,/SMOKE_FAIL: shortage quantities/,mutation.stderr);
   console.log('MUTATION: premature notice reads stale quantities; regression catches it.');
+  // Reused runs retain active office recipients, so count distinct deliveries rather than recipients.
+  const countReportedDeliveries = () => Number(sql("SELECT count(DISTINCT related_entity_id) FROM public.notifications WHERE notification_type='delivery_issue_reported';").stdout.trim());
+  const reportedBefore = countReportedDeliveries();
   sql(`BEGIN;\n${read(`supabase/migrations/${candidate}`)}\nCOMMIT;`);
   sql(`BEGIN;\n${chain.replace("RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';", "RAISE NOTICE 'SMOKE_COMMIT_PASS';")}\nCOMMIT;`);
-  assert.equal(sql("SELECT count(*) FROM public.notifications WHERE notification_type='delivery_issue_reported';").stdout.trim(),'10');
-  console.log('COMMIT: ten report notices persisted for eleven synthetic driver completions (one without an issue); a new transaction reads them.');
+  assert.equal(countReportedDeliveries() - reportedBefore,10);
+  console.log('COMMIT: notices for ten reported deliveries persisted from eleven synthetic completions (one without an issue); a new transaction reads them.');
   console.log('DRIVER_DELIVERY_ISSUE_PROOF_PASS');
 } finally {
   if (process.argv.includes('--keep-container')) console.log(`Kept own isolated container ${name}`);

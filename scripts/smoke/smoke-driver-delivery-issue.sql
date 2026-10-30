@@ -28,9 +28,9 @@ DECLARE
   v_failed boolean;
 BEGIN
   INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES
-    (v_admin,v_admin || '@example.invalid','{"full_name":"[SMOKE] Office","role":"admin"}'),
-    (v_inactive,v_inactive || '@example.invalid','{"full_name":"[SMOKE] Inactive Office","role":"admin"}'),
-    (v_driver,v_driver || '@example.invalid','{"full_name":"[SMOKE] Driver","role":"driver"}');
+    (v_admin,v_admin || '@example.invalid',jsonb_build_object('full_name','[SMOKE] Office ' || v_admin,'role','admin')),
+    (v_inactive,v_inactive || '@example.invalid',jsonb_build_object('full_name','[SMOKE] Inactive Office ' || v_inactive,'role','admin')),
+    (v_driver,v_driver || '@example.invalid',jsonb_build_object('full_name','[SMOKE] Driver ' || v_driver,'role','driver'));
   PERFORM set_config('request.jwt.claim.sub',v_admin::text,true);
   PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',v_admin,'role','authenticated')::text,true);
   UPDATE public.profiles SET is_active=false WHERE id=v_inactive;
@@ -63,7 +63,8 @@ BEGIN
       VALUES('delivery-signatures',v_path,v_driver::text,'{"size":1000,"mimetype":"image/png"}');
     v_notes := CASE v_i WHEN 1 THEN 'Shortage: only 3 GL on truck.'
       WHEN 2 THEN E'Damage: Atrazine container leaking.\n<img src=x onerror=alert(1)>'
-      WHEN 3 THEN '   ' WHEN 5 THEN 'Damage: cap broken; office please review.' ELSE NULL END;
+      WHEN 3 THEN '   ' WHEN 5 THEN 'Damage: cap broken; office please review.'
+      WHEN 11 THEN '  ' || repeat('Long explanation ',150) || ' END  ' ELSE NULL END;
     v_delivered := CASE WHEN v_i=1 THEN 3 ELSE 5 END;
     v_issue_type := CASE WHEN v_i=4 THEN NULL WHEN v_i<=5 THEN 'other'
       ELSE (ARRAY['customer_not_home','gate_locked','road_blocked','wrong_address','refused','weather'])[v_i-5] END;
@@ -117,6 +118,9 @@ BEGIN
       CONTINUE;
     END IF;
     IF v_count<>1 THEN RAISE EXCEPTION 'SMOKE_FAIL: shortage notice missing or duplicated (%)',v_count; END IF;
+    IF v_i=11 AND position(E'\nDriver explanation: ' || left(btrim(v_notes),2000) || E'\nDelivery lines (' in v_message)=0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: explanation must be trimmed to exactly 2000 characters';
+    END IF;
     IF v_i=1 AND (v_message NOT LIKE '%planned 5; delivered 3; units GL; short 2%') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: shortage quantities: %',v_message;
     END IF;

@@ -17,17 +17,17 @@ BEGIN
   END IF;
   SELECT count(*), min(md5(replace(prosrc, chr(13), ''))) INTO v_count, v_body
     FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'create_rebate_claim';
-  IF v_count <> 1 OR v_body NOT IN ('99e94daf650cffb362a482e532e28694', 'b10a817e3ed45f227c5a471a837b3a4c') THEN
+  IF v_count <> 1 OR v_body NOT IN ('99e94daf650cffb362a482e532e28694', '1cb36f7b9a9b2df8d3637ce058f10394') THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: create_rebate_claim body or overload drift; re-review current definition';
   END IF;
   SELECT count(*), min(md5(replace(prosrc, chr(13), ''))) INTO v_count, v_body
     FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'generate_order_number';
-  IF v_count <> 1 OR v_body NOT IN ('b05ec25cf0acc3788c1d07436876874e', '12ea44c2fab96aa4f3b84becd99aa8cf') THEN
+  IF v_count <> 1 OR v_body NOT IN ('b05ec25cf0acc3788c1d07436876874e', '7d9ca902da5f90d6a3804e5d352ec806') THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: generate_order_number body or overload drift; re-review current definition';
   END IF;
   SELECT count(*), min(md5(replace(prosrc, chr(13), ''))) INTO v_count, v_body
     FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'generate_quote_number';
-  IF v_count <> 1 OR v_body NOT IN ('43128e5f575b0a23a1941619ee878c93', '997d2761e4ccad424ec37b2eacf9bb60') THEN
+  IF v_count <> 1 OR v_body NOT IN ('43128e5f575b0a23a1941619ee878c93', 'a5d8a54ffec99cd7b6637c3c97f5f8b3') THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: generate_quote_number body or overload drift; re-review current definition';
   END IF;
 END;
@@ -103,7 +103,7 @@ BEGIN
     SET next_value = public.rebate_claim_counters.next_value + 1
   RETURNING next_value - 1 INTO v_seq;
 
-  v_claim_no := format('RC-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+  v_claim_no := format('RC-%s-%s', v_year, lpad(v_seq::text, greatest(4, length(v_seq::text)), '0'));
 
   INSERT INTO public.rebate_claims (
     program_id, order_id, customer_id, product_id,
@@ -135,6 +135,8 @@ RETURNS text
 LANGUAGE plpgsql
 SET search_path = public
 AS $fn$
+DECLARE
+  v_seq text;
 BEGIN
   -- Same rule as generate_quote_number.
   IF current_user = 'authenticated' AND NOT public.is_active_profile() THEN
@@ -145,7 +147,8 @@ BEGIN
     RAISE EXCEPTION 'NUMBER_ROLE_REQUIRED: only an admin or sales rep can take an order number'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
-  RETURN 'ORD-' || extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text || '-' || lpad(nextval('order_number_seq')::text, 4, '0');
+  v_seq := nextval('order_number_seq')::text;
+  RETURN 'ORD-' || extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text || '-' || lpad(v_seq, greatest(4, length(v_seq)), '0');
 END;
 $fn$;
 
@@ -154,6 +157,8 @@ RETURNS text
 LANGUAGE plpgsql
 SET search_path = public
 AS $fn$
+DECLARE
+  v_seq text;
 BEGIN
   -- A direct app call needs an active admin or sales rep (Mason: drivers do not take numbers).
   -- SECURITY DEFINER callers run this as their owner, so the checks skip them.
@@ -165,7 +170,8 @@ BEGIN
     RAISE EXCEPTION 'NUMBER_ROLE_REQUIRED: only an admin or sales rep can take a quote number'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
-  RETURN 'Q-' || extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text || '-' || lpad(nextval('quote_number_seq')::text, 4, '0');
+  v_seq := nextval('quote_number_seq')::text;
+  RETURN 'Q-' || extract(year FROM (now() AT TIME ZONE 'America/Chicago')::date)::text || '-' || lpad(v_seq, greatest(4, length(v_seq)), '0');
 END;
 $fn$;
 
@@ -200,9 +206,9 @@ BEGIN
     END IF;
     IF md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM
        (CASE v_fn.proname
-         WHEN 'generate_quote_number' THEN '997d2761e4ccad424ec37b2eacf9bb60'
-         WHEN 'generate_order_number' THEN '12ea44c2fab96aa4f3b84becd99aa8cf'
-         WHEN 'create_rebate_claim' THEN 'b10a817e3ed45f227c5a471a837b3a4c'
+         WHEN 'generate_quote_number' THEN 'a5d8a54ffec99cd7b6637c3c97f5f8b3'
+         WHEN 'generate_order_number' THEN '7d9ca902da5f90d6a3804e5d352ec806'
+         WHEN 'create_rebate_claim' THEN '1cb36f7b9a9b2df8d3637ce058f10394'
        END) THEN
       RAISE EXCEPTION 'CONTRACT_FAIL: % replacement body mismatch', v_fn.proname;
     END IF;

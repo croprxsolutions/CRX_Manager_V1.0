@@ -92,7 +92,7 @@ until a future authorized apply; no applied row is claimed here.
 Luna's original HIGH about absent candidate hashes was refuted by source and
 successful actual apply/reapply. Its later MED about container reuse was fixed
 by removing reuse and binding cleanup to the created container ID. Pre-existing
-`lpad(...,4,'0')` truncation above 9,999 remains a separate deferred capacity issue.
+At this historical checkpoint, `lpad(...,4,'0')` truncation above 9,999 was deferred. The later candidate fixes this for quotes, orders and rebate claims; production remains unchanged until the migration is applied.
 
 The first direct Claude review used `sonnet` at high effort; its capture resolved
 to `claude-sonnet-5`, not the requested 5.5. Its requests for stronger migration
@@ -141,4 +141,4 @@ finish. See this record and the PR for current delivery evidence."
 - Review round 1 (Luna, compliance, security) fixed in this head: quote screen now
   clears the previous number when a new allocation starts and no longer reports
   "still loading" for an existing quote; stale stamp/draft-only wording corrected.
-  The 9,999 `lpad` capacity limit stays a separate deferred follow-up (owner: Codex).
+  At this checkpoint the 9,999 `lpad` capacity limit was deferred; the later candidate fixes it for quotes, orders and rebate claims.

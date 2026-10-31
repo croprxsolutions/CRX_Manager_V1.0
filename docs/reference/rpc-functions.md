@@ -247,8 +247,8 @@ Migrations `20260714220000` through `20260714224000` preserve existing public si
 ## Sequential Numbers (advisory locks)
 The `next_*_number` generators use the America/Chicago calendar year (`20260908140000`; invoices `20260914100100`, applied 2026-09-21). `generate_quote_number()`, `generate_order_number()` and `create_rebate_claim` still use the UTC year, so a quote, order or rebate claim made after 6 pm Chicago time on December 31 gets next year's number (`docs/manual/KNOWN_ISSUES.md`).
 **Unapplied candidate, not merged (re-stamped 2026-10-29):** `20261029160300_document_numbers_chicago_year`
-changes these three year selections to Chicago time while preserving their signatures, allocators, grants
-and retry handling. See [the local verification record](../operations/2026-10-28-document-number-year-proof.md).
+changes these three year selections to Chicago time and preserves digits above 9,999 while retaining their
+signatures, allocators, grants and retry handling. See [the local verification record](../operations/2026-10-28-document-number-year-proof.md).
 - `next_delivery_number()` -> DEL-NNNNN (no year, 5 digits)
 - `next_po_number()` -> PO-YYYY-NNNN
 - `next_application_record_number()` -> APP-YYYY-NNNN

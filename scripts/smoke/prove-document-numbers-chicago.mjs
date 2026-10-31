@@ -41,9 +41,9 @@ const COVERED = /generate_quote_number|generate_order_number|create_rebate_claim
 // ------------------------------------------------------------------------------------------------
 
 const SPECS = [
-  ['generate_quote_number()', '43128e5f575b0a23a1941619ee878c93', '997d2761e4ccad424ec37b2eacf9bb60'],
-  ['generate_order_number()', 'b05ec25cf0acc3788c1d07436876874e', '12ea44c2fab96aa4f3b84becd99aa8cf'],
-  ['create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)', '99e94daf650cffb362a482e532e28694', 'b10a817e3ed45f227c5a471a837b3a4c'],
+  ['generate_quote_number()', '43128e5f575b0a23a1941619ee878c93', 'a5d8a54ffec99cd7b6637c3c97f5f8b3'],
+  ['generate_order_number()', 'b05ec25cf0acc3788c1d07436876874e', '7d9ca902da5f90d6a3804e5d352ec806'],
+  ['create_rebate_claim(uuid,numeric,bigint,uuid,uuid,uuid,text,text)', '99e94daf650cffb362a482e532e28694', '1cb36f7b9a9b2df8d3637ce058f10394'],
 ];
 const ADMIN = 'ab120000-0000-4000-8000-000000000001';
 const MANAGER = 'ab120000-0000-4000-8000-000000000003';
@@ -121,6 +121,14 @@ async function main() {
   for (let i=0;i<3;i++) assert.equal(new Set(results.map(x=>x.split('|')[i])).size,12,'parallel numbers unique');
   assert.equal(Number(scalar('SELECT count(*) FROM rebate_claims;')),Number(count)+12);
   console.log('PASS 12 independent concurrent transactions: unique quote/order/claim numbers');
+  psql(`SELECT setval('quote_number_seq', 9999, false), setval('order_number_seq', 9999, false);
+    INSERT INTO rebate_claim_counters(year, next_value) VALUES (2027, 9999)
+    ON CONFLICT (year) DO UPDATE SET next_value = 9999;`);
+  for (const n of [9999, 10000, 10001]) {
+    const values = call(`SELECT generate_quote_number()||'|'||generate_order_number()||'|'||(${claim('large-'+n)}->>'claim_number');`).split('|');
+    assert.deepEqual(values, [`Q-2027-${n}`, `ORD-2027-${n}`, `RC-2027-${n}`]);
+  }
+  console.log('PASS numbering preserves all digits at 9999 and beyond');
   for (const role of ['admin','sales_rep']) {
     psql(`${managerClaims} UPDATE profiles SET role='${role}' WHERE id='${ADMIN}';`);
     psql(`BEGIN; ${claims} SET LOCAL ROLE authenticated; SELECT generate_quote_number(),generate_order_number(),${claim('allowed-'+role)}; ROLLBACK;`);

@@ -34,7 +34,7 @@ export function applyTableSearchSort<T extends object>(
       if (typeof aVal === 'number' && typeof bVal === 'number') {
         return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
       }
-      const cmp = String(aVal).localeCompare(String(bVal));
+      const cmp = String(aVal).localeCompare(String(bVal), undefined, sortKey === 'claim_number' ? { numeric: true } : undefined);
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }

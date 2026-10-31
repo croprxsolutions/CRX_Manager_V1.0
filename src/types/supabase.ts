@@ -9040,6 +9040,7 @@ export type Database = {
       }
       quotes: {
         Row: {
+          chosen_expiry_date: string | null
           commission_split: Json | null
           created_at: string
           created_by: string
@@ -9067,6 +9068,7 @@ export type Database = {
           valid_days: number
         }
         Insert: {
+          chosen_expiry_date?: string | null
           commission_split?: Json | null
           created_at?: string
           created_by: string
@@ -9094,6 +9096,7 @@ export type Database = {
           valid_days?: number
         }
         Update: {
+          chosen_expiry_date?: string | null
           commission_split?: Json | null
           created_at?: string
           created_by?: string

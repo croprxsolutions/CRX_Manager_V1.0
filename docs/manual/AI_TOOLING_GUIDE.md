@@ -38,7 +38,7 @@ hooks themselves. If this page and those disagree, they win; please fix this pag
 | Sol | `gpt-6-sol` at high effort, the single final review that must run last, on the exact commit that will merge. |
 | CodeRabbit | A GitHub review bot. Advisory since 2026-10-19 and silent unless asked since 2026-10-21; required (as a clean review) only on PRs that touch money, invoices, payments, inventory or costs, or that Mason names. |
 | Codex GitHub App | A second GitHub review bot (`chatgpt-codex-connector`). It reviews when a draft PR is marked ready. |
-| Sol-exempt | A PR whose every file is plain documentation in an eligible folder. It may merge without the Sol review. Defined in `docs/reference/sol-exempt-paths.md` and `.claude/hooks/sol-exempt-lib.mjs`. |
+| Sol list | The files that need a Sol review: money, inventory, database, logins, dependencies, deployment and the kept safety rules. A PR off the list merges on green checks. Defined in `docs/reference/sol-required-paths.md` and `.claude/hooks/sol-risk-lib.mjs`. |
 
 ## What runs where
 
@@ -262,8 +262,8 @@ There is no checked path for a human today except installing the agent tools (op
    `--carry-forward`), it also sets a GitHub commit status on that head, for example context
    `crx/sol-review`, state `success`, with the reviewed base SHA in its description. It already has
    everything it needs; this adds one `gh api repos/.../statuses/<sha>` call.
-2. **Add one CI job, `Sol review on head`**, to `ci.yml`. It passes when either the PR is Sol-exempt
-   (reusing `.claude/hooks/sol-exempt-lib.mjs`, the same code the merge gate uses) or a
+2. **Add one CI job, `Sol review on head`**, to `ci.yml`. It passes when either the PR is off the Sol list
+   (reusing `.claude/hooks/sol-risk-lib.mjs`, the same code the merge gate uses) or a
    `crx/sol-review` success status exists on the exact head, set by an allowed account, whose base
    matches the PR's current base and is under 24 hours old. Otherwise it fails with a message
    saying how to get a Sol review. A new commit gives a new head, which has no status, so the job
@@ -301,7 +301,6 @@ Read the refusal first. Every gate prints which condition failed, and most print
 | Refusal says | Usually means | Do this |
 |---|---|---|
 | No Sol proof / proof does not match head or base | A commit or a `main` merge after the review, or the review is older than 24 hours | Rerun `write-codex-push-proof.mjs` on the clean head; after a plain `main` merge, try `--carry-forward` first |
-| `documentation-only exemption does not apply` | A file outside the eligible docs folders, or a never-eligible name | Run Sol, or move the file into an eligible folder |
 | A check is not green / `mergeStateStatus` not CLEAN | A check failed or is pending, or the branch is behind | `gh pr checks <n>`; `gh pr update-branch <n>` if behind |
 | CodeRabbit thread unresolved or has no reply | A thread from any commit | Reply on it, then resolve it |
 | Money PR has no completed CodeRabbit review | Required for money PRs | Post `@coderabbitai full review` once; if it says it is rate-limited, wait the stated time and check before asking again |
@@ -323,7 +322,7 @@ hook, that hook reads as missing until it lands). Known open problems are in `do
 1. **Say what is wrong and show it.** The command, the refusal text, the commit, and why the rule
    blocks something it should allow (or allows something it should block).
 2. **Open a PR that changes the rule and its test together.** Every hook has a `.test.mjs`. For the
-   documentation exemption, `sol-exempt-lib.mjs` and `docs/reference/sol-exempt-paths.md` change in
+   Sol list, `sol-risk-lib.mjs` and `docs/reference/sol-required-paths.md` change in
    the same PR (a test fails if they disagree). Run `node scripts/sync-agent-workflows.mjs --write`,
    `npm run test:agent-workflows` and `npm run agent-health` after changing agent files, and update
    `docs/reference/agent-guardrails.md`.
@@ -340,7 +339,7 @@ hook, that hook reads as missing until it lands). Known open problems are in `do
 | The rules | `AGENTS.md` |
 | The delivery path | `.claude/commands/ship.md` |
 | Every hook and why it exists | `docs/reference/agent-guardrails.md` |
-| Documentation exemption | `docs/reference/sol-exempt-paths.md` |
+| Sol list | `docs/reference/sol-required-paths.md` |
 | CodeRabbit rules | `docs/reference/coderabbit-native-review.md` |
 | Model and effort pins | `docs/reference/codex-model-tuning.md`, `docs/reference/claude-model-tuning.md` |
 | How Claude and Codex work together | `docs/workflows/AGENT_COLLABORATION.md` |

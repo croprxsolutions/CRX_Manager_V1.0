@@ -398,7 +398,8 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
 **How sizes see the parent's values: decided now (Sol round 3, finding 5): copy down.**
 - The parent is the **only writer** of parent-level values. The database copies each change to every size row in the same step, and the copied columns on size rows become database-owned: a direct write to them is refused.
 - **Why copy rather than read through:** every existing reader (the 93 rate readers, quotes, jobs, invoices, PDFs, the field app) keeps working unchanged, so PAR-1 changes no money path. Reading through would rewrite all of them at once. RT-4 changes the rate readers later anyway, on its own proof.
-- **Membership is checked by the database:** a size can be added to a parent only if its form and units fit the parent's (a liquid size under a liquid parent), and changing a parent's formulation identity (strength, formulation type, safener, generic registration) is refused while it has sizes; it is a new parent instead.
+- **Membership is checked by the database:** a size can be added to a parent only if its form and units fit the parent's (a liquid size under a liquid parent). Ordinary edits cannot change an attached parent's formulation identity (strength, formulation type, safener, generic registration). A genuinely different formulation uses a separate parent. Verified missing-data completion and correction of data-entry mistakes use only the dedicated correction below (Mason, 2026-10-30).
+- **Admin correction:** preview the old/proposed values and every affected size, require verified supporting information and a reason, and record who changed what with traceable history. Confirm the corrected facts describe the same actual formulation for every affected size; a misgrouped size instead needs a reviewed move, preserving its product ID. Refuse ambiguous corrections pending review. Preserve historical invoices, posted amounts, stock and units; apply the existing offer-to-update/review rules to affected open work. Enforce authorization, expected versions and retry safety in the database. Ordinary edits, imports and workbooks cannot bypass this process or the rate lock; a house-rate correction still uses overlap 11. Do not silently recalculate historical money, weights or ingredient quantities from corrected current facts. The package must identify historical readers and preserve the facts needed for their original meaning before correction is enabled.
 - A parent has at most one designated gallon-sold Bulk row. PAR-2 identifies the applicable Bulk row for each shop-filled fixed tote before a fill is enabled; missing or ambiguous mappings are review items, never guessed. A fixed tote that is never shop-filled need not have a Bulk source.
 - **And:**
   - a parent edit is **one** recorded change (who, when, old and new) with its effect on each size traceable, and all-or-nothing;
@@ -411,7 +412,7 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
 - **"Add a size"**: a new row under the same parent, sharing everything at parent and registration level;
 - **"New product"**: a new parent, with the formulation fields to confirm.
 
-**Brands** (`product_brands`, one list per size row today) move up with registrations to the parent, by a reviewed migration: brand lists that agree across a parent's sizes merge; any that disagree (different brands, EPA numbers or sourced flags) go to Mason to settle in PAR-2 before the move; each brand keeps its `row_version` and history, and the brand write permissions stay as they are. So brand PR B is built **after** PAR-1 is live (Stage 3).
+**Brands** (`product_brands`, one list per size row today) move up with registrations to the parent, by a reviewed migration: brand lists that agree across a parent's sizes merge; any that disagree (different brands, EPA numbers or sourced flags) go to Mason to settle in PAR-2 before the move; each brand keeps its `row_version` and history, and the brand write permissions stay as they are. Deliver compatible parent/proposal storage first (PAR-1 preparation), then PAR-2 review/grouping, then enable the reviewed shared-field/brand move for those groups. Preserve legacy edit routes until compatible replacements are deployed; prove current and stale writers across migration, deployment, activation and rollback. Unresolved groups retain their working legacy behavior and do not enter the new shared path. This is the required staged delivery within PAR-1/PAR-2, not a dependency on already-moved brands. Brand PR B starts only after that move is live and verified (Stage 3).
 
 **Where chemistry comes from (D-Z), decided per registration:**
 - If **any** registration on a parent has a usable EPA number, the chemistry comes only through EPA proposals.
@@ -547,6 +548,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - "Add a size" and "New product" each create what they say.
   - Typing "Generic Callisto" finds the product on Products and in the quote picker.
   - A non-admin edit and a direct table write are refused, and a repeated request with the same retry key writes once.
+  - An admin completes a missing strength and corrects a verified typo through a reasoned, evidence-backed preview covering all affected sizes. A non-admin, unsupported correction, stale version and ordinary-edit/import bypass are refused. A retry writes once. A genuinely different formulation stays separate; a misgrouped size can move through the reviewed operation without changing its ID or siblings' identity. Historical document facts and posted amounts remain unchanged, stock/units remain unchanged, and affected open work follows its existing review/update rule.
 
 **PAR-2 · Grouping existing products into parents** (overlap 13; DATA-9)
 - **Done when (in the harness, against a copy of the live structure and data):**
@@ -558,6 +560,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - The read-only baseline (representative quotes, jobs, invoices and inventory balances) matches after grouping, references and balances included.
   - Every product ID still exists and still resolves on old records.
   - Each shop-filled fixed tote has exactly one reviewed, compatible Bulk source; no parent has two designated Bulk rows. Missing and ambiguous mappings remain unavailable for fill until resolved.
+  - Parent/proposal preparation works before shared-field and brand activation. Disagreeing brand lists are reviewed before the move; unresolved groups remain usable through the legacy path. Prove old/new writers during each delivery step and rollback, then verify the moved brands before brand PR B begins.
 
 **DM-2 · Weight per gallon and dry net weight** (refresh plan; August WP-2, D-B, D-M; Sol 30 to 32)
 - **Scope:**
@@ -630,7 +633,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
 **DM-5 · dropped (2026-10-29).** Parent records (PAR-1) replace copying between sizes; the nickname moved to PAR-1 (overlaps 7, 13).
 
 ### Stage 3: brands (To-Do 2.8, its own plan)
-Brand step 1 is partly live: the `product_brands` list and the Brands section. Next is **brand PR B**: pick the delivered brand, print its EPA number, and keep RUP records per brand. **PAR-1 moves brands up to the parent (overlap 13), so PR B is built after PAR-1 is live** (its migration applied and its brand move done), designed and reviewed against that structure, and not at the same time as a package editing `ProductDetail.tsx`.
+Brand step 1 is partly live: the `product_brands` list and the Brands section. Next is **brand PR B**: pick the delivered brand, print its EPA number, and keep RUP records per brand. **The staged PAR-1/PAR-2 work moves brands up to the parent (overlap 13), so PR B is built after that move is live and verified**, designed and reviewed against that structure, and not at the same time as a package editing `ProductDetail.tsx`.
 
 **Carried forward from August WP-3 (Sol 6)** into PR B's acceptance:
 - a brand must be picked at delivery when the product has brands (picking it at receiving is step 2, with the same rules);
@@ -854,11 +857,13 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 
 **Duplicate-merge policy (Mason, 2026-10-30):** DATA-10 handles straightforward exact duplicates after Mason's review. Defer complicated merges involving unfinished bookings, reservations, jobs, orders or returns until safe, or give an urgent merge its own reviewed and proven procedure. Finishing those transactions alone does not prove safety: old documents must still resolve, and future returns and reversals must continue correctly. Keep deferred duplicates visible and prevent fresh duplication; no historical invoice IDs are rewritten.
 
+**Duplicate-lifecycle proof:** before enabling a merge, name each reference, reservation/booking and return/reversal route affected by the old-to-kept mapping. Prove a future return and a permitted reversal against an original transaction preserve its original financial basis and stock accounting, operate once on retry, and do not reopen a retired product for new sales. Ambiguous mappings or an unproven route keep that merge deferred. This implements the approved policy; it is not permission to rewrite history or bypass current lifecycle rules.
+
 ## 8. Full order across stages
 
 1. **Stage 1** in section 5's order (21 queue entries, including both halves of WP-PM-15). Data: DATA-1 and DATA-10 (DM-0's review list), then DATA-11; rates in the setup workbook only if Mason wants them before parents exist (PAR-2 then asks him to settle any sizes that disagree).
 2. **Stage 2:** PAR-1 → PAR-2, then BLK-1a may record quantities and DM-2 → DM-1 → REG-1 → DM-4 → DM-1b proceed independently. BLK-1b follows the separately reviewed and activated costing foundation. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
-3. **Stage 3:** brand PR B after PAR-1 is live, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
+3. **Stage 3:** brand PR B after the staged PAR-1/PAR-2 brand move is live and verified, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
 4. **Stage 4:** RT-1 and RT-2 in either order, each on its own evidence. Then RT-3 (Mason's review), then RT-4.
 5. **Stage 5:** CMP-2 follows its required data, RT-4 and relevant use guidance. Optional images, groupings and return-policy editing do not delay it (Mason, 2026-10-30). CLN-2 follows CMP-2.
 6. **Stage 6:** USE-1 (after WP-PM-5), then USE-2 (after REG-1), then USE-3.
@@ -979,7 +984,7 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 | 3 | RT-1: a rate above the label maximum is checked, then warns (Mason chose warn over refuse) |
 | 4, 12 | RT-4: readers keep the old columns, filled by RT-4's internal step; rollback through the same step |
 | 5, 6 | Overlap 13: copy-down decided; database membership checks |
-| 7, 9 | Overlap 13 brands migration; Stage 3 after PAR-1 is live |
+| 7, 9 | Overlap 13 brands migration; Stage 3 after the staged PAR-1/PAR-2 brand move is live and verified |
 | 10, 11, 13 | RT-1 per parent; the locked correction per parent; interim lock protection |
 | 14 | Stage 1 order: the setup workbook and lock before bulk import |
 | 15, 18 to 20 | Overlap 12 (cost fields named, starting links, preferred operations, PO link proposals) |

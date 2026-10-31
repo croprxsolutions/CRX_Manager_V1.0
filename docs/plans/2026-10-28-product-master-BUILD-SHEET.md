@@ -118,9 +118,10 @@
   - crop programs;
   - scheduled jobs.
 
-  Stock, crop programs and jobs warn as recommended; confirm with Mason at build time.
+  Stock, crop programs and jobs warn but allow (Mason's settled decision).
 - **Who sees the buttons:** reps don't see Deactivate (admin-only, matching the database).
-- **Reactivate:** inactive products can be selected, and there's a Reactivate action.
+- **Reactivate:** admins can select inactive products in the product-management view and use the Reactivate action.
+- **Inactive stock (Mason, 2026-10-30):** keep inactive products visible and labeled in inventory, stock counts, internal reports and historical records, including nonzero balances. Exclude them from customer sales sheets and normal new-quote/new-order selection; the database refuses new quote/order lines and conversion of an existing quote into a new order until an admin deliberately reactivates the product, including direct requests. Legitimate returns and corrections against original transactions remain possible without reactivation, under existing permissions and lifecycle rules. These operations cannot create fresh sales or reopen commitments as a side effect. Stock warnings and existing deactivation blockers remain.
 - **Questions put to Sol (answered 2026-10-28 in the Sol notes below):**
   - Is a trigger or an RPC the better boundary?
   - Which quote statuses count as "open"?
@@ -137,6 +138,7 @@
   - a rep sees no Deactivate button;
   - an inactive product can be selected and reactivated.
 - If the open-order check can't run, deactivation is refused, not allowed.
+- An inactive product with remaining stock is visible and labeled in inventory, counts and internal reports; its balances remain included in the applicable totals. It is absent from customer sales sheets and normal new-sale pickers. Direct creation of quote/order lines and quote conversion are refused until admin reactivation. A legitimate historical return/correction still works and leaves the product inactive; prove original references and stock/financial totals remain correct, including the reviewed mapping for a merged duplicate.
 
 **Sol (findings 9–14). This settles the trigger-vs-RPC question:**
 - **Both.** An admin RPC with `p_idempotency_key` handles the deactivate and reactivate action. A database guard (trigger) refuses every other `is_active` change that breaks the rule, including today's direct updates from the list (`Products.tsx:663-673`, confirmed).
@@ -212,7 +214,7 @@
 **Sol (findings 17–19). This settles the storage question:**
 - **Storage.** Use `text[]`, and the list is the one authoritative value. The old single column can't hold two values, so it is never written by app code again.
   - Its compatibility value is defined: for example, the first timing, kept by a trigger.
-  - Any old writer of the single column is found and switched before the migration, so nothing silently replaces the list.
+  - Stage the transition: add compatible storage first, adapt every app/workbook/import writer, then activate the list as authoritative. Inventory current and stale clients and prove the migration-before-app-deploy interval. Retain the single-column compatibility value for one release; once the list is authoritative, a legacy single-value save must not replace a multi-value list. Refuse unsupported stale writes with a refresh message. Prove each transition and rollback point preserves existing values, both timings and prices; removing the old column remains a separately approved destructive step.
   - Audit every writer, not only readers.
 - **Workbook and import.** They get an exact list format: fixed order, defined escaping, empty vs blank, legacy snapshots and conflicts.
   - Prove export → import → export keeps both timings and changes no price.
@@ -337,6 +339,7 @@
 - **"Complete setup" needs an applicability rule.** Classify each product as a registered pesticide, a non-pesticide or other. Tell "unknown" apart from a real 0 or "not applicable" for REI/PHI. Test representative products of each kind.
 - **The EPA check proves format only,** not that the registration is valid.
 - **Form changes.** A first-time form choice keeps compatible values. A later change follows WP-PM-6a's database-reviewed unit-change rule, tested on priced, stocked and open-line products.
+- **Dependency boundary:** PM-8 may deliver setup checks and PM-9 may add supported forms/conversions before PM-6a, but neither may enable changes to existing products' form or priced/inventory unit before PM-6a's reviewed rule and required row approvals are available. Keep that change path disabled/parked until its prerequisite is proven, then deliver it as a labeled follow-up; creating compatible new products does not authorize converting existing ones. This breaks the PM-8/PM-6a ordering cycle without waiving the audit or historical-amount protection.
 
 **Size / risk:** M. Migration (validation constraints).
 

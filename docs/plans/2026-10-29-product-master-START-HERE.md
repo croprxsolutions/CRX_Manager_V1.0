@@ -22,6 +22,12 @@ The old branch `loop/product-master-2026-10` holds a superseded first draft of t
 
 ## 2. What was decided (summary; the decision log is authoritative)
 
+- **Rollout decisions, 2026-10-30:** prepare and prove a reviewed everyday-product list first while retaining the full catalog scope and visible remaining data work. Defer complicated duplicate merges or give them a separately reviewed procedure, preserving future returns and history. Build comparison after its required data, trusted rates and relevant use guidance; optional images, groupings and return-policy editing do not delay it.
+- **Bulk/tote selling prices:** chemical prices generally match; fertilizer prices can differ. Keep prices independent per size and test both cases. Quantity-first tote filling remains the plan.
+- **Chemical comparison:** match a premix's active pounds with selected single-ingredient generics, sum their same-tier per-acre prices, and show savings and equivalent-premix-gallon pricing. Select several premixes or an entire category in one sortable comparison view. Keep each row's rate, component choices and missing-data warnings visible; fertilizer nutrient comparison is withdrawn.
+- **Admin company view:** toggle cost-versus-cost or selling price (Tier 1 by default, with tier selection). Show each program's cost, selling price, profit per acre and margin, with internal cost, customer-price and company-profit differences separately labeled. Costs and derived profitability are admin-only; changing comparison mode never changes saved prices.
+- **Approved comparison safeguards:** positive comparison rates, shared chosen generic references with marked overrides, active-reference rechecks and separate eligibility/ranking for cost, selling price, profit and margin. Unknown price dates stay unknown. These requirements are ready to publish; broader team-review findings still need resolution before their affected packages are built.
+
 - **Use Timing:** several timings per product. Add Post-Emerge Corn, Post-Emerge Soybeans and Pre-Emerge; keep the generic Post-Emergence. Only Herbicide and Foliar Fertilizer products keep a timing.
 - **New products** stay active and open for pricing straight after creation; they don't start turned off.
 - **Turning a product off:**

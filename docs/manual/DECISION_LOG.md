@@ -10,6 +10,40 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-30 — Four comparison safeguards approved; publish the documentation
+
+**Decision (Mason, in chat):** "I agree with all 4 points, finalize this and push updated docs" and merge. Require a finite positive comparison rate; use a shared explicitly chosen generic reference set with row overrides identified; invalidate normal comparisons using deactivated references without imposing an in-stock-only rule; evaluate availability/rankability separately for cost, sale price, profit and margin. Unknown price provenance remains unknown. See CMP-2 acceptance for the edge cases.
+
+This authorizes publication of these accumulated planning notes and supersedes the earlier no-push/no-merge instruction for them. It does not start the product build or authorize live data changes. The earlier team review's broader parent, retirement, duplicate-lifecycle and rollout findings still need resolution before their affected packages are built.
+
+## 2026-10-30 — Admin cost and seller-margin comparison for chemical programs
+
+**Decision (Mason, in chat):** compare cost against cost as well as Tier 1 selling price and the other existing selectable tiers. Different product margins must not make the customer selling-price comparison masquerade as a purchase-cost deal. Admins need cost/acre, selling price/acre, profit/acre and net margin for the premix and complete generic program, with separate cost, customer-price and company-profit differences. The app supports company pricing decisions; it does not set prices automatically.
+
+Compute program margin from total revenue and total cost, not the average of component margins, and use revenue as the margin denominator. Explain expenses excluded from this product-margin view. Keep costs and all derived profit/margin results admin-only at the server. Details and a synthetic 10%-versus-30% margin example are in CMP-2. Local plan additions only; no push, merge or build.
+
+## 2026-10-30 — Chemical premix benchmarks and multi-product deal comparison
+
+**Decision (Mason, in chat):** calculate the quantities of selected single-ingredient generics that match a premix's active pounds at the comparison rate, add their same-tier prices per acre, and show premix versus generic price per acre, equivalent premix-gallon benchmark and percentage savings. The gallon equivalent is an economic reference, not the physical generic-mixture volume. Cost comparisons remain separate and admin-only.
+
+Mason also requested selecting multiple premixes or an entire category on one page to find deals without clicking through products. Show each row's rate, generic components, price basis, savings and completeness; allow whole-set sorting and inspection. Incomplete component matches cannot rank as complete bargains, and differing chemistries are not automatically interchangeable. Details and synthetic arithmetic acceptance are in CMP-2 of the grand plan. This is local planning only; no push or merge while Mason adds ideas.
+
+## 2026-10-30 — Fertilizer comparison idea withdrawn
+
+**Decision (Mason, in chat):** "I don’t need fertilizer comparison tool remove that idea." The proposed fertilizer price-per-pound-of-nutrient comparison is withdrawn from CMP-2. The chemical active-ingredient comparison remains in scope.
+
+Existing fertilizer-analysis storage and weight requirements remain part of the earlier product data plan. The clarification that fertilizer Bulk and tote selling prices can differ also remains. No push or merge while Mason is adding ideas.
+
+## 2026-10-30 — Product rollout: everyday products first, careful duplicate merges, comparison after its foundations
+
+**Decision (Mason, in chat: "Yes I agree with all of those mark and note that please").** Build tools for the whole catalog, but first prepare and verify a reviewed list of everyday products through their applicable quoting, ordering, delivery and mixing flows. Track every other product as ready, missing data or intentionally excluded; the full catalog remains in scope. This does not waive package-specific data prerequisites or permit incomplete product data to produce guessed quantities or weights.
+
+Merge straightforward exact duplicates only after Mason's review. Where unfinished bookings, reservations, jobs, orders or returns make a merge complicated, defer it until safe or use a separately reviewed and proven procedure. Preserve historical documents and support legitimate future returns and reversals even after current transactions finish.
+
+The rebuilt Brand vs Generic page follows the parent records, chemistry, weights, brands, trusted rates and relevant use guidance it requires. Optional images, groupings and the return-policy editor do not delay it. CLN-2 still follows the rebuilt page. This refines the 2026-10-29 instruction that comparison comes last.
+
+**Pricing clarification (Mason, same conversation):** chemical bulk and tote selling prices generally match; fertilizer bulk and tote selling prices can differ. Prices remain independent on each sellable size. Do not synchronize them automatically or infer purchase cost from selling price. Prove both pricing cases during the build. No product implementation or live data change is authorized by this record.
+
 ## 2026-10-30 — The agent harness is cut back; a short keep list stays
 
 **Decision (Mason, in chat, 2026-10-30: "I want less strict rules so if we need to remove alot of guardrails etc I am fine with some risk, our harness has gotten way to strict and is causing more work than efficiency"; then "Approve the list").**

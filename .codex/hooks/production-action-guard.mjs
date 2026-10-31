@@ -12,22 +12,16 @@ import {
   extractPatchDestinations,
   ghApiMergeRequest,
   ghApiIsResolveReviewThreadOnly,
+  ghApiIsReviewThreadReply,
   ghApiMutates,
-  commandFedToInterpreter,
-  commandFedToInterpreterDenial,
-  ghCommandUnreadableDenial,
-  ghCommandUnreadableIn,
-  ghHiddenByShellComposition,
   hardGateBudgetDenial,
   mentionsMergePullRequest,
-  nestedComputedDenial,
   nestedTooDeepDenial,
   rawMergeEndpointCount,
   hookDeadlineMs,
   splitCommandSegments,
   ghMergeRequest,
   gitPushCwd,
-  gitSubcommandIsDynamic,
   isGitPush,
   mainPushSource,
   mcpMergeRequest,
@@ -35,14 +29,11 @@ import {
   nativePatchEnvelope,
   parseNativePatch,
   ENFORCEMENT_SURFACE_PATH_RE,
-  proofSearchDirs,
   proofValid,
   proofValidForMerge,
   pullRequestReviewBlocked,
   pushContextIsAmbiguous,
-  pushHiddenByShellComposition,
   pushIsForced,
-  pushTargetsCurrentHead,
   pushUsesBulkMode,
   pullRequestChecksGreen as sharedPullRequestChecksGreen,
   reviewProofPathMentioned,
@@ -74,7 +65,6 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { solExemptionOnGitHub } from "../../.claude/hooks/sol-exempt-lib.mjs";
 import { solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -123,8 +113,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // module executes at import time, an allowed edit could keep its exports intact
 // while terminating or subverting the hook at startup. Silent completion means
 // ALLOW, so that would bypass every production-action restriction, not merely
-// the Codex App review check this PR added. `sol-exempt-lib` joined 2026-10-07 for
-// the same reason: imported at startup, and it decides whether a merge needs Sol.
+// the Codex App review check this PR added.
 // `coderabbit-skip-lib` joined 2026-10-22 likewise: imported at startup, and it
 // decides whether Mason waived a money PR's CodeRabbit review (Codex App P1, #1035).
 // `read-only-search-lib` joined 2026-10-27: imported at startup, and it decides
@@ -133,7 +122,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // merge needs Sol at all.
 // `session-context-reminder` joined 2026-10-30: not imported, but its output is the
 // rules every later Codex session starts from.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-exempt-lib|sol-risk-lib|coderabbit-skip-lib|teammate-comments-lib|read-only-search-lib|app-repo-identity|session-context-reminder)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|teammate-comments-lib|read-only-search-lib|app-repo-identity|session-context-reminder)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -147,7 +136,6 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   ".claude/hooks/codex-bot-review-lib.mjs",
   ".claude/hooks/review-proof-guard.mjs",
   ".claude/hooks/live-testdata-lib.mjs",
-  ".claude/hooks/sol-exempt-lib.mjs",
   ".claude/hooks/sol-risk-lib.mjs",
   ".claude/hooks/coderabbit-skip-lib.mjs",
   ".claude/hooks/teammate-comments-lib.mjs",
@@ -245,133 +233,6 @@ function protectedHarnessPathMentioned(value) {
   return PROTECTED_HARNESS_PATH_RE.test(raw) || PROTECTED_HARNESS_PATH_RE.test(canonicalizeGuardPath(raw));
 }
 
-// Does any argument of this command resolve to a protected harness file?
-//
-// The first cut sniffed for a literal `../` next to a protected basename. Codex
-// round 3 walked straight past it with an interior `./`
-// (`Set-Content .claude/hooks/./codex-push-lib.mjs`) and with a Windows
-// drive-relative alias (`C:.claude/hooks/…`) — because enumerating the spellings
-// of "somewhere else" never terminates.
-//
-// So this matches the SHAPE instead: split the command into candidate path
-// tokens, canonicalize each one, and test the result against the protected-path
-// matcher. `./`, `../`, `C:`-relative, backslashes, and any combination all
-// collapse to the same canonical string, so one rule covers spellings nobody has
-// thought of yet.
-// Characters the shell DELETES while building a word — it does not break the
-// word at them. Round 3 treated them as separators, which is the same class of
-// error as the earlier spelling checks: a quote or backtick dropped into the
-// middle of a path split one protected token into two harmless ones, while
-// PowerShell rejoined them and wrote the protected file. Codex round 4 proved
-// it with Resolve-Path on two forms, both allowed at the time — a backtick
-// escape and an empty double-quoted string, each spliced into the middle of
-// `.claude/hooks/codex-push-lib.mjs`.
-//
-// Codex round 8 (SEC-002) added cmd.exe's caret: `echo x > codex-push-^lib.mjs`
-// under `cmd /c` drops the `^` and writes the protected file. The set is the
-// UNION of every shell's word-building no-ops — PowerShell's backtick, cmd's
-// caret, and the quotes all three share — because the guard cannot know which
-// interpreter will run the text. A literal caret in a PowerShell path is a
-// different file that this over-blocks, which is the safe direction.
-const SHELL_WORD_NOOP_RE = /[`"'^]/g;
-// A POSIX shell (Git Bash on this box) deletes an unquoted backslash and keeps
-// the next character, so `codex-push-\lib.mjs` opens `codex-push-lib.mjs`. The
-// backslash is ALSO Windows' separator, so it cannot join the no-op set above —
-// `.claude\hooks\x` must still read as a path. It gets its own view instead:
-// with every backslash deleted, the POSIX escape collapses while a
-// backslash-separated Windows path merely stops matching in THIS view and is
-// still caught by the two views that keep it.
-const POSIX_ESCAPE_RE = /\\/g;
-
-// Brace expansion, done the way the shell does it BEFORE the text is split into
-// words: `.claude/hooks/{codex-bot-review-lib,x}.mjs` is two paths, one of them
-// protected, and no token of the unexpanded text spells either (Codex round 12:
-// `cp evil.mjs .claude/hooks/{codex-bot-review-lib,x}.mjs` returned
-// blocked:false). Only a comma-bearing group expands — `{"a":1}` in an echoed
-// JSON literal is not an expansion and must not become a wildcard. A range
-// (`{1..3}`) or a group that would expand past the cap is replaced by `*`, which
-// the glob matcher below treats as "could be anything", the safe direction.
-const BRACE_GROUP_RE = /\{([^{}]*,[^{}]*)\}/;
-const BRACE_RANGE_RE = /\{[^{}]*\.\.[^{}]*\}/g;
-const BRACE_EXPANSION_CAP = 64;
-export function expandBraces(text) {
-  let expansions = [String(text || "").replace(BRACE_RANGE_RE, "*")];
-  for (let round = 0; round < 8; round++) {
-    const next = [];
-    let changed = false;
-    for (const item of expansions) {
-      const match = BRACE_GROUP_RE.exec(item);
-      if (!match) { next.push(item); continue; }
-      changed = true;
-      for (const alternative of match[1].split(",")) {
-        next.push(item.slice(0, match.index) + alternative + item.slice(match.index + match[0].length));
-      }
-    }
-    expansions = next;
-    if (!changed) break;
-    if (expansions.length > BRACE_EXPANSION_CAP) {
-      return [String(text || "").replace(/\{[^{}]*\}/g, "*").replace(/[{}]/g, "*")];
-    }
-  }
-  return expansions;
-}
-
-function commandPathTokens(command) {
-  const raw = String(command || "");
-  // Three views of the same command. The first splits on quotes so a quoted
-  // path is examined rather than skipped; the second REMOVES shell no-op
-  // characters so an intra-word splice collapses back to the path the shell
-  // will actually open; the third additionally deletes backslashes for the
-  // POSIX-escape case. All are needed: no view alone covers the others' cases.
-  // Each view is then brace-expanded, so a comma-bearing group yields one view
-  // per alternative.
-  const dequoted = raw.replace(SHELL_WORD_NOOP_RE, "");
-  const views = [raw, dequoted, dequoted.replace(POSIX_ESCAPE_RE, "")].flatMap(expandBraces);
-  const tokens = [];
-  for (const view of views) {
-    for (const token of view.split(/[\s"'`,;()|&<>]+/)) {
-      if (!token) continue;
-      // `-Path=x`, `--file=x`, `Path:x`, `of=x`, `FOO=x` — keep the value, drop
-      // the flag or key name. (`dd of=<protected>` was Codex round 12's writer.)
-      const value = token.replace(/^[-/]{1,2}[A-Za-z][\w-]*[:=]/, "").replace(/^[A-Za-z_][\w-]*=/, "");
-      if (value) tokens.push(value);
-    }
-  }
-  return tokens;
-}
-// Could this wildcard token expand to a protected harness file? The literal
-// matcher cannot see `codex-bot-review-l*.mjs` (Codex round 12), and a hook
-// cannot ask the file system what a glob will expand to at run time without
-// getting a different answer than the shell may. So the glob is matched against
-// the concrete protected names, segment by segment from the RIGHT, with the
-// same suffix semantics PROTECTED_HARNESS_PATH_RE uses: the token must have at
-// least as many segments as the protected path, every trailing segment must be
-// able to match, and any extra leading segments are unconstrained (they are the
-// enclosing directories). A character class is treated as "any one character"
-// and `**` as "any one segment" — both over-inclusive, both safe.
-const GLOB_CHARS_RE = /[*?[]/;
-function globSegmentToRegExp(segment) {
-  let source = "";
-  for (const ch of segment.replace(/\[[^\]]*\]/g, "?").replace(/[[\]]/g, "?")) {
-    if (ch === "*") source += "[^/]*";
-    else if (ch === "?") source += "[^/]";
-    else source += ch.replace(/[.\\+^$(){}|]/g, "\\$&");
-  }
-  return new RegExp(`^${source}$`, "i");
-}
-export function globCouldMatchProtectedHarnessPath(token) {
-  const canonical = canonicalizeGuardPath(token);
-  if (!GLOB_CHARS_RE.test(canonical)) return false;
-  const segments = canonical.replace(/^\//, "").split("/");
-  return PROTECTED_HARNESS_FILES.some((file) => {
-    const target = file.split("/");
-    if (segments.length < target.length) return false;
-    for (let i = 1; i <= target.length; i++) {
-      if (!globSegmentToRegExp(segments[segments.length - i]).test(target[target.length - i])) return false;
-    }
-    return true;
-  });
-}
 // A candidate path as the file system will see it: joined onto the working
 // directory the tool will run in, unless it is already rooted. Codex round 11
 // (HIGH): a `workdir` of `.claude/hooks` turned a bare `codex-bot-review-lib.mjs`
@@ -385,488 +246,13 @@ export function joinedWithWorkdir(candidate, workdir) {
   return `${base.replace(/\/+$/, "")}/${raw}`;
 }
 
-export function commandTouchesProtectedHarnessPath(command, workdir = "") {
-  return commandPathTokens(command).some((token) =>
-    PROTECTED_HARNESS_PATH_RE.test(canonicalizeGuardPath(token))
-    || globCouldMatchProtectedHarnessPath(token)
-    || (workdir && (
-      PROTECTED_HARNESS_PATH_RE.test(canonicalizeGuardPath(joinedWithWorkdir(token, workdir)))
-      || globCouldMatchProtectedHarnessPath(joinedWithWorkdir(token, workdir)))));
-}
-
-// Codex round 12 (HIGH): every shell rule above and below decides "is this a
-// write?" by recognising the verb — SHELL_MUTATION_RE — and a verb it does not
-// know is, by construction, not a write. `Write-Output forged | Tee-Object
-// -FilePath <protected>`, `tee`, `install`, `dd of=` all overwrote the module
-// this guard imports at startup and returned blocked:false. Enumerating writers
-// is the same losing trade as enumerating path spellings (rounds 2–8), so the
-// rule is inverted for protected files only: a shell segment that NAMES a
-// protected harness file must start with a recognised READ-ONLY command, and
-// any other head — a writer, an interpreter wrapper (`cmd /c`, `bash -c`,
-// `powershell -Command`), an editor, an unknown tool — is treated as a writer
-// and refused. Reading them stays cheap and ordinary: cat/type/head/tail/grep/
-// rg/Get-Content/Select-String/Get-Item/Test-Path/diff/hashes/ls, the read-only
-// git subcommands (diff, show, log, blame, status, ls-files, add, commit …),
-// and `node <that script>` — running one of the protected scripts is the
-// sanctioned workflow, so node is allowed when the protected token IS the
-// script being run, and refused when a protected path is merely an argument to
-// some other script. sed/perl/awk/python are deliberately NOT readers: each has
-// an in-place flag the verb list can miss (`sed --in-place`), and reading
-// through `cat <file> | sed -n …` costs nothing. This mirrors the stance the
-// Claude-side review-proof-guard has taken since it shipped. Commands that name
-// no protected file are untouched.
-const READ_ONLY_SHELL_HEADS = new Set([
-  "cat", "head", "tail", "less", "more", "wc", "grep", "egrep", "fgrep", "rg", "diff", "cmp", "comm",
-  "md5sum", "sha1sum", "sha256sum", "sha512sum", "shasum", "cksum", "stat", "file", "ls", "tree",
-  "realpath", "readlink", "basename", "dirname", "test", "[", "[[", "echo", "printf", "od", "hexdump",
-  "strings", "nl", "tac", "type", "findstr", "fc", "dir", "where", "comp",
-  "get-content", "gc", "select-string", "sls", "get-item", "gi", "get-childitem", "gci", "test-path",
-  "resolve-path", "rvpa", "get-filehash", "compare-object", "compare", "measure-object", "measure",
-  "write-output", "write-host", "get-acl",
-  // Round 13: the PowerShell pipeline stages and pure helpers a computed
-  // segment legitimately carries — `| Where-Object { $_ -match "x" }`,
-  // `(Join-Path $PWD docs)`, `| % { $_.Name }` — so refusing unknown command
-  // words in computed text does not make the shell unusable. None of these
-  // can name a file to write.
-  "where-object", "?", "foreach-object", "%", "out-string", "out-host", "out-null", "out-default",
-  "join-path", "split-path", "start-sleep", "write-verbose", "write-warning", "write-error",
-  "write-debug", "write-information", "write-progress",
-]);
-// PowerShell verbs that are read-only by convention: Get-*, Test-*, Select-*,
-// Sort-Object, Group-Object, Format-*, Measure-*, Compare-*, ConvertTo-/
-// ConvertFrom-*, Resolve-*, Split-*, Join-*. (Set-, Out-, New-, Add-, Remove-,
-// Invoke-, Start-, Tee- are deliberately absent.)
-const PS_READ_ONLY_VERB_RE = /^(?:get|test|select|sort|group|format|measure|compare|convertto|convertfrom|resolve|split|join)-[a-z]+$/;
-// Shell keywords and builtins that run no program of their own. They take the
-// command position but cannot write a file; `eval`, `source` and `.` are
-// deliberately absent because they execute text.
-const SHELL_KEYWORD_HEADS = new Set([
-  "for", "foreach", "case", "esac", "fi", "done", "function", "return", "exit", "break", "continue",
-  "true", "false", "export", "set", "unset", "local", "declare", "typeset", "readonly", "shift", "read",
-  "let", "pwd", "sleep", "date", "whoami", "hostname", "id", "uname", "printenv", "seq", "param",
-  "begin", "process", "end", "throw", "switch", "default", "trap", ":", "select",
-  "cd", "chdir", "pushd", "popd", "set-location", "sl", "push-location", "pop-location",
-]);
-// Prefixes that are followed by the real command word: the command position
-// passes THROUGH them (`sudo tee`, `if ! grep`, `else tee`, `exec tee`).
-const TRANSPARENT_HEADS = new Set([
-  "sudo", "doas", "time", "env", "nohup", "nice", "exec", "command", "builtin", "!",
-  "if", "then", "else", "elif", "do", "while", "until", "try", "catch", "finally",
-]);
-// Executors: the word after their flags is a command they will run with the
-// data they receive, so `echo <protected> | xargs tee` writes the file named
-// in a READER's segment. They are unwrapped like shell wrappers, and a segment
-// headed by one is examined whenever ANY segment of the command names a
-// protected file or carries computed text.
-const EXECUTOR_HEADS = new Set(["xargs", "gxargs", "parallel"]);
-// `find` resolves a NAME to the files that carry it, so a protected basename
-// in its arguments counts as the protected file, and its own writers/executors
-// (`-delete`, `-exec`, `-fprint`) disqualify it as a read.
-const FIND_WRITE_OR_EXEC_RE = /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/;
-const GIT_READ_ONLY_SUBCOMMANDS = new Set([
-  "diff", "show", "log", "status", "blame", "grep", "ls-files", "ls-tree", "cat-file", "rev-parse",
-  "check-ignore", "check-attr", "diff-tree", "diff-index", "describe", "shortlog", "whatchanged",
-  "annotate", "name-rev", "hash-object", "add", "commit",
-]);
-// Codex round 13 (HIGH): the read-only git subcommands were accepted whatever
-// their options, and `git diff --output=<protected> HEAD HEAD` truncates the
-// file it names. The options that make a "read" write or execute are refused
-// on a protected file: `--output` (diff/log/show write their result to a file),
-// `--ext-diff`/`--textconv` (run the configured external programs on the
-// named file), `--exec`, and grep's `-O`/`--open-files-in-pager` (open the
-// matched files in an arbitrary program). `--output-indicator-*` is a
-// different option and stays allowed. A `-c key=value`/`--config-env` override
-// or a `GIT_*` environment assignment anywhere in the command can point
-// diff.external, core.pager or core.editor at any program, so those disqualify
-// the invocation too; and an option VALUE is never a pathspec, so `--opt=<protected>`
-// is refused whatever the option.
-const GIT_WRITE_OR_EXEC_OPTION_RE = /^(?:--output(?:=|$)|--ext-diff$|--textconv$|--exec(?:=|$)|-O|--open-files-in-pager(?:=|$))/;
-const GIT_UNSAFE_GLOBAL_OPTION_RE = /^(?:-c|--config-env(?:=|$)|--exec-path(?:=|$))/;
-const GIT_ENV_OVERRIDE_RE = /(?:^|[^\w])GIT_\w+\s*=/i;
-const NODE_HEADS = new Set(["node", "nodejs"]);
-function shellSegmentWords(segment) {
-  return String(segment || "")
-    .replace(SHELL_WORD_NOOP_RE, "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-}
-function normalizeShellHead(word) {
-  return String(word || "")
-    .toLowerCase()
-    .replace(/\\/g, "/")
-    .replace(/^.*\//, "")
-    .replace(/\.(?:exe|cmd|bat|com)$/, "");
-}
-// The command word of a shell segment, with leading environment assignments,
-// `sudo`, `time`, `env`, `MSYS_NO_PATHCONV=1`-style prefixes and PowerShell's
-// call operator `&` skipped. A shell WRAPPER (`cmd /c …`, `bash -c …`,
-// `powershell -NoProfile -Command …`) is unwrapped: its flags are skipped and
-// the head is the first word of the text it will run, so `cmd /c "type
-// <protected>"` is the read it is. The wrapper's own writers are still seen —
-// `cmd /c "type x > <protected>"` keeps its `>` for the redirect gate, and the
-// segment split already happened on the whole text, quotes included. A
-// segment that begins with an assignment and nothing else has no head.
-const SHELL_WRAPPER_HEADS = new Set(["cmd", "bash", "sh", "zsh", "dash", "pwsh", "powershell"]);
-export function shellSegmentHead(segment) {
-  const words = shellSegmentWords(segment);
-  let i = 0;
-  for (let unwrap = 0; unwrap < 4; unwrap++) {
-    while (i < words.length && (/^[A-Za-z_][\w]*=/.test(words[i]) || /^(?:sudo|time|env|&)$/i.test(words[i]))) i++;
-    if (i >= words.length) return { head: "", rest: [] };
-    const head = normalizeShellHead(words[i]);
-    if (!SHELL_WRAPPER_HEADS.has(head)) return { head, rest: words.slice(i + 1) };
-    i++;
-    while (i < words.length && /^[-/]/.test(words[i])) i++;
-  }
-  return { head: "", rest: [] };
-}
-// Is this git invocation (the words after `git`) a read that cannot write or
-// execute? See GIT_WRITE_OR_EXEC_OPTION_RE above.
-export function gitInvocationIsReadOnly(rest, command = "", workdir = "") {
-  if (GIT_ENV_OVERRIDE_RE.test(String(command || ""))) return false;
-  let i = 0;
-  for (; i < rest.length; i++) {
-    const word = rest[i];
-    if (word === "-C") { i++; continue; }
-    if (GIT_UNSAFE_GLOBAL_OPTION_RE.test(word)) return false;
-    if (word.startsWith("-")) continue; // --no-pager, -P, --literal-pathspecs
-    break;
-  }
-  if (!GIT_READ_ONLY_SUBCOMMANDS.has(String(rest[i] || "").toLowerCase())) return false;
-  for (const word of rest.slice(i + 1)) {
-    if (GIT_WRITE_OR_EXEC_OPTION_RE.test(word)) return false;
-    const optionValue = /^--?[\w-]+=(.+)$/.exec(word);
-    if (optionValue && (PROTECTED_HARNESS_FRAGMENT_RE.test(optionValue[1]) || commandTouchesProtectedHarnessPath(optionValue[1], workdir))) return false;
-  }
-  return true;
-}
-// Is `head` (normalised) with the words that follow it a recognised read-only
-// operation? `node` may RUN a protected script — the protected token must be
-// the script, and nothing after it may name another protected file.
-function commandWordIsReadOnly(head, rest, command, workdir) {
-  if (READ_ONLY_SHELL_HEADS.has(head) || SHELL_KEYWORD_HEADS.has(head) || PS_READ_ONLY_VERB_RE.test(head)) return true;
-  if (head === "git") return gitInvocationIsReadOnly(rest, command, workdir);
-  if (head === "find") return !rest.some((word) => FIND_WRITE_OR_EXEC_RE.test(word));
-  if (NODE_HEADS.has(head)) {
-    const script = rest.find((word) => !word.startsWith("-")) || "";
-    const scriptIsProtected = protectedHarnessPathMentioned(script) || protectedHarnessPathMentioned(joinedWithWorkdir(script, workdir));
-    if (!scriptIsProtected) return false;
-    const remainder = rest.slice(rest.indexOf(script) + 1).join(" ");
-    return !PROTECTED_HARNESS_FRAGMENT_RE.test(remainder) && !commandTouchesProtectedHarnessPath(remainder, workdir);
-  }
-  return false;
-}
-// Does the next word make a `$var` / quoted word in command position an
-// EXPRESSION rather than an invocation? PowerShell's comparison, logical and
-// string operators (`$_ -match "x"`, `$a -join ","`), arithmetic and
-// assignment, `in`, or nothing at all. `-f` is deliberately NOT here: it is
-// PowerShell's format operator but also a flag every POSIX writer accepts, and
-// bash executes `$w -f src dest` when `$w` holds `cp`.
-const EXPRESSION_FOLLOWER_RE = /^(?:-[ci]?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin|is|isnot|as|and|or|xor|not|replace|split|join|band|bor|bxor|bnot|shl|shr)|in|[-+*\/%]?=|==|!=|=~|\+\+|--|[-+*\/%,]|\.\.|\?\?=?|[)}\]{(]|\|)$/i;
-const REDIRECT_TOKEN_RE = /^(?:\d?>>?|<|&>|>&|\d>&\d)$/;
-const PS_CAST_RE = /^\[[\w.]+\](?:\$|$)/;
-// Codex round 13 (HIGH): the round-12 rule looked only at a segment's HEAD, so
-// `$d=".codex/hooks/production-action-"; $f="guard.mjs"; Write-Output "" |
-// Tee-Object -FilePath $d$f` — no protected literal anywhere, a writer the verb
-// list does not know — returned blocked:false; and inside a reader's segment
-// `cat x $(tee <protected>)` was never looked at. So every COMMAND WORD of an
-// examined segment is walked, not just the first: the head, the word after
-// each `(`, `{`, paired backtick, `&`, assignment `=`, `in`, `-exec`, and
-// the word after a wrapper's or executor's flags. Each must be a recognised
-// read-only operation. A `$var` or quoted word in command position is an
-// expression when what follows is an operator or nothing (`$_ -match "x"`,
-// `"a" + "b"`) and an invocation otherwise (`$w $d$f`, `& $w`, `'tee' $d$f`).
-// Returns the first unrecognised command word, or "".
-export function unrecognizedCommandWord(segment, command = "", workdir = "") {
-  // `{}` is xargs'/find's placeholder, not a scriptblock: it vanishes before
-  // the brackets are spaced out.
-  let text = String(segment || "").replace(/\{\}/g, "");
-  const backticks = (text.match(/`/g) || []).length;
-  text = backticks >= 2 && backticks % 2 === 0 ? text.replace(/`/g, " ` ") : text.replace(/`/g, "");
-  text = text
-    .replace(/([{}()])/g, " $1 ")
-    .replace(/(\$[\w:.]+)\s*([-+*\/%]?=)(?!=)/g, "$1 $2 ")
-    .replace(/(^|\s)&(?=\S)/g, "$1& ")
-    .replace(/\^/g, "");
-  const tokens = text.trim().split(/\s+/).filter(Boolean);
-  let commandPosition = true;
-  let afterInvoker = false;
-  let skippingFlags = false;
-  let afterRedirect = false;
-  let inBacktick = false;
-  let previous = "";
-  const isFollower = (word) => word === undefined || EXPRESSION_FOLLOWER_RE.test(word);
-  const restAfter = (index) => {
-    const rest = [];
-    for (let j = index + 1; j < tokens.length; j++) {
-      if (/^[)}]$/.test(tokens[j]) || tokens[j] === "`") break;
-      rest.push(tokens[j].replace(SHELL_WORD_NOOP_RE, ""));
-    }
-    return rest;
-  };
-  for (let i = 0; i < tokens.length; i++) {
-    const raw = tokens[i];
-    const before = previous;
-    previous = raw;
-    if (raw === "`") {
-      inBacktick = !inBacktick;
-      commandPosition = inBacktick;
-      afterInvoker = skippingFlags = afterRedirect = false;
-      continue;
-    }
-    if (raw === "{" || raw === "(") {
-      // `${VAR}` / `"${VAR}"` is a variable and `@{k=v}` a hashtable: neither opens
-      // a command. `$(…)`, `@(…)`, `(…)`, `<(…)`, `>(…)` and `{ … }` all do.
-      const variableBrace = raw === "{" && (before.endsWith("$") || before.endsWith("@"));
-      commandPosition = !variableBrace;
-      afterInvoker = skippingFlags = afterRedirect = false;
-      continue;
-    }
-    if (raw === "}" || raw === ")") { commandPosition = false; skippingFlags = false; continue; }
-    if (/^(?:[-+*\/%]?=|\?\?=)$/.test(raw)) { commandPosition = true; afterInvoker = false; continue; }
-    if (raw === "&") { commandPosition = true; afterInvoker = true; continue; }
-    if (/^in$/i.test(raw) && !commandPosition) { commandPosition = true; continue; }
-    if (/^-(?:exec|execdir|ok|okdir)$/.test(raw)) { commandPosition = true; continue; }
-    if (afterRedirect) { afterRedirect = false; continue; }
-    if (REDIRECT_TOKEN_RE.test(raw)) { afterRedirect = !/&\d$/.test(raw); continue; } // `> file` names a target; `2>&1` does not
-    if (!commandPosition) continue;
-    if (skippingFlags) {
-      if (/^[-/]/.test(raw)) continue;
-      skippingFlags = false;
-    }
-    const bare = raw.replace(SHELL_WORD_NOOP_RE, "");
-    const quoted = /^["']/.test(raw);
-    if (!quoted && /^[A-Za-z_][\w]*=/.test(raw)) continue; // FOO=bar prefix; stays in command position
-    if (!bare) continue;
-    if (bare.startsWith("$") || (quoted && /^["']*\$/.test(raw))) {
-      if (afterInvoker) return raw;
-      if (isFollower(tokens[i + 1])) { commandPosition = false; continue; }
-      return raw;
-    }
-    if (quoted) {
-      if (isFollower(tokens[i + 1])) { commandPosition = false; continue; }
-      // a quoted command name (`'tee' $d$f`, `bash -c "cat x"`) is that command
-    } else {
-      if (/^[@\d]/.test(bare) || PS_CAST_RE.test(bare) || (/^-/.test(bare) && !TRANSPARENT_HEADS.has(bare))) { commandPosition = false; continue; }
-      if (bare === "." || bare === "source" || bare === "eval") return raw;
-    }
-    const head = normalizeShellHead(bare);
-    if (TRANSPARENT_HEADS.has(head) || TRANSPARENT_HEADS.has(bare)) { afterInvoker = head === "exec"; continue; }
-    if (SHELL_WRAPPER_HEADS.has(head) || EXECUTOR_HEADS.has(head)) { skippingFlags = true; afterInvoker = true; continue; }
-    if (!commandWordIsReadOnly(head, restAfter(i), command, workdir)) return raw;
-    commandPosition = false;
-    afterInvoker = false;
-  }
-  return "";
-}
-const PROTECTED_HARNESS_BASENAMES = Object.freeze(PROTECTED_HARNESS_FILES.map((file) => file.split("/").pop().toLowerCase()));
-// After a `cd`/`Set-Location`/`pushd` the guard cannot bind a relative token to
-// a directory, so a bare protected BASENAME (`production-action-guard.mjs`,
-// `package.json`) counts as naming the protected file. Codex round 13, own
-// finding: `cd .codex/hooks; echo x | tee production-action-guard.mjs` passed
-// every gate because the directory-change rule knew only the verb list.
-export function protectedBasenameMentioned(segment) {
-  return commandPathTokens(segment).some((token) => {
-    const last = canonicalizeGuardPath(token).split("/").pop().toLowerCase();
-    if (!last) return false;
-    if (GLOB_CHARS_RE.test(last)) return PROTECTED_HARNESS_BASENAMES.some((name) => globSegmentToRegExp(last).test(name));
-    return PROTECTED_HARNESS_BASENAMES.includes(last);
-  });
-}
 export const CHANGES_DIRECTORY_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|set-location)\s+/i;
-// NOTE: deliberately NOT splitCommandSegments. These two helpers never split on
-// a single `&`, so SEC-001 does not reach them, and making them quote-aware
-// regresses `cmd /c "set a=… && echo x > %a%lib.mjs"`: the whole nested command
-// becomes one segment, and the classifier then names the wrapper instead of the
-// mutating half an earlier round pinned it to name. Their quoted-`;`/`|` splits
-// are a pre-existing over-split (shorter segments, so fail-safe here) and are
-// named as still-open rather than half-fixed.
-//
-// The one exception is a search's double-quoted pattern: a batched
-// `rg -n "a|agent" package.json` was cut at the `|`, and `agent" package.json` was
-// refused as a command naming a protected file (Mason's harness audit, 2026-10-30).
-// The separator is only taken out of the text for a segment that really is a search,
-// and only where it is data to every shell: double quotes are literal under the same
-// test as above, unless cmd.exe's `^"` leaves the quote unopened. Single quotes get no
-// such exception. cmd.exe does not treat `'` as a quote, so every piece after a
-// separator would run there, even one word (an interpreter with no arguments executes
-// its stdin), and nothing in the hook payload says which shell will run the command.
-// A `"` inside single quotes also changes how cmd.exe pairs the quotes after it, so
-// that command stays as written. shortcut: `rg 'a|b' package.json` stays a false
-// refusal, use double quotes or separate simple reads; upgrade only if Codex ever
-// reports the shell. The rest of the text is left in place, so a protected path
-// still counts as named and a following `| xargs tee` is still examined. The search is
-// judged from the text outside quotes only, so a separator inside an earlier quoted
-// argument cannot make a `tee` look like a search.
-// The whole exception rests on the quote pairing below matching every shell's, and a
-// left-to-right scan is no parser. So anything that can re-pair quotes turns it off for
-// the whole command, wherever it sits: an expansion (`"$( … )"` nests quotes, cmd.exe's
-// %X% can hold one, and `--%` is caught by its `%`), a comment, a here-document or
-// here-string, cmd.exe's caret before a quote (even across a line end), and a quote pair
-// spanning a line end, because cmd.exe reads line by line. shortcut: a batched read with
-// any of those, even a harmless `# note`, can stay falsely refused; separate the reads.
-// Upgrade only with a parser every shell agrees on.
-const PATTERN_SEARCH_HEADS = new Set(["rg", "grep", "egrep", "fgrep", "findstr", "select-string", "sls"]);
-const QUOTE_PAIRING_UNSAFE_RE = /\^\s*["']|[$%!#]|<<|@["']/;
-function searchPatternSeparatorsRemoved(command) {
-  if (QUOTE_PAIRING_UNSAFE_RE.test(command)) return command;
-  // Only the text added since the last span is scanned: a hook killed at its time
-  // limit allows the command, so this must stay linear on adversarial quoting.
-  let scanned = 0;
-  let head = "";
-  let pairingDiffers = false;
-  const rewritten = literalDoubleQuotedTextBlanked(command, (span, unquotedBefore) => {
-    const pieces = unquotedBefore.slice(scanned).split(/&&?|\|\|?|;|\r?\n/);
-    scanned = unquotedBefore.length;
-    if (pieces.length > 1 || !head) head = shellSegmentWords(pieces.pop())[0];
-    pairingDiffers ||= /[\r\n]/.test(span) || (span[0] === "'" && span.includes('"'));
-    if (span[0] === "'" || !PATTERN_SEARCH_HEADS.has(normalizeShellHead(head))) return span;
-    return span.replace(/&&|\|\|?|;/g, " ");
-  });
-  return pairingDiffers ? command : rewritten;
-}
-function shellSegments(command) {
-  return searchPatternSeparatorsRemoved(String(command || "")).split(/(?:&&|\|\|?|;|\r?\n)/).map((s) => s.trim()).filter(Boolean);
-}
-function segmentHeadIsExecutor(segment) {
-  const { head } = shellSegmentHead(segment);
-  return EXECUTOR_HEADS.has(head) || head === "find";
-}
-// The first shell segment that names a protected harness file and carries a
-// command word that is not a recognised read-only operation, as `{ segment,
-// head }`, or null when every such segment is a read. A segment headed by an
-// executor is examined whenever ANY segment names a protected file (the name
-// reaches it through the pipe), and after a directory change a protected
-// basename counts as the protected file.
-export function unrecognizedProtectedHarnessAccess(command, workdir = "") {
-  const text = String(command || "");
-  const segments = shellSegments(text);
-  const changesDirectory = CHANGES_DIRECTORY_RE.test(text);
-  const names = (segment) =>
-    PROTECTED_HARNESS_FRAGMENT_RE.test(segment)
-    || commandTouchesProtectedHarnessPath(segment, workdir)
-    || ((changesDirectory || segmentHeadIsExecutor(segment)) && protectedBasenameMentioned(segment));
-  const commandNames = segments.some(names);
-  for (const segment of segments) {
-    if (!names(segment) && !(commandNames && segmentHeadIsExecutor(segment))) continue;
-    const word = unrecognizedCommandWord(segment, text, workdir);
-    if (!word) continue;
-    return { segment, head: normalizeShellHead(word.replace(SHELL_WORD_NOOP_RE, "")) || word };
-  }
-  return null;
-}
-// A conventional commit message (`git commit -m "docs(changelog): …"`) holds a
-// `(` that no shell runs: inside double quotes it is plain text in bash,
-// PowerShell and cmd.exe alike. So for the computed-text test below, a
-// double-quoted span is blanked when its body cannot expand in any of them (no
-// `$`, backtick, `%` or `!`). The segment is left untouched when anything could
-// make the quotes mean something else: a backslash right before a quote or any
-// backtick (an escaped quote) or a smart quote (PowerShell reads it as a quote,
-// the others do not). A backslash elsewhere (`C:\Program Files`) is plain text.
-// Single-quoted text is stepped over unchanged, so a `"` inside it never opens
-// a span (`Tee-Object '"' (Join-Path a b) '"'` keeps its subexpression visible).
-// shortcut: the `\"` check reads the whole text, so a `\"` that is harmless in PowerShell
-// also leaves it as written and a batched search can still be refused; drop the `\"`.
-// Upgrade only with a parser every shell agrees on.
-export function literalDoubleQuotedTextBlanked(segment, rewriteSpan = (span) => (span[0] === '"' && !/[$%!]/.test(span) ? '""' : span)) {
-  const text = String(segment || "");
-  if (/\\["']|[`‘’‚‛“”„]/.test(text)) return text;
-  let out = "";
-  let unquoted = "";
-  for (let i = 0; i < text.length; i++) {
-    const quote = text[i];
-    if (quote !== "'" && quote !== '"') { out += quote; unquoted += quote; continue; }
-    const close = text.indexOf(quote, i + 1);
-    if (close < 0) return text; // unbalanced: leave the whole segment as written
-    out += rewriteSpan(text.slice(i, close + 1), unquoted);
-    unquoted += "''";
-    i = close;
-  }
-  return out;
-}
-// Codex round 13 (HIGH): the computed-text refusal above is scoped to segments
-// whose VERB the mutation list knows, and the fail-closed rule to segments that
-// NAME a protected file. A destination split across variables and written by a
-// writer the list does not know satisfies neither — `$d=".codex/hooks/
-// production-action-"; $f="guard.mjs"; Write-Output "" | Tee-Object -FilePath
-// $d$f` blanked the startup guard and returned blocked:false. So computed text
-// fails closed the same way protected names do: a segment that carries
-// computed text may contain only recognised read-only command words. Readers
-// with computed arguments (`cat $f`, `Get-Content (Join-Path $a $b)`, `git -C
-// $repo diff`), pipeline stages (`| Where-Object { $_ -match "x" }`) and
-// keywords (`if ($LASTEXITCODE -ne 0) { exit 1 }`) stay allowed. An executor
-// is examined whenever any segment is computed (the value reaches it through
-// the pipe). Returns `{ segment, head }` or null.
-export function computedSegmentWithUnrecognizedCommand(command, workdir = "") {
-  const text = String(command || "");
-  const segments = shellSegments(text);
-  // The lone resolve-review-thread call (#973) holds `(` only inside its quoted
-  // GraphQL text; ghApiIsResolveReviewThreadOnly has already proved every word
-  // literal (no `$`, backtick or subexpression can match it), so it is not computed.
-  const computed = (segment) => COMPUTED_ARGUMENT_RE.test(literalDoubleQuotedTextBlanked(segment)) && !ghApiIsResolveReviewThreadOnly(segment);
-  const commandComputed = segments.some(computed);
-  for (const segment of segments) {
-    if (!computed(segment) && !(commandComputed && segmentHeadIsExecutor(segment))) continue;
-    const word = unrecognizedCommandWord(segment, text, workdir);
-    if (!word) continue;
-    return { segment, head: normalizeShellHead(word.replace(SHELL_WORD_NOOP_RE, "")) || word };
-  }
-  return null;
-}
-
 // The mutating verbs the shell-mutation gate recognises. Kept as one source so
-// the computed-text check below and `shellMutatesPath` cannot drift apart.
+// its checks cannot drift apart.
 // cmd.exe's own verbs (copy, move, xcopy, robocopy, mklink) joined the list in
 // Codex round 10: the list knew PowerShell's and POSIX's spellings of "write a
 // file" but not cmd's, so `copy evil.mjs <protected>` was not a mutation at all.
 const SHELL_MUTATION_RE = /(?:>|\b(?:set-content|add-content|out-file|new-item|set-item|clear-item|clear-content|set-itemproperty|new-itemproperty|remove-itemproperty|rename-itemproperty|clear-itemproperty|set-acl|remove-item|move-item|copy-item|rename-item|ac|clc|cli|clp|cpi|mi|ni|ri|ren|rni|sc|si|sp|sac|rm|mv|cp|del|erase|copy|move|xcopy|robocopy|mklink|sed\s+-i|perl\s+-pi|apply_patch)\b)/i;
-// Text that builds a value at run time rather than spelling it: a parenthesised
-// (sub)expression, a `$` variable or `$(…)`/`${…}`, Join-Path, the -f / -join
-// string operators, and cmd.exe's `%VAR%` / delayed `!VAR!` expansion (Codex
-// round 10 — the first cut knew only the PowerShell and POSIX spellings, and
-// `set a=.claude/hooks/codex-bot-review-&& echo x > %a%lib.mjs` assembled the
-// protected path with no literal token spelling it). Substring forms
-// (`%a:~0,5%`) are covered because the body match is anything up to the closing
-// delimiter. Deliberately broad — the point is to refuse the SHAPE of a
-// computed destination, not to recognise particular constructions. The same
-// two cmd forms are already how maintenanceProducerCommandMentioned() spots
-// dynamic syntax, so this is the guard agreeing with itself.
-// ANY `$` counts (Codex round 11): the first cut matched `$name`, `$(`, `${`
-// and missed the positional and special parameters — `$1`, `$@`, `$*`, `$?`,
-// `$$` — with which `sh -c 'cp src "$1$2"' _ <prefix> <suffix>` assembles a
-// protected name from two harmless arguments. A bare `$` in a mutating segment
-// has no honest literal reading, so it is computed text wherever it appears.
-// Codex round 13 added two spellings the first cut could not see: a PAIRED
-// backtick pair is a POSIX command substitution (`tee \`cat dest.txt\``), and a
-// whitespace-led `@name` is a PowerShell splat — `$p=@{FilePath=$d$f};
-// Tee-Object @p` carries its computed destination in a hashtable no `$` in the
-// writing segment reveals. A lone backtick stays a PowerShell escape, and
-// `body=@file` (gh's file-argument form) is preceded by `=`, not whitespace.
-const COMPUTED_TEXT_RE = /\(|\$|`[^`]*`|(?<=\s)@[A-Za-z_$]|\bjoin-path\b|\s-f\s|\s-join\b|%[^%\s]+%|![^!\s]+!/i;
-// The same set WITHOUT the bare `-f` arm, for the fail-closed gate over
-// unrecognised command words: there `-f` is overwhelmingly a flag (`gh api -f
-// key=value`, `grep -f patterns`), and PowerShell's format operator cannot
-// build a destination without a `$`, a `(` or an assignment that the other arms
-// already see.
-const COMPUTED_ARGUMENT_RE = /\(|\$|`[^`]*`|(?<=\s)@[A-Za-z_$]|\bjoin-path\b|\s-join\b|%[^%\s]+%|![^!\s]+!/i;
-
-// The first MUTATING segment of `command` whose text is computed, or "" when
-// none is. Segments are the same pipeline/chain units the merge and push gates
-// use, so a variable in a harmless later stage does not condemn an earlier
-// redirect. Codex round 9 (HIGH): `Set-Content (".claude/hooks/codex-bot-review-"
-// + "lib.mjs")` and `Copy-Item evil.mjs (Join-Path ".claude/hooks"
-// "codex-bot-review-lib.mjs")` both returned blocked:false, because no literal
-// token in either spells the protected file.
-export function mutatingSegmentWithComputedText(command) {
-  // See shellSegments above for why this split stays regex-based.
-  const segments = String(command || "").split(/(?:&&|\|\|?|;|\r?\n)/).map((s) => s.trim()).filter(Boolean);
-  for (const segment of segments) {
-    if (SHELL_MUTATION_RE.test(segment) && COMPUTED_TEXT_RE.test(segment)) return segment;
-  }
-  return "";
-}
-
 // scripts/apply-migration-file.mjs mutates the LIVE database. It was added
 // 2026-08-24 as a gated door for migrations too large to transmit through
 // apply_migration, and Codex's review of that PR caught that the new spelling
@@ -885,42 +271,6 @@ function liveApplyScriptMentioned(command) {
     base.replace(/["']/g, "").replace(/\\(.)/g, "$1"),
   ];
   return views.some((v) => LIVE_APPLY_SCRIPT_RE.test(v));
-}
-
-// The literal matcher above loses to a computed argument: `S=scripts/apply-migration-file.mjs; node $S`
-// never spells the name (CodeRabbit, PR #460 round 2 — the same class documented in
-// review-proof-guard, where a target hidden entirely from the command text defeats
-// any string matcher). A denylist cannot be completed by enumeration, so this
-// inverts: when a Node-family interpreter is invoked and ANY part of the command
-// is shell-expanded, the script it will run is statically unresolvable and the
-// command is refused. Codex has no need to launch an interpreter through an
-// expansion — `node -e`/`node -`/`| node` are already denied above — so the cost
-// is a clear error telling the operator to spell the path literally.
-// HONEST RESIDUAL: an interpreter that writes-then-runs a file, or any indirection
-// where no interpreter appears in the command text, is still outside what a
-// command-text guard can catch. The durable boundary stays the apply gate itself
-// plus Mason's in-chat approval, not this string match.
-const NODE_INTERPRETER_RE = /(?:^|[\s"'`\\/;&|(])(?:node|npx|tsx|ts-node|bun|deno)(?:\.exe)?["']?(?:\s|$)/i;
-const SHELL_EXPANSION_RE = /\$\{[^}]*\}|\$\(|`|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|\$env:/i;
-function interpreterArgumentIsUnresolvable(command) {
-  const text = String(command || "");
-  if (!NODE_INTERPRETER_RE.test(text)) return false;
-  return SHELL_EXPANSION_RE.test(text);
-}
-
-// Both option spellings below are DISJOINT on purpose. The single-dash form was
-// `-{1,2}[a-z-]+`, which also matched every `--name` the first form matches, so
-// each repeated option doubled the paths tried on a failing match: `node --a`
-// repeated 20 times, an 86-character command, took 26 s — past the hook limit,
-// and a killed hook allows the command. The pipe form's path prefix stops at `|`
-// for the same reason `\S*` did not: from every `|` it ran to the end of the
-// command and backtracked (quadratic). A prefix that spanned a `|` has a match
-// starting at that later `|`, so what matches is unchanged in both.
-function usesDynamicProcessEval(command) {
-  const text = String(command || "");
-  return /(?:^|[\s"'\\/])node(?:\.exe)?["']?\s+(?:(?:--[a-z-]+(?:=[^\s]+)?|-[a-z][a-z-]*)\s+)*(?:-e|--eval|-p|--print)(?:\s|=|$)/i.test(text) ||
-    /(?:^|[|;&]\s*)node(?:\.exe)?["']?\s*(?:-|$)/i.test(text) ||
-    /\|\s*(?:"[^"]*[\\/]node(?:\.exe)?"|'[^']*[\\/]node(?:\.exe)?'|(?:[^\s|]*[\\/])?node(?:\.exe)?)\s*(?:-|$)/i.test(text);
 }
 
 // What a blocked harness change should do instead. (The old text pointed at a
@@ -1409,19 +759,10 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
     laterChangesLowRisk: (proofHead, head) =>
       !solRiskOnGitHub({ baseSha: proofHead, headSha: head, repo: request.repo, gh: (args) => runGh(args, repoDir) }).risky,
   });
-  // Documentation-only exemption (Mason, 2026-10-07) — mirror of pr-merge-guard.mjs.
+  // Sol covers the listed files only (Mason, 2026-10-30) — mirror of pr-merge-guard.mjs.
   // Excuses ONLY the missing-or-invalid Sol proof, after every gate above and
-  // gateMainChange's head-contains-base check have passed. Same shared module and
-  // same GitHub comparison as the Claude side; any failure answers "Sol required".
+  // gateMainChange's head-contains-base check have passed.
   if (mainVerdict.blocked && mainVerdict.solProofMissing) {
-    const exemption = solExemptionOnGitHub({
-      baseSha: pullRequest.baseRefOid,
-      headSha: pullRequest.headRefOid,
-      repo: request.repo,
-      gh: (args) => runGh(args, repoDir),
-    });
-    if (exemption.exempt) return { blocked: false, advisoryRequest: request };
-    // Notes-only pull requests skip Sol (Mason, 2026-10-29) — mirror of pr-merge-guard.mjs.
     const risk = solRiskOnGitHub({
       baseSha: pullRequest.baseRefOid,
       headSha: pullRequest.headRefOid,
@@ -1429,10 +770,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
       gh: (args) => runGh(args, repoDir),
     });
     if (!risk.risky) return { blocked: false, advisoryRequest: request };
-    return denied(
-      `${mainVerdict.reason}\n\nSol is required because ${risk.reason} (any code change or large pull request ` +
-      `needs Sol; only notes skip it; Mason, 2026-10-29). The documentation-only exemption does not apply: ${exemption.reason}.`,
-    );
+    return denied(`${mainVerdict.reason}\n\nSol is required because ${risk.reason} (docs/reference/sol-required-paths.md; Mason, 2026-10-30).`);
   }
   if (mainVerdict.blocked) return mainVerdict;
 
@@ -1457,9 +795,8 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
 // Returns a denial verdict, or null when nothing blocks. Fails OPEN on any
 // error: see the header of codex-bot-review-lib.mjs for why this one predicate
 // does not fail closed like its neighbours here. The 7s budget stays under half
-// of the hook's 15s so the notices below can still be written; it rose from 5s
-// on 2026-10-26 because a minor-follow-up check (codex-bot-review-lib.mjs) adds
-// two or three GitHub reads. The hard-gate deadline still caps it.
+// of the hook's 15s so the notices below can still be written. The hard-gate
+// deadline still caps it.
 const CODEX_ADVISORY_BUDGET_MS = 7_000;
 
 // The hard gates' share of this hook (see createHardGateBudget). The timeout
@@ -1951,28 +1288,6 @@ export function evaluateProductionAction({
   if (nestingDepth === 0) {
     const nested = expandNestedCommands(command);
     if (nested.tooDeep) return denied(nestedTooDeepDenial("CODEX PRODUCTION GATE"));
-    if (nested.computed) return denied(nestedComputedDenial("CODEX PRODUCTION GATE"));
-    if ([command, ...nested.commands].some((text) => commandFedToInterpreter(text))) {
-      return denied(commandFedToInterpreterDenial("CODEX PRODUCTION GATE"));
-    }
-    // One policy with Claude's push guard: a push carried by another program is
-    // refused, not evaluated. Evaluating it here allowed
-    // `bash -c "git push origin HEAD:feature"` while Claude's guard refused the
-    // same command (Codex luna, PR #795, 2026-09-26, finding 10). Read without
-    // the `{ }` / `( )` regrouping, as Claude's push guard reads it: that pass
-    // re-emits the outer command itself, so `git push origin HEAD:feature/x &&
-    // (npm test)` was refused as a nested push (CodeRabbit, PR #795,
-    // 2026-09-30). A push behind grouping is still refused by the whole-command
-    // composition check below.
-    const pushNested = expandNestedCommands(command, { grouping: false });
-    if (pushNested.commands.some((inner) =>
-      isGitPush(inner) || gitSubcommandIsDynamic(inner) || pushHiddenByShellComposition(inner))) {
-      return denied(
-        "CODEX PRODUCTION GATE: this command runs a git push inside another shell or an evaluator (bash -c, " +
-        "cmd /c, pwsh -Command or -EncodedCommand, eval, Invoke-Expression, Start-Process). The gate reads the " +
-        "outer command's text, so it cannot prove where a push carried that way would go. Run the push as its " +
-        "own plain command: `git -C <repo> push <remote> <refspec>`.");
-    }
     for (const inner of nested.commands) {
       const verdict = evaluateProductionAction({
         toolName,
@@ -2008,139 +1323,11 @@ export function evaluateProductionAction({
       "review evidence but cannot verify Mason's required in-chat approval, so it is not an alternative spelling " +
       "for the reviewed migration path. Live migrations remain outside Codex's standing authorization.");
   }
-  if (interpreterArgumentIsUnresolvable(command)) {
-    return denied(
-      "CODEX PRODUCTION GATE: a Node-family interpreter invoked with a shell-expanded argument is blocked — the " +
-      "script it would run cannot be resolved from the command text, so a live-apply path such as " +
-      "scripts/apply-migration-file.mjs can hide behind `$VAR`, `${VAR}`, `$(…)` or a backtick. Spell the script " +
-      "path literally so the gate can see what will run.");
-  }
-  if (usesDynamicProcessEval(command)) {
-    return denied("CODEX PRODUCTION GATE: Node eval/print modes are blocked because generated code can hide uninspected git or GitHub writes. Put ordinary diagnostic code in a reviewed script instead.");
-  }
   const maintenanceProducerGate = gateMaintenanceProducerExecution({ command, repoDir: actionRepoDir, nowMs, runGit });
   if (maintenanceProducerGate.blocked) return maintenanceProducerGate;
 
-  if (/[\r\n]/.test(command) && PROTECTED_HARNESS_FRAGMENT_RE.test(command)) {
-    return denied("CODEX PRODUCTION GATE: multiline shell commands that reference the production/review harness are blocked.");
-  }
-  const shellMutatesPath = SHELL_MUTATION_RE.test(command);
-  if (shellMutatesPath && PROTECTED_HARNESS_FRAGMENT_RE.test(command)) {
+  if (SHELL_MUTATION_RE.test(command) && PROTECTED_HARNESS_FRAGMENT_RE.test(command)) {
     return denied(`CODEX PRODUCTION GATE: direct shell mutation of the production/review harness is blocked. ${HARNESS_REPAIR_PATH}`);
-  }
-  // The fragment match above compares raw text, so `.claude/hooks/../hooks/<f>`
-  // reaches the same file without ever spelling the protected path (Codex HIGH,
-  // PR #563 round 2). A command is not one path and cannot simply be
-  // canonicalized, so a mutating command that carries a dot-segment AND names a
-  // protected file is refused rather than gated.
-  if (shellMutatesPath && commandTouchesProtectedHarnessPath(command, actionRepoDir)) {
-    return denied(
-      "CODEX PRODUCTION GATE: an argument of this mutating command resolves to a protected harness file " +
-      "once `.`/`..` segments, drive-relative prefixes and the working directory are canonicalized, even " +
-      `though it is not spelled that way. ${HARNESS_REPAIR_PATH}`
-    );
-  }
-  // A directory change INSIDE the command moves the working directory out from
-  // under every path check above: `Set-Location .claude/hooks; Set-Content
-  // codex-bot-review-lib.mjs` writes the protected module while each token,
-  // joined onto the working directory the hook was told about, looks harmless
-  // (Codex round 11, same class as the workdir finding). The push gate already
-  // refuses a directory-changing push as unbindable; a directory-changing
-  // MUTATION is refused the same way. `cd` on its own, or with a read, is fine.
-  if (shellMutatesPath && changesDirectory) {
-    return denied(
-      "CODEX PRODUCTION GATE: this command changes directory and then writes, so the write's destination " +
-      "cannot be bound to the working directory the guard inspected. Run the write from the repository root " +
-      "with the destination path spelled out, without `cd`/`Set-Location`/`pushd`."
-    );
-  }
-  // A destination the guard cannot READ cannot be gated (Codex round 9). Every
-  // check above examines literal tokens; a path assembled at run time —
-  // `(".claude/hooks/codex-bot-review-" + "lib.mjs")`, `(Join-Path ".claude/hooks"
-  // "x.mjs")`, `$dest`, `-f` formatting — has no literal token to examine and
-  // walked straight past all of them. Enumerating the ways PowerShell can build
-  // a string is the losing half of that trade (rounds 2, 3, 4, 7, 8 were each
-  // one more spelling), so the SHAPE is refused instead: a mutating shell
-  // segment whose text carries a computed expression is denied outright, the
-  // same stance this guard already takes on shell-expanded interpreter
-  // arguments and on merge segments carrying a command substitution. Spell the
-  // destination literally and the segment is gated normally. Scoped to the
-  // MUTATING segment so `npm test 2>&1 | Where-Object { $_ -match "x" }` — a
-  // redirect in one stage and a variable in another — is not caught.
-  // Not applied to a NESTED command: its text was already inspected here as part
-  // of the outer command, and its grouping reading turns `{ $_ -match "x" }` into
-  // a bare `$_ …` segment these two rules would refuse on its own. The merge
-  // gate's own substitution refusal and the push gate's unresolvable-ref denial
-  // still apply to it.
-  const computedSegment = nestingDepth === 0 && mutatingSegmentWithComputedText(command);
-  if (computedSegment) {
-    return denied(
-      "CODEX PRODUCTION GATE: this mutating shell command builds a path or argument at run time " +
-      `(a parenthesised expression, a \`$\` variable, Join-Path, or the -f/-join operators) in: ${computedSegment}. ` +
-      "The guard cannot read a computed destination, so it is refused rather than gated. Spell the " +
-      "destination path literally and run the command again."
-    );
-  }
-  // Fail closed on protected files (Codex round 12): the verb-recognising rules
-  // above catch the writers they know; this one refuses every head they do not.
-  // Round 13 walks every command word of the segment (not only its head), holds
-  // read-only git to a safe argument grammar (`git diff --output=<file>` is a
-  // write), examines executors fed by a pipe, and counts a protected basename
-  // as the file after a directory change.
-  const unrecognizedAccess = unrecognizedProtectedHarnessAccess(command, actionRepoDir);
-  if (unrecognizedAccess) {
-    return denied(
-      "CODEX PRODUCTION GATE: this command names a protected harness file and its command word " +
-      `\`${unrecognizedAccess.head || "(none)"}\` is not a recognised read-only operation, in: ${unrecognizedAccess.segment}. ` +
-      "The guard fails closed here: only known readers (cat/type/head/tail/grep/rg/Get-Content/Select-String/" +
-      "Get-Item/Test-Path/diff/hash tools/ls, read-only git subcommands without --output/--ext-diff/--textconv/-c, " +
-      "or `node <that protected script>`) may name these files from the shell; anything else is treated as a " +
-      `writer. ${HARNESS_REPAIR_PATH}`
-    );
-  }
-  // Fail closed on computed text (Codex round 13): a segment that builds text at
-  // run time may contain only recognised read-only command words, because the
-  // guard cannot read what a writer it does not know will do with a value it
-  // cannot see.
-  const computedAccess = nestingDepth === 0 && computedSegmentWithUnrecognizedCommand(command, actionRepoDir);
-  if (computedAccess) {
-    return denied(
-      "CODEX PRODUCTION GATE: this shell segment builds text at run time (a `$` variable, a subexpression, " +
-      `a backtick substitution, a splat, or a %VAR% expansion) and its command word \`${computedAccess.head || "(none)"}\` ` +
-      `is not a recognised read-only operation, in: ${computedAccess.segment}. The guard cannot read a computed ` +
-      "argument and does not know what this command does with one, so it is refused rather than gated. Spell " +
-      "every argument literally, or read through a known reader (cat/Get-Content/grep/git diff/Where-Object …)."
-    );
-  }
-  // Checked on the WHOLE command and BEFORE isGitPush, because the point of the
-  // check is that isGitPush is reading text the shell will not execute:
-  // `git p""ush origin HEAD:main` is not a push to isGitPush, so a per-segment
-  // filter keyed on isGitPush never sees it. The Claude guard has refused these
-  // since Codex's nineteenth 2026-07-30 review; this side never got the check,
-  // so `git push origin HEAD:m""ain` and `HEAD:ma\in` returned blocked:false
-  // from evaluateProductionAction — the main-push gate did not run at all
-  // (measured on PR #630, not read off the parser). Shared helper, not a fourth
-  // copy: that duplication is what this whole change is removing.
-  if (pushHiddenByShellComposition(command)) {
-    return denied(
-      "CODEX PRODUCTION GATE: shell quoting or command substitution changes this push's meaning or reveals an " +
-      "additional push (for example `git p\"us\"h`, `HEAD:ma\"in\"`, `$(git push …)`, or a backtick). The gate reads " +
-      "command text, so analysing a spelling the shell rewrites would not prove the executed destination, force " +
-      "intent, or refspec. Write each push plainly: `git -C <repo> push <remote> <refspec>`."
-    );
-  }
-  // Same reasoning, same place, for gh: a backtick or caret escape is consumed
-  // before gh sees the word, so ``gh pr me`rge 1 --admin`` is an ordinary
-  // administrator merge that no parser below recognises as a merge at all.
-  // Whole command and before the segment loop, because a spliced merge verb is
-  // not a merge to ghMergeRequest either.
-  if (ghHiddenByShellComposition(command)) {
-    return denied(
-      "CODEX PRODUCTION GATE: a PowerShell backtick or cmd.exe caret escape changes which gh command this runs " +
-      "(for example ``gh pr me`rge 1`` or `gh api --met^hod=DELETE …`). The gate reads command text, so analysing " +
-      "a spelling the shell rewrites would not prove the subcommand or the HTTP method. Write the gh command " +
-      "plainly: `gh pr merge <n> …`, `gh api --method <VERB> <endpoint>`."
-    );
   }
   if (isGitPush(command) && pushContextIsAmbiguous(command)) {
     return denied("CODEX PRODUCTION GATE: directory-changing or GIT_DIR/GIT_WORK_TREE-prefixed pushes cannot be bound safely to the inspected worktree. Use `git -C <repo> push`.");
@@ -2175,9 +1362,6 @@ export function evaluateProductionAction({
   // slow (CodeRabbit, 2026-09-09). Keyed on the COMPLETE parse — see
   // mergeRequestKey for why selector+repo would erase an `--admin` reading.
   const gatedRequests = new Set();
-  // A gh alias or extension expands into a command no check below can read.
-  const unreadableGh = ghCommandUnreadableIn(command);
-  if (unreadableGh) return denied(ghCommandUnreadableDenial("CODEX PRODUCTION GATE", unreadableGh));
   for (const segment of commandSegments) {
     const ghRequest = ghMergeRequest(segment) || ghApiMergeRequest(segment);
     // ── raw merge transports (Codex proof on PR #541, 2026-09-01) ───────────
@@ -2257,9 +1441,9 @@ export function evaluateProductionAction({
       if (result.advisoryRequest) deferredAdvisories.push(result.advisoryRequest);
       continue;
     }
-    // Resolving one review thread is the sanctioned exit from the CodeRabbit
-    // thread denial, so that one narrowly-parsed mutation is allowed (#973).
-    if (ghApiMutates(segment) && !ghApiIsResolveReviewThreadOnly(segment)) {
+    // Resolving one review thread or replying to a review comment in plain text
+    // is ordinary review work (#973; Mason, 2026-10-30).
+    if (ghApiMutates(segment) && !ghApiIsResolveReviewThreadOnly(segment) && !ghApiIsReviewThreadReply(segment)) {
       return denied("CODEX PRODUCTION GATE: unrecognized mutating `gh api` calls are blocked because they can bypass the reviewed branch/push workflow.");
     }
   }

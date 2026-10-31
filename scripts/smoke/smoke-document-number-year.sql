@@ -35,6 +35,7 @@ DECLARE
   v_res     jsonb;
   v_res2    jsonb;
   v_next    int;
+  v_claim_seq int; -- at least five digits, and never below a number already issued
   v_count   int;
 BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active LIMIT 1;
@@ -70,10 +71,12 @@ BEGIN
   END IF;
 
   -- Rebate claim, its keyed replay, and a five-digit sequence.
-  INSERT INTO public.rebate_claim_counters (year, next_value) VALUES (v_year, 10000)
-  ON CONFLICT (year) DO UPDATE SET next_value = 10000;
+  SELECT greatest(10000, max(next_value)) INTO v_claim_seq
+    FROM public.rebate_claim_counters WHERE year = v_year;
+  INSERT INTO public.rebate_claim_counters (year, next_value) VALUES (v_year, v_claim_seq)
+  ON CONFLICT (year) DO UPDATE SET next_value = v_claim_seq;
   v_res := public.create_rebate_claim(v_program, 2, 1500, p_idempotency_key => v_key);
-  IF v_res->>'claim_number' IS DISTINCT FROM format('RC-%s-10000', v_year) THEN
+  IF v_res->>'claim_number' IS DISTINCT FROM format('RC-%s-%s', v_year, v_claim_seq) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: rebate claim number %', v_res;
   END IF;
   SELECT count(*) INTO v_count FROM public.rebate_claims
@@ -85,7 +88,7 @@ BEGIN
 
   v_res2 := public.create_rebate_claim(v_program, 2, 1500, p_idempotency_key => v_key);
   SELECT next_value INTO v_next FROM public.rebate_claim_counters WHERE year = v_year;
-  IF v_res2->>'claim_id' IS DISTINCT FROM v_res->>'claim_id' OR v_next <> 10001 THEN
+  IF v_res2->>'claim_id' IS DISTINCT FROM v_res->>'claim_id' OR v_next <> v_claim_seq + 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: replay % against % left counter at %', v_res2, v_res, v_next;
   END IF;
 
@@ -135,7 +138,7 @@ BEGIN
   END;
 
   SELECT next_value INTO v_next FROM public.rebate_claim_counters WHERE year = v_year;
-  IF v_next <> 10001 THEN
+  IF v_next <> v_claim_seq + 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: refused calls moved the counter to %', v_next;
   END IF;
 

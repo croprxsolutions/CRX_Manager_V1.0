@@ -1,0 +1,9 @@
+## 2026-10-28 - Preserve strict date intent for new payment retry keys
+
+- Fix the MED finding from Sol's high-effort review of the parked date/season changes: a new explicit-date payment could be retried with its date omitted and silently match the earlier payment.
+- New claim and cached-response envelopes carry `_date_intent_version: 1` while retaining `_contract: allocate_payment_v1` for the unchanged duplicate-key trigger. Marked requests compare raw dates strictly; date normalization is limited to older unmarked v1 keys. Bare cached results remain compatible.
+- Expanded the disposable PostgreSQL proof with the exact reported explicit-to-omitted failure, explicit-to-NULL/changed-date and omitted-to-explicit rejection, identical explicit/default replay, both metadata states, legacy v1 explicit/default replay, and bare cached replay. The previous permissive comparison must fail the new regression.
+- Added a synchronized two-session proof after Luna identified the missing contention case: the second marked-key call must wait for the first transaction, then both return one committed payment/prepay result and one 100-cent balance change.
+- Preserve Chicago date/season logic, RPC arguments, return shape, financial arithmetic, access checks and grants. The original reviewed worktree remains unchanged; continuation uses a separate current-main worktree.
+- Mason subsequently authorized publication as a draft after clean Sonnet 5.5/high review. Keep draft, with no merge/live apply/deploy authority. Release gates remain required, and no production behavior is claimed changed.
+- Observed verification: full real-schema disposable proof including synchronized contention passed; lint/typecheck/build, 166 focused tests and SQL validation passed. Sol at `high` returned `PAYMENT_REVIEW: CLEAN`, no actionable findings. Details and evidence limits are in `docs/audits/2026-10-28-chicago-payment-date.md`.

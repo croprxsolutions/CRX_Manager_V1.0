@@ -1159,6 +1159,10 @@ describe('QuoteBuilder', () => {
   });
 
   it.each(['error', 'empty', 'blank', 'throw'])('refuses to invent a quote number after a server %s', async (failure) => {
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
+      error: null,
+    }));
     mockRpc.mockImplementation((name: string) => {
       if (name !== 'generate_quote_number') return Promise.resolve({ data: null, error: null });
       if (failure === 'throw') return Promise.reject(new Error('offline'));
@@ -1166,6 +1170,12 @@ describe('QuoteBuilder', () => {
     });
     renderQuoteBuilder();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate quote number. Please refresh and try again.'));
+    const customer = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customer, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'A quote number could not be confirmed. Please refresh and try again.'));
     expect(mockFrom).not.toHaveBeenCalledWith('quotes');
     expect(screen.queryByText(/^Q-\d{4}-\d+$/)).not.toBeInTheDocument();
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());

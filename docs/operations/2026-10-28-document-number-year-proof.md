@@ -91,8 +91,10 @@ until a future authorized apply; no applied row is claimed here.
 
 Luna's original HIGH about absent candidate hashes was refuted by source and
 successful actual apply/reapply. Its later MED about container reuse was fixed
-by removing reuse and binding cleanup to the created container ID. Pre-existing
-At this historical checkpoint, `lpad(...,4,'0')` truncation above 9,999 was deferred. The later candidate fixes this for quotes, orders and rebate claims; production remains unchanged until the migration is applied.
+by removing reuse and binding cleanup to the created container ID. At this historical
+checkpoint, the pre-existing `lpad(...,4,'0')` truncation above 9,999 was deferred.
+The later candidate fixes this for quotes, orders and rebate claims; production
+remains unchanged until the migration is applied.
 
 The first direct Claude review used `sonnet` at high effort; its capture resolved
 to `claude-sonnet-5`, not the requested 5.5. Its requests for stronger migration
@@ -121,9 +123,11 @@ final Sol, guarded apply before merge). No Vercel project settings were changed.
 Rollback is a forward migration re-emitting the three reviewed bodies with the
 prior year expression. Never reset counters/sequences or renumber records.
 Quote/order prior definitions are in `20261027080100_number_generators_active_signed_in_only.sql`.
-For exact prior bodies, write the candidate's three explicit definitions with only
-the Chicago date expression restored to `current_date`, and verify the original
-body hashes pinned by its preflight. Do not dynamically rewrite live function source.
+For exact prior bodies, re-emit the three prior definitions, including their
+fixed-width formatting, and verify the original body hashes pinned by the preflight.
+That restores truncation above 9,999 and can cause duplicate numbers. To retain
+full-digit formatting, use a separately reviewed forward migration with new body
+hashes. Do not dynamically rewrite live function source.
 
 Proposed shared to-do status: "12.1 built; local Chicago boundary, concurrency,
 retry and failure proof passed. Not merged or applied until the landing gates

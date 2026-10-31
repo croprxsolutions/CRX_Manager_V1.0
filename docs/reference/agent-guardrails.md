@@ -4,8 +4,15 @@
 > automated safety net; `CLAUDE.md` keeps only a short summary + a pointer here. Regenerate the schema registry the
 > hooks read after schema changes: run the `regen-schema-registry` live-introspection skill.
 >
-> **Overrides older text below (Mason, 2026-10-29).** CodeRabbit is optional: no PR needs a CodeRabbit review, money PRs included, unless it carries the `needs-coderabbit` label. Sol runs once, before the PR opens, on any change outside the notes folders; an earlier-commit Sol proof covers later commits only when they stay inside the notes folders (`.claude/hooks/sol-risk-lib.mjs`). `AGENTS.md` "Safety and Protected Delivery" is authoritative. Where this page says money PRs need CodeRabbit, the
-> merge gates classify "risky" diffs by money paths or content, or Sol must review the exact head last, this rule wins.
+> **Reduced harness (Mason, 2026-10-30): overrides everything below where they differ.** Mason: "our harness has gotten way to strict and is causing more work than efficiency"; he approved the cut list in chat. What changed:
+>
+> 1. **CodeRabbit threads:** only an open thread on unchanged code holds a merge. Outdated threads do not, and no reply is required.
+> 2. **Codex may reply on review threads:** `gh api repos/<o>/<r>/pulls/<n>/comments/<id>/replies -f body='…'` (`ghApiIsReviewThreadReply` in `codex-push-lib.mjs`). Plain text only: `-F`, `--field`, `--input` and any `$`, backtick or `%`, even inside quotes, stay refused.
+> 3. **One CodeRabbit review is enough** on a `needs-coderabbit` PR, on any commit.
+> 4. **Sol covers only the Sol list** (`docs/reference/sol-required-paths.md`). A proof of an earlier commit covers later commits that stay off the list. `AGENTS.md` "Safety and Protected Delivery" is authoritative.
+> 5. **The shell-spelling checks are gone** from `codex-push-guard.mjs`, `pr-merge-guard.mjs`, `production-action-guard.mjs` and `codex-push-lib.mjs`: run-time program names, computed text, text fed to an interpreter, inline code, shell composition, git config and transport overrides, URL rewrites, and the unrecognized-harness-access check. Nested commands are still unwrapped and judged. Plain spellings still fire: a push to `main`, a force push, deleting `main`, bulk pushes, a plain merge without its gates, `--admin`, `--auto`, a raw REST merge, the live-apply script, Codex's file-tool and plain shell writes to the protected harness. Hook rows and history below that describe the removed checks are out of date.
+>
+> **What stops a mistake now:** GitHub's `protect-main` ruleset (no bypass actors, no force-push, no deletion, required checks), CI, and the kept local gates. Accepted risk: a push or merge hidden in code passes the local guards and meets only GitHub.
 >
 > **Review tier vs. gate identity (2026-09-20; re-pinned to the GPT-6 class 2026-09-23).** Everyday iterating review
 > runs on `gpt-6-luna` at xhigh and is
@@ -33,80 +40,27 @@
 > containing its link (`.claude/hooks/teammate-comments-lib.mjs`). A failed read refuses and the agent retries; a list
 > over 100 comments refuses and needs Mason's decision. A merge outside the local hooks, such as GitHub's button, skips this.
 >
-> **CodeRabbit is advisory (Mason, 2026-10-19, "cut coderabbit volume") — amends both blocks below.** The merge
-> gates (`pr-merge-guard.mjs`, the Codex `production-action-guard.mjs`) and the migration landing gate
-> (`migration-landing-gate-lib.mjs`) no longer require CodeRabbit `APPROVED` on the exact head; the helper
-> `coderabbitApprovedHead` was deleted. Still required to merge: the newest run of every reported check green with
-> `mergeStateStatus` CLEAN, no aggregate `reviewDecision` `CHANGES_REQUESTED` (from anyone), the head containing
-> GitHub's real base, the `--match-head-commit` pin, and a fresh exact-SHA `gpt-6-sol`/`high` proof run last — except a
-> documentation-only change, which needs only the green checks, no `CHANGES_REQUESTED`, the pin and base containment. A non-destructive
-> migration apply needs the same conditions minus CodeRabbit. Both merge gates also DENY while any CodeRabbit review
-> thread on the PR is not HANDLED — resolved with at least one reply (the fix or the reason) — on any commit (a thread
-> resolved with no reply still counts, Luna rounds 4–6; `unresolvedCodeRabbitThreads` / `coderabbitFindingsDenial` in
-> `codex-bot-review-lib.mjs`; unlike the Codex App check this FAILS CLOSED — a failed or partial thread read denies
-> via `coderabbitThreadCount` / `coderabbitUnreadableDenial`, and the agent retries; Luna round 3; an answer with no
-> thread list at all counts as unreadable, not as zero, Luna round 4; `collectCodexThreads` marks a page with a missing
-> or null `reviewThreads` list incomplete, Codex App review of PR #973, and ends a walk as complete only on an explicit
-> `pageInfo.hasNextPage: false`, Luna round 5). The Codex guard runs this lookup on its HARD-gate
-> time budget, so a slow lookup denies instead of being killed, and it allows exactly one GraphQL write,
-> `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`
-> (`ghApiIsResolveReviewThreadOnly` in `codex-push-lib.mjs`; bare `gh`/`gh.exe` only, and no `$` or backtick anywhere in
-> the segment), so a Codex session can clear the thread denial. Review DISMISSALS stay refused for Codex on purpose; a
-> pre-2026-10-19 CodeRabbit change request is dismissed by a Claude session (ship.md Step 8) (#973, because CodeRabbit never
-> re-reviews the fix. Mason sets the `protect-main` ruleset's required approving reviews to 0 himself (required status
-> checks stay). `.coderabbit.yaml`: `request_changes_workflow: false`
-> (CodeRabbit only comments) and, since 2026-10-21, `auto_review.enabled: false` (Mason: "Yes turn off auto review"):
-> CodeRabbit reviews only when an agent requests it (before that, one review per PR, when opened non-draft or marked
-> ready, skipping `docs(` titles). Agents open PRs as drafts, mark them ready once the head is frozen, fix or
-> refute every CodeRabbit comment that arrives before the merge in one push, do not wait for a review that has not
-> arrived, and never post `@coderabbitai review`. Exception (Mason, 2026-10-21): a PR that touches money, invoices,
-> payments, inventory, or costs in any way, or one Mason asks to have reviewed, needs a clean CodeRabbit review of its
-> current head plus a clean Sol, and the agent posts `@coderabbitai full review` once for its frozen, green head (one
-> retry after a stated wait; any fix commit moves the head and needs a new request, except narrow fixes for a review
-> whose findings were all Minor or Trivial, which `readMinorFollowUp()` checks (Mason, 2026-10-26); drop `docs(` from
-> the title before marking it ready). Both merge gates and the migration landing gate enforce it (`evaluateCodeRabbitRequirement()` in
-> `.claude/hooks/codex-bot-review-lib.mjs`): a PR that changes a migration, an Edge Function, a money-named `src/` file,
-> or carries the `needs-coderabbit` label needs CodeRabbit's own "Review completed" commit status on the head, or on an
-> earlier commit followed only by merges whose PR-own changes (three-dot compare, per-file status, blob and rename source) are identical at both
-> commits; each gate reads that status BEFORE the review threads, so a review finishing mid-check cannot pair with a
-> stale thread list; the file list is always read in full over REST, and a renamed file's source path is classified too (a money file
-> renamed to a generic name still qualifies); in the Claude guard every requirement and thread-page call is capped at 5s and only started if it can finish
-> before the advisory deadline; an unreadable answer (including a GraphQL answer carrying errors, or a
-> file or label entry with no name), or a lookup that could outlive the
-> hook, refuses (rules: `docs/reference/coderabbit-native-review.md`). The guidance check pins the trigger sentence in `AGENTS.md`
-> and, in that reference, the timing, the in-progress wait, the `docs(` title step, the stated wait and the retry cap. A failed CodeRabbit pre-merge check (all `warning` mode since 2026-10-19) is a finding, not a
-> blocker; accepted loss: its "edit to an already-applied migration" check no longer blocks (the mandatory Sol review
-> of any migration change and the CI migration check remain). Mason's per-PR waiver (2026-10-22): a message that STARTS with
-> `skip coderabbit #<PR>` records, through `coderabbit-skip-prompt.mjs` / `coderabbit-skip-lib.mjs`, a 24-hour waiver
-> bound to that session AND that PR; the three gates accept a missing CodeRabbit review only for the PR the waiver
-> names (GitHub's number for the PR being merged or applied), run from that session (`use coderabbit` cancels; a
-> skip naming no PR records nothing). It waives nothing else: Sol, checks, the thread rules and the fail-closed read
-> stay. Mentions of CodeRabbit APPROVED below are history.
+> **CodeRabbit is optional (Mason, 2026-10-19, 2026-10-29, 2026-10-30).** It only comments, makes no automatic reviews
+> (`auto_review.enabled: false`), and no PR needs it unless it carries the `needs-coderabbit` label; then one completed
+> review on any commit satisfies the gates (`evaluateCodeRabbitRequirement()` in `codex-bot-review-lib.mjs`). Both merge
+> gates and the migration landing gate read this. Both merge gates deny while a CodeRabbit thread is open on code that
+> has not changed; this read FAILS CLOSED (`coderabbitThreadCount`), so an unreadable thread list refuses and the agent
+> retries. Mason's per-PR waiver: a message that STARTS with `skip coderabbit #<PR>` records a 24-hour waiver bound to
+> that session and PR (`coderabbit-skip-lib.mjs`; `use coderabbit` cancels). Mentions of CodeRabbit APPROVED below are
+> history.
 >
-> **Documentation-only exemption (Mason, 2026-10-07) — amends point (1) of the autonomous-landing block below.**
-> A pull request whose every changed file is documentation as defined in `docs/reference/sol-exempt-paths.md`
-> merges into `main` without the Sol proof. Every other point (1) requirement still applies: every check green, the
-> `--match-head-commit` pin, no `--auto`, the head containing its base (and, until 2026-10-19, CodeRabbit APPROVED on
-> the exact head). Both
-> `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` ask `.claude/hooks/sol-exempt-lib.mjs`, and only
-> when no valid proof was found. It reads GitHub's compare API for `baseRefOid...headRefOid`, then one GraphQL
-> lookup confirming each changed path is a plain file (mode `100644`, not a symlink, submodule or executable): added and
-> kept files at the head, deleted and edited files and old names at the base. Both go through the same budgeted `gh`. It is an allow-list: only `.md` files under seven `docs/` (not `docs/reference/`, Mason 2026-10-10)
-> folders qualify (matched exactly), minus the rule-defining documents, any nested agent-instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `AGENT.md`) and package files, which
-> are matched without regard to case. Any uncertainty means Sol is required: a failed or unexpected GitHub answer, a comparison
-> that is not exactly base..head (or does not end at the head), 250 or more files (GitHub silently stops listing at
-> 300), an empty list, a change status other than a plain edit, a rename or copy whose old name is not exempt, or an
-> unusual path spelling. The module is in the Codex guard's protected-file list and the `.claude/settings.json`
-> `ask` tier. `sol-exempt-lib.test.mjs` checks it against the readable list and requires every loosened mutant in its list to fail. A change to
-> the rule touches `.claude/`, so it always needs Sol.
+> **Sol list (Mason, 2026-10-30).** `.claude/hooks/sol-risk-lib.mjs` decides which PRs need Sol; the readable copy is
+> `docs/reference/sol-required-paths.md`. Both merge guards ask it when no valid proof was found. It reads GitHub's
+> compare API for the PR's own changes, and any uncertainty means Sol is required. The module is in the Codex guard's
+> protected-file list.
 >
 > **Sol carry-forward (Mason, 2026-10-21: "go with carry-forward").** A moved main no longer forces a full Sol
 > re-review. `node scripts/write-codex-push-proof.mjs --carry-forward` mints a carried proof
 > (`codex_ran: false`, `carried_forward: true`, `carry.mode` `disjoint` or `collision_check`, `carry.from_head` /
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
 > hours old, as is the original full review behind a chain of carries) and today's origin/main: with no model call
-> only when the PR's files and main's new files do not overlap and one side is plain documentation (the Sol-exempt
-> definition, which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
+> only when the PR's files and main's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
+> which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
 > after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 24-hour terms as a full proof (the 24 hours also bind the
@@ -115,27 +69,11 @@
 > one. The minter is the same protected wrapper, so `review-proof-guard.mjs` still blocks hand-written proofs.
 >
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
-> refuses with no Codex call otherwise: the head contains the exact origin/main the review pins (read once, before the
-> check; that ref is shared by every worktree, so a peer's fetch can move it past the branch, and a clean review of a
-> head that lacks its base can neither merge nor be carried forward — #1075 paid five times, 2026-10-23; Mason, 2026-10-25; named even when GitHub cannot be read); an open non-draft PR whose head is this commit; the Codex GitHub App's summary
-> comment (`codex-review-state:v1`, written by the App's own login) shows a completed review of this commit, or it
-> was pushed, and the PR last marked ready (from its timeline; unreadable never counts as quiet), at least 15 minutes ago
-> with no App review of it started (`SOL_PREFLIGHT_QUIET_MS`; push time = the
-> commit's earliest check suite, which GitHub sets — a commit's own date is never used, and no suite never counts as
-> quiet; a commit pushed to another branch first can look quiet sooner, an accepted gap that costs one early Sol run); an App review of this commit that is still running is waited for until its summary has not changed for over an hour (timed from the summary's last update, never the commit's age — Codex App on #1075)
-> (`CODEX_APP_STALE_RUN_MS`); a newest App summary that cannot be parsed refuses; exactly one open PR has this head,
-> re-read after every other read (every lookup, including that re-read, reads the canonical repository's complete
-> paginated open-PR list and matches by exact 40-hex head SHA, open state and base repository; GitHub's commit-to-PR
-> association is not used because it can be empty for a fork-pushed head; a closed PR, another base repository, another
-> SHA, two matches on any page, a head that moved, or an unreadable, malformed or incomplete page or entry refuses, and a
-> PR is never inferred from a branch name — `openPullsAtHead`); no unanswered Codex App thread on this commit (`evaluateCodexBotReview`) and no unanswered
-> CodeRabbit thread (`coderabbitThreadCount`); CodeRabbit's newest status on this commit is not a PENDING it set less
-> than an hour ago (an older one is a dead review); and a money or Mason-named PR's completed CodeRabbit review
-> (`readCodeRabbitRequirement`, including a minor-only review covering narrow fixes, whose fixes the Sol prompt then
-> shows) or a live `skip coderabbit` waiver for that PR from any session; before CodeRabbit's first review of the PR,
-> Sol may run (Mason, 2026-10-26). Every unreadable answer
-> refuses. It is a cost control: the merge gates check the same things again, unchanged, and a refusal leaves any
-> existing proof in place. `--carry-forward` does not run it.
+> refuses with no Codex call otherwise: the head contains the exact origin/main the review pins, no Codex App review of
+> this commit is still running, no open Codex App thread stands on it, no open CodeRabbit thread stands on current code,
+> and CodeRabbit is not mid-review. With no PR yet, Sol simply runs. `--dry-run` prints the same decision. It is a cost
+> control: the merge gates check their own conditions again, and a refusal leaves any existing proof in place.
+> `--carry-forward` does not run it.
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
 > differ.** (1) `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` merge route now deny any merge into
@@ -254,35 +192,9 @@
 > backtick, `\"`, a smart quote, `^` before a quote, a `"` inside single quotes, or quoted text that crosses a line. A batched read with
 > one of those stays refused even when harmless; drop the comment or run the reads separately.
 >
-> **A `(` in a quoted commit message is text (2026-10-27).** Codex's `git commit -m "docs(changelog): …"` was refused because the
-> fail-closed computed-text rule treats any `(` as a subexpression and then read `changelog` as an unknown command. For that rule
-> only (`computedSegmentWithUnrecognizedCommand`), `literalDoubleQuotedTextBlanked` blanks a double-quoted span whose body holds no
-> `$`, backtick, `%` or `!`; single-quoted text is stepped over unchanged, and a segment with a backslash, a backtick, a smart quote or
-> an unbalanced quote is left as written. `"$(…)"`, `` "`…`" ``, `"%VAR%"`, smart-quoted subexpressions and every unquoted `(` are
-> still computed. The mutating-verb computed-text check is unchanged.
+> **Repairing a guard file (2026-10-27, amended 2026-10-30).** Codex's file tools and plain shell writes to the protected harness are refused. The supported path is to hand the change to a Claude session, which edits the file on a feature branch and ships it through `.claude/commands/ship.md`. Files on the Sol list always need Sol.
 >
-> **Repairing a guard file (2026-10-27).** Codex cannot change the protected harness or the enforcement surface by any route. Its
-> refusals used to point at a "reviewed maintenance workflow", whose script was retired unapplied on 2026-09-05. They now give the
-> supported path: hand the change to a Claude session, which edits the file on a feature branch and ships it through the reviewed PR
-> in `.claude/commands/ship.md` (Luna rounds, then a fresh Sol review of the exact head, which these files always need).
->
-> Last reconciled against `.claude/settings.json` and `.codex/hooks.json` hook wiring on 2026-10-30 (harness parity candidate, not landed: `session-context-reminder` wired for Codex with its Codex wording awaiting native install, `stop-verify` and the global Codex Stop hook recorded as complementary, `agent-health` reads the live hook list). Previous reconciliation 2026-09-26 (docs fact pass: the `Write|Edit|MultiEdit` matcher from PR #593, Codex `mcp__.*` parity in the MCP-guard and live-testdata rows, `actor-binding-check`'s post-#593 splice, the `pr-merge-guard` Codex GitHub App gate from PR #563, and corrected `stop-verify`, `stop-wrap`, `posttooluse-migration`, `registry-freshness` and `mcp-tool-guard` rows). Previous reconciliation 2026-09-04 (lean instruction review: the startup-reminder row now documents task-routed loading, and an accidental duplicate of the hook reference was removed). Previous reconciliation 2026-08-27 (first harness-simplification tranche:
-> the UserPromptSubmit and PostToolUse commands now enter through one event router apiece while preserving the existing rule modules;
-> Codex's MCP-only guards now use `mcp__.*` matcher parity with Claude; and Codex's `production-action-guard.mjs` deliberately remains
-> on `*` because it must inspect native Write/Edit/apply-patch actions as well as shell and MCP routes). SessionStart hooks were previously
-> matcher-gated by source on the Claude side so the heavy ones stop
-> re-running on every compact — also Claude-side only, since `.codex/hooks.json`'s SessionStart group has no `matcher`
-> key, so its three hooks are not source-gated there;
-> the two dead `"type": "prompt"` hooks (PreCompact re-anchor + SessionStart onboarding) replaced by the
-> `session-context-reminder.mjs` command hook — prompt-type hooks only work in the interactive REPL — though only
-> the PreCompact hook's rules half was carried forward (plus one added rule, see its row below); its
-> summarizer-steering half was dropped with no replacement;
-> `worktree-cleanup`'s network fetch rate-limited to once per 30 min; `eslint-autofix` switched from `npx` to the
-> project's local eslint binary — `--cache` is still passed but never
-> helps, since this hook only ever runs on a file just edited. No guard logic changed.) Previous reconciliation 2026-08-07 (Governed
-> Software Factory removal: the three factory hooks — `factory-state-integrity`, the factory lane guard, and
-> `factory-owner-input` — were deregistered from both manifests; `ship-intent-reminder` and every pre-factory
-> guard remain wired exactly as before). Previous reconciliation 2026-07-16 (scaffolding-review pass: `pr-merge-guard.mjs` added — the PR-merge twin of `codex-push-guard` for the post-2026-07-14 branch-protection landing path; `bash-safety-lib.mjs` db-push pattern made npx-optional and `supabase migration up` added; `write-apply-proofs.mjs` proof stamping made unconditionally machine-minted: every stamp executes EACH required reviewer charter as its own trusted-Codex machine-verdict run; the caller-supplied `--codex-verdict` form and the say-so reviewer-only stamp were both removed). Previous pass 2026-07-13 (guard-hardening: `mcp-tool-guard.mjs` and `review-proof-guard.mjs` added; `bash-safety.mjs`, `hold-latch-lib.mjs`, `codex-push-lib.mjs`, `live-testdata-lib.mjs`, `idempotency-body-check.mjs` broadened — see their rows below).
+> Last reconciled against `.claude/settings.json` and `.codex/hooks.json` hook wiring on 2026-10-30.
 
 ---
 
@@ -437,7 +349,7 @@ current commit containing all bounded successor corrections.
 
 **Wrappability is enforced, not documented: `.claude/hooks/migration-wrappability-lib.mjs`.** The one-transaction promise above is only real if the migration does not manage its own transactions and contains nothing PostgreSQL refuses inside a transaction block. The first revision merely stated that in a comment and hand-checked the one target migration — CodeRabbit (Major) and Codex (P2) both caught that nothing re-checked it, so the next caller would silently inherit a promise the code did not keep (a top-level `COMMIT` ends the outer transaction early and the ledger `INSERT` commits separately; `CREATE INDEX CONCURRENTLY` fails outright). It also refuses a migration that reduces to NO statements (comments and/or bare semicolons only): non-blank but a no-op, which would otherwise be wrapped and write a `schema_migrations` row for a change that never happened (CodeRabbit round 2). `checkWrappable()` now runs BEFORE the gate — so a dry run reports it — and refuses top-level transaction control (`BEGIN`/`COMMIT`/`ROLLBACK`/`SAVEPOINT`/`END`/`START`/`PREPARE`/`SET TRANSACTION`) and non-transactional statements (`CREATE`/`DROP INDEX CONCURRENTLY`, `REINDEX … CONCURRENTLY`, `VACUUM`, `CLUSTER`, `ALTER SYSTEM`, `CREATE`/`DROP DATABASE`/`TABLESPACE`). Two entries were **removed** after round 3 rather than kept as harmless over-refusals, because a wrong entry rejects a legitimate migration and gives a misleading reason: `ALTER TYPE … ADD VALUE` is transaction-safe from PostgreSQL 12 on (only *using* the new value must wait for commit; verified against this project's live server, 17.6) and its error even advised an impossible split that hit the same rule; `DROP OWNED` is destructive but perfectly transactional, and destruction is the destructive-content gate's job. It deliberately does **not** reuse `live-testdata-lib`'s `stripDollarQuoted`: that one strips DO bodies but keeps `CREATE FUNCTION` bodies visible, which is right for destructive detection (an over-kept body only causes a false PARK) and wrong here — a PL/pgSQL body's `BEGIN`/`END;` is ordinary block syntax, and the first implementation rejected the real 162KB draw-down migration for "a top-level END" that was a function body's `END;`. `topLevelSkeleton()` builds a true top-level view instead, removing comments, string literals, quoted identifiers and every dollar-quoted span, and returns `null` — a refusal — on anything it cannot tokenize.
 
-**The Codex production guard blocks this script.** Codex's review of PR #460 found the new spelling reached production while every other migration path was already denied in `.codex/hooks/production-action-guard.mjs` (P1): its internal gate checks review evidence but cannot verify Mason's required in-chat approval, so a token-bearing Codex session could have mutated production through it. `liveApplyScriptMentioned()` denies the command outright — dry run included, since matching `--confirm` invites quoting games — across quote-stripped and backslash-dropped views. Round 2 of that review caught that a literal matcher loses to a computed argument (`S=scripts/apply-migration-file.mjs; node $S` never spells the name), so `interpreterArgumentIsUnresolvable()` inverts it: a Node-family interpreter (`node`/`npx`/`tsx`/`ts-node`/`bun`/`deno`) invoked with ANY shell expansion — `$VAR`, `${VAR}`, `$(…)`, a backtick, `%VAR%`, `$env:` — is refused, because the script it would run cannot be resolved from the command text. **Honest residual:** an interpreter that writes-then-runs a file, or indirection where no interpreter appears in the command text, is still outside what a command-text guard can catch; the durable boundary stays the apply gate plus Mason's in-chat approval. Until PR #622 (2026-09-05), editing that guard also meant re-pinning its blobs in the maintenance producer `scripts/apply-live-testdata-maintenance-20260812.mjs` (PR #460 did so, as PR #400 had). That producer was retired unapplied and deleted (Mason's decision; see `docs/manual/KNOWN_ISSUES.md`), so editing the guard no longer requires any re-pin — only the guard's own tests must pass.
+**The Codex production guard blocks this script.** Codex's review of PR #460 found the new spelling reached production while every other migration path was already denied in `.codex/hooks/production-action-guard.mjs` (P1): its internal gate checks review evidence but cannot verify Mason's required in-chat approval, so a token-bearing Codex session could have mutated production through it. `liveApplyScriptMentioned()` denies the command outright — dry run included, since matching `--confirm` invites quoting games — across quote-stripped and backslash-dropped views. **Honest residual:** a computed script name, an interpreter that writes-then-runs a file, or indirection where no interpreter appears in the command text is outside what a command-text guard can catch; the durable boundary stays the apply gate plus Mason's in-chat approval. Until PR #622 (2026-09-05), editing that guard also meant re-pinning its blobs in the maintenance producer `scripts/apply-live-testdata-maintenance-20260812.mjs` (PR #460 did so, as PR #400 had). That producer was retired unapplied and deleted (Mason's decision; see `docs/manual/KNOWN_ISSUES.md`), so editing the guard no longer requires any re-pin — only the guard's own tests must pass.
 ### `live-testdata-lib.mjs` read-side false positives (verified 2026-09-02)
 
 The call-detection in `live-testdata-lib.mjs` treats any `identifier(` as a function call and refuses
@@ -522,24 +434,7 @@ An audit of which guards blocked safe work, checked by an independent adversaria
 (counts are sessions since 2026-10-03), produced five changes. Mason approved the revised plan and,
 separately, the permission change.
 
-1. **Merge and push gates** (`pr-merge-guard.mjs`, `codex-push-guard.mjs`): the "program or shell
-   text built at run time" and "text fed to an interpreter on its input" refusals now run only when
-   `couldReachGatedAction` (`codex-push-lib.mjs`) finds a gated word (gh, git, merge, push, api,
-   graphql, pulls, refs, a REST client, an encoded-command or base64 marker), or an obfuscation
-   marker (char codes, escapes, decoding, reversing, joining, `'…'+'…'` concatenation) together
-   with a way to run a program or reach the network, in the command or any nested
-   command. Before, they refused `node - <<'EOF'`, `python -` and `eval "$(fnm env)"` (about 86
-   sessions across the two gates). **@speed-bump:** `node file.mjs` and `bash payload.sh` were always
-   allowed, so these refusals never were a boundary. Every readable `gh pr merge`, REST/GraphQL
-   merge, `--admin`, and the existing composition, alias and depth checks are unchanged. A file-fed
-   interpreter with no gated word (`bash < payload.txt`, `Get-Content payload.txt | iex`) now passes,
-   like `bash payload.sh`. Two refusals run whatever words the command shows: any top-level
-   program name built at run time, by a variable, a command substitution or a backtick (`programAssembledAtRuntime`), and
-   inline code (`node -e`, `python -c`, `perl -e`, `ruby -e`, `php -r`) whose CODE could reach a gated
-   action (`inlineCodeReachesGatedAction`). main allowed both; only the code argument is judged, so
-   `gh … | node -e "…"` still passes. **Residual, stated:** a merge hidden inside code that a runtime
-   executes (char codes, joins, decoding — three review rounds each found a new spelling) cannot be
-   closed by reading command text. These checks raise the cost; they are not a boundary.
+1. **Merge and push gates:** superseded on 2026-10-30. The run-time-text, interpreter and inline-code refusals are gone; see the block at the top of this page.
 2. **Hold latch:** outward actions deny, local work warns. See its row above.
 3. **Review proof guard:** the rule that denied any command naming any `.claude` path next to a
    destructive word (34 sessions) now counts `.claude` only as a whole target (`.claude`, `.claude/`,
@@ -573,14 +468,7 @@ separately, the permission change.
    files are still refused, and nothing reaches `main` without the PR path. Because worktree
    sessions load settings and hooks from the main checkout, all of this takes effect only after
    `C:/CRX_Manager` is fast-forwarded past the merge.
-6. **Follow-up (2026-10-20, three items deferred from PR #956; main allowed all three):**
-   `inlineCodeReachesGatedAction` reads a short-option cluster with a code letter anywhere in it
-   (`node -pe`, `-ce`, `python -Bc`, `perl -0e`) as taking the next word as code, and judges every
-   word after `deno eval` / `bun eval` (any `eval` word after the runtime, so options and their values may come first); the merge-guard-launcher fallback counts the same clusters. The hold
-   latch now holds every GitHub MCP tool except a read (`get_*`, `list_*`, `search_*`, `*_read`,
-   `actions_get`, `actions_list`), so `create_pull_request`, `update_pull_request`,
-   `add_issue_comment` and any new write tool stop on "stop". The other six deferred spelling
-   variants were dropped by Mason's choice, not fixed.
+6. **Follow-up (2026-10-20):** the hold latch holds every GitHub MCP tool except a read (`get_*`, `list_*`, `search_*`, `*_read`, `actions_get`, `actions_list`), so `create_pull_request`, `update_pull_request`, `add_issue_comment` and any new write tool stop on "stop".
 
 ### Fewer prompts, automatic CodeRabbit, fail-closed merge guard (2026-09-26 decision, PR #841)
 
@@ -621,39 +509,8 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    moves to `allow`; the merge gates are its hard stop, and item 7 keeps them closed when the local guard breaks.
    `scripts/agent-manifest-parity.mjs` reads only each manifest's `hooks` block, so these `ask` rules are not mistaken
    for hook wiring.
-2. **SUPERSEDED — history only, do not follow.** Today (since 2026-10-21) `auto_review.enabled: false`: CodeRabbit
-   makes **no** automatic reviews, so marking a PR ready starts none, and a money or Mason-named PR gets its review
-   only when the agent posts `@coderabbitai full review` (rules: `docs/reference/coderabbit-native-review.md`). The
-   rest of this item records what applied from 2026-09-26 to 2026-10-19 (cut to one review per PR on 2026-10-19):
-   CodeRabbit then reviewed every non-draft PR automatically, on open and on every push, never pausing
-   (`auto_review.enabled: true`, no label restriction, `auto_pause_after_reviewed_commits: 0`). Proven on PR #822:
-   CodeRabbit reviewed it with no label or command. With no label filter the `ready-for-coderabbit` provider label no
-   longer triggers a review (the workflow stays installed), so **for a head CodeRabbit skipped or was rate limited on,
-   an agent posts `@coderabbitai review` on the PR once** — Mason's answer "Post" on 2026-09-27, which reverses the
-   standing "never post `@coderabbitai` commands by hand" rule (2026-09-07, autonomous landing). Posting can only add
-   a review; nothing merges until CodeRabbit approves the latest push. A fix on the same PR is re-reviewed
-   automatically; relabelling no longer earns a follow-up review.
-3. **GitHub requires CodeRabbit's approval again.** The `protect-main` ruleset's pull-request rule moved to
-   `required_approving_review_count: 1` and `dismiss_stale_reviews_on_push: true` (no bypass actors), verified via
-   `gh api repos/masonwells1/CRX_Manager_V1.0/rulesets/18904218` on 2026-09-27 and again on 2026-10-01. Only CodeRabbit
-   can supply the approval today: `masonwells1` is the only collaborator and authors every PR (no self-approval),
-   GitHub Actions cannot approve, and every approval on the last 40 closed PRs came from `coderabbitai[bot]`.
-   The ruleset's configuration shows the requirement; it is not evidence that any given PR met it. The PRs' own reviews
-   are that evidence: all 13 PRs merged between the ruleset's last update (`updated_at` 2026-09-27 13:05:59Z) and
-   #841's merge (2026-10-02 17:39Z), #830 first and #841 last, merged with `coderabbitai[bot]`'s APPROVED review on
-   their exact merged heads (checked 2026-10-02; the list is in
-   `docs/changelog.d/2026-10-02-coderabbit-approval-merges-recorded.md`). A push after an approval dismisses it:
-   CodeRabbit APPROVED #841's head `18cf44114` on 2026-09-30 00:37Z, and the next push turned that review
-   `DISMISSED`, as `dismiss_stale_reviews_on_push` requires. GitHub's ruleset requires the
-   approval server-side, and the local merge guard (the autonomous-landing gates) also requires CodeRabbit's latest
-   verdict APPROVED on the exact head and refuses `--auto`. Weakening the local guard alone does not bypass GitHub's
-   required approval. The reverse does not hold: a merge the local guard cannot see (assembled at run time, run from a
-   script, or the Bash line continuation in the residuals below) passes the guard and its launcher, so GitHub's rule is
-   the only review check on that route, and without it an unreviewed PR could land once its other requirements pass. The classic branch protection still shows
-   `enforce_admins` off, but the ruleset has no bypass actors, so its required review binds admins too. Cost Mason
-   accepted: if CodeRabbit is down, nothing merges until it recovers. The ruleset is his alone to change; agents never
-   change or work around it, and no document carries a step-by-step way to switch it off (a Sol review flagged such
-   steps as a written bypass path, 2026-09-27).
+2. **Superseded:** CodeRabbit makes no automatic reviews since 2026-10-21 (`docs/reference/coderabbit-native-review.md`).
+3. **Superseded:** the `protect-main` ruleset no longer requires an approving review (Mason, 2026-10-19). It keeps its required checks and no bypass actors. The ruleset is Mason's alone to change; agents never change or work around it, and no document carries a step-by-step way to switch it off.
 4. **Adversarial review:** unchanged from the autonomous-landing entry — Luna rounds and an exact-SHA Sol proof on
    every change (since 2026-10-07, except a documentation-only change; see the block at the top) — plus CodeRabbit
    (advisory since 2026-10-19; since 2026-10-21 no automatic reviews, only the requested full review on a money or
@@ -675,27 +532,7 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    prompt for now, Mason chose no prompt with this fix first. See the `merge-guard-launcher.mjs` row above for the
    launcher's behaviour and proof.
 
-**Residuals, stated.** Agents run `gh` with Mason's admin login, so a hand-assembled `gh api` call could in principle
-change the ruleset; only the auto-mode classifier stands in the way on the Claude side (Codex's production gate denies
-unrecognized mutating `gh api` calls). A non-admin token for agents is the real fix and is Mason's to authorize. Shell
-writes to the migration proof writer and its helpers are not blocked by `review-proof-guard`; only native edits
-prompt. Codex's `production-action-guard.mjs` already denies on a runtime crash and budgets its checks inside its
-15-second limit, but it has no watchdog for being killed at that limit or for a module that fails to load, and Codex
-merges without prompts. That gap predates this change. A launcher there changes `.codex/hooks.json`, which Codex
-silently skips until re-trusted (item 5), so it is a separate follow-up. A merge the command text does not show
-(decoded, assembled at run time, or run from a new script file) passes the working guard too; the launcher's "could
-merge" test matches every form the guard denies. `package.json` keeps its native-edit prompt because `npm run` is
-auto-allowed, but a shell write to it (Codex GitHub App, PR #841) or any new script file can still hide a merge. That
-route was just as unprompted before `gh pr merge` moved to `allow`, because only the literal command was ever prompted;
-closing it needs the non-admin agent credential above, not another text check. The working guard also misses a Bash
-line continuation inside a word (a backslash before a newline, so `g\`, newline, `h pr merge 1` runs as
-`gh pr merge 1`); it predates this change, the old `ask` rule did not match that spelling either, and it is a recorded
-follow-up. The same follow-up covers a merge spelled out inside a `node -e` or `python -c` program
-(`node -e "require('child_process').execSync('gh pr merge 812')"`), which the working guard also allows (measured
-2026-10-02). The launcher's fallback test does catch both (Luna, PR #841). A program fed run-time text the working
-guard also allows (`node -e "$X"`, `python -c "$X"`, `Invoke-Command -ScriptBlock { & $X }`) is the shared command-text
-limit, not a gap between the two. GitHub's required checks still hold for every route (its required
-CodeRabbit approval did too, until Mason removed that requirement on 2026-10-19).
+**Residuals, stated (rewritten 2026-10-30).** Agents run `gh` with Mason's admin login, so a hand-assembled `gh api` call could in principle change the ruleset; only the auto-mode classifier stands in the way on the Claude side (Codex's production gate denies unrecognized mutating `gh api` calls). A non-admin token for agents is the real fix and is Mason's to authorize. Codex's `production-action-guard.mjs` denies on a runtime crash and budgets its checks inside its 15-second limit, but it has no watchdog for being killed at that limit or for a module that fails to load. Since the 2026-10-30 reduction, a merge or push hidden from the command text (computed, inline code, a new script file) passes the working guards by design. GitHub's `protect-main` ruleset, with its required checks, is what stops it on every route.
 
 **Full audit (manual):** `scripts/validate-sql-migrations.sh` — scans ALL migration files. Run with `--idempotency-only` for focused check.
 

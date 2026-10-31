@@ -29,7 +29,6 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -73,7 +72,8 @@ import { notifyLargeOrder, notifyCreditLimitExceeded } from '../lib/notification
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
-import { localDatePlusDays, localToday, parseLocalDate } from '../lib/dateUtils';
+import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
+import { computeSeason, seasonEndDate } from '../utils/season';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { checkRUPCompliance } from '../lib/rupCompliance';
@@ -143,6 +143,9 @@ interface LocalItem {
   // "Use today's price" (20261027040000): once the quote has been sent, a saved line keeps its
   // stored price (savedLineIdsRef) unless it has a manual price or this asks for today's price.
   use_todays_price?: boolean;
+  // A higher booked price on a sent quote needs the rep's "grower agreed" tick (20261029120000).
+  // Holds the price, in cents, the tick confirmed, so changing the price again clears it.
+  grower_confirmed_cents?: number;
   suggested_rate: string | null;
   actual_rate: number | null;
   rate_unit: string | null;
@@ -184,6 +187,18 @@ interface ActivePlannedHold {
   product_id: string;
   quantity: number;
   expires_at: string | null;
+}
+
+// A saved line on a sent quote whose price went up since it was saved: it needs the rep's
+// "grower agreed" tick before it saves (Mason 2026-10-27, 20261029120000).
+function priceRaise(
+  saved: { productId: string; price: number } | undefined,
+  item: { product_id: string; price_per_unit: number },
+): { fromCents: number; toCents: number } | null {
+  if (!saved || saved.productId !== item.product_id) return null;
+  const fromCents = Math.round(saved.price * 100);
+  const toCents = Math.round(item.price_per_unit * 100);
+  return toCents > fromCents ? { fromCents, toCents } : null;
 }
 
 interface DrawRow {
@@ -433,7 +448,10 @@ export default function QuoteBuilder() {
   // Whether a customer was picked since the open quote loaded (picking one and back still counts).
   const customerPickedSinceLoadRef = useRef(false);
   const [tier, setTier] = useState(1);
-  const [validDays, setValidDays] = useState(15);
+  // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
+  // applies it at each send (20261029100000).
+  const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
+  const seasonEnd = seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz())));
   const [headerNotes, setHeaderNotes] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
   const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>({
@@ -444,6 +462,8 @@ export default function QuoteBuilder() {
   const loadedCommissionSplitRef = useRef<CommissionSplit | null>(null);
   const commissionSplitTouchedRef = useRef(false);
   const [quoteNumber, setQuoteNumber] = useState('');
+  // Only a new quote allocates a number; an existing quote's number arrives with its row.
+  const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
   const [status, setStatus] = useState<QuoteStatus>('draft');
   const [quoteId, setQuoteId] = useState<string | null>(id || null);
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
@@ -509,7 +529,7 @@ export default function QuoteBuilder() {
   // for, so an A -> B -> A navigation cannot hand quote A's retry quote B's clock.
   //
   // Only the CLOCK is frozen, never the payload. If the operator edits the quote —
-  // `valid_days` included — the fingerprint legitimately changes and the server is
+  // the expiry included — the fingerprint legitimately changes and the server is
   // right to refuse: that is a different request, not a retry.
   const saveQuoteAttemptClockRef = useRef<Map<string, { key: string; atMs: number }>>(new Map());
   const [isPlanned, setIsPlanned] = useState(false);
@@ -649,7 +669,7 @@ export default function QuoteBuilder() {
   }>());
   // The render-side copy of savedLineIdsRef, set with it on load and on each save. A line added and
   // saved since the page loaded has no local id, so the price lock names it from here.
-  const [savedLineIdByKey, setSavedLineIdByKey] = useState<ReadonlyMap<string, { id: string; productId: string }>>(new Map());
+  const [savedLineIdByKey, setSavedLineIdByKey] = useState<ReadonlyMap<string, { id: string; productId: string; price: number }>>(new Map());
   const priceLockLineOf = useCallback((item: LocalItem): PriceLockLine => {
     const saved = savedLineIdByKey.get(item._key);
     return {
@@ -790,7 +810,7 @@ export default function QuoteBuilder() {
       return;
     }
     setIsDirty(true);
-  }, [customerId, tier, validDays, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
+  }, [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
 
   // Release initial-load dirty suppression only after React has committed the
   // complete installed snapshot. Timer/frame releases can run before that
@@ -984,24 +1004,29 @@ export default function QuoteBuilder() {
     setReferenceDataReady(!productListFailed);
   }, [toast, isAdmin]);
 
+  // Opening a saved quote reuses this mounted page, so a late allocation must not replace its number.
+  const quoteNumberSeqRef = useRef(0);
+  // A new-quote session allocates once; a reference-data reload must not replace its number.
+  const newQuoteNumberRequestedRef = useRef(false);
   const generateQuoteNumber = async () => {
+    const seq = ++quoteNumberSeqRef.current;
     // Use server-side sequence to prevent race conditions
-    const { data, error } = await supabase.rpc('generate_quote_number');
-    if (error || !data) {
-      // Fallback for backward compatibility
-      const year = new Date().getFullYear();
-      const { count, error: countError } = await supabase
-        .from('quotes')
-        .select('id', { count: 'exact', head: true })
-        .like('quote_number', `Q-${year}-%`);
-      if (countError) {
-        toast('error', 'Failed to generate quote number. Please try again.');
-        return;
-      }
-      const next = (count || 0) + 1;
-      setQuoteNumber(`Q-${year}-${String(next).padStart(4, '0')}`);
-    } else {
+    setQuoteNumberLoading(true);
+    // Never keep a previous quote's number if this allocation fails.
+    setQuoteNumber('');
+    try {
+      const { data, error } = await supabase.rpc('generate_quote_number');
+      if (error) throw Object.assign(new Error(error.message), error);
+      if (!data) throw new Error('Quote number unavailable');
+      if (seq !== quoteNumberSeqRef.current) return;
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
+    } catch (err) {
+      Sentry.captureException(err, { extra: { context: 'generate_quote_number', ...(err instanceof Error ? err : {}) } });
+      if (seq === quoteNumberSeqRef.current) {
+        toast('error', 'Failed to generate quote number. Use Retry quote number to try again.');
+      }
+    } finally {
+      if (seq === quoteNumberSeqRef.current) setQuoteNumberLoading(false);
     }
   };
 
@@ -1306,7 +1331,7 @@ export default function QuoteBuilder() {
       ? "This quote's customer could not be loaded. Refresh the page before saving."
       : null);
     setTier(q.tier);
-    setValidDays(q.valid_days);
+    setChosenExpiryDate(q.chosen_expiry_date ?? null);
     setHeaderNotes(q.header_notes || '');
     setFooterNotes(q.footer_notes || '');
     setStatus(q.status);
@@ -1476,12 +1501,16 @@ export default function QuoteBuilder() {
       // skeleton until THIS id's snapshot installs, so the operator is never
       // shown quote A's numbers under quote B's address.
       setLoading(true);
+      quoteNumberSeqRef.current += 1;
+      newQuoteNumberRequestedRef.current = false;
+      setQuoteNumberLoading(false);
       fetchQuote(id);
-    } else {
+    } else if (!newQuoteNumberRequestedRef.current) {
+      newQuoteNumberRequestedRef.current = true;
       generateQuoteNumber().then(() => {
         // Allow a tick for state to settle before tracking changes
         setTimeout(() => { initialLoadDone.current = true; }, 0);
-      }).catch(() => { /* non-critical: quote number defaults handled inside generateQuoteNumber */ });
+      }).catch(() => { /* Number-generation failures are reported inside generateQuoteNumber. */ });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, fetchQuote, fetchReferenceData, isEditing]);
@@ -2127,6 +2156,14 @@ export default function QuoteBuilder() {
       toast('error', 'Products are still loading. Try again in a moment.');
       return null;
     }
+    if (!quoteNumber) {
+      if (quoteNumberLoading) {
+        toast('error', 'The quote number is still loading. Please wait a moment and try again.');
+      } else {
+        toast('error', `A quote number could not be confirmed. ${isEditing ? 'Please refresh and try again.' : 'Use Retry quote number to try again.'}`);
+      }
+      return null;
+    }
     if (!profile) return null;
 
     // Validation: warn about empty sections
@@ -2194,6 +2231,17 @@ export default function QuoteBuilder() {
       return null;
     }
 
+    if (priceLocked) {
+      const unconfirmed = sections.flatMap((sec) => sec.items).find((item) => {
+        const raise = item.product_id ? priceRaise(savedLineIdsRef.current.get(item._key), item) : null;
+        return raise && item.grower_confirmed_cents !== raise.toCents;
+      });
+      if (unconfirmed) {
+        toast('error', 'A booked price went up. Tick "Grower agreed" under that price once the grower has agreed, then save.');
+        return null;
+      }
+    }
+
     // Minted before the payload so the frozen clock can be bound to it. `getKey`
     // returns the SAME key until it is retired, so this is a read, not a new attempt.
     const idemKey = getSaveQuoteIdempotencyKey();
@@ -2224,10 +2272,9 @@ export default function QuoteBuilder() {
       total_cost: totals.totalCost,
       total_profit: totals.totalProfit,
       total_margin_pct: totals.totalMarginPct,
-      valid_days: validDays,
-      expires_at: new Date(
-        saveAttemptAtMs + validDays * 24 * 60 * 60 * 1000
-      ).toISOString(),
+      chosen_expiry_date: chosenExpiryDate,
+      // A draft shows the expiry a send would set; a send sets the real one.
+      expires_at: chosenExpiryDate ?? seasonEnd,
       header_notes: headerNotes || null,
       footer_notes: footerNotes || null,
       is_planned: isPlanned,
@@ -2274,6 +2321,7 @@ export default function QuoteBuilder() {
             price_override: item.price_override ?? null,
             // On a sent quote the server keeps the line's saved price unless this asks for today's.
             use_todays_price: wantsTodaysPrice(item),
+            ...(item.grower_confirmed_cents === Math.round(item.price_per_unit * 100) ? { grower_confirmed: true } : {}),
             current_cost: item.current_cost,
             suggested_rate: item.suggested_rate,
             actual_rate: item.actual_rate,
@@ -2670,8 +2718,7 @@ export default function QuoteBuilder() {
           customer_address: selectedCustomer?.billing_address || undefined,
           sales_rep_name: profile?.full_name || 'Sales Rep',
           created_at: new Date().toISOString(),
-          expires_at: undefined,
-          valid_days: validDays,
+          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
           tier,
           header_notes: headerNotes || undefined,
           footer_notes: footerNotes || undefined,
@@ -2956,8 +3003,7 @@ export default function QuoteBuilder() {
           customer_address: selectedCustomer?.billing_address || undefined,
           sales_rep_name: profile?.full_name || 'Sales Rep',
           created_at: new Date().toISOString(),
-          expires_at: undefined,
-          valid_days: validDays,
+          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
           tier,
           header_notes: headerNotes || undefined,
           footer_notes: footerNotes || undefined,
@@ -3077,7 +3123,6 @@ export default function QuoteBuilder() {
         // The expiry is the one this send stored (a date-only value, read as a local date).
         created_at: quoteCreatedAt || new Date().toISOString(),
         expires_at: parseLocalDate(sentExpiry).toISOString(),
-        valid_days: validDays,
         tier,
         header_notes: headerNotes || undefined,
         footer_notes: footerNotes || undefined,
@@ -4023,13 +4068,23 @@ export default function QuoteBuilder() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {!isEditing && !quoteNumber && !quoteNumberLoading && (
+            <Button
+              variant="secondary"
+              icon={<RotateCcw className="w-4 h-4" />}
+              showChevron={false}
+              onClick={generateQuoteNumber}
+            >
+              Retry quote number
+            </Button>
+          )}
           <Button
             variant="secondary"
             icon={<Save className="w-4 h-4" />}
             showChevron={false}
             onClick={handleSaveDraft}
             loading={saving}
-            disabled={!canEdit && isEditing}
+            disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
           >
             Save Draft
           </Button>
@@ -4304,7 +4359,7 @@ export default function QuoteBuilder() {
                   : `Prices stay as sent in V${lastSentVersion.version_number} unless you change them. `}
             {unsentChange
               ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
-              : 'Quantity and note changes need no re-send.'}
+              : 'A price you change applies without a re-send; a higher one needs the grower\u2019s OK. Quantity and note changes need no re-send.'}
           </span>
           <span className="flex flex-wrap gap-2">
             <Button
@@ -4765,13 +4820,35 @@ export default function QuoteBuilder() {
               <option value={3}>Tier 3</option>
             </select>
           </div>
-          <Input
-            label="Valid Days"
-            type="number"
-            value={validDays}
-            onChange={(e) => setValidDays(parseInt(e.target.value) || 15)}
-            min={0}
-          />
+          <div>
+            <label htmlFor="quote-expires" className="block text-sm font-medium text-secondary mb-1">
+              Expires
+            </label>
+            <select
+              id="quote-expires"
+              value={chosenExpiryDate ? 'date' : 'season'}
+              onChange={(e) => setChosenExpiryDate(e.target.value === 'date' ? seasonEnd : null)}
+              className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+            >
+              <option value="season">
+                {parseLocalDate(seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (season end)
+              </option>
+              <option value="date">Pick a date</option>
+            </select>
+            {chosenExpiryDate && (
+              <input
+                type="date"
+                aria-label="Expiry date"
+                value={chosenExpiryDate}
+                min={todayInBusinessTz()}
+                onChange={(e) => setChosenExpiryDate(e.target.value || seasonEnd)}
+                className="mt-2 w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              />
+            )}
+            {status !== 'draft' && (
+              <p className="mt-1 text-xs text-secondary">A change applies when the quote is sent again.</p>
+            )}
+          </div>
           <div className="sm:col-span-2 lg:col-span-4">
             <CommissionSplitEditor
               value={commissionSplit}
@@ -5097,6 +5174,22 @@ export default function QuoteBuilder() {
                                   </button>
                                 )}
                               </div>
+                              {!customerView && priceLocked && (() => {
+                                const raise = priceRaise(savedLineIdByKey.get(item._key), item);
+                                return raise && (
+                                  <label className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
+                                    <input
+                                      type="checkbox"
+                                      checked={item.grower_confirmed_cents === raise.toCents}
+                                      disabled={formLocked}
+                                      onChange={(e) => updateItem(sec._key, item._key, {
+                                        grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
+                                      })}
+                                    />
+                                    Grower agreed to {formatCents(raise.toCents)} (was {formatCents(raise.fromCents)})
+                                  </label>
+                                );
+                              })()}
                               {!customerView && (sentHint || todayPriceOffer != null) && (
                                 <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs">
                                   {sentHint && <span className="text-amber-700">{sentHint}</span>}

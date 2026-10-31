@@ -50,8 +50,7 @@ interface PdfQuoteData {
   customer_address?: string;
   sales_rep_name: string;
   created_at: string;
-  expires_at?: string;
-  valid_days: number;
+  expires_at: string;
   tier: number;
   header_notes?: string;
   footer_notes?: string;
@@ -148,10 +147,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFont('helvetica', 'bold');
   doc.text('VALID UNTIL', rightX, y + 48, { align: 'right' });
   doc.setFont('helvetica', 'normal');
-  const expiresStr = data.expires_at
-    ? new Date(data.expires_at).toLocaleDateString()
-    : `${data.valid_days} days`;
-  doc.text(expiresStr, rightX, y + 62, { align: 'right' });
+  doc.text(new Date(data.expires_at).toLocaleDateString(), rightX, y + 62, { align: 'right' });
 
   y += 85;
 

@@ -6,6 +6,8 @@ Every other section keeps its own date; nothing below was re-certified by that r
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
 ships or quarterly, whichever comes first.
 
+**Payment-date candidate (#1179):** `20261029160200_chicago_payment_business_date.sql` remains unapplied. It sets omitted payment dates from the Chicago business date and preserves retry intent; existing payment/prepay season assignment for explicitly backdated payments remains unchanged. See [the payment audit](../audits/2026-10-28-chicago-payment-date.md) for evidence and release limits.
+
 ## Current state at a glance (2026-10-19; migration ledger and registry lines 2026-10-20)
 
 - **Effective ordering high-water: `20261020210000_blend_ticket_pricing_guards`**
@@ -502,10 +504,8 @@ PR #875) and was verified on the live site 2026-10-04.
   follows the protected path in `AGENTS.md` and `.claude/commands/ship.md`:
   branch, PR (opened as a draft, marked ready once frozen; since 2026-10-21
   CodeRabbit reviews only when an agent requests it, on money or Mason-named
-  PRs), Luna review rounds, required checks (CodeRabbit
-  approval no longer required since 2026-10-19), a fresh exact-SHA Sol review run last (every merge, since
-  2026-09-26, except a documentation-only change as defined in
-  `docs/reference/sol-exempt-paths.md`, since 2026-10-07), then an exact-head merge. The merge is the deploy; a
+  PRs), Luna review rounds, required checks, a Sol review for a change on
+  `docs/reference/sol-required-paths.md` (Mason, 2026-10-30), then a merge pinned to the head. The merge is the deploy; a
   non-destructive migration (its grants routine, none widening access) is applied through the proof
   gate under the same conditions; one that deletes or overwrites data or widens
   access waits for Mason (`AGENTS.md` › Safety and Protected Delivery).

@@ -275,6 +275,7 @@ vi.mock('../lib/orderConfirmedEmail', () => ({ sendOrderConfirmedEmail: mockSend
 vi.mock('../lib/dateUtils', () => ({
   localDatePlusDays: vi.fn(() => '2026-04-15'),
   localToday: vi.fn(() => '2026-03-16'),
+  todayInBusinessTz: vi.fn(() => '2026-03-16'),
   parseLocalDate: (dateStr: string) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
@@ -508,7 +509,9 @@ describe('QuoteBuilder', () => {
     dirtyStates.length = 0;
     authState.role = 'admin';
     mockFrom.mockImplementation(() => buildChain({ data: [], error: null }));
-    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({
+      data: name === 'generate_quote_number' ? 'Q-2026-0042' : null, error: null,
+    }));
     mockSendEmail.mockResolvedValue({ deduplicated: false });
   });
 
@@ -1131,6 +1134,103 @@ describe('QuoteBuilder', () => {
     await waitFor(() => {
       expect(screen.getByText('Builder')).toBeInTheDocument();
     });
+  });
+
+  it('uses the server quote number without deriving a browser year', async () => {
+    mockRpc.mockImplementation((name: string) => Promise.resolve({
+      data: name === 'generate_quote_number' ? 'Q-2026-9876' : null, error: null,
+    }));
+    renderQuoteBuilder();
+    expect(await screen.findByText('Q-2026-9876')).toBeInTheDocument();
+    expect(mockFrom).not.toHaveBeenCalledWith('quotes');
+  });
+
+  it('waits for server numbering before enabling Save Draft', async () => {
+    let resolveNumber!: (result: { data: string; error: null }) => void;
+    const number = new Promise<{ data: string; error: null }>((resolve) => { resolveNumber = resolve; });
+    mockRpc.mockImplementation((name: string) => name === 'generate_quote_number'
+      ? number : Promise.resolve({ data: null, error: null }));
+    renderQuoteBuilder();
+    const save = await screen.findByRole('button', { name: 'Save Draft' });
+    expect(save).toBeDisabled();
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('quote number'));
+    await act(async () => resolveNumber({ data: 'Q-2026-9876', error: null }));
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(screen.getByText('Q-2026-9876')).toBeInTheDocument();
+  });
+
+  it.each(['error', 'empty', 'blank', 'throw'])('refuses to invent a quote number after a server %s', async (failure) => {
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
+      error: null,
+    }));
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'generate_quote_number') return Promise.resolve({ data: null, error: null });
+      if (failure === 'throw') return Promise.reject(new Error('offline'));
+      return Promise.resolve({ data: failure === 'blank' ? '' : null, error: failure === 'error' ? { message: 'unavailable', code: 'P0001', details: 'number allocation refused', hint: 'retry later' } : null });
+    });
+    renderQuoteBuilder();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate quote number. Use Retry quote number to try again.'));
+    const customer = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customer, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'A quote number could not be confirmed. Use Retry quote number to try again.'));
+    expect(mockFrom).not.toHaveBeenCalledWith('quotes');
+    expect(screen.queryByText(/^Q-\d{4}-\d+$/)).not.toBeInTheDocument();
+    expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+    if (failure === 'error') {
+      expect(mockSentryCaptureException).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'unavailable', code: 'P0001', details: 'number allocation refused', hint: 'retry later',
+      }), { extra: expect.objectContaining({
+        context: 'generate_quote_number', code: 'P0001', details: 'number allocation refused', hint: 'retry later',
+      }) });
+    }
+  });
+
+  it('keeps a confirmed new-quote number when a role change reloads reference data', async () => {
+    mockFrom.mockImplementation(() => buildChain({ data: [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({
+      data: name === 'generate_quote_number' ? 'Q-2026-9876' : null, error: null,
+    }));
+    const view = renderQuoteBuilder();
+    expect(await screen.findByText('Q-2026-9876')).toBeInTheDocument();
+    const productReads = () => mockFrom.mock.calls.filter(([table]) => table === 'products').length;
+    const readsBefore = productReads();
+
+    authState.role = 'sales';
+    view.rerender(
+      <MemoryRouter initialEntries={['/quotes/new']}>
+        <Routes>
+          <Route path="/quotes/new" element={<QuoteBuilder />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(productReads()).toBeGreaterThan(readsBefore));
+    expect(screen.getByText('Q-2026-9876')).toBeInTheDocument();
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'generate_quote_number')).toHaveLength(1);
+  });
+
+  it('retries a failed quote number without clearing the form', async () => {
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
+      error: null,
+    }));
+    let numberAvailable = false;
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'generate_quote_number' && !numberAvailable
+      ? { data: null, error: { message: 'unavailable' } }
+      : { data: name === 'generate_quote_number' ? 'Q-2026-9876' : null, error: null }));
+    renderQuoteBuilder();
+    const retry = await screen.findByRole('button', { name: 'Retry quote number' });
+    const customer = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customer, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    numberAvailable = true;
+    fireEvent.click(retry);
+    expect(await screen.findByText('Q-2026-9876')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry quote number' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('Far Field Farm');
   });
 
   it('opens the exact receipt-proven order after a changed draw intent', async () => {
@@ -1979,6 +2079,70 @@ describe('QuoteBuilder', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  // Item 9 (Mason 2026-10-26/27): a booking runs to season end (Sept 30) unless the rep picks a
+  // date. The database applies the pick at each send; the screen sends it with every save.
+  describe('expiry: season end or a picked date', () => {
+    function serveDraft(overrides: Record<string, unknown>) {
+      const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+      const served = { ...quote, ...overrides };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? served
+          : table === 'quote_sections' ? [section]
+          : table === 'quote_items' ? [item]
+          : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [product]
+          : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation(() => Promise.resolve({ data: { quote_id: served.id, row_version: 8 }, error: null }));
+      return served;
+    }
+    async function saveDraftPayload() {
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => {
+        expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(1);
+      });
+      const [, args] = mockRpc.mock.calls.find(([name]) => name === 'save_quote')!;
+      return (args as { p_quote_payload: Record<string, unknown> }).p_quote_payload;
+    }
+
+    it('keeps a picked date and sends it as the expiry', async () => {
+      const quote = serveDraft({ chosen_expiry_date: '2026-12-15' });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save Draft');
+
+      expect(screen.getByLabelText('Expires')).toHaveValue('date');
+      expect(screen.getByLabelText('Expiry date')).toHaveValue('2026-12-15');
+      const payload = await saveDraftPayload();
+      expect(payload.chosen_expiry_date).toBe('2026-12-15');
+      expect(payload.expires_at).toBe('2026-12-15');
+    });
+
+    it('switching to season end clears the pick and shows Sept 30', async () => {
+      const quote = serveDraft({ chosen_expiry_date: '2026-12-15' });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save Draft');
+
+      fireEvent.change(screen.getByLabelText('Expires'), { target: { value: 'season' } });
+      expect(screen.queryByLabelText('Expiry date')).not.toBeInTheDocument();
+      // "Today" is pinned to 2026-03-16 above: season 2026, which ends Sept 30, 2026.
+      expect(screen.getByRole('option', { name: 'Sep 30, 2026 (season end)' })).toBeInTheDocument();
+      const payload = await saveDraftPayload();
+      expect(payload.chosen_expiry_date).toBeNull();
+      expect(payload.expires_at).toBe('2026-09-30');
+      expect(payload).not.toHaveProperty('valid_days');
+    });
+
+    it('a quote with no pick opens on season end', async () => {
+      const quote = serveDraft({ chosen_expiry_date: null });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save Draft');
+
+      expect(screen.getByLabelText('Expires')).toHaveValue('season');
+      expect((await saveDraftPayload()).chosen_expiry_date).toBeNull();
+    });
   });
 
   /**
@@ -3053,17 +3217,20 @@ describe('QuoteBuilder', () => {
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, price_override: null, use_todays_price: false });
     });
 
-    it('takes today\'s price on one line only when asked, and says the quote must be sent again', async () => {
+    // Item 10b (Mason 2026-10-27, 20261029120000): a changed price applies without a re-send; a
+    // higher one needs the rep's "grower agreed" tick. Until then (#1105) it needed a re-send.
+    it('takes today\'s price on one line only when asked, with no re-send but the grower\'s OK', async () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);
       fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
 
       expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(12);
       expect(screen.getByText('Sent at $10.00')).toBeInTheDocument();
-      expect(screen.getByText(/Prices or lines changed after V1 was sent/)).toBeInTheDocument();
+      expect(screen.queryByText(/Prices or lines changed after V1 was sent/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
-      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, price_override: null, use_todays_price: true });
+      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, price_override: null, use_todays_price: true, grower_confirmed: true });
     });
 
     it('keeps the price the database stored at the last save, not the one loaded', async () => {
@@ -3082,6 +3249,7 @@ describe('QuoteBuilder', () => {
       const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
       await waitFor(() => expect(price).toBeEnabled());
       fireEvent.change(price, { target: { value: '11' } });
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $11.00 (was $10.00)' }));
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ })).toBeEnabled());
@@ -3131,6 +3299,7 @@ describe('QuoteBuilder', () => {
       });
       renderQuoteBuilder(quote.id);
       fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
 
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
@@ -3149,6 +3318,7 @@ describe('QuoteBuilder', () => {
         error: null,
       }));
       mockRpc.mockImplementation((name: string, args?: unknown) => {
+        if (name === 'generate_quote_number') return Promise.resolve({ data: 'Q-2026-0042', error: null });
         if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
         const line = (args as { p_sections: Array<{ items: Array<{ client_key: string }> }> }).p_sections[0].items[0];
         return Promise.resolve({ data: {
@@ -3187,6 +3357,7 @@ describe('QuoteBuilder', () => {
       vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:quote'), revokeObjectURL: vi.fn() });
       renderQuoteBuilder(quote.id);
       fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Mark as Presented' }));
 
@@ -3196,10 +3367,11 @@ describe('QuoteBuilder', () => {
     });
 
     it('rewinds to the version last sent in one confirmed step', async () => {
-      const { quote } = configureLockedQuote();
+      const { quote, sentVersion } = configureLockedQuote();
+      // A line the customer was not sent still needs a re-send (a changed price no longer does).
+      sentVersion.snapshot_data.sections[0].items[0].quote_item_id = 'item-2';
       renderQuoteBuilder(quote.id);
-      fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Rewind to V1' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Rewind to V1' }));
       const dialog = await screen.findByRole('dialog', { name: 'Rewind to V1' });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Rewind to V1' }));
 
@@ -3208,6 +3380,57 @@ describe('QuoteBuilder', () => {
         expect.objectContaining({ p_quote_id: quote.id, p_version_id: 'version-1' }),
       ));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Restored from V1'));
+    });
+  });
+
+  // Item 10b (Mason 2026-10-27): a booked price on a sent booking changes straight away, with no
+  // re-send. A higher price needs the rep's "grower agreed" tick; a lower one does not
+  // (20261029120000 records each change).
+  describe('changing a booked price on a sent booking', () => {
+    async function openRevisedAndSetPrice(price: string) {
+      const fixture = makeQuoteFixture('sent', 7);
+      const quote = { ...fixture.quote, status: 'revised', created_at: new Date().toISOString() };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [fixture.item]
+              : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+                : table === 'products' ? [fixture.product]
+                  : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { quote_id: quote.id, row_version: 8, item_ids: {} }, error: null }
+        : { data: null, error: null }));
+      renderQuoteBuilder(quote.id);
+      const priceInput = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(priceInput).toBeEnabled());
+      fireEvent.change(priceInput, { target: { value: price } });
+      fireEvent.blur(priceInput);
+    }
+    const savedLine = () => {
+      const call = mockRpc.mock.calls.find(([name]) => name === 'save_quote');
+      return (call?.[1] as { p_sections: Array<{ items: Array<Record<string, unknown>> }> }).p_sections[0].items[0];
+    };
+
+    it('a higher price needs the "grower agreed" tick before it saves', async () => {
+      await openRevisedAndSetPrice('12');
+      const tick = await screen.findByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' });
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Grower agreed')));
+      expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(0);
+
+      fireEvent.click(tick);
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(savedLine()).toMatchObject({ price_override: 12, grower_confirmed: true }));
+    });
+
+    it('a lower price saves with no tick', async () => {
+      await openRevisedAndSetPrice('9');
+      expect(screen.queryByRole('checkbox', { name: /Grower agreed/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Save Draft'));
+      await waitFor(() => expect(savedLine()).toMatchObject({ price_override: 9 }));
+      expect(savedLine()).not.toHaveProperty('grower_confirmed');
     });
   });
 
@@ -3623,6 +3846,7 @@ describe('QuoteBuilder', () => {
       loadPlan?: QuoteLoadPlan;
       belowCostApproval?: boolean;
       suspendOn?: string;
+      startOnNewQuote?: boolean;
     } = {},
   ) {
     const byId = new Map(fixtures.map((f) => [f.quote.id, f]));
@@ -3689,8 +3913,11 @@ describe('QuoteBuilder', () => {
       // means both ids resolve to the SAME route, so React Router reuses the
       // element instead of remounting it — which is precisely the condition
       // these tests exist to cover.
-      [{ path: '/quotes/:id', element: routeElement }],
-      { initialEntries: [`/quotes/${fixtures[0].quote.id}`] },
+      [
+        ...(options.startOnNewQuote ? [{ path: '/quotes/new', element: routeElement }] : []),
+        { path: '/quotes/:id', element: routeElement },
+      ],
+      { initialEntries: [options.startOnNewQuote ? '/quotes/new' : `/quotes/${fixtures[0].quote.id}`] },
     );
     // Mounted OUTSIDE the router, mirroring App.tsx's RootLayout: the provider
     // sits above the route, so navigating between quotes neither unmounts the
@@ -3709,6 +3936,24 @@ describe('QuoteBuilder', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   }
+
+  it('ignores a late new-quote number after a saved quote opens', async () => {
+    const quoteB = makeSwitchFixture('quote-b', 'Q-BBB-2');
+    let resolveNumber!: (result: { data: string; error: null }) => void;
+    const number = new Promise<{ data: string; error: null }>((resolve) => { resolveNumber = resolve; });
+    mockRpc.mockImplementation((name: string) => name === 'generate_quote_number'
+      ? number : Promise.resolve({ data: null, error: null }));
+    const router = renderQuoteSwitch([quoteB], {}, { startOnNewQuote: true });
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'generate_quote_number')).toBe(true));
+
+    await goToQuote(router, 'quote-b');
+    expect(await screen.findAllByText('Q-BBB-2')).not.toHaveLength(0);
+
+    await act(async () => resolveNumber({ data: 'Q-2026-9999', error: null }));
+    await flushPendingWork();
+    expect(screen.queryByText('Q-2026-9999')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Q-BBB-2')).not.toHaveLength(0);
+  });
 
   it('stops presenting quote A once the route points at a quote B that has not loaded', async () => {
     const quoteA = makeSwitchFixture('quote-a', 'Q-AAA-1');

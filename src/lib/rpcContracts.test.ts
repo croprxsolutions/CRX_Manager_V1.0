@@ -1069,13 +1069,14 @@ describe('RPC contract: create_rebate_claim', () => {
     expect(params.p_idempotency_key).toBeTruthy();
   });
 
-  it('result includes generated claim_number in RC-YYYY-NNNN form', () => {
+  it('result includes a year and at least four sequence digits in claim_number', () => {
     const result: CreateRebateClaimResult = {
       success: true,
       claim_id: 'claim-uuid',
       claim_number: 'RC-2026-0001',
     };
-    expect(result.claim_number).toMatch(/^RC-\d{4}-\d{4}$/);
+    expect(result.claim_number).toMatch(/^RC-\d{4}-\d{4,}$/);
+    expect('RC-2026-10000').toMatch(/^RC-\d{4}-\d{4,}$/);
   });
 });
 

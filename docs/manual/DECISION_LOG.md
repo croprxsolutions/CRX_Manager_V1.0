@@ -10,11 +10,19 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-30 — Product corrections and inactive-stock behavior approved
+
+**Decision (Mason, in chat: "1. Yes / 2. Yes agree").** Admins may complete missing formulation information or correct a verified data-entry mistake through a dedicated reviewed correction. Show the old and proposed values and every affected size; require verified supporting information and a reason; preserve who changed what, historical invoices and posted financial amounts. Use the existing review/update rules for affected open work. A genuinely different formulation needs a separate parent; a wrongly grouped size is moved through a reviewed correction rather than changing its siblings. Ordinary edits cannot bypass the correction process or the rate lock. See grand-plan overlap 13 and PAR-1 acceptance.
+
+An inactive product remains visible in inventory, stock counts, internal reports and historical records, clearly marked Inactive, including when stock remains. Exclude it from customer sales sheets and normal new-quote/new-order selection; server rules refuse new sales until an admin deliberately reactivates it. Legitimate returns and corrections against original transactions remain possible without automatic reactivation. Existing deactivation blockers and stock-on-hand warning remain. See build-sheet WP-PM-3.
+
+These settle the two remaining business questions from the broader plan review. Parent/brand activation order, unit-change prerequisites, the Use Timing compatibility transition and duplicate-lifecycle proof are engineering requirements, not additional unanswered owner choices. Package-specific designs, reviews, data approvals and behavioral proof are still required. This records planning decisions only; it does not start implementation or approve a future live permission/data change.
+
 ## 2026-10-30 — Four comparison safeguards approved; publish the documentation
 
 **Decision (Mason, in chat):** "I agree with all 4 points, finalize this and push updated docs" and merge. Require a finite positive comparison rate; use a shared explicitly chosen generic reference set with row overrides identified; invalidate normal comparisons using deactivated references without imposing an in-stock-only rule; evaluate availability/rankability separately for cost, sale price, profit and margin. Unknown price provenance remains unknown. See CMP-2 acceptance for the edge cases.
 
-This authorizes publication of these accumulated planning notes and supersedes the earlier no-push/no-merge instruction for them. It does not start the product build or authorize live data changes. The earlier team review's broader parent, retirement, duplicate-lifecycle and rollout findings still need resolution before their affected packages are built.
+This authorizes publication of these accumulated planning notes and supersedes the earlier no-push/no-merge instruction for them. It does not start the product build or authorize live data changes. The earlier team review's broader findings are addressed by the later "Product corrections and inactive-stock behavior approved" entry and its package requirements; that does not substitute for implementation review or proof.
 
 ## 2026-10-30 — Admin cost and seller-margin comparison for chemical programs
 

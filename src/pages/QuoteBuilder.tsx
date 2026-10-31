@@ -189,6 +189,12 @@ interface ActivePlannedHold {
   expires_at: string | null;
 }
 
+interface CostAlert {
+  quote_item_id: string;
+  cost_rose: boolean;
+  below_cost: boolean;
+}
+
 // A saved line on a sent quote whose price went up since it was saved: it needs the rep's
 // "grower agreed" tick before it saves (Mason 2026-10-27, 20261029120000).
 function priceRaise(
@@ -670,6 +676,8 @@ export default function QuoteBuilder() {
   // The render-side copy of savedLineIdsRef, set with it on load and on each save. A line added and
   // saved since the page loaded has no local id, so the price lock names it from here.
   const [savedLineIdByKey, setSavedLineIdByKey] = useState<ReadonlyMap<string, { id: string; productId: string; price: number }>>(new Map());
+  // Item 11: a rep's cost-rise flags per saved line id (no cost numbers).
+  const [costAlerts, setCostAlerts] = useState<ReadonlyMap<string, CostAlert>>(new Map());
   const priceLockLineOf = useCallback((item: LocalItem): PriceLockLine => {
     const saved = savedLineIdByKey.get(item._key);
     return {
@@ -851,6 +859,28 @@ export default function QuoteBuilder() {
     })();
     return () => { cancelled = true; };
   }, [isEditing, quoteId, currentStatus, bookingSettlementAttempt]);
+
+  // Item 11 (Mason 2026-10-26): a rep is told when a line's cost has gone up since it was quoted,
+  // as yes/no flags only (20261030090000); admins see the costs themselves (QuoteLineCost).
+  // Re-read whenever the saved lines change, so a save shows the flags of the lines it stored.
+  useEffect(() => {
+    if (isAdmin || !isEditing || !quoteId || savedLineIdByKey.size === 0) { setCostAlerts(new Map()); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_quote_cost_alerts', { p_quote_id: quoteId });
+        if (error) throw error;
+        const rows = assertRpcResult<CostAlert[]>(data, 'get_quote_cost_alerts');
+        if (!cancelled) setCostAlerts(new Map(rows.map((row) => [row.quote_item_id, row])));
+      } catch (err) {
+        if (cancelled) return;
+        // A warning only: a failed read shows no flag and never blocks the quote.
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'get_quote_cost_alerts' } });
+        setCostAlerts(new Map());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin, isEditing, quoteId, savedLineIdByKey]);
 
   const loadActivePlannedHolds = useCallback(async (targetQuoteId: string) => {
     const { data, error } = await supabase
@@ -5087,6 +5117,10 @@ export default function QuoteBuilder() {
                           : sentState.kind === 'new'
                             ? `New since V${lastSentVersion.version_number}`
                             : `Sent at ${formatCents(sentState.sentCents)}`;
+                        const costAlert = isAdmin ? undefined : costAlerts.get(savedLineIdByKey.get(item._key)?.id ?? '');
+                        const costHint = costAlert?.below_cost
+                          ? "Below today's cost: converting needs an admin's approval."
+                          : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
                         return (
                           <tr
                             key={item._key}
@@ -5190,9 +5224,12 @@ export default function QuoteBuilder() {
                                   </label>
                                 );
                               })()}
-                              {!customerView && (sentHint || todayPriceOffer != null) && (
+                              {!customerView && (sentHint || todayPriceOffer != null || costHint) && (
                                 <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs">
                                   {sentHint && <span className="text-amber-700">{sentHint}</span>}
+                                  {costHint && (
+                                    <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
+                                  )}
                                   {todayPriceOffer != null && (
                                     <button
                                       type="button"

@@ -14,6 +14,13 @@ const rows: Row[] = [
 ];
 
 describe('applyTableSearchSort', () => {
+  it('sorts claim numbers in numeric order across the four-digit boundary', () => {
+    const claims = ['RC-2027-10000', 'RC-2027-9999', 'RC-2027-10001'].map(claim_number => ({ claim_number }));
+    expect(applyTableSearchSort(claims, [], '', 'claim_number', 'asc').map(row => row.claim_number))
+      .toEqual(['RC-2027-9999', 'RC-2027-10000', 'RC-2027-10001']);
+    expect(applyTableSearchSort(claims, [], '', 'claim_number', 'desc').map(row => row.claim_number))
+      .toEqual(['RC-2027-10001', 'RC-2027-10000', 'RC-2027-9999']);
+  });
   it('returns all rows unchanged when no search and no sort', () => {
     expect(applyTableSearchSort(rows, ['job_number'], '', null, 'asc')).toEqual(rows);
   });

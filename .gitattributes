@@ -294,3 +294,5 @@ scripts/smoke/prove-adjust-inventory-intent-binding-real-schema.mjs text eol=lf
 # is reconciled by hand. Edited-in-place docs (KNOWN_ISSUES, CURRENT_STATE) stay normal.
 docs/reference/migration-history.md merge=union
 docs/manual/DECISION_LOG.md         merge=union
+# Keep the unapplied document-year candidate stable across checkouts.
+supabase/migrations/20261029160300_document_numbers_chicago_year.sql text eol=lf

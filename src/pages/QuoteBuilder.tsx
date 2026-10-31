@@ -439,6 +439,8 @@ export default function QuoteBuilder() {
   const loadedCommissionSplitRef = useRef<CommissionSplit | null>(null);
   const commissionSplitTouchedRef = useRef(false);
   const [quoteNumber, setQuoteNumber] = useState('');
+  // Only a new quote allocates a number; an existing quote's number arrives with its row.
+  const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
   const [status, setStatus] = useState<QuoteStatus>('draft');
   const [quoteId, setQuoteId] = useState<string | null>(id || null);
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
@@ -981,22 +983,19 @@ export default function QuoteBuilder() {
 
   const generateQuoteNumber = async () => {
     // Use server-side sequence to prevent race conditions
-    const { data, error } = await supabase.rpc('generate_quote_number');
-    if (error || !data) {
-      // Fallback for backward compatibility
-      const year = new Date().getFullYear();
-      const { count, error: countError } = await supabase
-        .from('quotes')
-        .select('id', { count: 'exact', head: true })
-        .like('quote_number', `Q-${year}-%`);
-      if (countError) {
-        toast('error', 'Failed to generate quote number. Please try again.');
-        return;
-      }
-      const next = (count || 0) + 1;
-      setQuoteNumber(`Q-${year}-${String(next).padStart(4, '0')}`);
-    } else {
+    setQuoteNumberLoading(true);
+    // Never keep a previous quote's number if this allocation fails.
+    setQuoteNumber('');
+    try {
+      const { data, error } = await supabase.rpc('generate_quote_number');
+      if (error) throw Object.assign(new Error(error.message), error);
+      if (!data) throw new Error('Quote number unavailable');
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
+    } catch (err) {
+      Sentry.captureException(err, { extra: { context: 'generate_quote_number', ...(err instanceof Error ? err : {}) } });
+      toast('error', 'Failed to generate quote number. Please refresh and try again.');
+    } finally {
+      setQuoteNumberLoading(false);
     }
   };
 
@@ -1476,7 +1475,7 @@ export default function QuoteBuilder() {
       generateQuoteNumber().then(() => {
         // Allow a tick for state to settle before tracking changes
         setTimeout(() => { initialLoadDone.current = true; }, 0);
-      }).catch(() => { /* non-critical: quote number defaults handled inside generateQuoteNumber */ });
+      }).catch(() => { /* Number-generation failures are reported inside generateQuoteNumber. */ });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, fetchQuote, fetchReferenceData, isEditing]);
@@ -2120,6 +2119,12 @@ export default function QuoteBuilder() {
     }
     if (!referenceDataReady) {
       toast('error', 'Products are still loading. Try again in a moment.');
+      return null;
+    }
+    if (!quoteNumber) {
+      toast('error', quoteNumberLoading
+        ? 'The quote number is still loading. Please wait a moment and try again.'
+        : 'A quote number could not be confirmed. Please refresh and try again.');
       return null;
     }
     if (!profile) return null;
@@ -4009,7 +4014,7 @@ export default function QuoteBuilder() {
             showChevron={false}
             onClick={handleSaveDraft}
             loading={saving}
-            disabled={!canEdit && isEditing}
+            disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
           >
             Save Draft
           </Button>

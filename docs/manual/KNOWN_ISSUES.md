@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-10-29 for the invoice-cap checks only; other evidence retains its stated dates.
+**Last verified:** 2026-10-30 for KI-12 only (main `1567b768` + local replay, not live); other evidence retains its stated dates.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
@@ -184,7 +184,7 @@ QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) 
 failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
 (proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
-rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app.
+rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app. Candidate fix: `20261029090000` (PR #1200, not applied) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`).
 Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched.
 **The December pre-booking flow had the same gap** (raised by Maksym, checked in the code 2026-10-26): a
 Planned Program quote reserves its stock with holds (`create_planned_holds`), and the trigger

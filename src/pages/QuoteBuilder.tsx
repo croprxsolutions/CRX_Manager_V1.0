@@ -996,7 +996,7 @@ export default function QuoteBuilder() {
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
     } catch (err) {
       Sentry.captureException(err, { extra: { context: 'generate_quote_number', ...(err instanceof Error ? err : {}) } });
-      toast('error', 'Failed to generate quote number. Please refresh and try again.');
+      toast('error', 'Failed to generate quote number. Use Retry quote number to try again.');
     } finally {
       setQuoteNumberLoading(false);
     }
@@ -2125,9 +2125,11 @@ export default function QuoteBuilder() {
       return null;
     }
     if (!quoteNumber) {
-      toast('error', quoteNumberLoading
-        ? 'The quote number is still loading. Please wait a moment and try again.'
-        : 'A quote number could not be confirmed. Please refresh and try again.');
+      if (quoteNumberLoading) {
+        toast('error', 'The quote number is still loading. Please wait a moment and try again.');
+      } else {
+        toast('error', `A quote number could not be confirmed. ${isEditing ? 'Please refresh and try again.' : 'Use Retry quote number to try again.'}`);
+      }
       return null;
     }
     if (!profile) return null;
@@ -4007,6 +4009,16 @@ export default function QuoteBuilder() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {!isEditing && !quoteNumber && !quoteNumberLoading && (
+            <Button
+              variant="secondary"
+              icon={<RotateCcw className="w-4 h-4" />}
+              showChevron={false}
+              onClick={generateQuoteNumber}
+            >
+              Retry quote number
+            </Button>
+          )}
           <Button
             variant="secondary"
             icon={<Save className="w-4 h-4" />}

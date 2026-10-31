@@ -1027,7 +1027,7 @@ interface CreateRebateClaimParams {
 interface CreateRebateClaimResult {
   success: true;
   claim_id: string;
-  claim_number: string;  // RC-YYYY-NNNN
+  claim_number: string;  // RC-YYYY-NNNN, or more sequence digits above 9,999
 }
 
 interface TransitionRebateClaimParams {

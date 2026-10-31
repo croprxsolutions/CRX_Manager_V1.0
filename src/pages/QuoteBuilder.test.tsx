@@ -1170,13 +1170,13 @@ describe('QuoteBuilder', () => {
       return Promise.resolve({ data: failure === 'blank' ? '' : null, error: failure === 'error' ? { message: 'unavailable', code: 'P0001', details: 'number allocation refused', hint: 'retry later' } : null });
     });
     renderQuoteBuilder();
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate quote number. Please refresh and try again.'));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to generate quote number. Use Retry quote number to try again.'));
     const customer = await screen.findByRole('combobox', { name: 'Customer' });
     fireEvent.change(customer, { target: { value: 'Far' } });
     fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'A quote number could not be confirmed. Please refresh and try again.'));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'A quote number could not be confirmed. Use Retry quote number to try again.'));
     expect(mockFrom).not.toHaveBeenCalledWith('quotes');
     expect(screen.queryByText(/^Q-\d{4}-\d+$/)).not.toBeInTheDocument();
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
@@ -1187,6 +1187,27 @@ describe('QuoteBuilder', () => {
         context: 'generate_quote_number', code: 'P0001', details: 'number allocation refused', hint: 'retry later',
       }) });
     }
+  });
+
+  it('retries a failed quote number without clearing the form', async () => {
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
+      error: null,
+    }));
+    let numberAvailable = false;
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'generate_quote_number' && !numberAvailable
+      ? { data: null, error: { message: 'unavailable' } }
+      : { data: name === 'generate_quote_number' ? 'Q-2026-9876' : null, error: null }));
+    renderQuoteBuilder();
+    const retry = await screen.findByRole('button', { name: 'Retry quote number' });
+    const customer = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customer, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
+    numberAvailable = true;
+    fireEvent.click(retry);
+    expect(await screen.findByText('Q-2026-9876')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry quote number' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('Far Field Farm');
   });
 
   it('opens the exact receipt-proven order after a changed draw intent', async () => {

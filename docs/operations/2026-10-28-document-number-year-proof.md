@@ -23,9 +23,11 @@ The generators retain their sequences and active-role checks. Claim creation
 retains five defaults, role checks, scoped idempotency helpers and its atomic
 yearly counter increment.
 
-The candidate replaces only `current_date` in these bodies with
+The original 2026-10-28 candidate replaced only `current_date` in these bodies with
 `(now() AT TIME ZONE 'America/Chicago')::date`, following the invoice pattern in
-`20260914100100_next_invoice_number_year_chicago.sql`. Preflight and postflight
+`20260914100100_next_invoice_number_year_chicago.sql`. The final candidate also keeps
+digits above 9,999 ([capacity update](../changelog.d/2026-10-31-document-number-capacity.md)),
+so its body hashes differ from this first version. Preflight and postflight
 verify signatures, overload counts, original/replacement body hashes, security
 mode, search path, owner, default arguments and existing grants. Postflight also
 asserts the Chicago year boundary. No grants change.
@@ -63,7 +65,8 @@ and live caller inspection supplied the authoritative paths above.
   migrations in a network-disabled PostgreSQL 17 container. Seven clock cases
   passed in UTC, Chicago and Tokyo: UTC New Year before Chicago midnight,
   immediately before/at/after Chicago midnight, summer and winter. The old
-  expression reproduced early rollover.
+  expression reproduced early rollover. The proof later added 9,999, 10,000 and
+  10,001 cases ([capacity update](../changelog.d/2026-10-31-document-number-capacity.md)).
 - Twelve concurrent transactions produced unique quote/order/claim numbers.
   A cross-midnight claim retry retained its ID/number. Admin and sales-rep calls
   succeeded; driver/applicator calls were refused. Invalid quantity and body

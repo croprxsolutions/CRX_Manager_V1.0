@@ -30,7 +30,7 @@ DECLARE
   v_program uuid;
   v_year    int := EXTRACT(YEAR FROM (now() AT TIME ZONE 'America/Chicago')::date)::int;
   v_key     text := 'smoke-doc-number-' || gen_random_uuid()::text;
-  v_before  bigint;
+  v_first   bigint; -- lowest value nextval can return; an unused sequence has not moved past last_value
   v_number  text;
   v_res     jsonb;
   v_res2    jsonb;
@@ -51,22 +51,22 @@ BEGIN
   -- Quote and order numbers, through the app's role.
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
-  SELECT last_value INTO v_before FROM public.quote_number_seq;
+  SELECT last_value + is_called::int INTO v_first FROM public.quote_number_seq;
   SET LOCAL ROLE authenticated;
   v_number := public.generate_quote_number();
   RESET ROLE;
   IF v_number !~ ('^Q-' || v_year || '-[0-9]{4,}$')
-     OR split_part(v_number, '-', 3)::bigint <= v_before THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: quote number % (year %, sequence was %)', v_number, v_year, v_before;
+     OR split_part(v_number, '-', 3)::bigint < v_first THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: quote number % (year %, sequence next %)', v_number, v_year, v_first;
   END IF;
 
-  SELECT last_value INTO v_before FROM public.order_number_seq;
+  SELECT last_value + is_called::int INTO v_first FROM public.order_number_seq;
   SET LOCAL ROLE authenticated;
   v_number := public.generate_order_number();
   RESET ROLE;
   IF v_number !~ ('^ORD-' || v_year || '-[0-9]{4,}$')
-     OR split_part(v_number, '-', 3)::bigint <= v_before THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: order number % (year %, sequence was %)', v_number, v_year, v_before;
+     OR split_part(v_number, '-', 3)::bigint < v_first THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: order number % (year %, sequence next %)', v_number, v_year, v_first;
   END IF;
 
   -- Rebate claim, its keyed replay, and a five-digit sequence.

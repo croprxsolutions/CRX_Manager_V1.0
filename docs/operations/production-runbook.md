@@ -39,8 +39,8 @@ Nobody pushes to `main` directly — the `protect-main` ruleset rejects it.
    approves or blocks) and makes no automatic reviews since 2026-10-21: it reviews a money or
    Mason-named PR when the agent requests it. Fix or answer any comments that arrive before the merge.
 2. The PR merges only through the protected path in `.claude/commands/ship.md` Step 8:
-   every check green, no `CHANGES_REQUESTED`, a fresh exact-SHA Sol review
-   (except a documentation-only change, `docs/reference/sol-exempt-paths.md`), then
+   every check green, no `CHANGES_REQUESTED`, a clean Sol review for a change on
+   `docs/reference/sol-required-paths.md`, then
    `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`.
 3. Watch [Vercel deployments](https://vercel.com/dashboard) until the new build is "Ready."
 4. Hit https://croprxsolutions.app → hard refresh → confirm the new build.

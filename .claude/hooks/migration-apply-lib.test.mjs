@@ -1612,8 +1612,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
   };
-  const crThread = (resolved) => ({ isResolved: resolved, isOutdated: true,
-    comments: { totalCount: resolved ? 2 : 1, nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
+  const crThread = (resolved, outdated = false) => ({ isResolved: resolved, isOutdated: outdated,
+    comments: { nodes: [{ author: { login: "coderabbitai" }, originalCommit: { oid: "c".repeat(40) } }] } });
   // The CodeRabbit requirement read. Since 2026-10-29 only the needs-coderabbit
   // label asks for a review, so the fixture is labelled (`labelled: false` shows
   // an unlabelled migration PR needs none); the default answer is a completed review.
@@ -1724,11 +1724,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   labelled = true;
   // A labelled PR needs a completed CodeRabbit review of its head before its
   // migration applies, read fail-closed.
-  refused(gate({ crStatuses: [] }), "needs a clean CodeRabbit review of its current head",
+  refused(gate({ crStatuses: [] }), "needs a completed CodeRabbit review",
     "a migration PR CodeRabbit never reviewed is refused");
-  refused(gate({ crStatuses: [{ ...crDone[0], description: "Review rate limited" }] }), "needs a clean CodeRabbit review",
+  refused(gate({ crStatuses: [{ ...crDone[0], description: "Review rate limited" }] }), "needs a completed CodeRabbit review",
     "a rate-limited CodeRabbit status is not a review");
-  refused(gate({ crStatuses: [{ ...crDone[0], creator: { login: "masonwells1" } }] }), "needs a clean CodeRabbit review",
+  refused(gate({ crStatuses: [{ ...crDone[0], creator: { login: "masonwells1" } }] }), "needs a completed CodeRabbit review",
     "a completed status posted by anyone but CodeRabbit does not count");
   // Mason's "skip coderabbit" (2026-10-22) waives the missing review for the
   // session he said it in, and nothing else.
@@ -1737,16 +1737,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     const skipSession = "skip-session-0001";
     ok(recordCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession, pullRequest: 901, said: "skip coderabbit #901" }) !== null,
       "a waiver for ANOTHER PR is recorded");
-    refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review",
+    refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a completed CodeRabbit review",
       "a waiver naming another PR does not let this PR's migration apply (Mason, 2026-10-22: per PR)");
     ok(recordCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession, pullRequest: 900, said: "skip coderabbit #900" }) !== null,
       "the waiver for this PR is recorded");
     const skipped = gate({ crStatuses: [], sessionId: skipSession });
     ok(skipped.ok === true && skipped.coderabbitSkippedBy?.pullRequest === 900,
       `a migration PR with no CodeRabbit review applies when Mason said skip coderabbit #900 in this session (${skipped.reason || ""})`);
-    refused(gate({ crStatuses: [], sessionId: "other-session-0002" }), "needs a clean CodeRabbit review",
+    refused(gate({ crStatuses: [], sessionId: "other-session-0002" }), "needs a completed CodeRabbit review",
       "the waiver does not carry to another session");
-    refused(gate({ crStatuses: [] }), "needs a clean CodeRabbit review", "an apply with no session id gets no waiver");
+    refused(gate({ crStatuses: [] }), "needs a completed CodeRabbit review", "an apply with no session id gets no waiver");
     refused(gate({ crStatuses: [], sessionId: skipSession, threads: [crThread(false)] }), "unresolved CodeRabbit comment thread",
       "the waiver does not excuse an unanswered CodeRabbit thread");
     refused(gate({ crError: new Error("HTTP 502"), sessionId: skipSession }), "fail closed",
@@ -1754,11 +1754,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ok(gate({ sessionId: skipSession }).coderabbitSkippedBy === undefined, "a reviewed PR is not marked as skipped");
     // Codex App P2 on #1035: the same number in another repository gets no waiver.
     refused(gate({ crStatuses: [], sessionId: skipSession, pr: { url: "https://github.com/other/repo/pull/900" } }),
-      "needs a clean CodeRabbit review", "a waiver for #900 here does not cover other/repo#900");
+      "needs a completed CodeRabbit review", "a waiver for #900 here does not cover other/repo#900");
     refused(gate({ crStatuses: [], sessionId: skipSession, pr: { url: undefined } }),
-      "needs a clean CodeRabbit review", "a PR whose repository cannot be read gets no waiver");
+      "needs a completed CodeRabbit review", "a PR whose repository cannot be read gets no waiver");
     cancelCodeRabbitSkip({ dirs: stateDirs, sessionId: skipSession });
-    refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a clean CodeRabbit review", "a cancelled waiver no longer counts");
+    refused(gate({ crStatuses: [], sessionId: skipSession }), "needs a completed CodeRabbit review", "a cancelled waiver no longer counts");
     // Codex App P2 and the final Sol review on #1035: waivers live in the MAIN
     // checkout's state folder (found through git's shared folder), so an apply
     // from a subfolder or another worktree finds the same one.
@@ -1770,9 +1770,9 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       ok(gate({ crStatuses: [], sessionId: skipSession, git: { [COMMON]: `${path.join(mainDir, ".git")}\n` } }).ok === true,
         "a waiver in the main checkout's state folder is found from a worktree");
       refused(gate({ crStatuses: [], sessionId: skipSession, git: { [COMMON]: new Error("not a repo") } }),
-        "needs a clean CodeRabbit review", "a failed shared-folder lookup finds no waiver");
+        "needs a completed CodeRabbit review", "a failed shared-folder lookup finds no waiver");
       refused(gate({ crStatuses: [], sessionId: skipSession, git: { [COMMON]: `${path.join(mainDir, "bare.git")}\n` } }),
-        "needs a clean CodeRabbit review", "a shared folder that is not <checkout>/.git finds no waiver");
+        "needs a completed CodeRabbit review", "a shared folder that is not <checkout>/.git finds no waiver");
     } finally {
       rmSync(mainDir, { recursive: true, force: true });
     }
@@ -1784,6 +1784,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   // and an apply fails CLOSED when the threads cannot be read.
   refused(gate({ threads: [crThread(false)] }), "unresolved CodeRabbit comment thread", "an unresolved CodeRabbit thread on an older commit is refused");
   ok(gate({ threads: [crThread(true)] }).ok === true, "a resolved CodeRabbit thread does not block");
+  ok(gate({ threads: [crThread(false, true)] }).ok === true, "an outdated CodeRabbit thread does not block");
   refused(gate({ threadsError: new Error("HTTP 502") }), "fail closed", "an unreadable thread list refuses the apply");
   refused(gate({ threadsMore: true }), "could not be read completely", "a partly read thread list refuses the apply");
   // Luna round 8: same fail-closed counter as the merge gates, bound to the checked head.

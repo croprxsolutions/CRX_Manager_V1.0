@@ -187,249 +187,6 @@ export function pushParseCostExceeded(cmd) {
   return false;
 }
 
-// The hook must see a literal Git subcommand. Shell variables, command
-// substitutions, splats and globs are expanded only after this review runs, so
-// `$verb='push'; git $verb ...` otherwise looks like a non-push and skips every
-// destination, force and proof check. Refuse the uninspectable Git invocation
-// itself, including dynamic non-pushes, rather than guessing what it becomes.
-// Token-level twin of BIN_TAIL, for the two parsers below that walk argv words
-// instead of matching the raw command text. They compared the final path segment
-// against the literal set {"git", "git.exe"} — the same one-item extension list,
-// with the same consequence: `git.cmd $verb origin main` was not seen as git at
-// all, so gitSubcommandIsDynamic missed the uninspectable subcommand and
-// unknownGitGlobalOptions missed the unlisted global option. Both verified false
-// by execution before the fix.
-//
-// The basename is the NAME plus AT MOST ONE extension, and an extension is a
-// dot-segment with no further dot — the argv-token form of BIN_TAIL(a), so the
-// two parsers and the regex agree on what a git command is. `mine.git`,
-// `git-crypt` and `git.exe.bak` are not git; `git`, `git.exe`, `git.CMD` and
-// `git.ps1` are. Tokens reach here already unquoted by splitShellArgs.
-const GIT_BASENAME_RE = /^git(?:\.[^.]*)?$/i;
-function isGitBinaryToken(token) {
-  const basename = String(token || "").replace(/\\/g, "/").split("/").pop() || "";
-  return GIT_BASENAME_RE.test(basename);
-}
-
-export function gitSubcommandIsDynamic(cmd) {
-  const takesValue = new Set(["-c", "-C", "--config-env", "--git-dir", "--work-tree"]);
-  const valueless = new Set(["--no-pager", "--literal-pathspecs", "--%"]);
-  for (const segment of shellSegments(String(cmd || ""))) {
-    const tokens = splitShellArgs(segment);
-    for (let index = 0; index < tokens.length; index += 1) {
-      if (!isGitBinaryToken(tokens[index])) continue;
-      let subcommand = index + 1;
-      while (subcommand < tokens.length) {
-        const token = tokens[subcommand];
-        if (takesValue.has(token)) { subcommand += 2; continue; }
-        if (valueless.has(token) || /^--(?:config-env|git-dir|work-tree|exec-path)=/.test(token)) {
-          subcommand += 1;
-          continue;
-        }
-        break;
-      }
-      const token = tokens[subcommand] || "";
-      if (/[$%!*?\[\]{}]/.test(token) || token.startsWith("@")) return true;
-    }
-  }
-  return false;
-}
-
-// A valid but unlisted Git GLOBAL option makes the literal push parser stop at
-// the option and classify the whole command as a non-push. Refuse unknown
-// options whenever a later token is the literal `push`, before the guard's early
-// non-push exit. Supported inspectable options mirror GIT_GLOBAL_OPTS above.
-export function unknownGitGlobalOptions(cmd) {
-  const offenders = new Set();
-  const takesValue = new Set(["-c", "-C", "--config-env", "--git-dir", "--work-tree"]);
-  const valueless = new Set(["--no-pager", "--literal-pathspecs", "--%"]);
-  for (const segment of shellSegments(String(cmd || ""))) {
-    const tokens = splitShellArgs(segment);
-    for (let index = 0; index < tokens.length; index += 1) {
-      if (!isGitBinaryToken(tokens[index])) continue;
-      for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
-        const token = tokens[cursor];
-        if (token === "push") break;
-        if (takesValue.has(token)) { cursor += 1; continue; }
-        if (valueless.has(token) || /^--(?:config-env|git-dir|work-tree|exec-path)=/.test(token)) continue;
-        if (token === "--exec-path") continue;
-        if (token.startsWith("-") && tokens.slice(cursor + 1).includes("push")) offenders.add(token);
-        break;
-      }
-    }
-  }
-  return [...offenders];
-}
-
-// `git --exec-path=<dir> push ...` replaces Git's own transport helpers before
-// the push starts. The destination can still look harmless while a planted
-// git-remote-https sends the objects elsewhere, so this executable selector is
-// never valid in a guarded push command.
-export function pushUsesExecPathOption(cmd) {
-  const text = String(cmd || "");
-  return isGitPush(text) && /(?<![A-Za-z0-9_-])--exec-path(?:=|\s|$)/i.test(text);
-}
-
-// A guard that reads command TEXT sees the text; the shell runs something else.
-// Codex's nineteenth 2026-07-30 review probed three spellings that every check
-// in this file missed: `git p"us"h origin HEAD:main`, which the shell
-// concatenates back into `push`, and `$(git push …)` / `` `git push …` ``, where
-// the inner command runs but its `git` is not at a word start this pattern
-// matches. All three skipped the destination, force and proof checks entirely.
-//
-// No pattern closes this — a shell has unbounded ways to spell a word — so a
-// better pattern is not attempted. The command is instead re-read with quotes
-// removed and substitution/grouping punctuation turned into whitespace. If that
-// reading is a push while the literal text is not, the command is HIDING a push
-// and is refused rather than analysed, because an analysis of text the shell
-// will not execute proves nothing. The honest boundary against a determined
-// evader is GitHub's branch protection, which no local spelling reaches; this
-// only has to stop the accident and the clever-but-not-adversarial case.
-export function pushHiddenByShellComposition(cmd) {
-  const text = String(cmd || "");
-  const joined = text.replace(/\(([^()\r\n]+)\)/g, (whole, body) => {
-    const parts = body.split(/\s*\+\s*/);
-    if (parts.length < 2 || parts.some((part) => !/^(['"])[^'"\r\n]*\1$/.test(part))) return whole;
-    return parts.map((part) => part.slice(1, -1)).join("");
-  });
-  const unwrapped = joined
-    .replace(/--%(?=\s)/g, "")      // PowerShell stop-parsing token: git --% push
-    .replace(/`\r?\n/g, "")          // PowerShell line continuation
-    .replace(/`(?=[^\r\n])/g, "")    // PowerShell character escape: pu`sh
-    .replace(/\\\r?\n/g, "")         // POSIX shell line continuation
-    .replace(/\\(?=[^\r\n])/g, "")   // POSIX shell character escape: pu\sh
-    .replace(/\^(?=[^\r\n])/g, "")    // cmd.exe character escape: pu^sh
-    .replace(/["']/g, "")
-    .replace(/[$`(){}]/g, " ");
-  const literalPushes = eachPush(text);
-  const executedPushes = eachPush(unwrapped);
-  if (executedPushes.length === 0) return false;
-  if (executedPushes.length !== literalPushes.length) return true;
-  // The ARGS are compared word by word from the SAME split, not by re-splitting
-  // the unwrapped text. Deleting a quote from the whole command MANUFACTURES a
-  // word boundary that was never there: `git push "C:/scratch repo/repo.git"` is
-  // one destination word to every shell, and the unwrapped copy read it as two,
-  // so an ordinary local push was refused as a hidden one. Codex sol, 2026-09-08,
-  // finding 9; reproduced through the guard before this line changed. The helper
-  // has read it that way since 2026-07-30, so the Claude side refused it too —
-  // wiring the Codex side in only made the existing defect visible on both.
-  return literalPushes.some((push) =>
-    // Two signals, because the word-wise comparison alone cannot see the second.
-    // SUBSTITUTION: `git push $(cat ref) HEAD:main` has no quote or escape in any
-    // word, so every word reads back identically — yet the destination is decided
-    // at run time and no text analysis of it proves anything. The whole-command
-    // unwrap used to catch this incidentally by turning `$(){}` into whitespace;
-    // naming it is what keeps it after the comparison narrowed. Caught by the
-    // differential sweep over this file's other consumers, not by review.
-    SUBSTITUTION_PUNCTUATION_RE.test(push.args) ||
-    // REWRITING: a word whose quote/escape syntax means the parsers below are
-    // reading something other than what the shell will hand git.
-    splitShellWordsRaw(push.args).some((word) => shellCompositionWord(word) !== unquoteShellArg(word)) ||
-    // DISAGREEMENT: the POSIX and PowerShell readings split the arguments into
-    // different words. The Windows-path exemption above lets a trailing
-    // backslash through, and then every parser downstream is reading a command
-    // that one of the two shells will not run. Codex found this twice, through
-    // two different consequences: `git push origin --repo C:\x\ evil:main` read
-    // source `C` while PowerShell pushes `evil`, and
-    // `git push --repo C:\x\ <crx-url> HEAD:main` hid the destination so the
-    // proof gate stood down (Codex sol, 2026-09-21). Refusing the disagreement
-    // itself closes every consequence at once. Ordinary Windows paths — bare or
-    // quoted, with or without spaces — split the same both ways and still pass.
-    pushReadingsDisagree(push.args)
-  );
-}
-
-function pushReadingsDisagree(argsText) {
-  const readings = pushArgReadings(argsText).map((tokens) => JSON.stringify(tokens));
-  return new Set(readings).size > 1;
-}
-
-// Text a shell computes rather than passes through: a variable, a substitution,
-// a subexpression, a brace group. In a push's ARGUMENTS this is never analysable
-// — the destination or refspec is not decided until the command runs.
-const SUBSTITUTION_PUNCTUATION_RE = /[$`(){}]/;
-
-// A drive-qualified absolute path (`C:\scratch\repo.git`, `\\server\share`) as a
-// push WORD. Its backslashes are separators, not escapes, and no shell rewriting
-// of them can produce a push to `main`: this token position is a destination or a
-// refspec, a local repository is not a GitHub branch, and no refspec starts with
-// a drive letter. Exempting it is what lets an ordinary Windows local-repo push
-// through the composition check while `git p\ush` and `HEAD:ma\in` still fail it.
-const WINDOWS_ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/;
-
-// What a shell CONSUMES from one word, for the composition comparison only —
-// deliberately shell-AGNOSTIC, unlike shellArgvWord below. The guard reads text
-// without knowing which shell will run it, so this consumes POSIX backslashes,
-// PowerShell backticks AND cmd.exe carets: any of the three could be the one that
-// rewrites the word. That makes it useless for reading a VALUE, and it is never
-// used for one — only to answer "does this word mean something else once a shell
-// has had it?".
-function shellCompositionWord(word) {
-  const text = String(word || "");
-  if (WINDOWS_ABSOLUTE_PATH_RE.test(unquoteShellArg(text))) return unquoteShellArg(text);
-  let out = "";
-  let index = 0;
-  while (index < text.length) {
-    const char = text[index];
-    if ((char === "\\" || char === "`" || char === "^") && index + 1 < text.length) {
-      out += text[index + 1];
-      index += 2;
-      continue;
-    }
-    if (char === "\\" || char === "`" || char === "^") { out += char; break; }
-    if (char === "'") {
-      // Single quotes are literal in POSIX and in PowerShell alike.
-      const close = text.indexOf("'", index + 1);
-      const end = close === -1 ? text.length : close;
-      out += text.slice(index + 1, end);
-      index = end + 1;
-      continue;
-    }
-    if (char === '"') {
-      index += 1;
-      while (index < text.length && text[index] !== '"') {
-        // Inside double quotes PowerShell consumes a backtick before anything,
-        // and POSIX consumes a backslash only before " \ ` $. A backslash before
-        // any other character is literal in BOTH — which is what keeps
-        // `"C:\scratch repo\repo.git"` intact.
-        if (text[index] === "`" && index + 1 < text.length) { out += text[index + 1]; index += 2; continue; }
-        if (text[index] === "\\" && index + 1 < text.length && ['"', "\\", "`", "$"].includes(text[index + 1])) {
-          out += text[index + 1];
-          index += 2;
-          continue;
-        }
-        out += text[index];
-        index += 1;
-      }
-      index += 1;
-      continue;
-    }
-    out += char;
-    index += 1;
-  }
-  return out;
-}
-
-// EVERY push in the command, not just the first. `String.match` without /g and
-// `RegExp.exec` on a non-global pattern both stop at the first hit, which meant a
-// whole-command check saw only the leading push — so `git push origin feature &&
-// git push --recurse-submodule no <CRX Manager URL> HEAD:main` reported no unknown
-// options and no inline variables at all, while the second push carried both
-// (Codex's eighth 2026-07-30 review; confirmed by probe the same day, which also
-// showed pushSetsInlineEnv blind to a chained second push, which the review did
-// not name). Every whole-command scan below iterates this instead.
-export function eachPush(cmd) {
-  const text = String(cmd || "");
-  const scanner = new RegExp(GIT_PUSH_RE.source, "gi");
-  const found = [];
-  let match;
-  while ((match = scanner.exec(text)) !== null) {
-    found.push({ args: match.groups.args || "", index: match.index });
-    if (scanner.lastIndex === match.index) scanner.lastIndex += 1; // zero-width safety
-  }
-  return found;
-}
-
 function unquoteShellArg(value) {
   const text = String(value || "");
   if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
@@ -1272,27 +1029,11 @@ export function urlIsGuardedApp(url) {
 const PUSH_OPTS_WITH_VALUE = new Set([
   "--receive-pack", "--exec", "--repo", "-o", "--push-option", "--recurse-submodules",
 ]);
-// Every remaining `git push` option, from `git push -h` on git 2.54. These take
-// no separate value (`--force-with-lease` and `--signed` take an OPTIONAL one,
-// which git only accepts attached with `=`, so they never swallow a token).
-//
-// This list exists so the guard can fail CLOSED on an option it does not know.
-// Rounds four through seven were all the same mistake in different clothes — a
-// hand-kept list that was missing an entry — so the list is no longer trusted to
-// be complete. Anything not named here makes the argv walk untrustworthy, and an
-// untrustworthy walk means an untrustworthy destination. A future git option
-// then costs one clear error message; the old behaviour cost an unreviewed push.
-const PUSH_OPTS_KNOWN = new Set([
-  ...PUSH_OPTS_WITH_VALUE,
-  "--verbose", "--quiet", "--all", "--branches", "--mirror", "--delete", "--tags",
-  "--dry-run", "--porcelain", "--force", "--force-with-lease", "--force-if-includes",
-  "--thin", "--set-upstream", "--progress", "--prune", "--verify", "--follow-tags",
-  "--signed", "--atomic", "--ipv4", "--ipv6",
-]);
-// Short forms, which git also accepts bundled (`-fu`). `-o` is the only one that
-// takes a value.
-const PUSH_SHORT_OPTS_KNOWN = new Set(["v", "q", "d", "n", "f", "u", "o", "4", "6"]);
-
+// Git accepts any shortened long option (`--recurse-submodule`), so read the full name.
+function fullPushOption(option) {
+  if (!option.startsWith("--") || option.length < 3) return option;
+  return [...PUSH_OPTS_WITH_VALUE].find((name) => name.startsWith(option)) ?? option;
+}
 // Value-taking short options of `git push`. Only `-o` (`--push-option`) takes one.
 const PUSH_VALUE_SHORTS = "o";
 
@@ -1336,34 +1077,6 @@ function pushShortClusterTakesNextWord(word) {
   return Boolean(cluster) && !cluster.attached;
 }
 
-// `--receive-pack=<prog>` / `--exec=<prog>` name the program that RECEIVES the
-// push on the far side. Every other check here answers "where is this push
-// addressed?" — and this one option makes that question the wrong one, because
-// the named program decides what actually happens to the objects once they
-// arrive. It can ignore the nominal destination and relay them elsewhere, so a
-// push addressed to a scratch repo can still land in production while all three
-// guarded-repository classifiers say "unrelated" (Codex's seventeenth 2026-07-30
-// review, confirmed with a read-only parser probe and reproduced here).
-//
-// The argv walk already skips their values correctly, so this is not a parsing
-// gap that a better parser would close — the destination it reads is simply not
-// where the data ends up. There is no legitimate use of either option in this
-// repo: GitHub runs its own receive-pack. So they are denied outright rather
-// than parsed.
-export function pushNamesRemoteProgram(cmd) {
-  for (const push of eachPush(cmd)) {
-    for (const tokens of pushArgReadings(push.args)) {
-      for (const token of tokens) {
-        if (token === "--") break;
-        const eq = token.indexOf("=");
-        const bare = eq === -1 ? token : token.slice(0, eq);
-        if (bare === "--receive-pack" || bare === "--exec") return true;
-      }
-    }
-  }
-  return false;
-}
-
 // Round seventeen denied `--receive-pack` on the COMMAND LINE. Git stores the
 // same instruction persistently, and Codex's twenty-first 2026-07-30 review found
 // both halves of that: `remote.<name>.receivepack` makes an innocuous-looking
@@ -1400,44 +1113,6 @@ export function executableTransportSettings(configOutput) {
   return found;
 }
 
-// Any option in a push command that this guard's argv walk does not understand.
-// A non-empty result means the destination cannot be resolved safely.
-export function unknownPushOptions(cmd) {
-  const unknown = [];
-  for (const push of eachPush(cmd)) {
-    for (const tokens of pushArgReadings(push.args)) {
-    for (let i = 0; i < tokens.length; i += 1) {
-      const token = tokens[i];
-      if (token === "--") break;
-      if (token === "-" || !token.startsWith("-")) continue;
-      const eq = token.indexOf("=");
-      const bare = eq === -1 ? token : token.slice(0, eq);
-      if (bare.startsWith("--")) {
-        // `--no-force` is git's negation of `--force`; judge the base option.
-        // Note that git also accepts unambiguous ABBREVIATIONS of long options
-        // (`--recurse-submodule`), which do not match here and are therefore
-        // reported as unknown — the fail-closed direction, and how round eight's
-        // finding gets caught rather than parsed.
-        const base = PUSH_OPTS_KNOWN.has(bare) ? bare : bare.replace(/^--no-/, "--");
-        if (!PUSH_OPTS_KNOWN.has(base)) unknown.push(bare);
-        else if (eq === -1 && PUSH_OPTS_WITH_VALUE.has(base)) i += 1;
-        continue;
-      }
-      // Only the letters BEFORE a value-taking one are flags; everything after it
-      // is `-o`'s value, which may be any text at all (`-oci.skip`). With no
-      // value-taking letter, scan the WHOLE word — `=` included — because git
-      // refuses a boolean short carrying `=` (``unknown switch `='`` on `-q=o`),
-      // so the guard must report it too rather than read only the `-q` before it.
-      const cluster = pushShortCluster(token);
-      for (const ch of cluster ? token.slice(1, cluster.index) : token.slice(1)) {
-        if (!PUSH_SHORT_OPTS_KNOWN.has(ch)) unknown.push(`-${ch}`);
-      }
-      if (cluster && !cluster.attached) i += 1;
-    }
-    }
-  }
-  return [...new Set(unknown)];
-}
 // The destination this push writes to: a remote NAME, a URL, or null when the
 // command names none (git then resolves its own default — see the guard).
 export function pushDestinationToken(cmd) {
@@ -1457,7 +1132,7 @@ export function pushDestinationToken(cmd) {
     if (token === "--") return tokens[i + 1] ?? repoOpt;
     if (!token.startsWith("-")) return token;
     const eq = token.indexOf("=");
-    const bare = eq === -1 ? token : token.slice(0, eq);
+    const bare = fullPushOption(eq === -1 ? token : token.slice(0, eq));
     if (bare === "--repo") {
       const value = eq === -1 ? tokens[i + 1] : token.slice(eq + 1);
       if (repoOpt === null && value) repoOpt = value;
@@ -1473,109 +1148,6 @@ export function pushDestinationToken(cmd) {
   return repoOpt;
 }
 
-// Does this push name its refspecs outright? `git push [<repository> [<refspec>…]]`
-// — when refspecs are on the command line git does not consult the DEFAULT refspec
-// configuration (`remote.<n>.push`, `push.default`, `branch.<b>.merge`) at all, so
-// an inherited override of those cannot move where such a push lands. Verified
-// against git rather than assumed — Codex reported it on 2026-08-06 and a scratch
-// repo on git 2.43.0 reproduced it before this fix landed: with
-// `remote.origin.push=HEAD:refs/heads/unrelated` live, `push --dry-run origin
-// main:refs/heads/feature` reports `main -> feature` and nothing else, while
-// `push --dry-run origin` under the very same config reports `HEAD -> unrelated`.
-//
-// A second positional is the first refspec. `--repo=<url>` is deliberately NOT
-// counted: git documents the positional as taking precedence, so the lone
-// positional in `push --repo=<url> HEAD:main` is the REPOSITORY, not a refspec —
-// counting it would skip the default-refspec proof on a push that still needs it.
-// Everything uncertain therefore lands on `false`, which keeps the lookups.
-export function pushNamesRefspec(cmd) {
-  // An option this walk does not understand makes the count untrustworthy in the
-  // dangerous direction: an unknown VALUE-taking option leaves its value looking
-  // like a second positional, i.e. like a refspec, which would skip the lookups on
-  // a push that is really bare. The guard denies unknown options anyway, but it
-  // does so AFTER this comparison, so this cannot rely on that ordering.
-  if (unknownPushOptions(cmd).length > 0) return false;
-  const args = String(cmd || "").match(GIT_PUSH_RE)?.groups.args || "";
-  const tokens = splitShellArgs(args);
-  let positionals = 0;
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    // After `--` every remaining token is positional, options included.
-    if (token === "--") { positionals += tokens.length - (i + 1); break; }
-    if (!token.startsWith("-")) { positionals += 1; continue; }
-    const eq = token.indexOf("=");
-    const bare = eq === -1 ? token : token.slice(0, eq);
-    if (bare === "--repo") { if (eq === -1) i += 1; continue; }
-    if (eq === -1 && PUSH_OPTS_WITH_VALUE.has(bare)) i += 1;
-    else if (pushShortClusterTakesNextWord(token)) i += 1;
-  }
-  return positionals >= 2;
-}
-
-// The default-refspec lookups `pushNamesRefspec` makes irrelevant. The remote
-// SELECTION keys are not here: they answer which remote a push uses, which an
-// explicit refspec says nothing about — that is `pushNamesDestination`'s question,
-// and it is a genuinely separate one. Conflating the two is what left the second
-// half of this over-refusal live after the first was fixed (Codex, 2026-08-06).
-export const REFSPEC_DEFAULT_LOOKUPS = new Set(["push.default", "remote.*.push", "branch.merge"]);
-
-// Even a BARE push consults `branch.<b>.merge` only under some `push.default`
-// modes, and comparing it under the others is the same over-refusal one level
-// down: `pushNamesRefspec` correctly says "this push has no refspec", but git
-// still never reads the key. Only `upstream` (and its `tracking` alias) and
-// `simple` consult it — `simple` because it must compare the upstream's name to
-// refuse a mismatch. `current` and `matching` derive the destination refname
-// from the branch alone, and `nothing` refuses outright.
-//
-// Reproduced on git 2.43.0 before fixing, with `branch.feature.merge=refs/heads/main`
-// set and unset: under `current` the dry run reports
-// `refs/heads/feature:refs/heads/feature` BOTH times, while under `upstream` it
-// reports `refs/heads/feature:refs/heads/main` only with the key — so the two
-// modes genuinely differ and only the first is safe to skip (Codex, 2026-08-06).
-//
-// Unset means git's own default, which is `simple` — consulted, so absent reads
-// as "compare". Any unrecognised value also compares, fail-closed: a mode this
-// guard does not know about is not a mode it may declare harmless.
-export function pushDefaultConsultsBranchMerge(value) {
-  const mode = String(value ?? "").trim().toLowerCase();
-  if (mode === "") return true; // unset → git's default `simple`
-  return !["current", "matching", "nothing"].includes(mode);
-}
-
-// Does this push name the repository it pushes to? Git resolves a bare push's
-// remote through `branch.<b>.pushRemote` → `remote.pushDefault` →
-// `branch.<b>.remote` → `origin`, and consults NONE of them once the command
-// names a destination — so an inherited override of those cannot move such a
-// push. Reproduced on git 2.43.0 before this fix, for all three keys: with each
-// set to a second remote, `push --dry-run --porcelain origin main:refs/heads/feature`
-// reports `To <origin.git>` every time, while the bare push under the very same
-// config reports `To <unrelated.git>` every time.
-//
-// `--repo=<dest>` DOES count here, unlike in `pushNamesRefspec`. The asymmetry is
-// git's, not an inconsistency: `--repo` names a repository, so it answers this
-// question and not the refspec one. Confirmed rather than reasoned — `push
-// --repo=origin` under each of the three keys also reports `To <origin.git>`.
-// `pushDestinationToken` already prefers a positional over `--repo`, matching
-// git's documented precedence.
-export function pushNamesDestination(cmd) {
-  // Same fail-closed reason as `pushNamesRefspec`: an unknown value-taking option
-  // leaves its value looking like the positional destination, which would skip
-  // these lookups on a push that really is bare.
-  if (unknownPushOptions(cmd).length > 0) return false;
-  return pushDestinationToken(cmd) !== null;
-}
-
-// The remote-selection lookups `pushNamesDestination` makes irrelevant. The
-// per-remote keys (`remotes`, `remote.*.push`, `remote.*.mirror`) are NOT here:
-// they say where a named remote points and what it sends, which naming that
-// remote does not answer — an inherited `remote.origin.pushurl` still redirects
-// `push origin HEAD:feature`, and the scoped comparison must keep catching it.
-export const REMOTE_SELECTION_LOOKUPS = new Set([
-  "remote.pushDefault",
-  "branch.pushRemote",
-  "branch.remote",
-]);
-
 // Git treats a destination as a URL/path unless it is a bare remote name, and a
 // remote name can contain neither `:` nor a path separator.
 export function destinationLooksLikeUrl(token) {
@@ -1584,409 +1156,6 @@ export function destinationLooksLikeUrl(token) {
   return text.includes(":") || text.includes("/") || text.includes("\\");
 }
 
-// Inline configuration overrides the guard cannot see. Codex's second 2026-07-30
-// review found this bypass: the destination is resolved with SEPARATE `git`
-// calls, which do not inherit `-c` values from the push command, so
-//   git -c remote.origin.pushurl=<CRX Manager URL> push origin HEAD:main
-// sends the push to production while every lookup the guard makes still
-// describes the checkout's ordinary, unrelated remote. Rather than trying to
-// replay arbitrary overrides (`-c` can rewrite pushurl, url.*.pushInsteadOf,
-// remote.pushDefault, and more), deny the form outright: `git -C <repo> push`
-// is inspectable and is the only form this repo's workflows use.
-//
-// `-C` (directory) and `-c` (config) differ only in case, so this must stay
-// case-SENSITIVE — matching `-C` here would deny every legitimate push.
-export function pushUsesInlineConfig(cmd) {
-  const text = String(cmd || "");
-  if (!isGitPush(text)) return false;
-  const prefix = text.match(GIT_PUSH_PREFIX_RE)?.[1] || "";
-  return /(?:^|\s)(?:-c(?:\s|=)|--config-env(?:\s|=))/.test(prefix);
-}
-
-// Environment-variable configuration is the same bypass as `-c`, wearing a
-// different hat. Codex's third 2026-07-30 review found it and a live test
-// confirmed it (2026-07-30): with `origin` configured to point at nowhere.git,
-//   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl \
-//   GIT_CONFIG_VALUE_0=<other repo> git -C <repo> push origin <branch>
-// pushed to the OTHER repo — "* [new branch] feature -> probe" — while every
-// lookup this guard makes still reported the configured `origin`. The variables
-// live in the command string, not in the hook's own environment, so the guard
-// cannot see them by inspecting its own config. Deny the form.
-//
-// Only GIT_CONFIG* is denied. Transport variables (GIT_SSH_COMMAND and friends)
-// change HOW a connection is made, not WHICH repository is written, and the
-// documented keepalive push workaround for this repo sets GIT_SSH_COMMAND —
-// denying it would break the normal push path to close nothing.
-// Four review rounds tried to describe the SYNTAX of setting one of these
-// variables, and each description had a hole:
-//   round 3 — the variables existed at all (`GIT_CONFIG_KEY_0=… git push`)
-//   round 4 — quoting  (`env 'GIT_CONFIG_COUNT=1' git push`)
-//   round 5 — the variable NAME list  (`GIT_CONFIG_PARAMETERS` was not on it)
-//   round 6 — the assignment SYNTAX  (`Set-Item Env:GIT_CONFIG_COUNT 1`,
-//             `${env:GIT_CONFIG_COUNT} = '1'`, `New-Item -Path Env:… -Value …`,
-//             and `[Environment]::SetEnvironmentVariable('GIT_CONFIG_COUNT','1')`,
-//             which the round-6 review did not even name — all verified `false`
-//             against the previous detector on 2026-07-30)
-// A shell has unbounded ways to spell "set a variable", so matching spellings is
-// the wrong shape. The rule is now about the NAMESPACE, not the syntax: if a
-// push command mentions `GIT_CONFIG` as its own identifier ANYWHERE, deny it.
-// There is no legitimate reason for a push command in this repo to name that
-// namespace at all, and the failure directions are not symmetric — a false deny
-// costs one clear error message, a false allow writes to production unreviewed.
-export function pushUsesConfigEnv(cmd) {
-  const text = String(cmd || "");
-  if (!isGitPush(text)) return false;
-  // `(?<![A-Za-z0-9_])` keeps an unrelated `MY_GIT_CONFIG_COUNT` allowed: the
-  // token has to start on its own, not in the middle of a longer identifier.
-  // The trailing group swallows the rest of the variable name so the check does
-  // not care which one it is.
-  return /(?<![A-Za-z0-9_])GIT_CONFIG(?:_[A-Za-z0-9_]*)?(?![A-Za-z0-9])/i.test(text);
-}
-
-// The other half of the same bypass: a variable that was set by an EARLIER,
-// separate command and is still live when the push runs. The push command text
-// is then completely innocent, so `pushUsesConfigEnv` above cannot see it — but
-// the hook inherits the same environment the push will inherit, so it can just
-// look. Codex's sixth 2026-07-30 review asked for this after noting that
-// `Set-Item Env:GIT_CONFIG_COUNT 1` on its own line is not a push command.
-//
-// Fails CLOSED by design: if any `GIT_CONFIG*` variable is set, the guard cannot
-// trust its own destination lookups (it strips them to read the real config) AND
-// the push would carry them, so the two disagree by construction.
-export function environmentCarriesConfigOverride(env) {
-  return Object.keys(env || {}).filter((key) => /^GIT_CONFIG(_|$)/i.test(key));
-}
-
-// …but "fails closed" was doing more work than the danger warranted, and it made
-// the guard unusable in every environment that routes git through a credential
-// proxy (Claude Code on the web sets `GIT_CONFIG_*` to install a `url.…insteadOf`
-// rewrite, so EVERY push from a web/mobile session was denied — 2026-08-04).
-//
-// The asymmetry note above CONFIG_ROOT_ENV_RE already states the principle: a
-// variable written into the push command is dangerous because the guard never
-// sees it, but an INHERITED one reaches this hook and the push alike. So the
-// honest question is not "is any GIT_CONFIG* set?" — it is "does it CHANGE any
-// answer this guard classifies the push from?". That is decidable: read every
-// such answer twice, once with the variables stripped and once exactly as the
-// push will see them, and compare.
-//
-// These are the answers. Between them they fix the destination repository
-// (`remote -v`, which has rewrites already applied), which remote a bare push
-// picks (`remote.pushDefault`, `branch.<b>.pushRemote`, `branch.<b>.remote`), and
-// which refspec it sends (`push.default`, `branch.<b>.merge`, `remote.<n>.push`).
-//
-// Three more are compared by the caller, because they are answers of CLASSIFIERS
-// rather than of git: `executableTransportSettings` over `config --list` (the
-// program that carries the objects decides where they land whatever the URLs
-// say), `rewritesReachGuardedApp` over the rewrite table (compared through the
-// classifier, not as raw text — inherited variables legitimately ADD rewrite
-// lines, and a rewrite that cannot reach the app repo changes no answer here),
-// and `ls-remote --get-url` per literal URL destination (a push naming a URL
-// outright is rewritten at transport time, where `remote -v` cannot see it).
-export function pushDestinationLookupArgs(branch) {
-  const ref = String(branch || "");
-  return [
-    ["remotes", ["remote", "-v"]],
-    ["remote.pushDefault", ["config", "--get", "remote.pushDefault"]],
-    ["push.default", ["config", "--get", "push.default"]],
-    ["remote.*.push", ["config", "--get-regexp", "^remote\\..*\\.push$"]],
-    ["branch.pushRemote", ["config", "--get", `branch.${ref}.pushRemote`]],
-    ["branch.remote", ["config", "--get", `branch.${ref}.remote`]],
-    ["branch.merge", ["config", "--get", `branch.${ref}.merge`]],
-    // `remote.<n>.mirror` is the config spelling of `--mirror`, and it changes
-    // WHICH REFS a bare push sends, not where they go — so it sits oddly among
-    // keys that all fix a destination. It earns its place by failing closed where
-    // the classifier that actually denies it fails open.
-    //
-    // `configuredMirrorRemotes` is the primary deny and already covers BOTH
-    // vectors, inherited and local, because the guard feeds it `config --list`
-    // unioned over both environments. Measured, not assumed: with this line
-    // deleted, every behavioural test below still passes. What differs is the
-    // failure mode. That union is built by a reader that swallows errors and
-    // returns "" — an unreadable config yields no mirror and no denial. This
-    // lookup goes through `answerFor`, where a read that succeeds ambiently and
-    // fails scrubbed is itself a divergence, so an inherited mirror still denies
-    // when the classifier has gone quiet.
-    //
-    // Codex's 2026-08-05 review of this change reported the inherited vector.
-    ["remote.*.mirror", ["config", "--get-regexp", "^remote\\..*\\.mirror$"]],
-  ];
-}
-
-// The same setting, read as a CLASSIFIER rather than as a compared answer. The
-// lookup above catches an inherited mirror; this catches one already sitting in
-// the repository's own config, which diverges from nothing and so would pass
-// that comparison untouched while still dragging main into every bare push.
-//
-// Git makes the remedy unambiguous: under a mirror remote an explicit refspec is
-// a hard error ("--mirror can't be combined with refspecs"), so the ONLY push
-// form that runs is the bare one, and that form always includes main. There is
-// no narrow push to preserve here — which is why the guard denies on this rather
-// than trying to classify a main-bound push it cannot see in the command text.
-// Values follow git's boolean spelling; only a true value mirrors.
-const GIT_TRUE_VALUES = ["true", "yes", "on", "1"];
-// Splitting the line on its first `=`-or-space was wrong in two separate ways,
-// both confirmed by reproduction against real `git config` output rather than
-// reasoned from the docs (Codex's 2026-08-05 review of this PR reported the
-// first). Git's own parser is the specification here:
-//
-//   remote.origin.mirror          valueless boolean -> TRUE  (`--bool` agrees)
-//   remote.origin.mirror=         empty string      -> false (git's own false)
-//   remote.my remote.mirror=true  spaces are legal in a subsection name -> TRUE
-//
-// The old split skipped the first outright ("a bare key carries no value") and
-// mis-keyed the third as `remote.my`, so both spellings sailed past the deny and
-// reached a bare push that carries main. Anchoring on the KEY SHAPE instead of
-// hunting a separator parses all three the same way, and handles both output
-// formats this is fed: `key=value` from `--list`, `key value` from
-// `--get-regexp`. The name capture is greedy so a remote actually named
-// `a.mirror` keeps its full name instead of being truncated at the first match.
-const MIRROR_LINE = /^remote\.(.+)\.mirror(?:=(.*)|[ \t]+(.*))?$/i;
-export function configuredMirrorRemotes(configOutput) {
-  const found = [];
-  for (const raw of String(configOutput ?? "").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line) continue;
-    const match = line.match(MIRROR_LINE);
-    if (!match) continue;
-    // Section and variable names are case-insensitive to git, but a SUBSECTION —
-    // the remote name — is case-sensitive, so it is captured verbatim. The deny
-    // message hands Mason `git config --unset remote.<name>.mirror`, and that
-    // command silently does nothing if the name is not spelled exactly as stored.
-    const remote = match[1];
-    const value = match[2] ?? match[3];
-    // An absent value is the valueless boolean, which git reads as true. An
-    // explicit value still has to spell true — `mirror=` is false.
-    if (value !== undefined && !GIT_TRUE_VALUES.includes(value.trim().toLowerCase())) continue;
-    if (!found.includes(remote)) found.push(remote);
-  }
-  return found;
-}
-
-// Comparing `remote -v` as raw text was too literal, and it left the original
-// bug half-alive (Codex's 2026-08-05 review of this very change). A credential
-// proxy's rewrite re-spells `git@github.com:owner/repo` as
-// `https://github.com/owner/repo` — the SAME repository, reached the same way,
-// which is the entire purpose of that rewrite. The two reads differ as strings,
-// so an ordinary feature-branch push from any SSH-remote checkout in a web
-// session was still denied. Verified by reproduction: an HTTPS-remote checkout
-// (which is what this repo happens to use, and why the first round of testing
-// missed it) was allowed while `git@github.com:` and `ssh://git@github.com/`
-// spellings were both denied.
-//
-// So destinations compare by REPOSITORY IDENTITY, not spelling. Two URLs are the
-// same destination when they name the same repository AND both arrive over a
-// transport from the sanctioned set below. Anything else — a different
-// repository, a proxy host, a downgraded or unrecognised transport — has no
-// canonical form here and falls back to its raw text, which then differs from
-// the other side and denies. Fails CLOSED by construction: `null` from
-// `canonicalRepoId` (unparseable, malformed escape, no repository named) also
-// falls back to raw text rather than comparing equal to anything.
-// Reworked 2026-08-05 (Mason's call) after FOUR consecutive review findings in
-// three rounds, each a new way two different destinations collapsed to one key:
-// the SSH re-spelling gap, a dropped port, a namespace collision between keys and
-// their raw fallback, and a lowercased path that merged `Team/Repo` with
-// `team/repo` on case-sensitive hosts. A fifth was self-inflicted — the port rule
-// would have denied `ssh://git@ssh.github.com:443/…`, GitHub's own documented
-// endpoint for networks blocking port 22.
-//
-// The leaks were characteristic of the approach, not bad luck: reconstructing
-// "same repository" from URL text means re-deriving, by hand, every rule git and
-// the host apply — case, ports, escapes, aliases, IDN, traversal. Get one wrong
-// and two destinations merge.
-//
-// So stop trying to prove two URLs are the same place, and prove the opposite
-// instead: that NOTHING about the destination moved. Each push line emits two
-// components — the gate classification (`guarded-app` / `unrelated`, from
-// `urlIsGuardedApp`, which fails CLOSED on anything it cannot resolve) and a
-// spelling key from `pushDestinationKey` — and the comparison denies when either
-// changes.
-//
-// An earlier version of this rework compared the classification ALONE, reasoning
-// that a port or a path case may differ freely as long as neither side is the
-// production repo. That was fail-open twice over and is documented at
-// `pushDestinationKey`: `urlIsGuardedApp` is path-only by design, so an off-HOST
-// rewrite read as production on both sides and compared equal; and a
-// feature-branch push is not gated at all, so this comparison is the only thing
-// protecting it.
-//
-// What that means concretely: two different non-GitHub URLs produce two different
-// raw keys and DENY, even when neither is the production repo — a changed host,
-// path case, SSH login user, port, or scheme all survive into the key. Only the
-// allow-listed GitHub spellings collapse. A destination that is unreadable or
-// fails closed keys off its own raw text, so it stays distinct from every
-// resolvable destination rather than quietly matching one.
-export function pushDestinationDecisions(remoteVerboseOutput) {
-  return String(remoteVerboseOutput ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    // `git remote -v` prints `<name> <url> (fetch|push)`; only push lines decide
-    // where objects go. Sorted, so remote ordering is not mistaken for a change.
-    .filter((line) => /\(push\)\s*$/.test(line))
-    .map((line) => {
-      // Parsed by shape, not by splitting on whitespace. Splitting put the
-      // literal `(push)` marker into the URL slot whenever the URL was missing,
-      // so a malformed line classified as UNRELATED — failing open on exactly
-      // the input that should fail closed. Caught by this function's own
-      // empty-destination test before it shipped.
-      const fields = /^(\S+)\s+(.*)\s+\(push\)\s*$/.exec(line);
-      if (!fields) return `${line} guarded-app`;
-      return `${fields[1]} ${pushDestinationDecision(fields[2].trim())}`;
-    })
-    .sort()
-    .join("\n");
-}
-
-// The spelling half of a destination decision. Deliberately NOT `urlIsGuardedApp`,
-// which is path-only on purpose ("decide on the path, whatever host precedes it")
-// so that an SSH alias or a mirror of the production repo still gates. That is
-// right for gating and wrong for comparison: it returns true for
-// `https://evil.example.com/masonwells1/CRX_Manager_V1.0`, so an inherited rewrite
-// moving a push to another HOST folded to the same answer on both sides, and a
-// comparison that sees no change allows. Failing closed there fails OPEN here.
-// Found by running the real guard against a real off-host rewrite; the unit tests
-// and three review rounds all missed it.
-//
-// So spelling collapses in exactly one place — GitHub, whose repository paths are
-// genuinely case-insensitive and whose alternate hostnames GitHub itself
-// publishes (`ssh.github.com:443` is its documented port-22-blocked endpoint).
-// That covers the case this rework exists for: a credential proxy re-spelling
-// `git@github.com:owner/repo` as `https://github.com/owner/repo`, the same
-// repository reached the same way.
-//
-// Everything else compares by RAW TEXT, so a changed host, path case, SSH login
-// user, or port all differ and deny. Both reviewers of this change were right and
-// were asking for the same boundary from opposite sides: CodeRabbit, that a
-// lowercased path merges `Team/Repo` with `team/repo` on case-sensitive servers;
-// Codex, that a dropped SSH user merges `alice@host:repo` with `bob@host:repo`.
-// Neither can happen now, because off GitHub nothing is normalised at all.
-//
-// The cost is a false DENIAL if a proxy re-spells a non-GitHub remote. That is the
-// safe direction, it does not affect this repo (whose remote is GitHub), and the
-// deny message says which lookup disagreed.
-// The GitHub carve-out is an ALLOW-LIST of spellings, not "any URL whose path
-// canonicalizes under github.com". Keying on the canonical id alone was still too
-// loose (CodeRabbit, 2026-08-05): `canonicalRepoId` reads `URL.hostname`, which
-// drops the port, and it does not look at the scheme at all — so
-// `https://github.com:8443/…`, `http://github.com/…` and `git://github.com/…` all
-// produced the SAME key as plain HTTPS. An inherited rewrite from HTTPS to any of
-// them changed the endpoint or downgraded the transport while the comparison saw
-// no change. Same failure as the off-host hole one round earlier: a normalizer
-// built for gating, reused for comparison, discards exactly what comparison needs.
-//
-// Only these spellings collapse, because only these are GitHub reached the normal
-// way: HTTPS on the implicit or explicit 443, SSH on the implicit or explicit 22,
-// `ssh.github.com` on an explicit 443 (GitHub's documented endpoint for networks
-// blocking 22), and the scp-style `git@github.com:owner/repo`. The SSH user must
-// be absent or `git`, which is the only one GitHub accepts. Everything else —
-// other scheme, other port, other host, unparseable — returns a raw key.
-const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
-function githubSpelling(text) {
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text)) {
-    let parsed;
-    try { parsed = new URL(text); } catch { return false; }
-    const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
-    const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
-    if (scheme === "https") return GITHUB_HOSTS.has(host) && (parsed.port === "" || parsed.port === "443");
-    if (scheme === "ssh") {
-      if (parsed.username && parsed.username.toLowerCase() !== "git") return false;
-      if (GITHUB_HOSTS.has(host)) return parsed.port === "" || parsed.port === "22";
-      // The alternate host is only GitHub on its documented port.
-      if (host === "ssh.github.com") return parsed.port === "443";
-    }
-    return false;
-  }
-  // scp-style `[user@]host:path` carries no scheme or port of its own.
-  const scp = /^(?:([^@\s/\\]+)@)?([^\s:/\\]{2,}):(?!\/)[\s\S]+$/.exec(text);
-  if (!scp) return false;
-  if (scp[1] && scp[1].toLowerCase() !== "git") return false;
-  return GITHUB_HOSTS.has(scp[2].toLowerCase().replace(/\.$/, ""));
-}
-// Exported because the guard resolves a literal URL destination separately, and
-// that path had the SAME boolean-only fail-open this rework removed from
-// `remote -v` (Codex, 2026-08-05): a `git push <url>` whose inherited rewrite
-// moved it off-host but kept the production path classified as `guarded-app` on
-// both sides and compared equal. One helper, both paths.
-export function pushDestinationDecision(url) {
-  return `${urlIsGuardedApp(url) ? "guarded-app" : "unrelated"} ${pushDestinationKey(url)}`;
-}
-function pushDestinationKey(url) {
-  const text = String(url ?? "").trim();
-  // Namespaced, so a raw URL can never collide with a canonical id.
-  if (githubSpelling(text)) {
-    const id = canonicalRepoId(text);
-    if (id) return `github ${id}`;
-  }
-  return `raw ${text}`;
-}
-
-
-// Compare two answer sets. A key whose value differs — including one side
-// erroring while the other does not — means the inherited configuration moves
-// this push somewhere the guard's own lookups would not have seen, so the caller
-// denies. Identical answers (including identically absent, and identically
-// failing) prove the variables cannot redirect this push.
-export function divergentPushLookups(scrubbed, ambient) {
-  const keys = [...new Set([
-    ...Object.keys(scrubbed || {}),
-    ...Object.keys(ambient || {}),
-  ])].sort();
-  return keys.filter((key) => String(scrubbed?.[key]) !== String(ambient?.[key]));
-}
-
-// `GIT_CONFIG*` names a config FILE. These name the DIRECTORY git looks in for
-// the global config, which reaches the same place by a longer road: point HOME
-// at a directory holding a `.gitconfig` with `url.<CRX Manager URL>.pushInsteadOf`
-// and an ordinary-looking `git push origin main` lands in production.
-//
-// Verified against git 2.54 on 2026-07-30, in a scratch repo whose only remote
-// was a harmless local path: with HOME overridden, `git config --get-regexp
-// '^url\..*insteadof$'` returned NOTHING in the guard's environment and the
-// rewrite in the push's environment, and the objects arrived in the rewritten
-// destination. Codex's seventh 2026-07-30 review found this.
-//
-// Note the asymmetry that decides the shape of the fix: this only works when the
-// override reaches the PUSH but not the GUARD, i.e. when it is written into the
-// command itself. A variable set by an earlier, separate command is inherited by
-// both, so the guard reads the very config the push will use and classifies the
-// destination correctly — which is why this half needs no environment check, and
-// why `environmentCarriesConfigOverride` above stays scoped to `GIT_CONFIG*`.
-// The lookbehind excludes a preceding path separator, and that exclusion is
-// load-bearing rather than cosmetic. The match is case-insensitive (PowerShell
-// spells it `Env:userprofile`) and matches bare text anywhere in the command, so
-// before 2026-08-05 the plain Unix path `/home/user/repo` matched `HOME` — which
-// denied `git -C /home/user/CRX_Manager_V1.0 push`, the exact form this guard's
-// own denial messages tell you to use, on every Linux web/mobile session. A
-// variable name is never preceded by `/` or `\`, and no override spelling puts
-// one there, so excluding that position drops the false positive without
-// weakening any real case: the inline, quoted, and PowerShell forms below are
-// preceded by start-of-string, whitespace, a quote, or `:`.
-//
-// `-` joined it on 2026-08-06, for the same reason one round later. That fix
-// covered `/home/…` but not a path SEGMENT spelled with hyphens, and this
-// environment's scratch directories are named exactly that way
-// (`/tmp/claude-0/-home-user-CRX-Manager-V1-0/…`), so `git -C <scratch path>
-// push` — again the form the denials recommend — was refused; it is what blocked
-// the scratch-repo reproduction of the refspec fix in this same change. A shell
-// assignment name cannot contain `-` at all, and no override spelling below puts
-// one on either side of the name, so a hyphen adjacent to the match means the
-// text is part of a path or a branch name rather than a variable.
-//
-// Only VARIABLE SYNTAX counts (Mason, 2026-10-29: accept holes over false
-// alarms), so "home" or "HOME" in a commit message pushed in the same command is
-// prose: an assignment `NAME=…` (also inside `env 'NAME=…'`), a POSIX reference
-// `$NAME` / `${NAME}`, and — case-insensitively, as Windows names are —
-// PowerShell's `$env:NAME` / `Env:NAME` and cmd's `set NAME=…` (Luna, PR #1195).
-const CONFIG_ROOT_ENV_NAMES = "HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|XDG_CONFIG_HOME|GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_CEILING_DIRECTORIES|GIT_DISCOVERY_ACROSS_FILESYSTEM";
-const CONFIG_ROOT_ENV_RE = new RegExp(
-  `(?<![A-Za-z0-9_/\\\\-])(?:${CONFIG_ROOT_ENV_NAMES})\\s*=|\\$\\{?(?:${CONFIG_ROOT_ENV_NAMES})(?![A-Za-z0-9_-])`);
-const CONFIG_ROOT_WINDOWS_ENV_RE = new RegExp(
-  `(?:\\$?env:|\\bset\\s+["']?)(?:${CONFIG_ROOT_ENV_NAMES})(?![A-Za-z0-9_-])`, "i");
-export function pushUsesConfigRootEnv(cmd) {
-  const text = String(cmd || "");
-  if (!isGitPush(text)) return false;
-  return CONFIG_ROOT_ENV_RE.test(text) || CONFIG_ROOT_WINDOWS_ENV_RE.test(text);
-}
 
 // The general net behind both of the specific rules above. A push command that
 // sets ANY environment variable inline is uninspectable on principle: the guard
@@ -2051,42 +1220,6 @@ export function shellSegments(cmd) {
   return segments;
 }
 
-// `NAME=value`, `NAME="value with spaces"`, and `'NAME=value'` are all one token
-// by the time this sees it. Returns null when the token is not an assignment.
-function inlineAssignment(token) {
-  let text = String(token ?? "");
-  const outer = /^(['"])([\s\S]*)\1$/.exec(text);
-  if (outer) text = outer[2];
-  const split = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/.exec(text);
-  if (!split) return null;
-  let value = split[2];
-  const quoted = /^(['"])([\s\S]*)\1$/.exec(value);
-  if (quoted) value = quoted[2];
-  return { name: split[1], value: value.trim() };
-}
-export function pushSetsInlineEnv(cmd) {
-  const text = String(cmd || "");
-  const names = [];
-  for (const push of eachPush(text)) {
-    // Assignments sit BEFORE the git binary, which is outside what
-    // GIT_PUSH_PREFIX_RE captures (that starts after it). Take the text up to the
-    // binary, trimmed to the current segment so an earlier chained command's
-    // arguments are not misread as this push's prefix.
-    const prefix = shellSegments(text.slice(0, push.index)).pop() || "";
-    // splitShellArgs is not usable here: it only treats a quote as grouping when
-    // the token STARTS with one, so `GIT_SSH_COMMAND="ssh -o Foo=1"` came apart at
-    // the space and the fragment `Foo=1"` read as a second assignment. A token is
-    // really a run of unquoted characters and quoted spans, in any order.
-    for (const token of prefix.match(/(?:[^\s'"]|'[^']*'|"[^"]*")+/g) || []) {
-      const assignment = inlineAssignment(token);
-      if (!assignment) continue;
-      const shape = INLINE_ENV_ALLOWED.get(assignment.name.toUpperCase());
-      if (!shape || !shape.test(assignment.value)) names.push(assignment.name);
-    }
-  }
-  return names;
-}
-
 // The asymmetry argument above — "a variable set by an earlier command is
 // inherited by BOTH, so the guard reads what the push will read" — is true of
 // variables that select CONFIGURATION, and false of variables that select an
@@ -2104,37 +1237,12 @@ const TRANSPORT_ENV_NAMES = [
   "GIT_ASKPASS", "SSH_ASKPASS", "GIT_EXEC_PATH", "GIT_CREDENTIAL_HELPER",
   "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "GIT_TERMINAL_PROMPT",
 ];
-const TRANSPORT_ENV_RE = new RegExp(
-  `(?<![A-Za-z0-9_])(${TRANSPORT_ENV_NAMES.join("|")})(?![A-Za-z0-9_])`, "gi",
-);
-// Only an ASSIGNMENT counts (`PATH=…`, `export PATH=…`, `$env:Path = …`,
-// `$env:PATH += …`). Matching the bare word refused every push whose commit
-// message said "path" (Mason, 2026-10-29: accept holes over false alarms).
-const EXECUTABLE_SEARCH_ENV_RE = /(?<![A-Za-z0-9_])(PATH|PATHEXT)(?=\s*\+?=(?!=))/gi;
 function transportValueIsAllowed(name, rawValue) {
   const shape = INLINE_ENV_ALLOWED.get(String(name).toUpperCase());
   if (!shape) return false;
   let value = String(rawValue ?? "");
   const quoted = /^(['"])([\s\S]*)\1$/.exec(value.trim());
   return shape.test(quoted ? quoted[2].trim() : value.trim());
-}
-export function pushUsesTransportEnv(cmd) {
-  const text = String(cmd || "");
-  if (!isGitPush(text)) return [];
-  const offenders = new Set();
-  for (const match of text.matchAll(TRANSPORT_ENV_RE)) {
-    // `NAME=value`, `export NAME=value`, and PowerShell's `$env:NAME = "value"`
-    // all leave `=` next. Anything else that merely NAMES one of these (`echo
-    // $GIT_SSH_COMMAND`, a value built up elsewhere) is unverifiable, so it is
-    // reported too — fail closed, as everywhere else in this guard.
-    const assign = /^\s*=\s*("[^"]*"|'[^']*'|[^\s;&|]*)/.exec(text.slice(match.index + match[1].length));
-    if (!assign || !transportValueIsAllowed(match[1], assign[1])) offenders.add(match[1]);
-  }
-  // Unlike configuration variables, an executable search path changed in an
-  // earlier segment is not shared safely with this already-running guard. It
-  // controls which `git` and `git-remote-*` program the later push executes.
-  for (const match of text.matchAll(EXECUTABLE_SEARCH_ENV_RE)) offenders.add(match[1]);
-  return [...offenders];
 }
 // And the same names arriving from the shell the push will inherit. Unlike
 // GIT_CONFIG*, an inherited transport variable is NOT neutralised by the guard
@@ -2147,9 +1255,7 @@ export function pushUsesTransportEnv(cmd) {
 // environment of every hook it runs, so an ordinary push from a session that
 // started under a git hook inherits it from git itself — its presence carries no
 // signal at all, and treating it as one denied every ordinary feature-branch
-// push (caught by the tracked guard suite before this shipped). Written into a
-// command it is still a deliberate act, so `pushUsesTransportEnv` keeps checking
-// it. The residual risk is stated rather than hidden: a GIT_EXEC_PATH planted in
+// push (caught by the tracked guard suite before this shipped). The residual risk is stated rather than hidden: a GIT_EXEC_PATH planted in
 // an earlier segment is indistinguishable from git's own export, so this rule
 // cannot see it.
 //
@@ -2161,9 +1267,7 @@ export function pushUsesTransportEnv(cmd) {
 // guard's own process could set it in the inherited environment, so the code
 // execution it grants is not a capability the attacker gained here.) Claude Code
 // on the web exports GIT_ASKPASS for its credential proxy, so treating presence
-// as intent denied every push from a web or mobile session. Written into the
-// command it is still a deliberate act and still denied by
-// `pushUsesTransportEnv`; only the inherited read is relaxed.
+// as intent denied every push from a web or mobile session.
 const INHERITED_CREDENTIAL_ENV_NAMES = new Set([
   "GIT_ASKPASS", "SSH_ASKPASS", "GIT_CREDENTIAL_HELPER",
 ]);
@@ -2186,51 +1290,6 @@ export function environmentCarriesTransportOverride(env, trustedGitExecPath) {
     }
     return !transportValueIsAllowed(key, env[key]);
   });
-}
-
-// URL rewrites are the other way inline-free config can redirect a push:
-//   url.<CRX Manager URL>.pushInsteadOf = crx:
-// turns an innocuous-looking `git push crx: main` into a production push, and
-// the destination token alone ("crx:") classifies as unguarded. Accepts
-// `git config --get-regexp '^url\..*insteadof$'` output. Any rewrite whose BASE
-// is the app repo makes this checkout capable of reaching production under an
-// alias, so the gate applies. Fails CLOSED on unparseable input.
-export function rewritesReachGuardedApp(configOutput) {
-  const lines = String(configOutput ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  return lines.some((line) => {
-    // `url.<base>.insteadof <alias>` — the base is everything between the
-    // leading `url.` and the trailing `.insteadof`/`.pushinsteadof` key part.
-    const key = line.split(/\s+/)[0] || "";
-    const match = key.match(/^url\.(.+)\.(?:push)?insteadof$/i);
-    if (!match) return true; // fail CLOSED: a line we cannot parse gates the push
-    return rewriteBaseReachesGuardedApp(match[1]);
-  });
-}
-// insteadOf is a PREFIX substitution, not an exact-URL alias: git replaces the
-// matched alias text with the base and keeps whatever followed. So
-//   url.git@github.com:masonwells1/.insteadOf = ghm:
-// turns `git push ghm:CRX_Manager_V1.0.git` into a production push while the base
-// itself is not a repository URL at all — comparing the base to the app repo by
-// identity returned false and the gate was skipped (Codex's thirteenth 2026-07-30
-// review, confirmed by its own read-only expansion). A base is dangerous when the
-// app repo's canonical identity STARTS at it: an exact match, or a shorter path
-// (`github.com/masonwells1`) that any suffix can complete. Bases that name no
-// repository at all (`https://github.com/`, a bare host) fail CLOSED. Comparing
-// canonical ids rather than raw text gates slightly more than git would rewrite,
-// which is the safe direction.
-function rewriteBaseReachesGuardedApp(rawBase) {
-  const base = String(rawBase ?? "").trim().replace(/\/+$/, "");
-  if (urlIsGuardedApp(base)) return true;
-  const id = canonicalRepoId(base);
-  if (!id) return true;
-  // Path, not host — an aliased base (`github-crx:masonwells1/`) rewrites to the
-  // production repo exactly like `git@github.com:masonwells1/` does.
-  const p = idPath(id);
-  // Git substitutes raw prefixes, not path segments. That means both an owner
-  // prefix (`.../masonwells1/`) and a partial repository name
-  // (`.../masonwells1/CRX_`) can be completed by the destination's suffix.
-  // Classify any non-empty canonical path prefix of a guarded repository path.
-  return p !== "" && GUARDED_REPO_PATHS.some((guarded) => guarded.startsWith(p));
 }
 
 // Extract rewrite-setting names from `git config --list` output. Backup and
@@ -3093,19 +2152,6 @@ export function ghApiMergeRequest(command) {
   return match ? { selector: match[3], repo: `${match[1]}/${match[2]}`, auto: false } : null;
 }
 
-// The gh analogue of pushHiddenByShellComposition. shellArgvWord models POSIX
-// quoting, which is the right reading for a value; it deliberately does not model
-// PowerShell's backtick or cmd.exe's caret, and those are live here — PowerShell
-// is the fleet's shell. ``gh pr me`rge 123 --admin --squash`` and
-// `cmd /c "gh api --met^hod=DELETE …"` reach the program as an ordinary merge and
-// an ordinary DELETE, while every parser above reads an unknown word (Codex sol,
-// 2026-09-08, finding 3).
-//
-// Only the backtick and the caret are removed here. Quotes are NOT: erasing a
-// quote is the blanket normalization CodeRabbit objected to on PR #630, and
-// `gh api --method='P"OST'` must keep reading as the non-POST it is. The caller
-// refuses rather than analyses, for the same reason the push side does — an
-// analysis of text the shell will not run proves nothing.
 // Comparing only WHETHER each reading parses as a merge is not enough, and that
 // was the first spelling of this helper (Codex sol, 2026-09-08, SEC-002).
 // ``gh pr merge 123 --ad`min --squash`` parses as a merge BOTH ways — the raw
@@ -3120,37 +2166,6 @@ function sameMergeRequest(a, b) {
     && a.repo === b.repo
     && a.auto === b.auto
     && a.admin === b.admin;
-}
-
-export function ghHiddenByShellComposition(cmd) {
-  const text = String(cmd || "");
-  const unwrapped = text
-    .replace(/`\r?\n/g, "")
-    .replace(/\^\r?\n/g, "")
-    .replace(/`(?=[^\r\n])/g, "")
-    .replace(/\^(?=[^\r\n])/g, "");
-  if (unwrapped === text) return false;
-  // Compared over EVERY command in the chain, not the whole text. The parsers
-  // read the first command they find, so `gh pr merge 1 --squash; gh pr me`rge 2
-  // --admin` looked identical both ways while PowerShell ran an administrator
-  // merge second (Codex sol, 2026-09-14). Each reading becomes the SET of
-  // operations its segments parse to; any operation in one set and not the
-  // other is a difference in what the command does.
-  const operations = (reading) => new Set(splitCommandSegments(reading).map((segment) => {
-    const shape = (request) => (request
-      ? [request.selector, request.repo, request.auto, request.admin]
-      : null);
-    return JSON.stringify([
-      shape(ghMergeRequest(segment)),
-      shape(ghApiMergeRequest(segment)),
-      ghApiMutates(segment),
-    ]);
-  }));
-  const raw = operations(text);
-  const shell = operations(unwrapped);
-  if (raw.size !== shell.size) return true;
-  for (const operation of shell) if (!raw.has(operation)) return true;
-  return false;
 }
 
 // Top-level command segmentation, quote-aware.
@@ -3709,169 +2724,25 @@ function finishNested(inner, text) {
     .filter((entry) => entry.windowExceeded || (entry.text && entry.text !== text));
 }
 
-// Text built at run time — a `$` variable or substitution, or a backtick — that a
-// shell or evaluator will expand before it runs. `bash -c '$0 pr merge 1 --admin'
-// gh` names neither gh nor git in its inner text, so the gh/git filter below
-// dropped it and the Claude merge guard allowed it (independent Opus review of
-// PR #795).
-const RUNTIME_TEXT_RE = /[$`]/;
-const GATED_VERB_RE = /(?:^|[^\w-])(?:merge|push|api|alias)(?:$|[^\w-])/i;
-
-// Does any command in `text` get its PROGRAM NAME at run time? `g$1 pr merge …`,
-// `${P}h …`, `$P …`, `` `echo g`h … ``, `& $p …` never spell gh or git, so the
-// gh/git test above cannot see them and both Claude guards allowed every one
-// (found testing round 2 of the independent review of PR #795). A variable in
-// an ARGUMENT (`echo $HOME`, `ForEach-Object { $_.Name }`) is not this case.
-//
-// The program is found with programCandidates, so a wrapper's own options and
-// values come before it: stopping at the first non-wrapper word read the `30`
-// in `timeout 30 $P push origin HEAD:main --force` as the program (Codex luna,
-// PR #795, 2026-09-28 round 2, finding 4). A PowerShell assignment
-// (`$b = git branch`, `$p='gh'`) assigns; its `$` word is not a program.
-const POWERSHELL_ASSIGNED_RE = /^\$\{?[A-Za-z_][\w:]*\}?$/;
-const POWERSHELL_ASSIGN_OP_RE = /^[+\-*/%]?=$/;
-const POWERSHELL_ASSIGNMENT_WORD_RE = /^\$\{?[A-Za-z_][\w:]*\}?[+\-*/%]?=/;
-//
-// A raw word split cut `x=$(echo "$f")` at its space and offered `"$f")` as a
-// program, refusing an ordinary read loop (Mason's 2026-10-02 cleanup, fixed
-// 2026-10-04). So each `$( … )` is read as one word whose inside is checked on
-// its own: the text is regrouped, never hidden, and a program computed in there
-// is still found. Blanking single-quoted text first was tried and dropped after
-// two Luna rounds on PR #882: shells disagree on where a quote ends (backticks,
-// `$'…'`, here-strings, curly quotes, quotes nested in `"$( )"`), so blanking hid
-// real programs. awk's `'{print $2}'` is therefore still refused, as before.
-//
-// Past NESTED_MAX_DEPTH a substitution is not unwrapped, so one still left there
-// counts as built at run time: reading it as plain words skipped the assignment
-// `x=$($P` and allowed `x=$(x=$(x=$(x=$(x=$($P pr merge 1 --admin)))))`
-// (CodeRabbit, PR #882). An arithmetic `$(( … ))` there is not a command and
-// does not count; a backtick or an unclosed `$(` still does.
-//
-// A `$(` the reader cannot close is read as running to the end of the text,
-// and that tail is checked like any other substitution: a quoted `'$('` opened
-// a quote that never closed, so `echo '$('; x=$($P pr merge 1 --admin)` hid the
-// real substitution after it (CodeRabbit, PR #882). Refusing every unclosed
-// `$(` instead would refuse the everyday `git commit -m "$(cat <<'EOF' … EOF )"`
-// whenever the message holds an apostrophe, since the reader does not know
-// heredocs.
-function programBuiltAtRuntime(text, runtimeText = RUNTIME_TEXT_RE, depth = 0) {
-  const source = String(text || "");
-  const split = splitSubstitutions(source);
-  if (depth >= NESTED_MAX_DEPTH) {
-    return source.includes("`") || split.inners.length > 0 || /\$\((?![()])/.test(split.outer) ||
-      programWordBuiltAtRuntime(source, runtimeText);
-  }
-  if (split.inners.some((inner) => programBuiltAtRuntime(inner, runtimeText, depth + 1))) return true;
-  if (split.unclosed !== undefined && programBuiltAtRuntime(split.unclosed, runtimeText, depth + 1)) return true;
-  return programWordBuiltAtRuntime(split.outer, runtimeText);
-}
-
-// Replaces each outermost `$( … )` with `$()` and returns the inside texts.
-// A `$(` that never closes, and everything after it, stays in the outer text
-// as it was, and the text after it is returned as `unclosed`; the substitutions
-// before it are still returned, so a quoted `'$('` later in the command cannot
-// hide an earlier one (CodeRabbit, PR #882).
-//
-// An arithmetic `$(( … ))` is not a command: reading `i=$(($i+1))` as one made
-// `$i+1` a run-time program and refused `i=$(($i+1)); git status` (Codex
-// connector, PR #882). Its text stays in place, read as it was before this split
-// existed, and only a `$( … )` nested inside it is taken out and checked.
-function splitSubstitutions(text) {
-  let outer = "";
-  const inners = [];
-  for (let index = 0; index < text.length; index += 1) {
-    if (text[index] === "\\" || text[index] === "`") {
-      outer += text.slice(index, index + 2);
-      index += 1;
-      continue;
-    }
-    if (text[index] !== "$" || text[index + 1] !== "(") { outer += text[index]; continue; }
-    let depth = 0;
-    let quote = "";
-    let end = -1;
-    for (let at = index + 1; at < text.length; at += 1) {
-      const char = text[at];
-      if (quote) { if (char === quote) quote = ""; else if (char === "\\") at += 1; continue; }
-      if (char === "'" || char === '"') { quote = char; continue; }
-      if (char === "\\") { at += 1; continue; }
-      if (char === "(") depth += 1;
-      else if (char === ")" && --depth === 0) { end = at; break; }
-    }
-    if (end < 0) return { outer: outer + text.slice(index), inners, unclosed: text.slice(index + 2) };
-    if (text[index + 2] === "(" && text[end - 1] === ")") {
-      outer += "$((";
-      index += 2;
-      continue;
-    }
-    inners.push(text.slice(index + 2, end));
-    outer += "$()";
-    index = end;
-  }
-  return { outer, inners };
-}
-
-function programWordBuiltAtRuntime(text, runtimeText) {
-  for (const segment of splitCommandSegments(text)) {
-    let words = splitShellWordsRaw(segment);
-    if (POWERSHELL_ASSIGNED_RE.test(words[0] ?? "") && POWERSHELL_ASSIGN_OP_RE.test(words[1] ?? "")) {
-      words = words.slice(2);
-    } else if (POWERSHELL_ASSIGNMENT_WORD_RE.test(words[0] ?? "")) {
-      words = words.slice(1);
-    }
-    for (const candidate of programCandidates(words)) {
-      // A word with whitespace in it is a quoted STRING (the quote-keeping reading
-      // of `pwsh -Command "… { $_.Name }"`), not a program name.
-      const program = words[candidate];
-      if (runtimeText.test(program) && !/\s/.test(shellArgvWord(program))) return true;
-    }
-  }
-  return false;
-}
-
 // Every nested command, at any depth, that could reach a merge/push/GitHub gate.
 // `tooDeep` means the nesting went past what the guard is willing to unwrap; the
 // callers refuse such a command rather than inspect part of it.
 //
-// `grouping: false` leaves out the `{ }` / `( )` reading. The push guard passes
-// it: its own composition check already refuses a push behind that syntax, and
-// the reading would pre-empt that check's more specific denials (a
-// `${env:GIT_CONFIG_COUNT} = '1'; git push` must still be refused as a
-// GIT_CONFIG redirect).
-//
-// `computed` is true when a shell or evaluator (not a mere `{ }`/`( )` block)
-// is handed text it will expand at run time, and either the command mentions
-// gh or git anywhere or the inner command's program name is itself built at
-// run time. The guard cannot read what that text becomes, so callers refuse it.
+// `grouping: false` leaves out the `{ }` / `( )` reading, for the push guard.
 export function expandNestedCommands(command, { grouping = true } = {}) {
   const outer = String(command || "");
   const found = [];
   const seen = new Set([outer.trim()]);
-  const outerMentionsGhOrGit = mentionsGhOrGit(outer);
-  // The TOP-LEVEL command's own program can be built at run time too:
-  // `$p='gh'; & $p pr merge 123 --admin` in PowerShell, `P=gh; $P pr merge …` in
-  // POSIX. Only nested text was checked, so the Claude merge guard allowed it
-  // (Codex luna, PR #795, 2026-09-28 round 2, finding 3). Refused when the
-  // command names gh or git, or a merge, push or API call. Only `$` is looked
-  // for here: a top-level backtick (``g`h``, `` `echo g`h ``) is refused by the
-  // composition checks, whose denial names the actual cause.
-  let computed = programBuiltAtRuntime(outer, /\$/) && (outerMentionsGhOrGit || GATED_VERB_RE.test(outer));
   let frontier = [outer];
   for (let depth = 1; frontier.length; depth += 1) {
     const next = [];
     for (const text of frontier) {
       for (const entry of nestedCommandsOneLevel(text, { grouping })) {
-        if (entry.windowExceeded) return { commands: found, tooDeep: true, computed };
-        // The inner text's own gh/git mention counts too: a decoded
-        // `-EncodedCommand` payload such as `$f='--admin'; gh pr merge 1 $f`
-        // names gh only once decoded (CodeRabbit, PR #851, 2026-09-30).
-        if (!entry.grouped && RUNTIME_TEXT_RE.test(entry.text) &&
-            (outerMentionsGhOrGit || mentionsGhOrGit(entry.text) || programBuiltAtRuntime(entry.text))) {
-          computed = true;
-        }
+        if (entry.windowExceeded) return { commands: found, tooDeep: true };
         if (seen.has(entry.text)) continue;
         seen.add(entry.text);
         if (depth > NESTED_MAX_DEPTH || seen.size > NESTED_MAX_COMMANDS + 1) {
-          return { commands: found, tooDeep: true, computed };
+          return { commands: found, tooDeep: true };
         }
         next.push(entry.text);
       }
@@ -3891,7 +2762,7 @@ export function expandNestedCommands(command, { grouping = true } = {}) {
     }
     frontier = next;
   }
-  return { commands: found, tooDeep: false, computed };
+  return { commands: found, tooDeep: false };
 }
 
 // The text left once a shell consumes its quoting and escapes: bash `\`, cmd
@@ -3917,15 +2788,6 @@ export function rawMergeEndpointCount(segment) {
 // Does a segment name the GraphQL mergePullRequest mutation, however quoted?
 export function mentionsMergePullRequest(segment) {
   return /\bmergePullRequest\b/i.test(`${segment} ${withoutShellQuoting(segment)}`);
-}
-
-export function nestedComputedDenial(prefix) {
-  return (
-    `${prefix}: this command runs a program whose name, or hands another shell or evaluator text that, ` +
-    "is built at run time (a `$` variable, a substitution, or a backtick) in a command that involves gh, " +
-    "git, a merge or a push. The guard cannot read what that text will become, so it is refused rather " +
-    "than guessed at. Spell the gh or git command literally and run it directly."
-  );
 }
 
 // A command FED to an interpreter on its input, rather than passed as an
@@ -4299,179 +3161,6 @@ export function commandFedToInterpreter(command) {
   });
 }
 
-// Could this command's text reach a merge, a push, or a GitHub call at all?
-// @speed-bump — the two fail-closed refusals above (a program or shell text built at run
-// time, and text fed to an interpreter on its input) are only worth their cost
-// when it could. Before 2026-10-18 they ran on every command, and refused an
-// ordinary `node - <<'EOF'` script, `python -` and `eval "$(fnm env)"` in about
-// 50 sessions in two weeks (adversarial review, 2026-10-18) — while
-// `node scratch.mjs` and `bash payload.sh`, which run the same arbitrary code
-// from a file, were always allowed. So these refusals are a speed bump for
-// commands that visibly involve gated words, not a boundary; the boundary for
-// merges is the merge gate's own checks on every readable `gh pr merge`, and
-// GitHub's branch protection.
-//
-// "Could reach" is read from every view the guards already use (as written,
-// with shell quoting consumed, and as argv words), over the command AND every
-// nested command it unwraps (a decoded -EncodedCommand payload included):
-//   • a gated WORD: gh, git, merge, push, api, alias, graphql, pulls, refs, a
-//     REST client (curl, wget, irm, iwr, Invoke-RestMethod/WebRequest), or an
-//     encoded-command / base64 marker whose payload the text does not show;
-//   • or an OBFUSCATION marker (char codes, escapes, decoding, reversing,
-//     joining) together with a way to run a program or reach the network,
-//     because that pair is how a gated word is hidden from the first test.
-const GATED_WORD_RE = /(?:^|[^\w-])(?:gh|git|merge|push|api|alias|graphql|pulls|refs|curl|wget|irm|iwr|invoke-restmethod|invoke-webrequest|encodedcommand|frombase64string|base64|atob)(?:$|[^\w-])|api\.github|(?:^|\s)-e(?:nc(?:odedcommand)?)?\s+[A-Za-z0-9+/=]{12,}/i;
-// String concatenation with `+` (`'g'+'h pr '+'mer'+'ge'`) hides a gated word from
-// GATED_WORD_RE just as well as char codes do (Luna, PR #956 round 1). Only `+` between two
-// quotes counts: `'.'` is an ordinary path argument, not a join.
-// `printf 'g%s pr m%s 951' h erge | bash` assembles the words from a format string
-// (Codex connector, PR #956): a printf format with a `%` directive counts too.
-const OBFUSCATION_RE = /\bprintf\b[^|;&\n]*%|fromcharcode|fromcodepoint|fromhex|unhexlify|\bpack\s*\(|\bord\s*\(|\bchr\s*\(|buffer\.from|\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|\\[0-7]{3}|\$'|\[char\]|-join\b|\bjoin\s*\(|reverse\s*\(|\brev\b|\btr\b|\bxxd\b|decode|['"`]\s*\+\s*['"`]|\bconcat\s*\(/i;
-const CAPABILITY_RE = /child_process|subprocess|\bspawn|\bexec|popen|\bsystem\s*\(|start-process|invoke-expression|\biex\b|\beval\b|\bfetch\b|https?:|\brequest\b|socket|\b(?:bash|sh|zsh|cmd|pwsh|powershell|python3?|node|perl|ruby|deno|bun)\b|\$\(|`/i;
-// A PROGRAM NAME assembled from shell variables set in the same command
-// (`a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951`) shows no gated word at all, and was
-// allowed on main before this change too (Codex connector, PR #956). An agent never
-// needs to build the name of the program it runs, so a run-time program name next
-// to a variable assignment is refused outright, whatever words the command shows.
-const SHELL_ASSIGNMENT_RE = /(?:^|[;&|\r\n(`]|\s)(?:export\s+|local\s+|declare\s+(?:-\w+\s+)*|readonly\s+|set\s+)?[A-Za-z_]\w*\+?=|\$(?:env:)?[A-Za-z_][\w:]*\s*[+]?=(?!=)|\b(?:set-variable|new-variable|sv|nv|set-item\s+env:)\b|\bread\s+(?:-\w+\s+)*[A-Za-z_]/i;
-// Widened (Codex connector, PR #956 second pass): a program word built by a plain
-// command substitution (`$(printf g)h pr m$(printf er)ge 951`) needs no assignment at
-// all, so ANY run-time-built top-level program name is refused. Running a program
-// from a variable (`node "$f"`) or handing a shell run-time text (`bash -c "$CMD"`,
-// `eval "$(fnm env)"`) is a different shape and is not affected.
-export function programAssembledAtRuntime(command) {
-  const text = String(command || "");
-  // `$` AND backtick: `` `printf g`h pr m`printf er`ge 951 `` builds the name too
-  // (Codex connector, PR #956 third pass).
-  return programBuiltAtRuntime(text, /[$`]/);
-}
-
-// A NESTED command's program name glued from a substitution or variable AND
-// literal letters (`$(printf g)h`, `g$(printf i)t`, `` `printf g`h ``, `g${X}t`):
-// a shell inside `bash -c '…'` assembles it, and the outer scan never reads it
-// (Codex connector, PR #956). A whole-word substitution (`eval "$(fnm env)"`'s
-// `$(fnm env)`) is not glued and stays allowed, as on the outer command.
-export function nestedProgramNameGlued(command) {
-  // Mark substitutions and variables first, so a space inside `$(fnm env)` does
-  // not split the word, then judge the first word alone. The balanced parser keeps
-  // a nested `$(echo $(printf g))h` whole; a flat `\$\([^()]*\)` split it at the
-  // inner space and missed the glued name (CodeRabbit, PR #956).
-  // An unclosed `$(` stays in `outer` as written; mark its opening too, so
-  // `$(printf g h pr m$(printf er)ge 951` still reads as a built name (CodeRabbit,
-  // PR #956). An unclosed arithmetic `$((` is not a command and is left alone.
-  const split = splitSubstitutions(String(command || "").trim());
-  let marked = split.outer;
-  if (split.unclosed !== undefined) {
-    const start = marked.length - split.unclosed.length - 2;
-    if (start >= 0 && marked.slice(start, start + 2) === "$(" && marked[start + 2] !== "(") {
-      marked = `${marked.slice(0, start)}\u0000${marked.slice(start + 2)}`;
-    }
-  }
-  marked = marked.replace(/\$\(\)|`[^`]*`|\$\{[^}]*\}|\$\w+/g, "\u0000");
-  const first = (marked.split(/[\s;&|]+/)[0] || "").replace(/["']/g, "");
-  return first.includes("\u0000") && first.replace(/\u0000/g, "").length > 0;
-}
-
-// Inline program code handed to a runtime as an ARGUMENT (`node -e "…"`,
-// `python -c "…"`, `perl -e`, `ruby -e`, `php -r`) is not fed input, so the fed-
-// interpreter refusal never saw it, on main or here: `node -e "…execSync(Buffer
-// .from('<base64 of gh pr merge>','base64')…)"` ran a merge the gate could not read
-// (Luna, PR #956 round 2). Only the CODE argument is judged, never the rest of the
-// command, so `gh pr view --json x | node -e "…"` — the everyday way to read gh JSON —
-// still passes when that code itself shows nothing gated.
-const INLINE_CODE_FLAG_RE = /^(?:--eval|--print|--command|--run)$/;
-const INLINE_CODE_ATTACHED_RE = /^(?:--eval|--print|--command)=([\s\S]*)$/;
-// A short-option cluster with a code letter in it (`-e`, `-pe`, `-ce`, `-Bc`). The
-// code is the text after that letter or, when the cluster ends there, the next word.
-// Before this, `node -pe "…gh pr merge…"` was read as code "e" and the real code
-// argument was never judged (Codex connector, PR #956; main allowed it too).
-// Digits count as cluster letters too (`perl -0e`; Luna, follow-up to PR #956).
-const INLINE_CODE_CLUSTER_RE = /^-[A-Za-z0-9]*?[epcrE]([\s\S]*)$/;
-// `deno eval "…"` takes its code as a subcommand argument, not a flag (Codex
-// connector, PR #956). Every word after `eval` in the window is judged, and
-// `eval` may follow the runtime's own options (`deno --quiet eval`; Luna).
-const EVAL_SUBCOMMAND_RUNTIMES = new Set(["deno", "bun"]);
-export function inlineCodeReachesGatedAction(command) {
-  for (const segment of splitCommandSegments(String(command || ""))) {
-    const words = splitShellArgv(segment);
-    for (let index = 0; index < words.length; index += 1) {
-      const program = String(words[index]).split(/[\\/]/).pop().replace(/\.exe$/i, "").toLowerCase();
-      if (!STDIN_PROGRAM_RUNTIMES.has(program) && program !== "nodejs") continue;
-      const end = Math.min(words.length, index + 1 + NESTED_SCAN_WINDOW);
-      let evalSubcommand = false;
-      for (let at = index + 1; at < end; at += 1) {
-        const word = String(words[at]);
-        // Any `eval` word counts, not only the first non-option one: a global option
-        // with a detached value (`deno -L debug eval`) looks like a subcommand (Codex
-        // connector, PR #975). Words after it are refused only if they could reach a
-        // gated action, so a script argument named `eval` costs nothing.
-        if (EVAL_SUBCOMMAND_RUNTIMES.has(program) && word.toLowerCase() === "eval") {
-          evalSubcommand = true;
-          continue;
-        }
-        if (evalSubcommand && couldReachGatedAction([word])) return true;
-        // `--eval=…`, a separate `--eval …`, or a short cluster whose code is
-        // attached (`perl -e'…'` reaches argv as `-e…`; Luna, PR #956 round 3) or
-        // is the next word (`node -pe "…"`).
-        const attached = INLINE_CODE_ATTACHED_RE.exec(word);
-        const cluster = word.startsWith("--") ? null : INLINE_CODE_CLUSTER_RE.exec(word);
-        const codes = attached ? [attached[1]]
-          : INLINE_CODE_FLAG_RE.test(word) ? [words[at + 1]]
-          : cluster ? [cluster[1], words[at + 1]]
-          : [];
-        if (codes.some((code) => code !== undefined && code !== "" && couldReachGatedAction([code]))) return true;
-        // No early stop at the first bare word: a detached option value
-        // (`node --require fs -e "…"`) looks like a script argument, so the whole
-        // window is scanned (Codex connector, PR #956 third pass).
-      }
-    }
-  }
-  return false;
-}
-
-export function couldReachGatedAction(texts) {
-  return [].concat(texts).some((text) => {
-    const raw = String(text || "");
-    const views = [raw, withoutShellQuoting(raw), splitShellArgv(raw).join(" ")];
-    return views.some((view) => GATED_WORD_RE.test(view) || (OBFUSCATION_RE.test(view) && CAPABILITY_RE.test(view)));
-  });
-}
-
-export function commandFedToInterpreterDenial(prefix) {
-  return (
-    `${prefix}: this command feeds text to a shell or evaluator on its input (a pipe or redirection into ` +
-    "bash/sh/cmd/pwsh/iex, node or python reading its program from input, a here-string or here-document, " +
-    "or xargs running gh, git push or a shell), or it has a here-document whose closing line the guard " +
-    "cannot find. What " +
-    "the interpreter runs is not on the command line, so the guard cannot check it. Run the command directly."
-  );
-}
-
-// ── gh commands the guards can read ────────────────────────────────────────
-//
-// A gh ALIAS or EXTENSION is a command name gh expands into something else —
-// `gh alias set mm 'pr merge --admin'` makes `gh mm 123` an administrator merge
-// that no parser here reads as a merge (measured on PR #630's head, 2026-09-24:
-// both guards allowed both commands). Expanding aliases would mean reading gh's
-// config at hook time, which an agent can also rewrite; so the guards instead
-// refuse to CREATE aliases, and refuse any top-level gh command they do not know.
-//
-// gh's built-in top-level commands and their built-in (non-config) aliases,
-// from gh's manual. `co` is deliberately absent: it is a CONFIG alias
-// (`pr checkout`) that can be redefined, so `gh pr checkout` is the spelling to
-// use. A genuine new gh command, or an extension installed on purpose, is added
-// here after checking what it does. `discussion` (gh 2.96), `skill` and
-// `telemetry` (listed by gh 2.92's own `gh help`) were missing, so harmless
-// commands such as `gh discussion list` were refused (Codex GitHub review of
-// PR #795, 2026-09-30). None of the three can merge or push.
-export const GH_BUILTIN_COMMANDS = new Set([
-  "accessibility", "a11y", "actions", "agent-task", "alias", "api", "attestation", "auth", "browse",
-  "cache", "codespace", "cs", "completion", "config", "copilot", "discussion", "environment",
-  "exit-codes", "extension", "extensions", "ext", "formatting", "gist", "gpg-key", "help", "issue",
-  "label", "licenses", "mintty", "org", "pr", "preview", "project", "reference", "release", "repo",
-  "ruleset", "rs", "run", "search", "secret", "skill", "ssh-key", "status", "telemetry", "variable",
-  "version", "workflow",
-]);
 // Words that run the program after them (possibly after their own options and
 // values). `timeout`, `nice`, `sudo -u root` and `env -u X` each hid an alias
 // from the check below when they were missing or their values were misread
@@ -4540,82 +3229,6 @@ function programCandidates(words) {
 // and a redirection glued to it (`bash<payload.txt`) is cut off.
 function candidateProgram(word) {
   return programName(stripGrouping(String(word).trim().split(/\s+/)[0].split(/[<>]/)[0] || ""));
-}
-
-// The gh command a segment runs, when it is one the guards cannot read: an
-// unknown top-level command (an alias or extension), or `gh alias set|import`.
-// Returns null when the segment does not run gh at its command position.
-export function ghCommandUnreadable(segment) {
-  const rawWords = splitShellWordsRaw(String(segment || ""));
-  const words = rawWords.map(shellArgvWord);
-  for (const candidate of programCandidates(words)) {
-    if (candidateProgram(words[candidate]) !== "gh" && candidateProgram(rawWords[candidate]) !== "gh") continue;
-    // `env -S 'gh mm 1'`: the command string is read as its own segment.
-    if (/\s/.test(words[candidate].trim())) {
-      const inner = ghCommandUnreadable(words[candidate]);
-      if (inner) return inner;
-      continue;
-    }
-    const found = ghSubcommandUnreadable(words, candidate + 1);
-    if (found) return found;
-  }
-  return null;
-}
-
-function ghSubcommandUnreadable(words, start) {
-  let index = start;
-  while (index < words.length && words[index].startsWith("-")) {
-    index += ["-r", "--repo"].includes(words[index].toLowerCase()) ? 2 : 1;
-  }
-  const command = (words[index] || "").toLowerCase();
-  if (!command) return null;
-  if (!GH_BUILTIN_COMMANDS.has(command)) return command;
-  if (command === "alias") {
-    let sub = index + 1;
-    while (sub < words.length && words[sub].startsWith("-")) sub += 1;
-    const subcommand = (words[sub] || "").toLowerCase();
-    if (subcommand === "set" || subcommand === "import") return `alias ${subcommand}`;
-  }
-  return null;
-}
-
-// ghCommandUnreadable over every segment of a whole command. The naive reading
-// that splitCommandSegments includes cuts INSIDE quotes, so prose such as
-// `git commit -m 'docs: …; gh mm now denied'` produced a segment starting
-// `gh mm` and refused a harmless commit (independent Opus review of PR #795). A
-// segment only the naive reading produced, whose quotes do not balance, is a
-// fragment of a quoted string and is skipped. The quote-honouring readings — as
-// written, PowerShell's (backslash literal), and one that honours quotes but no
-// escape characters (cmd's `^` and PowerShell's backtick are escapes in one
-// shell and not the other) — are always checked.
-function quotesUnbalanced(segment) {
-  return (segment.split("'").length - 1) % 2 === 1 || (segment.split('"').length - 1) % 2 === 1;
-}
-
-export function ghCommandUnreadableIn(command) {
-  const text = String(command || "");
-  const quoteAware = new Set([
-    ...segmentOneReading(text, { honorQuotes: true, honorEscapes: true }),
-    ...segmentOneReading(text.replace(/\\/g, "\\\\"), { honorQuotes: true, honorEscapes: true }),
-    ...segmentOneReading(text, { honorQuotes: true, honorEscapes: false }),
-  ]);
-  for (const segment of new Set([...quoteAware, ...splitCommandSegments(text)])) {
-    if (!quoteAware.has(segment) && quotesUnbalanced(segment)) continue;
-    const found = ghCommandUnreadable(segment);
-    if (found) return found;
-  }
-  return null;
-}
-
-export function ghCommandUnreadableDenial(prefix, command) {
-  return (
-    `${prefix}: \`gh ${command}\` is not a gh command this guard can read. A gh alias or extension can ` +
-    "expand into a merge or an API write (`gh alias set mm 'pr merge --admin'` makes `gh mm 1` an " +
-    "administrator merge), so aliases may not be created and unknown gh commands are refused. Use the " +
-    "built-in command it stands for (for example `gh pr checkout` instead of `gh co`). If this is a genuine " +
-    "new gh command or a deliberately installed extension, add it to GH_BUILTIN_COMMANDS in " +
-    ".claude/hooks/codex-push-lib.mjs after checking what it does."
-  );
 }
 
 export function nestedTooDeepDenial(prefix) {
@@ -4698,7 +3311,7 @@ export function hardGateBudgetDenial(prefix, action = "merge") {
 // followed only by separate `-f`/`-F` fields, exactly one `query=` whose whole
 // text is a lone resolveReviewThread mutation on a LITERAL thread id, selecting
 // only `id`/`isResolved`. (A `$threadId` variable form is not accepted: the
-// guard's computed-text rule refuses any `$` in the segment anyway.) Anything
+// check below refuses any `$` in the segment.) Anything
 // else stays an unrecognized mutating call.
 const RESOLVE_THREAD_QUERY_RE = new RegExp(
   "^\\s*mutation\\s*\\{\\s*" +
@@ -4708,7 +3321,7 @@ const RESOLVE_THREAD_QUERY_RE = new RegExp(
 export function ghApiIsResolveReviewThreadOnly(command) {
   const raw = String(command || "");
   // No run-time text anywhere in the raw segment: this predicate exempts the
-  // segment from the computed-text rule, so it must prove there is none
+  // segment from the gh api mutation refusal, so it must prove there is none
   // (automated security review of #973: an unanchored binary path let
   // `$(...)/gh` through).
   if (/[$`]/.test(raw)) return false;
@@ -4722,6 +3335,39 @@ export function ghApiIsResolveReviewThreadOnly(command) {
   const value = String(words[4]);
   if (!value.startsWith("query=")) return false;
   return RESOLVE_THREAD_QUERY_RE.test(value.slice("query=".length));
+}
+
+// A plain-text reply on a pull-request review comment (Mason, 2026-10-30): Codex
+// may answer a review the same way Claude can. Only POST to .../pulls/<n>/comments/
+// <id>/replies with `-f`/`--raw-field` body text. `-F`, `--field` and `--input` are
+// refused because they can upload a local file, and any `$`, backtick or `%` is
+// refused, even inside quotes, because it could paste a secret into a public comment.
+const REVIEW_REPLY_ENDPOINT_RE = /^\/?repos\/[^/\s]+\/[^/\s]+\/pulls\/\d+\/comments\/\d+\/replies$/;
+export function ghApiIsReviewThreadReply(command) {
+  const raw = String(command || "");
+  if (/[$`%]/.test(raw)) return false;
+  const words = splitShellArgv(raw);
+  if (!/^gh(?:\.exe)?$/i.test(words[0] || "") || words[1] !== "api") return false;
+  let endpoint = "";
+  let hasBody = false;
+  for (let index = 2; index < words.length; index += 1) {
+    const word = words[index];
+    if ((word === "-X" || word === "--method") && String(words[index + 1]).toUpperCase() === "POST") {
+      index += 1;
+    } else if (/^(?:-XPOST|--method=POST)$/i.test(word)) {
+      continue;
+    } else if ((word === "-f" || word === "--raw-field") && String(words[index + 1]).startsWith("body=")) {
+      hasBody = true;
+      index += 1;
+    } else if (/^(?:-f|--raw-field=)body=/.test(word)) {
+      hasBody = true;
+    } else if (!endpoint && !word.startsWith("-")) {
+      endpoint = word;
+    } else {
+      return false;
+    }
+  }
+  return hasBody && REVIEW_REPLY_ENDPOINT_RE.test(endpoint);
 }
 
 export function ghApiMutates(command) {

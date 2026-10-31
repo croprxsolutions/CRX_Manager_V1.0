@@ -79,14 +79,14 @@ export function mayMerge(input) {
   // (Luna, PR #841): a line continuation — a backslash (Bash), backtick
   // (PowerShell) or caret (cmd) before a newline — joins two lines into one word,
   // and quotes and those same escapes vanish inside a word (`g''h pr me''rge 1`,
-  // `gh pr me^rge 1`). The working guard denies these spellings, so continuations
+  // `gh pr me^rge 1`). So continuations
   // are joined first, then quotes and escapes removed. Both steps can only widen
   // what counts as a possible merge.
   parts = parts.map((part) => part.replace(/[`\\^]\r?\n/g, "").replace(/['"`\\^]/g, ""));
   const text = parts.join(" ");
   if (/merge|graphql|api\.github|\bgh(?:\.(?:exe|cmd|bat|ps1))?\b/i.test(`${name} ${text}`)) return true;
   // A program the command hands text it cannot see runs whatever that text says at
-  // run time, so the working guard denies it and it is a possible merge here too
+  // run time, so it is a possible merge here too
   // (Codex App P1 and Luna, PR #841). The names mirror the guard's own lists in
   // codex-push-lib.mjs (POSIX_SHELLS, CMD_SHELLS, POWERSHELLS,
   // EXPRESSION_EVALUATORS, PROCESS_STARTERS, fed interpreters):
@@ -109,8 +109,7 @@ export function mayMerge(input) {
     || /\|[^|;&\n]*\b(?:node|python\d*|py|deno|bun|perl|ruby|php)\b/i.test(text)
     || /\b(?:node|python\d*|py|deno|bun|perl|ruby|php)(?:\.exe)?\s+-(?:\s|$)/i.test(text)
     || /\b(?:node|python\d*|py|deno|bun|perl|ruby|php)(?:\.exe)?\b[^|;&\n]*<(?!<)/i.test(text)
-    // Inline code given as an argument (`node -e`, `python -c`, `php -r`): the working
-    // guard now judges that code (inlineCodeReachesGatedAction, PR #956), so while the
+    // Inline code given as an argument (`node -e`, `python -c`, `php -r`): while the
     // guard is broken any such launch is a possible merge. A short-option cluster
     // with a code letter anywhere in it (`-pe`, `-Bc`) counts too, as it does in
     // the guard. `deno eval` already counts through the `eval` word above.

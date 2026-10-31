@@ -8,6 +8,8 @@
 - the brand plan;
 - every August product-data phase that was never scheduled.
 
+**Review update 2026-10-30:** Stage 1 may be built when Mason starts it. BLK-1 is split: quantity movements first after PAR-2, and average-purchase-cost tracking after the separately reviewed and activated inventory-costing foundation. That foundation is still parked and this plan does not authorize its build or live opening. See overlap 14 and the build mission for dependencies and proof rules.
+
 It doesn't replace the detailed documents. It says:
 - what comes in which order;
 - what was merged;
@@ -131,9 +133,9 @@ From a read-only check of `main` on 2026-10-29. Re-check each at build time.
 
 Every package in Stages 2 to 9 inherits all 11 rules in build sheet section 1 (`2026-10-28-product-master-BUILD-SHEET.md`). It also follows these (Sol findings 49 to 51):
 
-1. **Proof never writes live data.**
-   - Every "Done when" is shown in the harness with seeded edge cases, or in the local app against it.
-   - A live check is read-only.
+1. **Proof is local by default.**
+   - Prove database behavior in the schema-matched harness with seeded edge cases. Observe the real app against an isolated database where available; otherwise record app behavior as owed, with non-saving UI checks and component tests as supporting evidence, not a substitute for observed behavior.
+   - A live check is read-only unless Mason explicitly approves the exact live test in the current conversation.
    - A rolled-back live smoke check, or a test on a named live product, needs Mason's OK in that conversation.
    - Tests are supporting evidence, never the only proof.
 2. **Each package's own plan lists its exact permissions before any migration is applied.** That means:
@@ -308,6 +310,10 @@ Mason: "allow rates and everything to be adjusted from spreadsheet to help our i
 
   It is logged like any rate change.
 
+  PAR-1 copy-down and PAR-2 grouping are not general exceptions to the lock. With the lock on, a change to a live rate must go through this authorized, reasoned, version-checked single-parent correction; its internal copy to the sizes is part of that same atomic operation. Grouping that would change a live rate must wait for an authorized correction or an explicitly logged unlock. No direct or ordinary parent edit can bypass the lock. Prove locked and unlocked grouping, unchanged-rate grouping, stale versions, and concurrent lock changes.
+
+  PAR-1 extends the existing one-product correction into the one-parent operation. Adding a new size while locked may only initialize its rate from the unchanged locked parent in the same authorized, version-checked parent operation; it cannot supply a different rate. Prove that initialization, rejection of an attempted different rate, and a concurrent lock change.
+
 **Order:**
 - Setup and review happen with the lock off.
 - Mason turns it on when setup is done.
@@ -328,16 +334,21 @@ Mason: "a lot of chemical we normally go through Wells Ag Supply but I also orde
 - A **Vendors section** lists every vendor the product is bought from: the vendor's item name, item number, pack and last cost.
 - Linking goes through the existing `upsert_product_supplier_link`, brought up to the retry-key rule (section 3, rule 4) if it isn't already.
 - **Starting point (DATA-11):** today only 10 links exist, while every product's vendor text is already used for purchasing. Before the copy rule is switched on, the app proposes a link for each product from its current vendor text (all 13 names match the 13 vendors), Mason reviews any that don't resolve, and nothing loses its vendor.
+- A vendor-name match is only a proposal. The existing link writer also requires supplier product name, SKU, unit and pack description; obtain each from verified purchasing records or Mason, never invent placeholders. Incomplete or ambiguous records stay proposals with their legacy text preserved. Re-audit the current writer at build time and prove missing fields cannot become confirmed links. The affected cutover remains blocked until all required legacy cases are resolved.
+- **Transition gate:** WP-PM-15 includes the proposal and review mechanism itself; it does not depend on the later setup workbook. Recount current vendors, preview matched and unresolved rows, and resolve them before enabling the copy rule. Until then preserve the old text and its working edit routes. A product with no link retains any unresolved legacy text, clearly flagged for review; it must not silently become "No vendor". The reviewed data changes require the applicable current-session approval and proof; a draft may be prepared before them, but the cutover cannot ship first.
+- **Deliver in compatible steps:** first ship the proposal/review tool and compatible app writers with existing vendor behavior intact, then perform the separately approved data step. Only after data verification and deployment verification may a later PR apply and enable the copy rule. Because migrations apply before their app deploy, its database change must remain compatible with the currently deployed app and stale browser clients; prove old and new writers through that interval and either safely route them or keep enforcement inactive until a separately reviewed safe activation. Never reject ordinary existing writes in the gap. If compatibility cannot be proved, park enforcement and document the deployment and rollback sequence.
 - **Preferred-vendor changes are one database operation:** the first active link becomes preferred automatically; switching preferred clears the old one and sets the new one together; two changes at once can't leave zero or two preferred.
 
 **Preferred vendor**
 - **A product with any active vendor link has exactly one preferred.** The database already allows at most one.
-  - WP-PM-15 adds the other half: deactivating or unlinking the preferred vendor is refused until another is chosen. A product with no links has no preferred vendor and shows "No vendor".
+  - WP-PM-15 adds the other half: deactivating or unlinking the preferred vendor is refused until another is chosen. A product with no links has no preferred vendor; show "No vendor" only if it also has no unresolved legacy vendor text.
 - **The vendor record is authoritative, not the name.** `products.vendor` (text) becomes a read-only display copy of the preferred vendor's name, kept in step by the database:
   - when the preferred vendor changes;
   - when the vendor is renamed;
   - when the link is deactivated or removed.
 - A direct edit of the text is refused.
+
+**Writers as well as readers:** before enforcing the guard, inventory the product page, new-product flow, list editing, CSV import and every database writer. In the same rollout, route supported edits to the vendor-link operation or give an actionable refusal without losing a product import. Prove each route, including a legacy row with no link and a vendor rename; do not wait for WP-PM-10 to repair a broken importer.
 
 **Readers to check, each with its expected behaviour:**
 - the new-PO pre-fill (`NewPurchaseOrder.tsx`);
@@ -352,6 +363,7 @@ Current suggestions follow the new preferred vendor. **Historical POs, receipts 
 - **A new purchase order** suggests the preferred vendor and its last cost, and any linked vendor can be chosen. Anyone who can make a PO can save it with a vendor that isn't linked yet; that records a link *proposal*, which an admin confirms later. The PO is never blocked.
 - **The suggested cost is converted to the PO's unit** using that vendor link's pack conversion, and shows its date and source.
   - If it can't be converted (no conversion on the link), no cost is suggested rather than a wrong one.
+  - "Last paid" means the latest verified received PO cost for the same vendor and product, with its receipt date and unit. Supplier offers, contracts, promotions and quotes are not silently presented as paid cost; expired or unverified offers are never auto-filled. If no qualifying paid cost or safe unit conversion exists, leave the suggestion blank for an admin to enter or confirm.
 - **Need Reordering** groups by preferred vendor and shows the other vendors' last cost beside it.
 
 **Cost visibility:** cost is admin-only **in the database**: `supplier_price_observations.cost_cents` and any cost or price field returned by `get_supplier_pricing_workspace`, `get_supplier_market_evidence` and WP-PM-15's new operations. Each is named in the package plan and tested by a non-admin's direct requests, not only the screen.
@@ -386,7 +398,9 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
 **How sizes see the parent's values: decided now (Sol round 3, finding 5): copy down.**
 - The parent is the **only writer** of parent-level values. The database copies each change to every size row in the same step, and the copied columns on size rows become database-owned: a direct write to them is refused.
 - **Why copy rather than read through:** every existing reader (the 93 rate readers, quotes, jobs, invoices, PDFs, the field app) keeps working unchanged, so PAR-1 changes no money path. Reading through would rewrite all of them at once. RT-4 changes the rate readers later anyway, on its own proof.
-- **Membership is checked by the database:** a size can be added to a parent only if its form and units fit the parent's (a liquid size under a liquid parent), and changing a parent's formulation identity (strength, formulation type, safener, generic registration) is refused while it has sizes; it is a new parent instead.
+- **Membership is checked by the database:** a size can be added to a parent only if its form and units fit the parent's (a liquid size under a liquid parent). Ordinary edits cannot change an attached parent's formulation identity (strength, formulation type, safener, generic registration). A genuinely different formulation uses a separate parent. Verified missing-data completion and correction of data-entry mistakes use only the dedicated correction below (Mason, 2026-10-30).
+- **Admin correction:** preview the old/proposed values and every affected size, require verified supporting information and a reason, and record who changed what with traceable history. Confirm the corrected facts describe the same actual formulation for every affected size; a misgrouped size instead needs a reviewed move, preserving its product ID. Refuse ambiguous corrections pending review. Preserve historical invoices, posted amounts, stock and units; apply the existing offer-to-update/review rules to affected open work. Enforce authorization, expected versions and retry safety in the database. Ordinary edits, imports and workbooks cannot bypass this process or the rate lock; a house-rate correction still uses overlap 11. Do not silently recalculate historical money, weights or ingredient quantities from corrected current facts. The package must identify historical readers and preserve the facts needed for their original meaning before correction is enabled.
+- A parent has at most one designated gallon-sold Bulk row. PAR-2 identifies the applicable Bulk row for each shop-filled fixed tote before a fill is enabled; missing or ambiguous mappings are review items, never guessed. A fixed tote that is never shop-filled need not have a Bulk source.
 - **And:**
   - a parent edit is **one** recorded change (who, when, old and new) with its effect on each size traceable, and all-or-nothing;
   - it uses its own version number, so it never collides with the `pricing_version` check on price edits;
@@ -398,7 +412,7 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
 - **"Add a size"**: a new row under the same parent, sharing everything at parent and registration level;
 - **"New product"**: a new parent, with the formulation fields to confirm.
 
-**Brands** (`product_brands`, one list per size row today) move up with registrations to the parent, by a reviewed migration: brand lists that agree across a parent's sizes merge; any that disagree (different brands, EPA numbers or sourced flags) go to Mason to settle in PAR-2 before the move; each brand keeps its `row_version` and history, and the brand write permissions stay as they are. So brand PR B is built **after** PAR-1 is live (Stage 3).
+**Brands** (`product_brands`, one list per size row today) move up with registrations to the parent, by a reviewed migration: brand lists that agree across a parent's sizes merge; any that disagree (different brands, EPA numbers or sourced flags) go to Mason to settle in PAR-2 before the move; each brand keeps its `row_version` and history, and the brand write permissions stay as they are. Deliver compatible parent/proposal storage first (PAR-1 preparation), then PAR-2 review/grouping, then enable the reviewed shared-field/brand move for those groups. Preserve legacy edit routes until compatible replacements are deployed; prove current and stale writers across migration, deployment, activation and rollback. Unresolved groups retain their working legacy behavior and do not enter the new shared path. This is the required staged delivery within PAR-1/PAR-2, not a dependency on already-moved brands. Brand PR B starts only after that move is live and verified (Stage 3).
 
 **Where chemistry comes from (D-Z), decided per registration:**
 - If **any** registration on a parent has a usable EPA number, the chemistry comes only through EPA proposals.
@@ -444,16 +458,22 @@ Until REG-1 exists, those fields stay on the size rows as today, and PAR-1 doesn
   - it takes the tote's gallons out of the Bulk stock and adds one tote to the tote's stock, in one step;
   - it's a database operation with a retry key and a recorded who and when;
   - **a shortfall in Bulk stock** warns and goes ahead, recording the shortfall for the next stock count, as deliveries do (Mason, 2026-10-29, question 14);
-  - **the tote's cost** is its gallons at Bulk's current average cost per gallon, in whole cents, with nothing added for the tote itself; a vendor-filled tote keeps the cost it was received at (Mason, 2026-10-29, question 15);
-  - the fill locks the Bulk and tote stock rows while it runs, so two fills can't use the same gallons;
-  - it's undone only by a recorded opposite step, which links to the fill, and is refused once that tote has been sold, delivered or used in another fill.
+  - **BLK-1b purchase cost:** after the costing foundation is active, the tote's cost is its gallons at Bulk's current average purchase cost per gallon, in whole cents, with nothing added for the tote itself; a vendor-filled tote keeps the cost it was received at (Mason, 2026-10-29, question 15). BLK-1a records no purchase cost.
+  - **Quantity-first decision (Mason, 2026-10-30):** record quantities first. Mason clarified that chemical bulk and tote selling prices generally match, but fertilizer bulk and tote selling prices can differ. Keep each sellable size's prices independent; prove matching chemical and differing fertilizer price cases, with no automatic synchronization. Pricing is not proof of actual purchase cost. BLK-1a records linked, repeat-safe bulk-out and tote-in stock movements, without changing catalog cost, prices or historical records. It does not claim an on-hand purchase cost or cost event.
+  - **Inventory-value safeguard:** today's Inventory Value uses each product's catalog cost, so a transfer can change that display if the two rows' unit costs do not correspond. Before enabling BLK-1a, show a preview of the current catalog-basis value before and after, clearly label it as a catalog estimate, flag missing or mismatched costs and never silently assert a value-preserving transfer. Prove equal, unequal and missing cost cases; do not overwrite either catalog cost to make totals match. Report actual purchase-cost tracking as not yet available.
+  - **Purchase-cost follow-up (BLK-1b):** refresh and separately plan the parked `docs/plans/2026-07-16-inventory-costing-plan.md` C1–C4 foundation, its opening valuation, negative-stock handling, repack events and C3 relabel of today's "Inventory Value" tile against current schema. Obtain owner decisions on opening date and values, tote classification and purchase-recording practice before activation; the separate returns-cost issue remains its own decision. Once activated, a shop fill transfers Bulk's current average purchase cost and a vendor-filled tote retains its received purchase cost. The opening plan explicitly accounts for quantity-only fills before activation without pretending their historic cost is known. This plan does not authorize the costing project's build or live opening.
+  - BLK-1a locks source and destination rows in a stable order and records linked quantity movements atomically. BLK-1b adds linked cost events in the same transaction, exact unit factors, precision and one rounding rule; move attributable cents without creating or losing value and retain confidence/provisional status.
+  - undo is a linked, authorized, repeat-safe opposite operation that restores the recorded quantity and, once BLK-1b is active, the original recorded cost, subject to a conservative stock-availability guard. Stock is fungible, so do not claim to identify a particular sold tote without actual tracking; the package design must prove when reversal is safe, including intervening receipts, deliveries and concurrent fills. If safety cannot be demonstrated, refuse and route for review.
+  - full-capacity fills are the specified operation; partial fills are not represented as a full tote. Confirm the actual partial-fill workflow before extending the feature. Define authorized warehouse roles during the package design and prove unauthorized calls write nothing.
 
   *Done when (in the harness):*
   - filling a 265-gal tote from a Bulk stock of 1,000 gal leaves 735 gal and one more tote, and a repeat with the same retry key returns the first result and changes nothing;
-  - two fills at once from 300 gal can't both take the same gallons;
+  - two simultaneous identical fills using the same retry key record one movement pair and both return the same result;
+  - two simultaneous 265-gal fills from 300 gal serialize: both record once, the first leaves 35 gal and the second warns and records a 230-gal shortfall; no movement is lost or duplicated;
   - a fill from 200 gal for a 265-gal tote warns, goes ahead, and records the 65-gal shortfall for the next count;
-  - stock value moves at Bulk's average cost per gallon times the gallons filled, to the cent for a shop-filled tote, while a vendor-filled tote keeps its received cost;
-  - undoing a fill restores both counts and values; undoing a sold tote's fill is refused.
+  - BLK-1a displays the before/after catalog-basis estimate and flags mismatched or missing costs; neither product's catalog cost changes and actual purchase cost is identified as unavailable;
+  - BLK-1b cost events transfer Bulk's moving-average purchase cost in exact attributable cents, preserving confidence; vendor receipts retain their actual purchase cost. The separately reviewed costing design states factors and one rounding point. For the portion drawn below zero, use the last valid average provisionally or mark it unresolved if none exists; never silently use zero;
+  - a safe undo restores recorded counts and, after BLK-1b, cents exactly; an unsafe or ambiguous undo and an unauthorized fill write nothing. Prove concurrent fill, retry, reversal and intervening stock movement.
 
 **No tote deposits or container charges** (Mason, 2026-10-29, question 13: "no they dont"), so nothing is stored for them. Return policy stays on the sellable size, never on the parent.
 
@@ -503,14 +523,14 @@ The build sheet's packages, in its section 4 order, with these changes from sect
 | 12 | WP-PM-6a 💲 Unit audit | per-row approval by Mason; history preserved; lists the remaining `unit_size` readers (overlap 2) |
 | 13 | WP-PM-6b 💲 New-product flow and basic Duplicate | no chemistry copy (DM-5 dropped); after PAR-1, Duplicate becomes "Add a size" or "New product" (overlaps 7, 13) |
 | 14 | WP-PM-7 💲 One cost path and the tier-order warning | none |
-| 15 | **WP-PM-15 💲 Vendors on the product page** (new) | overlap 12; uses the existing supplier links |
+| 15a–b | **WP-PM-15 💲 Vendors on the product page** (new) | proposal/compatible-writer PR, then separately gated enforcement PR; overlap 12 |
 | 16 | WP-PM-11a **Setup workbook** | one file with Setup, Rates and Vendors tabs; the "Lock rates" switch; price workbook rate columns become read-only; merges after DM-0's data step (overlaps 5, 9, 11) |
 | 17 | WP-PM-10 Bulk import | one rate-writing function; obeys the rate lock; merges after DM-0's data step (overlaps 6, 9, 11) |
 | 18 | WP-PM-11b List editing | none |
 | 19 | WP-PM-12b Corrections | none |
 | 20 | WP-PM-13 Reorder display | none |
 
-The overnight loop (`docs/plans/2026-10-28-product-master-loop-MISSION.md`) runs Stage 1 only, in this order. DM-0's data step parks for Mason.
+The overnight loop (`docs/plans/2026-10-28-product-master-loop-MISSION.md`) runs Stage 1 only, in this order: 21 queue entries, including both halves of WP-PM-15. DM-0's data step parks for Mason.
 
 ## 6. Stages 2 to 9
 
@@ -519,7 +539,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
 
 **PAR-1 · Parent record per formulation, plus nickname** (overlap 13; August PRD 1.15)
 - **Done when (in the harness):**
-  - A liquid parent with a 2.5-gal jug, a fixed 265-gal tote and a Bulk size: changing its category, Use Timing or house rate on the parent changes it for all three sizes in one recorded change.
+  - A liquid parent with a 2.5-gal jug, a fixed 265-gal tote and a Bulk size: changing its category or Use Timing changes all three sizes in one recorded change. A house-rate correction updates all three only through the rate-lock rules in overlap 11.
   - A dry parent with a 5-lb and a 10-lb bag: each keeps its own net weight.
   - Editing a parent-level value on one size row is refused, naming the parent.
   - A size's own price, SKU and stock change without touching its siblings, and a price edit's `pricing_version` check is unaffected by a parent edit made at the same time.
@@ -528,6 +548,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - "Add a size" and "New product" each create what they say.
   - Typing "Generic Callisto" finds the product on Products and in the quote picker.
   - A non-admin edit and a direct table write are refused, and a repeated request with the same retry key writes once.
+  - An admin completes a missing strength and corrects a verified typo through a reasoned, evidence-backed preview covering all affected sizes. A non-admin, unsupported correction, stale version and ordinary-edit/import bypass are refused. A retry writes once. A genuinely different formulation stays separate; a misgrouped size can move through the reviewed operation without changing its ID or siblings' identity. Historical document facts and posted amounts remain unchanged, stock/units remain unchanged, and affected open work follows its existing review/update rule.
 
 **PAR-2 · Grouping existing products into parents** (overlap 13; DATA-9)
 - **Done when (in the harness, against a copy of the live structure and data):**
@@ -538,6 +559,8 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - A proposal that changed after Mason saw it is refused.
   - The read-only baseline (representative quotes, jobs, invoices and inventory balances) matches after grouping, references and balances included.
   - Every product ID still exists and still resolves on old records.
+  - Each shop-filled fixed tote has exactly one reviewed, compatible Bulk source; no parent has two designated Bulk rows. Missing and ambiguous mappings remain unavailable for fill until resolved.
+  - Parent/proposal preparation works before shared-field and brand activation. Disagreeing brand lists are reviewed before the move; unresolved groups remain usable through the legacy path. Prove old/new writers during each delivery step and rollback, then verify the moved brands before brand PR B begins.
 
 **DM-2 · Weight per gallon and dry net weight** (refresh plan; August WP-2, D-B, D-M; Sol 30 to 32)
 - **Scope:**
@@ -610,7 +633,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
 **DM-5 · dropped (2026-10-29).** Parent records (PAR-1) replace copying between sizes; the nickname moved to PAR-1 (overlaps 7, 13).
 
 ### Stage 3: brands (To-Do 2.8, its own plan)
-Brand step 1 is partly live: the `product_brands` list and the Brands section. Next is **brand PR B**: pick the delivered brand, print its EPA number, and keep RUP records per brand. **PAR-1 moves brands up to the parent (overlap 13), so PR B is built after PAR-1 is live** (its migration applied and its brand move done), designed and reviewed against that structure, and not at the same time as a package editing `ProductDetail.tsx`.
+Brand step 1 is partly live: the `product_brands` list and the Brands section. Next is **brand PR B**: pick the delivered brand, print its EPA number, and keep RUP records per brand. **The staged PAR-1/PAR-2 work moves brands up to the parent (overlap 13), so PR B is built after that move is live and verified**, designed and reviewed against that structure, and not at the same time as a package editing `ProductDetail.tsx`.
 
 **Carried forward from August WP-3 (Sol 6)** into PR B's acceptance:
 - a brand must be picked at delivery when the product has brands (picking it at receiving is step 2, with the same rules);
@@ -678,7 +701,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
 
 ### Stage 5: comparison (August Phase 3; Sol 27, 35)
 - **CMP-1** (admin cost per lb of active) ships with DM-1.
-- **CMP-2 · The full tool, as a complete rebuild of the Brand vs Generic page.** Mason, 2026-10-29: "the old brand vs generic page will get completely re done once all of this work is finished." So it comes **last, after every other stage** (and so after RT-4, Mason's August rule: comparison after the rate clean-up). It reads only the new data (parents, registrations, ingredients, weights, approved rates), never `ingredient_map`. It covers:
+- **CMP-2 · The full tool, as a complete rebuild of the Brand vs Generic page.** Mason refined "last" on 2026-10-30: build it after its required parent records, chemistry, weights, brands, trusted rates (RT-4) and relevant use guidance are ready. Optional images, groupings and the return-policy editor do not delay it. CLN-2 follows the verified replacement to retire the old table. It reads only the new data (parents, registrations, ingredients, weights, approved rates), never `ingredient_map`. It covers:
   - search by active ingredient through the canonical ingredient;
   - a mode-of-action filter;
   - build-from-generics cost;
@@ -697,6 +720,33 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - The Resicore REV case reports its missing ingredient.
   - Switching the tier changes the price column and not the cost column.
   - An ester-to-amine swap and a safened-vs-unsafened pair each show a warning.
+
+**Premix benchmark and deal-finding view (Mason, 2026-10-30):** CMP-2 uses selected single-ingredient generic products to reproduce each premix's verified active-ingredient amounts at the displayed comparison rate. It benchmarks the premix against the sum of those components; it never automatically changes a catalog price or treats matching actives as permission to substitute products.
+
+- **Component calculation:** for each matched ingredient, target lb/acre = premix gal/acre × verified target lb/gal. Generic gal/acre = target lb/acre / verified generic lb/gal. Multiply each component quantity by that exact selected product/size's normalized price and sum. Use verified matching chemical forms and bases, including existing isomer, salt/acid and safener rules. For other supported units, use the shared explicit conversion path, not a guessed gallon concentration. Show the component product, size, concentration, quantity/acre and price/acre so the benchmark is inspectable and components can be changed.
+- **Shared reference set (Mason approved, 2026-10-30):** choose one visible generic product and size for each compatible ingredient/form/basis across the comparison set. Reuse those choices for equivalent requirements and preserve them when sorting, switching tier/mode or refreshing prices. Do not silently substitute the cheapest candidate. A row override is visibly a different reference scenario; identify it in the ranking view rather than presenting all rows as one common benchmark. If no compatible reference exists, show the gap.
+- **Component eligibility:** ordinary references must be active sellables. Recheck on refresh/recompute; if a selected component is deactivated, retain its identity for explanation, mark the affected comparison incomplete and exclude it from normal complete-deal rankings until replaced. Zero inventory alone does not disqualify a reference or imply it cannot be ordered.
+- **Same pricing basis:** compare selling prices at the same selected tier on both sides. Administrators may separately compare catalog costs, with cost-derived inputs and outputs protected server-side. Never mix a generic purchase cost with a premix selling price or silently choose a different tier. Show each price source/date and missing or stale data; actual average purchase cost is not implied.
+- **Honest price provenance:** show unknown source/date when the data does not establish a price-specific source/date. A general product update timestamp is not a tier-price timestamp, and a cost-basis selection date is not necessarily the price date. Identify the supported freshness rule in package design; never imply unknown provenance is verified or fresh.
+- **Admin cost toggle and seller profitability (Mason, 2026-10-30):** provide an explicit Cost / Selling price comparison mode, with Tier 1 the default selling tier and the existing tier selector available. Cost mode compares the premix's catalog cost against the total catalog cost of its matched generic quantities, never their selling prices. Clearly label which mode supplies the savings and deal ranking. Switching mode retains the selected products, rates and generic reference choices; it does not change prices.
+- **Profitability beside either comparison:** admins can see, for each premix program and its generic-component program, cost/acre, selected-tier selling price/acre, product profit/acre = selling price − cost, and net margin % = (selling price − cost) / selling price × 100 when selling price > 0. Aggregate component revenue and cost first, then compute the generic program's margin; never average its component margin percentages. Use the app's sales-margin convention, not markup on cost. State that this is product margin before expenses not included in the recorded catalog cost (such as excluded adjuvants, commissions or application expenses), not full company net income. Keep missing costs distinct from genuine zero; missing cost withholds cost/profit/margin results without hiding a valid selling-price comparison. Negative profits remain visible; zero selling price leaves margin percentage unavailable.
+- **Company decision columns:** show three separately labeled differences: internal cost difference, customer selling-price difference and company profit/acre difference, plus each program's margin %. Margin differences are percentage points, not percent savings. Support whole-set sorting by admin cost/acre, profit/acre and margin as well as customer savings, with the ranking basis visible. A customer-cheaper generic program is not automatically a better company-margin deal. All costs, profit values, margins and derived differences require server-side admin authorization; a non-admin must not retrieve them through requests, exports or hidden columns.
+- **Outputs:** show premix price/acre, summed generic price/acre, the difference and percent savings. For liquid premixes, show the generic benchmark per equivalent premix gallon = generic price/acre / premix gal/acre. This is an economic comparison unit, not the physical volume of the generic mixture. Keep actual component volumes visible; never imply they sum to one premix gallon. The comparison rate starts from the approved default, is visible on every row and can be adjusted for the comparison without changing the saved product rate.
+- **Signs and denominators:** let B = premix price/acre and G = generic-component total/acre. Generic savings = B − G; generic savings percent = (B − G) / B × 100 where B > 0. A premix deal is the reverse comparison: premix discount versus the generic benchmark = (G − B) / G × 100 where G > 0. Label which side is cheaper; do not present the same percent as both discounts. Keep exact arithmetic until final display rounding; a zero denominator gives an unavailable percent while dollar differences remain meaningful.
+- **Multiple products and whole categories:** allow selecting several premixes or choosing an entire product category, then show all matching products in one comparison table without opening each product. Include search/filter and sorting by premix price/acre, generic benchmark/acre, dollar difference, percentage discount/premium and completeness. Preserve the selected set/category and tier while expanding a row to inspect or change its generic components. A large category may use pagination or virtualization, but the view must state total/visible counts and sort/filter across the full matching set, not only loaded rows.
+- **Deal context:** every row uses its own displayed target rate and active amounts. Comparing category rows is deal screening against each product's ingredient benchmark, not proof that products with different chemistry, rates or uses are interchangeable. Keep formulation/adjuvant exclusions and unresolved equivalence warnings visible. An ingredient match that lacks a required component, supported concentration, price or comparison rate remains visibly incomplete; do not rank its partial component subtotal as a full low-price deal. A problem with one row must not prevent valid rows from displaying.
+- **Valid comparison rate:** require a finite, strictly positive comparison rate before computing benchmark results or admitting the row to complete-deal rankings. A missing, zero, negative or non-finite rate shows "Comparison rate required" and no derived benchmark; this does not change catalog rules that otherwise allow zero rates.
+- **Eligibility per metric:** completeness is evaluated independently for cost, selling price, profit and margin. Complete selling prices can support selling-price rankings even when cost is missing; complete costs can support cost rankings even when selling price is missing. Profit needs both, and margin also needs positive revenue. Preserve genuine zero values, show unavailable results explicitly, exclude them from that metric's ranking, and reevaluate eligibility and ordering when switching mode/tier or refreshing data. Never reuse a previous mode's subtotal or rank, or suppress all valid metrics because one is unavailable.
+
+*Added acceptance:*
+- Synthetic economic example: a liquid premix priced at $20/gal and compared at 2 qt/acre is $10/acre. Its complete matched generic components total $8/acre: show $2/acre and 20% generic savings, and $16 per equivalent premix gallon. Do not label the actual component mixture as one gallon. This is an arithmetic fixture, not a verified product price or an application-rate recommendation.
+- Reverse the economic example: a premix at $8/acre against $10/acre of generic components shows a 20% premix discount; zero/missing prices and unavailable percentages are explicitly distinguished.
+- Select three premixes with different concentrations and then an entire category. Every matching row is accessible together; each retains its own rate, selected components, completeness and price basis. Sorting the whole category finds the same best complete deal regardless of pagination/loading order.
+- A premix missing one active component is marked incomplete and excluded from complete-deal ranking, rather than appearing cheaper from a partial sum. Changing a tier or generic component recalculates the affected results while preserving the selected comparison set; no catalog values are written.
+- Synthetic seller example: at the same tier/rate, the generic program costs $7.20/acre and sells for $8/acre, giving $0.80 profit and 10% margin. The premix costs $7/acre and sells for $10/acre, giving $3 profit and 30% margin. Show that generics save the customer $2/acre while the premix costs CRX $0.20/acre less and produces $2.20/acre more product profit, with a 20-percentage-point higher margin. Cost mode must not reuse the 20% selling-price savings result.
+- Changing the selling tier changes selling price, profit and margin but not catalog cost. A component group with different component margins yields the correct aggregate margin. Missing cost, genuine zero cost, zero revenue and a below-cost sale have distinct outcomes; a non-admin direct request receives no cost or profitability data.
+- Zero/non-finite comparison rates cannot create $0-per-acre bargains. Two premixes with identical active requirements use the same compatible reference set; a manual row override is visibly separate. Deactivating a selected reference invalidates its normal comparison, while an active reference with no stock remains eligible.
+- With costs missing but selling prices complete, selling savings still rank and cost/profit/margin remain unavailable. With selling prices missing but costs complete, cost savings still rank and selling/profit/margin remain unavailable. Switch modes and refresh repeatedly to prove rankings never retain an invalid previous result. Unknown price dates remain explicitly unknown.
 
 ### Stage 6: use guidance (August Phase 4; Sol 40 to 42)
 **USE-1 · Crop and timing pairs** (overlap 1)
@@ -797,19 +847,25 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 | DATA-9 | Grouping sizes under parent records | about 600 rows; the app proposes groups | Mason approves each group | PAR-2 |
 | DATA-10 | **Exact duplicates** (the same product and size split by vendor): keep, or merge into one row | from DM-0's list | Mason, in DM-0's review list. Each merge: both product IDs are kept; the merged row is turned off and points to the kept row; its open lines, vendor links and price history are mapped to the kept row; stock moves by recorded, reversible adjustments; old records still show what they showed; quote, invoice and inventory totals are compared before and after, to the cent | DM-0 (Stage 1) |
 | DATA-12 | Tote and Bulk rows: a real fixed package, or a duplicate of Bulk | 56 tote rows | Mason, in PAR-2's review | PAR-2 (Stage 2) |
-| DATA-11 | Vendor links for each product | 10 links exist | Mason, in the setup workbook's Vendors tab | After WP-PM-15 and WP-PM-11a |
+| DATA-11 | Vendor links for each product | 10 links existed at the prior survey; recount | Proposal and review in WP-PM-15; Mason resolves exceptions | Before the WP-PM-15 copy-rule cutover; the later workbook maintains links |
 
 **Type shared values once:** house rates, chemistry and weight per gallon are best entered after PAR-2, on the parent (once per formulation), and label facts once per EPA registration (REG-1), never once per size. Setup and clean-up of size rows (DATA-1, DATA-10, DATA-11) can start in Stage 1.
 
 **Order of entry (D-Y):** a ranked worklist from real orders and deliveries, refreshed when entry starts (Sol 54). Top sellers come first; the long tail is tracked after.
 
+**Initial readiness (Mason, 2026-10-30):** build for the whole catalog, but agree a reviewed everyday-product list for the first operating release. Each selected product must have approved data and observed proof through its applicable quoting, ordering, delivery and mixing flows; missing data must never be guessed. Record the list and its version, the proof for each applicable flow, and every other product's ready / missing-data / intentionally-excluded outcome. Keep the remaining catalog work assigned and visible. Mechanism completion, initial operating readiness and full catalog completion are separate milestones. Existing package-specific cleanup and approval prerequisites still apply.
+
+**Duplicate-merge policy (Mason, 2026-10-30):** DATA-10 handles straightforward exact duplicates after Mason's review. Defer complicated merges involving unfinished bookings, reservations, jobs, orders or returns until safe, or give an urgent merge its own reviewed and proven procedure. Finishing those transactions alone does not prove safety: old documents must still resolve, and future returns and reversals must continue correctly. Keep deferred duplicates visible and prevent fresh duplication; no historical invoice IDs are rewritten.
+
+**Duplicate-lifecycle proof:** before enabling a merge, name each reference, reservation/booking and return/reversal route affected by the old-to-kept mapping. Prove a future return and a permitted reversal against an original transaction preserve its original financial basis and stock accounting, operate once on retry, and do not reopen a retired product for new sales. Ambiguous mappings or an unproven route keep that merge deferred. This implements the approved policy; it is not permission to rewrite history or bypass current lifecycle rules.
+
 ## 8. Full order across stages
 
-1. **Stage 1** in section 5's order (20 packages: WP-PM-1 to WP-PM-16 and DM-0). Data: DATA-1 and DATA-10 (DM-0's review list), then DATA-11; rates in the setup workbook only if Mason wants them before parents exist (PAR-2 then asks him to settle any sizes that disagree).
-2. **Stage 2:** PAR-1 → PAR-2 → BLK-1 → DM-2 → DM-1 → REG-1 → DM-4 → DM-1b. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
-3. **Stage 3:** brand PR B after PAR-1 is live, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
+1. **Stage 1** in section 5's order (21 queue entries, including both halves of WP-PM-15). Data: DATA-1 and DATA-10 (DM-0's review list), then DATA-11; rates in the setup workbook only if Mason wants them before parents exist (PAR-2 then asks him to settle any sizes that disagree).
+2. **Stage 2:** PAR-1 → PAR-2, then BLK-1a may record quantities and DM-2 → DM-1 → REG-1 → DM-4 → DM-1b proceed independently. BLK-1b follows the separately reviewed and activated costing foundation. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
+3. **Stage 3:** brand PR B after the staged PAR-1/PAR-2 brand move is live and verified, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
 4. **Stage 4:** RT-1 and RT-2 in either order, each on its own evidence. Then RT-3 (Mason's review), then RT-4.
-5. **Stage 5:** CMP-2, the rebuilt Brand vs Generic page, **last**: after every other stage (Mason, 2026-10-29).
+5. **Stage 5:** CMP-2 follows its required data, RT-4 and relevant use guidance. Optional images, groupings and return-policy editing do not delay it (Mason, 2026-10-30). CLN-2 follows CMP-2.
 6. **Stage 6:** USE-1 (after WP-PM-5), then USE-2 (after REG-1), then USE-3.
 7. **Stage 8:** CLN-3 after brand PR B; CLN-1 after Stages 2 and 4; CLN-2 right after CMP-2.
 8. **Stages 7 and 9** when Mason says so.
@@ -928,7 +984,7 @@ Ranked per Mason's answer to question 1 (2026-10-29).
 | 3 | RT-1: a rate above the label maximum is checked, then warns (Mason chose warn over refuse) |
 | 4, 12 | RT-4: readers keep the old columns, filled by RT-4's internal step; rollback through the same step |
 | 5, 6 | Overlap 13: copy-down decided; database membership checks |
-| 7, 9 | Overlap 13 brands migration; Stage 3 after PAR-1 is live |
+| 7, 9 | Overlap 13 brands migration; Stage 3 after the staged PAR-1/PAR-2 brand move is live and verified |
 | 10, 11, 13 | RT-1 per parent; the locked correction per parent; interim lock protection |
 | 14 | Stage 1 order: the setup workbook and lock before bulk import |
 | 15, 18 to 20 | Overlap 12 (cost fields named, starting links, preferred operations, PO link proposals) |

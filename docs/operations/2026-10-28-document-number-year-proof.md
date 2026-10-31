@@ -125,7 +125,8 @@ prior year expression. Never reset counters/sequences or renumber records.
 Quote/order prior definitions are in `20261027080100_number_generators_active_signed_in_only.sql`.
 For exact prior bodies, re-emit the three prior definitions, including their
 fixed-width formatting, and verify the original body hashes pinned by the preflight.
-That restores truncation above 9,999 and can cause duplicate numbers. To retain
+That restores truncation above 9,999 and can generate duplicate values that the
+unique constraints reject. To retain
 full-digit formatting, use a separately reviewed forward migration with new body
 hashes. Do not dynamically rewrite live function source.
 

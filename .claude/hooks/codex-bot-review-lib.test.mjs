@@ -18,16 +18,11 @@ import {
   CODERABBIT_REQUIREMENT_QUERY,
   codexBotFindingsDenial,
   coderabbitCompletedCommit,
-  coderabbitFindingSeverity,
   coderabbitRequirementArgs,
   coderabbitRequirementUnreadableDenial,
   coderabbitReviewMissingDenial,
-  FOLLOWUP_REQUIRED_CHECKS,
-  isFollowUpExcludedPath,
-  isFollowUpTestPath,
   evaluateCodeRabbitRequirement,
   isMoneyPath,
-  prOwnChangesUnchanged,
   readCodeRabbitRequirement,
   codexBotThreads,
   coderabbitFindingsDenial,
@@ -51,13 +46,10 @@ const HEAD = "53e9c07142a4428848a3cebc0c31d2c1b83334c9";
 const OLD = "306d1e263e0000000000000000000000000000aa";
 
 // Build a GraphQL-shaped reviewThread node.
-// A resolved thread carries a reply by default (resolved AND answered is the
-// handled state since #973); pass totalCount explicitly to test otherwise, or
-// null to omit the field.
-const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = false, totalCount = resolved ? 2 : 1 } = {}) => ({
+const thread = ({ login = "chatgpt-codex-connector", oid = HEAD, resolved = false, outdated = false } = {}) => ({
   isResolved: resolved,
-  isOutdated: false,
-  comments: { ...(totalCount === null ? {} : { totalCount }), nodes: [{ author: { login }, originalCommit: { oid } }] },
+  isOutdated: outdated,
+  comments: { nodes: [{ author: { login }, originalCommit: { oid } }] },
 });
 const pr = (threads, headRefOid = HEAD) => ({ headRefOid, reviewThreads: { nodes: threads } });
 
@@ -66,19 +58,15 @@ ok(isCodeRabbitLogin("coderabbitai") && isCodeRabbitLogin("coderabbitai[bot]") &
   "both API spellings of CodeRabbit's login match");
 ok(!isCodeRabbitLogin("coderabbit") && !isCodeRabbitLogin("chatgpt-codex-connector"), "other logins do not");
 eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", oid: OLD })])), 1,
-  "an unresolved CodeRabbit thread on an OLDER commit counts — it never re-reviews the fix");
-eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: 2 })])), 0,
-  "a thread resolved WITH a reply is handled");
-eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: 1 })])), 1,
-  "a thread resolved with NO reply still counts as unanswered (Luna rounds 4–6)");
-eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true, totalCount: null })])), 1,
-  "an unknown comment count is treated as no reply");
+  "an open CodeRabbit thread on an OLDER commit counts while its code is unchanged");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", oid: OLD, outdated: true })])), 0,
+  "an open thread GitHub marks outdated does not block (Mason, 2026-10-30)");
+eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: true })])), 0,
+  "a resolved thread is handled, with or without a reply (Mason, 2026-10-30)");
 // A thread whose opening author cannot be read is unreadable, not clean (Luna round 7).
 eq(coderabbitThreadCount(pr([{ isResolved: false, comments: null }])), null, "a thread with no readable comments makes the count null");
 eq(coderabbitThreadCount(pr([{ isResolved: false, comments: { totalCount: 1, nodes: [{ author: null }] } }])), null,
   "a thread whose author is null makes the count null");
-eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai", resolved: false, totalCount: 3 })])), 1,
-  "a reply alone, without resolving, is still open");
 eq(unresolvedCodeRabbitThreads(pr([thread()])), 0, "a Codex App thread is not a CodeRabbit thread");
 eq(unresolvedCodeRabbitThreads(pr([thread({ login: "coderabbitai" }), thread({ login: "coderabbitai[bot]", oid: OLD })])), 2,
   "every unresolved CodeRabbit thread is counted");
@@ -222,11 +210,9 @@ ok(oidMatchesHead(HEAD.toUpperCase(), HEAD), "oid match is case-insensitive");
 ok(oidMatchesHead(` ${HEAD} `, HEAD), "oid match tolerates surrounding whitespace");
 ok(!isStandingAtHead({ resolved: false, oid: "" }, ""), "MUST NOT BLOCK: unknown-vs-unknown is not a standing finding");
 ok(isStandingAtHead({ resolved: false, oid: HEAD }, HEAD), "unresolved at the head IS a standing finding");
-ok(!isStandingAtHead({ resolved: true, replies: 1, oid: HEAD }, HEAD), "MUST NOT BLOCK: resolved and answered at the head is not standing");
-ok(isStandingAtHead({ resolved: true, replies: 0, oid: HEAD }, HEAD),
-  "resolved with NO reply at the head is still standing — a silent resolve does not clear a finding (Luna round 7)");
-eq(evaluateCodexBotReview(pr([thread({ resolved: true, totalCount: 1, oid: HEAD })])).status, "findings-at-head",
-  "a Codex App thread resolved without a reply still blocks");
+ok(!isStandingAtHead({ resolved: true, oid: HEAD }, HEAD), "MUST NOT BLOCK: resolved at the head is not standing, reply or not");
+eq(evaluateCodexBotReview(pr([thread({ resolved: true, oid: HEAD })])).status, "clean-at-head",
+  "a Codex App thread resolved without a reply no longer blocks (Mason, 2026-10-30)");
 
 // An unknown oid must never compare equal to a head, in either direction.
 eq(
@@ -529,11 +515,10 @@ ok(
 // after the request loop drains the queue. Since Mason's autonomous-landing rule
 // (2026-09-26) every main merge needs the exact-SHA Sol proof, so there is ONE
 // allow point, behind that proof — the old non-risky allow point, which returned
-// before the proof section, is gone. Mason's documentation-only exemption
-// (2026-10-07) adds the second and last: reached only when the proof scan found
-// nothing, and only for a docs-only diff (sol-exempt-lib.mjs). Mason's "Sol only
-// on risky PRs" (2026-10-29) adds the third, right after it (sol-risk-lib.mjs).
-// The pins are: exactly three pushes, all after every hard gate and the proof
+// before the proof section, is gone. Mason's "Sol only on risky PRs" (2026-10-29)
+// adds the second and last: reached only when the proof scan found nothing, and
+// only off the Sol list (sol-risk-lib.mjs).
+// The pins are: exactly two pushes, all after every hard gate and the proof
 // section; the one call site sits after the loop.
 const claudeQueuePushes = [...guardSource.matchAll(/advisoryQueue\.push\(request\);/g)].map((m) => m.index);
 const claudeAdvisoryCalls = [...guardSource.matchAll(/codexAdvisory\(request, advisoryDeadlineMs\);/g)].map((m) => m.index);
@@ -542,8 +527,8 @@ const claudeProofAt = guardSource.indexOf("every main merge → require the fres
 const claudeRequestLoopAt = guardSource.indexOf("for (const request of requests) gateRequest(request);");
 eq(
   claudeQueuePushes.length,
-  3,
-  "the Claude guard has exactly THREE allow points — the Sol proof, the documentation-only exemption and a low-risk pull request; a fourth would be a merge path that skips all three",
+  2,
+  "the Claude guard has exactly TWO allow points — the Sol proof and a pull request off the Sol list; a third would be a merge path that skips both",
 );
 eq(
   claudeAdvisoryCalls.length,
@@ -618,20 +603,19 @@ eq(
 );
 
 // ── Money PRs need a completed CodeRabbit review of the head (2026-10-21) ────
-const MID = "4a1b2c3d4e5f60718293a4b5c6d7e8f901234567";
+// ── A labelled PR needs one completed CodeRabbit review (2026-10-30) ─────────
 const crStatus = (description, { login = "coderabbitai", state = "SUCCESS", context = "CodeRabbit" } = {}) =>
   ({ context, state, description, creator: { login } });
-const commit = (oid, { parents = 1, statuses = [] } = {}) =>
-  ({ commit: { oid, parents: { totalCount: parents }, status: statuses === null ? null : { contexts: statuses }, checkSuites: { totalCount: 0, nodes: [] } } });
+const commit = (oid, { statuses = [] } = {}) =>
+  ({ commit: { oid, status: statuses === null ? null : { contexts: statuses }, checkSuites: { totalCount: 0, nodes: [] } } });
 // Labelled by default: since 2026-10-29 only the label asks for a review, and the
 // review-reading rules below are exercised through it.
-const facts = ({ files = ["src/lib/invoiceMath.ts"], labels = [CODERABBIT_REQUIRED_LABEL], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
-  headRefOid = HEAD, filesTotal = files.length } = {}) => ({
+const facts = ({ labels = [CODERABBIT_REQUIRED_LABEL], commits = [commit(HEAD, { statuses: [crStatus("Review completed")] })],
+  headRefOid = HEAD } = {}) => ({
   number: 1134,
   baseRepository: { nameWithOwner: "masonwells1/CRX_Manager_V1.0" },
   headRefOid,
   labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
-  files: { totalCount: filesTotal, nodes: files.map((filePath) => ({ path: filePath })) },
   commits: { totalCount: commits.length, nodes: commits },
 });
 
@@ -649,13 +633,9 @@ ok(!isMoneyPath("src/pages/Reports.paging.test.tsx") && !isMoneyPath("src/compon
 ok(isMoneyPath("src/pages/Deliveries.tsx") && isMoneyPath("src/lib/reconciliation.ts") && isMoneyPath("src/pages/ARaging.tsx")
   && isMoneyPath("src/lib/fuelSurcharge.ts") && isMoneyPath("src/pages/CycleCount.tsx") && isMoneyPath("src/lib/orderTotals.ts"),
 "plurals, camelCase pieces and joined word pairs still qualify");
-eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md", "src/components/Map.tsx"], labels: [], commits: [commit(HEAD)] })).status,
-  "not-required", "a non-money PR with no label is not gated");
 eq(evaluateCodeRabbitRequirement(facts({ labels: [], commits: [commit(HEAD)] })).status,
-  "not-required", "a money PR with no label is not gated (Mason, 2026-10-29)");
-eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], labels: [], filesTotal: 250, commits: [commit(HEAD)] })).status,
-  "not-required", "a cut-short file list no longer matters without the label");
-eq(evaluateCodeRabbitRequirement(facts({ files: ["docs/x.md"], labels: [CODERABBIT_REQUIRED_LABEL], commits: [commit(HEAD)] })).status,
+  "not-required", "a PR with no label is not gated, money or not (Mason, 2026-10-29)");
+eq(evaluateCodeRabbitRequirement(facts({ labels: [CODERABBIT_REQUIRED_LABEL], commits: [commit(HEAD)] })).status,
   "missing", "the needs-coderabbit label makes any PR qualify");
 
 // The DENY direction: a money PR with no completed review is refused.
@@ -671,7 +651,7 @@ eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crS
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(HEAD, { statuses: [crStatus("Review completed", { state: "PENDING" })] })] })).status,
   "missing", "a non-success state does not count");
 eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] })).status,
-  "missing", "an ordinary commit after the reviewed one needs a new review");
+  "reviewed", "one completed review stands for later commits (Mason, 2026-10-30)");
 
 // CodeRabbit's check run (since 2026-10-27), shaped like GitHub's answer for
 // 4a8914672 (reviewed) and 52b05497b (skipped) on PR #1134.
@@ -769,15 +749,11 @@ eq(evaluateCodeRabbitRequirement(cutShort).priorReview, undefined,
 const noTotal = facts({ commits: [commit(OLD), commit(HEAD)] });
 delete noTotal.commits.totalCount;
 eq(evaluateCodeRabbitRequirement(noTotal).priorReview, undefined, "an unreadable commit total is unknown");
-eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] })).priorReview,
-  true, "a listed reviewed commit means CodeRabbit did review");
+eq(evaluateCodeRabbitRequirement({ ...facts(), labels: { totalCount: 0, nodes: [] } }).status, "not-required", "no label, no gate, even with a review on file");
 
 // The ALLOW direction.
 const reviewedHead = evaluateCodeRabbitRequirement(facts());
 eq([reviewedHead.status, reviewedHead.reviewedOid], ["reviewed", HEAD], "a completed review of the head passes");
-eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }),
-  commit(MID, { parents: 2 }), commit(HEAD, { parents: 2, statuses: [crStatus("Review skipped: incremental reviews are disabled")] })] })).status,
-  "reviewed", "only merge commits after the reviewed commit keep the earlier review");
 ok(coderabbitCompletedCommit({ status: { contexts: [crStatus("Review completed", { login: "coderabbitai[bot]" })] } }),
   "both CodeRabbit login spellings count");
 
@@ -786,17 +762,13 @@ eq(evaluateCodeRabbitRequirement(null).status, "unreadable", "no data is unreada
 eq(evaluateCodeRabbitRequirement({ headRefOid: HEAD }).status, "unreadable", "missing lists are unreadable");
 // A partial answer is never "not required" (Sol, PR #1009).
 {
-  const partialFiles = facts({ files: ["docs/x.md"], commits: [commit(HEAD)] });
-  partialFiles.files.nodes.push({ path: null });
-  partialFiles.files.totalCount = 2;
-  eq(evaluateCodeRabbitRequirement(partialFiles).status, "unreadable", "a file entry with no path is unreadable, not exempt");
-  const partialLabels = facts({ files: ["docs/x.md"], commits: [commit(HEAD)] });
+  const partialLabels = facts({ commits: [commit(HEAD)] });
   partialLabels.labels = { totalCount: 1, nodes: [{ name: null }] };
   eq(evaluateCodeRabbitRequirement(partialLabels).status, "unreadable", "a label entry with no name is unreadable, not exempt");
   let threw = false;
   try {
     readCodeRabbitRequirement(() => JSON.stringify({ errors: [{ message: "partial" }],
-      data: { repository: { pullRequest: facts({ files: ["docs/x.md"], commits: [commit(HEAD)] }) } } }), { owner: "o", name: "r", number: 1 });
+      data: { repository: { pullRequest: facts({ commits: [commit(HEAD)] }) } } }), { owner: "o", name: "r", number: 1 });
   } catch { threw = true; }
   ok(threw, "a GraphQL answer carrying errors is refused even when it includes data");
 }
@@ -805,74 +777,23 @@ eq(evaluateCodeRabbitRequirement(facts({ commits: [commit(OLD, { statuses: [crSt
 eq(evaluateCodeRabbitRequirement(facts({ commits: [] })).status, "unreadable", "an empty commit list is not trusted");
 
 // A label list cut short cannot prove the label is absent (Luna round 5).
-eq(evaluateCodeRabbitRequirement({ ...facts({ files: ["docs/x.md"], commits: [commit(HEAD)] }),
+eq(evaluateCodeRabbitRequirement({ ...facts({ commits: [commit(HEAD)] }),
   labels: { totalCount: 150, nodes: [] } }).status, "missing", "an incomplete label list makes the PR qualify");
 
-// The merge walk is only provisional (Luna round 5, BLOCKER): the PR's own
-// changes must be byte-identical at the reviewed commit and at the head.
-const BASE40 = "b".repeat(40);
-const walkFacts = { ...facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD, { parents: 2 })] }), baseRefOid: BASE40 };
-const prFiles = [{ filename: "src/lib/invoiceMath.ts", status: "modified", sha: "1".repeat(40) }];
-const fakeGh = ({ atReview = prFiles, atHead = prFiles, onCall = () => {} } = {}) => (args) => {
-  onCall(args);
-  const target = String(args[1] || "");
-  if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: walkFacts } } });
-  if (target.includes("/files?per_page")) return "src/lib/invoiceMath.ts\t\n";
-  if (target.endsWith(`...${OLD}`)) return JSON.stringify(atReview);
-  if (target.endsWith(`...${HEAD}`)) return JSON.stringify(atHead);
-  throw new Error(`unexpected gh ${args.join(" ")}`);
-};
+// One read decides it: no compare, whatever came after the reviewed commit.
 const read = (gh, extra = {}) => readCodeRabbitRequirement(gh, { owner: "o", name: "r", number: 9, ...extra });
-eq(read(fakeGh()).status, "reviewed", "a merge-only walk with identical PR changes keeps the earlier review");
-eq(read(fakeGh({ atHead: [{ ...prFiles[0], sha: "2".repeat(40) }] })).status, "missing",
-  "a merge that changed a PR file voids the earlier review");
-eq(read(fakeGh({ atHead: [{ ...prFiles[0], sha: "2".repeat(40) }] })).priorReview, true,
-  "...and still says CodeRabbit reviewed this PR, so Sol does not go first (Codex App P2 on #1125)");
-eq(read(fakeGh({ atHead: [...prFiles, { filename: "src/lib/newMoney.ts", status: "added", sha: "3".repeat(40) }] })).status, "missing",
-  "a merge that added a file to the PR's own changes voids the earlier review");
-{
-  // Identical on both sides, so only the cap can refuse it.
-  const capped = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}`, status: "modified", sha: "4".repeat(40) }));
-  eq(read(fakeGh({ atReview: capped, atHead: capped })).status,
-    "missing", "a compare at GitHub's 300-file cap cannot prove anything, even when both sides match");
-}
-ok(read(fakeGh({ onCall: (args) => ok(!String(args[1]).includes("compare/") || /compare\/b{40}\.\.\./.test(args[1]), "compares against the PR's base") })),
-  "the compare is three-dot against the PR's base");
-eq(prOwnChangesUnchanged(null, prFiles), false, "an unreadable compare is never 'unchanged'");
-{
-  const renamed = (from) => [{ filename: "src/lib/newName.ts", status: "renamed", sha: "5".repeat(40), previous_filename: from }];
-  eq(prOwnChangesUnchanged(renamed("src/lib/a.ts"), renamed("src/lib/a.ts")), true, "the same rename is unchanged");
-  eq(prOwnChangesUnchanged(renamed("src/lib/a.ts"), renamed("src/lib/b.ts")), false,
-    "a rename from a different source path is a different change (Codex App P2)");
-}
-// A review AT the head needs no compare at all.
 {
   let calls = 0;
-  const headGh = (args) => {
+  const oneRead = () => {
     calls += 1;
-    if (args[1] === "graphql") return JSON.stringify({ data: { repository: { pullRequest: { ...facts(), baseRefOid: BASE40 } } } });
-    if (String(args[1]).includes("/files?per_page")) return "src/lib/invoiceMath.ts\t";
-    throw new Error("no compare expected");
+    return JSON.stringify({ data: { repository: { pullRequest: facts({ commits: [commit(OLD, { statuses: [crStatus("Review completed")] }), commit(HEAD)] }) } } });
   };
-  eq(read(headGh).status, "reviewed", "a review of the head passes");
-  eq(calls, 2, "…with the GraphQL read and the file list only (no compare)");
-}
-// Money files no longer qualify a PR on their own (Mason, 2026-10-29).
-{
-  const moneyFacts = { ...facts({ labels: [], commits: [commit(HEAD)] }), baseRefOid: BASE40 };
-  const moneyGh = (args) => (args[1] === "graphql"
-    ? JSON.stringify({ data: { repository: { pullRequest: structuredClone(moneyFacts) } } })
-    : "src/lib/invoiceMath.ts\t\n");
-  eq(read(moneyGh).status, "not-required", "an unlabelled money PR needs no CodeRabbit review");
-}
-
-// Budget: a call is not started unless it can finish before the deadline.
-{
+  eq(read(oneRead).status, "reviewed", "the read returns reviewed for an earlier reviewed commit");
+  eq(calls, 1, "...with one GitHub call");
   let threw = false;
-  try { read(fakeGh(), { deadlineMs: 10_000, callTimeoutMs: 5_000, now: () => 6_000 }); } catch { threw = true; }
+  try { read(oneRead, { deadlineMs: 10_000, callTimeoutMs: 5_000, now: () => 6_000 }); } catch { threw = true; }
   ok(threw, "a call that could outlive the budget is not started — the read throws (callers refuse)");
-  eq(read(fakeGh(), { deadlineMs: 10_000, callTimeoutMs: 5_000, now: () => 1_000 }).status, "reviewed",
-    "a call that fits the budget runs");
+  eq(read(oneRead, { deadlineMs: 10_000, callTimeoutMs: 5_000, now: () => 1_000 }).status, "reviewed", "a call that fits the budget runs");
 }
 
 // The query and denial carry what the agent needs.
@@ -883,264 +804,8 @@ ok(/@coderabbitai full review/.test(coderabbitReviewMissingDenial("X", "7", "it 
   && /pr comment 7/.test(coderabbitReviewMissingDenial("X", "7", "w", HEAD)),
   "the denial tells the agent the exact one request to post");
 
-// ── One CodeRabbit review per PR: minor follow-ups (Mason, 2026-10-26) ───────
-// Real GitHub answers recorded 2026-10-26 (trimmed to what the parser reads:
-// fixtures/coderabbit-followup/). Each is replayed through the same
-// readCodeRabbitRequirement the merge gates, the landing gate and the Sol
-// pre-flight call; then copies are broken one condition at a time.
-{
-  const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "coderabbit-followup");
-  const loadFixture = (number) => JSON.parse(readFileSync(path.join(fixtureDir, `pr${number}.json`), "utf8"));
-  const isFollowUpRead = (args) => args[1] === "graphql" && args.some((arg) => String(arg).includes('reviews(first:100, author:"coderabbitai[bot]")'));
-  const isRequirementRead = (args) => args[1] === "graphql" && args.some((arg) => String(arg).includes("commits(last:100)"));
-  // Replays calls by their exact arguments; `edit(kind, value)` may change a parsed answer.
-  const replay = (fixture, edit = () => {}) => {
-    const answers = new Map(fixture.calls.map((call) => [JSON.stringify(call.args), call.out]));
-    // A broken copy may change which trees the follow-up read asks for; answer
-    // it with the recorded read (a tree it lacks reads as "not a plain file").
-    const followUpAnswer = fixture.calls.find((call) => isFollowUpRead(call.args))?.out;
-    // Recorded before the read also asked for check runs (2026-10-27): answer the
-    // current query with the recorded one, whose commits carry statuses only.
-    const requirementAnswer = fixture.calls.find((call) => isRequirementRead(call.args))?.out;
-    const head = JSON.parse(fixture.calls[0].out).data.repository.pullRequest.headRefOid;
-    return (args) => {
-      const out = isFollowUpRead(args) ? followUpAnswer
-        : isRequirementRead(args) ? requirementAnswer
-        : answers.get(JSON.stringify(args));
-      if (out === undefined) throw new Error(`fixture has no answer for gh ${args.slice(0, 2).join(" ")}`);
-      // "fixes" is the R...F compare; "tipFix"/"tipHead" are the PR's own changes
-      // against the base at the last fix and at the head.
-      const url = String(args[1]);
-      const kind = isFollowUpRead(args) ? "followUp"
-        : url.includes("/compare/") ? (Array.isArray(JSON.parse(out)) ? (url.endsWith(`...${head}`) ? "tipHead" : "tipFix") : "fixes")
-        : args[1] === "graphql" ? "requirement" : "files";
-      if (kind === "files") return edit(kind, out) ?? out;
-      const value = JSON.parse(out);
-      // Recorded when money files qualified a PR; since 2026-10-29 only the label does.
-      const labels = kind === "requirement" ? value?.data?.repository?.pullRequest?.labels : null;
-      if (labels) {
-        labels.nodes = [...labels.nodes, { name: CODERABBIT_REQUIRED_LABEL }];
-        labels.totalCount = labels.nodes.length;
-      }
-      edit(kind, value);
-      return JSON.stringify(value);
-    };
-  };
-  const readFixture = (number, edit) => {
-    const fixture = loadFixture(number);
-    return readCodeRabbitRequirement(replay(fixture, edit), { owner: "masonwells1", name: "CRX_Manager_V1.0", number });
-  };
-
-  // The recorded outcomes.
-  for (const number of [1017, 1099, 1101, 1065, 1086]) {
-    const fixture = loadFixture(number);
-    const verdict = readFixture(number);
-    eq([verdict.status, verdict.via || ""], [fixture.expect.status, fixture.expect.via], `PR #${number} replays to its recorded outcome`);
-  }
-  // As recorded, #1017 is refused: a merge of main after its fixes also changed
-  // docs/workflows/UI_PATTERNS.md, which the PR edits and which is guidance, not a
-  // shared status ledger (Luna round 2). With that one main edit taken out, it is the
-  // covered base every broken copy below starts from.
-  ok(/changed the PR's own changes \(docs\/workflows\/UI_PATTERNS\.md\)/.test(readFixture(1017).why),
-    "#1017 as recorded: a main edit to a shared guidance doc refuses");
-  const withoutMainDocEdit = () => {
-    let atFix = "";
-    return (k, v) => {
-      const entry = Array.isArray(v) ? v.find((f) => f.filename === "docs/workflows/UI_PATTERNS.md") : null;
-      if (k === "tipFix" && entry) atFix = entry.sha;
-      if (k === "tipHead" && entry && atFix) entry.sha = atFix;
-    };
-  };
-  const readCovered = (edit = () => {}) => {
-    const align = withoutMainDocEdit();
-    return readFixture(1017, (k, v) => { align(k, v); edit(k, v); });
-  };
-  const covered = readCovered();
-  eq(covered.via, "minor-follow-up", "#1017 without that main doc edit is covered");
-  eq(covered.followUp.reviewedOid, "faa0f2fa31ec15b34ebabeccf07e5abafde2fa31", "#1017: R is the commit CodeRabbit marked Review completed");
-  eq(covered.followUp.findings.map((f) => [f.path, f.severity]), [["src/components/ui/RecordSearchPicker.tsx", "minor"]],
-    "#1017: its one finding is read with CodeRabbit's own Minor label");
-  eq(covered.followUp.files.map((f) => [f.filename, f.category]).sort(),
-    [["src/components/customers/CustomerSearchPicker.test.tsx", "test"], ["src/components/ui/RecordSearchPicker.tsx", "finding"]],
-    "#1017: the fix touched the finding's file and a test");
-  ok(/rated its finding .* major/.test(readFixture(1099).why), "#1099: a Major finding needs a new review");
-  eq(readFixture(1101).followUp.files.map((f) => f.category), ["finding"], "#1101: a trivial finding in a smoke test is covered");
-  ok(/merge commit sits between/.test(readFixture(1065).why), "#1065: main merged before the fixes needs a new review");
-  ok(/holds none of CodeRabbit's findings/.test(readFixture(1086).why), "#1086: a fix in a file with no finding needs a new review");
-
-  // Break one condition at a time on #1017 (covered as recorded).
-  const R = "faa0f2fa31ec15b34ebabeccf07e5abafde2fa31";
-  const fullReview = (value) => value.data.repository.pullRequest.reviews.nodes.find((r) => r.commit.oid === R && r.body);
-  const finding = (value) => fullReview(value).comments.nodes.find((c) => !c.replyTo);
-  const walkthrough = (value) => value.data.repository.pullRequest.comments.nodes.find((c) => c.body.includes("pre_merge_checks_walkthrough_start"));
-  const fileIn = (value, name) => value.files.find((f) => f.filename.endsWith(name));
-  const cases = [
-    ["missing", "a Major label", "followUp", (v) => { finding(v).body = finding(v).body.replace("🟡 Minor", "🟠 Major"); }],
-    ["missing", "an unrecognised severity header", "followUp", (v) => { finding(v).body = "**Please fix.**"; }],
-    ["missing", "a Minor label with the wrong colour", "followUp", (v) => { finding(v).body = finding(v).body.replace("🟡 Minor", "🔵 Minor"); }],
-    ["missing", "a review that claims more findings than were read", "followUp", (v) => { fullReview(v).body = fullReview(v).body.replace("Actionable comments posted: 1", "Actionable comments posted: 2"); }],
-    ["missing", "a review with zero findings", "followUp", (v) => { fullReview(v).body = fullReview(v).body.replace("Actionable comments posted: 1", "Actionable comments posted: 0"); }],
-    ["missing", "outside-diff comments in the review summary", "followUp", (v) => { fullReview(v).body += "\n> **⚠️ Outside diff range comments (1)**"; }],
-    ["missing", "a nitpick section in the review summary", "followUp", (v) => { fullReview(v).body += "\n<summary>🧹 Nitpick comments (2)</summary>"; }],
-    ["missing", "two full reviews of the same commit", "followUp", (v) => { const reviews = v.data.repository.pullRequest.reviews; reviews.nodes.push(structuredClone(fullReview(v))); reviews.totalCount += 1; }],
-    ["missing", "a review with more than 100 comments", "followUp", (v) => { fullReview(v).comments.totalCount = 101; }],
-    ["missing", "more than 100 CodeRabbit reviews", "followUp", (v) => { v.data.repository.pullRequest.reviews.totalCount = 101; }],
-    ["missing", "more than 100 PR comments", "followUp", (v) => { v.data.repository.pullRequest.comments.totalCount = 101; }],
-    ["missing", "another review of R with a finding of its own", "followUp", (v) => {
-      const reviews = v.data.repository.pullRequest.reviews;
-      const other = structuredClone(fullReview(v));
-      other.body = "";
-      other.comments.nodes = [{ ...finding(v), body: finding(v).body.replace("🟡 Minor", "🟠 Major") }];
-      reviews.nodes.push(other);
-      reviews.totalCount += 1;
-    }],
-    ["missing", "another review of R requesting changes", "followUp", (v) => {
-      const reviews = v.data.repository.pullRequest.reviews;
-      reviews.nodes.push({ ...structuredClone(fullReview(v)), body: "", state: "CHANGES_REQUESTED", comments: { totalCount: 0, nodes: [] } });
-      reviews.totalCount += 1;
-    }],
-    ["missing", "a review with two finding-count lines", "followUp", (v) => { fullReview(v).body += "\n**Actionable comments posted: 1**\n"; }],
-    ["missing", "another review of R with only a written finding", "followUp", (v) => {
-      const reviews = v.data.repository.pullRequest.reviews;
-      reviews.nodes.push({ ...structuredClone(fullReview(v)), body: "This change double-bills an invoice.", comments: { totalCount: 0, nodes: [] } });
-      reviews.totalCount += 1;
-    }],
-    ["missing", "a merge after the fixes that changed a shared policy document", "any", (v, k) => {
-      if (k === "tipFix") v.push({ filename: "docs/reference/coderabbit-native-review.md", status: "modified", sha: "6".repeat(40) });
-      if (k === "tipHead") v.push({ filename: "docs/reference/coderabbit-native-review.md", status: "modified", sha: "7".repeat(40) });
-    }],
-    ["missing", "a base compare entry with no blob", "any", (v, k) => { if (k === "tipFix" || k === "tipHead") delete v[0].sha; }],
-    ["unreadable", "a summary describing another commit", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(R, "f".repeat(40)); }],
-    ["unreadable", "no summary comment", "followUp", (v) => { walkthrough(v).body = ""; }],
-    ["unreadable", "a pre-merge table missing a row", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/\n\|[^\n]*New Table Without Rls[^\n]*/, ""); }],
-    ["missing", "a custom pre-merge check in warning", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/(\|\s*Money Not Exact Whole Cents\s*\|\s*)!\[Passed\]/, "$1![Warning]"); }],
-    ["unreadable", "GitHub errors with the follow-up read", "followUp", (v) => { v.errors = [{ message: "partial" }]; }],
-    ["missing", "a finding file that became executable", "followUp", (v) => { for (const key of ["t2_0", "t2_1"]) for (const entry of v.data.repository[key]?.entries || []) if (entry.name === "RecordSearchPicker.tsx") entry.mode = 0o100755; }],
-    ["missing", "a new test file that already existed at R", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").status = "added"; }],
-    ["missing", "a fix in a file with no finding", "fixes", (v) => { v.files.push({ ...fileIn(v, "RecordSearchPicker.tsx"), filename: "src/lib/invoiceMath.ts" }); }],
-    ["missing", "a fix under supabase/", "fixes", (v) => { v.files.push({ ...fileIn(v, "RecordSearchPicker.tsx"), filename: "supabase/migrations/20261026000000_x.sql" }); }],
-    ["missing", "a fix to agent tooling", "fixes", (v) => { v.files.push({ ...fileIn(v, "RecordSearchPicker.tsx"), filename: "scripts/write-codex-push-proof.mjs" }); }],
-    ["missing", "a renamed file", "fixes", (v) => { fileIn(v, "RecordSearchPicker.tsx").previous_filename = "src/components/ui/Old.tsx"; }],
-    ["missing", "a file with no text diff", "fixes", (v) => { delete fileIn(v, "RecordSearchPicker.tsx").patch; }],
-    ["missing", "61 changed lines in a finding file", "fixes", (v) => { fileIn(v, "RecordSearchPicker.tsx").additions = 61; }],
-    ["missing", "151 changed test lines", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").additions = 151; }],
-    ["missing", "21 deleted test lines", "fixes", (v) => { fileIn(v, "CustomerSearchPicker.test.tsx").deletions = 21; }],
-    ["missing", "a changelog entry over 40 lines", "fixes", (v) => { v.files.push({ filename: "docs/changelog.d/2026-10-26-x.md", status: "added", additions: 41, deletions: 0, patch: "+x" }); }],
-    ["missing", "a compare listing a commit outside the chain", "fixes", (v) => { v.commits[0].sha = "e".repeat(40); }],
-    ["missing", "a merge after the fixes that changed a PR code file", "tipHead", (v) => { v.find((f) => f.filename === "src/components/ui/RecordSearchPicker.tsx").sha = "9".repeat(40); }],
-    ["missing", "a merge of another branch that adds a file", "tipHead", (v) => { v.push({ filename: "src/lib/sneaky.ts", status: "added", sha: "8".repeat(40) }); }],
-    ["missing", "a fix to a test file in agent tooling", "fixes", (v) => { v.files.push({ ...fileIn(v, "CustomerSearchPicker.test.tsx"), filename: ".claude/hooks/pr-merge-guard.test.mjs" }); }],
-    ["unreadable", "commit parents without their SHAs", "requirement", (v) => { for (const node of v.data.repository.pullRequest.commits.nodes) delete node.commit.parents.nodes; }],
-  ];
-  // Each break must be refused for ITS reason, not a side effect of the edit.
-  const reasons = {
-    "a Major label": /rated its finding .* major/,
-    "an unrecognised severity header": /no readable severity/,
-    "a Minor label with the wrong colour": /no readable severity/,
-    "a review that claims more findings than were read": /says it posted 2 findings but 1/,
-    "a review with zero findings": /posted no findings/,
-    "outside-diff comments in the review summary": /outside the changed lines/,
-    "a nitpick section in the review summary": /nitpick/,
-    "two full reviews of the same commit": /more than one full review/,
-    "a review with more than 100 comments": /more than 100 comments/,
-    "more than 100 CodeRabbit reviews": /more than 100 reviews/,
-    "more than 100 PR comments": /PR has more than 100 comments/,
-    "another review of R with a finding of its own": /another CodeRabbit review of that commit posted findings/,
-    "another review of R requesting changes": /another CodeRabbit review of that commit is CHANGES_REQUESTED/,
-    // Its count is not trusted, so it is no full review; as "another" review it has text.
-    "a review with two finding-count lines": /another CodeRabbit review of that commit has text of its own/,
-    "a merge of another branch that adds a file": /changed the PR's own changes \(src\/lib\/sneaky\.ts\)/,
-    "a fix to a test file in agent tooling": /pr-merge-guard\.test\.mjs, which always gets a fresh review/,
-    "another review of R with only a written finding": /another CodeRabbit review of that commit has text of its own/,
-    "a merge after the fixes that changed a shared policy document": /changed the PR's own changes \(docs\/reference\/coderabbit-native-review\.md\)/,
-    "a base compare entry with no blob": /could not be compared in full/,
-    "a summary describing another commit": /no single CodeRabbit summary comment describes the reviewed commit/,
-    "no summary comment": /no single CodeRabbit summary comment describes the reviewed commit/,
-    "a pre-merge table missing a row": /lists 8 checks but its summary counts 9/,
-    "a custom pre-merge check in warning": /"money not exact whole cents" pre-merge check reads warning/,
-    "GitHub errors with the follow-up read": /GitHub returned errors/,
-    "a finding file that became executable": /RecordSearchPicker\.tsx is not a plain file/,
-    "a new test file that already existed at R": /already existed at the reviewed commit/,
-    "a fix in a file with no finding": /invoiceMath\.ts, which holds none/,
-    "a fix under supabase/": /supabase\/migrations\/20261026000000_x\.sql, which always gets a fresh review/,
-    "a fix to agent tooling": /write-codex-push-proof\.mjs, which always gets a fresh review/,
-    "a renamed file": /only edits, new tests/,
-    "a file with no text diff": /has no text diff/,
-    "61 changed lines in a finding file": /61 lines in finding files \(limit 60\)/,
-    "151 changed test lines": /151 test lines \(limit 150\)/,
-    "21 deleted test lines": /delete 21 test lines/,
-    "a changelog entry over 40 lines": /changelog entry is over 40 lines/,
-    "a compare listing a commit outside the chain": /exactly the fix commits/,
-    "a merge after the fixes that changed a PR code file": /changed the PR's own changes \(src\/components\/ui\/RecordSearchPicker\.tsx\)/,
-    "commit parents without their SHAs": /parents could not be read/,
-  };
-  eq(Object.keys(reasons).sort(), cases.map(([, label]) => label).sort(), "every broken case names its expected reason");
-  for (const [status, label, kind, change] of cases) {
-    const verdict = readCovered((k, value) => { if (kind === "any" || k === kind) change(value, k); });
-    eq(verdict.status, status, `#1017 broken by ${label} -> ${status}`);
-    ok(reasons[label].test(verdict.why), `#1017 broken by ${label} is refused for that reason (got: ${verdict.why})`);
-  }
-  // Allowed variations stay covered.
-  const stays = [
-    ["a Title-check warning (PR text, not code)", "followUp", (v) => { walkthrough(v).body = walkthrough(v).body.replace(/(\|\s*Title check\s*\|\s*)!\[Passed\]/, "$1![Warning]"); }],
-    ["one new changelog entry", "any", (v, k) => {
-      if (k === "fixes") v.files.push({ filename: "docs/changelog.d/2026-10-26-x.md", status: "added", additions: 12, deletions: 0, patch: "+x" });
-      // Its directory's tree at F and the head (third directory in the read).
-      if (k === "followUp") for (const key of ["t1_2", "t2_2"]) v.data.repository[key] = { entries: [{ name: "2026-10-26-x.md", type: "blob", mode: 0o100644 }] };
-    }],
-    ["an older summary comment about another commit", "followUp", (v) => {
-      const comments = v.data.repository.pullRequest.comments;
-      comments.nodes.unshift({ ...structuredClone(walkthrough(v)), body: walkthrough(v).body.replace(R, "a".repeat(40)) });
-      comments.totalCount += 1;
-    }],
-    ["a merge after the fixes that changed a shared doc", "any", (v, k) => {
-      // Main and the PR both edited the same ledger: its blob differs, nothing else does.
-      if (k === "tipFix") v.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified", sha: "6".repeat(40) });
-      if (k === "tipHead") v.push({ filename: "docs/manual/KNOWN_ISSUES.md", status: "modified", sha: "7".repeat(40) });
-    }],
-  ];
-  for (const [label, kind, change] of stays) {
-    eq(readCovered((k, value) => { if (kind === "any" || k === kind) change(value, k); }).via, "minor-follow-up", `#1017 with ${label} stays covered`);
-  }
-  {
-    const fixture = loadFixture(1017);
-    let threw = false;
-    try {
-      readCodeRabbitRequirement(replay(fixture), { owner: "masonwells1", name: "CRX_Manager_V1.0", number: 1017, deadlineMs: 10_000, callTimeoutMs: 5_000, now: (() => { let t = 0; return () => (t += 2_000); })() });
-    } catch { threw = true; }
-    ok(threw, "a follow-up read that would outlive the hook budget throws (callers refuse; never 'not covered')");
-  }
-
-  // Header parsing, both formats.
-  const pic = (icon, word) => `<!-- coderabbit-ai-generated:v1 -->\n\n**<picture><img src="https://x/review-comment-icons-v1/${icon}-16.svg" alt=""></picture> ${word}** · **Functional Correctness** · **Quick win**\n\nBody mentions 🟠 Major in passing.`;
-  eq(coderabbitFindingSeverity(pic("amber", "Minor")), "minor", "pictured Minor");
-  eq(coderabbitFindingSeverity(pic("neutral", "Trivial")), "trivial", "pictured Trivial");
-  eq(coderabbitFindingSeverity(pic("major", "Major")), "major", "pictured Major");
-  eq(coderabbitFindingSeverity(pic("major", "Minor")), null, "a Minor word with another icon is unrecognised");
-  eq(coderabbitFindingSeverity("**🎯 Functional Correctness** | **🔵 Trivial**"), "trivial", "older table-style Trivial");
-  eq(coderabbitFindingSeverity("**🎯 Functional Correctness** | **🟡 Minor** | **🟠 Major**"), null, "two severities in one header are unrecognised");
-  eq(coderabbitFindingSeverity("Some text\n**🟡 Minor**"), null, "only the first line counts");
-  ok(isFollowUpExcludedPath("supabase/functions/send-email/index.ts") && isFollowUpExcludedPath(".github/workflows/ci.yml")
-    && isFollowUpExcludedPath("package-lock.json") && isFollowUpExcludedPath("vite.config.ts") && isFollowUpExcludedPath("AGENTS.md")
-    && isFollowUpExcludedPath("src/AGENTS.md") && isFollowUpExcludedPath("src/pages/CLAUDE.md")
-    && isFollowUpExcludedPath("src/config.ts") && isFollowUpExcludedPath("config/payment-limits.json")
-    && isFollowUpExcludedPath(".nvmrc") && isFollowUpExcludedPath(".npmrc") && isFollowUpExcludedPath(".node-version")
-    && isFollowUpExcludedPath("src/.babelrc") && isFollowUpExcludedPath("Dockerfile") && isFollowUpExcludedPath("Makefile")
-    && !isFollowUpExcludedPath("src/lib/configurePicker.ts")
-    && !isFollowUpExcludedPath("src/lib/invoiceMath.ts"), "control files are excluded; app code is not");
-  ok(isFollowUpTestPath("scripts/smoke/smoke-x.sql") && isFollowUpTestPath("scripts/smoke/prove-x-real-schema.mjs")
-    && !isFollowUpTestPath("scripts/smoke/smoke-specs.json")
-    && !isFollowUpTestPath("scripts/smoke/run-smoke.mjs") && !isFollowUpTestPath("scripts/smoke/interpret-result.mjs")
-    && !isFollowUpTestPath("scripts/smoke/seed-supplier-pricing-phase1a.sql")
-    && !isFollowUpTestPath("scripts/smoke/setup-offline-action-receipt-failure-proof.sql")
-    && !isFollowUpTestPath("scripts/write-codex-push-proof.mjs"),
-    "only smoke and prover chains count as tests under scripts/; the runner, verdict, seed and setup files do not");  // The required pre-merge checks are exactly the custom checks in .coderabbit.yaml.
-  const yaml = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".coderabbit.yaml"), "utf8");
-  const customNames = [...yaml.slice(yaml.indexOf("custom_checks:")).matchAll(/^\s+- name: (.+)$/gm)].map((m) => m[1].trim().toLowerCase());
-  eq([...FOLLOWUP_REQUIRED_CHECKS].sort(), customNames.sort(), "FOLLOWUP_REQUIRED_CHECKS matches .coderabbit.yaml's custom checks");
-  ok(/do NOT post a new @coderabbitai request/.test(coderabbitRequirementUnreadableDenial("X", "7", "a read was cut short"))
-    && /a read was cut short/.test(coderabbitRequirementUnreadableDenial("X", "7", "a read was cut short")),
-    "the unreadable denial names the failed read and forbids spending a review on it");
-}
+ok(/do NOT post a new @coderabbitai request/.test(coderabbitRequirementUnreadableDenial("X", "7", "a read was cut short"))
+  && /a read was cut short/.test(coderabbitRequirementUnreadableDenial("X", "7", "a read was cut short")),
+  "the unreadable denial names the failed read and forbids spending a review on it");
 
 console.log(`codex-bot-review-lib: ${pass} assertions passed`);

@@ -106,6 +106,7 @@ Quote sections and quote items are RPC-owned: browser roles may read them but mu
 
 ### Key RPCs
 - `convert_quote_to_order()` — creates order + order_items + commissions from a `sent`, `revised` or `accepted` quote and sets the quote to `accepted`. Any active admin or sales rep can convert any booking, not only the rep who created it (Mason, 2026-10-27, as for Partial Order); the order and its commissions take the booking's commission split, so the commission stays with the booking's rep. Any other status is refused (`BOOKING_CLOSED`), as is a partly drawn booking (`BOOKING_PARTIALLY_DRAWN`) or a line without a positive quote-time cost (`COST_BASIS_REQUIRED`)
+- `draw_down_quote()` — Partial Order: draws part of a booking into a new order (`booking_draw`). From `20261029110000` (once applied), a line may go over what is left when it carries `extra_price` (`today` | `booked`; the screen defaults to today): the booking part draws what is left, and the extra is written to its own ordinary order (no `quote_id`, notes name the booking) at that price with today's cost. The booking ledger never exceeds what was booked. Without `extra_price` an over-draw is refused with `BOOKING_OVERDRAWN` as before.
 - `create_direct_order()` — creates an order without a quote
 - `cancel_order()` — cancels order and releases its prebooked stock (the undelivered remainder, recorded as `released` ledger rows)
 - `update_order_items()` — modify order items (admin or sales rep)

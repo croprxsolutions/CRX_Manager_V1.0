@@ -1326,6 +1326,69 @@ describe('QuoteBuilder', () => {
     expect(screen.queryByRole('dialog', { name: 'Create Order from Booking' })).not.toBeInTheDocument();
   });
 
+  // Item 10 (Mason 2026-10-26/27): a customer may take more than is left on a booking. The rep
+  // sees how much over, the booked and today's price, and chooses (today's by default); the extra
+  // becomes its own order (20261029110000).
+  describe('taking more than is left on a booking', () => {
+    async function openDrawAndEnter(qty: string) {
+      const fixture = configureDrawDownFixture({ message: 'unused' });
+      // Today's tier price rose to $11.00 after the booking at $10.00.
+      const product = { ...fixture.product, tier1_price: 11 };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? fixture.quote
+          : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [{ ...fixture.item, product }]
+          : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [product]
+          : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'draw_down_quote'
+        ? { data: { status: 'created', order_id: 'order-1', order_number: 'ORD-1', fully_drawn: true,
+            extra_order_id: 'order-2', extra_order_number: 'ORD-2' }, error: null }
+        : { data: null, error: null }));
+      renderQuoteBuilder(fixture.quote.id);
+      const createOrderButton = await screen.findByRole('button', { name: /Create Order/ });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      fireEvent.click(createOrderButton);
+      fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
+      const dialog = await screen.findByRole('dialog', { name: 'Create Order from Booking' });
+      fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: qty } });
+      return dialog;
+    }
+    function sentDraws() {
+      const call = mockRpc.mock.calls.find(([name]) => name === 'draw_down_quote');
+      return (call?.[1] as { p_draws: unknown[] }).p_draws;
+    }
+
+    it('shows how much over, both prices, and defaults to today’s price', async () => {
+      const dialog = await openDrawAndEnter('3');
+      expect(within(dialog).getByText(/1 gal over the booking/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/Booked \$10\.00/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/today \$11\.00/)).toBeInTheDocument();
+      expect(within(dialog).getByRole('radio', { name: /Today's price/ })).toBeChecked();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3, extra_price: 'today' }]));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('ORD-2')));
+    });
+
+    it('sends the booked price when the rep picks it', async () => {
+      const dialog = await openDrawAndEnter('3');
+      fireEvent.click(within(dialog).getByRole('radio', { name: /Booked price/ }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3, extra_price: 'booked' }]));
+    });
+
+    it('a draw within what is left sends no price choice and shows no over line', async () => {
+      const dialog = await openDrawAndEnter('1');
+      expect(within(dialog).queryByText(/over the booking/)).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 1 }]));
+    });
+  });
+
   it('shows loading skeleton while fetching data for existing quote', () => {
     mockFrom.mockImplementation(() => buildPendingChain());
     mockRpc.mockImplementation(() => new Promise(() => {}));

@@ -9,5 +9,7 @@
   "still loading", and a failed allocation reports a real `Error` to Sentry.
 - Corrected stale stamp and draft-only wording in the proof record, review record,
   RPC reference and the first changelog entry; pinned the migration file as LF.
-- Deferred, unchanged: four-digit numbers stop at 9,999 (pre-existing capacity limit,
-  owner: Codex); `generate_ticket_number` stays on its own year logic.
+- Deferred at this round: four-digit numbers stop at 9,999 (pre-existing capacity limit,
+  owner: Codex), since removed from the candidate by
+  [2026-10-31-document-number-capacity.md](2026-10-31-document-number-capacity.md);
+  `generate_ticket_number` stays on its own year logic.

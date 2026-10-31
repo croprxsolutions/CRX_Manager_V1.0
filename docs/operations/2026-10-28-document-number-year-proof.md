@@ -120,15 +120,18 @@ The safe optional live lock timeout can be assessed by the future apply session.
 Not applied and not merged. Delivery follows the `ship.md` gates (CI, reviews,
 final Sol, guarded apply before merge). No Vercel project settings were changed.
 
-Rollback is a forward migration re-emitting the three reviewed bodies with the
-prior year expression. Never reset counters/sequences or renumber records.
+Rollback is always a forward migration, with one of two options. Never reset
+counters/sequences, renumber records, or dynamically rewrite live function source.
 Quote/order prior definitions are in `20261027080100_number_generators_active_signed_in_only.sql`.
-For exact prior bodies, re-emit the three prior definitions, including their
-fixed-width formatting, and verify the original body hashes pinned by the preflight.
-That restores truncation above 9,999 and can generate duplicate values that the
-unique constraints reject. To retain
-full-digit formatting, use a separately reviewed forward migration with new body
-hashes. Do not dynamically rewrite live function source.
+
+- **Option A, keep full digits:** a separately reviewed forward migration re-emits
+  the three candidate bodies, keeping their full-digit formatting and restoring each
+  function's own prior year expression from its prior definition (do not assume one
+  expression fits all three). It records new body hashes.
+- **Option B, exact prior bodies:** re-emit the three prior definitions, including
+  their fixed-width formatting, and verify the original body hashes pinned by the
+  preflight. This restores truncation above 9,999 and can generate duplicate values
+  that the unique constraints reject.
 
 Proposed shared to-do status: "12.1 built; local Chicago boundary, concurrency,
 retry and failure proof passed. Not merged or applied until the landing gates

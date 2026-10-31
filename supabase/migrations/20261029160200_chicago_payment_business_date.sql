@@ -8,6 +8,31 @@
 -- Existing v1 envelopes and older bare responses remain replayable.
 -- ============================================================================
 
+DO $preflight$
+DECLARE
+  v_count integer;
+  v_body text;
+  v_fn record;
+BEGIN
+  SELECT count(*), min(md5(replace(prosrc, chr(13), ''))) INTO v_count, v_body
+    FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'allocate_payment';
+  IF v_count <> 1 OR to_regprocedure('public.allocate_payment(uuid,bigint,text,text,text,date,text,jsonb,uuid,text)') IS NULL
+     OR v_body <> '6a945a2510d8e788d4e6f03c0c6d7563' THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: allocate_payment signature or body drift; re-review before applying';
+  END IF;
+  SELECT * INTO v_fn FROM pg_proc
+    WHERE oid = 'public.allocate_payment(uuid,bigint,text,text,text,date,text,jsonb,uuid,text)'::regprocedure;
+  IF pg_get_userbyid(v_fn.proowner) <> 'postgres'
+     OR v_fn.proacl::text IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'
+     OR NOT v_fn.prosecdef OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+     OR v_fn.provolatile <> 'v' OR v_fn.proisstrict OR v_fn.proparallel <> 'u'
+     OR v_fn.pronargdefaults <> 7 OR pg_get_expr(v_fn.proargdefaults, 0) IS DISTINCT FROM
+       'NULL::text, NULL::text, CURRENT_DATE, NULL::text, ''[]''::jsonb, NULL::uuid, NULL::text' THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: allocate_payment contract drift; re-review before applying';
+  END IF;
+END;
+$preflight$;
+
 CREATE OR REPLACE FUNCTION public.allocate_payment(p_customer_id uuid, p_total_cents bigint, p_payment_method text, p_reference_number text DEFAULT NULL::text, p_check_number text DEFAULT NULL::text, p_payment_date date DEFAULT NULL::date, p_notes text DEFAULT NULL::text, p_allocations jsonb DEFAULT '[]'::jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql

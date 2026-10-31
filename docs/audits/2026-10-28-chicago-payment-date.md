@@ -97,6 +97,6 @@ The historical closeouts below describe the earlier local-only stages. Their no-
 
 - Mason confirmed retaining the existing payment-season behavior: an explicitly backdated September 29 prepay entered October 2 still goes to the new season. This release changes the Chicago business-day boundary and retry intent without changing that rule.
 
-- The candidate is now `20261029160200_chicago_payment_business_date.sql` (history row 1004; authored as `20261028175551`). Only its two status-comment lines changed in the restamp, so the SQL sha256 is now `91119fc1759d66785f25cc4fc0bc7cdb97a4dd4a9990a65fa85802dbc837f553` (LF line endings) and the earlier `5ced6a5e...` hashes above are historical.
+- At the restamp checkpoint, candidate `20261029160200_chicago_payment_business_date.sql` (authored as `20261028175551`) had SQL sha256 `91119fc1759d66785f25cc4fc0bc7cdb97a4dd4a9990a65fa85802dbc837f553` (LF line endings). The later preflight addition changed that hash; migration history carries the current pin.
 - Live read-only checks on 2026-10-29 (about 4:30 PM Central): exactly one `allocate_payment` overload; body md5 `6a945a2510d8e788d4e6f03c0c6d7563`, which equals the pre-migration body the proof uses as its baseline; no `anon` or `PUBLIC` execute; security-definer, `search_path=public, pg_temp`, owner `postgres`. The ledger high-water at that read was `20261029143642` (`20261028185500_order_edit_and_number_concurrency`).
 - Not live: the PR is awaiting the release gates (CI, Sol, apply proofs, smoke chain, sweeps).

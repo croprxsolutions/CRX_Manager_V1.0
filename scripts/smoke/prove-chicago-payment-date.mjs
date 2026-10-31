@@ -149,7 +149,21 @@ try {
     INSERT INTO public.customers(id,farm_name) VALUES ('${customer}','[PROOF] Chicago payment');`);
 
   const acl = sql(`SELECT proacl::text FROM pg_proc WHERE oid='${signature}'::regprocedure`);
-  sql(file(`supabase/migrations/${candidate}`)); // whole migration, before clock-controlled copies
+  const wholeCandidate = file(`supabase/migrations/${candidate}`);
+  assert.throws(() => sql(`BEGIN; CREATE FUNCTION public.allocate_payment(integer) RETURNS integer LANGUAGE sql AS 'SELECT $1'; ${wholeCandidate} ROLLBACK;`), /PREFLIGHT_FAIL/);
+  assert.throws(() => sql(`BEGIN; ${old.replace('DECLARE', 'DECLARE\n  -- drift')} ${wholeCandidate} ROLLBACK;`), /PREFLIGHT_FAIL/);
+  for (const change of [
+    `REVOKE EXECUTE ON FUNCTION ${signature} FROM authenticated;`,
+    `ALTER FUNCTION ${signature} SECURITY INVOKER;`,
+    `ALTER FUNCTION ${signature} SET search_path = public;`,
+    `ALTER FUNCTION ${signature} IMMUTABLE;`,
+    `ALTER FUNCTION ${signature} STRICT;`,
+    `ALTER FUNCTION ${signature} PARALLEL SAFE;`,
+    `CREATE ROLE payment_proof_owner; GRANT payment_proof_owner TO postgres WITH SET TRUE; GRANT CREATE ON SCHEMA public TO payment_proof_owner; ALTER FUNCTION ${signature} OWNER TO payment_proof_owner;`,
+    old.replace('p_payment_date date DEFAULT CURRENT_DATE', 'p_payment_date date DEFAULT NULL::date'),
+  ]) assert.throws(() => sql(`BEGIN; ${change} ${wholeCandidate} ROLLBACK;`), /PREFLIGHT_FAIL/);
+  console.log('PASS: candidate refuses unexpected overload, body or function contract drift');
+  sql(wholeCandidate); // whole migration, before clock-controlled copies
   assert.equal(sql(`SELECT proacl::text FROM pg_proc WHERE oid='${signature}'::regprocedure`), acl, 'ACL preserved');
   run(`DO $$ DECLARE r jsonb; d date; BEGIN r := ${call('real-clock')};
     SELECT payment_date INTO d FROM public.allocation_sets WHERE id=(r->>'allocation_set_id')::uuid;

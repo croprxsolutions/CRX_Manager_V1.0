@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Save,
@@ -143,6 +143,9 @@ interface LocalItem {
   // "Use today's price" (20261027040000): once the quote has been sent, a saved line keeps its
   // stored price (savedLineIdsRef) unless it has a manual price or this asks for today's price.
   use_todays_price?: boolean;
+  // A higher booked price on a sent quote needs the rep's "grower agreed" tick (20261029120000).
+  // Holds the price, in cents, the tick confirmed, so changing the price again clears it.
+  grower_confirmed_cents?: number;
   suggested_rate: string | null;
   actual_rate: number | null;
   rate_unit: string | null;
@@ -186,6 +189,24 @@ interface ActivePlannedHold {
   expires_at: string | null;
 }
 
+interface CostAlert {
+  quote_item_id: string;
+  cost_rose: boolean;
+  below_cost: boolean;
+}
+
+// A saved line on a sent quote whose price went up since it was saved: it needs the rep's
+// "grower agreed" tick before it saves (Mason 2026-10-27, 20261029120000).
+function priceRaise(
+  saved: { productId: string; price: number } | undefined,
+  item: { product_id: string; price_per_unit: number },
+): { fromCents: number; toCents: number } | null {
+  if (!saved || saved.productId !== item.product_id) return null;
+  const fromCents = Math.round(saved.price * 100);
+  const toCents = Math.round(item.price_per_unit * 100);
+  return toCents > fromCents ? { fromCents, toCents } : null;
+}
+
 interface DrawRow {
   product_id: string;
   product_name: string;
@@ -194,6 +215,11 @@ interface DrawRow {
   remaining: number;
   qty: string;
   unit: string | null;
+  // Item 10: a quantity over `remaining` is allowed; the extra is its own order at the price the
+  // rep picks (20261029110000). The booked price is the last booked line's, as the server uses.
+  bookedPrice: number | null;
+  todayPrice: number | null;
+  extraPrice: 'today' | 'booked';
 }
 
 let keyCounter = 0;
@@ -649,7 +675,9 @@ export default function QuoteBuilder() {
   }>());
   // The render-side copy of savedLineIdsRef, set with it on load and on each save. A line added and
   // saved since the page loaded has no local id, so the price lock names it from here.
-  const [savedLineIdByKey, setSavedLineIdByKey] = useState<ReadonlyMap<string, { id: string; productId: string }>>(new Map());
+  const [savedLineIdByKey, setSavedLineIdByKey] = useState<ReadonlyMap<string, { id: string; productId: string; price: number }>>(new Map());
+  // Item 11: a rep's cost-rise flags per saved line id (no cost numbers).
+  const [costAlerts, setCostAlerts] = useState<ReadonlyMap<string, CostAlert>>(new Map());
   const priceLockLineOf = useCallback((item: LocalItem): PriceLockLine => {
     const saved = savedLineIdByKey.get(item._key);
     return {
@@ -831,6 +859,28 @@ export default function QuoteBuilder() {
     })();
     return () => { cancelled = true; };
   }, [isEditing, quoteId, currentStatus, bookingSettlementAttempt]);
+
+  // Item 11 (Mason 2026-10-26): a rep is told when a line's cost has gone up since it was quoted,
+  // as yes/no flags only (20261030090000); admins see the costs themselves (QuoteLineCost).
+  // Re-read whenever the saved lines change, so a save shows the flags of the lines it stored.
+  useEffect(() => {
+    if (isAdmin || !isEditing || !quoteId || savedLineIdByKey.size === 0) { setCostAlerts(new Map()); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_quote_cost_alerts', { p_quote_id: quoteId });
+        if (error) throw error;
+        const rows = assertRpcResult<CostAlert[]>(data, 'get_quote_cost_alerts');
+        if (!cancelled) setCostAlerts(new Map(rows.map((row) => [row.quote_item_id, row])));
+      } catch (err) {
+        if (cancelled) return;
+        // A warning only: a failed read shows no flag and never blocks the quote.
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'get_quote_cost_alerts' } });
+        setCostAlerts(new Map());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin, isEditing, quoteId, savedLineIdByKey]);
 
   const loadActivePlannedHolds = useCallback(async (targetQuoteId: string) => {
     const { data, error } = await supabase
@@ -2211,6 +2261,17 @@ export default function QuoteBuilder() {
       return null;
     }
 
+    if (priceLocked) {
+      const unconfirmed = sections.flatMap((sec) => sec.items).find((item) => {
+        const raise = item.product_id ? priceRaise(savedLineIdsRef.current.get(item._key), item) : null;
+        return raise && item.grower_confirmed_cents !== raise.toCents;
+      });
+      if (unconfirmed) {
+        toast('error', 'A booked price went up. Tick "Grower agreed" under that price once the grower has agreed, then save.');
+        return null;
+      }
+    }
+
     // Minted before the payload so the frozen clock can be bound to it. `getKey`
     // returns the SAME key until it is retired, so this is a read, not a new attempt.
     const idemKey = getSaveQuoteIdempotencyKey();
@@ -2290,6 +2351,7 @@ export default function QuoteBuilder() {
             price_override: item.price_override ?? null,
             // On a sent quote the server keeps the line's saved price unless this asks for today's.
             use_todays_price: wantsTodaysPrice(item),
+            ...(item.grower_confirmed_cents === Math.round(item.price_per_unit * 100) ? { grower_confirmed: true } : {}),
             current_cost: item.current_cost,
             suggested_rate: item.suggested_rate,
             actual_rate: item.actual_rate,
@@ -3444,16 +3506,23 @@ export default function QuoteBuilder() {
       });
       const rows = Array.from(bookedByProduct.entries())
         .filter(([, booked]) => booked > 0)
-        .map(([productId, booked]) => {
+        .map(([productId, booked]): DrawRow => {
           const drawn = drawnByProduct.get(productId) || 0;
+          const product = products.find((p) => p.id === productId);
+          // The quote is saved (checked above), so the screen's lines are the booked lines.
+          const bookedLines = sections.flatMap((sec) => sec.items)
+            .filter((it) => it.product_id === productId && (it.total_units_needed ?? 0) > 0);
           return {
             product_id: productId,
-            product_name: products.find((p) => p.id === productId)?.product_name || 'Unknown product',
-            unit: products.find((p) => p.id === productId)?.inventory_unit ?? null,
+            product_name: product?.product_name || 'Unknown product',
+            unit: product?.inventory_unit ?? null,
             booked,
             drawn,
             remaining: Math.max(booked - drawn, 0),
             qty: '',
+            bookedPrice: bookedLines.length ? bookedLines[bookedLines.length - 1].price_per_unit : null,
+            todayPrice: product ? getQuoteTierPrice(product, tier) : null,
+            extraPrice: 'today',
           };
         })
         .sort((a, b) => a.product_name.localeCompare(b.product_name));
@@ -3477,23 +3546,30 @@ export default function QuoteBuilder() {
       toast('warning', 'Enter a quantity for at least one product');
       return;
     }
-    const over = draws.find((d) => d.quantity > d.remaining);
-    if (over) {
-      toast('error', `${over.product_name}: only ${over.remaining} remaining on this booking`);
+    const closed = draws.find((d) => d.remaining <= 0);
+    if (closed) {
+      toast('error', `${closed.product_name}: nothing left on this booking`);
       return;
     }
     setDrawing(true);
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,
-        p_draws: draws.map((d) => ({ product_id: d.product_id, quantity: d.quantity })),
+        // The price choice is sent only for a quantity over what is left, so every other draw
+        // is the same request as before.
+        p_draws: draws.map((d) => ({
+          product_id: d.product_id,
+          quantity: d.quantity,
+          ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
+        })),
         p_performed_by: profile!.id,
         p_idempotency_key: drawDownIdem.getKey(),
       }, reason)));
       if (error) throw error;
       drawDownIdem.resetKey();
-      const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean }>(data, 'draw_down_quote');
-      toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`);
+      const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
+      toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`
+        + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
       if (result.warnings && result.warnings.length > 0) {
         result.warnings.forEach((w) => toast('warning', `Inventory: ${w}`));
       }
@@ -3502,6 +3578,7 @@ export default function QuoteBuilder() {
         data: { orderId: result.order_id ?? '', orderNumber: result.order_number ?? '', quoteId: id },
       });
       sendOrderConfirmedEmail(result.order_id!);
+      if (result.extra_order_id) sendOrderConfirmedEmail(result.extra_order_id);
       setIsDirty(false);
       setShowDrawModal(false);
       skipUnsavedPromptRef.current = true;
@@ -4312,7 +4389,7 @@ export default function QuoteBuilder() {
                   : `Prices stay as sent in V${lastSentVersion.version_number} unless you change them. `}
             {unsentChange
               ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
-              : 'Quantity and note changes need no re-send.'}
+              : 'A price you change applies without a re-send; a higher one needs the grower\u2019s OK. Quantity and note changes need no re-send.'}
           </span>
           <span className="flex flex-wrap gap-2">
             <Button
@@ -5040,6 +5117,10 @@ export default function QuoteBuilder() {
                           : sentState.kind === 'new'
                             ? `New since V${lastSentVersion.version_number}`
                             : `Sent at ${formatCents(sentState.sentCents)}`;
+                        const costAlert = isAdmin ? undefined : costAlerts.get(savedLineIdByKey.get(item._key)?.id ?? '');
+                        const costHint = costAlert?.below_cost
+                          ? "Below today's cost: converting needs an admin's approval."
+                          : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
                         return (
                           <tr
                             key={item._key}
@@ -5127,9 +5208,28 @@ export default function QuoteBuilder() {
                                   </button>
                                 )}
                               </div>
-                              {!customerView && (sentHint || todayPriceOffer != null) && (
+                              {!customerView && priceLocked && (() => {
+                                const raise = priceRaise(savedLineIdByKey.get(item._key), item);
+                                return raise && (
+                                  <label className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
+                                    <input
+                                      type="checkbox"
+                                      checked={item.grower_confirmed_cents === raise.toCents}
+                                      disabled={formLocked}
+                                      onChange={(e) => updateItem(sec._key, item._key, {
+                                        grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
+                                      })}
+                                    />
+                                    Grower agreed to {formatCents(raise.toCents)} (was {formatCents(raise.fromCents)})
+                                  </label>
+                                );
+                              })()}
+                              {!customerView && (sentHint || todayPriceOffer != null || costHint) && (
                                 <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs">
                                   {sentHint && <span className="text-amber-700">{sentHint}</span>}
+                                  {costHint && (
+                                    <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
+                                  )}
                                   {todayPriceOffer != null && (
                                     <button
                                       type="button"
@@ -5661,7 +5761,8 @@ export default function QuoteBuilder() {
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Enter how much of each booked product to send now. The quote keeps the
-              remaining balance and stays open until it is fully drawn.
+              remaining balance and stays open until it is fully drawn. You can send more than
+              is left: the extra goes on its own order at the price you choose.
             </p>
             {drawLoading ? (
               <p className="text-sm text-secondary">Loading booking balance…</p>
@@ -5678,8 +5779,16 @@ export default function QuoteBuilder() {
                     </tr>
                   </thead>
                   <tbody>
-                    {drawRows.map((row, idx) => (
-                      <tr key={row.product_id} className="border-b last:border-0">
+                    {drawRows.map((row, idx) => {
+                      const over = (parseFloat(row.qty) || 0) - row.remaining;
+                      const setRow = (patch: Partial<DrawRow>) => {
+                        const next = [...drawRows];
+                        next[idx] = { ...row, ...patch };
+                        setDrawRows(next);
+                      };
+                      return (
+                      <Fragment key={row.product_id}>
+                      <tr className={over > 0 && row.remaining > 0 ? '' : 'border-b last:border-0'}>
                         <td className="py-2 pr-2">{row.product_name}</td>
                         <td className="py-2 pr-2 text-right">{row.booked}{row.unit ? ` ${row.unit}` : ''}</td>
                         <td className="py-2 pr-2 text-right">{row.drawn}{row.unit ? ` ${row.unit}` : ''}</td>
@@ -5689,23 +5798,44 @@ export default function QuoteBuilder() {
                             <input
                               type="number"
                               min={0}
-                              max={row.remaining}
                               step="any"
                               value={row.qty}
                               // Locked while the order is created: a later change would not be in it.
                               disabled={drawing || row.remaining <= 0}
-                              onChange={(e) => {
-                                const next = [...drawRows];
-                                next[idx] = { ...row, qty: e.target.value };
-                                setDrawRows(next);
-                              }}
+                              onChange={(e) => setRow({ qty: e.target.value })}
                               className="w-24 px-2 py-1 text-sm text-right border border-gray-200 rounded-lg disabled:bg-gray-50"
                             />
                             {row.unit && <span className="text-xs text-secondary">{row.unit}</span>}
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      {over > 0 && row.remaining > 0 && (
+                        <tr className="border-b last:border-0">
+                          <td colSpan={5} className="pb-2 text-xs text-secondary">
+                            <p>
+                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : '—'},
+                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : '—'}. The extra goes on its own order at:
+                            </p>
+                            <div className="mt-1 flex gap-4">
+                              {(['today', 'booked'] as const).map((choice) => (
+                                <label key={choice} className="inline-flex items-center gap-1 text-nav-dark">
+                                  <input
+                                    type="radio"
+                                    name={`extra-price-${row.product_id}`}
+                                    checked={row.extraPrice === choice}
+                                    disabled={drawing}
+                                    onChange={() => setRow({ extraPrice: choice })}
+                                  />
+                                  {choice === 'today' ? "Today's price" : 'Booked price'}
+                                </label>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

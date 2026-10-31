@@ -14135,6 +14135,10 @@ export type Database = {
         }[]
       }
       get_program_completion: { Args: { p_season?: number }; Returns: Json }
+      get_quote_cost_alerts: {
+        Args: { p_quote_id: string }
+        Returns: { below_cost: boolean; cost_rose: boolean; quote_item_id: string }[]
+      }
       get_quote_versions: {
         Args: { p_quote_id: string }
         Returns: {

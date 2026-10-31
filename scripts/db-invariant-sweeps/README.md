@@ -96,6 +96,8 @@ that guard-of-the-guard and the rollback behavior smoke with
 
 ## Output containment (the repo is public)
 
+Reviewed role-wrapper exceptions can pin the wrapper, identity source, and authorization dependencies through `reviewed_contracts`, just like actor exceptions. Actor exceptions additionally require the exact `suspect_param`; role predicates do not emit that field. Missing or changed contracts never clear either kind of reviewed exception. The five-argument order-edit wrapper was rechecked against live definitions on 2026-10-29 after its concurrency migration changed the signature.
+
 `CRX_Manager_V1.0` is a **public** GitHub repository. Predicates split into two groups by what their
 output contains, and the difference decides where that output may be pasted:
 

@@ -38,7 +38,7 @@ hooks themselves. If this page and those disagree, they win; please fix this pag
 | Sol | `gpt-6-sol` at high effort, the single final review that must run last, on the exact commit that will merge. |
 | CodeRabbit | A GitHub review bot. Advisory since 2026-10-19 and silent unless asked since 2026-10-21; required (as a clean review) only on PRs that touch money, invoices, payments, inventory or costs, or that Mason names. |
 | Codex GitHub App | A second GitHub review bot (`chatgpt-codex-connector`). It reviews when a draft PR is marked ready. |
-| Sol-exempt | A PR whose every file is plain documentation in an eligible folder. It may merge without the Sol review. Defined in `docs/reference/sol-exempt-paths.md` and `.claude/hooks/sol-exempt-lib.mjs`. |
+| Sol list | The files that need a Sol review: money, inventory, database, logins, dependencies, deployment and the kept safety rules. A PR off the list merges on green checks. Defined in `docs/reference/sol-required-paths.md` and `.claude/hooks/sol-risk-lib.mjs`. |
 
 ## What runs where
 
@@ -119,7 +119,9 @@ missing backup), `worktree-awareness` (other sessions working), `worktree-cleanu
 worktrees), `session-snapshot`, `session-heartbeat`, `session-context-reminder`. At the end of a turn:
 `stop-wrap` (uncommitted files, unapplied migrations, undeployed functions). Codex also runs
 `stop-verify` (refuses "done" until the change was actually run and observed); Claude's wiring of
-it was dropped on 2026-10-27 because Mason's global verify-before-stop hook does the same job. After a tool call:
+it was dropped on 2026-10-27 because Mason's global verify-before-stop hook does the same job. Mason's
+Codex install has a global hook too, but the two are complementary: it reminds once and reads no proof,
+`stop-verify` checks for proof, and both can prompt on the same stop. After a tool call:
 `posttool-router`, `eslint-autofix`, `registry-freshness`, `applied-snapshot-invalidate`.
 
 Files ending in `-lib.mjs` hold the shared logic; files ending in `.test.mjs` are their tests and run
@@ -168,7 +170,9 @@ domains or ownership.
 - **Do not delete, reset or force-push someone else's branch or worktree.** An agent may own it.
   `node scripts/fleet-status.mjs` (or asking an agent for `/fleet`) lists who is working where.
 - **Never stage `.claude/session-state/`, `.codex/session-state/` or `.agents/skills/source-command-*`.**
-  These are per-machine state and harness output.
+  These are per-machine state and harness output. If the sync check warns about `source-command-*` folders,
+  preview moving them to a restorable archive with `node scripts/sync-agent-workflows.mjs --archive-imported`,
+  then add `--confirm`. Nothing is deleted: they go to `.git/crx-archive/imported-skills/` with a restore map.
 - **Changelog:** every change adds its own `docs/changelog.d/<YYYY-MM-DD>-<slug>.md`. A commit that
   touches agent tooling or adds a migration is refused by the pre-commit hook without one.
 - **Migrations:** new files only, never edit an applied one; Row Level Security and policies in the
@@ -258,8 +262,8 @@ There is no checked path for a human today except installing the agent tools (op
    `--carry-forward`), it also sets a GitHub commit status on that head, for example context
    `crx/sol-review`, state `success`, with the reviewed base SHA in its description. It already has
    everything it needs; this adds one `gh api repos/.../statuses/<sha>` call.
-2. **Add one CI job, `Sol review on head`**, to `ci.yml`. It passes when either the PR is Sol-exempt
-   (reusing `.claude/hooks/sol-exempt-lib.mjs`, the same code the merge gate uses) or a
+2. **Add one CI job, `Sol review on head`**, to `ci.yml`. It passes when either the PR is off the Sol list
+   (reusing `.claude/hooks/sol-risk-lib.mjs`, the same code the merge gate uses) or a
    `crx/sol-review` success status exists on the exact head, set by an allowed account, whose base
    matches the PR's current base and is under 24 hours old. Otherwise it fails with a message
    saying how to get a Sol review. A new commit gives a new head, which has no status, so the job
@@ -297,7 +301,6 @@ Read the refusal first. Every gate prints which condition failed, and most print
 | Refusal says | Usually means | Do this |
 |---|---|---|
 | No Sol proof / proof does not match head or base | A commit or a `main` merge after the review, or the review is older than 24 hours | Rerun `write-codex-push-proof.mjs` on the clean head; after a plain `main` merge, try `--carry-forward` first |
-| `documentation-only exemption does not apply` | A file outside the eligible docs folders, or a never-eligible name | Run Sol, or move the file into an eligible folder |
 | A check is not green / `mergeStateStatus` not CLEAN | A check failed or is pending, or the branch is behind | `gh pr checks <n>`; `gh pr update-branch <n>` if behind |
 | CodeRabbit thread unresolved or has no reply | A thread from any commit | Reply on it, then resolve it |
 | Money PR has no completed CodeRabbit review | Required for money PRs | Post `@coderabbitai full review` once; if it says it is rate-limited, wait the stated time and check before asking again |
@@ -310,15 +313,16 @@ Never get past a gate with `--no-verify`, `--admin`, `--auto`, a hand-written pr
 autopilot flag or a merge from the GitHub website. If a gate is wrong, change the gate through a
 reviewed PR (next section).
 
-`npm run agent-health` checks that the agent tooling is wired correctly. Known open problems are in
-`docs/manual/KNOWN_ISSUES.md`.
+`npm run agent-health` checks that the agent tooling is wired correctly, including whether Codex would
+really run each project hook (it fails on a missing, disabled or untrusted hook; on a branch with a new
+hook, that hook reads as missing until it lands). Known open problems are in `docs/manual/KNOWN_ISSUES.md`.
 
 ## Asking for a policy change
 
 1. **Say what is wrong and show it.** The command, the refusal text, the commit, and why the rule
    blocks something it should allow (or allows something it should block).
 2. **Open a PR that changes the rule and its test together.** Every hook has a `.test.mjs`. For the
-   documentation exemption, `sol-exempt-lib.mjs` and `docs/reference/sol-exempt-paths.md` change in
+   Sol list, `sol-risk-lib.mjs` and `docs/reference/sol-required-paths.md` change in
    the same PR (a test fails if they disagree). Run `node scripts/sync-agent-workflows.mjs --write`,
    `npm run test:agent-workflows` and `npm run agent-health` after changing agent files, and update
    `docs/reference/agent-guardrails.md`.
@@ -335,7 +339,7 @@ reviewed PR (next section).
 | The rules | `AGENTS.md` |
 | The delivery path | `.claude/commands/ship.md` |
 | Every hook and why it exists | `docs/reference/agent-guardrails.md` |
-| Documentation exemption | `docs/reference/sol-exempt-paths.md` |
+| Sol list | `docs/reference/sol-required-paths.md` |
 | CodeRabbit rules | `docs/reference/coderabbit-native-review.md` |
 | Model and effort pins | `docs/reference/codex-model-tuning.md`, `docs/reference/claude-model-tuning.md` |
 | How Claude and Codex work together | `docs/workflows/AGENT_COLLABORATION.md` |

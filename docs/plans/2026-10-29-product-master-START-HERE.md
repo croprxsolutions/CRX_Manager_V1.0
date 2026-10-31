@@ -12,7 +12,7 @@
 |---|---|---|
 | **The grand plan (2026-10-29)** | `docs/plans/2026-10-29-product-GRAND-PLAN.md` | All product work in one order: this Product Master work is Stage 1; weight, chemistry, brands, rates, comparison, use guidance, families, clean-up and images follow. Sol-reviewed; it revised the build sheet's order |
 | The 43 items | `docs/plans/2026-10-28-product-master-setup-edits-BACKLOG.md` | What's wrong or missing on product setup: Mason's requests (items 1–2) and the review's findings (items 3–43) |
-| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 20 work packages (16 on 2026-10-28, plus WP-PM-14, WP-PM-16, DM-0 and WP-PM-15 from the grand plan; see its section 2a): approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
+| **The game plan** | `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` | 21 queue entries, including both halves of WP-PM-15: approach, "Done when", size, database impact, Sol's notes, the final order (section 4) and the Sol review record (section 6) |
 | **The build loop** | `docs/plans/2026-10-28-product-master-loop-MISSION.md` | How a session builds it: Codex builds, Claude checks and proves, one draft PR per package, nothing merged or applied live. Passes `node scripts/validate-mission-doc.mjs` |
 | Weight per gallon and active ingredients | `docs/plans/2026-10-28-product-data-model-REFRESH.md` | The larger feature that follows (To-Do row 2.9), refreshed from the August plan |
 | Mason's decisions | `docs/manual/DECISION_LOG.md`, the three 2026-10-28 entries (Product Master backlog; product data model) | Every business answer, so the build needs no owner input |
@@ -21,6 +21,14 @@
 The old branch `loop/product-master-2026-10` holds a superseded first draft of the mission file; ignore it. The `main` copy above is the one to use.
 
 ## 2. What was decided (summary; the decision log is authoritative)
+
+- **Rollout decisions, 2026-10-30:** prepare and prove a reviewed everyday-product list first while retaining the full catalog scope and visible remaining data work. Defer complicated duplicate merges or give them a separately reviewed procedure, preserving future returns and history. Build comparison after its required data, trusted rates and relevant use guidance; optional images, groupings and return-policy editing do not delay it.
+- **Bulk/tote selling prices:** chemical prices generally match; fertilizer prices can differ. Keep prices independent per size and test both cases. Quantity-first tote filling remains the plan.
+- **Chemical comparison:** match a premix's active pounds with selected single-ingredient generics, sum their same-tier per-acre prices, and show savings and equivalent-premix-gallon pricing. Select several premixes or an entire category in one sortable comparison view. Keep each row's rate, component choices and missing-data warnings visible; fertilizer nutrient comparison is withdrawn.
+- **Admin company view:** toggle cost-versus-cost or selling price (Tier 1 by default, with tier selection). Show each program's cost, selling price, profit per acre and margin, with internal cost, customer-price and company-profit differences separately labeled. Costs and derived profitability are admin-only; changing comparison mode never changes saved prices.
+- **Approved comparison safeguards:** positive comparison rates, shared chosen generic references with marked overrides, active-reference rechecks and separate eligibility/ranking for cost, selling price, profit and margin. Unknown price dates stay unknown.
+- **Final business answers, 2026-10-30:** admins may complete missing formulation facts and correct verified mistakes through the evidence-backed, reasoned, version-checked correction in grand-plan overlap 13; genuinely different formulations remain separate, wrongly grouped sizes need reviewed moves, and history/posted amounts stay intact. Inactive products and their stock remain visible internally; new sales require deliberate admin reactivation, while legitimate historical returns/corrections do not reactivate them. See build-sheet WP-PM-3.
+- **Broader review disposition:** the two business questions above are answered. Staged parent/brand activation, the PM-8/PM-6a dependency boundary, a safe Use Timing transition and duplicate-lifecycle proof are explicit package requirements, not unanswered owner policy. The affected packages still need their detailed designs, independent review, applicable data approvals and observed proof before activation. No product build has started.
 
 - **Use Timing:** several timings per product. Add Post-Emerge Corn, Post-Emerge Soybeans and Pre-Emerge; keep the generic Post-Emergence. Only Herbicide and Foliar Fertilizer products keep a timing.
 - **New products** stay active and open for pricing straight after creation; they don't start turned off.
@@ -91,6 +99,8 @@ Never: merge, mark a PR ready, push to main, apply a migration live, write live 
 - **Pace:** an 8-hour run will probably finish 6–10 packages properly; the rest queue for another run.
 - **Parked for Mason:**
   - the Unit back-fill: Sol's BLOCKER, so audit only, and Mason sees the mismatch list first;
-  - the data clean-up itself: Mason types the missing SKUs and approves each fix. Bulk import and the detail workbook stay as draft PRs until it is done;
+  - the data clean-up itself: Mason types the missing SKUs and approves each fix. Dependent packages may be parked until their prerequisites are available and the data step is done;
+  - the vendor-link review and live data transition before the preferred-vendor copy rule is enabled;
+  - average purchase-cost tracking for shop-filled totes until the separate inventory-costing foundation has been reviewed, approved where required and activated; the quantity-only first release is planned after PAR-2;
   - any migration that changes grants on `products`, which needs his `I approve`.
-- **The morning report** lists, per package: the PR, the proof, what's still owed (Mason's click-through on the preview, the Sol merge gate, CodeRabbit for money packages) and a suggested merge order.
+- **The morning report** lists, per package: the PR, the proof, what's still owed (including real app proof and applicable Sol gate), and a suggested merge order. CodeRabbit is required only when labeled.

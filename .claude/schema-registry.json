@@ -8674,7 +8674,8 @@
       "deleted_at",
       "pdf_template_id",
       "pdf_columns_override",
-      "row_version"
+      "row_version",
+      "chosen_expiry_date"
     ],
     "rate_limit_log": [
       "id",

@@ -5,6 +5,10 @@
 > so compare their UTC timestamps; the newest timestamp is the latest evidence. Refer to a
 > migration by its version or file name, not its row number: two PRs can give a new row the same number.
 
+**Live capture — 2026-10-31 06:33 UTC (1:33 AM Central; read-only ledger query for PR #1181):** The ledger has 1079 rows. Its effective high-water is `20261029160100`, using the first 14 digits of the recorded name when present and the version otherwise; the highest raw apply-time version is `20261030162633`. No ledger name contains `document_numbers_chicago_year`, and candidate `20261029160300` follows the effective high-water. Refresh this read immediately before apply.
+
+The 2026-10-31 type review confirmed that generated Supabase types and the schema registry already describe `rebate_claim_counters.year` and `next_value`. The table is written inside the claim RPC, not directly by app callers; no separate app-facing interface is needed.
+
 **Live capture — 2026-10-30 05:28 UTC (12:28 AM Central; read-only Supabase `list_migrations` for project `rhyzpcqhnizqbxphqdkr`, full ledger evaluated row by row before PR #1174):** 1077 rows / 1070 distinct names. The newest raw version is `20261029143642`, named `20261028185500_order_edit_and_number_concurrency`. Computing each row's effective stamp from its name's leading 14 digits when present, otherwise its version, gives maximum `20261028185500` from that same row. Zero rows have an effective stamp at or after `20261029160000`, and no row names `cap_order_invoices_at_delivered`. Candidate `20261029160000_cap_order_invoices_at_delivered` therefore sorts strictly after every applied migration. This is ordering evidence only; the guarded apply must recheck the live ledger and candidate preflight before writing.
 
 **Live capture — 2026-10-29 14:36 UTC (9:36 AM Central; the apply script's read-only ledger refresh after row 1001 applied for PR #1185, then a read-only catalog check):** 1077 rows, `max(version)` `20261029143642` = `20261028185500_order_edit_and_number_concurrency` (row 1001). The effective ordering high-water is `20261028185500`.

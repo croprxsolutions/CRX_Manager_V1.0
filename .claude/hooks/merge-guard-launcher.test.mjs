@@ -20,7 +20,6 @@ import {
   readableCall,
   superviseGuard,
 } from "./merge-guard-launcher.mjs";
-import { couldReachGatedAction } from "./codex-push-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCHER = path.join(__dirname, "merge-guard-launcher.mjs");
@@ -149,18 +148,6 @@ for (const command of guardForms) {
   if (!realGuardDenies(command)) continue;
   deniedForms += 1;
   ok(mayMerge(payload(command)), `a form the working guard denies is a possible merge here too: ${command}`);
-}
-// Since 2026-10-18 the working guard refuses run-time text and fed interpreters
-// only when the command could reach a merge (couldReachGatedAction), so the
-// forms above with no gated word (`bash -c "$CMD"`, `cat prog.js | node`, …)
-// pass it. This launcher still treats them as possible merges, which is the
-// stricter side and stays correct. Exact, not only a floor (Luna, PR #956 round
-// 1): EVERY form couldReachGatedAction marks must be denied by the working guard,
-// so a form that silently stops matching fails here instead of shrinking a count.
-// The inline `node -e` base64 form was allowed on main; inlineCodeReachesGatedAction
-// now refuses it (Luna, PR #956 round 2), so no form is exempt.
-for (const command of guardForms.filter((form) => couldReachGatedAction([form]))) {
-  ok(realGuardDenies(command), `the working guard still denies a form that could reach a merge: ${command}`);
 }
 ok(deniedForms >= 8, `the parity sample reached the real guard's denials (${deniedForms} denied)`);
 

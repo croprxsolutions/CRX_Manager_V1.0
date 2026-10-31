@@ -145,10 +145,8 @@ If ready, state the remaining landing steps explicitly — this skill does **not
    `@coderabbitai full review` once for its frozen, green head if CodeRabbit has not reviewed it
    (rules: `docs/reference/coderabbit-native-review.md`). The legacy `ready-for-coderabbit`
    label route no longer triggers a review; `docs/reference/coderabbit-native-review.md` describes it.
-5. Run the exact-SHA `gpt-6-sol` high-effort proof LAST (every change, since 2026-09-26, except a documentation-only
-   change as defined in `docs/reference/sol-exempt-paths.md`, which the merge gates accept without
-   it; run Sol only if a gate refuses saying "documentation-only exemption does not apply",
-   and fix any other refusal's own failing condition), then apply the change's
+5. Run the `gpt-6-sol` high-effort proof for a change on `docs/reference/sol-required-paths.md`
+   (Mason, 2026-10-30; other changes need none), then apply the change's
    non-destructive migration if it has one, then merge with `--match-head-commit`. Both agent
    merge gates enforce Mason's autonomous-landing rule: the newest run of every reported check
    green with `mergeStateStatus` CLEAN, and the Sol proof bound to that head and to a base the

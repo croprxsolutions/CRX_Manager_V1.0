@@ -7,9 +7,10 @@
 // with "Prompt stop hooks are not yet supported outside REPL", so both were
 // silently dead there (observed live 2026-08-18; also the source of the
 // hook_error noise on startup/resume in transcript telemetry). A command hook
-// printing that text through SessionStart additionalContext works on the one
-// harness this hook is wired to (Claude only — it is declared in CLAUDE_ONLY_HOOKS
-// and is absent from .codex/hooks.json; verified on the desktop harness 2026-08-18).
+// printing that text through SessionStart additionalContext works on Claude (verified
+// on the desktop harness 2026-08-18). Codex runs this same file through .codex/hooks.json
+// since 2026-10-30: its hook docs list source=compact and the same additionalContext
+// shape, and the adapter sets CRX_AGENT_SURFACE=codex.
 // Only the old PreCompact re-anchor's rules half was carried forward here (as
 // COMPACT_REANCHOR, fired on source === "compact"), and not verbatim: the old
 // prompt's "Always include these reminders:" connective became the "POST-COMPACT
@@ -63,9 +64,13 @@ const COMPACT_REANCHOR =
   "unless the summary says they were run and observed. Mason cannot read code or safely review a diff — " +
   "explain in plain English.";
 
+// Codex loads AGENTS.md but not CLAUDE.md, so it must not be told CLAUDE.md is in context.
+const CONTEXT_ALREADY_LOADED = process.env.CRX_AGENT_SURFACE === "codex"
+  ? "AGENTS.md (the shared contract) is already in context; do not re-read it. "
+  : "AGENTS.md (the shared contract) and CLAUDE.md (Claude-only routing) are already in context; do not re-read AGENTS.md or CLAUDE.md. ";
+
 const SESSION_ONBOARDING =
-  "You are starting a new session on the CRX Manager project. AGENTS.md (the shared contract) and " +
-  "CLAUDE.md (Claude-only routing) are already in context; do not re-read AGENTS.md or CLAUDE.md. " +
+  "You are starting a new session on the CRX Manager project. " + CONTEXT_ALREADY_LOADED +
   "Load only the workflow and reference documents that AGENTS.md routes for the current task. " +
   "CRITICAL CONTEXT: Mason cannot read code or safely review a diff. Own routine technical choices, " +
   "and explain outcomes and risk in plain English. Post a short plan, then continue routine implementation " +
@@ -73,7 +78,7 @@ const SESSION_ONBOARDING =
   "Edge Function deployment, and data deletion—requires Mason's current approval immediately beforehand. " +
   "Under his autonomous-landing rule (2026-09-26) a NON-destructive migration and the merge need no ask once " +
   "the exact-SHA Sol proof is clean and checks are green; the gates enforce it. CodeRabbit is advisory. " +
-  "A documentation-only change as defined in docs/reference/sol-exempt-paths.md needs no Sol proof; the merge gates check its file list. " +
+  "A change touching no file on docs/reference/sol-required-paths.md needs no Sol proof; the merge gates check its file list. " +
   "Clearly identify the rare action or business decision only Mason can make.";
 
 emit(source === "compact" ? COMPACT_REANCHOR : SESSION_ONBOARDING);

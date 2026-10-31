@@ -107,6 +107,25 @@ try {
   equal(subtractAllowlist(delivery.predicate, [signed, forged], [delivery], deliveryCatalog), [forged], 'PR652 P1: signature-name exception must not clear actual actor parameter');
 
   const legacy = { predicate: 'fin-prepay-balance', violation_key: 'opaque-existing-baseline' };
+  const roleEntry = {
+    predicate: 'auth-bound-role-ungated', violation_key: delivery.violation_key,
+    reviewed_contracts: delivery.reviewed_contracts,
+  };
+  const roleRow = { violation_key: roleEntry.violation_key };
+  equal(subtractAllowlist(roleEntry.predicate, [roleRow], [roleEntry], deliveryCatalog), [],
+    'a reviewed role-wrapper exception requires exact function and dependency contracts');
+  equal(subtractAllowlist(roleEntry.predicate, [roleRow], [roleEntry]).length, 1,
+    'a role-wrapper exception without live contracts fails closed');
+  for (const pin of deliveryCatalog) {
+    equal(subtractAllowlist(roleEntry.predicate, [roleRow], [roleEntry],
+      deliveryCatalog.filter((item) => item.function_key !== pin.function_key)).length, 1,
+    'a missing role-wrapper dependency fails closed');
+    equal(subtractAllowlist(roleEntry.predicate, [roleRow], [roleEntry],
+      deliveryCatalog.map((item) => item.function_key === pin.function_key ? { ...item, contract_md5: '0'.repeat(32) } : item)).length, 1,
+    'a changed role-wrapper dependency fails closed');
+  }
+  equal(subtractAllowlist('actor-forgery', [signed], [{ ...roleEntry, predicate: 'actor-forgery' }], deliveryCatalog).length, 1,
+    'contract-only role entries cannot waive actor parameter binding');
   const futureActor = { predicate: 'actor-forgery-inventory', violation_key: delivery.violation_key };
   equal(subtractAllowlist(futureActor.predicate, [signed], [futureActor], deliveryCatalog), [signed],
     'an actor-shaped detector row cannot fall back to identity-only matching under a new predicate name');

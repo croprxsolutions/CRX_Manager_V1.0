@@ -7,6 +7,14 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "driver_delivery_issue_notice": {
+      "chain": "smoke-driver-delivery-issue.sql",
+      "container_only": true,
+      "container_prover": "prove-driver-delivery-issue-real-schema.mjs",
+      "description": "CONTAINER ONLY: assigned driver completes a synthetic delivery through the public RPC; deferred office report uses final quantities, saved explanation and recorded type. Covers shortage, damage explanation, absent optional fields, no-issue completion, audience/sender, retry deduplication, notification failure rollback and retry. Restores the real schema and proves failure before the candidate and with premature trigger execution.",
+      "covers": ["_notify_driver_delivery_issue"],
+      "area": ["lifecycle", "idempotency", "regression"]
+    },
     "adjust_inventory": {
       "chain": "smoke-adjust-inventory-intent-binding.sql",
       "container_only": true,
@@ -262,6 +270,40 @@
       "area": [
         "billing",
         "lifecycle"
+      ]
+    },
+    "order_invoice_delivered_cap": {
+      "chain": "smoke-order-invoice-delivered-cap-pipeline.sql",
+      "container_only": true,
+      "container_prover": "prove-order-invoice-delivered-cap-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-order-invoice-delivered-cap-real-schema.mjs, never through run-smoke.mjs against the live database: the fixtures create orders, deliveries and invoices, which create data and consume document-number sequences that a rollback does not return. Disposable full real-schema proof of the delivered cap on order invoices: invoice-first lifecycle, exact split-invoice quantity conservation with cents and acres unchanged, edited quick-draft completion and posting checks, replay, concurrency, and negative controls. The chain ends SMOKE_PASS_ROLLBACK.",
+      "covers": [
+        "_order_invoice_overbilling",
+        "enforce_order_invoice_within_delivered",
+        "enforce_delivery_void_needs_invoice_void",
+        "_create_split_invoices_from_order_provenance_impl_20260719",
+        "create_split_invoices_from_order",
+        "save_invoice",
+        "post_invoice",
+        "void_invoice",
+        "unpost_invoice",
+        "void_delivery",
+        "cancel_delivery",
+        "complete_delivery",
+        "confirm_delivery",
+        "create_quick_delivery",
+        "post_invoice_group",
+        "create_return",
+        "approve_return",
+        "receive_return",
+        "issue_return_credit"
+      ],
+      "area": [
+        "billing",
+        "inventory",
+        "lifecycle",
+        "idempotency",
+        "regression"
       ]
     },
     "orders_blend_tickets_rep_own_name": {

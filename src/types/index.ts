@@ -1660,6 +1660,22 @@ export interface Notification {
   sender_name?: string;
 }
 
+/**
+ * A retry key and the answer it was first given (`idempotency_keys`): database functions record one per
+ * request, so a repeated request returns the first result instead of acting twice. Written only by
+ * those functions; screens read it to check a retry (KI-83).
+ */
+export interface IdempotencyKey {
+  id: string;
+  idempotency_key: string;
+  operation: string;
+  result: Json | null;
+  created_at: string | null;
+  expires_at: string | null;
+  request_fingerprint: string | null;
+  request_actor_id: string | null;
+}
+
 export interface AppSetting {
   id: string;
   setting_key: string;

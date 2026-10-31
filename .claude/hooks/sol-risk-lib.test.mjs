@@ -1,61 +1,63 @@
-// Tests for sol-risk-lib.mjs: which pull requests still need Sol (Mason, 2026-10-29).
+// Tests for sol-risk-lib.mjs: which pull requests still need Sol (Mason, 2026-10-30).
 import assert from "node:assert/strict";
-import { classifySolRisk, solRiskOnGitHub, solRiskPathProblem, SOL_LARGE_PR_LINES, SOL_RISK_MAX_FILES } from "./sol-risk-lib.mjs";
+import { readFileSync } from "node:fs";
+import { PROTECTED_HARNESS_FILES } from "../../.codex/hooks/production-action-guard.mjs";
+import { classifySolRisk, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_NAMES, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES } from "./sol-risk-lib.mjs";
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed += 1; console.log(`ok - ${name}`); };
-const file = (filename, changes = 10, extra = {}) => ({ filename, status: "modified", changes, ...extra });
+const file = (filename, extra = {}) => ({ filename, status: "modified", ...extra });
 
-check("notes files are low risk", () => {
-  assert.equal(classifySolRisk([file("docs/plans/product.md"), file("docs/manual/x.md"), file("docs/changelog.d/y.md")]).risky, false);
-});
 for (const name of [
-  // Any code, configuration or asset (Sol, 2026-10-29: name and content rules kept missing real risks).
-  "src/components/Label.tsx", "src/lib/units.ts", "src/lib/db.ts", "src/App.tsx", "public/sw.js", "vite.config.ts",
-  ".gitignore", "src/lib/invoiceMath.ts", "supabase/migrations/20261029_x.sql", "supabase/functions/send-email/index.ts",
-  "docs/plans/diagram.png", "docs/plans/data.json",
-  // Agent rules and review machinery, even as notes.
-  ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/x.mjs", ".github/workflows/ci.yml", "scripts/write-codex-push-proof.mjs",
-  ".husky/pre-commit", ".agents/x.md", "package.json", "docs/plans/CLAUDE.md", "AGENTS.md", ".coderabbit.yaml", ".Claude/hooks/x.md",
-  "docs/workflows/SAFE_DEVELOPMENT_RULES.md", "docs/reference/agent-guardrails.md", "docs/reference/gotchas.md",
-  "docs/reference/sql-canonical-patterns.md", "README.md", "docs/x.md", "notes/todo.md",
+  "docs/plans/product.md", "docs/reference/gotchas.md", "README.md", "AGENTS.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
+  "src/components/Label.tsx", "src/lib/units.ts", "public/sw.js", ".gitignore",
+  ".claude/commands/ship.md", ".claude/hooks/loop-guard.mjs", ".claude/hooks/pr-merge-guard.test.mjs", "scripts/agent-health-check.mjs",
+]) {
+  check(`${name} does not need Sol`, () => assert.equal(solRiskPathProblem(name), null));
+}
+for (const name of [
+  "src/lib/invoiceMath.ts", "src/pages/Inventory.tsx", "supabase/migrations/20261029_x.sql", "supabase/functions/send-email/index.ts", "supabase/config.toml",
+  "src/lib/db.ts", "src/contexts/AuthContext.tsx", "src/lib/pagePermissions.ts", "src/components/auth/ResetPasswordPage.tsx", "SRC\\Components\\Auth\\LoginPage.tsx",
+  "package.json", "package-lock.json", "tools/x/package.json", ".github/workflows/ci.yml", "vercel.json", ".husky/pre-push", ".claude/settings.json", ".codex/hooks.json",
+  ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/codex-push-lib.mjs", ".claude/hooks/env-guard.mjs", ".claude/hooks/migration-apply-lib.mjs",
+  ".claude/hooks/sol-risk-lib.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs", "scripts/write-apply-proofs-lib.mjs",
+  "src/App.tsx", "src/appPages.tsx", "src/pages/MonthEndClose.tsx", "src/lib/offlineSync.ts", "src/components/receiving/ReceiveForm.tsx", "vite.config.ts", "index.html", ".npmrc", "tools/x/.npmrc", "deno.lock",
+  ".claude/settings.local.json", ".claude/agents/rls-security-reviewer.md", ".claude/hooks/live-testdata-lib.mjs", ".claude/hooks/migration-access-lib.mjs", "scripts/classify-ci-scope.mjs", "scripts/verify-schema-baseline.mjs", "scripts/check-agent-guidance.mjs",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }
-check("a rename out of a code file needs Sol", () => {
-  assert.equal(classifySolRisk([file("docs/plans/x.md", 2, { status: "renamed", previous_filename: "src/lib/invoiceMath.ts" })]).risky, true);
+check("every Codex-protected file needs Sol", () => {
+  for (const name of PROTECTED_HARNESS_FILES) assert.ok(solRiskPathProblem(name), name);
+});
+check("a rename out of a listed file needs Sol", () => {
+  assert.equal(classifySolRisk([file("docs/plans/x.md", { status: "renamed", previous_filename: "src/lib/invoiceMath.ts" })]).risky, true);
 });
 check("a rename with no old name needs Sol", () => {
-  assert.equal(classifySolRisk([file("docs/plans/x.md", 2, { status: "renamed" })]).risky, true);
-});
-check(`exactly ${SOL_LARGE_PR_LINES} lines is low risk, one more needs Sol`, () => {
-  assert.equal(classifySolRisk([file("docs/plans/a.md", 300), file("docs/plans/b.md", 200)]).risky, false);
-  assert.equal(classifySolRisk([file("docs/plans/a.md", 300), file("docs/plans/b.md", 201)]).risky, true);
+  assert.equal(classifySolRisk([file("docs/plans/x.md", { status: "renamed" })]).risky, true);
 });
 check("unreadable answers need Sol", () => {
-  for (const files of [null, [], [null], [file("docs/a.md", 1, { changes: undefined })], [file("docs/a.md", 1, { status: "changed" })],
-    Array.from({ length: SOL_RISK_MAX_FILES }, (_, i) => file(`docs/f${i}.md`, 0))]) {
+  for (const files of [null, [], [null], [file("docs/a.md", { status: "changed" })],
+    Array.from({ length: SOL_RISK_MAX_FILES }, (_, i) => file(`docs/f${i}.md`))]) {
     assert.equal(classifySolRisk(files).risky, true);
   }
+});
+check("the readable page lists every entry", () => {
+  const page = readFileSync(new URL("../../docs/reference/sol-required-paths.md", import.meta.url), "utf8");
+  for (const entry of [...SOL_REQUIRED_PATHS, ...SOL_REQUIRED_NAMES]) assert.ok(page.includes(`\`${entry}\``), entry);
 });
 
 const BASE = "a".repeat(40);
 const HEAD = "b".repeat(40);
-const answer = (over = {}) => JSON.stringify({ status: "ahead", ahead_by: 1, behind_by: 0, merge_base: BASE, head: HEAD, files: [file("docs/plans/note.md")], ...over });
-// GraphQL file-kind lookup, at the head (d0) and the base (d1): docs/plans holds
-// note.md as a plain file, or as `kind`.
-const tree = (kind = { mode: 0o100644, type: "blob" }) => {
-  const folder = { entries: [{ name: "note.md", ...kind }] };
-  return JSON.stringify({ data: { repository: { d0: folder, d1: folder } } });
-};
-const ask = (stdout, extra = {}, kinds = tree()) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
-  gh: (args) => { if (args[1] === "graphql") return kinds; if (stdout instanceof Error) throw stdout; return stdout; }, ...extra });
+const answer = (over = {}) => JSON.stringify({ status: "ahead", ahead_by: 1, head: HEAD, files: [file("src/components/Label.tsx")], ...over });
+const ask = (stdout, extra = {}) => solRiskOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "croprxsolutions/CRX_Manager_V1.0",
+  gh: () => { if (stdout instanceof Error) throw stdout; return stdout; }, ...extra });
 
-check("a clean base..head comparison of a notes file is low risk", () => assert.equal(ask(answer()).risky, false));
-check("a symlink, submodule or unreadable file kind at a notes path needs Sol", () => {
-  assert.equal(ask(answer(), {}, tree({ mode: 0o120000, type: "blob" })).risky, true);
-  assert.equal(ask(answer(), {}, tree({ mode: 0o160000, type: "commit" })).risky, true);
-  assert.equal(ask(answer(), {}, "not json").risky, true);
+check("a comparison off the list is low risk, behind main or not", () => {
+  assert.equal(ask(answer()).risky, false);
+  assert.equal(ask(answer({ status: "diverged" })).risky, false);
+});
+check("a behind pull request on the list needs Sol", () => {
+  assert.equal(ask(answer({ status: "diverged", files: [file("src/lib/db.ts")] })).risky, true);
 });
 check("the comparison is fetched for exactly base...head", () => {
   let seen;
@@ -63,8 +65,8 @@ check("the comparison is fetched for exactly base...head", () => {
   assert.equal(seen[1], `repos/o/r/compare/${BASE}...${HEAD}`);
 });
 check("GitHub failures and mismatched comparisons need Sol", () => {
-  for (const out of [new Error("boom"), "not json", "null", answer({ status: "diverged" }), answer({ behind_by: 1 }),
-    answer({ merge_base: "c".repeat(40) }), answer({ head: "c".repeat(40) }), answer({ ahead_by: 0 })]) {
+  for (const out of [new Error("boom"), "not json", "null", answer({ status: "behind" }), answer({ status: "identical" }),
+    answer({ head: "c".repeat(40) }), answer({ ahead_by: 0 })]) {
     assert.equal(ask(out).risky, true);
   }
   assert.equal(ask(answer(), { headSha: "short" }).risky, true);

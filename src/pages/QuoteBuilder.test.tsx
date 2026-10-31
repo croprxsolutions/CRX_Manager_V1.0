@@ -1189,6 +1189,29 @@ describe('QuoteBuilder', () => {
     }
   });
 
+  it('keeps a confirmed new-quote number when a role change reloads reference data', async () => {
+    mockFrom.mockImplementation(() => buildChain({ data: [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({
+      data: name === 'generate_quote_number' ? 'Q-2026-9876' : null, error: null,
+    }));
+    const view = renderQuoteBuilder();
+    expect(await screen.findByText('Q-2026-9876')).toBeInTheDocument();
+    const productReads = () => mockFrom.mock.calls.filter(([table]) => table === 'products').length;
+    const readsBefore = productReads();
+
+    authState.role = 'sales';
+    view.rerender(
+      <MemoryRouter initialEntries={['/quotes/new']}>
+        <Routes>
+          <Route path="/quotes/new" element={<QuoteBuilder />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(productReads()).toBeGreaterThan(readsBefore));
+    expect(screen.getByText('Q-2026-9876')).toBeInTheDocument();
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'generate_quote_number')).toHaveLength(1);
+  });
+
   it('retries a failed quote number without clearing the form', async () => {
     mockFrom.mockImplementation((table: string) => buildChain({
       data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
@@ -3702,6 +3725,7 @@ describe('QuoteBuilder', () => {
       loadPlan?: QuoteLoadPlan;
       belowCostApproval?: boolean;
       suspendOn?: string;
+      startOnNewQuote?: boolean;
     } = {},
   ) {
     const byId = new Map(fixtures.map((f) => [f.quote.id, f]));
@@ -3768,8 +3792,11 @@ describe('QuoteBuilder', () => {
       // means both ids resolve to the SAME route, so React Router reuses the
       // element instead of remounting it — which is precisely the condition
       // these tests exist to cover.
-      [{ path: '/quotes/:id', element: routeElement }],
-      { initialEntries: [`/quotes/${fixtures[0].quote.id}`] },
+      [
+        ...(options.startOnNewQuote ? [{ path: '/quotes/new', element: routeElement }] : []),
+        { path: '/quotes/:id', element: routeElement },
+      ],
+      { initialEntries: [options.startOnNewQuote ? '/quotes/new' : `/quotes/${fixtures[0].quote.id}`] },
     );
     // Mounted OUTSIDE the router, mirroring App.tsx's RootLayout: the provider
     // sits above the route, so navigating between quotes neither unmounts the
@@ -3788,6 +3815,24 @@ describe('QuoteBuilder', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   }
+
+  it('ignores a late new-quote number after a saved quote opens', async () => {
+    const quoteB = makeSwitchFixture('quote-b', 'Q-BBB-2');
+    let resolveNumber!: (result: { data: string; error: null }) => void;
+    const number = new Promise<{ data: string; error: null }>((resolve) => { resolveNumber = resolve; });
+    mockRpc.mockImplementation((name: string) => name === 'generate_quote_number'
+      ? number : Promise.resolve({ data: null, error: null }));
+    const router = renderQuoteSwitch([quoteB], {}, { startOnNewQuote: true });
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'generate_quote_number')).toBe(true));
+
+    await goToQuote(router, 'quote-b');
+    expect(await screen.findAllByText('Q-BBB-2')).not.toHaveLength(0);
+
+    await act(async () => resolveNumber({ data: 'Q-2026-9999', error: null }));
+    await flushPendingWork();
+    expect(screen.queryByText('Q-2026-9999')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Q-BBB-2')).not.toHaveLength(0);
+  });
 
   it('stops presenting quote A once the route points at a quote B that has not loaded', async () => {
     const quoteA = makeSwitchFixture('quote-a', 'Q-AAA-1');

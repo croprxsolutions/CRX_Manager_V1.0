@@ -984,7 +984,12 @@ export default function QuoteBuilder() {
     setReferenceDataReady(!productListFailed);
   }, [toast, isAdmin]);
 
+  // Opening a saved quote reuses this mounted page, so a late allocation must not replace its number.
+  const quoteNumberSeqRef = useRef(0);
+  // A new-quote session allocates once; a reference-data reload must not replace its number.
+  const newQuoteNumberRequestedRef = useRef(false);
   const generateQuoteNumber = async () => {
+    const seq = ++quoteNumberSeqRef.current;
     // Use server-side sequence to prevent race conditions
     setQuoteNumberLoading(true);
     // Never keep a previous quote's number if this allocation fails.
@@ -993,12 +998,15 @@ export default function QuoteBuilder() {
       const { data, error } = await supabase.rpc('generate_quote_number');
       if (error) throw Object.assign(new Error(error.message), error);
       if (!data) throw new Error('Quote number unavailable');
+      if (seq !== quoteNumberSeqRef.current) return;
       setQuoteNumber(assertRpcResult<string>(data, 'generate_quote_number'));
     } catch (err) {
       Sentry.captureException(err, { extra: { context: 'generate_quote_number', ...(err instanceof Error ? err : {}) } });
-      toast('error', 'Failed to generate quote number. Use Retry quote number to try again.');
+      if (seq === quoteNumberSeqRef.current) {
+        toast('error', 'Failed to generate quote number. Use Retry quote number to try again.');
+      }
     } finally {
-      setQuoteNumberLoading(false);
+      if (seq === quoteNumberSeqRef.current) setQuoteNumberLoading(false);
     }
   };
 
@@ -1473,8 +1481,12 @@ export default function QuoteBuilder() {
       // skeleton until THIS id's snapshot installs, so the operator is never
       // shown quote A's numbers under quote B's address.
       setLoading(true);
+      quoteNumberSeqRef.current += 1;
+      newQuoteNumberRequestedRef.current = false;
+      setQuoteNumberLoading(false);
       fetchQuote(id);
-    } else {
+    } else if (!newQuoteNumberRequestedRef.current) {
+      newQuoteNumberRequestedRef.current = true;
       generateQuoteNumber().then(() => {
         // Allow a tick for state to settle before tracking changes
         setTimeout(() => { initialLoadDone.current = true; }, 0);

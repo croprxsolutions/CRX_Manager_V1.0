@@ -295,6 +295,9 @@ scripts/smoke/prove-adjust-inventory-intent-binding-real-schema.mjs text eol=lf
 docs/reference/migration-history.md merge=union
 docs/manual/DECISION_LOG.md         merge=union
 
+# Keep the unapplied document-year candidate stable across checkouts.
+supabase/migrations/20261029160300_document_numbers_chicago_year.sql text eol=lf
+
 # Keep the unapplied Chicago payment-date candidate's SHA stable across checkouts.
 supabase/migrations/20261029160200_chicago_payment_business_date.sql text eol=lf
 supabase/migrations/20261029160150_retire_allocate_payment_old_overload.sql text eol=lf

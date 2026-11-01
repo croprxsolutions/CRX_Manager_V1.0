@@ -5,6 +5,8 @@
 > so compare their UTC timestamps; the newest timestamp is the latest evidence. Refer to a
 > migration by its version or file name, not its row number: two PRs can give a new row the same number.
 
+**Live capture — 2026-11-01 16:40 UTC (10:40 AM Central; read-only ledger query for candidate `20261101100000`):** The ledger has 1087 rows. Its effective high-water is `20261030090000`, using the first 14 digits of the recorded name when present and the version otherwise; the highest raw apply-time version is `20261031221306`. No row sits at or after `20261101100000`, and no ledger name contains `quote_price_trail`, so the candidate follows the effective high-water. Re-read this before applying.
+
 **Live capture — 2026-10-31 06:33 UTC (1:33 AM Central; read-only ledger query for PR #1181):** The ledger has 1079 rows. Its effective high-water is `20261029160100`, using the first 14 digits of the recorded name when present and the version otherwise; the highest raw apply-time version is `20261030162633`. No ledger name contains `document_numbers_chicago_year`, and candidate `20261029160300` follows the effective high-water. Refresh this read immediately before apply.
 
 The 2026-10-31 type review confirmed that generated Supabase types and the schema registry already describe `rebate_claim_counters.year` and `next_value`. The table is written inside the claim RPC, not directly by app callers; no separate app-facing interface is needed.

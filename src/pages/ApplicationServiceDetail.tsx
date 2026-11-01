@@ -300,6 +300,8 @@ export default function ApplicationServiceDetail() {
         {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
       </div>
 
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={isNew && saving} className="min-w-0">
       <Card><div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Input label="Service Name" value={form.name} onChange={(e) => updateField('name', e.target.value)} required placeholder="e.g. Hagie Y-Drop Nitrogen" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Vehicle (optional)</label><select value={form.vehicle_id} onChange={(e) => updateField('vehicle_id', e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="">No vehicle linked</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicle_name}</option>)}</select></div>
@@ -311,6 +313,7 @@ export default function ApplicationServiceDetail() {
         <Input label="Sort Order" type="number" value={form.sort_order} onChange={(e) => updateField('sort_order', e.target.value)} placeholder="0" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Status</label><select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => updateField('is_active', e.target.value === 'active')} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
       </div></Card>
+      </fieldset>
 
       {!isNew && <Card>
         <h3 className="text-lg font-semibold text-nav-dark mb-4">Customer Rate Overrides</h3>

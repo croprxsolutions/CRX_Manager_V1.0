@@ -1026,7 +1026,7 @@ export default function ProductDetail() {
               </Button>
             </div>
           )}
-          <fieldset disabled={pricingReloadRequired} className="contents">
+          <fieldset disabled={pricingReloadRequired || (isNew && saving)} className="contents">
           <Card>
             <CardHeader title="Product" accent="Information" />
 

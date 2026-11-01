@@ -93,6 +93,26 @@ describe('ProductDetail — leaving a new product', () => {
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
   });
 
+  it('locks the form while a new product saves', async () => {
+    let finish: (value: unknown) => void = () => {};
+    const pending = new Promise((resolve) => { finish = resolve; });
+    const reads = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      const query = reads(table) as Record<string, unknown>;
+      query.insert = () => ({ select: () => pending });
+      return query;
+    });
+    renderNewProduct();
+    const name = await screen.findByLabelText(/Product Name/);
+    fireEvent.change(name, { target: { value: 'New Chem' } });
+    expect(name).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+
+    await waitFor(() => expect(name).toBeDisabled());
+    finish({ data: [{ id: 'product-1' }], error: null });
+    await screen.findByText('Products list page');
+  });
+
   it('leaving with an unsaved name still prompts', async () => {
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });

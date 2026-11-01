@@ -511,6 +511,8 @@ export default function NewDelivery() {
         Back to Deliveries
       </button>
 
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
       <Card>
         <h2 className="text-xl font-semibold font-heading text-nav-dark mb-6">
           Schedule Delivery
@@ -719,6 +721,7 @@ export default function NewDelivery() {
           )}
         </Card>
       )}
+      </fieldset>
 
       <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={() => navigate('/deliveries')}>

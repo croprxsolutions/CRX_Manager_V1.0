@@ -190,6 +190,8 @@ export default function VehicleDetail() {
       </div>
 
       {/* Form */}
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={isNew && saving} className="min-w-0">
       <Card>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Input
@@ -278,6 +280,7 @@ export default function VehicleDetail() {
           />
         </div>
       </Card>
+      </fieldset>
     </div>
   );
 }

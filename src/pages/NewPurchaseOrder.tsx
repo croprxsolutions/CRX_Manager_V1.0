@@ -385,6 +385,8 @@ export default function NewPurchaseOrder() {
         Back to Purchase Orders
       </button>
 
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
       <Card>
         <CardHeader title="New Purchase" accent="Order" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -575,6 +577,7 @@ export default function NewPurchaseOrder() {
           )}
         </div>
       </Card>
+      </fieldset>
 
       <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={() => navigate('/purchase-orders')}>

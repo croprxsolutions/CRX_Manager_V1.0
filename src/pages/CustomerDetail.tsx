@@ -1201,7 +1201,8 @@ export default function CustomerDetail() {
       )}
 
       {(tab === 'info' || isNew) && (
-        <div className="space-y-4">
+        <fieldset disabled={isNew && saving} className="min-w-0 space-y-4">
+          {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
           {/* key remounts on customer switch — in-flight loads/mutations from the previous customer must never write into this one's view (Sol 2.G r2) */}
           {/* interactionRefresh in the key: logging a call remounts the prep card so "Last conversation" is never stale (Sol final gauntlet) */}
           {!isNew && id && <CustomerPrepCard key={`${id}:${interactionRefresh}`} customerId={id} />}
@@ -1449,7 +1450,7 @@ export default function CustomerDetail() {
               onCreateTask={() => setQuickTaskOpen(true)}
             />
           )}
-        </div>
+        </fieldset>
       )}
 
       {tab === 'contacts' && !isNew && id && profile && (

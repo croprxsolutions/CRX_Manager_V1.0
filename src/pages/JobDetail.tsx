@@ -3858,7 +3858,9 @@ export default function JobDetail() {
   }
 
   // A failed customers/fields/products read closes editing until a retry succeeds.
-  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0 && !lookupsLoading;
+  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0 && !lookupsLoading
+    // Locked while a new job saves: an edit typed then would be neither saved nor warned about.
+    && !(isNew && saving);
   // U12: the assigned applicator (job-level applicator_id match — mirrors the
   // existing AppliedRecordsManager canEdit gate a few hundred lines down) can
   // see Start/Complete on THEIR OWN job even though isEditable is office-only.
@@ -4016,7 +4018,7 @@ export default function JobDetail() {
               Create Task
             </Button>
           )}
-          {canEdit && (
+          {(canEdit || (isNew && saving)) && (
             <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
               {isNew ? `Save Job ${jobNumber || ''}`.trim() : 'Save Changes'}
             </Button>

@@ -10,8 +10,10 @@ test('nobody can sign themselves up', async ({ request }) => {
 });
 
 test('a website cannot reach the keys or the gateway', async ({ request }) => {
-  const keys = await request.get('/scripts/local-app/.state/local.env');
-  expect(keys.status()).toBe(403);
+  // .env.example is harmless, but the rule that refuses it is the one that protects a real .env.
+  for (const file of ['/scripts/local-app/.state/local.env', '/.env.example', '/.git/config']) {
+    expect((await request.get(file)).status(), file).toBe(403);
+  }
 
   const fromAWebsite = await request.fetch(`${API_URL}/rest/v1/`, {
     method: 'OPTIONS',

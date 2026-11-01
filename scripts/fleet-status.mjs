@@ -30,6 +30,7 @@ import {
   ORIGIN_MAIN_CAT_FILE_MAX_BUFFER, originMainSqlBlobMap as parseOriginMainSqlBlobMap,
   originMainForwardBlobPaths,
 } from "../.claude/hooks/worktree-awareness-lib.mjs";
+import { combinedMigrationHistoryAtRev, readCombinedMigrationHistory } from "../.claude/hooks/migration-records-lib.mjs";
 
 // The repo root this script lives in (works no matter what cwd it's launched from).
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -184,11 +185,15 @@ function originMainHistory() {
     return originMainHistoryText;
   }
   try {
-    originMainHistoryText = git(["show", `${originMainRev}:docs/reference/migration-history.md`], repoRoot, 5000);
+    originMainHistoryText = combinedMigrationHistoryAtRev(git, originMainRev, originMainSqlBlobMap);
   } catch {
     originMainHistoryText = null;
   }
   return originMainHistoryText;
+}
+
+function readWorktreeHistory(wtPath) {
+  try { return readCombinedMigrationHistory(wtPath); } catch { return null; }
 }
 
 const ownDraftPaths = createOwnDraftPathsReader({
@@ -199,10 +204,7 @@ const ownDraftPaths = createOwnDraftPathsReader({
   dirtyCount,
   exists: (wtPath, rel) => existsSync(path.join(wtPath, ...rel.split("/"))),
   readText: (wtPath, rel) => readTextSafe(path.join(wtPath, ...rel.split("/"))),
-  readHistory: (wtPath) => {
-    const text = readTextSafe(path.join(wtPath, "docs", "reference", "migration-history.md"));
-    return text || null;
-  },
+  readHistory: readWorktreeHistory,
   // Git's default text clean-filter stores LF blobs even when a Windows checkout
   // materializes CRLF. Hash the bytes the candidate will have in Git, matching the
   // immutable origin/main verification path.
@@ -299,7 +301,7 @@ for (const e of entries) {
     // re-surface drafts main has already retired, so say so instead of letting the number
     // move unexplained.
     let fallbackChangedPaths = null;
-    const fallbackHistoryText = readTextSafe(path.join(e.path, "docs", "reference", "migration-history.md")) || null;
+    const fallbackHistoryText = readWorktreeHistory(e.path);
     const fallbackDiscoveryUnknownReasons = new Set();
     const classifyFallback = createParkedFallbackClassifier(
       fallbackHistoryText,

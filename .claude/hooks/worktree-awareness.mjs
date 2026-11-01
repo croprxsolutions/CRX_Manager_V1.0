@@ -25,6 +25,7 @@ import {
   originMainForwardBlobPaths,
   classifyDirt, formatSiblingReport, groupUnknownReasons,
 } from "./worktree-awareness-lib.mjs";
+import { combinedMigrationHistoryAtRev, readCombinedMigrationHistory } from "./migration-records-lib.mjs";
 
 function emit(extra) {
   if (extra) {
@@ -182,7 +183,7 @@ function originMainHistory() {
     return originMainHistoryText;
   }
   try {
-    originMainHistoryText = git(["show", `${originMainRev}:docs/reference/migration-history.md`]);
+    originMainHistoryText = combinedMigrationHistoryAtRev(git, originMainRev, originMainSqlBlobMap);
   } catch {
     originMainHistoryText = null;
   }
@@ -200,7 +201,7 @@ const ownDraftPaths = createOwnDraftPathsReader({
     try { return readFileSync(path.join(wtPath, ...rel.split("/")), "utf8"); } catch { return ""; }
   },
   readHistory: (wtPath) => {
-    try { return readFileSync(path.join(wtPath, "docs", "reference", "migration-history.md"), "utf8"); } catch { return null; }
+    try { return readCombinedMigrationHistory(wtPath); } catch { return null; }
   },
   // Git's default text clean-filter stores LF blobs even when a Windows checkout
   // materializes CRLF. Hash the bytes the candidate will have in Git, matching the
@@ -280,7 +281,7 @@ try {
     let fallbackChangedPaths = null;
     let fallbackHistory = null;
     try {
-      fallbackHistory = readFileSync(path.join(e.path, "docs", "reference", "migration-history.md"), "utf8");
+      fallbackHistory = readCombinedMigrationHistory(e.path);
     } catch { /* discovery below reports the unreadable history as unknown */ }
     const classifyFallback = createParkedFallbackClassifier(
       fallbackHistory,

@@ -111,11 +111,10 @@ on a typecheck alone.
 
 ## Step 5: Update Documentation
 
-### migration-history.md
-Read `docs/reference/migration-history.md` and add a new row to the table with:
-- Timestamp (from filename)
-- Filename
-- One-line description of what it does
+### Migration record
+Add `docs/reference/migrations.d/<migration name>.md`, named exactly like the `.sql` file. Follow
+that folder's README: the first paragraph holds the status, the backticked filename and a one-line
+description of what it does. Never add a row to the frozen `migration-history.md`.
 
 ### database-schema.md (if tables or columns changed)
 Read `docs/reference/database-schema.md` and:
@@ -144,7 +143,7 @@ SQL validate: PASS / FAIL
 Drift test:   PASS / FAIL
 
 Docs updated:
-  - docs/reference/migration-history.md
+  - docs/reference/migrations.d/<migration name>.md
   - docs/reference/database-schema.md  (if applicable)
   - docs/reference/rpc-functions.md    (if applicable)
 

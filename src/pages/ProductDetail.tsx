@@ -280,7 +280,9 @@ export default function ProductDetail() {
   const [isDirty, setIsDirty] = useState(false);
   // The margin floor card saves on its own, so its unsaved edit is tracked apart from the form.
   const [marginFloorDirty, setMarginFloorDirty] = useState(false);
-  const blocker = useUnsavedChanges(isDirty || marginFloorDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty || marginFloorDirty, skipUnsavedPromptRef);
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
     const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
@@ -651,6 +653,7 @@ export default function ProductDetail() {
         setIsDirty(false);
         toast('success', 'Product created');
         logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product' });
+        skipUnsavedPromptRef.current = true;
         navigate('/products');
         return;
       }
@@ -1047,7 +1050,7 @@ export default function ProductDetail() {
               </Button>
             </div>
           )}
-          <fieldset disabled={pricingReloadRequired} className="contents">
+          <fieldset disabled={pricingReloadRequired || (isNew && saving)} className="contents">
           <Card>
             <CardHeader title="Product" accent="Information" />
 

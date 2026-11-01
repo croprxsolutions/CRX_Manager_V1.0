@@ -88,6 +88,10 @@ describe('formatCSVCell', () => {
   it('escapes quotes after neutralizing values', () => {
     expect(formatCSVCell('="hello"')).toBe('"\'=""hello"""');
   });
+
+  it('keeps a product name with a comma and quote safe when it starts like a formula', () => {
+    expect(formatCSVCell('=Grower, "Special"')).toBe('"\'=Grower, ""Special"""');
+  });
 });
 
 describe('exportToCSV', () => {

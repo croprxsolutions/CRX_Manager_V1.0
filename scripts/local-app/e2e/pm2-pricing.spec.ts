@@ -29,18 +29,21 @@ async function applyReview(page: Page) {
   await page.getByLabel('Source (supplier, document, date)').fill('Invented price list');
   await page.getByLabel('Reason for the change').fill('Proof of the pricing page');
   await page.getByRole('button', { name: 'Preview changes' }).click();
+  // A first price is a large change, so the review asks for a reason, as it should.
+  await page.getByLabel('Why is this acceptable?').fill('Invented first price');
   await page.getByRole('button', { name: 'Apply approved changes' }).click();
 }
 
 test('margins type cleanly on all tiers, save exactly, and reopen priced', async ({ page }) => {
   await signIn(page);
+  const productName = `Pricing Proof ${Date.now()} (invented)`;
   const id: string = await page.evaluate(async (name) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
     const { data, error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid' }).select('id').single();
     if (error) throw new Error(error.message);
     return data.id;
-  }, `Pricing Proof ${Date.now()} (invented)`);
+  }, productName);
 
   await page.goto(`/products/${id}`);
   await page.getByLabel('Pricing mode', { exact: true }).selectOption('margin_driven');
@@ -83,15 +86,9 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
 
   // The list opens the same row in the same mode, ready to edit.
   await page.goto('/products');
-  await page.getByPlaceholder(/search/i).first().fill('Pricing Proof');
+  await page.getByPlaceholder(/search/i).first().fill(productName);
   await page.getByRole('button', { name: /edit/i }).first().click();
-  const name = await page.evaluate(async (productId) => {
-    const path = '/src/lib/db.ts';
-    const { supabase } = await import(/* @vite-ignore */ path);
-    const { data } = await supabase.from('products').select('product_name').eq('id', productId).single();
-    return data.product_name;
-  }, id);
-  await expect(page.getByRole('combobox', { name: `Pricing mode for ${name}` })).toHaveValue('price_driven');
-  await expect(page.getByRole('spinbutton', { name: `Tier 1 price for ${name}` })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: `Pricing mode for ${productName}` })).toHaveValue('price_driven');
+  await expect(page.getByRole('spinbutton', { name: `Tier 1 price for ${productName}` })).toBeVisible();
   await page.screenshot({ path: 'scripts/local-app/.state/pm2-list.png' });
 });

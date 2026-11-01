@@ -13,12 +13,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 ## 2026-11-01 — Sol is cut to the database, logins and money; changelog notes are for migrations
 
 **Decision (Mason, in chat, 2026-11-01: "Yes, all three").** Round two of the harness reduction.
-1. **The Sol list shrinks** to the database, logins and permissions, and money and inventory (`docs/reference/sol-required-paths.md`). Dependencies, deployment files and the blanket `src/pages/` entry come off. Pages with no money word in their name that are plainly money, inventory or permissions stay by name. This supersedes item 4 of the 2026-10-30 entry below.
+1. **The Sol list shrinks** to the database, logins and permissions, and money and inventory (`docs/reference/sol-required-paths.md`). Dependencies, deployment files and the blanket `src/pages/` entry come off. Pages with no money word in their name that write money, inventory or permissions stay by name (for example `JobDetail`, `Products`, `OfficeCockpit`, `Reports`). This supersedes item 4 of the 2026-10-30 entry below.
 2. **Guard files need no Sol:** hooks, the merge and proof scripts, CI workflows and the Sol list itself land on green checks.
 3. **Only a migration needs a ledger record at commit time.** Small hook, command, script and test fixes commit freely.
 
 **Why.** Mason spends more time managing guards than building. The list caught 59.8% of the last 500 commits; it now catches about a third. GitHub's ruleset, CI and the database rules remain the wall.
-**What this forbids/implies:** the keep list in `AGENTS.md` stays, including the migration-apply proof gate, which still requires exact-head Sol. Accepted risk: a guard, CI, dependency or deployment change, or a page such as Products or Jobs, reaches `main` on green checks with no independent review. Money and inventory rules still live in the database, whose changes stay on the list.
+**What this forbids/implies:** the keep list in `AGENTS.md` stays, including the migration-apply proof gate, which still requires exact-head Sol. Accepted risk: a guard, CI, dependency or deployment change, or a page that only reads money or holds no money writes, such as `Jobs`, reaches `main` on green checks with no independent review. Money and inventory rules still live in the database, whose changes stay on the list.
 
 ## 2026-10-30 — Product corrections and inactive-stock behavior approved
 

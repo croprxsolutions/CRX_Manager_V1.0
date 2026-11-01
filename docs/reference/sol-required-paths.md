@@ -35,7 +35,9 @@ Folders end in `/`. The match ignores case, from the repository root.
 
 **Money and inventory files with no money word in their name:** `src/pages/MonthEndClose.tsx`,
 `src/pages/Rebates.tsx`, `src/pages/Receiving.tsx`, `src/pages/Integrity.tsx`, `src/pages/LotTrace.tsx`,
-`src/pages/CustomerTransactionReview.tsx`, `src/pages/OfflineWorkReview.tsx`, `src/lib/offlineSync.ts`, `src/lib/offlineQueue.ts`,
+`src/pages/CustomerTransactionReview.tsx`, `src/pages/OfflineWorkReview.tsx`, `src/pages/JobDetail.tsx`,
+`src/pages/ProductDetail.tsx`, `src/pages/Products.tsx`, `src/pages/OfficeCockpit.tsx`, `src/pages/Reports.tsx`,
+`src/pages/ApplicationServiceDetail.tsx`, `src/pages/CustomerDetail.tsx`, `src/lib/offlineSync.ts`, `src/lib/offlineQueue.ts`,
 `src/lib/jobChemicalPayload.ts`, `src/lib/recipeHelpers.ts`, `src/hooks/useGuardrails.ts`,
 `src/components/products/BulkProductImport.tsx`, `src/components/products/bulkProductImportSafety.ts`,
 `src/components/receiving/`, `src/components/integrity/`, `src/components/field-app/`

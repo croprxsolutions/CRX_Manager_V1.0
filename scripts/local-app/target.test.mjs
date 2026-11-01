@@ -2,6 +2,7 @@
 // The command tests start each real command and need port 5199 free.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
-  assertCleanEnvironment, assertFrontendIsOurs, assertLocalState, assertLoopbackBindings,
+  assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
 } from './target.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +23,12 @@ const COMMANDS = ['rebuild', 'seed', 'start', 'frontend', 'stop', 'status', 'tes
 const PASSWORD = '0123456789abcdef0123456789abcdef';
 const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
 const jwt = (payload) => `${b64({ alg: 'HS256' })}.${b64(payload)}.sig`;
-const localKey = (role) => jwt({ iss: ISSUER, role });
+const SECRET = 'ab'.repeat(32);
+const signed = (secret, payload) => {
+  const body = `${b64({ alg: 'HS256' })}.${b64(payload)}`;
+  return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`;
+};
+const localKey = (role) => signed(SECRET, { iss: ISSUER, role });
 const liveKey = jwt({ iss: 'supabase', ref: 'rhyzpcqhnizqbxphqdkr', role: 'service_role' });
 
 const goodState = () => ({
@@ -32,11 +38,11 @@ const goodState = () => ({
   LOCAL_DB_PORT: String(DB_PORT),
   LOCAL_DB_PASSWORD: PASSWORD,
   LOCAL_DB_URL: `${DB_URL_PREFIX}${PASSWORD}${DB_URL_SUFFIX}`,
-  LOCAL_JWT_SECRET: 'invented',
+  LOCAL_JWT_SECRET: SECRET,
   LOCAL_ANON_KEY: localKey('anon'),
   LOCAL_SERVICE_KEY: localKey('service_role'),
   LOCAL_TEST_EMAIL: 'admin@crx-local-app.test',
-  LOCAL_TEST_PASSWORD: 'invented',
+  LOCAL_TEST_PASSWORD: '0123456789abcdef01234567',
 });
 
 function viteModule(env) {
@@ -63,6 +69,8 @@ describe('inherited environment', () => {
     ['any access token, even an unknown one', { SUPABASE_ACCESS_TOKEN: 'abc' }],
     ['a lower-case Windows name', { database_url: PROD_DB }],
     ['a remote Docker', { DOCKER_HOST: 'tcp://10.0.0.5:2375' }],
+    ['a Docker context chosen by the shell', { DOCKER_CONTEXT: 'elsewhere' }],
+    ['a Docker settings folder chosen by the shell', { DOCKER_CONFIG: 'C:\\elsewhere' }],
   ]) {
     it(`refuses ${name}`, () => assert.throws(() => assertCleanEnvironment(env), Refused));
   }
@@ -86,6 +94,13 @@ describe('saved settings', () => {
     ['a live key', { LOCAL_SERVICE_KEY: liveKey }],
     ['a live anon key', { LOCAL_ANON_KEY: liveKey }],
     ['a key that is not a token', { LOCAL_ANON_KEY: 'x' }],
+    ['a key claiming to be local that another secret signed', { LOCAL_SERVICE_KEY: signed('cd'.repeat(32), { iss: ISSUER, role: 'service_role' }) }],
+    ['a test email carrying SQL', { LOCAL_TEST_EMAIL: "x'; DROP TABLE y; --" }],
+    ['a test password carrying anything else', { LOCAL_TEST_PASSWORD: 'x$y' }],
+    ['a port written another way', { LOCAL_API_PORT: '5.4721e4' }],
+    ['a line Docker would read differently', { 'export LOCAL_API_URL': PROD_URL }],
+    ['an extra setting', { COMPOSE_FILE: 'elsewhere.yaml' }],
+    ['a secret of the wrong shape', { LOCAL_JWT_SECRET: 'super-secret-production-jwt-secret-with-at-least-32-characters' }],
   ]) {
     it(`refuses ${name}`, () => assert.throws(() => assertLocalState({ ...goodState(), ...change }), Refused));
   }
@@ -93,14 +108,15 @@ describe('saved settings', () => {
 
 describe('running frontend', () => {
   it('is fine when nothing is running', async () => {
-    await assert.doesNotReject(assertFrontendIsOurs({ isOpen: async () => false, fetchFn: async () => assert.fail('must not fetch') }));
+    await assert.doesNotReject(assertFrontendIsOurs(localKey('anon'), { isOpen: async () => false, fetchFn: async () => assert.fail('must not fetch') }));
   });
   it('accepts the test app', async () => {
-    await assert.doesNotReject(assertFrontendIsOurs({ isOpen: portOpen, fetchFn: servedBy(viteModule(ourEnv)) }));
+    await assert.doesNotReject(assertFrontendIsOurs(localKey('anon'), { isOpen: portOpen, fetchFn: servedBy(viteModule(ourEnv)) }));
   });
   for (const [name, fetchFn] of [
     ['one wired to production', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_URL: PROD_URL }))],
     ['one using a live key', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_ANON_KEY: liveKey }))],
+    ['a look-alike with a key of its own', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_ANON_KEY: jwt({ iss: ISSUER, role: 'anon' }) }))],
     ['one with map calls switched on', servedBy(viteModule({ ...ourEnv, VITE_MAPBOX_TOKEN: 'pk.x' }))],
     ['one with error reporting switched on', servedBy(viteModule({ ...ourEnv, VITE_SENTRY_DSN: 'https://a@b.ingest.sentry.io/1' }))],
     ['a built site', servedBy('<html></html>')],
@@ -109,7 +125,7 @@ describe('running frontend', () => {
     ['garbled settings', servedBy('import.meta.env = {nope};')],
   ]) {
     it(`refuses ${name}`, async () => {
-      await assert.rejects(assertFrontendIsOurs({ isOpen: portOpen, fetchFn }), Refused);
+      await assert.rejects(assertFrontendIsOurs(localKey('anon'), { isOpen: portOpen, fetchFn }), Refused);
     });
   }
 });
@@ -118,6 +134,13 @@ describe('network exposure', () => {
   it('accepts loopback', () => assert.doesNotThrow(() => assertLoopbackBindings([{ HostIp: '127.0.0.1', HostPort: '54721' }])));
   for (const HostIp of ['0.0.0.0', '', '192.168.1.5', '::']) {
     it(`refuses a binding on "${HostIp}"`, () => assert.throws(() => assertLoopbackBindings([{ HostIp, HostPort: '54721' }]), Refused));
+  }
+  it('accepts this computer\'s Docker', () => {
+    assert.doesNotThrow(() => assertLocalDockerEndpoint('npipe:////./pipe/dockerDesktopLinuxEngine'));
+    assert.doesNotThrow(() => assertLocalDockerEndpoint('unix:///var/run/docker.sock'));
+  });
+  for (const endpoint of ['npipe:////otherpc/pipe/docker_engine', 'tcp://10.0.0.5:2375', 'ssh://user@host', 'https://docker.example.com', '']) {
+    it(`refuses a Docker at "${endpoint}"`, () => assert.throws(() => assertLocalDockerEndpoint(endpoint), Refused));
   }
   it('the compose file publishes only the gateway, only on loopback, and seals the rest', () => {
     const lines = readFileSync(path.join(HERE, 'compose.yaml'), 'utf8').split(/\r?\n/);
@@ -130,6 +153,12 @@ describe('network exposure', () => {
     assert.ok(lines.includes('    internal: true'));
     assert.ok(lines.includes('      GOTRUE_DISABLE_SIGNUP: "true"'));
   });
+  it('every gateway route answers only to loopback and the test app', () => {
+    const kong = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
+    assert.equal(kong.match(/hosts: \[127\.0\.0\.1\]/g).length, 3);
+    assert.equal(kong.match(/origins: \["http:\/\/127\.0\.0\.1:5199"\]/g).length, 3);
+    assert.equal(kong.match(/- name: cors$/gm).length, 3);
+  });
 });
 
 // Each real command, against a copy of the settings, must stop before it touches a container.
@@ -141,8 +170,10 @@ describe('every command refuses before it changes anything', () => {
   // What identifies a container and its last start, so any restart or replacement shows.
   const containers = () => {
     const ids = spawnSync('docker', ['ps', '-aq', '--filter', 'label=com.docker.compose.project=crx-local-app'], { encoding: 'utf8' }).stdout.trim();
-    if (!ids) return '';
-    return spawnSync('docker', ['inspect', '-f', '{{.Id}} {{.State.Status}} {{.State.StartedAt}}', ...ids.split(/\s+/)], { encoding: 'utf8' }).stdout;
+    const label = ['--filter', 'label=com.docker.compose.project=crx-local-app', '--format', '{{.Name}}'];
+    const others = ['volume', 'network'].map((kind) => spawnSync('docker', [kind, 'ls', ...label], { encoding: 'utf8' }).stdout).join();
+    if (!ids) return others;
+    return others + spawnSync('docker', ['inspect', '-f', '{{.Id}} {{.State.Status}} {{.State.StartedAt}}', ...ids.split(/\s+/)], { encoding: 'utf8' }).stdout;
   };
 
   function refused(command, { state = goodState(), env = {} }) {

@@ -7,8 +7,8 @@ import { connect } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused,
-  assertCleanEnvironment, assertFrontendIsOurs, assertLocalState, assertLoopbackBindings, portIsOpen,
+  API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
+  assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
 } from './target.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -17,13 +17,11 @@ const ROOT = path.resolve(HERE, '..', '..');
 const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, '.state');
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
-const FRONTEND_PID = path.join(STATE_DIR, 'frontend.pid');
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
-const TEST_EMAIL = 'admin@crx-local-app.test';
 const SERVICES = ['auth', 'rest', 'storage', 'gateway'];
 
 // Children get only what they need to run, never the caller's whole environment.
-const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|docker_host|docker_config|supabase_go_binary|ms_playwright_browsers_path)$/i;
+const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path)$/i;
 function childEnv(extra = {}) {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => PASSTHROUGH.test(k))), ...extra };
 }
@@ -79,10 +77,15 @@ function compose(args, options) {
   return run('docker', ['compose', '-p', PROJECT, '-f', path.join(HERE, 'compose.yaml'), '--env-file', STATE_FILE, ...args], options);
 }
 
-function assertRunningStackIsLoopback() {
-  const ids = text(run('docker', ['ps', '-q', '--filter', `label=com.docker.compose.project=${PROJECT}`]));
+function assertExistingStackIsOurs() {
+  const ids = text(run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${PROJECT}`]));
   if (!ids) return;
   const inspected = JSON.parse(text(run('docker', ['inspect', ...ids.split(/\s+/)])));
+  for (const container of inspected) {
+    if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
+      throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
+    }
+  }
   assertLoopbackBindings(inspected.flatMap((c) => Object.values(c.HostConfig.PortBindings ?? {}).flat()));
 }
 
@@ -92,8 +95,9 @@ async function preflight({ needState = true } = {}) {
   const state = readState();
   if (!state && needState) throw new Refused('No test app here yet. Run: node scripts/local-app/app.mjs rebuild');
   if (state) assertLocalState(state);
-  await assertFrontendIsOurs();
-  assertRunningStackIsLoopback();
+  assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
+  await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
+  assertExistingStackIsOurs();
   return state;
 }
 
@@ -143,6 +147,7 @@ async function startServices(state) {
   await waitFor('login service', () => answers(`${API_URL}/auth/v1/health`));
   await waitFor('storage service', () => answers(`${API_URL}/storage/v1/status`));
   await waitFor('data service', () => answers(`${API_URL}/rest/v1/`, { apikey: state.LOCAL_ANON_KEY, Authorization: `Bearer ${state.LOCAL_ANON_KEY}` }));
+  assertExistingStackIsOurs();
 }
 
 function restoreBaseline() {
@@ -191,6 +196,7 @@ function pushPostBaselineMigrations(state) {
     writeFileSync(path.join(workdir, 'supabase', 'config.toml'), `project_id = "${PROJECT}-push"\n\n[db]\nport = ${DB_PORT}\n`);
     // The CLI stops on ledger rows with no file, so each gets an empty stand-in it treats as applied.
     for (const version of scalar('SELECT version FROM supabase_migrations.schema_migrations;').split(/\r?\n/)) {
+      if (!/^\d{14}$/.test(version)) throw new Error('The ledger holds a version that is not a timestamp.');
       writeFileSync(path.join(workdir, 'supabase', 'migrations', `${version}_in_baseline_ledger.sql`), '');
     }
     // The CLI stores what follows the version as the name, so this makes it store the whole stem,
@@ -256,6 +262,7 @@ async function rebuild() {
   compose(['down', '-v', '--remove-orphans']);
   await startDatabase(state);
   await startServices(state);
+  assertSealed();
   run(process.execPath, ['scripts/verify-schema-baseline.mjs']);
   console.log('Restoring the baseline...');
   restoreBaseline();
@@ -263,28 +270,29 @@ async function rebuild() {
   // Some migrations refuse to run beside another open transaction, so the services wait.
   compose(['stop', 'auth', 'rest', 'storage']);
   const migrations = pushPostBaselineMigrations(state);
+  // The services can come back on swapped addresses, and the gateway remembers the old ones.
+  compose(['stop', 'gateway']);
   await startServices(state);
   await seed(state);
-  assertSealed();
   const ledgerRows = scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;');
   const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), builtAt: new Date().toISOString(), ledgerRows, migrations };
   writeFileSync(BUILD_FILE, JSON.stringify(build, null, 2));
   console.log(`Rebuilt from ${build.commit}: ${migrations.length} migrations pushed, ${ledgerRows} ledger rows.`);
 }
 
-// The database must have no way out, or a stray job could reach a real service.
+// The sealed services, the database among them, must have no way out, or a stray job could reach
+// a real service. Runs before anything is restored.
 function assertSealed() {
   const probe = "const net=require('net');const s=net.connect({host:'1.1.1.1',port:443,timeout:3000});s.on('connect',()=>{console.log('OPEN');s.destroy()});s.on('error',()=>console.log('SEALED'));s.on('timeout',()=>{console.log('SEALED');s.destroy()});";
   const result = text(compose(['exec', '-T', 'storage', 'node', '-e', probe]));
   if (result !== 'SEALED') throw new Error('The sealed network has a route out. Stopping.');
 }
 
+// Only called after preflight has confirmed that whatever is on the port is this test app.
+// shortcut: Windows only, like everything else that runs this today; add lsof when another OS does.
 function stopFrontend() {
-  if (!existsSync(FRONTEND_PID)) return;
-  const pid = readFileSync(FRONTEND_PID, 'utf8').trim();
-  if (process.platform === 'win32') run('taskkill', ['/pid', pid, '/t', '/f'], { allowFailure: true });
-  else try { process.kill(-Number(pid)); } catch { /* already stopped */ }
-  rmSync(FRONTEND_PID, { force: true });
+  const listener = new RegExp(`127\\.0\\.0\\.1:${APP_PORT}\\s+\\S+\\s+LISTENING\\s+(\\d+)`).exec(text(run('netstat', ['-ano', '-p', 'tcp'])));
+  if (listener) run('taskkill', ['/pid', listener[1], '/t', '/f'], { allowFailure: true });
 }
 
 function frontendEnv(state) {
@@ -303,12 +311,10 @@ async function start() {
   await startDatabase(state);
   await startServices(state);
   if (!(await portIsOpen(APP_PORT))) {
-    const child = spawn(process.execPath, VITE, { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' });
-    child.unref();
-    writeFileSync(FRONTEND_PID, String(child.pid));
+    spawn(process.execPath, VITE, { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
     await waitFor('test app', () => portIsOpen(APP_PORT));
   }
-  await assertFrontendIsOurs();
+  await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
   console.log(`Test app: ${APP_URL}\nSign in with LOCAL_TEST_EMAIL and LOCAL_TEST_PASSWORD from scripts/local-app/.state/local.env`);
 }
 

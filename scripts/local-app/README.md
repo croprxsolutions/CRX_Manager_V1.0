@@ -29,15 +29,17 @@ line. `.state/build.json` holds the full list.
 ## What keeps it away from production
 
 - **Every command checks first.** It refuses a shell holding a live address or credential, saved settings
-  that point anywhere but the fixed `127.0.0.1` ports, a frontend on port 5199 that is not wired to this
-  test copy, and a gateway published beyond loopback. `target.mjs` holds the checks.
+  that point anywhere but the fixed `127.0.0.1` ports or keys this test copy did not sign, a Docker on
+  another machine, a frontend on port 5199 that is not wired to this test copy, a stack of the same name
+  from somewhere else, and a gateway published beyond loopback. `target.mjs` holds the checks.
 - **Commands pass on no credentials.** Child programs get a short list of variables, not the whole shell.
 - **The frontend overrides a checkout's `.env`.** It sets the Supabase address and key itself, and sets the
   Mapbox and Sentry values empty.
 - **The services have no way out.** They sit on a Docker network with no route off it, and `rebuild`
   checks that. Only the gateway has a second network, and it publishes only to `127.0.0.1`.
-- **The browser cannot leave.** The Playwright config makes every other name fail to resolve, and the test
-  fails if any request goes anywhere else. It is separate from the staging config, which is unchanged.
+- **The browser cannot leave.** The Playwright config sends everything but `127.0.0.1` to a dead proxy, IP
+  addresses included, and the test fails if any request tries. It is separate from the staging config,
+  which is unchanged.
 
 We do not use `supabase start`, because it publishes its ports on every network address.
 
@@ -68,4 +70,6 @@ list exactly. Trying that path for real needed these additions, all in the throw
   screens wait for no live updates. All of those attempts stay on localhost.
 - **No maps and no web fonts.** The Mapbox token is empty and the Google Fonts links are removed, so the page
   uses fallback fonts. List anything visual as owed on the Vercel preview.
+- **Other outside sites.** Weather, land-survey and street-map lookups are blocked in the Playwright run. In
+  a normal browser they can still go out, carrying only invented locations. None of them is production.
 - **Invented data only.** It does not stand in for how a change behaves on real rows.

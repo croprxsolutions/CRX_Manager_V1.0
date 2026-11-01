@@ -9,6 +9,26 @@ test('nobody can sign themselves up', async ({ request }) => {
   expect((await response.json()).error_code).toBe('signup_disabled');
 });
 
+test('a website cannot reach the keys or the gateway', async ({ request }) => {
+  const keys = await request.get('/scripts/local-app/.state/local.env');
+  expect(keys.status()).toBe(403);
+
+  const fromAWebsite = await request.fetch(`${API_URL}/rest/v1/`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://example.com', 'Access-Control-Request-Method': 'GET' },
+  });
+  expect(fromAWebsite.headers()['access-control-allow-origin']).not.toBe('https://example.com');
+  expect(fromAWebsite.headers()['access-control-allow-origin']).not.toBe('*');
+
+  const reboundName = await request.get(`${API_URL}/rest/v1/`, { headers: { Host: 'example.com:54721' } });
+  expect(reboundName.status()).toBe(404);
+});
+
+test('the browser cannot leave this computer, even by IP address', async ({ page }) => {
+  await expect(page.goto('http://1.1.1.1/', { timeout: 5000 })).rejects.toThrow();
+  await expect(page.goto('https://example.com/', { timeout: 5000 })).rejects.toThrow();
+});
+
 test('signs in, saves a test product, and the save survives a reload, on localhost only', async ({ page }) => {
   const hosts = new Set<string>();
   page.on('request', (request) => {

@@ -14,7 +14,7 @@ const state = Object.fromEntries(
 );
 assertCleanEnvironment();
 assertLocalState(state);
-await assertFrontendIsOurs();
+await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
 process.env.LOCAL_TEST_EMAIL = state.LOCAL_TEST_EMAIL;
 process.env.LOCAL_TEST_PASSWORD = state.LOCAL_TEST_PASSWORD;
 
@@ -29,8 +29,8 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     baseURL: APP_URL,
     screenshot: 'only-on-failure',
-    // Any name but the loopback address fails to resolve, so a stray request cannot leave.
-    launchOptions: { args: ['--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1'] },
+    // A dead proxy for everything but this computer, so a stray request cannot leave, IP addresses included.
+    proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1' },
   },
   webServer: {
     command: 'node scripts/local-app/app.mjs frontend',

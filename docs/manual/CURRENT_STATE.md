@@ -1,12 +1,12 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-10-30 (America/Chicago), for the quote cost-visibility rules only (main + local replay, not live); the ledger and To-Do 1.12 objects 2026-10-29.
+**Last verified:** 2026-11-01 (America/Chicago), for the migration ledger and the payment function only (read-only live read); other sections keep their own dates.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
 ships or quarterly, whichever comes first.
 
-**Payment-date candidate (#1179):** `20261029160200_chicago_payment_business_date.sql` remains unapplied. It sets omitted payment dates from the Chicago business date and preserves retry intent; existing payment/prepay season assignment for explicitly backdated payments remains unchanged. See [the payment audit](../audits/2026-10-28-chicago-payment-date.md) for evidence and release limits.
+**Payment dates (#1179):** `20261029160200_chicago_payment_business_date` is live (ledger version `20261031143926`, read 2026-11-01). It sets omitted payment dates from the Chicago business date and preserves retry intent; existing payment/prepay season assignment for explicitly backdated payments remains unchanged. See [the payment audit](../audits/2026-10-28-chicago-payment-date.md) for evidence and release limits.
 
 ## Current state at a glance (2026-10-19; migration ledger and registry lines 2026-10-20)
 

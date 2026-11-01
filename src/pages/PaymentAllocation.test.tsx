@@ -2,7 +2,7 @@
  * PaymentAllocation.test.tsx — Tests for the unified payment entry page
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
@@ -32,6 +32,9 @@ vi.mock('../lib/db', () => ({
   checkMutationResult: vi.fn(),
   assertRpcResult: vi.fn((d) => d),
   sanitizeError: vi.fn((e: unknown) => (e as Error)?.message || 'Error'),
+  hasRpcCode: (e: unknown, code: string) => String((e as { message?: unknown } | null)?.message ?? '').startsWith(code),
+  rpcAuthErrorMessage: (e: unknown) => (String((e as { message?: unknown } | null)?.message ?? '').startsWith('ACTOR_MISMATCH') ? 'Your sign-in could not be verified.' : null),
+  RpcErrorCodes: new Proxy({}, { get: (_target, name) => name }),
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
@@ -109,6 +112,132 @@ describe('PaymentAllocation page', () => {
     fireEvent.change(amount, { target: { value: '12.34' } });
     expect(screen.queryByText('Enter an amount with no more than two decimal places.')).not.toBeInTheDocument();
     expect(amount).toHaveAttribute('aria-invalid', 'false');
+  });
+});
+
+describe('PaymentAllocation duplicate and retry warnings', () => {
+  const customer = { id: 'cust-1', farm_name: 'Big Farm', account_number: null, prepay_balance_cents: 0 };
+  const existing = { id: 'p1', reference_number: '1234', check_number: null, payment_date: '2026-10-05' };
+  const rpcCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'allocate_payment');
+
+  function tables(allocationSets: { data: unknown; error: unknown }) {
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'allocation_sets' ? allocationSets
+        : table === 'customers' ? { data: [customer], error: null }
+          : { data: [], error: null, count: 0 } as { data: unknown; error: unknown },
+    ));
+  }
+
+  async function fillPayment(reference: string) {
+    renderPayments();
+    fireEvent.change(screen.getByPlaceholderText('Search by name or account #...'), { target: { value: 'Big' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Big Farm/ }));
+    fireEvent.change(await screen.findByPlaceholderText('0.00'), { target: { value: '500.00' } });
+    fireEvent.change(screen.getByPlaceholderText('Check # or ref...'), { target: { value: reference } });
+    await screen.findByText('No open invoices for this customer');
+    fireEvent.click(await screen.findByRole('button', { name: /Apply Payment/ }));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRpc.mockImplementation(() => Promise.resolve({ data: { total_allocated_cents: 0, prepay_created_cents: 50000, invoices_paid: 0 }, error: null }));
+  });
+
+  it('saves nothing on a matching payment until the user chooses Record Anyway', async () => {
+    tables({ data: [existing], error: null });
+    await fillPayment('#1234');
+
+    expect(await screen.findByText('Possible Duplicate Payment')).toBeInTheDocument();
+    expect(screen.getByText(/already has a \$500\.00 payment with reference 1234/)).toBeInTheDocument();
+    expect(rpcCalls()).toHaveLength(0);
+
+    // One warning also says where the money goes, so a double tap cannot land on a second modal.
+    expect(screen.getByText(/\$500\.00 will be added as prepay credit/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Record Anyway/ }));
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    expect(screen.queryByText('Full Prepay Credit')).not.toBeInTheDocument();
+    expect(rpcCalls()[0][1]).toMatchObject({ p_customer_id: 'cust-1', p_total_cents: 50000, p_reference_number: '#1234', p_payment_method: 'check' });
+  });
+
+  describe('while the duplicate check is running', () => {
+    let finishCheck: (result: { data: unknown; error: unknown }) => void;
+    let held: Promise<{ data: unknown; error: unknown }>;
+
+    beforeEach(() => {
+      held = new Promise((resolve) => { finishCheck = resolve; });
+      mockFrom.mockImplementation((table: string) => {
+        const chain = buildChain(table === 'customers' ? { data: [customer], error: null } : { data: [], error: null });
+        if (table === 'allocation_sets') chain.then = held.then.bind(held);
+        return chain;
+      });
+    });
+
+    it('locks the form, so the warning and the save use what was checked', async () => {
+      await fillPayment('1234');
+      await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeDisabled());
+      expect(screen.getByPlaceholderText('Check # or ref...')).toBeDisabled();
+      expect(screen.getByPlaceholderText('Search by name or account #...')).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Clear customer' })).toBeDisabled();
+
+      await act(async () => { finishCheck({ data: [existing], error: null }); await held; });
+      expect(await screen.findByText(/already has a \$500\.00 payment/)).toBeInTheDocument();
+      fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '12.345' } });
+      fireEvent.click(screen.getByRole('button', { name: /Record Anyway/ }));
+      await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+      expect(rpcCalls()[0][1]).toMatchObject({ p_total_cents: 50000, p_reference_number: '1234' });
+    });
+
+    it('leaving the page drops the save', async () => {
+      await fillPayment('1234');
+      await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeDisabled());
+      cleanup();
+      await act(async () => { finishCheck({ data: [], error: null }); await held; });
+      expect(rpcCalls()).toHaveLength(0);
+      expect(screen.queryByText('Full Prepay Credit')).not.toBeInTheDocument();
+    });
+  });
+
+  it('Cancel leaves the payment unsaved', async () => {
+    tables({ data: [existing], error: null });
+    await fillPayment('1234');
+    await screen.findByText('Possible Duplicate Payment');
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel/ }));
+    await waitFor(() => expect(screen.queryByText('Possible Duplicate Payment')).not.toBeInTheDocument());
+    expect(screen.queryByText('Full Prepay Credit')).not.toBeInTheDocument();
+    expect(rpcCalls()).toHaveLength(0);
+  });
+
+  it('no match goes straight to the usual flow', async () => {
+    tables({ data: [{ ...existing, reference_number: '999' }], error: null });
+    await fillPayment('1234');
+    fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
+    await waitFor(() => expect(rpcCalls()).toHaveLength(1));
+    expect(screen.queryByText('Possible Duplicate Payment')).not.toBeInTheDocument();
+  });
+
+  it('a failed duplicate check saves nothing', async () => {
+    tables({ data: null, error: { message: 'read failed' } });
+    await fillPayment('1234');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This attempt was not saved')));
+    expect(screen.queryByText('Full Prepay Credit')).not.toBeInTheDocument();
+    expect(rpcCalls()).toHaveLength(0);
+  });
+
+  it('a refused edited retry stays on screen and points the user at Payment History', async () => {
+    tables({ data: [], error: null });
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_ARGUMENT_MISMATCH: key k was already used for different allocate_payment arguments' } }));
+    await fillPayment('1234');
+    fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Check Payment History, or ask an admin to');
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  it('a forged-actor refusal shows the friendly sign-in message, not the raw token', async () => {
+    tables({ data: [], error: null });
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'ACTOR_MISMATCH: p_performed_by does not match authenticated user' } }));
+    await fillPayment('1234');
+    fireEvent.click(await screen.findByRole('button', { name: /^Continue/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Your sign-in could not be verified.'));
   });
 });
 

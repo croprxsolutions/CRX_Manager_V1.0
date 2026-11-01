@@ -73,8 +73,8 @@ proof runs in CI.
 
 The **pre-commit** hook runs:
 
-1. `scripts/check-ledger-update.mjs` — a policy or guard change must stage its
-   changelog, decision, or reference update.
+1. `scripts/check-ledger-update.mjs` — a migration must stage its changelog,
+   decision, or reference update.
 2. `scripts/check-supplier-pricing-phase3-private-artifacts.mjs --pre-commit` —
    private-artifact containment (checks untracked and modified files too).
 3. `scripts/validate-sql.sh` — on staged migrations; blocks SQL with wrong

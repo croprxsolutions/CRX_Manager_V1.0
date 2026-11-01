@@ -1,12 +1,11 @@
-// SOL WHERE A MISTAKE COSTS MOST (Mason, 2026-10-30).
+// SOL WHERE A MISTAKE COSTS MOST (Mason, 2026-10-30; cut to three areas 2026-11-01).
 //
 // Both merge guards (.claude/hooks/pr-merge-guard.mjs and
 // .codex/hooks/production-action-guard.mjs) ask this module when no Sol proof was
-// found. A pull request needs Sol when it touches money or inventory code, the
-// database, logins and permissions, dependencies, deployment, or the files that
-// enforce the kept safety rules (the lists below; readable copy with the reasons:
-// docs/reference/sol-required-paths.md). Other app code, notes and the rest of the
-// agent tooling rely on CI.
+// found. A pull request needs Sol when it touches the database, logins and
+// permissions, or money and inventory code (the list below; readable copy with the
+// reasons: docs/reference/sol-required-paths.md). Everything else, dependencies,
+// deployment files and the guards themselves included, relies on CI.
 //
 // FAIL CLOSED: any GitHub failure, a comparison that does not end at the head, a
 // list that may be truncated or an unknown change status answers "Sol required".
@@ -20,8 +19,6 @@ const show = (value) => sanitizeForMessage(value, 160);
 // (Windows checks out either spelling).
 export const SOL_REQUIRED_PATHS = Object.freeze([
   "supabase/",
-  ".github/",
-  ".husky/",
   "src/components/auth/",
   "src/contexts/AuthContext.tsx",
   "src/lib/db.ts",
@@ -29,7 +26,21 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   "src/App.tsx",
   "src/appPages.tsx",
   "src/routeBaseline.json",
-  "src/pages/",
+  "src/pages/SettingsPage.tsx",
+  "src/pages/MonthEndClose.tsx",
+  "src/pages/Rebates.tsx",
+  "src/pages/Receiving.tsx",
+  "src/pages/Integrity.tsx",
+  "src/pages/LotTrace.tsx",
+  "src/pages/CustomerTransactionReview.tsx",
+  "src/pages/OfflineWorkReview.tsx",
+  "src/pages/JobDetail.tsx",
+  "src/pages/ProductDetail.tsx",
+  "src/pages/Products.tsx",
+  "src/pages/OfficeCockpit.tsx",
+  "src/pages/Reports.tsx",
+  "src/pages/ApplicationServiceDetail.tsx",
+  "src/pages/CustomerDetail.tsx",
   "src/lib/offlineSync.ts",
   "src/lib/offlineQueue.ts",
   "src/lib/jobChemicalPayload.ts",
@@ -40,92 +51,6 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   "src/components/receiving/",
   "src/components/integrity/",
   "src/components/field-app/",
-  "vercel.json",
-  "vite.config.ts",
-  "index.html",
-  "public/sw-doctor.js",
-  ".gitmodules",
-  "scripts/vercel-ignore-build.sh",
-  "scripts/classify-ci-scope.mjs",
-  ".claude/settings.json",
-  ".claude/settings.local.json",
-  ".claude/agents/migration-drift-reviewer.md",
-  ".claude/agents/rls-security-reviewer.md",
-  ".codex/hooks.json",
-  ".codex/hooks/codex-hook-adapter.mjs",
-  ".codex/hooks/production-action-guard.mjs",
-  ".claude/hooks/bash-safety.mjs",
-  ".claude/hooks/bash-safety-lib.mjs",
-  ".claude/hooks/codex-bot-review-lib.mjs",
-  ".claude/hooks/codex-push-guard.mjs",
-  ".claude/hooks/codex-push-lib.mjs",
-  ".claude/hooks/env-guard.mjs",
-  ".claude/hooks/mcp-tool-guard.mjs",
-  ".claude/hooks/merge-guard-launcher.mjs",
-  ".claude/hooks/migration-apply-guard.mjs",
-  ".claude/hooks/migration-apply-lib.mjs",
-  ".claude/hooks/migration-landing-gate-lib.mjs",
-  ".claude/hooks/migration-pending-lib.mjs",
-  ".claude/hooks/money-safety.mjs",
-  ".claude/hooks/owner-approval-lib.mjs",
-  ".claude/hooks/owner-approval-prompt.mjs",
-  ".claude/hooks/pr-merge-guard.mjs",
-  ".claude/hooks/review-proof-guard.mjs",
-  ".claude/hooks/rls-on-new-tables.mjs",
-  ".claude/hooks/sol-risk-lib.mjs",
-  ".claude/hooks/sql-safety.mjs",
-  ".claude/hooks/actor-binding-check.mjs",
-  ".claude/hooks/app-repo-identity.mjs",
-  ".claude/hooks/applied-snapshot-invalidate.mjs",
-  ".claude/hooks/autopilot-lib.mjs",
-  ".claude/hooks/changelog-entry-lib.mjs",
-  ".claude/hooks/coderabbit-skip-lib.mjs",
-  ".claude/hooks/teammate-comments-lib.mjs",
-  ".claude/hooks/edit-splice-lib.mjs",
-  ".claude/hooks/generated-column-check.mjs",
-  ".claude/hooks/grant-change-guard.mjs",
-  ".claude/hooks/idempotency-body-check.mjs",
-  ".claude/hooks/ledger-lock-lib.mjs",
-  ".claude/hooks/live-testdata-guard.mjs",
-  ".claude/hooks/live-testdata-lib.mjs",
-  ".claude/hooks/migration-access-lib.mjs",
-  ".claude/hooks/migration-ordering-lib.mjs",
-  ".claude/hooks/migration-wrappability-lib.mjs",
-  ".claude/hooks/read-only-search-lib.mjs",
-  ".claude/hooks/registry-freshness-lib.mjs",
-  ".claude/hooks/session-context-reminder.mjs",
-  ".claude/hooks/hook-router-runtime.mjs",
-  ".claude/hooks/posttool-router.mjs",
-  ".claude/hooks/prompt-router.mjs",
-  ".claude/hooks/status-enum-check.mjs",
-  "scripts/apply-migration-file.mjs",
-  "scripts/check-migration-hard-rules.mjs",
-  "scripts/verify-schema-baseline.mjs",
-  "scripts/verify-deps.mjs",
-  "scripts/check-agent-guidance.mjs",
-  "scripts/check-supplier-pricing-phase3-private-artifacts.mjs",
-  "scripts/owner-approve-migration.mjs",
-  "scripts/validate-sql-migrations.sh",
-  "scripts/write-apply-proofs.mjs",
-  "scripts/write-apply-proofs-lib.mjs",
-  "scripts/write-codex-push-proof.mjs",
-  "scripts/apply-live-testdata-maintenance-20260812.mjs",
-  "scripts/overnight-codex-gate.mjs",
-  "scripts/refresh-applied-migrations.mjs",
-  "scripts/remove-applied-ledger-entry.mjs",
-  "scripts/run-claude-review.mjs",
-]);
-
-// These names need Sol in any folder.
-export const SOL_REQUIRED_NAMES = Object.freeze([
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "bun.lockb",
-  "deno.lock",
-  ".npmrc",
 ]);
 
 // GitHub's compare lists at most 300 files and says nothing when it stops.
@@ -142,8 +67,6 @@ export function solRiskPathProblem(name) {
     const rule = entry.toLowerCase();
     if (rule.endsWith("/") ? lower.startsWith(rule) : lower === rule) return `${show(name)} is in a path that always needs Sol (${entry})`;
   }
-  const base = lower.slice(lower.lastIndexOf("/") + 1);
-  if (SOL_REQUIRED_NAMES.includes(base)) return `${show(name)} is a dependency file`;
   if (isMoneyPath(name)) return `${show(name)} is money or inventory code`;
   return null;
 }

@@ -1,12 +1,11 @@
-// documentation rule into a HARD one. If a commit touches the agent surface —
-// commands, skills, hooks, workflows, settings, the shared contract, the guard
-// scripts themselves, OR a database migration (2026-07-16) — it must ALSO update
-// at least one ledger file (CHANGELOG, DECISION_LOG, KNOWN_ISSUES, another
-// docs/manual/ file, agent-guardrails.md, or a loop ledger) in the SAME commit.
-// Otherwise a policy, guard, or live-database change lands with no written
-// record, and Mason (zero code knowledge) has no way to discover what changed or
-// why. Migrations were added because the manual layer went stale within 48h of
-// shipping — a migration that lands with no ledger line is exactly that failure.
+// documentation rule into a HARD one, for database migrations only (Mason,
+// 2026-11-01: small tooling fixes commit freely). A commit that touches
+// supabase/migrations/ must ALSO update at least one ledger file (a changelog.d
+// entry, CHANGELOG, DECISION_LOG, KNOWN_ISSUES, another docs/manual/ file,
+// migration-history.md, agent-guardrails.md, or a loop ledger) in the SAME commit:
+// otherwise a live-database change lands with no written record, and Mason (zero
+// code knowledge) has no way to discover what changed or why. A malformed
+// docs/changelog.d/ entry is refused in any commit.
 //
 // Runs from .husky/pre-commit (BLOCKING). Examines STAGED files only, so a
 // dirty working tree doesn't false-positive.
@@ -26,31 +25,10 @@ import {
 
 export { ENTRY_RE, isAttemptedEntry, isRealCalendarDate };
 
-// Files whose change means "the agent surface / policy changed".
-const TRIGGER_RES = [
-  /^\.claude\/(commands|skills|hooks|workflows|agents)\//,
-  /^\.claude\/settings\.json$/,
-  /^\.codex\//,
-  /^\.cursorrules$/,
-  /^AGENTS\.md$/,
-  /^CLAUDE\.md$/,
-  /^\.husky\//,
-  // The deterministic guard layer in scripts/: validators, checkers,
-  // verifiers, and the workflow mirror-sync.
-  /^scripts\/(check-|validate-|verify-)[^/]+$/,
-  /^scripts\/sync-agent-workflows\.mjs$/,
-  // Shared by both mirror comparisons: an edit here changes what "in sync"
-  // means for the whole agent surface (2026-08-19).
-  /^scripts\/normalize-eol\.mjs$/,
-  /^scripts\/agent-health-check\.mjs$/,
-  /^scripts\/run-claude-review\.mjs$/,
-  /^scripts\/write-codex-push-proof\.mjs$/,
-  // A new database migration is a live-schema change — it must leave a ledger
-  // trail too (2026-07-16 scaffolding review). Existing migrations are immutable
-  // so only ADDED files realistically hit this; the /ship flow's CHANGELOG +
-  // migration-history update already satisfies it.
-  /^supabase\/migrations\/[^/]+\.sql$/,
-];
+// A database migration is a live-schema change, so it must leave a ledger trail.
+// Existing migrations are immutable so only ADDED files realistically hit this; the
+// /ship flow's CHANGELOG + migration-history update already satisfies it.
+const TRIGGER_RES = [/^supabase\/migrations\/[^/]+\.sql$/];
 
 // docs/reference/migration-history.md is the natural ledger companion for a
 // migration commit, so it also satisfies the requirement (added 2026-07-16).
@@ -64,7 +42,7 @@ const TRIGGER_RES = [
 const LEDGER_RES = [
   /^docs\/CHANGELOG\.md$/,
   // One file per change (2026-08-25). docs/CHANGELOG.md is a single 15k-line file
-  // that every parallel session appends to, so concurrent agent-surface work
+  // that every parallel session appends to, so concurrent work
   // collided there constantly - 12 of 13 open PRs touched one of the shared ledger
   // docs. A per-change entry file removes the contention by construction: two
   // sessions never write the same path.
@@ -91,8 +69,8 @@ function toPosix(v) {
 
 // Accepts either plain paths ("docs/CHANGELOG.md") or {path, status} entries where
 // status is a git name-status letter (A/M/D/R/C). A changelog.d fragment counts ONLY
-// when it is ADDED: modifying or deleting an existing fragment alongside an
-// agent-surface change would otherwise satisfy the guard while creating no new record
+// when it is ADDED: modifying or deleting an existing fragment alongside a
+// migration would otherwise satisfy the guard while creating no new record
 // (Codex P2, PR #482) — i.e. a session could edit someone else's entry instead of
 // writing its own. A path supplied WITHOUT a status therefore cannot satisfy the
 // changelog.d rule; that direction fails closed on purpose. The older ledger files are
@@ -149,7 +127,7 @@ export function ledgerCheck(stagedFiles) {
 
   // A malformed ADDED entry is refused no matter what else the commit stages. This runs
   // AHEAD of the trigger branch on purpose: when it lived inside `triggers.length === 0`,
-  // a commit that touched the agent surface AND updated a legacy ledger file satisfied
+  // a commit that touched a migration AND updated a legacy ledger file satisfied
   // hasLedger and carried an unreadable fragment in with it, contradicting the contract
   // the README states (CodeRabbit Major, PR #482). A src-only commit must not be able to
   // drop an empty or misnamed entry into the folder either (Codex P2, same PR).
@@ -184,14 +162,13 @@ export function ledgerCheck(stagedFiles) {
     ok: false,
     triggers,
     reason: rejected.length
-      ? "This commit changes the agent surface, and it stages docs/changelog.d/ entries, but " +
+      ? "This commit changes a database migration, and it stages docs/changelog.d/ entries, but " +
         "none of them records THIS change:\n" +
         rejected.map(([p, why]) => `  • ${p} ${why}`).join("\n") +
         "\nAn entry records ONE change: add your own new dated file rather than editing, " +
         "renaming, or emptying someone else's."
-      : "This commit changes the agent surface (commands / skills / hooks / workflows / settings / " +
-        "shared contract / guard scripts) but stages NO ledger update. Every such change must be " +
-        "recorded in the same commit so Mason and future agents can discover it.",
+      : "This commit changes a database migration but stages NO ledger update. Every migration " +
+        "must be recorded in the same commit so Mason and future agents can discover it.",
   };
 }
 
@@ -267,7 +244,7 @@ if (isMain) {
   const result = ledgerCheck(staged);
   if (result.ok) {
     if (result.triggers.length > 0) {
-      console.log(`✅ ledger-guard: agent-surface change is accompanied by a ledger update (${result.triggers.length} trigger file(s)).`);
+      console.log(`✅ ledger-guard: migration change is accompanied by a ledger update (${result.triggers.length} trigger file(s)).`);
     }
     process.exit(0);
   }
@@ -276,7 +253,7 @@ if (isMain) {
   console.error("");
   console.error(result.reason);
   console.error("");
-  console.error("Agent-surface files staged in this commit:");
+  console.error("Migration files staged in this commit:");
   for (const t of result.triggers.slice(0, 20)) console.error(`  • ${t}`);
   if (result.triggers.length > 20) console.error(`  … and ${result.triggers.length - 20} more`);
   console.error("");

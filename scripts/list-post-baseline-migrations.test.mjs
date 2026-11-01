@@ -133,16 +133,36 @@ const repairPlan = spawnSync(
 assert.equal(repairPlan.status, 0, repairPlan.stderr);
 assert.deepEqual(
   repairPlan.stdout.trim().split(/\r?\n/).filter(Boolean),
-  expectedQuarantined.map(
-    (name) =>
-      `supabase migration repair ${name.slice(0, 14)} --status applied --db-url "$DATABASE_URL"`,
-  ),
-  'the recovery plan records every skipped version so later unfiltered pushes cannot rediscover it',
+  expectedQuarantined.map((name) => name.slice(0, -4)),
+  'the list names each withheld one-shot in order, under its whole name, and is not a command',
 );
 assert.equal(
-  repairPlan.stderr.includes('only AFTER independently proving the restored data'),
+  repairPlan.stderr.includes('Nothing here needs running'),
   expectedQuarantined.length > 0,
-  'the executable repair plan must retain the data-proof warning',
+  'the list must say the README push records these, or someone will repair them by hand',
+);
+assert.equal(
+  /--one-shot-repair-plan/.test(result.stderr),
+  false,
+  'the default advice must not send anyone to repair one-shots after the push',
+);
+
+// The data proof must name the same deliveries the migration recorded, or a typo in the
+// README would refuse a good restore or, worse, stop checking a real delivery.
+const listedDeliveries = (file) =>
+  [...readFileSync(path.join(root, ...file), 'utf8').matchAll(/\('(DEL-\d{5})', '(ORD-\d{4}-\d{4})'\)/g)]
+    .map((match) => `${match[1]} ${match[2]}`)
+    .sort();
+const migrationDeliveries = listedDeliveries([
+  'supabase',
+  'migrations',
+  '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
+]);
+assert.equal(migrationDeliveries.length, 53, 'the migration lists 53 deliveries');
+assert.deepEqual(
+  listedDeliveries(['supabase', 'baselines', 'README.md']),
+  migrationDeliveries,
+  'the README data proof must list exactly the deliveries the migration recorded',
 );
 
 const conflictingModes = spawnSync(

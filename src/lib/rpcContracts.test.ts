@@ -3021,10 +3021,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * anything, they are simply no longer discovered. `_lock_invoice_post_inputs`
  * (20261022022000, a lock-only posting helper with no API-role EXECUTE) was
  * pruned on 2026-10-22, when that migration applied live.
+ * `_notify_driver_delivery_issue` (20261029160100) and
+ * `enforce_delivery_void_needs_invoice_void` (20261029160000) were pruned on 2026-11-01,
+ * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
-  _notify_driver_delivery_issue:
-    'trigger-only office notice on the completion status transition; the parent completion receipt owns replay safety, notification failure rolls back the transaction, and direct app EXECUTE is revoked',
   _close_undelivered_order_remainder_20260718:
     'preserved internal cancel-remainder impl (Phase 1a closeout); the required-key public cancel_order wrapper owns idempotency and every application-role EXECUTE is revoked',
   _post_deleted_delivery_recovery_invoice_20260719:
@@ -3070,8 +3071,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   auto_expire_quotes: 'service-role maintenance sets only currently-expirable quote statuses',
   bump_cycle_count_item_revision:
     'trigger-only cycle-count revision bump; it is SECURITY DEFINER with all application-role EXECUTE revoked and the item-write transaction owns its atomicity',
-  enforce_delivery_void_needs_invoice_void:
-    'trigger-only invoice-first delivery guard; direct application-role EXECUTE is revoked and the idempotent parent delivery RPC owns the transaction',
   check_idempotency: 'idempotency infrastructure helper; mutation only purges an expired key',
   check_idempotency_intent:
     'idempotency infrastructure helper (Section 07 gauntlet finding 2); mutation only purges an expired key, and it raises rather than replays when the actor or request fingerprint differs; direct client EXECUTE is revoked',

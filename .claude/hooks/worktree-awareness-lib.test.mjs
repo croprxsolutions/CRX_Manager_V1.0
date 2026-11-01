@@ -3,7 +3,7 @@
 // Run: node .claude/hooks/worktree-awareness-lib.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -732,6 +732,30 @@ ok(/check_period_open[\s\S]*?SET search_path = ''[\s\S]*?FROM public\.accounting
   assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => null), /unreadable/, "unreadable record blobs fail closed");
   assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map()), /unreadable/, "a missing frozen blob fails closed");
   assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map([frozenBlob])), /unreadable/, "a missing record blob fails closed");
+
+  // The mock above trusts its listing, so prove the real git listing against real commits.
+  const recordsRepo = mkdtempSync(path.join(tmpdir(), "crx-records-at-rev-"));
+  try {
+    const realGit = (args) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.test", ...args], { cwd: recordsRepo, encoding: "utf8" });
+    const commitAll = () => {
+      realGit(["add", "--", "."]);
+      return realGit(["commit-tree", realGit(["write-tree"]).trim(), "-m", "fixture"]).trim();
+    };
+    const readAt = (rev) => (paths) => new Map(paths.map((p) => [normRepoPath(p), realGit(["show", `${rev}:${p}`])]));
+    realGit(["init", "-q"]);
+    mkdirSync(path.join(recordsRepo, ...MIGRATION_RECORDS_DIR.split("/"), "archive"), { recursive: true });
+    writeFileSync(path.join(recordsRepo, ...MIGRATION_HISTORY_FILE.split("/")), "# frozen\n");
+    writeFileSync(path.join(recordsRepo, ...recordPath.split("/")), candidate);
+    const withRecord = commitAll();
+    eq(localCandidateMigrationPathsFromHistory(combinedMigrationHistoryAtRev(realGit, withRecord, readAt(withRecord))).paths.size, 1,
+      "a real commit's record reaches the parked scan through the non-recursive listing");
+    writeFileSync(path.join(recordsRepo, ...MIGRATION_RECORDS_DIR.split("/"), "archive", "20261102090100_hidden.md"), candidate);
+    const withSubfolder = commitAll();
+    assert.throws(() => combinedMigrationHistoryAtRev(realGit, withSubfolder, readAt(withSubfolder)), /must be named after its migration/,
+      "a record in a real commit's subfolder is refused");
+  } finally {
+    rmSync(recordsRepo, { recursive: true, force: true });
+  }
 }
 
 // Path normalization the count key depends on.

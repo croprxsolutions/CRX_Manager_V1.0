@@ -72,7 +72,8 @@ export function readCombinedMigrationHistory(root) {
 // `readBlobs(paths)` is the fail-closed batch reader in worktree-awareness-lib.mjs. The
 // frozen file goes through it too: at 1.4 MB it overflows a plain `git show` capture.
 export function combinedMigrationHistoryAtRev(git, rev, readBlobs) {
-  // Not recursive: a subfolder is refused here exactly as it is on disk.
+  // The trailing slash lists the folder's entries. No -r on purpose: it would flatten a
+  // subfolder's files into valid-looking names, and a subfolder must stay refused as on disk.
   const paths = git(["ls-tree", "--name-only", rev, "--", `${MIGRATION_RECORDS_DIR}/`])
     .split("\n").map((line) => line.trim()).filter(Boolean);
   const blobs = readBlobs([MIGRATION_HISTORY_FILE, ...paths]);

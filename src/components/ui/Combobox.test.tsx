@@ -87,6 +87,22 @@ describe('Combobox', () => {
     expect(onChange).toHaveBeenNthCalledWith(2, 'ch');
   });
 
+  it.each(['e', 'zz'])('does not scroll to the saved index when typing into a closed list (%s)', (query) => {
+    render(<StatefulCombobox initialValue="Banana" />);
+    const input = screen.getByRole('combobox');
+
+    fireEvent.change(input, { target: { value: query } });
+    if (query === 'zz') {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+      fireEvent.change(input, { target: { value: 'e' } });
+    }
+
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Apple', 'Cherry', 'Date', 'Elderberry',
+    ]);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it('collapses aria-expanded when there are no matches and expands again when cleared', () => {
     render(<StatefulCombobox />);
     const input = screen.getByRole('combobox');

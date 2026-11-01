@@ -42,8 +42,8 @@ const optionTexts = (page: Page) => page.getByRole('listbox').getByRole('option'
 
 async function expectFullList(page: Page, input: Locator, saved: string, expected: string[]) {
   await input.click();
-  const listed = (await optionTexts(page)).map((text) => text.trim());
-  expect(listed).toEqual(expect.arrayContaining(expected));
+  await expect.poll(async () => (await optionTexts(page)).map((text) => text.trim()))
+    .toEqual(expect.arrayContaining(expected));
   await expect(page.getByRole('listbox').getByRole('option', { selected: true })).toHaveText(saved);
 }
 
@@ -122,7 +122,17 @@ test('the list scrolls by wheel and hovering does not move it', async ({ page })
   const afterWheel = await scrollTop();
 
   await page.mouse.move(0, 0);
-  await page.getByRole('listbox').getByRole('option').nth(3).hover();
+  const point = await list.evaluate((el) => {
+    const listRect = el.getBoundingClientRect();
+    const option = Array.from(el.querySelectorAll('[role="option"]')).find((item) => {
+      const rect = item.getBoundingClientRect();
+      return rect.top >= listRect.top && rect.bottom <= listRect.bottom;
+    });
+    if (!option) throw new Error('No fully visible option to hover');
+    const rect = option.getBoundingClientRect();
+    return { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
+  });
+  await page.mouse.move(point.x, point.y);
   expect(await scrollTop()).toBe(afterWheel);
   await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   const last = (await page.getByRole('listbox').getByRole('option').last().innerText()).trim();

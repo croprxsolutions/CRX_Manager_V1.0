@@ -165,7 +165,10 @@ function useComboboxState({ disabled, value, onChange, options }: ComboboxStateP
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
-    if (!open) openDropdown();
+    if (!open) {
+      openDropdown();
+      pendingScrollIndexRef.current = null;
+    }
     if (query === null) valueBeforeTypingRef.current = value;
     setQuery(e.target.value);
     setHighlightIndex(-1);

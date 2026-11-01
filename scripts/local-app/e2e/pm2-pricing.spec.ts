@@ -30,7 +30,7 @@ async function applyReview(page: Page) {
   await page.getByLabel('Reason for the change').fill('Proof of the pricing page');
   await page.getByRole('button', { name: 'Preview changes' }).click();
   // A first price is a large change, so the review asks for a reason, as it should.
-  await page.getByLabel('Why is this acceptable?').fill('Invented first price');
+  await page.getByRole('region', { name: 'Warnings to acknowledge' }).locator('textarea').fill('Invented first price');
   await page.getByRole('button', { name: 'Apply approved changes' }).click();
 }
 

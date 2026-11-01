@@ -18,11 +18,37 @@ import {
   approvePricingChangeSet,
   assertPricingPreviewRowsSafe,
   createPricingWorkbookExport,
+  defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
   previewProductPricingChanges,
   sha256Hex,
 } from './productPricing';
+
+describe('defaultPricingMode', () => {
+  const prices = { tier1_price: 100, tier2_price: 90, tier3_price: 80 };
+  const margins = { tier1_margin: 0.2, tier2_margin: 0.15, tier3_margin: 0.1 };
+
+  it('prefers complete saved prices even when all margins are saved', () => {
+    expect(defaultPricingMode({ ...prices, ...margins })).toBe('price_driven');
+    expect(defaultPricingMode(prices)).toBe('price_driven');
+  });
+
+  it('uses complete margins when prices are incomplete', () => {
+    expect(defaultPricingMode(margins)).toBe('margin_driven');
+    expect(defaultPricingMode({ ...margins, tier1_price: 100 })).toBe('margin_driven');
+  });
+
+  it('leaves incomplete pricing without a mode', () => {
+    expect(defaultPricingMode({})).toBe('');
+    expect(defaultPricingMode({ tier1_price: 100, tier1_margin: 0.2 })).toBe('');
+  });
+
+  it('counts zero as a saved price or margin', () => {
+    expect(defaultPricingMode({ ...prices, tier1_price: 0 })).toBe('price_driven');
+    expect(defaultPricingMode({ ...margins, tier1_margin: 0 })).toBe('margin_driven');
+  });
+});
 
 describe('price sheet approval (To-Do 0.1)', () => {
   beforeEach(() => {

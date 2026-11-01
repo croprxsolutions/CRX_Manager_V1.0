@@ -667,20 +667,92 @@ describe('ProductDetail governed pricing flow', () => {
     ));
   });
 
-  it('requires an explicit mode when saved prices and margins are both populated', async () => {
+  it('opens saved prices in price-driven mode and reviews them unchanged', async () => {
     render(<ProductDetail />);
     await screen.findByText('Grower Description');
 
-    expect(screen.getByLabelText('Pricing mode')).toHaveValue('');
+    expect(screen.getByLabelText('Pricing mode')).toHaveValue('price_driven');
+    for (const tier of [1, 2, 3]) {
+      expect(screen.getByLabelText(`Tier ${tier} price`)).toBeEnabled();
+    }
+    expect(screen.getAllByText('Net margin %')).toHaveLength(3);
+    expect(screen.getAllByText('Markup %:')).toHaveLength(3);
+    expect(screen.getByText('Net margin')).toBeInTheDocument();
+    expect(screen.getByText('Markup %')).toBeInTheDocument();
+    expect(screen.getByText(/Profit as a % of price/)).toBeInTheDocument();
+    expect(screen.getByText(/Profit as a % of cost/)).toBeInTheDocument();
+    expect(screen.getByText(/A product with saved prices opens price-driven/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
+    await giveSourceAndReason('Supplier quote', 'Cost change');
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
+      rows: [expect.objectContaining({
+        pricing_mode: 'price_driven',
+        tier1_price: '62.5',
+        tier2_price: '58.82',
+        tier3_price: '55.56',
+      })],
+    })));
+  });
 
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
-      'error',
-      'Choose margin-driven or price-driven before reviewing pricing.',
-    ));
-    expect(mockPreviewPricing).not.toHaveBeenCalled();
+  it('explains the disabled cost-basis controls without internal release wording', async () => {
+    mockGetCostBasisWorkspace.mockResolvedValue({
+      enabled: false,
+      product: { id: product.id, pricing_version: product.pricing_version },
+      current_basis: null,
+      supplier_candidates: [],
+      purchase_candidates: [],
+    });
+    render(<ProductDetail />);
+    expect(await screen.findByText('Choosing a cost basis is turned off for now. You can review evidence below, but selection controls remain disabled.')).toBeInTheDocument();
+    expect(screen.queryByText(/Phase 2 release gate/)).not.toBeInTheDocument();
+  });
+
+  it.each(['25', '22.5'])('keeps typed %s margins in all three tiers through preview', async (margin) => {
+    render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
+    for (const tier of [1, 2, 3]) {
+      const input = screen.getByLabelText(`Tier ${tier} net margin percent`);
+      fireEvent.change(input, { target: { value: '2' } });
+      expect(input).toHaveValue(2);
+      fireEvent.change(input, { target: { value: '25' } });
+      expect(input).toHaveValue(25);
+      if (margin === '22.5') {
+        fireEvent.change(input, { target: { value: '22' } });
+        fireEvent.change(input, { target: { value: '22.5' } });
+        expect(input).toHaveValue(22.5);
+      }
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await giveSourceAndReason('Supplier quote', 'Margin change');
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
+      rows: [expect.objectContaining({
+        pricing_mode: 'margin_driven',
+        tier1_margin_percent: margin,
+        tier2_margin_percent: margin,
+        tier3_margin_percent: margin,
+      })],
+    })));
+  });
+
+  it('sends untouched stored margins exactly after switching to margin-driven', async () => {
+    productLoadResults.push({ data: { ...product, tier1_margin: 0.2255, tier3_margin: 0.2255 }, error: null });
+    render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
+    expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(22.6);
+    fireEvent.change(screen.getByLabelText('Tier 2 net margin percent'), { target: { value: '25' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await giveSourceAndReason('Supplier quote', 'Tier 2 margin change');
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
+      rows: [expect.objectContaining({
+        tier1_margin_percent: '22.55',
+        tier2_margin_percent: '25',
+        tier3_margin_percent: '22.55',
+      })],
+    })));
   });
 
   it('previews and applies a quick cost change without a direct products update', async () => {

@@ -1,0 +1,97 @@
+import { expect, test, type Page } from '@playwright/test';
+
+// WP-PM-2 proof: margins type cleanly, save exactly, and a product opens usable with nothing changed.
+// Invented data only.
+async function signIn(page: Page) {
+  await page.goto('/login');
+  await page.fill('#email', process.env.LOCAL_TEST_EMAIL!);
+  await page.fill('#password', process.env.LOCAL_TEST_PASSWORD!);
+  await page.getByRole('button', { name: /sign in/i }).click();
+  await expect(page).not.toHaveURL(/login/);
+}
+
+async function dbRow(page: Page, id: string) {
+  return page.evaluate(async (productId) => {
+    const path = '/src/lib/db.ts';
+    const { supabase } = await import(/* @vite-ignore */ path);
+    const { data, error } = await supabase
+      .from('products')
+      .select('current_cost, tier1_price, tier2_price, tier3_price, tier1_margin, tier2_margin, tier3_margin, pricing_version')
+      .eq('id', productId)
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }, id);
+}
+
+async function applyReview(page: Page) {
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await page.getByLabel('Source (supplier, document, date)').fill('Invented price list');
+  await page.getByLabel('Reason for the change').fill('Proof of the pricing page');
+  await page.getByRole('button', { name: 'Preview changes' }).click();
+  await page.getByRole('button', { name: 'Apply approved changes' }).click();
+}
+
+test('margins type cleanly on all tiers, save exactly, and reopen priced', async ({ page }) => {
+  await signIn(page);
+  const id: string = await page.evaluate(async (name) => {
+    const path = '/src/lib/db.ts';
+    const { supabase } = await import(/* @vite-ignore */ path);
+    const { data, error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid' }).select('id').single();
+    if (error) throw new Error(error.message);
+    return data.id;
+  }, `Pricing Proof ${Date.now()} (invented)`);
+
+  await page.goto(`/products/${id}`);
+  await page.getByLabel('Pricing mode', { exact: true }).selectOption('margin_driven');
+  await page.locator('#product-current-cost').fill('80');
+
+  const margins: [string, string, string][] = [
+    ['#tier1-net-margin', '20', '100'],
+    ['#tier2-net-margin', '22.5', '103.23'],
+    ['#tier3-net-margin', '25', '106.67'],
+  ];
+  for (const [box, percent] of margins) {
+    await page.locator(box).pressSequentially(percent, { delay: 40 });
+    await expect(page.locator(box)).toHaveValue(percent);
+  }
+
+  await applyReview(page);
+  await expect(page.getByRole('button', { name: 'Apply approved changes' })).toHaveCount(0);
+  await page.reload();
+
+  const saved = await dbRow(page, id);
+  expect(saved.tier1_margin).toBeCloseTo(0.2, 6);
+  expect(saved.tier2_margin).toBeCloseTo(0.225, 6);
+  expect(saved.tier3_margin).toBeCloseTo(0.25, 6);
+  expect([saved.tier1_price, saved.tier2_price, saved.tier3_price].map(Number)).toEqual(margins.map(([, , price]) => Number(price)));
+
+  // A product with prices and margins saved opens price-driven with its boxes usable.
+  await expect(page.locator('#product-pricing-mode')).toHaveValue('price_driven');
+  await expect(page.locator('#tier1-price')).toBeEnabled();
+  await expect(page.locator('#tier1-net-margin')).toBeDisabled();
+  await expect(page.locator('#tier1-net-margin')).toHaveValue('20.0');
+  await expect(page.getByText('Markup %:').first()).toBeVisible();
+  await expect(page.getByText('Gross Margin')).toHaveCount(0);
+  await expect(page.getByText(/release gate/i)).toHaveCount(0);
+  await page.screenshot({ path: 'scripts/local-app/.state/pm2-priced-product.png', fullPage: true });
+
+  // Opening and saving a product whose margins set its prices changes no price.
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await page.reload();
+  expect(await dbRow(page, id)).toEqual(saved);
+
+  // The list opens the same row in the same mode, ready to edit.
+  await page.goto('/products');
+  await page.getByPlaceholder(/search/i).first().fill('Pricing Proof');
+  await page.getByRole('button', { name: /edit/i }).first().click();
+  const name = await page.evaluate(async (productId) => {
+    const path = '/src/lib/db.ts';
+    const { supabase } = await import(/* @vite-ignore */ path);
+    const { data } = await supabase.from('products').select('product_name').eq('id', productId).single();
+    return data.product_name;
+  }, id);
+  await expect(page.getByRole('combobox', { name: `Pricing mode for ${name}` })).toHaveValue('price_driven');
+  await expect(page.getByRole('spinbutton', { name: `Tier 1 price for ${name}` })).toBeVisible();
+  await page.screenshot({ path: 'scripts/local-app/.state/pm2-list.png' });
+});

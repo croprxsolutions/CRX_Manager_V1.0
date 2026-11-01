@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -97,13 +97,33 @@ vi.mock('../lib/productPricingWorkbook', () => ({
 }));
 
 vi.mock('../components/ui/EditableDataTable', () => ({
-  default: ({ data, onSave, filters }: {
+  default: function MockEditableDataTable({ data, onSave, filters, columns }: {
     data: typeof product[];
     onSave: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
     filters?: ReactNode;
-  }) => (
-    <>
+    columns: Array<{
+      key: string;
+      editRender?: (
+        row: typeof product,
+        getCellValue: (key: string) => unknown,
+        setCellValue: (key: string, value: unknown) => void,
+      ) => ReactNode;
+    }>;
+  }) {
+    const [dirty, setDirty] = useState<Record<string, unknown>>({});
+    const row = data[0];
+    const getCellValue = (key: string): unknown => key in dirty ? dirty[key] : row[key as keyof typeof product];
+    const setCellValue = (key: string, value: unknown) => setDirty((current) => ({ ...current, [key]: value }));
+    return <>
       {filters}
+      {row && columns.filter((column) => ['pricing_mode', 'tier1_price', 'tier2_price', 'tier3_price'].includes(column.key))
+        .map((column) => <div key={column.key}>{column.editRender?.(row, getCellValue, setCellValue)}</div>)}
+      <button
+        disabled={data.length === 0}
+        onClick={() => void onSave(new Map([[data[0].id, { ...dirty, current_cost: String(data[0].current_cost) }]])).catch(() => {})}
+      >
+        Test default pricing save
+      </button>
       <button
         disabled={data.length === 0}
         onClick={() => void onSave(new Map([[
@@ -119,8 +139,8 @@ vi.mock('../components/ui/EditableDataTable', () => ({
       >
         Test inline pricing save
       </button>
-    </>
-  ),
+    </>;
+  },
 }));
 
 vi.mock('../components/products/BulkProductImport', () => ({ default: () => null }));
@@ -202,6 +222,52 @@ describe('Products governed inline pricing flow', () => {
       applied_count: 1,
       rows: [],
     });
+  });
+
+  it('opens saved prices for editing and saves price-driven without a manual mode choice', async () => {
+    render(<Products />);
+    const mode = await screen.findByLabelText(`Pricing mode for ${product.product_name}`);
+    expect(mode).toHaveValue('price_driven');
+    for (const tier of [1, 2, 3]) {
+      expect(screen.getByLabelText(`Tier ${tier} price for ${product.product_name}`)).toBeEnabled();
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Test default pricing save' }));
+    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Supplier list' } });
+    fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Review saved prices' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
+      rows: [expect.objectContaining({
+        pricing_mode: 'price_driven',
+        tier1_price: '62.5',
+        tier2_price: '58.82',
+        tier3_price: '55.56',
+      })],
+    })));
+  });
+
+  it('opens a margins-only row in margin-driven mode', async () => {
+    mockProducts.splice(0, 1, { ...product, tier1_price: null, tier2_price: null, tier3_price: null });
+    render(<Products />);
+    expect(await screen.findByLabelText(`Pricing mode for ${product.product_name}`)).toHaveValue('margin_driven');
+    for (const tier of [1, 2, 3]) {
+      expect(screen.getByLabelText(`Tier ${tier} net margin percent for ${product.product_name}`)).toBeEnabled();
+    }
+  });
+
+  it('keeps an unpriced row unselected and refuses its save', async () => {
+    mockProducts.splice(0, 1, {
+      ...product,
+      tier1_price: null, tier2_price: null, tier3_price: null,
+      tier1_margin: null, tier2_margin: null, tier3_margin: null,
+    });
+    render(<Products />);
+    expect(await screen.findByLabelText(`Pricing mode for ${product.product_name}`)).toHaveValue('');
+    expect(screen.getAllByText('Select a pricing mode')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Test default pricing save' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error', `Choose margin-driven or price-driven for ${product.product_name}.`,
+    ));
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
 
   it('previews and applies inline pricing without a direct products update', async () => {

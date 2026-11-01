@@ -28,6 +28,7 @@ import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
   createPricingWorkbookExport,
+  defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
   previewProductPricingChanges,
@@ -477,7 +478,7 @@ export default function Products() {
       getCellValue: (colKey: string) => unknown,
       setCellValue: (colKey: string, value: unknown) => void
     ) => {
-      const mode = getCellValue('pricing_mode') as PricingMode | undefined;
+      const mode = (getCellValue('pricing_mode') as PricingMode | undefined) || defaultPricingMode(row);
       if (mode === 'price_driven') {
         const price = getCellValue(priceKey);
         return (
@@ -611,7 +612,7 @@ export default function Products() {
           if (!Object.keys(fields).some((key) => INLINE_PRICING_FIELDS.has(key))) continue;
           const original = products.find((product) => product.id === productId);
           if (!original) throw new Error('A Product changed while you were editing. Refresh and try again.');
-          const mode = fields.pricing_mode as PricingMode | undefined;
+          const mode = (fields.pricing_mode as PricingMode | undefined) || defaultPricingMode(original);
           if (mode !== 'margin_driven' && mode !== 'price_driven') {
             throw new Error(`Choose margin-driven or price-driven for ${original.product_name}.`);
           }
@@ -945,6 +946,18 @@ export default function Products() {
             { value: 'price_driven', label: 'Price-driven' },
           ],
           editAriaLabel: (row) => `Pricing mode for ${row.product_name}`,
+          editRender: (row, getCellValue, setCellValue) => (
+            <select
+              aria-label={`Pricing mode for ${row.product_name}`}
+              value={(getCellValue('pricing_mode') as PricingMode | undefined) || defaultPricingMode(row)}
+              onChange={(event) => setCellValue('pricing_mode', event.target.value)}
+              className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 bg-white"
+            >
+              <option value="">Choose a mode</option>
+              <option value="margin_driven">Margin-driven</option>
+              <option value="price_driven">Price-driven</option>
+            </select>
+          ),
           render: () => <span className="text-xs text-gray-400">Choose while editing</span>,
         } satisfies EditableColumn<Product>]
       : []),

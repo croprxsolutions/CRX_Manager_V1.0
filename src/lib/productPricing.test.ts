@@ -34,9 +34,10 @@ describe('defaultPricingMode', () => {
     expect(defaultPricingMode(prices)).toBe('price_driven');
   });
 
-  it('uses complete margins when prices are incomplete', () => {
+  it('uses complete margins only when no prices are saved', () => {
     expect(defaultPricingMode(margins)).toBe('margin_driven');
-    expect(defaultPricingMode({ ...margins, tier1_price: 100 })).toBe('margin_driven');
+    expect(defaultPricingMode({ ...margins, tier1_price: 100 })).toBe('');
+    expect(defaultPricingMode({ ...margins, tier1_price: 100, tier2_price: 90 })).toBe('');
   });
 
   it('leaves incomplete pricing without a mode', () => {

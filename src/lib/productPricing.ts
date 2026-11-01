@@ -4,19 +4,6 @@ import { assertRpcResult, supabase } from './db';
 
 export type PricingSource = 'pricing_worksheet' | 'product_page' | 'products_inline';
 export type PricingMode = 'margin_driven' | 'price_driven';
-export function defaultPricingMode(product: {
-  tier1_price?: number | null; tier2_price?: number | null; tier3_price?: number | null;
-  tier1_margin?: number | null; tier2_margin?: number | null; tier3_margin?: number | null;
-}): PricingMode | '' {
-  // Saved customer-facing prices take precedence; choosing the default does not change them.
-  if ([product.tier1_price, product.tier2_price, product.tier3_price].every((value) => value != null)) {
-    return 'price_driven';
-  }
-  if ([product.tier1_margin, product.tier2_margin, product.tier3_margin].every((value) => value != null)) {
-    return 'margin_driven';
-  }
-  return '';
-}
 export type PricingRowStatus = 'ready' | 'conflict' | 'invalid' | 'unchanged';
 export type PricingChangeSetStatus =
   | 'previewed'
@@ -36,6 +23,19 @@ export interface CostBasisPreviewMetadata {
   basis_selection?: boolean;
   supplier_price_observation_id?: string;
   purchase_order_item_id?: string;
+}
+
+export function defaultPricingMode(product: {
+  tier1_price?: number | null; tier2_price?: number | null; tier3_price?: number | null;
+  tier1_margin?: number | null; tier2_margin?: number | null; tier3_margin?: number | null;
+}): PricingMode | '' {
+  const prices = [product.tier1_price, product.tier2_price, product.tier3_price];
+  if (prices.every((value) => value != null)) return 'price_driven';
+  if (prices.some((value) => value != null)) return '';
+  if ([product.tier1_margin, product.tier2_margin, product.tier3_margin].every((value) => value != null)) {
+    return 'margin_driven';
+  }
+  return '';
 }
 
 const MAX_PRICING_CENTS = 9_223_372_036_854_775_807n;

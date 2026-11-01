@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-01 — A product with saved prices opens price-driven
+
+**Decision (WP-PM-2, option a of the build sheet, as the mission's Wave 1 scope sets it).** The pricing mode is not stored. A product with all three prices saved opens price-driven, on the product page and in the list, whether or not its margins are saved too. A product with no prices and all three margins opens margin-driven. A partly priced product, or one with neither, opens with no mode, so someone chooses before a cost change can rewrite a saved price.
+
+**Why.** Prices are the customer-facing number, and this default changes nothing until someone edits. Option b, storing the last-used mode, needs a column and a grant on `products`, which is a Mason-gated migration.
+
+**What this forbids/implies:** a cost change on a product whose margins used to set its prices now starts on "keep prices", so its margins move unless someone switches the mode. The preview still shows every result before Apply. A change to this default is a new entry here.
+
 ## 2026-11-01 — Product Master runs in waves, with a test copy of the app and a CodeRabbit stage
 
 **Decision (Mason, in chat, 2026-11-01: "yes add the missing decisions and the 5 things you suggest and anything I need to do before we start the work").** The mission `docs/plans/2026-10-28-product-master-loop-MISSION.md` and `docs/plans/2026-10-29-product-master-START-HERE.md` now say:

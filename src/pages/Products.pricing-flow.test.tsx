@@ -139,6 +139,13 @@ vi.mock('../components/ui/EditableDataTable', () => ({
       >
         Test inline pricing save
       </button>
+      {[null, ''].map((cost, index) => (
+        <button key={index} disabled={data.length === 0} onClick={() => void onSave(new Map([[
+          data[0].id, { pricing_mode: 'price_driven', current_cost: cost },
+        ]])).catch(() => {})}>
+          Test cleared cost {index}
+        </button>
+      ))}
     </>;
   },
 }));
@@ -228,6 +235,7 @@ describe('Products governed inline pricing flow', () => {
     render(<Products />);
     const mode = await screen.findByLabelText(`Pricing mode for ${product.product_name}`);
     expect(mode).toHaveValue('price_driven');
+    expect(screen.queryByRole('option', { name: 'Choose a mode' })).not.toBeInTheDocument();
     for (const tier of [1, 2, 3]) {
       expect(screen.getByLabelText(`Tier ${tier} price for ${product.product_name}`)).toBeEnabled();
     }
@@ -254,6 +262,14 @@ describe('Products governed inline pricing flow', () => {
     }
   });
 
+  it.each([0, 1])('refuses a cleared cost value %s instead of using the stored cost', async (index) => {
+    render(<Products />);
+    await screen.findByRole('button', { name: `Test cleared cost ${index}` });
+    fireEvent.click(screen.getByRole('button', { name: `Test cleared cost ${index}` }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', `Enter a cost for ${product.product_name}.`));
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
+  });
+
   it('keeps an unpriced row unselected and refuses its save', async () => {
     mockProducts.splice(0, 1, {
       ...product,
@@ -262,6 +278,7 @@ describe('Products governed inline pricing flow', () => {
     });
     render(<Products />);
     expect(await screen.findByLabelText(`Pricing mode for ${product.product_name}`)).toHaveValue('');
+    expect(screen.getByRole('option', { name: 'Choose a mode' })).toBeInTheDocument();
     expect(screen.getAllByText('Select a pricing mode')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Test default pricing save' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(

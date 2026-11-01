@@ -616,7 +616,7 @@ export default function Products() {
           if (mode !== 'margin_driven' && mode !== 'price_driven') {
             throw new Error(`Choose margin-driven or price-driven for ${original.product_name}.`);
           }
-          const newCost = inputDecimal(fields.current_cost ?? original.current_cost);
+          const newCost = inputDecimal('current_cost' in fields ? fields.current_cost : original.current_cost);
           if (newCost === null) throw new Error(`Enter a cost for ${original.product_name}.`);
           if (mode === 'margin_driven' && pricingDollarInputToCents(newCost) === 0n) {
             throw new Error(`Margin-driven pricing requires a cost greater than $0 for ${original.product_name}. No prices were changed.`);
@@ -940,11 +940,6 @@ export default function Products() {
           key: 'pricing_mode',
           header: 'Pricing Mode',
           editable: true,
-          editType: 'select' as const,
-          editOptions: [
-            { value: 'margin_driven', label: 'Margin-driven' },
-            { value: 'price_driven', label: 'Price-driven' },
-          ],
           editAriaLabel: (row) => `Pricing mode for ${row.product_name}`,
           editRender: (row, getCellValue, setCellValue) => (
             <select
@@ -953,7 +948,7 @@ export default function Products() {
               onChange={(event) => setCellValue('pricing_mode', event.target.value)}
               className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 bg-white"
             >
-              <option value="">Choose a mode</option>
+              {defaultPricingMode(row) === '' && <option value="">Choose a mode</option>}
               <option value="margin_driven">Margin-driven</option>
               <option value="price_driven">Price-driven</option>
             </select>

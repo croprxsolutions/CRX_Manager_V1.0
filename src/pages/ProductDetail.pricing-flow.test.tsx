@@ -65,7 +65,7 @@ const product = {
 
 let routeProductId = product.id;
 
-let productLoadResults: Array<{ data: typeof product | null; error: unknown }> = [];
+let productLoadResults: Array<{ data: typeof product | null; error: unknown } | Promise<{ data: typeof product | null; error: unknown }>> = [];
 let costHistoryLoadResult: { data: unknown[] | null; error: unknown } = { data: [], error: null };
 let productMutationResult: { data: Array<typeof product>; error: unknown } = {
   data: [product],
@@ -533,8 +533,10 @@ describe('ProductDetail governed pricing flow', () => {
     ));
     const { rerender } = render(<ProductDetail />);
     await waitFor(() => expect(mockGetCostBasisWorkspace).toHaveBeenCalledWith(product.id));
+    await screen.findByText('Grower Description');
 
     const secondProductId = '22222222-2222-4222-8222-222222222222';
+    productLoadResults.push({ data: { ...product, id: secondProductId, product_name: 'Second Product' }, error: null });
     routeProductId = secondProductId;
     rerender(<ProductDetail />);
     await waitFor(() => expect(mockGetCostBasisWorkspace).toHaveBeenCalledWith(secondProductId));
@@ -587,6 +589,56 @@ describe('ProductDetail governed pricing flow', () => {
     routeProductId = '22222222-2222-4222-8222-222222222222';
     rerender(<ProductDetail />);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('does not show or save the previous Product when the next Product fails to load', async () => {
+    const { rerender } = render(<ProductDetail />);
+    fireEvent.change(await screen.findByLabelText('Quoting Notes'), { target: { value: 'X-only edit' } });
+
+    const secondProductId = '22222222-2222-4222-8222-222222222222';
+    productLoadResults.push({ data: null, error: new Error('load failed') });
+    routeProductId = secondProductId;
+    rerender(<ProductDetail />);
+
+    expect(await screen.findByText('Product not found')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Quoting Notes')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
+    expect(mockProductUpdate).not.toHaveBeenCalled();
+    expect(mockProductEq).toHaveBeenCalledWith('id', secondProductId);
+  });
+
+  it('keeps the next Product loading when an older Product load fails', async () => {
+    let finishOld!: (result: { data: typeof product | null; error: unknown }) => void;
+    let finishNew!: (result: { data: typeof product | null; error: unknown }) => void;
+    productLoadResults.push(new Promise((resolve) => { finishOld = resolve; }));
+    productLoadResults.push(new Promise((resolve) => { finishNew = resolve; }));
+    const { rerender } = render(<ProductDetail />);
+
+    const secondProductId = '22222222-2222-4222-8222-222222222222';
+    routeProductId = secondProductId;
+    rerender(<ProductDetail />);
+    await act(async () => finishOld({ data: null, error: new Error('old load failed') }));
+    expect(screen.queryByText('Product not found')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Quoting Notes')).not.toBeInTheDocument();
+
+    await act(async () => finishNew({ data: { ...product, id: secondProductId, product_name: 'Second Product' }, error: null }));
+    expect(await screen.findByText('Second Product')).toBeInTheDocument();
+  });
+
+  it('clears a Product margin draft when navigating to another Product', async () => {
+    const { rerender } = render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
+    fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: '37' } });
+    expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(37);
+
+    const secondProductId = '22222222-2222-4222-8222-222222222222';
+    productLoadResults.push({ data: { ...product, id: secondProductId, product_name: 'Second Product' }, error: null });
+    routeProductId = secondProductId;
+    rerender(<ProductDetail />);
+
+    expect(await screen.findByText('Second Product')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(20);
   });
 
   it('discards an in-flight Product preview when the route changes', async () => {
@@ -753,6 +805,36 @@ describe('ProductDetail governed pricing flow', () => {
         tier3_margin_percent: '22.55',
       })],
     })));
+  });
+
+  it('drops unsaved inputs from the other family when either pricing mode select changes', async () => {
+    render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
+    fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: '37' } });
+    fireEvent.change(screen.getByLabelText('Current Cost'), { target: { value: '55.00' } });
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
+    expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(20);
+    expect(screen.getByLabelText('Tier 1 net margin percent')).toBeDisabled();
+    expect(screen.getByLabelText('Current Cost')).toHaveValue(55);
+
+    fireEvent.change(screen.getByLabelText('Tier 1 price'), { target: { value: '75' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.change(screen.getAllByLabelText('Pricing mode')[1], { target: { value: 'margin_driven' } });
+    expect(screen.getByLabelText('Tier 1 price')).toHaveValue(62.5);
+    expect(screen.getByLabelText('Tier 1 price')).toBeDisabled();
+    expect(screen.getByLabelText('Current Cost')).toHaveValue(55);
+  });
+
+  it.each(['.5', '100'])('refuses invalid margin draft %s before asking for a reason', async (margin) => {
+    render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
+    fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: margin } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Enter each net margin as a plain number below 100.');
+    expect(screen.queryByLabelText('Source (supplier, document, date)')).not.toBeInTheDocument();
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
 
   it('previews and applies a quick cost change without a direct products update', async () => {

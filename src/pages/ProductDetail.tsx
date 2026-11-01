@@ -130,6 +130,9 @@ function pricingPreviewRow(
         throw new Error('Margin-driven pricing requires all three net margins.');
       }
       const draft = marginDrafts[`tier${tier}_margin` as ProductPricingMarginField];
+      if (draft && (!/^[0-9]+([.][0-9]+)?$/.test(draft) || Number(draft) >= 100)) {
+        throw new Error('Enter each net margin as a plain number below 100.');
+      }
       row[`tier${tier}_margin_percent` as const] = draft ? draft : formatPricingMarginPercent(value);
     }
   } else {
@@ -246,6 +249,7 @@ export default function ProductDetail() {
   const [costHistoryLoaded, setCostHistoryLoaded] = useState(false);
   const [costHistoryLoadFailed, setCostHistoryLoadFailed] = useState(false);
   const pricingPreviewIntentRef = useRef<string | null>(null);
+  const productLoadRequestRef = useRef(0);
   const costBasisWorkspaceRequestRef = useRef(0);
   const pricingPreviewRequestRef = useRef(0);
   // Committed product id, read after awaits to drop results for a product the user has left.
@@ -279,42 +283,39 @@ export default function ProductDetail() {
   const blocker = useUnsavedChanges(isDirty || marginFloorDirty);
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
-    const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
-    if (error) {
-      Sentry.captureException(error);
-      if (reportError) toast('error', 'Failed to load product');
-      setLoading(false);
-      return false;
-    }
-    // Cost is admin-only (Mason, 2026-10-15).
-    let withCost: Product | null;
+    const requestId = ++productLoadRequestRef.current;
+    const isCurrentRequest = () => productLoadRequestRef.current === requestId && productIdRef.current === id;
     try {
-      withCost = await withAdminCost('products', data as Product | null, isAdmin);
-    } catch (costError) {
-      Sentry.captureException(costError);
+      const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
+      if (!isCurrentRequest()) return false;
+      if (error) throw error;
+      // Cost is admin-only (Mason, 2026-10-15).
+      const withCost = await withAdminCost('products', data as Product | null, isAdmin);
+      // The admin cost read is a second await: an older load must not install its product.
+      if (!isCurrentRequest()) return false;
+      if (withCost) {
+        const loadedProduct = withCost;
+        setProduct(loadedProduct);
+        setPersistedProduct(loadedProduct);
+        setPricingMode(defaultPricingMode(loadedProduct));
+        setPricingMoneyDrafts({});
+        setPricingMarginDrafts({});
+        setPricingReloadRequired(false);
+        setIsDirty(false);
+        setPersistedLabelFields({
+          signalWord: loadedProduct.signal_word,
+          epaRegistration: loadedProduct.epa_registration,
+        });
+      }
+      return data !== null;
+    } catch (loadError) {
+      if (!isCurrentRequest()) return false;
+      Sentry.captureException(loadError);
       if (reportError) toast('error', 'Failed to load product');
-      setLoading(false);
       return false;
+    } finally {
+      if (isCurrentRequest()) setLoading(false);
     }
-    // The admin cost read is a second await: if the route moved to another product meanwhile,
-    // this older load must not install its product on the new page (Luna round 2).
-    if (productIdRef.current !== id) return false;
-    if (withCost) {
-      const loadedProduct = withCost;
-      setProduct(loadedProduct);
-      setPersistedProduct(loadedProduct);
-      setPricingMode(defaultPricingMode(loadedProduct));
-      setPricingMoneyDrafts({});
-      setPricingMarginDrafts({});
-      setPricingReloadRequired(false);
-      setIsDirty(false);
-      setPersistedLabelFields({
-        signalWord: loadedProduct.signal_word,
-        epaRegistration: loadedProduct.epa_registration,
-      });
-    }
-    setLoading(false);
-    return data !== null;
   }, [id, isAdmin, productIdRef, toast]);
 
   const fetchCostHistory = useCallback(async (reportError = true): Promise<boolean> => {
@@ -380,6 +381,14 @@ export default function ProductDetail() {
     pricingPreviewRequestRef.current += 1;
     setPricingPreview(null);
     setPricingPreviewTitle('Review Product Pricing');
+    setPersistedProduct(null);
+    setPricingMoneyDrafts({});
+    setPricingMarginDrafts({});
+    setPendingPricingReview(null);
+    setCostModal(false);
+    setNewCost('');
+    setCostNote('');
+    if (id && id !== 'new') setLoading(true);
     resetPreviewPricingKey();
     resetApplyPricingKey();
     setCostBasisReason('');
@@ -407,7 +416,7 @@ export default function ProductDetail() {
   }, []);
 
   const saveExistingProductDetails = async () => {
-    if (!persistedProduct || !Number.isInteger(persistedProduct.pricing_version)) {
+    if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
     const result = await supabaseUntyped
@@ -966,11 +975,28 @@ export default function ProductDetail() {
     setIsDirty(true);
   };
 
+  const changePricingMode = (mode: PricingMode | '') => {
+    if (mode === 'price_driven') {
+      setPricingMarginDrafts({});
+      if (persistedProduct) {
+        setProduct((current) => ({
+          ...current,
+          tier1_margin: persistedProduct.tier1_margin,
+          tier2_margin: persistedProduct.tier2_margin,
+          tier3_margin: persistedProduct.tier3_margin,
+        }));
+      }
+    } else if (mode === 'margin_driven') {
+      setPricingMoneyDrafts(({ current_cost }) => current_cost === undefined ? {} : { current_cost });
+    }
+    setPricingMode(mode);
+  };
+
   if (loading) {
     return <div className="animate-pulse space-y-4"><div className="h-8 bg-gray-200 rounded w-1/3" /><div className="h-64 bg-gray-200 rounded" /></div>;
   }
 
-  if (!isNew && !product.id) {
+  if (!isNew && (product.id !== id || persistedProduct?.id !== id)) {
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-4">
         <p className="text-secondary text-lg">Product not found</p>
@@ -1457,7 +1483,7 @@ export default function ProductDetail() {
                   <select
                     id="product-pricing-mode"
                     value={pricingMode}
-                    onChange={(event) => setPricingMode(event.target.value as PricingMode | '')}
+                    onChange={(event) => changePricingMode(event.target.value as PricingMode | '')}
                     className="w-full sm:max-w-xs px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                   >
                     <option value="">Choose a mode</option>
@@ -1752,7 +1778,7 @@ export default function ProductDetail() {
             <select
               id="cost-update-pricing-mode"
               value={pricingMode}
-              onChange={(event) => setPricingMode(event.target.value as PricingMode | '')}
+              onChange={(event) => changePricingMode(event.target.value as PricingMode | '')}
               disabled={pricingReloadRequired}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >

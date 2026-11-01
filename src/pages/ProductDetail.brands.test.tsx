@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { Product } from '../types';
 
 const H = vi.hoisted(() => ({
@@ -173,7 +173,8 @@ describe('ProductDetail brands section', () => {
     // never reach product-2's brand section, where a name suggestion could be saved to the wrong product.
     H.routeId = 'product-2';
     render(<ProductDetail />);
-    await waitFor(() => expect(screen.getAllByDisplayValue('Test Herbicide').length).toBeGreaterThan(0));
+    expect(await screen.findByText('Product not found')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('Test Herbicide')).not.toBeInTheDocument();
     expect(screen.queryByTestId('brands-section')).not.toBeInTheDocument();
     expect(H.brandSection).not.toHaveBeenCalled();
   });

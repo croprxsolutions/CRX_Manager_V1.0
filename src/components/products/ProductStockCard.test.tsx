@@ -3,13 +3,14 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InventoryPositionRow } from '../../types';
 
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), captureException: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), captureException: vi.fn(), useAuth: vi.fn() }));
 
 vi.mock('../../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../../lib/db')>('../../lib/db');
   return { ...actual, supabase: { ...actual.supabase, rpc: mocks.rpc } };
 });
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: mocks.captureException } }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: mocks.useAuth }));
 
 import ProductStockCard from './ProductStockCard';
 
@@ -40,14 +41,19 @@ function position(overrides: Partial<InventoryPositionRow> = {}): InventoryPosit
   };
 }
 
-function renderCard(productId = 'product-a') {
-  return render(<MemoryRouter><ProductStockCard productId={productId} /></MemoryRouter>);
+function renderCard(productId = 'product-a', isActive = true) {
+  return render(
+    <MemoryRouter>
+      <ProductStockCard productId={productId} isActive={isActive} />
+    </MemoryRouter>,
+  );
 }
 
 describe('ProductStockCard', () => {
   beforeEach(() => {
     mocks.rpc.mockReset();
     mocks.captureException.mockReset();
+    mocks.useAuth.mockReturnValue({ role: 'admin', deniedPages: [] });
   });
 
   it('shows one location, reorder status, the returned time, and the Inventory link without cost', async () => {
@@ -81,19 +87,103 @@ describe('ProductStockCard', () => {
     expect(screen.getByText('Total on hand: 0.3 GAL')).toBeInTheDocument();
   });
 
-  it('shows the empty state and Inventory link when there are no stock rows', async () => {
+  it('explains that stock is not shown when an inactive product has no rows', async () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
-    renderCard();
+    renderCard('product-a', false);
 
-    expect(await screen.findByText('No stock recorded for this product.')).toBeInTheDocument();
-    expect(screen.getByText(/^As of /)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open in Inventory' })).toHaveAttribute(
-      'href',
-      '/inventory?product=product-a',
-    );
+    expect(await screen.findByText(
+      'Inventory does not list inactive products, so stock cannot be shown here.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText('No stock recorded for this product.')).not.toBeInTheDocument();
   });
 
-  it('reports a failed read without a quantity and reloads on Try again', async () => {
+  it('shows no stock on hand and the on-order quantity for an on-order-only row', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [position({
+        inventory_id: null,
+        inventory_unit: null,
+        location: null,
+        quantity_available: 0,
+        quantity_on_order: 14.5,
+      })],
+      error: null,
+    });
+    renderCard();
+
+    expect(await screen.findByText('No location')).toBeInTheDocument();
+    expect(screen.getByText('No stock on hand.')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'On order: 14.5 2.5 GL')).toBeInTheDocument();
+    expect(screen.queryByText('No stock recorded for this product.')).not.toBeInTheDocument();
+  });
+
+  it('uses unit_size when inventory_unit is missing for rows and totals', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        position({ inventory_id: 'inventory-a', inventory_unit: null, unit_size: '2.5 GL', quantity_available: 0.1 }),
+        position({ inventory_id: 'inventory-b', inventory_unit: null, unit_size: '2.5 GL', quantity_available: 0.2 }),
+      ],
+      error: null,
+    });
+    renderCard();
+
+    expect(await screen.findByText((_, element) => element?.textContent === 'On hand: 0.1 2.5 GL')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'On hand: 0.2 2.5 GL')).toBeInTheDocument();
+    expect(screen.getByText('Total on hand: 0.3 2.5 GL')).toBeInTheDocument();
+  });
+
+  it('does not total stock across different product sizes', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        position({ inventory_id: 'inventory-a', unit_size: '2.5 GL', quantity_available: 5 }),
+        position({ inventory_id: 'inventory-b', unit_size: '30 GL', quantity_available: 7 }),
+      ],
+      error: null,
+    });
+    renderCard();
+
+    expect(await screen.findByText((_, element) => element?.textContent === 'On hand: 5 GAL')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'On hand: 7 GAL')).toBeInTheDocument();
+    expect(screen.queryByText(/Total on hand:/)).not.toBeInTheDocument();
+  });
+
+  it('keeps negative exact totals', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        position({ inventory_id: 'inventory-a', quantity_available: -0.3 }),
+        position({ inventory_id: 'inventory-b', quantity_available: 0.2 }),
+      ],
+      error: null,
+    });
+    renderCard();
+
+    expect(await screen.findByText('Total on hand: -0.1 GAL')).toBeInTheDocument();
+  });
+
+  it('sorts locations alphabetically and uses No location for an empty location', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        position({ inventory_id: 'inventory-z', location: 'Zulu' }),
+        position({ inventory_id: 'inventory-a', location: 'Alpha' }),
+        position({ inventory_id: 'inventory-empty', location: '  ' }),
+      ],
+      error: null,
+    });
+    renderCard();
+
+    const locations = await screen.findAllByText(/^(No location|Alpha|Zulu)$/);
+    expect(locations.map((element) => element.textContent)).toEqual(['No location', 'Alpha', 'Zulu']);
+  });
+
+  it('hides the Inventory link when this user is denied the page', async () => {
+    mocks.useAuth.mockReturnValue({ role: 'sales_rep', deniedPages: ['inventory'] });
+    mocks.rpc.mockResolvedValue({ data: [position()], error: null });
+    renderCard();
+
+    expect(await screen.findByText('Main Warehouse')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open in Inventory' })).not.toBeInTheDocument();
+  });
+
+  it('shows the shared failed state and successfully retries the read', async () => {
     mocks.rpc
       .mockResolvedValueOnce({ data: null, error: new Error('network down') })
       .mockResolvedValueOnce({ data: [position({ quantity_available: 17.8 })], error: null });
@@ -108,11 +198,11 @@ describe('ProductStockCard', () => {
     expect(mocks.rpc).toHaveBeenCalledTimes(2);
   });
 
-  it('ignores rows for other products and rows without an inventory record', async () => {
+  it('keeps the on-order row while ignoring rows for other products', async () => {
     mocks.rpc.mockResolvedValue({
       data: [
         position({ inventory_id: 'inventory-b', product_id: 'product-b', location: 'Other Warehouse', quantity_available: 900 }),
-        position({ inventory_id: null, location: 'Virtual row', quantity_available: 800 }),
+        position({ inventory_id: null, location: 'Virtual row', quantity_available: 0, quantity_on_order: 8 }),
         position({ inventory_id: 'inventory-a', location: 'Kept Warehouse', quantity_available: 7 }),
       ],
       error: null,
@@ -120,11 +210,10 @@ describe('ProductStockCard', () => {
     renderCard();
 
     expect(await screen.findByText('Kept Warehouse')).toBeInTheDocument();
-    expect(screen.getByText('7 GAL')).toBeInTheDocument();
+    expect(screen.getByText('Virtual row')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'On order: 8 GAL')).toBeInTheDocument();
     expect(screen.queryByText('Other Warehouse')).not.toBeInTheDocument();
-    expect(screen.queryByText('Virtual row')).not.toBeInTheDocument();
     expect(screen.queryByText('900 GAL')).not.toBeInTheDocument();
-    expect(screen.queryByText('800 GAL')).not.toBeInTheDocument();
   });
 
   it('does not install an older product response after the product changes', async () => {
@@ -136,7 +225,11 @@ describe('ProductStockCard', () => {
     const view = renderCard('product-a');
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(1));
-    view.rerender(<MemoryRouter><ProductStockCard productId="product-b" /></MemoryRouter>);
+    view.rerender(
+      <MemoryRouter>
+        <ProductStockCard productId="product-b" isActive />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(2));
     resolveSecond({ data: [position({ product_id: 'product-b', location: 'Current Product' })], error: null });
     expect(await screen.findByText('Current Product')).toBeInTheDocument();

@@ -310,7 +310,7 @@ describe('InventoryPage Product identity writers', () => {
     mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
       ? {
           data: [
-            inventoryPosition(),
+            inventoryPosition({ is_low_stock: true }),
             inventoryPosition({ inventory_id: 'inventory-b', product_id: 'product-b', product_name: 'Product B', location: 'South' }),
           ],
           error: null,
@@ -319,6 +319,13 @@ describe('InventoryPage Product identity writers', () => {
     renderInventoryAt('/inventory?product=product-a&keep=yes');
 
     expect(await screen.findByText('Showing one product: Product A')).toBeInTheDocument();
+    for (const label of ['Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value']) {
+      expect(screen.queryByText(label, { selector: 'p' })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText(/ACTION REQUIRED.*Need Reordering/)).not.toBeInTheDocument();
+    const filteredReorderChips = screen.getAllByRole('button', { name: /Needs Reorder/ });
+    expect(filteredReorderChips.some((chip) => within(chip).queryByText('1'))).toBe(false);
+
     const cards = screen.getByTestId('inventory-mobile-cards');
     expect(within(cards).getByText('Product A')).toBeInTheDocument();
     expect(within(cards).queryByText('Product B')).not.toBeInTheDocument();
@@ -326,7 +333,31 @@ describe('InventoryPage Product identity writers', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
     await waitFor(() => expect(screen.getByTestId('router-search')).toHaveTextContent('?keep=yes'));
     expect(await within(cards).findByText('Product B')).toBeInTheDocument();
+    const totalOnFloorLabel = await screen.findByText('Total on Floor', { selector: 'p' });
+    const summaryCards = totalOnFloorLabel.closest('div.grid');
+    expect(summaryCards).not.toBeNull();
+    for (const label of ['On Order', 'Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value']) {
+      expect(within(summaryCards as HTMLElement).getByText(label, { selector: 'p' })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/ACTION REQUIRED.*Need Reordering/)).toBeInTheDocument();
+    const unfilteredReorderChips = screen.getAllByRole('button', { name: /Needs Reorder/ });
+    await waitFor(() => expect(unfilteredReorderChips.some((chip) => within(chip).queryByText('1'))).toBe(true));
     expect(screen.queryByRole('button', { name: 'Show all' })).not.toBeInTheDocument();
+  });
+
+  it('clears selected inventory rows when the product parameter changes', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
+      ? { data: [inventoryPosition()], error: null }
+      : { data: [], error: null });
+    renderInventoryAt('/inventory?product=product-a');
+
+    const selectProduct = await screen.findByRole('checkbox', { name: 'Select Product A' });
+    fireEvent.click(selectProduct);
+    expect(screen.getByRole('button', { name: 'Adjust 1 Selected' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Adjust 1 Selected' })).not.toBeInTheDocument());
+    expect(selectProduct).not.toBeChecked();
   });
 
   it('shows every product when the product parameter is absent', async () => {

@@ -249,6 +249,10 @@ export default function InventoryPage() {
   const [batchAdjustOpen, setBatchAdjustOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [productIdFilter]);
+
   // Delete confirm modal
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -1488,7 +1492,7 @@ export default function InventoryPage() {
 
 
       {/* Hidden after a failed read, where every total would read 0 */}
-      {!inventoryFailed && (
+      {!inventoryFailed && !hasProductFilter && (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
         {summaryCards.map((c) => (
           <Card key={c.label}>
@@ -1507,7 +1511,7 @@ export default function InventoryPage() {
       )}
 
       {/* Enhanced Reorder Alerts — grouped by vendor */}
-      {(() => {
+      {!hasProductFilter && (() => {
         const lowStockItems = inventory.filter((i) => i.is_low_stock);
         if (lowStockItems.length === 0) return null;
 
@@ -1668,6 +1672,7 @@ export default function InventoryPage() {
 
         <div className="hidden p-5 md:block">
           <EditableDataTable<InventoryRow>
+            key={productIdFilter ?? 'all'}
             data={filtered}
             columns={columns}
             rowKey="id"
@@ -1705,7 +1710,7 @@ export default function InventoryPage() {
                   Needs Reorder
                   {(() => {
                     const count = inventory.filter((i) => i.is_low_stock).length;
-                    return count > 0 ? (
+                    return !hasProductFilter && count > 0 ? (
                       <span className={`ml-1.5 px-1.5 py-0.5 text-xs rounded-full ${
                         reorderFilter ? 'bg-red-200 text-red-800' : 'bg-red-100 text-red-600'
                       }`}>

@@ -1583,7 +1583,7 @@ export default function ProductDetail() {
 
         {!isNew && id && (
           <div className="space-y-4">
-            <ProductStockCard key={id} productId={id} />
+            <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
             {isAdmin && (
               <Card>
                 <CardHeader title="Select" accent="Cost Basis" />

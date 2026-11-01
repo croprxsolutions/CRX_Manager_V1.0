@@ -68,12 +68,16 @@ export default function ApplicationServiceDetail() {
   const [costKnown, setCostKnown] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
+  const loadedFormRef = useRef<typeof form | null>(null);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('admin_save_application_service', profile?.id || '');
   const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: currentSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
-  useEffect(() => { if (!initialLoadDone.current) return; setIsDirty(true); }, [form]);
+  useEffect(() => { if (!initialLoadDone.current || form === loadedFormRef.current) return; setIsDirty(true); }, [form]);
 
   useEffect(() => {
     supabase.from('vehicles').select('id, vehicle_name').eq('status', 'active').order('vehicle_name')
@@ -117,7 +121,9 @@ export default function ApplicationServiceDetail() {
       }
     }
     setCostKnown(costCents !== null);
-    setForm({ name: data.name, vehicle_id: data.vehicle_id || '', default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents), cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents), is_active: data.is_active, sort_order: String(data.sort_order) });
+    const loaded = { name: data.name, vehicle_id: data.vehicle_id || '', default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents), cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents), is_active: data.is_active, sort_order: String(data.sort_order) };
+    loadedFormRef.current = loaded;
+    setForm(loaded);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [id, toast, navigate, isAdmin]);
@@ -235,7 +241,7 @@ export default function ApplicationServiceDetail() {
       });
       if (isNew) {
         if (profile) logActivity({ event: 'app_service_created', description: `Application service "${form.name}" created`, performedBy: profile.id, entityType: 'application_service', entityId: saved.service_id });
-        toast('success', 'Application service created'); setIsDirty(false); navigate(`/application-services/${saved.service_id}`);
+        toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
       } else {
         if (profile) logActivity({ event: 'app_service_updated', description: `Application service "${form.name}" updated`, performedBy: profile.id, entityType: 'application_service', entityId: id! });
         toast('success', costKnown ? 'Service saved' : 'Service saved — cost/acre left unchanged (it could not be loaded)'); setIsDirty(false);

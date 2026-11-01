@@ -244,6 +244,9 @@ function FieldSetupPage() {
   // Track dirty state
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
+  // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
+  const loadedFieldRef = useRef<typeof field | null>(null);
+  const loadedSplitsRef = useRef<typeof billingSplits | null>(null);
   const blocker = useUnsavedChanges(isDirty);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
@@ -257,6 +260,7 @@ function FieldSetupPage() {
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
+    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current) return;
     setIsDirty(true);
   }, [field, billingSplits]);
 
@@ -289,7 +293,8 @@ function FieldSetupPage() {
     }
     if (data) {
       const { customer: _customer, ...fieldRow } = data;
-      setField(fieldRow as Partial<Field>);
+      loadedFieldRef.current = fieldRow as Partial<Field>;
+      setField(loadedFieldRef.current);
       loadedOverrideRef.current = (fieldRow as Partial<Field>).override_acres ?? null;
       loadedHadBoundaryRef.current = (fieldRow as Partial<Field>).measured_acres != null; // A1 backfilled measured for every boundaried field
       setHasSavedBoundary(loadedHadBoundaryRef.current);
@@ -381,8 +386,7 @@ function FieldSetupPage() {
       if (defaults && defaults.length > 0) setBillingOpen(true);
       // Always replace the splits, even with none: Save sends this whole list, so splits left over
       // from another field (or an earlier read) must never stay on screen.
-      setBillingSplits(
-        (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
+      const loadedSplits: BillingSplit[] = (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
           customer_id: d.customer_id,
           customer_name: d.customer?.farm_name || 'Unknown',
           split_pct: Number(d.split_pct),
@@ -390,11 +394,13 @@ function FieldSetupPage() {
           notes: d.notes || '',
           price_override_cents: d.price_override_cents ?? null,
           pricing_note: d.pricing_note || '',
-        }))
-      );
+        }));
+      loadedSplitsRef.current = loadedSplits;
+      setBillingSplits(loadedSplits);
     } else {
       // No such field: show "Field not found", never the form of the field open before.
-      setField({});
+      loadedFieldRef.current = {};
+      setField(loadedFieldRef.current);
     }
     setLoadError(false);
     setLoading(false);

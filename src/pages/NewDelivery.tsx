@@ -122,7 +122,9 @@ export default function NewDelivery() {
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
 
   const fetchDrivers = useCallback(async () => {
     // PR-07 follow-up: driver picker only uses d.id + d.full_name + d.role; safe via view.
@@ -495,6 +497,7 @@ export default function NewDelivery() {
       await notifyDriverAssigned(selectedDriverId, deliveryNumber, custName, scheduledDate, deliveryId);
     }
 
+    skipUnsavedPromptRef.current = true;
     navigate(`/deliveries/${deliveryId}`);
   };
 

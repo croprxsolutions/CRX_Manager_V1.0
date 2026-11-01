@@ -47,10 +47,14 @@ export default function VehicleDetail() {
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
+  const loadedFormRef = useRef<typeof form | null>(null);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
 
   useEffect(() => {
-    if (!initialLoadDone.current) return;
+    if (!initialLoadDone.current || form === loadedFormRef.current) return;
     setIsDirty(true);
   }, [form]);
 
@@ -68,7 +72,7 @@ export default function VehicleDetail() {
     }
 
     const v = data as Vehicle;
-    setForm({
+    const loaded = {
       vehicle_name: v.vehicle_name,
       vehicle_type: v.vehicle_type,
       category: v.category || '',
@@ -77,7 +81,9 @@ export default function VehicleDetail() {
       registration: v.registration || '',
       status: v.status,
       notes: v.notes || '',
-    });
+    };
+    loadedFormRef.current = loaded;
+    setForm(loaded);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [id, toast, navigate]);
@@ -120,6 +126,7 @@ export default function VehicleDetail() {
         if (profile) logActivity({ event: 'vehicle_created', description: `Vehicle "${form.vehicle_name}" created`, performedBy: profile.id });
         toast('success', 'Vehicle created');
         setIsDirty(false);
+        skipUnsavedPromptRef.current = true;
         navigate(`/vehicles/${result.data!.id}`);
       } else {
         const result = await supabase.from('vehicles').update(payload).eq('id', id!).select().single();

@@ -74,7 +74,9 @@ export default function NewPurchaseOrder() {
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('save_purchase_order', profile?.id || '');
   const submitIdem = useIdempotencyKey('submit_purchase_order', profile?.id || '');
 
@@ -338,6 +340,7 @@ export default function NewPurchaseOrder() {
         }
 
         setIsDirty(false);
+        skipUnsavedPromptRef.current = true;
         navigate(`/purchase-orders/${poId}`, { replace: true });
 
         return { poNumber, isFirstSave };

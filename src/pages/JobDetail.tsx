@@ -363,7 +363,9 @@ export default function JobDetail() {
     return () => routeEpochRef.current === epoch;
   }, []);
   const [baselineSettleTick, setBaselineSettleTick] = useState(0);
-  const blocker = useUnsavedChanges(isDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   // Field-app parity #16: allow a deep-link to a tab (e.g. the Jobs-list "Map / Logs"
   // row action opens /jobs/:id?tab=map_logs). Falls back to 'locations'.
   const initialTab = ((): TabKey => {
@@ -2989,6 +2991,7 @@ export default function JobDetail() {
           if (stillOnThisJob()) {
             setIsDirty(false);
             if (isNew) {
+              skipUnsavedPromptRef.current = true;
               navigate(`/jobs/${result.job_id}`);
             } else {
               await fetchJob();
@@ -3019,6 +3022,7 @@ export default function JobDetail() {
           if (stillOnThisJob()) {
             setIsDirty(false);
             if (isNew) {
+              skipUnsavedPromptRef.current = true;
               navigate(`/jobs/${result.job_id}`);
             } else {
               await fetchJob();
@@ -3131,6 +3135,7 @@ export default function JobDetail() {
         setSavedJobDate(jobDate);
 
         if (isNew) {
+          skipUnsavedPromptRef.current = true;
           navigate(`/jobs/${result.job_id}`);
         } else {
           await fetchJob();
@@ -3328,6 +3333,7 @@ export default function JobDetail() {
         } else {
           toast('success', `Invoice ${result.invoice_number} created`);
         }
+        skipUnsavedPromptRef.current = true;
         navigate(`/field-invoices/${result.invoice_id}`);
       }
     } catch (err: unknown) {

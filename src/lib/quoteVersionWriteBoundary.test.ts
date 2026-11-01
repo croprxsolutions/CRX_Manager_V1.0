@@ -1017,8 +1017,8 @@ describe('quote_versions write boundary — standing predicate', () => {
       [
         '_create_quote_version_owner_impl:body-pinned',
         'public._create_quote_version_owner_impl(uuid,uuid,text,text)',
-        3824,
-        '725e938050898eeb9bf17f10cb6b86fd',
+        4265,
+        '8aca1c1433a799a505c6f888997b109e',
       ],
       [
         '_restore_quote_version_owner_impl:body-pinned',
@@ -1028,7 +1028,8 @@ describe('quote_versions write boundary — standing predicate', () => {
       ],
     ];
     // The two owner-impl pins were renewed 2026-10-28 (KNOWN_ISSUES KI-85) after
-    // the sent-quote price lock re-emitted both bodies. The migration's own
+    // the sent-quote price lock re-emitted both bodies, and the create pin again
+    // 2026-11-01 after the season-end expiry did. The migration's own
     // apply-time copies (3362/4ecb8acc…, 13566/6972f2d6…) are history and must
     // stay exactly as applied; the live pins above must never fall back to them.
     expect(liveBodyPins.some(([, , , digest]) => digest === '4ecb8accbaf6be4fb64aadbc79e492e3')).toBe(false);

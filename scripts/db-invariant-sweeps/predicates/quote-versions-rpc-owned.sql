@@ -963,8 +963,12 @@ UNION ALL
 -- from live and reproduced in a disposable replica of live plus every later
 -- migration. The 20260826220000 migration's own copies are apply-time pins of
 -- that migration's baseline and stay as applied.
+-- The create pin was renewed again 2026-11-01: 20261029100000 (season-end
+-- expiry) re-emitted that body. Live reproduces the migration file's digest,
+-- and the only changes are how expires_at is chosen and a refusal of a chosen
+-- date in the past.
 SELECT '_create_quote_version_owner_impl:body-pinned' AS violation_key,
-       'the owner-side snapshot writer body drifted from the reviewed text — the create wrapper trusts its returned version_id enough to stamp it restore_trusted_at; expected 3824/725e938050898eeb9bf17f10cb6b86fd, measured '
+       'the owner-side snapshot writer body drifted from the reviewed text — the create wrapper trusts its returned version_id enough to stamp it restore_trusted_at; expected 4265/8aca1c1433a799a505c6f888997b109e, measured '
          || coalesce((SELECT length(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g')))::text || '/' || md5(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g')))
                         FROM pg_proc p
                        WHERE p.oid = to_regprocedure('public._create_quote_version_owner_impl(uuid,uuid,text,text)')), 'signature unresolvable')
@@ -972,8 +976,8 @@ SELECT '_create_quote_version_owner_impl:body-pinned' AS violation_key,
  WHERE NOT EXISTS (
    SELECT 1 FROM pg_proc p
    WHERE p.oid = to_regprocedure('public._create_quote_version_owner_impl(uuid,uuid,text,text)')
-     AND length(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g'))) = 3824
-     AND md5(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g'))) = '725e938050898eeb9bf17f10cb6b86fd'
+     AND length(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g'))) = 4265
+     AND md5(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g'))) = '8aca1c1433a799a505c6f888997b109e'
  )
 
 UNION ALL

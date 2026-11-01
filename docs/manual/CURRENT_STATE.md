@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-01 (America/Chicago), for the migration ledger and the payment function only (read-only live read); other sections keep their own dates.
+**Last verified:** 2026-11-01 (America/Chicago), for the quote price trail, expiry grant, migration ledger and payment function only (live reads); other sections keep their own dates.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature

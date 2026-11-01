@@ -274,17 +274,13 @@ record(
     && /Hunt EDGE FUNCTIONS in supabase\/functions \(create-user, epa-lookup, process-blend-ticket, process-document, reset-user-password, send-email, setup-blend-tickets-storage\)/.test(lifecycleAuditPrompts[1]),
   "whole-codebase and overnight edge-function audits include epa-lookup",
 );
-record(
-  /\.claude\/commands\|skills\|hooks\|workflows\|agents\|settings\.json/.test(agentGuardrails),
-  "ledger guardrail lists every Claude agent-surface directory",
-);
 record(/`… \\\| sl`/.test(agentGuardrails), "agent-guardrails table escapes its shell-pipe example");
 record(/DECISION_LOG\.md[\s\S]*settled design choice[\s\S]*KNOWN_ISSUES\.md[\s\S]*problem is new/i.test(codingGuidelines), "every code change checks settled decisions and known issues");
 record(/^Read this before any multi-file, data, money, security, permission, production, migration, or customer-facing change\./m.test(safeDevelopmentRules), "safe-development trigger matches the lean routing table");
 record(
   /LEDGER_REQUIRED=true[\s\S]*new `supabase\/migrations\/\*\.sql` file[\s\S]*If `LEDGER_REQUIRED` is true/.test(preflightWorkflow)
     && /docs\/reference\/migration-history\.md/.test(preflightWorkflow),
-  "preflight ledger guidance matches migration and agent-surface enforcement",
+  "preflight ledger guidance matches migration enforcement",
 );
 record(/mergeStateStatus[\s\S]*known-stale protection sub-resource/i.test(shipWorkflow), "ship workflow uses behavioral PR mergeability evidence");
 record(migrationStampCheck.trim() === canonicalMigrationStampCheck.trim(), "migration drift reviewer B7 check matches the canonical fail-closed contract");

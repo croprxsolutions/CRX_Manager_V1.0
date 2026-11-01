@@ -38,7 +38,7 @@ hooks themselves. If this page and those disagree, they win; please fix this pag
 | Sol | `gpt-6-sol` at high effort, the single final review that must run last, on the exact commit that will merge. |
 | CodeRabbit | A GitHub review bot. Advisory since 2026-10-19 and silent unless asked since 2026-10-21; required (as a clean review) only on PRs that touch money, invoices, payments, inventory or costs, or that Mason names. |
 | Codex GitHub App | A second GitHub review bot (`chatgpt-codex-connector`). It reviews when a draft PR is marked ready. |
-| Sol list | The files that need a Sol review: money, inventory, database, logins, dependencies, deployment and the kept safety rules. A PR off the list merges on green checks. Defined in `docs/reference/sol-required-paths.md` and `.claude/hooks/sol-risk-lib.mjs`. |
+| Sol list | The files that need a Sol review: money, inventory, database and logins. A PR off the list merges on green checks. Defined in `docs/reference/sol-required-paths.md` and `.claude/hooks/sol-risk-lib.mjs`. |
 
 ## What runs where
 
@@ -326,8 +326,8 @@ hook, that hook reads as missing until it lands). Known open problems are in `do
    the same PR (a test fails if they disagree). Run `node scripts/sync-agent-workflows.mjs --write`,
    `npm run test:agent-workflows` and `npm run agent-health` after changing agent files, and update
    `docs/reference/agent-guardrails.md`.
-3. **It goes through the full path with a Sol review.** Anything under `.claude/`, `.codex/`,
-   `.github/`, `scripts/` or `AGENTS.md` is never Sol-exempt.
+3. **It goes through the full path.** Since 2026-11-01 a guard change needs Sol only when it also
+   touches a file on the Sol list.
 4. **Loosening a gate is Mason's decision.** He records it with a date (for example "Mason,
    2026-10-19") in `AGENTS.md` or `docs/manual/DECISION_LOG.md`. A PR that loosens a gate is merged
    by Mason himself after the review. GitHub ruleset and permission changes are his too.

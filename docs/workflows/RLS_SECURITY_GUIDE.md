@@ -328,7 +328,7 @@ to show was stale: live also pins the actor.
 | cost_history | Admin | - (no INSERT policy) | - | - |
 | customers | Admin / Sales Rep / Driver (recent delivery) / Applicator (recent job) / dispatched to a job location | Admin / Sales Rep (assigned to themselves) | Admin / Sales Rep (any customer). For a sales rep only (admins skip these checks), `customers_guard_rep_edit_20261013` refuses reassignment, a default commission split change unless they are the assigned rep, deactivating a customer with a posted or overdue invoice (`CUSTOMER_HAS_OPEN_INVOICES`), and a direct `prepay_balance_cents` change (`PREPAY_BALANCE_SERVER_ONLY`) | Admin |
 | customer_addresses | All authenticated | Admin / Sales Rep by policy, but `authenticated` holds no INSERT grant (`save_customer` writes addresses) | Admin / Sales Rep by policy, but no UPDATE grant either | Admin |
-| quotes | Admin / Sales Rep | Admin / Sales Rep (own), not `expires_at` (`20261101100000`, once applied: definer-rights code only) | Admin / Sales Rep (own), not `expires_at` (same) | Admin |
+| quotes | Admin / Sales Rep | Admin / Sales Rep (own), not `expires_at` (`20261101100000`: definer-rights code only) | Admin / Sales Rep (own), not `expires_at` (same) | Admin |
 | quote_sections | All authenticated | Admin / Sales Rep (quote owner) | Admin / Sales Rep (quote owner) | Admin / Sales Rep (quote owner) |
 | quote_items | Admin / Sales Rep | - (RPC only, since `20260812115236` dropped `qitems_insert`/`qitems_update`/`qitems_delete`) | - (RPC only) | - (RPC only) |
 | quote_price_changes | Admin / Sales Rep | - (`save_quote` only) | - (`save_quote` only) | - |

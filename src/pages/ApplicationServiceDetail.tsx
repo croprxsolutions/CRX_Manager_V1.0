@@ -68,12 +68,16 @@ export default function ApplicationServiceDetail() {
   const [costKnown, setCostKnown] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
+  const loadedFormRef = useRef<typeof form | null>(null);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('admin_save_application_service', profile?.id || '');
   const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: currentSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
-  useEffect(() => { if (!initialLoadDone.current) return; setIsDirty(true); }, [form]);
+  useEffect(() => { if (!initialLoadDone.current || form === loadedFormRef.current) return; setIsDirty(true); }, [form]);
 
   useEffect(() => {
     supabase.from('vehicles').select('id, vehicle_name').eq('status', 'active').order('vehicle_name')
@@ -117,7 +121,9 @@ export default function ApplicationServiceDetail() {
       }
     }
     setCostKnown(costCents !== null);
-    setForm({ name: data.name, vehicle_id: data.vehicle_id || '', default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents), cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents), is_active: data.is_active, sort_order: String(data.sort_order) });
+    const loaded = { name: data.name, vehicle_id: data.vehicle_id || '', default_rate_per_acre: formatCentsToDollars(data.default_rate_per_acre_cents), cost_per_acre: costCents === null ? '' : formatApplicationServiceCostDollars(costCents), is_active: data.is_active, sort_order: String(data.sort_order) };
+    loadedFormRef.current = loaded;
+    setForm(loaded);
     setLoading(false);
     setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [id, toast, navigate, isAdmin]);
@@ -235,7 +241,7 @@ export default function ApplicationServiceDetail() {
       });
       if (isNew) {
         if (profile) logActivity({ event: 'app_service_created', description: `Application service "${form.name}" created`, performedBy: profile.id, entityType: 'application_service', entityId: saved.service_id });
-        toast('success', 'Application service created'); setIsDirty(false); navigate(`/application-services/${saved.service_id}`);
+        toast('success', 'Application service created'); setIsDirty(false); skipUnsavedPromptRef.current = true; navigate(`/application-services/${saved.service_id}`);
       } else {
         if (profile) logActivity({ event: 'app_service_updated', description: `Application service "${form.name}" updated`, performedBy: profile.id, entityType: 'application_service', entityId: id! });
         toast('success', costKnown ? 'Service saved' : 'Service saved — cost/acre left unchanged (it could not be loaded)'); setIsDirty(false);
@@ -294,6 +300,8 @@ export default function ApplicationServiceDetail() {
         {isAdmin && <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>{isNew ? 'Create Service' : 'Save Changes'}</Button>}
       </div>
 
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={isNew && saving} className="min-w-0">
       <Card><div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Input label="Service Name" value={form.name} onChange={(e) => updateField('name', e.target.value)} required placeholder="e.g. Hagie Y-Drop Nitrogen" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Vehicle (optional)</label><select value={form.vehicle_id} onChange={(e) => updateField('vehicle_id', e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="">No vehicle linked</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicle_name}</option>)}</select></div>
@@ -305,6 +313,7 @@ export default function ApplicationServiceDetail() {
         <Input label="Sort Order" type="number" value={form.sort_order} onChange={(e) => updateField('sort_order', e.target.value)} placeholder="0" />
         <div><label className="block text-sm font-medium text-nav-dark mb-1">Status</label><select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => updateField('is_active', e.target.value === 'active')} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
       </div></Card>
+      </fieldset>
 
       {!isNew && <Card>
         <h3 className="text-lg font-semibold text-nav-dark mb-4">Customer Rate Overrides</h3>

@@ -74,7 +74,9 @@ export default function NewPurchaseOrder() {
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('save_purchase_order', profile?.id || '');
   const submitIdem = useIdempotencyKey('submit_purchase_order', profile?.id || '');
 
@@ -338,6 +340,7 @@ export default function NewPurchaseOrder() {
         }
 
         setIsDirty(false);
+        skipUnsavedPromptRef.current = true;
         navigate(`/purchase-orders/${poId}`, { replace: true });
 
         return { poNumber, isFirstSave };
@@ -382,6 +385,8 @@ export default function NewPurchaseOrder() {
         Back to Purchase Orders
       </button>
 
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
       <Card>
         <CardHeader title="New Purchase" accent="Order" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -572,6 +577,7 @@ export default function NewPurchaseOrder() {
           )}
         </div>
       </Card>
+      </fieldset>
 
       <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={() => navigate('/purchase-orders')}>

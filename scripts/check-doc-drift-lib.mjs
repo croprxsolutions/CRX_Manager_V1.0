@@ -30,11 +30,16 @@ export function frozenHistoryProblems(frozenHistory) {
   ].filter(Boolean);
 }
 
-// A record must carry the exact name of a migration file, so a renamed or misspelled
-// migration cannot leave a record that vouches for nothing.
-export function orphanRecords(recordNames, migrationFiles) {
+// Records match migration files by exact name in both directions: a renamed migration
+// cannot leave a record that vouches for nothing, and two files sharing a version cannot
+// share one record.
+export function recordFileProblems(recordNames, migrationFiles) {
   const stems = new Set(migrationFiles.map((name) => name.replace(/\.sql$/, '')));
-  return recordNames.filter((name) => !stems.has(name.replace(/\.md$/, '')));
+  const records = new Set(recordNames.map((name) => name.replace(/\.md$/, '')));
+  return {
+    orphans: recordNames.filter((name) => !stems.has(name.replace(/\.md$/, ''))),
+    unrecorded: migrationFiles.filter((name) => name >= RECORDS_FROM && !records.has(name.replace(/\.sql$/, ''))),
+  };
 }
 
 export function migrationIndexProblems(history, migrationVersions) {

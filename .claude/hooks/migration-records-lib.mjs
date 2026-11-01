@@ -14,6 +14,9 @@ export const MIGRATION_RECORDS_DIR = "docs/reference/migrations.d";
 export const MIGRATION_RECORDS_README = "README.md";
 
 const RECORD_NAME_RE = /^(\d{14})_[a-z0-9_]+\.md$/;
+// Anchored on purpose: a status buried in prose or in the notes could hide a pending
+// migration from the parked scan. PENDING APPLY is absent because that scan cannot see it.
+const RECORD_STATUS_RE = /^\*\*(?:LOCAL\s+CANDIDATE\b[^*]*\bNOT\s+APPLIED\b|APPLIED\s+LIVE\b|RETIRED\s+CODE-ONLY\s+ARTIFACT\b|SUPERSEDED\b|STATUS\s+UNKNOWN\b)/i;
 
 // The first paragraph is the row; later paragraphs are free notes such as live captures,
 // so a note naming another migration's file cannot trip the one-filename candidate rule.
@@ -23,6 +26,9 @@ export function migrationRecordRow(name, text) {
   if (typeof text !== "string") throw new Error(`${MIGRATION_RECORDS_DIR}/${name} is unreadable`);
   const detail = text.trim().split(/\r?\n[ \t]*\r?\n/)[0].split(/\r?\n/).map((line) => line.trim()).join(" ");
   if (!detail) throw new Error(`${MIGRATION_RECORDS_DIR}/${name} is empty`);
+  if (!RECORD_STATUS_RE.test(detail)) throw new Error(`${MIGRATION_RECORDS_DIR}/${name} must start with its status; see the folder's README`);
+  const sqlName = `\`${name.replace(/\.md$/, ".sql")}\``;
+  if (!detail.includes(sqlName)) throw new Error(`${MIGRATION_RECORDS_DIR}/${name} must name ${sqlName} in its first paragraph`);
   // Row 0: new records are referred to by version; row numbers were a collision of their own.
   return `| 0 | ${version} | ${detail} |`;
 }
@@ -57,7 +63,8 @@ export function readCombinedMigrationHistory(root) {
 // `readBlobs(paths)` is the fail-closed batch reader in worktree-awareness-lib.mjs. The
 // frozen file goes through it too: at 1.4 MB it overflows a plain `git show` capture.
 export function combinedMigrationHistoryAtRev(git, rev, readBlobs) {
-  const paths = git(["ls-tree", "-r", "--name-only", rev, "--", MIGRATION_RECORDS_DIR])
+  // Not recursive: a subfolder is refused here exactly as it is on disk.
+  const paths = git(["ls-tree", "--name-only", rev, "--", `${MIGRATION_RECORDS_DIR}/`])
     .split("\n").map((line) => line.trim()).filter(Boolean);
   const blobs = readBlobs([MIGRATION_HISTORY_FILE, ...paths]);
   const frozen = blobs?.get(normRepoPath(MIGRATION_HISTORY_FILE));

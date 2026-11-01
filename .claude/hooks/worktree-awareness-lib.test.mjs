@@ -716,6 +716,13 @@ ok(/check_period_open[\s\S]*?SET search_path = ''[\s\S]*?FROM public\.accounting
   assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "notes.md", text: "x" }]), /must be named after its migration/, "a misnamed record is refused, not skipped");
   assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text: " \n" }]), /is empty/, "an empty record is refused");
   assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md" }]), /is unreadable/, "an unreadable record is refused");
+  const refused = (text, pattern, message) => assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text }]), pattern, message);
+  refused(`**LOCAL CANDIDATE**\n\nNOT APPLIED \`${name}\`\n`, /must start with its status/, "a candidate status split into the notes is refused, not hidden from the scan");
+  refused(`Pending. **LOCAL CANDIDATE — NOT APPLIED.** \`${name}\`\n`, /must start with its status/, "a status buried in prose is refused");
+  refused(`**PENDING APPLY.** \`${name}\`\n`, /must start with its status/, "a status the parked scan cannot see is refused");
+  refused("**LOCAL CANDIDATE — NOT APPLIED.** Pin below.\n\n`20261102090000_example.sql`\n", /must name/, "the file name must be in the first paragraph");
+  refused("**APPLIED LIVE.** `20261102090000_other.sql`\n", /must name/, "a record naming a different migration is refused");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "archive", text: "x" }]), /must be named after its migration/, "a subfolder is refused");
 
   const recordPath = `${MIGRATION_RECORDS_DIR}/20261102090000_example.md`;
   const git = () => `${recordPath}\n`;

@@ -6,7 +6,7 @@ import {
   manualFreshnessBoundary,
   manualStampProblems,
   migrationIndexProblems,
-  orphanRecords,
+  recordFileProblems,
 } from './check-doc-drift-lib.mjs';
 import { combineMigrationHistory } from '../.claude/hooks/migration-records-lib.mjs';
 
@@ -28,7 +28,7 @@ import { combineMigrationHistory } from '../.claude/hooks/migration-records-lib.
 }
 {
   const frozen = '| 1011 | 20261030090000 | APPLIED LIVE |\n';
-  const record = (slug) => ({ name: `20261102090000_${slug}.md`, text: '**LOCAL CANDIDATE — NOT APPLIED.** body\n' });
+  const record = (slug) => ({ name: `20261102090000_${slug}.md`, text: `**LOCAL CANDIDATE — NOT APPLIED.** \`20261102090000_${slug}.sql\`\n` });
   const versions = ['20261030090000', '20261102090000'];
   const one = migrationIndexProblems(combineMigrationHistory(frozen, [record('a')]), versions);
   assert.deepEqual([one.missing, one.duplicated], [[], []], 'a record file counts as the one record');
@@ -41,7 +41,8 @@ import { combineMigrationHistory } from '../.claude/hooks/migration-records-lib.
   const captures = (count) => '**Live capture — x:** y\n'.repeat(count);
   assert.deepEqual(frozenHistoryProblems(captures(FROZEN_LIVE_CAPTURES)), [], 'the frozen captures pass');
   assert.match(frozenHistoryProblems(captures(FROZEN_LIVE_CAPTURES + 1)).join(' '), /1 new live capture/, 'a new capture in the frozen file fails');
-  assert.deepEqual(orphanRecords(['20261102090000_a.md', '20261102090000_b.md'], ['20261102090000_a.sql']), ['20261102090000_b.md'], 'a record with no matching migration file fails');
+  assert.deepEqual(recordFileProblems(['20261102090000_a.md', '20261102090000_b.md'], ['20261102090000_a.sql']).orphans, ['20261102090000_b.md'], 'a record with no matching migration file fails');
+  assert.deepEqual(recordFileProblems(['20261102090000_a.md'], ['20261030090000_old.sql', '20261102090000_a.sql', '20261102090000_b.sql']).unrecorded, ['20261102090000_b.sql'], 'two migrations cannot share one version\'s record; older files are exempt');
 }
 assert.deepEqual(manualStampProblems('# Doc\n\n**Last verified:** 2026-10-29 (America/Chicago), ledger only.\n'), [], 'a short single stamp passes');
 assert.match(manualStampProblems(`**Last verified:** 2026-10-29 ${'x'.repeat(200)}`).join(' '), /limit 200/, 'a 201+ character stamp line fails');

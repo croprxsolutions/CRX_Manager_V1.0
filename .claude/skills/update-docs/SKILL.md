@@ -55,7 +55,7 @@ the timestamp and a slug, and that is **all** it gives.
 **Never infer applied/planned/rolled-back status from a filename.** A file on disk proves only
 that the migration was written. To state whether it is live, check the live database read-only
 (Supabase MCP `list_migrations` on project `rhyzpcqhnizqbxphqdkr`) and record what you actually
-observed. If you did not check, write the record with the status left explicitly unknown rather
+observed. If you did not check, write the record starting `**STATUS UNKNOWN.**` rather
 than guessing — a fabricated "applied" record is worse than a blank one.
 
 Every migration needs exactly **one** record: `check:docs` fails a migration from 2026-09-15 on

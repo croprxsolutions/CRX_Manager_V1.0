@@ -19,8 +19,10 @@ supabase/migrations/20261102090000_example_change.sql
 docs/reference/migrations.d/20261102090000_example_change.md
 ```
 
-The **first paragraph** is the record, written the way a table row's description was:
-status first, then the backticked migration file name, then what it does.
+The **first paragraph** is the record, written the way a table row's description was: status
+first, then the backticked migration file name, then what it does. It must start with one of
+`**LOCAL CANDIDATE — NOT APPLIED`, `**APPLIED LIVE`, `**RETIRED CODE-ONLY ARTIFACT`, `**SUPERSEDED`
+or `**STATUS UNKNOWN`, and it must name the record's own `.sql` file.
 
 ```markdown
 **LOCAL CANDIDATE — NOT APPLIED.** PR #1234: `20261102090000_example_change.sql` (SQL sha256: `<64 hex>`). One or two plain sentences on what it does.
@@ -44,9 +46,10 @@ exactly one backticked `<version>_<name>.sql` in the first paragraph, and at mos
 ## What enforces this
 
 `npm run check:docs` fails when a migration from 2026-09-15 on has no record or more than one,
-when a record has no matching `.sql` file, and when a new row or live capture lands in the frozen
-file. A misnamed or empty record stops the check, and parked-migration reports show UNKNOWN
-rather than a false clean count.
+when a record and a `.sql` file do not match by name in either direction, and when a new row or
+live capture lands in the frozen file. A misnamed or empty record, or one that lacks its status or
+file name, stops the check, and parked-migration reports show UNKNOWN rather than a false clean
+count.
 
 `.claude/hooks/migration-records-lib.mjs` turns each record into one row and joins it to the
 frozen text, so every migration gate reads both.

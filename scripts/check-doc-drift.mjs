@@ -12,7 +12,7 @@ import {
   manualFreshnessBoundary,
   manualStampProblems,
   migrationIndexProblems,
-  orphanRecords,
+  recordFileProblems,
   STRICT_INDEX_FROM,
 } from "./check-doc-drift-lib.mjs";
 import {
@@ -47,9 +47,12 @@ const frozenProblems = frozenHistoryProblems(read(MIGRATION_HISTORY_FILE));
 row("migration-history stays frozen", 0, frozenProblems.length,
   frozenProblems.length === 0 ? "PASS" : "FAIL", frozenProblems.join("; "));
 
-const orphans = orphanRecords(migrationRecordNames(ROOT), migrations);
-row("migration records match a migration file", 0, orphans.length,
-  orphans.length === 0 ? "PASS" : "FAIL", orphans.length ? `no matching .sql: ${orphans.join(", ")}` : "");
+const recordFiles = recordFileProblems(migrationRecordNames(ROOT), migrations);
+row("migration records match migration files by name", 0, recordFiles.orphans.length + recordFiles.unrecorded.length,
+  recordFiles.orphans.length + recordFiles.unrecorded.length === 0 ? "PASS" : "FAIL",
+  [recordFiles.orphans.length ? `no matching .sql: ${recordFiles.orphans.join(", ")}` : "",
+    recordFiles.unrecorded.length ? `no record file: ${recordFiles.unrecorded.join(", ")}` : ""]
+    .filter(Boolean).join("; "));
 
 const missingMigrations = migrations.filter((filename) => {
   const base = filename.replace(/\.sql$/, "");

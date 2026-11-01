@@ -88,4 +88,55 @@ describe('initSentry', () => {
     const result = config.beforeSend(event);
     expect(result).toEqual(event);
   });
+
+  describe('beforeBreadcrumb', () => {
+    const FILTERED_PATH = '/rest/v1/allocation_sets?customer_id=eq.11111111-2222-3333-4444-555555555555'
+      + '&total_payment_cents=eq.123456';
+
+    async function scrubber() {
+      import.meta.env.VITE_SENTRY_DSN = 'https://abc@o123.ingest.sentry.io/456';
+      const { initSentry } = await import('./sentry');
+      initSentry();
+      return mockInit.mock.calls[0][0].beforeBreadcrumb;
+    }
+
+    it.each(['fetch', 'xhr'])('removes filter values from %s urls and keeps method and status', async (category) => {
+      const beforeBreadcrumb = await scrubber();
+      const result = beforeBreadcrumb({
+        category,
+        type: 'http',
+        data: { method: 'GET', status_code: 200, url: `https://x.supabase.co${FILTERED_PATH}` },
+      });
+      expect(result.data).toEqual({
+        method: 'GET',
+        status_code: 200,
+        url: 'https://x.supabase.co/rest/v1/allocation_sets?[REDACTED]',
+      });
+    });
+
+    it('removes filter values from the crumb db.ts writes', async () => {
+      const beforeBreadcrumb = await scrubber();
+      const result = beforeBreadcrumb({
+        category: 'supabase',
+        message: `GET ${FILTERED_PATH}`,
+        data: { requestId: 'req-1' },
+      });
+      expect(result.message).toBe('GET /rest/v1/allocation_sets?[REDACTED]');
+      expect(result.data).toEqual({ requestId: 'req-1' });
+    });
+
+    it('removes a fragment and everything after a line break', async () => {
+      const beforeBreadcrumb = await scrubber();
+      expect(beforeBreadcrumb({ category: 'supabase', message: 'GET /auth/v1/verify#token=abc\nsecond line' }).message)
+        .toBe('GET /auth/v1/verify?[REDACTED]');
+    });
+
+    it('leaves a url without a query alone and passes other crumbs through', async () => {
+      const beforeBreadcrumb = await scrubber();
+      const rpc = { category: 'fetch', data: { method: 'POST', url: 'https://x.supabase.co/rest/v1/rpc/allocate_payment' } };
+      expect(beforeBreadcrumb(rpc)).toEqual(rpc);
+      const click = { category: 'ui.click', message: 'button?not-a-url' };
+      expect(beforeBreadcrumb(click)).toEqual(click);
+    });
+  });
 });

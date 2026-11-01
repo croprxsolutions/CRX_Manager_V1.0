@@ -273,11 +273,32 @@ Two things sit outside the block and differ by target:
   the backup fits the final schema, not the baseline's, and the migrations must not
   edit restored rows. That means each one-shot is recorded before its correction can
   be seen. Until the proof below passes, those ledger rows are a claim, not a fact, so
-  keep the target closed, including after an interrupted run. Before allowing writes,
-  prove the restored data contains every registered correction. If it does not, the
-  restore has failed: do not open it. The registry says what each correction was, but
-  no written check exists yet for each one, and the test copy has no business rows, so
-  this order has only been run on an empty database.
+  keep the target closed, including after an interrupted run. After loading the data
+  and before allowing writes, run this read-only query. Every row must say `t`. If
+  any says `f`, the restore has failed: do not open it. A backup taken before a
+  correction went live fails here, as it should. The expected values come from the
+  migrations themselves. If a later reviewed migration changes these rows, update this
+  query in that change.
+
+  ```sql
+  SELECT 'line profit rule' AS correction, count(*) = 0 AS proven
+    FROM public.order_items
+   WHERE total_price IS NOT NULL
+     AND profit IS DISTINCT FROM (ROUND(total_price, 2)
+         - ROUND(COALESCE(cost_per_unit, 0) * COALESCE(total_units_needed, 0), 2))
+  UNION ALL
+  SELECT 'spring deliveries billed in Chem Man', count(*) = 53
+    FROM public.delivery_external_billings
+   WHERE reason LIKE 'Billed outside CRX in Chem Man (spring 2026%'
+  UNION ALL
+  SELECT 'deleted-order reservations released', sum(quantity) IS NOT DISTINCT FROM -4643.1
+    FROM public.inventory_transactions
+   WHERE transaction_type = 'prebook_reconciliation'
+     AND notes LIKE 'CRX-2026-10-07 release of deleted-order reservation%';
+  ```
+
+  The test copy has no business rows, so this order has only been run on an empty
+  database.
 
 ## Data recovery
 

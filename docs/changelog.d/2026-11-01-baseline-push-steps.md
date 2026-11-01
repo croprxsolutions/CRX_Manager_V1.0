@@ -16,6 +16,8 @@ copy.
   `20260817120000` pins the CRLF text. The block converts the body in place from the database.
 - One-shots are now recorded during the push, because `20261010120000` refuses to run without
   `20261007150200` in the ledger. A real restore proves those corrections after loading data and before
-  allowing writes. That order has only been run on an empty database.
+  allowing writes, with a read-only query in the README. That query fails on data without the corrections
+  and passes once matching rows exist (tested in a rolled-back transaction on invented data), but this
+  order has never run with real rows and the query has not been run against live values.
 - The proof ran with `supabase --version` 2.109.1 forwarding to a `supabase-go` binary at 2.106.0.
 - No migration, no baseline artifact and no live database access.

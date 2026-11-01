@@ -55,6 +55,21 @@ describe('ProductBrandsSection', () => {
     expect(screen.queryByText(/named in the product name/i)).not.toBeInTheDocument();
   });
 
+  it('shows an EPA label search link for the brand registration', async () => {
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="u2" />);
+
+    expect(await screen.findByRole('link', { name: 'Search EPA labels for 524-475' }))
+      .toHaveAttribute('href', 'https://ordspub.epa.gov/ords/pesticides/f?p=PPLS:102:::NO::P102_REG_NUM:524-475');
+  });
+
+  it('does not show an EPA label search link for a brand without a registration', async () => {
+    mocks.listProductBrands.mockResolvedValue([{ ...slam, epa_registration: null }]);
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin={false} userId="u2" />);
+
+    expect(await screen.findByText('Slam 5.4')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Search EPA labels/ })).not.toBeInTheDocument();
+  });
+
   it('suggests only the brands from the name that are not listed yet', async () => {
     render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
     await screen.findByText('Slam 5.4');

@@ -222,13 +222,15 @@ describe('every command refuses before it changes anything', () => {
     it(`${command}: an inherited live credential`, () => refused(command, { env: { SUPABASE_SERVICE_ROLE_KEY: liveKey } }));
   }
 
-  it('the settings folder cannot sit where the frontend serves it', () => {
-    const result = spawnSync(process.execPath, [APP, 'status'], {
-      encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: path.join(HERE, '..', '..', 'public') },
+  for (const folder of [path.join(HERE, '..', '..', 'public'), path.join(HERE, '.state-private')]) {
+    it(`the settings folder cannot be ${path.basename(folder)}, where the frontend could serve it`, () => {
+      const result = spawnSync(process.execPath, [APP, 'status'], {
+        encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: folder },
+      });
+      assert.equal(result.status, 3);
+      assert.match(result.stderr, /temp folder/);
     });
-    assert.equal(result.status, 3);
-    assert.match(result.stderr, /temp folder/);
-  });
+  }
 
   it('every command: an unknown running frontend', async () => {
     const server = createServer((_, response) => response.end('<html>not the test app</html>'));

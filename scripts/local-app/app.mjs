@@ -21,6 +21,7 @@ const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const SERVICES = ['auth', 'rest', 'storage', 'gateway'];
+const SUPABASE_CLI = '2.109.1';
 
 // Children get only what they need to run, never the caller's whole environment.
 const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path)$/i;
@@ -94,7 +95,8 @@ function assertExistingStackIsOurs() {
 /** Runs before anything changes. A missing state file is fine only for a first rebuild. */
 async function preflight({ needState = true } = {}) {
   assertCleanEnvironment();
-  if (!path.resolve(STATE_DIR).startsWith(path.resolve(HERE, '.state')) && !path.resolve(STATE_DIR).startsWith(path.resolve(tmpdir()))) {
+  const inside = (folder) => `${path.resolve(STATE_DIR)}${path.sep}`.startsWith(`${path.resolve(folder)}${path.sep}`);
+  if (!inside(path.join(HERE, '.state')) && !inside(tmpdir())) {
     throw new Refused('CRX_LOCAL_APP_STATE_DIR may only point at the temp folder.');
   }
   const state = readState();
@@ -104,6 +106,8 @@ async function preflight({ needState = true } = {}) {
   assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])));
   await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
   assertExistingStackIsOurs();
+  // A Docker restart can hand the gateway its route back, so every command takes it away again.
+  if (state && text(compose(['ps', '-q', 'gateway']))) sealGateway();
   return state;
 }
 
@@ -147,11 +151,15 @@ async function startDatabase(state) {
   psql(roles.map((role) => `ALTER ROLE ${role} WITH PASSWORD '${state.LOCAL_DB_PASSWORD}';`).join('\n'), { user: 'supabase_admin' });
 }
 
+// Docker cannot publish a port from a sealed network, so the gateway needs a real one. Without a
+// default route it can still answer on its own links, and it cannot start a trip anywhere else.
+function sealGateway() {
+  compose(['exec', '-T', '-u', 'root', 'gateway', 'sh', '-c', 'ip route del default 2>/dev/null; ! ip route | grep -q ^default']);
+}
+
 async function startServices(state) {
   compose(['up', '-d', ...SERVICES]);
-  // Docker cannot publish a port from a sealed network, so the gateway needs a real one. Without
-  // a default route it can still answer on its own links, and it cannot start a trip anywhere else.
-  compose(['exec', '-T', '-u', 'root', 'gateway', 'sh', '-c', 'ip route del default 2>/dev/null; ! ip route | grep -q ^default']);
+  sealGateway();
   await waitFor('database through the gateway', databaseAnswers);
   await waitFor('login service', () => answers(`${API_URL}/auth/v1/health`));
   await waitFor('storage service', () => answers(`${API_URL}/storage/v1/status`));
@@ -195,8 +203,12 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_tem
 AS $live_crlf_close$${body}$live_crlf_close$;\n${sql}`;
 }
 
+const approvedMigrations = () => text(run(process.execPath, ['scripts/list-post-baseline-migrations.mjs'])).split(/\r?\n/).filter(Boolean);
+
 function pushPostBaselineMigrations(state) {
-  const files = text(run(process.execPath, ['scripts/list-post-baseline-migrations.mjs'])).split(/\r?\n/).filter(Boolean);
+  const version = text(run('supabase', ['--version']));
+  if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
+  const files = approvedMigrations();
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));
   // The password travels in the environment so it never shows in a process list.
   const urlWithoutPassword = state.LOCAL_DB_URL.replace(`:${state.LOCAL_DB_PASSWORD}@`, '@');
@@ -327,8 +339,11 @@ function frontendEnv(state) {
 }
 const VITE = ['node_modules/vite/bin/vite.js', '--config', 'scripts/local-app/vite.config.mjs', '--host', '127.0.0.1', '--port', String(APP_PORT), '--strictPort'];
 
+// A test on another branch's database would prove nothing about this one.
 function requireFinishedBuild() {
   if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
+  const built = JSON.parse(readFileSync(BUILD_FILE, 'utf8')).migrations.join();
+  if (built !== approvedMigrations().join()) throw new Refused('This checkout has different migrations from the test database. Run: node scripts/local-app/app.mjs rebuild');
 }
 
 async function start() {

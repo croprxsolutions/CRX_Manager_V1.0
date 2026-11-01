@@ -7,7 +7,8 @@ production, and nothing outside this computer can reach it. The rules are in the
 
 ## Commands
 
-Run these from the root of a checkout. They need Docker running, `npm ci` done and the Supabase CLI.
+Run these from the root of a checkout. They need Docker running, `npm ci` done and Supabase CLI 2.109.1,
+the version these steps are proven on.
 
 | Command | What it does |
 |---|---|
@@ -22,7 +23,8 @@ Run these from the root of a checkout. They need Docker running, `npm ci` done a
 Sign in with `LOCAL_TEST_EMAIL` and `LOCAL_TEST_PASSWORD` from `scripts/local-app/.state/local.env`.
 That folder is generated, git-ignored and holds local keys only. Never copy it into a PR or a report.
 
-There is one test copy per computer, and the last `rebuild` owns it. Before a package's decisive proof,
+There is one test copy per computer, and the last `rebuild` owns it. `start`, `seed` and `test` refuse a
+checkout whose migrations differ from the test database. Before a package's decisive proof,
 rebuild from that package's branch and copy the commit and migration count from `status` into the PROOF
 line. `.state/build.json` holds the full migration list.
 

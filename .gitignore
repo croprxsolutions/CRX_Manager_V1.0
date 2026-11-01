@@ -59,6 +59,9 @@ docs/claude-memory/
 # Working data for perf sweep / one-off analyses (regenerable from advisor + DB)
 .perf-sweep-data/
 
+# The local test app's generated keys, build record and test results (WP-PM-0)
+scripts/local-app/.state/
+
 # Generated EPA catalog data-quality manifest/report (contains live product data)
 .epa-data-quality/
 

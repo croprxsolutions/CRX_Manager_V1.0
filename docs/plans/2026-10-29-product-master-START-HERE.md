@@ -54,7 +54,7 @@ The old branch `loop/product-master-2026-10` holds a superseded first draft of t
 
 **Before the first run:**
 
-0. **Land this plan, then say "build the test app".** A run reads the plan from `main`, so these documents must merge first. The test app is Wave 0 and takes a normal session.
+0. **The test app (Wave 0).** Its commands and rules are in `scripts/local-app/README.md`. A run needs it on `main` before Wave 1 starts.
 1. **Check the CodeRabbit dashboard.** Switch to the `croprxsolutions` organization and confirm the trial end date (last seen 2026-11-11). Confirm there's no per-file review charge, and leave the agent minutes add-on off, so paid fixes stay refused. On the personal `masonwells1` organization, don't click "Remove cancellation". If charges are possible, tell the session to skip CodeRabbit.
 2. **Docker Desktop is running.** The database work and the test copy of the app need it. Without Docker, the database packages park.
 3. **The PC stays awake**, plugged in with the lid open. The session asks the app to keep it awake, but a closed lid still sleeps.
@@ -94,7 +94,7 @@ Never: merge a PR, mark a PR ready, push to main, apply a migration live, write 
 
 ## 5. What to expect
 
-- **Wave 0:** the private test copy of the app, built and landed in a normal session.
+- **Wave 0:** the private test copy of the app (`scripts/local-app/`), built and landed in a normal session.
 - **Wave 1:** dropdowns, RUP "known incomplete" notice, "Search EPA labels" link, pricing page, sales sheet and list, reorder display, list editing, then change history if time remains.
 - **Wave 2:** turning products off safely, setup checks in the database, forms, units and containers, data clean-up review lists, Use Timing, the Unit audit, new-product flow and basic Duplicate, one cost path and the tier-order warning, the vendor proposal tool, corrections to existing records.
 - **Wave 3:** vendor enforcement, setup workbook and the "Lock rates" switch, bulk import. It starts only after the vendor data step and your data clean-up.

@@ -2300,6 +2300,9 @@ export interface AllocationSet {
   updated_at: string;
 }
 
+/** The active payment a new one matches, as the duplicate warning shows it. */
+export type DuplicatePayment = Pick<AllocationSet, 'id' | 'reference_number' | 'check_number' | 'payment_date'>;
+
 export interface PrepayCredit {
   id: string;
   customer_id: string;

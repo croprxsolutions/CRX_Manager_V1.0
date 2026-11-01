@@ -38,13 +38,13 @@ async function addProducts(page: Page) {
 }
 
 const box = (page: Page, label: string) => page.getByRole('combobox', { name: label, exact: true });
-const optionTexts = (page: Page) => page.getByRole('option').allInnerTexts();
+const optionTexts = (page: Page) => page.getByRole('listbox').getByRole('option').allInnerTexts();
 
 async function expectFullList(page: Page, input: Locator, saved: string, expected: string[]) {
   await input.click();
   const listed = (await optionTexts(page)).map((text) => text.trim());
   expect(listed).toEqual(expect.arrayContaining(expected));
-  await expect(page.getByRole('option', { selected: true })).toHaveText(saved);
+  await expect(page.getByRole('listbox').getByRole('option', { selected: true })).toHaveText(saved);
 }
 
 test('product page dropdowns show the full list, mark the saved choice, and save', async ({ page }) => {
@@ -56,7 +56,8 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   const category = box(page, 'Category');
   await expectFullList(page, category, 'Herbicide', categories);
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('listbox')).toHaveCount(0);
+  // Focus moves to the next box, which opens by itself, so this one is what must have closed.
+  await expect(category).toHaveAttribute('aria-expanded', 'false');
 
   await expectFullList(page, box(page, 'Vendor'), vendors[1], vendors);
   await page.keyboard.press('Tab');
@@ -69,12 +70,12 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   await page.keyboard.press('Tab');
   for (const option of timings) {
     await timing.click();
-    await expect(page.getByRole('option')).toHaveCount(timings.length);
-    await page.getByRole('option', { name: option }).click();
+    await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(timings.length);
+    await page.getByRole('listbox').getByRole('option', { name: option }).click();
     await expect(timing).toHaveValue(option);
     await expect(page.getByRole('listbox')).toHaveCount(0);
     await timing.click();
-    await expect(page.getByRole('option')).toHaveCount(timings.length);
+    await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(timings.length);
     await page.keyboard.press('Escape');
     await expect(timing).toHaveValue(option);
   }
@@ -82,8 +83,8 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   // Typing narrows, Escape cancels the typing, and typed text stays free text.
   const maker = box(page, 'Manufacturer');
   await maker.click();
-  await maker.fill('Maker A');
-  await expect(page.getByRole('option')).toHaveCount(1);
+  await maker.fill(makers[0]);
+  await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(maker).toHaveValue(makers[1]);
   await maker.fill(`Typed Maker ${run}`);
@@ -93,11 +94,11 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   // Keyboard: down to the last option, then Enter.
   await category.click();
   await page.keyboard.press('ArrowUp');
-  const last = await page.getByRole('option').last().innerText();
-  for (let i = 0; i < 40 && (await category.getAttribute('aria-activedescendant')) !== await page.getByRole('option').last().getAttribute('id'); i += 1) {
+  const last = await page.getByRole('listbox').getByRole('option').last().innerText();
+  for (let i = 0; i < 40 && (await category.getAttribute('aria-activedescendant')) !== await page.getByRole('listbox').getByRole('option').last().getAttribute('id'); i += 1) {
     await page.keyboard.press('ArrowDown');
   }
-  await expect(page.getByRole('option').last()).toBeInViewport();
+  await expect(page.getByRole('listbox').getByRole('option').last()).toBeInViewport();
   await page.keyboard.press('Enter');
   await expect(category).toHaveValue(last.trim());
   await expect(page.getByRole('listbox')).toHaveCount(0);
@@ -115,17 +116,17 @@ test('the list scrolls by wheel and hovering does not move it', async ({ page })
   const scrollTop = () => list.evaluate((el) => el.scrollTop);
   await list.evaluate((el) => { el.scrollTop = 0; });
 
-  await page.getByRole('option').nth(1).hover();
+  await page.getByRole('listbox').getByRole('option').nth(1).hover();
   await page.mouse.wheel(0, 120);
   await expect.poll(scrollTop).toBeGreaterThan(0);
   const afterWheel = await scrollTop();
 
   await page.mouse.move(0, 0);
-  await page.getByRole('option').nth(3).hover();
+  await page.getByRole('listbox').getByRole('option').nth(3).hover();
   expect(await scrollTop()).toBe(afterWheel);
   await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-  const last = (await page.getByRole('option').last().innerText()).trim();
-  await page.getByRole('option').last().click();
+  const last = (await page.getByRole('listbox').getByRole('option').last().innerText()).trim();
+  await page.getByRole('listbox').getByRole('option').last().click();
   await expect(category).toHaveValue(last);
   await expect(page.getByRole('listbox')).toHaveCount(0);
 });
@@ -136,7 +137,7 @@ test('a save after a pick survives a reload', async ({ page }) => {
   await page.goto(`/products/${id}`);
   const timing = box(page, 'Use Timing');
   await timing.click();
-  await page.getByRole('option', { name: 'Volunteer Corn' }).click();
+  await page.getByRole('listbox').getByRole('option', { name: 'Volunteer Corn' }).click();
   await page.getByRole('button', { name: /^Save/ }).first().click();
   await expect(page.getByText(/product (saved|updated)/i).first()).toBeVisible();
   await page.reload();

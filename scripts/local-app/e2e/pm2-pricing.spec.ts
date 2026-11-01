@@ -12,15 +12,18 @@ async function signIn(page: Page) {
 
 async function dbRow(page: Page, id: string) {
   return page.evaluate(async (productId) => {
-    const path = '/src/lib/db.ts';
-    const { supabase } = await import(/* @vite-ignore */ path);
+    const dbPath = '/src/lib/db.ts';
+    const costPath = '/src/lib/costFields.ts';
+    const { supabase } = await import(/* @vite-ignore */ dbPath);
+    const { withAdminCost } = await import(/* @vite-ignore */ costPath);
     const { data, error } = await supabase
       .from('products')
-      .select('current_cost, tier1_price, tier2_price, tier3_price, tier1_margin, tier2_margin, tier3_margin, pricing_version')
+      .select('id, tier1_price, tier2_price, tier3_price, pricing_version')
       .eq('id', productId)
       .single();
     if (error) throw new Error(error.message);
-    return data;
+    // Cost and margins are admin-only and do not come back from a plain read.
+    return withAdminCost('products', data, true);
   }, id);
 }
 

@@ -19,9 +19,9 @@
 
 | Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
 |---|---|---|---|---|---|---|---|---|
-| WP-PM-1 Dropdowns | CodeRabbit pending | `pm/wp-pm-1-dropdowns` | [#1245](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1245) | Luna, 3 rounds | 3 rounds, last clean; 1 LOW accepted | compliance clean | none | not required |
+| WP-PM-1 Dropdowns | DRAFTED | `pm/wp-pm-1-dropdowns` | [#1245](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1245) | Luna, 3 rounds, plus CodeRabbit's one free fix | 4 rounds, last two clean; 1 LOW accepted | compliance clean; CodeRabbit 3 comments, all fixed | none | not required |
 | WP-PM-14 RUP notice | DRAFTED | `pm/wp-pm-14-rup-notice` | [#1246](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1246) | Luna, 1 round | clean | compliance clean | none | not required |
-| WP-PM-16 EPA label link | ⬜ | | | | | | none | |
+| WP-PM-16 EPA label link | DRAFTED | `pm/wp-pm-16-epa-label-link` | [#1247](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1247) | Luna, 1 round | 2 rounds; 1 LOW accepted | compliance clean | none | clean on `22021aa02`, 2026-11-01 15:07 Central |
 | WP-PM-2 Pricing page 💲 | ⬜ | | | | | | none | |
 | WP-PM-4 Sales sheet and list 💲 | ⬜ | | | | | | none | |
 | WP-PM-13 Reorder display | ⬜ | | | | | | none | |
@@ -30,8 +30,10 @@
 
 ## Proof
 
-**WP-PM-1.** PROOF — Ran: rebuilt the test app from `73191bd1c` (172 migrations, 1,089 ledger rows) and `node scripts/local-app/app.mjs test` · Saw: 8 of 8 passed, including the full list with the saved choice marked on Category, Vendor, Manufacturer and Use Timing, all 5 Use Timing options clicked, wheel scroll, keyboard to the last option, Escape inside a pop-up closing only the list, a pick surviving save and reload; browser hosts 127.0.0.1 only · Not verified: touch scroll, a screen reader, Brand vs Generic with a long real list. Owed on the Vercel preview. CI green on the head.
+**WP-PM-1.** PROOF — Ran: rebuilt the test app from `e9ed2bd3f` (172 migrations, 1,089 ledger rows) and `node scripts/local-app/app.mjs test` · Saw: 8 of 8 passed, including the full list with the saved choice marked on Category, Vendor, Manufacturer and Use Timing, all 5 Use Timing options clicked, wheel scroll, keyboard to the last option, Escape inside a pop-up closing only the list, a pick surviving save and reload; browser hosts 127.0.0.1 only · Not verified: touch scroll, a screen reader, Brand vs Generic with a long real list. Owed on the Vercel preview. CI green on the head.
 
 **WP-PM-14.** PROOF — Ran: rebuilt the test app from `83fa16ba6` (172 migrations) and `node scripts/local-app/app.mjs test` · Saw: 5 of 5 passed, notice on both RUP tabs, screenshot shows it above the filters; browser hosts 127.0.0.1 only · Not verified: the notice beside real register rows. Owed on the Vercel preview. CI green on the head.
 
-**Flaky test, not from this work.** `BlendTicketDetail.test.tsx` "blocks application-record creation while a local product edit is unsaved" failed in the local full run on three unrelated branches and 1 of 3 solo repeats on one of them, and passed in the baseline and in CI. That page does not use any changed component.
+**WP-PM-16.** PROOF — Ran: rebuilt the test app from `22021aa02` (172 migrations) and `node scripts/local-app/app.mjs test`; requested EPA's page for `524-475`, `100-1070` and `7969-405` · Saw: 5 of 5 passed, the link followed the typed number and a three-part number linked to its base; EPA returned the right product title for all three; browser hosts 127.0.0.1 only · Not verified: clicking through to EPA from the app (the test browser cannot leave the computer), and the brand-row link in a browser (component test only). Owed on the Vercel preview. CI green on the head.
+
+**Flaky tests, not from this work.** `BlendTicketDetail.test.tsx` "blocks application-record creation while a local product edit is unsaved" failed in the local full run on three unrelated branches and 1 of 3 solo repeats on one of them, and passed in the baseline, in another full run and in CI. That page does not use any changed component. `InventoryPage.uncertainRetry.test.tsx` failed once in CI on #1245 and has its own fix branch, `claude/fix-inventory-retry-flake`.

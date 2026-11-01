@@ -5,7 +5,6 @@ import { LoadFailedState } from '../ui/EmptyState';
 import { useAuth } from '../../contexts/AuthContext';
 import { assertRpcResult, supabase } from '../../lib/db';
 import { exactDecimalSum, type ExactDecimal } from '../../lib/chemCalculator';
-import { hasPageAccess } from '../../lib/pagePermissions';
 import { Sentry } from '../../lib/sentry';
 import { validateInventoryPositionShape } from '../../lib/inventoryPositionValidator';
 import type { InventoryPositionRow } from '../../types';
@@ -31,8 +30,14 @@ interface ProductStockCardProps {
 }
 
 export default function ProductStockCard({ productId, isActive }: ProductStockCardProps) {
-  const { role, deniedPages } = useAuth();
-  const canOpenInventory = hasPageAccess(role, deniedPages, 'inventory');
+  const { deniedPages } = useAuth();
+
+  if (deniedPages?.includes('inventory')) return null;
+
+  return <ProductStockCardContent productId={productId} isActive={isActive} />;
+}
+
+function ProductStockCardContent({ productId, isActive }: ProductStockCardProps) {
   const [rows, setRows] = useState<InventoryPositionRow[]>([]);
   const [asOf, setAsOf] = useState<Date | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
@@ -144,11 +149,9 @@ export default function ProductStockCard({ productId, isActive }: ProductStockCa
               As of {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(asOf)}
             </p>
           )}
-          {canOpenInventory && (
-            <Link to={inventoryLink} className="inline-flex min-h-11 items-center text-sm font-medium text-crx-green underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crx-green">
-              Open in Inventory
-            </Link>
-          )}
+          <Link to={inventoryLink} className="inline-flex min-h-11 items-center text-sm font-medium text-crx-green underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crx-green">
+            Open in Inventory
+          </Link>
         </div>
       )}
     </Card>

@@ -174,13 +174,21 @@ describe('ProductStockCard', () => {
     expect(locations.map((element) => element.textContent)).toEqual(['No location', 'Alpha', 'Zulu']);
   });
 
-  it('hides the Inventory link when this user is denied the page', async () => {
+  it('renders nothing and skips the stock read when this user is denied Inventory', () => {
     mocks.useAuth.mockReturnValue({ role: 'sales_rep', deniedPages: ['inventory'] });
+    const { container } = renderCard();
+
+    expect(container).toBeEmptyDOMElement();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('allows the stock card when deniedPages is missing', async () => {
+    mocks.useAuth.mockReturnValue({ role: 'sales_rep' });
     mocks.rpc.mockResolvedValue({ data: [position()], error: null });
     renderCard();
 
     expect(await screen.findByText('Main Warehouse')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open in Inventory' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open in Inventory' })).toBeInTheDocument();
   });
 
   it('shows the shared failed state and successfully retries the read', async () => {

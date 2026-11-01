@@ -211,6 +211,100 @@ describe('Products list and exports', () => {
     expect(selectedColumns[selectedColumns.length - 1]?.key).toBe('is_active');
   });
 
+  it('leaves missing customer prices blank while preserving a real zero', async () => {
+    mocks.products.splice(0, mocks.products.length, { ...activeProduct, tier1_price: null, tier2_price: 0 });
+    await loadProducts();
+    openDownload();
+    salesOption('CSV');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+    expect(exportToCSV).toHaveBeenCalledTimes(2);
+    for (const [rows, columns] of vi.mocked(exportToCSV).mock.calls) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ tier1_price: null, tier2_price: 0 });
+      expect(columns.find((column) => column.key === 'tier1_price')?.format?.(rows[0].tier1_price, rows[0])).toBe('');
+      expect(columns.find((column) => column.key === 'tier2_price')?.format?.(rows[0].tier2_price, rows[0])).toBe('$0.00');
+    }
+  });
+
+  it('leaves missing internal cost blank on both CSV paths', async () => {
+    mocks.products.splice(0, mocks.products.length, { ...activeProduct, current_cost: null });
+    await loadProducts();
+    openDownload();
+    internalOption('CSV');
+    fireEvent.click(screen.getByRole('button', { name: 'Margins' }));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+    expect(exportToCSV).toHaveBeenCalledTimes(2);
+    for (const [rows, columns] of vi.mocked(exportToCSV).mock.calls) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0].current_cost).toBeNull();
+      expect(columns.find((column) => column.key === 'current_cost')?.format?.(rows[0].current_cost, rows[0])).toBe('');
+    }
+  });
+
+  it('excludes a selected product switched inactive from selected CSV and PDF', async () => {
+    mocks.products.splice(0, mocks.products.length, activeProduct, { ...inactiveProduct, is_active: true });
+    const view = render(<Products />);
+    await screen.findByText('Active Product');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+
+    mocks.products.splice(0, 1, { ...activeProduct, is_active: false });
+    mocks.role = 'sales_rep';
+    view.rerender(<Products />);
+    await waitFor(() => expect(screen.getAllByRole('checkbox')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(vi.mocked(exportToCSV).mock.calls[0][0].map((row) => row.id)).toEqual([inactiveProduct.id]);
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(1));
+    const [pdf] = vi.mocked(downloadReportPdf).mock.calls[0];
+    expect(pdf.data.map((row) => row.id)).toEqual([inactiveProduct.id]);
+    expect(pdf.subtitle).toBe('1 product(s) selected');
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Downloaded PDF with 1 product(s)');
+  });
+
+  it('warns and skips both selected exports when the only selected product became inactive', async () => {
+    const view = render(<Products />);
+    await screen.findByText('Active Product');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+
+    mocks.products.splice(0, 1, { ...activeProduct, is_active: false });
+    mocks.role = 'sales_rep';
+    view.rerender(<Products />);
+    await waitFor(() => expect(screen.queryAllByRole('checkbox')).toHaveLength(0));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    expect(exportToCSV).not.toHaveBeenCalled();
+    expect(downloadReportPdf).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledTimes(2);
+    expect(mocks.toast).toHaveBeenNthCalledWith(1, 'warning', 'No active products selected.');
+    expect(mocks.toast).toHaveBeenNthCalledWith(2, 'warning', 'No active products selected.');
+  });
+
+  it('labels selected exports internal when Margins are shown', async () => {
+    await loadProducts();
+    fireEvent.click(screen.getByRole('button', { name: 'Margins' }));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(vi.mocked(exportToCSV).mock.calls[0][2]).toBe('products-internal');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(downloadReportPdf).mock.calls[0][0].title).toBe('Products — Internal');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(vi.mocked(exportToCSV).mock.calls[1][2]).toBe('products');
+  });
+
   it('uses filtered row counts for the internal PDF and adds Size and Unit to selected PDF', async () => {
     await loadProducts();
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'inactive' } });
@@ -241,6 +335,34 @@ describe('Products list and exports', () => {
     expect(downloadReportPdf).not.toHaveBeenCalled();
   });
 
+  it('keeps cost and margin columns out of a rep selected CSV', async () => {
+    mocks.role = 'sales_rep';
+    await loadProducts();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    const [rows, columns, filename] = vi.mocked(exportToCSV).mock.calls[0];
+    expect(rows.map((row) => row.id)).toEqual([activeProduct.id]);
+    expect(columns.map((column) => column.key).join(' ')).not.toMatch(/cost|margin/);
+    expect(filename).toBe('products');
+  });
+
+  it('shows a matching-products message without an add action when filters hide the catalog', async () => {
+    mocks.products.splice(0, mocks.products.length, activeProduct);
+    await loadProducts();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'inactive' } });
+    const title = screen.getByText('No matching products');
+    expect(screen.getByText('Try a different search or filter')).toBeInTheDocument();
+    expect(title.parentElement?.querySelector('button')).toBeNull();
+    expect(screen.queryByText('No products yet')).not.toBeInTheDocument();
+  });
+
+  it('hides Select All when the Inactive filter has no selectable products', async () => {
+    await loadProducts();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'inactive' } });
+    expect(screen.getByText('Inactive Product')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select All' })).not.toBeInTheDocument();
+  });
+
   it('finds a product by EPA registration number and manufacturer', async () => {
     await loadProducts();
     const search = screen.getByRole('textbox', { name: 'Search products...' });
@@ -257,7 +379,7 @@ describe('Products list and exports', () => {
     await loadProducts();
     expect(screen.queryByRole('columnheader', { name: 'RUP' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
-    for (const header of ['RUP', 'Signal Word', 'Form', 'Unit']) {
+    for (const header of ['RUP', 'Signal Word', 'Form', 'Inventory Unit']) {
       expect(screen.getByRole('columnheader', { name: header })).toBeInTheDocument();
     }
     expect(screen.getByText('Yes')).toBeInTheDocument();

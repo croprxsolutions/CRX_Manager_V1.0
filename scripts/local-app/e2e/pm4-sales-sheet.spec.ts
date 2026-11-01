@@ -1,5 +1,6 @@
 import { expect, test, type Download, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 // WP-PM-4 proof: read the downloaded files themselves. Invented data only.
 const run = Date.now();
@@ -24,7 +25,7 @@ async function addProducts(page: Page) {
     if (error) throw new Error(error.message);
   }, [
     { product_name: activeName, product_form: 'liquid', category, manufacturer: `Maker ${run}`, epa_registration: epa, is_rup: true, signal_word: 'Caution', is_active: true },
-    { product_name: inactiveName, product_form: 'liquid', category, is_active: false },
+    { product_name: inactiveName, product_form: 'liquid', category, manufacturer: null, epa_registration: null, is_rup: false, signal_word: null, is_active: false },
   ]);
 }
 
@@ -35,13 +36,22 @@ async function chooseFilters(page: Page, status: string) {
 
 async function download(page: Page, section: 'PDF' | 'CSV', item: string): Promise<Download> {
   await page.getByRole('button', { name: /^Download/ }).first().click();
-  const menu = page.getByText(section, { exact: true }).locator('..');
   const started = page.waitForEvent('download');
-  await menu.getByRole('button', { name: item }).click();
+  // The menu lists PDF then CSV, with the same names in each.
+  await page.getByRole('button', { name: item }).nth(section === 'PDF' ? 0 : 1).click();
   return started;
 }
 
 const fileText = async (file: Download) => readFileSync(await file.path());
+
+async function pdfText(file: Download) {
+  const pdf = await getDocument({ data: new Uint8Array(await fileText(file)) }).promise;
+  const pages = await Promise.all(Array.from({ length: pdf.numPages }, async (_, index) => {
+    const content = await (await pdf.getPage(index + 1)).getTextContent();
+    return content.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+  }));
+  return pages.join(' ');
+}
 
 test('the sales sheet leaves out inactive products and internal fields, whatever the filter', async ({ page }) => {
   await signIn(page);
@@ -65,8 +75,10 @@ test('the sales sheet leaves out inactive products and internal fields, whatever
   expect(lines[1]).toContain(`"'=Active, ""Quoted"" ${run}"`);
   expect(lines[0]).not.toMatch(/cost|margin|status|epa|signal|notes/i);
 
-  const pdf = (await fileText(await download(page, 'PDF', 'Sales Sheet (prices only)'))).toString('latin1');
+  const pdf = await pdfText(await download(page, 'PDF', 'Sales Sheet (prices only)'));
+  expect(pdf).toContain('Product Sales Sheet');
   expect(pdf).toContain('1 active product(s)');
+  expect(pdf).toContain(String(run));
   expect(pdf).not.toContain(inactiveName);
   expect(pdf).not.toMatch(/Cost|Margin|Internal|EPA/);
 
@@ -82,6 +94,7 @@ test('the sales sheet leaves out inactive products and internal fields, whatever
 
 test('search finds a product by EPA number, and Details adds the compliance columns', async ({ page }) => {
   await signIn(page);
+  await addProducts(page);
   await page.goto('/products');
   await page.getByPlaceholder('Search products...').fill(epa);
   await expect(page.getByText(`Quoted" ${run}`).first()).toBeVisible();

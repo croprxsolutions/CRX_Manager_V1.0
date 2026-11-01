@@ -1,0 +1,94 @@
+# The private test copy of the app's back end. Started only through app.mjs, which
+# validates the target first. Only the gateway is off the "sealed" network. It publishes
+# only to 127.0.0.1, and app.mjs removes its default route at every start, so nothing
+# here can reach production or the LAN.
+name: crx-local-app
+
+services:
+  db:
+    image: public.ecr.aws/supabase/postgres:17.6.1.143
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks: [sealed]
+
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.195.0
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: ${LOCAL_API_URL}
+      GOTRUE_SITE_URL: ${LOCAL_APP_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${LOCAL_DB_PASSWORD}@db:5432/postgres
+      # Accounts come only from the seed step, through the admin API.
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_JWT_SECRET: ${LOCAL_JWT_SECRET}
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+    networks: [sealed]
+
+  rest:
+    image: public.ecr.aws/supabase/postgrest:v14.16
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${LOCAL_DB_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${LOCAL_JWT_SECRET}
+    networks: [sealed]
+
+  storage:
+    image: public.ecr.aws/supabase/storage-api:v1.68.10
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${LOCAL_ANON_KEY}
+      SERVICE_KEY: ${LOCAL_SERVICE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${LOCAL_JWT_SECRET}
+      AUTH_JWT_SECRET: ${LOCAL_JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${LOCAL_DB_PASSWORD}@db:5432/postgres
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      FILE_SIZE_LIMIT: "52428800"
+      TENANT_ID: crx-local-app
+      REGION: local
+      GLOBAL_S3_BUCKET: crx-local-app
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+    networks: [sealed]
+
+  gateway:
+    image: public.ecr.aws/supabase/kong:2.8.1
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong.yml
+      KONG_STREAM_LISTEN: 0.0.0.0:5432
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: cors
+    # Only so app.mjs can remove this container's default route.
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ./kong.yml:/kong.yml:ro
+    ports:
+      - 127.0.0.1:${LOCAL_API_PORT}:8000
+      - 127.0.0.1:${LOCAL_DB_PORT}:5432
+    networks: [sealed, published]
+
+volumes:
+  db-data:
+  storage-data:
+
+networks:
+  sealed:
+    internal: true
+  published:

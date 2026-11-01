@@ -1,0 +1,42 @@
+_format_version: "2.1"
+_transform: true
+
+# Routes answer only to the loopback address and pages from the test app, so a website open in a
+# normal browser cannot use this gateway, directly or by pointing its own name at 127.0.0.1.
+
+services:
+  - name: auth
+    url: http://auth:9999/
+    routes:
+      - name: auth
+        paths: [/auth/v1/]
+        hosts: [127.0.0.1]
+    plugins:
+      - name: cors
+        config: { origins: ["http://127.0.0.1:5199"] }
+  - name: rest
+    url: http://rest:3000/
+    routes:
+      - name: rest
+        paths: [/rest/v1/]
+        hosts: [127.0.0.1]
+    plugins:
+      - name: cors
+        config: { origins: ["http://127.0.0.1:5199"] }
+  - name: storage
+    url: http://storage:5000/
+    routes:
+      - name: storage
+        paths: [/storage/v1/]
+        hosts: [127.0.0.1]
+    plugins:
+      - name: cors
+        config: { origins: ["http://127.0.0.1:5199"] }
+  # The migration tool's only way to the database, which has no published port of its own.
+  - name: db
+    url: tcp://db:5432
+    routes:
+      - name: db
+        protocols: [tcp]
+        destinations:
+          - port: 5432

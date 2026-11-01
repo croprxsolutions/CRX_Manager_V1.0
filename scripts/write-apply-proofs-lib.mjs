@@ -10,6 +10,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import {
+  MIGRATION_HISTORY_FILE,
+  MIGRATION_RECORDS_DIR,
+  migrationRecordNames,
+} from '../.claude/hooks/migration-records-lib.mjs';
 
 export const REVIEW_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -76,7 +81,8 @@ export function createReviewerPacket({ sourceRoot, migRelPath, migrationSql, que
     const evidenceFiles = [
       '.claude/schema-registry.json',
       'src/types/index.ts',
-      'docs/reference/migration-history.md',
+      MIGRATION_HISTORY_FILE,
+      ...migrationRecordNames(sourceRoot).map((name) => `${MIGRATION_RECORDS_DIR}/${name}`),
     ];
     for (const relativeFile of evidenceFiles) {
       const source = path.join(sourceRoot, ...relativeFile.split('/'));

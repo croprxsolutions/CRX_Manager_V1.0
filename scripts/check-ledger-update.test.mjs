@@ -277,6 +277,9 @@ eq(ledgerCheck([MIG, "docs/CHANGELOG.md"]).ok, true, "CHANGELOG satisfies a Code
 eq(ledgerCheck(["supabase/migrations/20260716000000_add_foo.sql", "docs/CHANGELOG.md"]).ok, true, "CHANGELOG satisfies a migration commit");
 eq(ledgerCheck(["supabase/migrations/20260716000000_add_foo.sql", "docs/reference/migration-history.md"]).ok, true, "migration-history.md satisfies a migration commit (its natural ledger companion)");
 
+eq(ledgerCheck(["supabase/migrations/20261102090000_add_foo.sql", "docs/reference/migrations.d/20261102090000_add_foo.md"]).ok, true, "a migration's record file satisfies a migration commit");
+eq(ledgerCheck(["supabase/migrations/20261102090000_add_foo.sql", "docs/reference/migrations.d/README.md"]).ok, false, "the records README does not satisfy a migration commit");
+
 // ── path normalization ───────────────────────────────────────────────────────
 eq(ledgerCheck(["supabase\\migrations\\20260825000000_x.sql"]).ok, false, "backslash paths are normalized (still a trigger)");
 eq(ledgerCheck(["supabase\\migrations\\20260825000000_x.sql", "docs\\CHANGELOG.md"]).ok, true, "backslash ledger path is normalized too");

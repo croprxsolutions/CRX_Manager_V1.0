@@ -15,6 +15,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { localCandidateMigrationPathsFromHistory } from '../../.claude/hooks/worktree-awareness-lib.mjs';
+import { readCombinedMigrationHistory } from '../../.claude/hooks/migration-records-lib.mjs';
 import { checkPendingMigrations, migrationSlug } from '../../.claude/hooks/migration-pending-lib.mjs';
 
 // -------------------------------------------------------------------------
@@ -2749,8 +2750,8 @@ function registryMigrationHighWater(): string {
 
 // Intentional bookkeeping gate: migrations whose RPCs must stay in the mutator
 // inventory because neither the generated types nor the schema registry know
-// about them yet. Every entry must have a row in
-// docs/reference/migration-history.md marked PENDING APPLY or APPLIED LIVE.
+// about them yet. Every entry must have a record in
+// docs/reference/migration-history.md or migrations.d/ marked PENDING APPLY or APPLIED LIVE.
 //
 // The six PR #535 gauntlet migrations APPLIED LIVE on 2026-09-03 (ledger
 // versions 20260903023935/024550/025249/025854/124710/124741). They stay
@@ -2830,16 +2831,9 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
  * this survives the apply and is cleared by the type/registry regeneration.
  */
 function migrationsAwaitingTypeRegeneration(): Set<string> {
-  const historyPath = join(
-    dirname(fileURLToPath(import.meta.url)),
-    '..',
-    '..',
-    'docs',
-    'reference',
-    'migration-history.md',
-  );
-  const migrationDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'supabase', 'migrations');
-  const lines = readFileSync(historyPath, 'utf8').split(/\r?\n/);
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const migrationDir = join(repoRoot, 'supabase', 'migrations');
+  const lines = readCombinedMigrationHistory(repoRoot).split(/\r?\n/);
   // Each registered timestamp must have a real migration-history row, and that
   // row must state a rollout status this gate understands. Scanning for
   // "PENDING APPLY" alone stopped working once the Section 9 chain applied on
@@ -2929,7 +2923,6 @@ function generatedMutatingRpcInventory(): Set<string> {
   const highWater = registryMigrationHighWater();
   const pendingTimestamps = migrationsAwaitingTypeRegeneration();
   const migrationDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'supabase', 'migrations');
-  const historyPath = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'reference', 'migration-history.md');
   const registryPath = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.claude', 'schema-registry.json');
   const registry = JSON.parse(readFileSync(registryPath, 'utf8')) as {
     _meta?: { applied_migration_names?: string[] };
@@ -2939,7 +2932,7 @@ function generatedMutatingRpcInventory(): Set<string> {
     throw new Error('Mutator inventory requires a truthful non-empty applied-migration name snapshot.');
   }
   for (const timestamp of unappliedLocalCandidateTimestamps(
-    readFileSync(historyPath, 'utf8'), appliedNames, readdirSync(migrationDir),
+    readCombinedMigrationHistory(join(dirname(fileURLToPath(import.meta.url)), '..', '..')), appliedNames, readdirSync(migrationDir),
   )) pendingTimestamps.add(timestamp);
   return new Set([...mutators].filter((name) => {
     const timestamp = functions.get(name)?.fileName.match(/^\d{14}/)?.[0] || '';

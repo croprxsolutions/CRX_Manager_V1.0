@@ -154,7 +154,7 @@ The database also allows a fifth role, `entity_recipient`. It is not a login rol
 
 ## Database
 
-Counts (tables, functions, migrations, Edge Functions) change with almost every release, so this page does not repeat them. Every database change is a file under `supabase/migrations/`, and each Edge Function is a folder under `supabase/functions/`. For current, dated figures and live state see [docs/manual/CURRENT_STATE.md](./docs/manual/CURRENT_STATE.md) and the [migration history](./docs/reference/migration-history.md).
+Counts (tables, functions, migrations, Edge Functions) change with almost every release, so this page does not repeat them. Every database change is a file under `supabase/migrations/`, and each Edge Function is a folder under `supabase/functions/`. For current, dated figures and live state see [docs/manual/CURRENT_STATE.md](./docs/manual/CURRENT_STATE.md) and the migration history ([current](./docs/reference/migrations.d/README.md), [older](./docs/reference/migration-history.md)).
 
 See the [database schema reference](./docs/reference/database-schema.md) for the table and RLS policy inventory, and the [RPC reference](./docs/reference/rpc-functions.md) for database functions.
 

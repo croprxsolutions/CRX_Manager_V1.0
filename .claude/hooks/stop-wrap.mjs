@@ -517,6 +517,7 @@ const LEDGER_RES = [
   /^docs\/manual\/[^/]+\.md$/,
   /^docs\/reference\/agent-guardrails\.md$/,
   /^docs\/reference\/migration-history\.md$/,
+  /^docs\/reference\/migrations\.d\/\d{14}_[^/]+\.md$/,
   /^docs\/loops\//,
 ];
 // Normalize one `git status --porcelain` record to its path. Rename and copy

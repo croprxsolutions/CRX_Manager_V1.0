@@ -19,8 +19,8 @@
 
 | Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
 |---|---|---|---|---|---|---|---|---|
-| WP-PM-1 Dropdowns | ⬜ | | | | | | none | |
-| WP-PM-14 RUP notice | ⬜ | | | | | | none | |
+| WP-PM-1 Dropdowns | CodeRabbit pending | `pm/wp-pm-1-dropdowns` | [#1245](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1245) | Luna, 3 rounds | 3 rounds, last clean; 1 LOW accepted | compliance clean | none | not required |
+| WP-PM-14 RUP notice | DRAFTED | `pm/wp-pm-14-rup-notice` | [#1246](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1246) | Luna, 1 round | clean | compliance clean | none | not required |
 | WP-PM-16 EPA label link | ⬜ | | | | | | none | |
 | WP-PM-2 Pricing page 💲 | ⬜ | | | | | | none | |
 | WP-PM-4 Sales sheet and list 💲 | ⬜ | | | | | | none | |
@@ -30,3 +30,8 @@
 
 ## Proof
 
+**WP-PM-1.** PROOF — Ran: rebuilt the test app from  (172 migrations, 1,089 ledger rows) and  · Saw: 8 of 8 passed, including the full list with the saved choice marked on Category, Vendor, Manufacturer and Use Timing, all 5 Use Timing options clicked, wheel scroll, keyboard to the last option, Escape inside a pop-up closing only the list, a pick surviving save and reload; browser hosts 127.0.0.1 only · Not verified: touch scroll, a screen reader, Brand vs Generic with a long real list. Owed on the Vercel preview. CI green on the head.
+
+**WP-PM-14.** PROOF — Ran: rebuilt the test app from  (172 migrations) and  · Saw: 5 of 5 passed, notice on both RUP tabs, screenshot shows it above the filters; browser hosts 127.0.0.1 only · Not verified: the notice beside real register rows. Owed on the Vercel preview. CI green on the head.
+
+**Flaky test, not from this work.**  "blocks application-record creation while a local product edit is unsaved" failed in the local full run on three unrelated branches and 1 of 3 solo repeats on one of them, and passed in the baseline and in CI. That page does not use any changed component.

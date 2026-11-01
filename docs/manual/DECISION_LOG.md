@@ -10,6 +10,19 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-01 — Product Master runs in waves, with a test copy of the app and a CodeRabbit stage
+
+**Decision (Mason, in chat, 2026-11-01: "yes add the missing decisions and the 5 things you suggest and anything I need to do before we start the work").** The mission `docs/plans/2026-10-28-product-master-loop-MISSION.md` and `docs/plans/2026-10-29-product-master-START-HERE.md` now say:
+1. **WP-PM-0 lands first:** a private test copy of the app with its own local database, invented data only, localhost only, so agents can save and check real behavior.
+2. **One run builds one wave** of the queue; no PR merges during a run, and Mason picks what lands between waves. `/goal` keeps the session working toward a closing line printed in chat.
+3. **Sonnet helpers** do searches and doc updates. They never write proof lines or make money or security judgments.
+4. **CodeRabbit reviews larger packages after Sol, on the draft PR.** Its free one-time `fix comments` is used only where the final files are off the Sol list and carry no migration. Codex fixes everything else on the same PR. Sol stays before the PR opens; a later listed change is marked owed and re-run at landing, because the proof script refuses a draft.
+5. **Row-level lists from live data stay in Mason's private vault,** never in this public repository.
+6. **Context size is automatic for a run:** it switches to 800K at the start and back to 300K at the end through the `deep-mode` skill.
+
+**Why.** Deep stacks of unmerged work and Sol proofs that expire before merging would waste the run, and a UI nobody could save in would leave every screen package unproven. Sol reviewed the plan on 2026-11-01 and blocked an earlier version that ran Sol on a draft PR; this is the corrected form.
+**What this forbids/implies:** the start of the build still needs Mason's own go. No live write, merge or deploy is authorized by this record. Continuous CodeRabbit autofix and paid CodeRabbit options stay off.
+
 ## 2026-11-01 — Sol is cut to the database, logins and money; changelog notes are for migrations
 
 **Decision (Mason, in chat, 2026-11-01: "Yes, all three").** Round two of the harness reduction.

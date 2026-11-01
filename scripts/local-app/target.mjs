@@ -130,6 +130,14 @@ export function portIsOpen(port) {
  * Vite writes the Supabase address into the module it serves, so this reads what the
  * running frontend will really talk to rather than trusting a pid or a port number.
  */
+/** Refuses a frontend open beyond this computer. Takes the output of `netstat -ano -p tcp`. */
+export function assertAppPortIsLoopback(netstat) {
+  const listeners = netstat.split(/\r?\n/).filter((line) => line.includes(`:${APP_PORT} `) && /LISTENING/.test(line));
+  if (listeners.some((line) => !line.trim().split(/\s+/)[1].startsWith('127.0.0.1:'))) {
+    throw new Refused(`Port ${APP_PORT} is open beyond this computer.`);
+  }
+}
+
 export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetchFn = fetch } = {}) {
   if (!(await isOpen(APP_PORT))) return;
   let source = '';

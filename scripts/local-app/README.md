@@ -23,8 +23,8 @@ Sign in with `LOCAL_TEST_EMAIL` and `LOCAL_TEST_PASSWORD` from `scripts/local-ap
 That folder is generated, git-ignored and holds local keys only. Never copy it into a PR or a report.
 
 There is one test copy per computer, and the last `rebuild` owns it. Before a package's decisive proof,
-rebuild from that package's branch and copy the commit and migration list from `status` into the PROOF
-line. `.state/build.json` holds the full list.
+rebuild from that package's branch and copy the commit and migration count from `status` into the PROOF
+line. `.state/build.json` holds the full migration list.
 
 ## What keeps it away from production
 
@@ -35,8 +35,9 @@ line. `.state/build.json` holds the full list.
 - **Commands pass on no credentials.** Child programs get a short list of variables, not the whole shell.
 - **The frontend never reads a checkout's `.env`.** It sets the Supabase address and key itself, and sets
   the Mapbox and Sentry values empty.
-- **The services have no way out.** They sit on a Docker network with no route off it, and `rebuild`
-  checks that. Only the gateway has a second network, and it publishes only to `127.0.0.1`.
+- **The services have no way out.** They sit on a Docker network with no route off it. Only the gateway has
+  a second network, which publishes only to `127.0.0.1`, and each start removes its default route.
+  `rebuild` proves both are sealed before it restores anything.
 - **The browser cannot leave.** The Playwright config sends everything but `127.0.0.1` to a dead proxy, IP
   addresses included, and the test fails if any request tries. It is separate from the staging config,
   which is unchanged.

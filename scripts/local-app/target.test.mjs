@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
-  assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
 } from './target.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -147,6 +147,15 @@ describe('network exposure', () => {
   for (const HostIp of ['0.0.0.0', '', '192.168.1.5', '::']) {
     it(`refuses a binding on "${HostIp}"`, () => assert.throws(() => assertLoopbackBindings([{ HostIp, HostPort: '54721' }]), Refused));
   }
+  it('accepts a frontend open only on loopback, or none', () => {
+    assert.doesNotThrow(() => assertAppPortIsLoopback(`  TCP    127.0.0.1:${APP_PORT}    0.0.0.0:0    LISTENING    123\n`));
+    assert.doesNotThrow(() => assertAppPortIsLoopback('  TCP    0.0.0.0:135    0.0.0.0:0    LISTENING    123\n'));
+  });
+  for (const address of ['0.0.0.0', '192.168.1.5', '[::]']) {
+    it(`refuses a frontend open on ${address}`, () => {
+      assert.throws(() => assertAppPortIsLoopback(`  TCP    ${address}:${APP_PORT}    0.0.0.0:0    LISTENING    123\n`), Refused);
+    });
+  }
   it('accepts this computer\'s Docker', () => {
     assert.doesNotThrow(() => assertLocalDockerEndpoint('npipe:////./pipe/dockerDesktopLinuxEngine'));
     assert.doesNotThrow(() => assertLocalDockerEndpoint('unix:///var/run/docker.sock'));
@@ -212,6 +221,14 @@ describe('every command refuses before it changes anything', () => {
     it(`${command}: a production database`, () => refused(command, { state: { ...goodState(), LOCAL_DB_URL: NO_ROUTE_DB } }));
     it(`${command}: an inherited live credential`, () => refused(command, { env: { SUPABASE_SERVICE_ROLE_KEY: liveKey } }));
   }
+
+  it('the settings folder cannot sit where the frontend serves it', () => {
+    const result = spawnSync(process.execPath, [APP, 'status'], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, CRX_LOCAL_APP_STATE_DIR: path.join(HERE, '..', '..', 'public') },
+    });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /temp folder/);
+  });
 
   it('every command: an unknown running frontend', async () => {
     const server = createServer((_, response) => response.end('<html>not the test app</html>'));

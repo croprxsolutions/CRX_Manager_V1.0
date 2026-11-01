@@ -1,6 +1,7 @@
 # The private test copy of the app's back end. Started only through app.mjs, which
-# validates the target first. Only the gateway has a route off the "sealed" network,
-# and it publishes only to 127.0.0.1, so nothing here can reach production or the LAN.
+# validates the target first. Only the gateway is off the "sealed" network. It publishes
+# only to 127.0.0.1, and app.mjs removes its default route at every start, so nothing
+# here can reach production or the LAN.
 name: crx-local-app
 
 services:
@@ -74,6 +75,8 @@ services:
       KONG_STREAM_LISTEN: 0.0.0.0:5432
       KONG_DNS_ORDER: LAST,A,CNAME
       KONG_PLUGINS: cors
+    # Only so app.mjs can remove this container's default route.
+    cap_add: [NET_ADMIN]
     volumes:
       - ./kong.yml:/kong.yml:ro
     ports:

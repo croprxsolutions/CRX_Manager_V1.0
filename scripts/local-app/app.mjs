@@ -3,17 +3,19 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
-  assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
 } from './target.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
-// Tests point this at a throwaway copy. Whatever it holds still has to pass the checks.
+// The refusal tests point this at a throwaway copy. Whatever it holds still has to pass the
+// checks, and it may only be in the temp folder, where the frontend cannot serve it.
 const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, '.state');
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
@@ -92,10 +94,14 @@ function assertExistingStackIsOurs() {
 /** Runs before anything changes. A missing state file is fine only for a first rebuild. */
 async function preflight({ needState = true } = {}) {
   assertCleanEnvironment();
+  if (!path.resolve(STATE_DIR).startsWith(path.resolve(HERE, '.state')) && !path.resolve(STATE_DIR).startsWith(path.resolve(tmpdir()))) {
+    throw new Refused('CRX_LOCAL_APP_STATE_DIR may only point at the temp folder.');
+  }
   const state = readState();
   if (!state && needState) throw new Refused('No test app here yet. Run: node scripts/local-app/app.mjs rebuild');
   if (state) assertLocalState(state);
   assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
+  assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])));
   await assertFrontendIsOurs(state?.LOCAL_ANON_KEY);
   assertExistingStackIsOurs();
   return state;
@@ -143,6 +149,9 @@ async function startDatabase(state) {
 
 async function startServices(state) {
   compose(['up', '-d', ...SERVICES]);
+  // Docker cannot publish a port from a sealed network, so the gateway needs a real one. Without
+  // a default route it can still answer on its own links, and it cannot start a trip anywhere else.
+  compose(['exec', '-T', '-u', 'root', 'gateway', 'sh', '-c', 'ip route del default 2>/dev/null; ! ip route | grep -q ^default']);
   await waitFor('database through the gateway', databaseAnswers);
   await waitFor('login service', () => answers(`${API_URL}/auth/v1/health`));
   await waitFor('storage service', () => answers(`${API_URL}/storage/v1/status`));
@@ -296,6 +305,8 @@ function assertSealed() {
   const probe = "const net=require('net');const s=net.connect({host:'1.1.1.1',port:443,timeout:3000});s.on('connect',()=>{console.log('OPEN');s.destroy()});s.on('error',()=>console.log('SEALED'));s.on('timeout',()=>{console.log('SEALED');s.destroy()});";
   const result = text(compose(['exec', '-T', 'storage', 'node', '-e', probe]));
   if (result !== 'SEALED') throw new Error('The sealed network has a route out. Stopping.');
+  const gateway = compose(['exec', '-T', 'gateway', 'sh', '-c', 'timeout 4 nc -z 1.1.1.1 443'], { allowFailure: true });
+  if (gateway.status === 0) throw new Error('The gateway has a route out. Stopping.');
 }
 
 // Only called after preflight has confirmed that whatever is on the port is this test app.
@@ -316,9 +327,13 @@ function frontendEnv(state) {
 }
 const VITE = ['node_modules/vite/bin/vite.js', '--config', 'scripts/local-app/vite.config.mjs', '--host', '127.0.0.1', '--port', String(APP_PORT), '--strictPort'];
 
+function requireFinishedBuild() {
+  if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
+}
+
 async function start() {
   const state = await preflight();
-  if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
+  requireFinishedBuild();
   await startDatabase(state);
   await startServices(state);
   if (!(await portIsOpen(APP_PORT))) {
@@ -336,7 +351,7 @@ async function frontend() {
 
 async function test() {
   const state = await preflight();
-  if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
+  requireFinishedBuild();
   await startDatabase(state);
   await startServices(state);
   run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts'], { stdio: 'inherit' });
@@ -365,7 +380,11 @@ const COMMANDS = {
   stop,
   status,
   test,
-  seed: async () => seed(await preflight()),
+  seed: async () => {
+    const state = await preflight();
+    requireFinishedBuild();
+    await seed(state);
+  },
 };
 
 (COMMANDS[process.argv[2]] ?? (() => { throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`); }))().catch((error) => {

@@ -1,6 +1,11 @@
 // eslint-disable-next-line no-restricted-imports
 import * as Sentry from '@sentry/react';
 
+// Supabase reads carry their filter values (customer ids, amounts) in the query string.
+function redactQuery(url: string): string {
+  return url.replace(/[?#].*$/s, '?[REDACTED]');
+}
+
 export function initSentry() {
   // Only init in production (VITE_SENTRY_DSN must be set)
   const dsn = import.meta.env.VITE_SENTRY_DSN;
@@ -24,6 +29,19 @@ export function initSentry() {
       'NetworkError',
       'Load failed',
     ],
+    beforeBreadcrumb(breadcrumb) {
+      // 'supabase' is the crumb db.ts adds; 'fetch' and 'xhr' are the SDK's own.
+      if (breadcrumb.category === 'supabase' && typeof breadcrumb.message === 'string') {
+        return { ...breadcrumb, message: redactQuery(breadcrumb.message) };
+      }
+      if (
+        (breadcrumb.category === 'fetch' || breadcrumb.category === 'xhr')
+        && typeof breadcrumb.data?.url === 'string'
+      ) {
+        return { ...breadcrumb, data: { ...breadcrumb.data, url: redactQuery(breadcrumb.data.url) } };
+      }
+      return breadcrumb;
+    },
     beforeSend(event) {
       // Strip PII from error messages
       if (event.message) {

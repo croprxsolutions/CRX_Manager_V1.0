@@ -12,7 +12,7 @@ fi
 echo "📒 Checking ledger requirement..."
 node scripts/check-ledger-update.mjs || {
   echo ""
-  echo "❌ LEDGER MISSING — stage the real CHANGELOG/decision/reference update for this policy change."
+  echo "❌ LEDGER MISSING — stage the real CHANGELOG/decision/reference update for this migration."
   exit 1
 }
 

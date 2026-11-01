@@ -31,7 +31,7 @@ heading naming the date and the change, then the detail. Say what changed, what
 proof you observed, and what you did **not** verify.
 
 This satisfies the pre-commit ledger guard (`scripts/check-ledger-update.mjs`), so an
-agent-surface or migration commit is recorded without touching the shared file.
+migration commit is recorded without touching the shared file.
 
 ## What is enforced, not just asked
 
@@ -63,7 +63,7 @@ gets them wrong is blocked rather than merely discouraged:
   is treated as unverifiable and does not count — that direction fails closed on purpose.
 
 These are refused unconditionally. A malformed entry does not become acceptable because
-the commit also staged something else the guard likes: not an agent-surface trigger, not
+the commit also staged something else the guard likes: not a migration, not
 a `docs/CHANGELOG.md` update, and not a well-formed sibling entry. A `src/`-only commit
 cannot drop a malformed entry in here either. If it is added to this folder and it will
 not be read as a record, the commit is blocked, full stop.

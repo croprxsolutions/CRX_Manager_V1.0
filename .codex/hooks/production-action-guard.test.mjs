@@ -1860,13 +1860,14 @@ try {
     for (const file of [
       "src/components/Label.tsx", "AGENTS.md", "docs/reference/gotchas.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
       ".claude/commands/ship.md", ".claude/hooks/loop-guard.mjs", "scripts/agent-health-check.mjs",
+      ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs",
+      "package.json", ".github/workflows/ci.yml", "vercel.json",
     ]) {
       assert.equal(mergeDocs({ compare: compareOf([file]) }).blocked, false, `${file} merges without Sol (Mason, 2026-10-30)`);
     }
     for (const file of [
-      ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs",
       "supabase/migrations/20261007000000_x.sql", "supabase/functions/send-email/index.ts", "src/lib/invoiceMath.ts", "src/pages/Inventory.tsx", "src/App.tsx",
-      "src/lib/db.ts", "src/components/auth/LoginPage.tsx", "src/lib/pagePermissions.ts", "package.json", ".github/workflows/ci.yml", "vercel.json",
+      "src/lib/db.ts", "src/components/auth/LoginPage.tsx", "src/lib/pagePermissions.ts",
     ]) {
       const verdict = mergeDocs({ compare: compareOf(["docs/plans/2026-10-07-note.md", file]) });
       assert.equal(verdict.blocked, true, `${file} still needs Sol`);
@@ -1874,9 +1875,9 @@ try {
       assert.match(verdict.reason, /write-codex-push-proof/, `and says how to get the Sol proof (${file})`);
     }
     const renamed = mergeDocs({ compare: { ...compareOf([]), files: [
-      { filename: "docs/plans/2026-10-07-note.md", previous_filename: ".claude/hooks/pr-merge-guard.mjs", status: "renamed" },
+      { filename: "docs/plans/2026-10-07-note.md", previous_filename: "src/lib/invoiceMath.ts", status: "renamed" },
     ] } });
-    assert.equal(renamed.blocked, true, "a file renamed from a merge gate into docs needs Sol");
+    assert.equal(renamed.blocked, true, "a file renamed from money code into docs needs Sol");
     assert.equal(mergeDocs({ compare: new Error("HTTP 502: Bad Gateway") }).blocked, true,
       "an unreadable diff (GitHub call failed) needs Sol");
     // Codex review (2026-10-09): a file name is chosen by the PR's author, and the

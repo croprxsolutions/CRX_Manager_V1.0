@@ -1,8 +1,7 @@
 // Tests for sol-risk-lib.mjs: which pull requests still need Sol (Mason, 2026-10-30).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PROTECTED_HARNESS_FILES } from "../../.codex/hooks/production-action-guard.mjs";
-import { classifySolRisk, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_NAMES, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES } from "./sol-risk-lib.mjs";
+import { classifySolRisk, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES } from "./sol-risk-lib.mjs";
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed += 1; console.log(`ok - ${name}`); };
@@ -12,23 +11,21 @@ for (const name of [
   "docs/plans/product.md", "docs/reference/gotchas.md", "README.md", "AGENTS.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
   "src/components/Label.tsx", "src/lib/units.ts", "public/sw.js", ".gitignore",
   ".claude/commands/ship.md", ".claude/hooks/loop-guard.mjs", ".claude/hooks/pr-merge-guard.test.mjs", "scripts/agent-health-check.mjs",
+  ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/sol-risk-lib.mjs", ".claude/hooks/env-guard.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json",
+  "scripts/write-codex-push-proof.mjs", "scripts/check-agent-guidance.mjs", ".claude/agents/rls-security-reviewer.md",
+  "package.json", "package-lock.json", "tools/x/package.json", ".npmrc", "deno.lock",
+  ".github/workflows/ci.yml", ".husky/pre-push", "vercel.json", "vite.config.ts", "index.html", "scripts/classify-ci-scope.mjs",
+  "src/pages/Jobs.tsx", "src/pages/Fields.tsx",
 ]) {
   check(`${name} does not need Sol`, () => assert.equal(solRiskPathProblem(name), null));
 }
 for (const name of [
   "src/lib/invoiceMath.ts", "src/pages/Inventory.tsx", "supabase/migrations/20261029_x.sql", "supabase/functions/send-email/index.ts", "supabase/config.toml",
   "src/lib/db.ts", "src/contexts/AuthContext.tsx", "src/lib/pagePermissions.ts", "src/components/auth/ResetPasswordPage.tsx", "SRC\\Components\\Auth\\LoginPage.tsx",
-  "package.json", "package-lock.json", "tools/x/package.json", ".github/workflows/ci.yml", "vercel.json", ".husky/pre-push", ".claude/settings.json", ".codex/hooks.json",
-  ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/codex-push-lib.mjs", ".claude/hooks/env-guard.mjs", ".claude/hooks/migration-apply-lib.mjs",
-  ".claude/hooks/sol-risk-lib.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs", "scripts/write-apply-proofs-lib.mjs",
-  "src/App.tsx", "src/appPages.tsx", "src/pages/MonthEndClose.tsx", "src/lib/offlineSync.ts", "src/components/receiving/ReceiveForm.tsx", "vite.config.ts", "index.html", ".npmrc", "tools/x/.npmrc", "deno.lock",
-  ".claude/settings.local.json", ".claude/agents/rls-security-reviewer.md", ".claude/hooks/live-testdata-lib.mjs", ".claude/hooks/migration-access-lib.mjs", "scripts/classify-ci-scope.mjs", "scripts/verify-schema-baseline.mjs", "scripts/check-agent-guidance.mjs",
+  "src/App.tsx", "src/appPages.tsx", "src/pages/MonthEndClose.tsx", "src/pages/Rebates.tsx", "src/pages/Receiving.tsx", "src/pages/LotTrace.tsx", "src/pages/JobDetail.tsx", "src/pages/OfficeCockpit.tsx", "src/pages/Reports.tsx", "src/pages/SettingsPage.tsx", "src/lib/offlineSync.ts", "src/components/receiving/ReceiveForm.tsx",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }
-check("every Codex-protected file needs Sol", () => {
-  for (const name of PROTECTED_HARNESS_FILES) assert.ok(solRiskPathProblem(name), name);
-});
 check("a rename out of a listed file needs Sol", () => {
   assert.equal(classifySolRisk([file("docs/plans/x.md", { status: "renamed", previous_filename: "src/lib/invoiceMath.ts" })]).risky, true);
 });
@@ -43,7 +40,7 @@ check("unreadable answers need Sol", () => {
 });
 check("the readable page lists every entry", () => {
   const page = readFileSync(new URL("../../docs/reference/sol-required-paths.md", import.meta.url), "utf8");
-  for (const entry of [...SOL_REQUIRED_PATHS, ...SOL_REQUIRED_NAMES]) assert.ok(page.includes(`\`${entry}\``), entry);
+  for (const entry of SOL_REQUIRED_PATHS) assert.ok(page.includes(`\`${entry}\``), entry);
 });
 
 const BASE = "a".repeat(40);

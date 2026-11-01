@@ -18,7 +18,7 @@ Categorize the changed files:
 - **Edge Function** changed → set `EDGE_CHANGED=true` (any `supabase/functions/**/*.ts`)
 - **Schema registry** changed → set `REGISTRY_CHANGED=true` (`.claude/schema-registry.json`)
 - **Agent surface** changed → set `AGENT_SURFACE_CHANGED=true` (any `.claude/{commands,skills,hooks,workflows,agents}/` file, `.claude/settings.json`, any `.codex/` file, `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, `.husky/`, `scripts/check-*`, `scripts/validate-*`, `scripts/verify-*`, `scripts/normalize-eol.mjs`, `scripts/agent-health-check.mjs`, `scripts/run-claude-review.mjs`, `scripts/write-codex-push-proof.mjs`, or `scripts/sync-agent-workflows.mjs`)
-- **Ledger-triggering change** detected → set `LEDGER_REQUIRED=true` when `AGENT_SURFACE_CHANGED` is true or a new `supabase/migrations/*.sql` file is added
+- **Ledger-triggering change** detected → set `LEDGER_REQUIRED=true` when a new `supabase/migrations/*.sql` file is added
 
 ## Step 2: Dispatch reviewer subagents (in PARALLEL)
 

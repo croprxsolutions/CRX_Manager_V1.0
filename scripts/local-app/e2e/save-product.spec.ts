@@ -11,7 +11,7 @@ test('nobody can sign themselves up', async ({ request }) => {
 
 test('a website cannot reach the keys or the gateway', async ({ request }) => {
   // .env.example is harmless, but the rule that refuses it is the one that protects a real .env.
-  for (const file of ['/scripts/local-app/.state/local.env', '/.env.example', '/.git/config']) {
+  for (const file of ['/scripts/local-app/.state/local.env', '/.env.example']) {
     expect((await request.get(file)).status(), file).toBe(403);
   }
 

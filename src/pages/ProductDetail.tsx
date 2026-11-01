@@ -12,6 +12,7 @@ import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
+import ProductStockCard from '../components/products/ProductStockCard';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -1582,6 +1583,7 @@ export default function ProductDetail() {
 
         {!isNew && id && (
           <div className="space-y-4">
+            <ProductStockCard key={id} productId={id} />
             {isAdmin && (
               <Card>
                 <CardHeader title="Select" accent="Cost Basis" />

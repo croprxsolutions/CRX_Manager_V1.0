@@ -1,5 +1,5 @@
 import { useEffect, useState , useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -82,6 +82,9 @@ function inventoryIntentErrorMessage(error: unknown): string {
 
 export default function InventoryPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const hasProductFilter = searchParams.has('product');
+  const productIdFilter = searchParams.get('product');
   const { role, profile } = useAuth();
   const receivePoIntent = useUncertainMutationIntent<{
     items: Array<{ po_item_id: string; quantity: number }>;
@@ -1154,10 +1157,14 @@ export default function InventoryPage() {
   };
 
   const filtered = inventory.filter((i) => {
+    if (hasProductFilter && i.product_id !== productIdFilter) return false;
     if (locationFilter && i.location !== locationFilter) return false;
     if (reorderFilter && !i.is_low_stock) return false;
     return true;
   });
+  const selectedProductName = productIdFilter
+    ? inventory.find((item) => item.product_id === productIdFilter)?.product_name
+    : undefined;
   const mobileFiltered = filtered.filter((item) =>
     item.product_name.toLowerCase().includes(mobileSearch.trim().toLowerCase())
   );
@@ -1584,6 +1591,26 @@ export default function InventoryPage() {
           </Card>
         );
       })()}
+
+      {hasProductFilter && (
+        <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2">
+          <p className="text-sm text-secondary" role="status">
+            Showing one product{selectedProductName ? `: ${selectedProductName}` : ''}
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-11 shrink-0"
+            onClick={() => setSearchParams((current) => {
+              current.delete('product');
+              return current;
+            })}
+          >
+            Show all
+          </Button>
+        </div>
+      )}
 
       <Card padding={false}>
         <div className="border-b border-gray-100 p-3 md:hidden">

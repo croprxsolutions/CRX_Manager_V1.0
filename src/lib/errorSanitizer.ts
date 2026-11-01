@@ -11,6 +11,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This retry belonged to a different, earlier request. Refresh the page to see what that request did, then try again'],
   [/^IDEMPOTENCY_ACTOR_MISMATCH\b/,
    'Nothing was changed. This retry belongs to another user. Reload the page and try again'],
+  // The first attempt committed under this key, usually a lost reply followed by an edit.
+  [/^IDEMPOTENCY_ARGUMENT_MISMATCH\b/,
+   'This attempt was not saved, but an earlier attempt with different details may have saved. Check the record before entering it again'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.

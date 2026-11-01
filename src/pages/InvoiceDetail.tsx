@@ -12,7 +12,13 @@ import { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
-import { supabase, sanitizeError, assertRpcResult, describePostInvoiceBlock, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { supabase, sanitizeError, assertRpcResult, describePostInvoiceBlock, hasRpcCode, rpcAuthErrorMessage, RpcErrorCodes } from '../lib/db';
+import {
+  DUPLICATE_CHECK_FAILED_MESSAGE,
+  PAYMENT_RETRY_REFUSED_MESSAGE,
+  duplicatePaymentMessage,
+  findDuplicatePayment,
+} from '../lib/paymentDuplicate';
 import { requireGroupVersions, requirePostVersion } from '../lib/invoicePostVersion';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
@@ -20,7 +26,7 @@ import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
-import type { Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
+import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
@@ -86,6 +92,17 @@ interface LineItem {
 
 const NEGATIVE_PRICE_MESSAGE = 'Enter a price of $0.00 or more. Use a credit memo to give money back.';
 
+/** What Record Payment validated: the only values the duplicate check reads and the save sends. */
+interface PaymentEntry {
+  invoiceId: string;
+  customerId: string;
+  amountCents: number;
+  allocationCents: number;
+  method: string;
+  reference: string;
+  notes: string;
+}
+
 const statusBadge = (status: InvoiceStatus) => {
   const map: Record<InvoiceStatus, { variant: 'default' | 'warning' | 'success' | 'error' | 'info'; label: string }> = {
     draft: { variant: 'default', label: 'Draft' },
@@ -120,7 +137,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // so payments recorded here flow into the same `allocation_sets` ledger that
   // Payment History reads. The operation key follows the new RPC name so
   // idempotency cache hits resolve correctly.
-  const payIdem = useIdempotencyKey('allocate_payment', profile?.id || '');
+  const payIdem = useIdempotencyKey('allocate_payment', profile?.id || '', id);
   const reverseWoIdem = useIdempotencyKey('reverse_write_off', profile?.id || '');
   // #27: reverse "Transfer to Scheduling" — push a job-built field invoice back to
   // its source job. This is the editor a TRANSFERRED field invoice actually opens in
@@ -240,6 +257,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Payment modal
   const [showPayModal, setShowPayModal] = useState(false);
+  // An active payment that matches the one being recorded, waiting on the user's answer.
+  const [duplicatePayment, setDuplicatePayment] = useState<{ match: DuplicatePayment; payment: PaymentEntry } | null>(null);
+  // A refused edited retry: stays in the form until the next attempt, a toast is too short for it.
+  const [payRetryRefused, setPayRetryRefused] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  // Moved on by leaving this invoice, so a duplicate check still running drops its save.
+  const payAttemptRef = useRef(0);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('check');
   const [payRef, setPayRef] = useState('');
@@ -835,6 +859,17 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     activeInvoiceIdRef.current = id;
     if (!isNew && id) fetchInvoice(id);
   }, [id, isNew, fetchInvoice]);
+
+  // /invoices/:id reuses this component, and a payment in progress belongs to the invoice it began on.
+  useEffect(() => () => {
+    payAttemptRef.current += 1;
+    setShowPayModal(false);
+    setDuplicatePayment(null);
+    setPayRetryRefused(false);
+    setPayMethod('check');
+    setPayRef('');
+    setPayNotes('');
+  }, [id]);
 
   // Product search
   const searchProducts = useCallback(async (q: string) => {
@@ -1448,24 +1483,61 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'Enter a valid payment amount');
       return;
     }
-    if (!invoice?.customer_id) {
+    if (!id || !invoice?.customer_id) {
       toast('error', 'Cannot record payment — invoice has no customer linked');
       return;
     }
-    setPayingInvoice(true);
-    try {
-      const idemKey = payIdem.getKey();
+    const payment: PaymentEntry = {
+      invoiceId: id,
+      customerId: invoice.customer_id,
+      amountCents,
       // Overpay -> prepay credit (parity with the Payments/allocation screen): cap this
       // invoice's allocation at its own balance and let allocate_payment bank any excess as
       // a prepay credit, instead of rejecting the whole payment for exceeding the balance.
-      const allocCents = Math.min(amountCents, invoice.balance_cents || 0);
+      allocationCents: Math.min(amountCents, invoice.balance_cents || 0),
+      method: payMethod,
+      reference: payRef,
+      notes: payNotes,
+    };
+    const attempt = ++payAttemptRef.current;
+    setPayRetryRefused(false);
+    setPayingInvoice(true);
+    setCheckingPayment(true);
+    let match: DuplicatePayment | null;
+    try {
+      match = await findDuplicatePayment(payment.customerId, amountCents, payment.reference);
+    } catch (err: unknown) {
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'duplicate_payment_check' } });
+      if (payAttemptRef.current === attempt) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
+      setPayingInvoice(false);
+      return;
+    } finally {
+      setCheckingPayment(false);
+    }
+    if (payAttemptRef.current !== attempt) {
+      setPayingInvoice(false);
+      return;
+    }
+    if (match) {
+      setDuplicatePayment({ match, payment });
+      setPayingInvoice(false);
+      return;
+    }
+    await recordPayment(payment);
+  };
+
+  const recordPayment = async ({ invoiceId, customerId, amountCents, allocationCents, method, reference, notes }: PaymentEntry) => {
+    const attempt = payAttemptRef.current;
+    setPayingInvoice(true);
+    try {
+      const idemKey = payIdem.getKey();
       const { data, error } = await supabase.rpc('allocate_payment', {
-        p_customer_id: invoice.customer_id,
+        p_customer_id: customerId,
         p_total_cents: amountCents,
-        p_payment_method: payMethod,
-        p_reference_number: payRef || undefined,
-        p_notes: payNotes || undefined,
-        p_allocations: allocCents > 0 ? [{ invoice_id: id, amount_cents: allocCents }] : [],
+        p_payment_method: method,
+        p_reference_number: reference || undefined,
+        p_notes: notes || undefined,
+        p_allocations: allocationCents > 0 ? [{ invoice_id: invoiceId, amount_cents: allocationCents }] : [],
         p_idempotency_key: idemKey,
       });
       if (error) throw error;
@@ -1489,7 +1561,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       fetchInvoice(id!);
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'allocate_payment' } });
-      toast('error', sanitizeError(err));
+      if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH) && payAttemptRef.current === attempt) {
+        // The form can be closed during the save, and this refusal has to be seen.
+        setPayRetryRefused(true);
+        setShowPayModal(true);
+      } else {
+        toast('error', rpcAuthErrorMessage(err) ?? sanitizeError(err));
+      }
     }
     setPayingInvoice(false);
   };
@@ -1992,9 +2070,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               <Button
                 variant="secondary"
                 icon={<DollarSign className="w-4 h-4" />}
+                disabled={payingInvoice}
                 onClick={() => {
-                  // Codex P2 fix: reset pay key per modal open (variable amount/allocation).
-                  payIdem.resetKey();
+                  // The retry key stays across opens: an earlier attempt's outcome may be unknown.
                   setPayAmount(((invoice.balance_cents || 0) / 100).toFixed(2));
                   setShowPayModal(true);
                 }}
@@ -2608,12 +2686,18 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       </Modal>
 
       {/* Payment Modal */}
-      <Modal open={showPayModal} onClose={() => setShowPayModal(false)} title="Record Payment">
+      <Modal
+        open={showPayModal && !duplicatePayment}
+        onClose={() => { if (!checkingPayment) setShowPayModal(false); }}
+        title="Record Payment"
+        closeDisabled={checkingPayment}
+      >
         <div className="space-y-4">
           <Input
             label="Amount ($)"
             type="number"
             value={payAmount}
+            disabled={payingInvoice}
             onChange={(e) => setPayAmount(e.target.value)}
             min={0}
             step={0.01}
@@ -2622,6 +2706,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             <label className="text-sm font-medium text-nav-dark">Payment Method</label>
             <select
               value={payMethod}
+              disabled={payingInvoice}
               onChange={(e) => setPayMethod(e.target.value)}
               className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
@@ -2632,10 +2717,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               <option value="credit_card">Credit Card</option>
             </select>
           </div>
-          <Input label="Reference # (optional)" value={payRef} onChange={(e) => setPayRef(e.target.value)} />
-          <Input label="Notes (optional)" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />
+          <Input label="Reference # (optional)" value={payRef} disabled={payingInvoice} onChange={(e) => setPayRef(e.target.value)} />
+          <Input label="Notes (optional)" value={payNotes} disabled={payingInvoice} onChange={(e) => setPayNotes(e.target.value)} />
+          {payRetryRefused && (
+            <p role="alert" className="text-sm text-red-600">{PAYMENT_RETRY_REFUSED_MESSAGE}</p>
+          )}
           <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => setShowPayModal(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setShowPayModal(false)} disabled={checkingPayment}>Cancel</Button>
             <Button onClick={handlePayment} loading={payingInvoice}>Record Payment</Button>
           </div>
         </div>
@@ -2791,6 +2879,20 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         variant="warning"
         icon={RotateCcw}
         loading={unposting}
+      />
+
+      <ConfirmModal
+        open={duplicatePayment !== null}
+        onClose={() => setDuplicatePayment(null)}
+        onConfirm={() => {
+          if (!duplicatePayment) return;
+          setDuplicatePayment(null);
+          void recordPayment(duplicatePayment.payment);
+        }}
+        title="Possible Duplicate Payment"
+        message={duplicatePayment ? duplicatePaymentMessage(duplicatePayment.match, duplicatePayment.payment.amountCents) : ''}
+        confirmLabel="Record Anyway"
+        variant="warning"
       />
     </div>
   );

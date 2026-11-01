@@ -3333,7 +3333,6 @@ export default function JobDetail() {
         } else {
           toast('success', `Invoice ${result.invoice_number} created`);
         }
-        skipUnsavedPromptRef.current = true;
         navigate(`/field-invoices/${result.invoice_id}`);
       }
     } catch (err: unknown) {

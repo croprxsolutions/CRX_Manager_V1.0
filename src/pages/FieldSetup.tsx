@@ -400,7 +400,9 @@ function FieldSetupPage() {
     } else {
       // No such field: show "Field not found", never the form of the field open before.
       loadedFieldRef.current = {};
+      loadedSplitsRef.current = [];
       setField(loadedFieldRef.current);
+      setBillingSplits(loadedSplitsRef.current);
     }
     setLoadError(false);
     setLoading(false);

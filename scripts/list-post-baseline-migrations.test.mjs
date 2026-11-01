@@ -149,18 +149,23 @@ assert.equal(
 
 // The data proof must name the same deliveries the migration recorded, or a typo in the
 // README would refuse a good restore or, worse, stop checking a real delivery.
-const listedDeliveries = (file) =>
-  [...readFileSync(path.join(root, ...file), 'utf8').matchAll(/\('(DEL-\d{5})', '(ORD-\d{4}-\d{4})'\)/g)]
+const listedDeliveries = (text) =>
+  [...text.matchAll(/\('(DEL-\d{5})', '(ORD-\d{4}-\d{4})'\)/g)]
     .map((match) => `${match[1]} ${match[2]}`)
     .sort();
-const migrationDeliveries = listedDeliveries([
-  'supabase',
-  'migrations',
-  '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
-]);
+const migrationDeliveries = listedDeliveries(
+  readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql'),
+    'utf8',
+  ),
+);
 assert.equal(migrationDeliveries.length, 53, 'the migration lists 53 deliveries');
+const readme = readFileSync(path.join(root, 'supabase', 'baselines', 'README.md'), 'utf8');
+const proofListStart = readme.indexOf('WITH chem_man_listed');
+const proofListEnd = readme.indexOf('chem_man_recorded AS', proofListStart);
+assert.equal(proofListStart >= 0 && proofListEnd > proofListStart, true, 'the data proof delivery list not found');
 assert.deepEqual(
-  listedDeliveries(['supabase', 'baselines', 'README.md']),
+  listedDeliveries(readme.slice(proofListStart, proofListEnd)),
   migrationDeliveries,
   'the README data proof must list exactly the deliveries the migration recorded',
 );

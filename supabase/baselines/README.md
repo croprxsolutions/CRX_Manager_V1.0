@@ -109,46 +109,175 @@ from the normal replay plan; each withheld filename and reason is printed to
 stderr so the omission is never silent. `--include-one-shot` is an explicit
 escape hatch only for a target whose population has been independently proven
 to match the population originally approved. A normal data restore already
-contains those corrected values and must not replay the rewrite. After proving
-those restored values, record the skipped versions in that target's migration
-ledger before any later unfiltered push:
+contains those corrected values and must not replay the rewrite.
+
+Each withheld migration is still recorded in the target's ledger, without being
+run, at its place in the order. The push below does that with `supabase migration
+repair <version> --status applied`, which changes only migration history, not
+business rows. The order matters in both directions: `20260807215532` refuses a
+ledger holding anything newer than itself, and `20261010120000` refuses to run
+until `20261007150200_release_reservations_of_deleted_spring_orders` is in the
+ledger under that whole name. So do not run the `--one-shot-repair-plan` commands
+on their own against a restore. They record everything at once, and from the
+repository they store the short name.
+
+Do not execute the emitted files directly with `psql`: that changes the schema
+without recording the migrations in `supabase_migrations.schema_migrations`.
+Instead, build an isolated Supabase CLI workdir and push through it. Run this from
+the repository root, in bash, with `psql` on the path. Put the password in
+`PGPASSWORD`, not in `DATABASE_URL`, so it stays out of the process list. It is proven
+with `supabase --version` 2.109.1 forwarding to a `supabase-go` binary at 2.106.0 (the
+CLI is those two programs, and `SUPABASE_GO_BINARY` can point at the second). It stops
+by itself on production, on a ledger that is not this baseline's, and if a dry run
+differs from the approved list.
+`LOCAL_DB_PORT` is for a local container only; leave it unset for a hosted project.
 
 ```bash
-node scripts/list-post-baseline-migrations.mjs --one-shot-repair-plan
-# Inspect the printed commands, then run them against the same DATABASE_URL.
-```
+set -euo pipefail
+: "${DATABASE_URL:?set DATABASE_URL to the restored target}"
+: "${PGPASSWORD:?set PGPASSWORD; keep the password out of DATABASE_URL}"
+case "${DATABASE_URL,,}" in
+  *rhyzpcqhnizqbxphqdkr*) echo "This is production. Stopping." >&2; exit 1 ;;
+  *://*:*@*) echo "The password belongs in PGPASSWORD. Stopping." >&2; exit 1 ;;
+esac
+push_dir="$(mktemp -d)"
+trap 'rm -rf "$push_dir"' EXIT
+migrations_dir="$push_dir/supabase/migrations"
+mkdir -p "$migrations_dir"
 
-The generated commands use `supabase migration repair <version> --status
-applied`; they change only migration history, not business rows. Never run them
-until the restored data is proven to contain each registered correction.
+# Not `supabase init`: it writes a [local_smtp] block that push then refuses to parse.
+printf 'project_id = "crx-post-baseline-push"\n' > "$push_dir/supabase/config.toml"
+if [ -n "${LOCAL_DB_PORT:-}" ]; then
+  printf '\n[db]\nport = %s\n' "$LOCAL_DB_PORT" >> "$push_dir/supabase/config.toml"
+fi
 
-Do not execute those files directly with `psql`: that changes the schema without
-recording the migrations in `supabase_migrations.schema_migrations`. Instead,
-copy only the emitted files into an isolated Supabase CLI workdir, inspect the
-ledger-aware dry run, and then push that exact filtered set:
+# The CLI stops on a ledger row with no file, so each gets an empty stand-in.
+psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 \
+  -c 'SELECT version FROM supabase_migrations.schema_migrations' | tr -d '\r' |
+while IFS= read -r version; do
+  : > "$migrations_dir/${version}_in_baseline_ledger.sql"
+done
 
-```bash
-post_baseline_dir="$(mktemp -d)"
-supabase --workdir "$post_baseline_dir" init
-mkdir -p "$post_baseline_dir/supabase/migrations"
-while IFS= read -r migration; do
-  cp "$migration" "$post_baseline_dir/supabase/migrations/"
-done < <(node scripts/list-post-baseline-migrations.mjs)
+# The baseline holds this body with LF; 20260817120000 pins the CRLF text live held.
+cat > "$push_dir/crlf_body.sql" <<'SQL'
+DO $crlf$ BEGIN
+  EXECUTE replace(pg_get_functiondef(
+    'public._close_undelivered_order_remainder_20260718(uuid,uuid)'::regprocedure),
+    chr(10), chr(13) || chr(10));
+END $crlf$;
+SQL
 
-supabase --workdir "$post_baseline_dir" db push \
-  --db-url "$DATABASE_URL" --include-all --dry-run
-supabase --workdir "$post_baseline_dir" db push \
-  --db-url "$DATABASE_URL" --include-all
-rm -rf "$post_baseline_dir"
+# The name holds the whole stem, because that is what live's ledger stores and what
+# later migrations look for. `git show` gives the committed bytes on any operating
+# system. Live ran each file in one transaction and the CLI does not, so add it here.
+stage_file() {
+  local body="$push_dir/body.sql" target="$migrations_dir/${1:0:14}_$1.sql"
+  {
+    if [ "${1:0:14}" = 20260817120000 ]; then cat "$push_dir/crlf_body.sql"; fi
+    git show "HEAD:supabase/migrations/$1.sql"
+  } > "$body"
+  if grep -qiE '^[[:space:]]*(BEGIN|START[[:space:]]+TRANSACTION)[[:space:]]*;' "$body"; then
+    cp "$body" "$target"
+  else
+    { printf 'BEGIN;\n'; cat "$body"; printf '\n;COMMIT;\n'; } > "$target"
+  fi
+}
+
+pending=""
+push_pending() {
+  local db_push=(--workdir "$push_dir" db push --db-url "$DATABASE_URL" --include-all)
+  local planned
+  supabase "${db_push[@]}" --dry-run > "$push_dir/dry_run.txt" 2>&1 ||
+    { cat "$push_dir/dry_run.txt" >&2; exit 1; }
+  planned="$(grep -oE '[0-9]{14}_[^[:space:]]+\.sql' "$push_dir/dry_run.txt" || true)"
+  if [ "$planned" != "$pending" ]; then
+    echo "The dry run differs from the approved list. Nothing was pushed." >&2
+    exit 1
+  fi
+  if [ -n "$pending" ]; then supabase "${db_push[@]}" --yes; fi
+  pending=""
+}
+
+{
+  node scripts/list-post-baseline-migrations.mjs | sed 's#.*/##; s/\.sql$/ push/'
+  node -p "Object.keys(require('./supabase/baselines/one-shot-migrations.json').one_shot).join('\n')" |
+    sed 's/$/ record/'
+} | LC_ALL=C sort > "$push_dir/plan.txt"
+
+# Up to the high-water the ledger must equal the baseline's. Past it, it may hold only this
+# plan's rows, each filed under its own version. Any other history is not this restore.
+high_water="$(node -p "require('./supabase/baselines/manifest.json').migrations_high_water")"
+awk -F'\t' '/^COPY /{on=1; next} /^\\\.$/{on=0} on{print $1 "\t" $2}' \
+  "supabase/baselines/${high_water}_migration_history.sql" | tr -d '\r' |
+  LC_ALL=C sort > "$push_dir/baseline_ledger.txt"
+psql "$DATABASE_URL" -X -At -F $'\t' -v ON_ERROR_STOP=1 \
+  -c "SELECT version, name FROM supabase_migrations.schema_migrations WHERE version <= '$high_water'" |
+  tr -d '\r' | LC_ALL=C sort | cmp -s - "$push_dir/baseline_ledger.txt" ||
+  { echo "The ledger is not this baseline's. Stopping." >&2; exit 1; }
+psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 \
+  -c "SELECT CASE WHEN left(name, 14) = version THEN name ELSE version || ' ' || name END
+      FROM supabase_migrations.schema_migrations WHERE version > '$high_water'" | tr -d '\r' |
+while IFS= read -r name; do
+  cut -d' ' -f1 "$push_dir/plan.txt" | grep -qxF -- "$name" ||
+    { echo "Unexpected ledger row: $name. Stopping." >&2; exit 1; }
+done
+
+while read -r stem action <&3; do
+  version="${stem:0:14}"
+  # Already in the ledger: a rerun after a failure carries on from here.
+  if [ -e "$migrations_dir/${version}_in_baseline_ledger.sql" ]; then continue; fi
+  if [ "$action" = push ]; then
+    stage_file "$stem"
+    pending="${pending:+$pending$'\n'}${version}_$stem.sql"
+  else
+    push_pending
+    : > "$migrations_dir/${version}_$stem.sql"
+    supabase --workdir "$push_dir" migration repair "$version" --status applied \
+      --db-url "$DATABASE_URL"
+  fi
+done 3< "$push_dir/plan.txt"
+push_pending
+
+supabase --workdir "$push_dir" migration list --db-url "$DATABASE_URL"
 ```
 
 The temporary workdir is mandatory: never run an unfiltered `supabase db push`
-from the CRX repository against a restored baseline. The CLI push both applies
-each migration and records its filename version/name in the target ledger. If
-the dry run lists anything other than the selector output, stop. After the push,
-inspect `supabase migration list --db-url "$DATABASE_URL"`, regenerate
+from the CRX repository against a restored baseline. If it stops partway, every
+file that finished is already in the ledger, so fix the cause and run the same
+block again. Check the `migration list` output, regenerate
 `.claude/schema-registry.json` from that database, and run the normal schema/live
 tests and DB invariant sweeps.
+
+The table says what each target needs. Only the right-hand column has been run; no
+part of this has run on a hosted project.
+
+| What the block does | Real disaster recovery | Empty local test copy |
+| --- | --- | --- |
+| Hand-written `config.toml`, no `supabase init` | Yes | Yes |
+| `[db]` port from `LOCAL_DB_PORT` | No. A hosted project uses TLS. | Yes. It is how the CLI skips TLS. |
+| Empty stand-ins for ledger rows | Yes | Yes |
+| One transaction per file | Yes | Yes |
+| `<version>_<whole file name>` naming | Yes | Yes |
+| One-shots recorded in order | Yes, then prove them (below) | Yes. No business rows, so nothing to prove. |
+| CRLF function body | Yes. The gap is in the baseline itself. | Yes |
+
+Two things sit outside the block and differ by target:
+
+- **A quiet database.** `20260816120000` and `20260914101300` refuse to run beside
+  another open transaction. On the local test copy, stop the login, data and storage
+  services first (`scripts/local-app/app.mjs` does). On a hosted project those
+  services cannot be stopped from here, so keep the app and every other client off
+  the project. If either file raises its `_NOT_QUIET` error, wait for that
+  transaction to end and run the block again.
+- **The data proof.** A real restore must load business data after this push, because
+  the backup fits the final schema, not the baseline's, and the migrations must not
+  edit restored rows. That means each one-shot is recorded before its correction can
+  be seen. Until the proof below passes, those ledger rows are a claim, not a fact, so
+  keep the target closed, including after an interrupted run. Before allowing writes,
+  prove the restored data contains every registered correction. If it does not, the
+  restore has failed: do not open it. The registry says what each correction was, but
+  no written check exists yet for each one, and the test copy has no business rows, so
+  this order has only been run on an empty database.
 
 ## Data recovery
 

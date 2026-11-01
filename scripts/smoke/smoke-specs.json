@@ -841,6 +841,20 @@
         "lifecycle"
       ]
     },
+    "quote_price_trail_and_expiry": {
+      "chain": "smoke-quote-price-trail-and-expiry.sql",
+      "description": "Migration 20261101100000: a trail row vouches only for the send it followed. Rewinds that put back a price with no row since the last send are refused QUOTE_RESEND_REQUIRED, above or below the sent price; a price above the sent one needs a tick since that send, at that price or higher. A ticked raise after the last send converts and its row names that send, a raise after a re-send converts at the newest price, a later cut keeps the tick, a rewind to the last send converts at its price, an unticked raise is refused with no row, and an id-less change is recorded and needs the tick to rise. An owning rep cannot write expires_at directly (update or insert) but still saves a permitted column; a send still sets the expiry and refuses a past pick. Terminal rollback.",
+      "covers": [
+        "save_quote",
+        "create_quote_version",
+        "restore_quote_version",
+        "convert_quote_to_order"
+      ],
+      "area": [
+        "lifecycle",
+        "security"
+      ]
+    },
     "quote_commission_split_validation": {
       "chain": "smoke-quote-commission-split-validation.sql",
       "description": "Quote commission money-routing guard: blank or duplicate recipients and missing/JSON-null percentages fail closed on direct INSERT/UPDATE, while an explicit empty no-commission split and a complete named 100% split remain valid. Self-contained fixture and terminal rollback.",

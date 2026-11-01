@@ -112,11 +112,10 @@ test('moving between products keeps Stay and Leave honest', async ({ page }) => 
 
   await page.goto(`/products/${ids[0]}`);
   await expect(page.getByLabel(/product name/i)).toHaveValue(first);
-  // An in-app move, so the same router carries it, as the search box does.
-  await page.evaluate((id) => {
-    window.history.pushState({}, '', `/products/${id}`);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  }, ids[1]);
+  // The search box moves to another product without leaving the page, which is the route change under test.
+  await page.keyboard.press('Control+k');
+  await page.getByPlaceholder(/search pages/i).fill(second);
+  await page.getByRole('option', { name: new RegExp(second.slice(0, 20)) }).first().click();
   await expect(page.getByLabel(/product name/i)).toHaveValue(second);
 
   await page.getByLabel('SKU').fill('UNSAVED-SKU');

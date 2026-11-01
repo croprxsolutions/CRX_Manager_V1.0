@@ -191,8 +191,8 @@ Read `docs/reference/rpc-functions.md` and add:
 |----------|-----------|---------|-------------|
 | function_name | p_param1 uuid, p_param2 text, p_idempotency_key text | uuid | One-line description |
 
-### migration-history.md
-Add new row to `docs/reference/migration-history.md`.
+### Migration record
+Add `docs/reference/migrations.d/<migration name>.md`, following that folder's README.
 
 (Do NOT add function/migration counts to `CLAUDE.md` or `AGENTS.md` — volatile counts
 live only in `docs/reference/` files that `npm run check:docs` validates.)
@@ -238,7 +238,7 @@ Pre-flight checks:
 
 Docs updated:
   - docs/reference/rpc-functions.md
-  - docs/reference/migration-history.md
+  - docs/reference/migrations.d/<migration name>.md
 
 Typecheck:    PASS
 Build:        PASS

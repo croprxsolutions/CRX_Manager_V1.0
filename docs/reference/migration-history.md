@@ -1,9 +1,11 @@
-# Migration History (latest entry 1011)
+# Migration History (frozen)
 
-> **LATEST LIVE EVIDENCE (read this first).** Read-only `list_migrations` observations sit at
-> the top of this file. Two PRs can add one at the same time and git keeps both in either order,
-> so compare their UTC timestamps; the newest timestamp is the latest evidence. Refer to a
-> migration by its version or file name, not its row number: two PRs can give a new row the same number.
+> **FROZEN 2026-11-01. Do not add rows or live captures here.** Every newer migration keeps its
+> record in its own file: [`migrations.d/`](./migrations.d/README.md). This file is the record of
+> older migrations; a row here changes only to correct or settle that migration in place.
+> The newest live evidence may be in `migrations.d/`; when current state matters, read the live ledger.
+> Compare the captures below by their UTC timestamps. Refer to a migration by its version or file name,
+> not its row number: row numbers here repeat.
 
 **Live capture — 2026-10-31 06:33 UTC (1:33 AM Central; read-only ledger query for PR #1181):** The ledger has 1079 rows. Its effective high-water is `20261029160100`, using the first 14 digits of the recorded name when present and the version otherwise; the highest raw apply-time version is `20261030162633`. No ledger name contains `document_numbers_chicago_year`, and candidate `20261029160300` follows the effective high-water. Refresh this read immediately before apply.
 

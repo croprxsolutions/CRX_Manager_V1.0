@@ -105,6 +105,8 @@ try {
   writeFileSync(path.join(sourceRoot, '.claude', 'schema-registry.json'), '{}\n', 'utf8');
   writeFileSync(path.join(sourceRoot, 'src', 'types', 'index.ts'), 'export {};\n', 'utf8');
   writeFileSync(path.join(sourceRoot, 'docs', 'reference', 'migration-history.md'), '# history\n', 'utf8');
+  mkdirSync(path.join(sourceRoot, 'docs', 'reference', 'migrations.d'), { recursive: true });
+  writeFileSync(path.join(sourceRoot, 'docs', 'reference', 'migrations.d', '20260904185900_example.md'), '**LOCAL CANDIDATE — NOT APPLIED.**\n', 'utf8');
   writeFileSync(path.join(sourceRoot, '.env'), 'SECRET=must-not-copy\n', 'utf8');
 
   let reads = 0;
@@ -137,6 +139,7 @@ try {
   );
   assert.ok(existsSync(path.join(packetRoot, 'supabase', 'migrations', '20260101000000_prior.sql')));
   assert.ok(!existsSync(path.join(packetRoot, 'supabase', 'migrations', 'secret.txt')));
+  assert.ok(existsSync(path.join(packetRoot, 'docs', 'reference', 'migrations.d', '20260904185900_example.md')), 'reviewers get the migration records as well as the frozen history');
   assert.ok(!existsSync(path.join(packetRoot, '.env')), 'real-worktree secrets must stay outside the packet');
 } finally {
   if (packetRoot) rmSync(packetRoot, { recursive: true, force: true });

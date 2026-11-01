@@ -25,6 +25,7 @@ import {
   isCodexImportDirtLine, classifyDirt, shortWorktreeName, describeDirt,
   formatSiblingReport, groupUnknownReasons,
 } from "./worktree-awareness-lib.mjs";
+import { MIGRATION_HISTORY_FILE, MIGRATION_RECORDS_DIR, combineMigrationHistory, combinedMigrationHistoryAtRev } from "./migration-records-lib.mjs";
 
 let pass = 0;
 function ok(cond, msg) { assert.ok(cond, msg); pass++; }
@@ -656,7 +657,12 @@ const readCanonicalBlob = (repoPath) => {
 // because the correct pin is still sitting unstaged on disk. Read the history
 // through the same index-first reader so pre-commit validates the commit being
 // created, not a mix of staged and working-tree bytes.
-const historyText = readCanonicalBlob("docs/reference/migration-history.md");
+const stagedRecordPaths = execFileSync("git", ["ls-files", "--", MIGRATION_RECORDS_DIR], { cwd: repoRoot, encoding: "utf8" })
+  .split("\n").filter(Boolean);
+const historyText = combineMigrationHistory(
+  readCanonicalBlob(MIGRATION_HISTORY_FILE),
+  stagedRecordPaths.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), text: readCanonicalBlob(p) })),
+);
 ok(typeof historyText === "string", "migration history is readable from the index or HEAD, not only from the working tree");
 const currentCrossReference = validateParkedMigrationCrossReferences(
   repoMigrationPaths,
@@ -690,6 +696,36 @@ eq(periodCloseMatches.length, 1, "period-close migration has one stable-suffix m
 const periodCloseCandidate = readCanonicalBlob(periodCloseMatches[0]);
 ok(typeof periodCloseCandidate === "string", "period-close candidate SQL is readable from the index or HEAD");
 ok(/check_period_open[\s\S]*?SET search_path = ''[\s\S]*?FROM public\.accounting_periods/.test(periodCloseCandidate), "period-close candidate deliberately hardens check_period_open to an empty search path while retaining schema-qualified body references");
+
+// One-file-per-migration records reach every parser as ordinary rows.
+{
+  const name = "20261102090000_example.sql";
+  const pin = "a".repeat(64);
+  const candidate = `**LOCAL CANDIDATE — NOT APPLIED.** PR #1: \`${name}\` (SQL sha256: \`${pin}\`).\n\nNote naming \`20261102090100_other.sql\`.\n`;
+  const combined = combineMigrationHistory("# frozen\n", [
+    { name: "README.md", text: "how to" },
+    { name: "20261102090000_example.md", text: candidate.replace(/\n/g, "\r\n") },
+  ]);
+  const parsed = localCandidateMigrationPathsFromHistory(combined);
+  eq([parsed.state, [...parsed.paths]], ["known", [`supabase/migrations/${name}`]], "a candidate record is a candidate; its later notes cannot trip the one-filename rule");
+  eq(parsed.sha256ByPath.get(`supabase/migrations/${name}`), pin, "a candidate record keeps its SQL pin");
+  const applied = combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text: `**APPLIED LIVE 2026-11-02.** \`${name}\`.\n` }]);
+  eq(localCandidateMigrationPathsFromHistory(applied).paths.size, 0, "rewriting the record to applied clears the candidate");
+  const header = validateParkedMigrationCrossReferences([`supabase/migrations/${name}`], applied, () => "-- STATUS: NOT APPLIED\nSELECT 1;\n");
+  eq(header.state, "known", "a stale parked header self-clears against an applied record");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "notes.md", text: "x" }]), /must be named after its migration/, "a misnamed record is refused, not skipped");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text: " \n" }]), /is empty/, "an empty record is refused");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md" }]), /is unreadable/, "an unreadable record is refused");
+
+  const recordPath = `${MIGRATION_RECORDS_DIR}/20261102090000_example.md`;
+  const git = () => `${recordPath}\n`;
+  const frozenBlob = [normRepoPath(MIGRATION_HISTORY_FILE), "# frozen\n"];
+  const atRev = combinedMigrationHistoryAtRev(git, "abc", () => new Map([frozenBlob, [normRepoPath(recordPath), candidate]]));
+  eq(localCandidateMigrationPathsFromHistory(atRev).paths.size, 1, "a commit's combined history includes its records");
+  assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => null), /unreadable/, "unreadable record blobs fail closed");
+  assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map()), /unreadable/, "a missing frozen blob fails closed");
+  assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map([frozenBlob])), /unreadable/, "a missing record blob fails closed");
+}
 
 // Path normalization the count key depends on.
 eq(normRepoPath("Docs\\Audits\\A.SQL"), "docs/audits/a.sql", "backslashes, case and separators normalize");

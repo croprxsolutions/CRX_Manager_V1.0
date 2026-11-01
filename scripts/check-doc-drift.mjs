@@ -8,11 +8,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   chicagoCalendarStamp,
+  frozenHistoryProblems,
   manualFreshnessBoundary,
   manualStampProblems,
   migrationIndexProblems,
+  orphanRecords,
   STRICT_INDEX_FROM,
 } from "./check-doc-drift-lib.mjs";
+import {
+  MIGRATION_HISTORY_FILE,
+  migrationRecordNames,
+  readCombinedMigrationHistory,
+} from "../.claude/hooks/migration-records-lib.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const rows = [];
@@ -20,7 +27,7 @@ const row = (check, claim, actual, status, note = "") => rows.push({ check, clai
 const read = (relative) => readFileSync(path.join(ROOT, relative), "utf8");
 
 const migrations = readdirSync(path.join(ROOT, "supabase", "migrations")).filter((name) => name.endsWith(".sql"));
-const history = read("docs/reference/migration-history.md");
+const history = readCombinedMigrationHistory(ROOT);
 const routes = read("docs/reference/pages-routes.md");
 // Lazy pages are declared in the shared page list; App.tsx keeps the dev gallery's.
 const app = read("src/App.tsx") + "\n" + read("src/appPages.tsx");
@@ -29,12 +36,20 @@ const schemaRegistry = JSON.parse(read(".claude/schema-registry.json"));
 
 const index = migrationIndexProblems(history,
   migrations.map((name) => name.match(/^(\d{8,14})_/)?.[1]).filter(Boolean));
-row(`migration-history one table row per migration since ${STRICT_INDEX_FROM}`, index.checked,
+row(`migration records: exactly one per migration since ${STRICT_INDEX_FROM}`, index.checked,
   index.checked - index.missing.length - index.duplicated.length,
   index.missing.length === 0 && index.duplicated.length === 0 ? "PASS" : "FAIL",
-  [index.missing.length ? `no table row: ${index.missing.join(", ")}` : "",
-    index.duplicated.length ? `more than one row (reconcile into one): ${index.duplicated.join(", ")}` : ""]
+  [index.missing.length ? `no record: ${index.missing.join(", ")}` : "",
+    index.duplicated.length ? `more than one record (reconcile into one): ${index.duplicated.join(", ")}` : ""]
     .filter(Boolean).join("; "));
+
+const frozenProblems = frozenHistoryProblems(read(MIGRATION_HISTORY_FILE));
+row("migration-history stays frozen", 0, frozenProblems.length,
+  frozenProblems.length === 0 ? "PASS" : "FAIL", frozenProblems.join("; "));
+
+const orphans = orphanRecords(migrationRecordNames(ROOT), migrations);
+row("migration records match a migration file", 0, orphans.length,
+  orphans.length === 0 ? "PASS" : "FAIL", orphans.length ? `no matching .sql: ${orphans.join(", ")}` : "");
 
 const missingMigrations = migrations.filter((filename) => {
   const base = filename.replace(/\.sql$/, "");

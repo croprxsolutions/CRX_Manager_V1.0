@@ -83,8 +83,8 @@ This is the B7 pattern from 2026-05-26.
 4. If no current live effective ordering high-water evidence derived from both `name` and fallback `version` is available, emit a **HIGH** finding telling the orchestrator to run Supabase MCP `list_migrations` and calculate it row by row. If evidence shows the filename is not greater, emit **HIGH** and require a fresh filename. If current evidence proves it is greater, this check is clean.
 5. Always note the post-apply B7 reconciliation requirement: after a successful MCP apply, read the new ledger row's `version` and `name`, normalize the live name and disk basename with the repository's migration-ordering convention, and update migration history before commit. If the normalized live `name` already matches the authored disk basename, keep the disk filename; a differing apply-time `version` alone does **not** require a rename. Rename to the MCP-assigned version only when the live `name` does not preserve the authored basename, so disk and ledger would otherwise remain unmatched. This is a post-apply obligation, not a pre-apply finding.
 
-### CHECK 7 — Missing migration-history.md entry
-After all checks: verify `docs/reference/migration-history.md` contains either the full filename or its unique timestamp prefix for each new migration file. If missing, severity = **MED** (doc drift, not safety).
+### CHECK 7 — Missing migration record
+After all checks: verify each new migration file has a record at `docs/reference/migrations.d/<migration name>.md` (older migrations: a row in the frozen `docs/reference/migration-history.md`). If missing, severity = **MED** (doc drift, not safety).
 
 ## Output Format
 
@@ -117,9 +117,9 @@ MED:      <count>
 
 ─── MED ────────────────────────────────────────────
 
-[M1] CHECK 7 — Missing migration-history.md entry
+[M1] CHECK 7 — Missing migration record
   File: supabase/migrations/20260527000000_foo.sql
-  Fix: Add row to docs/reference/migration-history.md
+  Fix: Add docs/reference/migrations.d/20260527000000_foo.md
 
 ─── RECOMMENDATION ─────────────────────────────────
 

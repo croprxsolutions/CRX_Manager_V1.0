@@ -683,8 +683,8 @@ function FieldSetupPage() {
         }
 
         if (persistError) {
-          // Keep the form dirty so the user retries. A brand-new field moves to the created record
-          // so a retry edits it: Stay on /fields/new would create a second field, so the real
+          // An existing field stays dirty so the user retries. A brand-new field moves to the created
+          // record so a retry edits it: Stay on /fields/new would create a second field, so the real
           // unsaved-changes prompt must not stop this move. That page reloads from the database.
           if (isNew && savedFieldId) {
             skipUnsavedPromptRef.current = true;

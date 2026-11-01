@@ -126,8 +126,10 @@ file**: `src/lib/db.ts`. Key exports and why they exist:
 
 - **`supabase`** — the single, typed Supabase client. Its custom `fetch`
   attaches an `X-Request-ID` header and a Sentry breadcrumb to every
-  request (for tracing a failed call through logs). **Never instantiate a
-  second Supabase client elsewhere.**
+  request (for tracing a failed call through logs). `src/lib/sentry.ts`
+  redacts request query strings from breadcrumbs, because Supabase reads
+  carry their filter values there. **Never instantiate a second Supabase
+  client elsewhere.**
 - **`assertRpcResult(data, rpcName)`** — call after every `.rpc()` call.
   Supabase silently returns `{ data: null, error: null }` when Row Level
   Security (RLS — Postgres's per-row permission system) denies access to a

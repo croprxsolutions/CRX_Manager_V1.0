@@ -86,7 +86,7 @@ for (const p of onDisk) {
 // the directory and the manifest without any assertion noticing, once the suite
 // grows past it (Codex, PR #648 round 1). Adding or removing a predicate is a
 // deliberate act, so it updates this number in the same diff.
-eq(diskNames.length, 29, `expected exactly 29 predicates, found ${diskNames.length} — update this number deliberately`);
+eq(diskNames.length, 30, `expected exactly 30 predicates, found ${diskNames.length} — update this number deliberately`);
 
 // 2. Every predicate file is recognised, and therefore allowed. This is the
 //    behaviour the whole change exists to produce. Before it, all 29 were

@@ -10,12 +10,19 @@ vi.mock('./db', () => ({
   supabase: {
     from: (table: string) => {
       expect(table).toBe('allocation_sets');
+      // Unranged reads stop at the server's row cap, as they do live.
+      let range: [number, number] = [0, 999];
       const chain = {
         select: () => chain,
         eq: (column: string, value: unknown) => { eqCalls.push([column, value]); return chain; },
         order: () => chain,
+        range: (from: number, to: number) => { range = [from, to]; return chain; },
         abortSignal: (signal: AbortSignal) => { signals.push(signal); return chain; },
-        then: (done: (r: unknown) => unknown) => Promise.resolve(result.value).then(done),
+        then: (done: (r: unknown) => unknown) => Promise.resolve(result.value).then((read) => done(
+          Array.isArray(read.data)
+            ? { ...read, data: read.data.slice(range[0], range[1] + 1), count: read.data.length }
+            : read,
+        )),
       };
       return chain;
     },
@@ -37,10 +44,18 @@ describe('findDuplicatePayment', () => {
     expect(eqCalls).toEqual([['customer_id', 'cust-1'], ['total_payment_cents', 50000], ['is_active', true]]);
   });
 
-  it('gives the read a time limit, so a stalled check cannot leave the form locked', async () => {
+  it('gives every page one time limit, so a stalled check cannot leave the form locked', async () => {
     signals.length = 0;
+    result.value = { data: Array.from({ length: 1001 }, (_, i) => row({ id: `p${i}`, reference_number: `r${i}` })), error: null };
     await findDuplicatePayment('cust-1', 50000, '1234');
-    expect(signals).toHaveLength(1);
+    expect(new Set(signals).size).toBe(1);
+    expect(signals.length).toBeGreaterThan(0);
+  });
+
+  it('finds a match past the first page of same-amount payments', async () => {
+    const others = Array.from({ length: 1000 }, (_, i) => row({ id: `other-${i}`, reference_number: `r${i}` }));
+    result.value = { data: [...others, row({ id: 'old', reference_number: '1234' })], error: null };
+    expect(await findDuplicatePayment('cust-1', 50000, '1234')).toMatchObject({ id: 'old' });
   });
 
   it('a stall that ignores the abort still ends as a failed check', async () => {

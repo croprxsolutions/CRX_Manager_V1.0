@@ -54,9 +54,15 @@ async function isolate(page: Page) {
         await lookupReleased;
       }
       const eq = (name: string) => url.searchParams.get(name)?.replace(/^eq\./, '');
-      return json(state.payments.filter((p) => p.customer_id === eq('customer_id')
+      const rows = state.payments.filter((p) => p.customer_id === eq('customer_id')
         && String(p.total_payment_cents) === eq('total_payment_cents')
-        && String(p.is_active) === eq('is_active')));
+        && String(p.is_active) === eq('is_active'));
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'content-range', 'content-range': rows.length ? `0-${rows.length - 1}/${rows.length}` : '*/0' },
+        body: JSON.stringify(rows),
+      });
     }
     if (url.pathname.endsWith('/rpc/allocate_payment')) {
       state.rpcCalls += 1;

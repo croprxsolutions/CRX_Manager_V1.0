@@ -8,6 +8,7 @@
  */
 import { supabase } from './db';
 import { formatCents } from './money';
+import { fetchAllRows, pageWithList, PAGE_RETURNED_NO_LIST } from './pagedRead';
 import type { DuplicatePayment } from '../types';
 
 // The form stays locked during the check, so a stall must end as a failed check.
@@ -36,22 +37,23 @@ export async function findDuplicatePayment(
   const wanted = normalizeReference(reference);
   if (!wanted) return null;
 
-  const query = supabase
-    .from('allocation_sets')
-    .select('id, reference_number, check_number, payment_date')
-    .eq('customer_id', customerId)
-    .eq('total_payment_cents', totalCents)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
-    .order('id');
   const timeLimit = AbortSignal.timeout(DUPLICATE_CHECK_TIMEOUT_MS);
   // The abort stops the read itself. The race also ends a stall in the sign-in step before it.
   const stalled = new Promise<never>((_, reject) => {
     timeLimit.addEventListener('abort', () => reject(timeLimit.reason), { once: true });
   });
-  const { data, error } = await Promise.race([query.abortSignal(timeLimit), stalled]);
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error('duplicate payment check returned no list');
+  const read = fetchAllRows<DuplicatePayment>((from, to) => pageWithList(supabase
+    .from('allocation_sets')
+    .select('id, reference_number, check_number, payment_date', { count: 'exact' })
+    .eq('customer_id', customerId)
+    .eq('total_payment_cents', totalCents)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .order('id')
+    .range(from, to)
+    .abortSignal(timeLimit)));
+  const { data, error } = await Promise.race([read, stalled]);
+  if (error || !data) throw new Error(error?.message ?? PAGE_RETURNED_NO_LIST);
 
   return data.find((payment) =>
     normalizeReference(payment.reference_number) === wanted

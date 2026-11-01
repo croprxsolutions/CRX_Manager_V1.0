@@ -42,14 +42,23 @@ export function combineMigrationHistory(frozenText, records) {
   return [frozenText.replace(/\s+$/, ""), "", ...rows, ""].join("\n");
 }
 
+// Refuses rather than skips: these names are read and copied into the review packet, so a
+// link or stray file must not carry anything outside this folder to the reviewer.
 export function migrationRecordNames(root) {
+  let entries;
   try {
-    return readdirSync(path.join(root, ...MIGRATION_RECORDS_DIR.split("/"))).filter((name) => name !== MIGRATION_RECORDS_README);
+    entries = readdirSync(path.join(root, ...MIGRATION_RECORDS_DIR.split("/")), { withFileTypes: true });
   } catch (error) {
     // A branch cut before the folder existed simply has no records.
     if (error?.code === "ENOENT") return [];
     throw error;
   }
+  return entries.filter(({ name }) => name !== MIGRATION_RECORDS_README).map((entry) => {
+    if (!entry.isFile() || !RECORD_NAME_RE.test(entry.name)) {
+      throw new Error(`${MIGRATION_RECORDS_DIR}/${entry.name} must be a regular file named after its migration: <14-digit version>_<name>.md`);
+    }
+    return entry.name;
+  });
 }
 
 export function readCombinedMigrationHistory(root) {

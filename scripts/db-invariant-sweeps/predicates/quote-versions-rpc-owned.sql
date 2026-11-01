@@ -965,7 +965,8 @@ UNION ALL
 -- that migration's baseline and stay as applied.
 -- The create pin was renewed again 2026-11-01: 20261029100000 (season-end
 -- expiry) re-emitted that body. Live reproduces the migration file's digest,
--- and the only change is how expires_at is chosen.
+-- and the only changes are how expires_at is chosen and a refusal of a chosen
+-- date in the past.
 SELECT '_create_quote_version_owner_impl:body-pinned' AS violation_key,
        'the owner-side snapshot writer body drifted from the reviewed text — the create wrapper trusts its returned version_id enough to stamp it restore_trusted_at; expected 4265/8aca1c1433a799a505c6f888997b109e, measured '
          || coalesce((SELECT length(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g')))::text || '/' || md5(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g')))

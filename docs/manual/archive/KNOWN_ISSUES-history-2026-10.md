@@ -7037,3 +7037,32 @@ PR #1100 and To-Do 0.12/0.16 record Mason's 2026-10-25 closure and that day's li
 Original text: "A `[E2E]` marker exempts a whole SQL batch (`.claude/hooks/live-testdata-lib.mjs:731`). MED."
 
 PRs #1084/#1093 replaced that behavior. Current `live-testdata-lib.mjs` (per-write classifier, lines 1365 onward at reconciliation base `fe258c2fe`) requires a literal marker in every INSERT VALUES row or a top-level marker predicate in each UPDATE/DELETE's own WHERE. A comment, another statement or a SET value does not confer the exemption. Independent Luna review identified the stale residual claim; this reconciliation removes it after checking the current classifier. The other KI-47 issues remain open.
+
+### Closed 2026-11-01 — KI-85
+
+Closed by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`. PRs #1201 and #1203 had moved two reviewed quote functions after PR #1165 re-pinned them. Both live bodies were re-read and matched their migration files exactly: the changes add a chosen quote expiry and a recorded price-change trail, and the actor binding, strict actor-mismatch refusal, role gates and EXECUTE restrictions are unchanged. The 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
+
+Original text:
+
+### KI-85 — Four sweep fingerprints went stale when the sent-quote price lock applied
+**MED · OPEN (correction written 2026-10-28 on the PR #1165 branch; not yet reviewed, merged or confirmed by a live sweep) · database/sweeps · Mason authorized the fix 2026-10-28 (To-Do 11.12)**
+The live db-invariant sweeps run after PR #1119 (2026-10-27, all 29 predicates, adjudicated `complete: true`)
+returned `ok: false` with 4 unallowlisted rows. All four functions were rewritten by `20261027040000_quote_sent_price_lock`
+(PR #1105, applied 12:37 UTC), whose PR did not update their reviewed fingerprints. The sweep after row 991 that
+morning was 29/29 clean. Two are `actor-forgery` rows: `save_quote` and `convert_quote_to_order` (their
+`allowlist.json` entries pin `_save_quote_below_cost_impl_20260810` and `_convert_quote_to_order_below_cost_impl_20260810`
+bodies that no longer match live). Two are `quote-versions-rpc-owned` rows: the body pins of
+`_create_quote_version_owner_impl` and `_restore_quote_version_owner_impl`. None touches PR #1119's objects. Not yet
+known: whether the rewritten bodies still hold the actor binding and the database-owned quote-version write rule;
+that needs a reading of each live body before re-pinning. Until it is fixed, **every post-apply sweep will show these
+same 4 rows**: compare against this list, and treat any OTHER unallowlisted row as new. Fix: read the four live bodies,
+then re-pin in `scripts/db-invariant-sweeps/allowlist.json`, the `quote-versions-rpc-owned` predicate and its test,
+through the security ship path; never re-pin a body that lost its guard. Done = a full live sweep adjudicates `ok: true`.
+2026-10-28 reading and correction (PR #1165 branch): an independent RLS review read all four live bodies and found the
+actor binding, strict actor-mismatch refusal, active-role gates, private-function EXECUTE restrictions and the
+quote-version trust-marker route intact, so these were stale fingerprints, not defects. The correction re-pins the
+`save_quote` and `convert_quote_to_order` dependency digests and the two quote-version body pins from live; the
+`convert_quote_to_order` exception also gets a second, separately reviewed entry for the candidate body of
+`20261027080400` (any active rep may convert; the actor stays bound), so the sweep is clean both before and after
+that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
+every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.

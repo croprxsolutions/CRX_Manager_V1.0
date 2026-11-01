@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -105,6 +106,8 @@ try {
   writeFileSync(path.join(sourceRoot, '.claude', 'schema-registry.json'), '{}\n', 'utf8');
   writeFileSync(path.join(sourceRoot, 'src', 'types', 'index.ts'), 'export {};\n', 'utf8');
   writeFileSync(path.join(sourceRoot, 'docs', 'reference', 'migration-history.md'), '# history\n', 'utf8');
+  mkdirSync(path.join(sourceRoot, 'docs', 'reference', 'migrations.d'), { recursive: true });
+  writeFileSync(path.join(sourceRoot, 'docs', 'reference', 'migrations.d', '20260904185900_example.md'), '**LOCAL CANDIDATE — NOT APPLIED.**\n', 'utf8');
   writeFileSync(path.join(sourceRoot, '.env'), 'SECRET=must-not-copy\n', 'utf8');
 
   let reads = 0;
@@ -137,7 +140,40 @@ try {
   );
   assert.ok(existsSync(path.join(packetRoot, 'supabase', 'migrations', '20260101000000_prior.sql')));
   assert.ok(!existsSync(path.join(packetRoot, 'supabase', 'migrations', 'secret.txt')));
+  assert.ok(existsSync(path.join(packetRoot, 'docs', 'reference', 'migrations.d', '20260904185900_example.md')), 'reviewers get the migration records as well as the frozen history');
   assert.ok(!existsSync(path.join(packetRoot, '.env')), 'real-worktree secrets must stay outside the packet');
+
+  const recordsDir = path.join(sourceRoot, 'docs', 'reference', 'migrations.d');
+  const packetRefuses = (plant, label) => {
+    const planted = plant();
+    assert.throws(() => createReviewerPacket({
+      sourceRoot,
+      migRelPath: 'supabase/migrations/20260904185900_example.sql',
+      migrationSql: snapshot.migrationSql,
+      queryHash: snapshot.queryHash,
+    }), /must be a regular file named after its migration/, label);
+    rmSync(planted, { recursive: true, force: true });
+  };
+  packetRefuses(() => {
+    const stray = path.join(recordsDir, 'notes.txt');
+    writeFileSync(stray, 'SECRET=must-not-copy\n', 'utf8');
+    return stray;
+  }, 'a stray file in the records folder stops the packet');
+  packetRefuses(() => {
+    const folder = path.join(recordsDir, '20260904185901_folder.md');
+    mkdirSync(folder);
+    return folder;
+  }, 'a folder wearing a record name stops the packet');
+  const link = path.join(recordsDir, '20260904185902_link.md');
+  let canLink = true;
+  try {
+    symlinkSync(path.join(sourceRoot, '.env'), link);
+  } catch (error) {
+    // shortcut: Windows without Developer Mode cannot create links, so this case runs on CI's Linux jobs.
+    if (error?.code !== 'EPERM') throw error;
+    canLink = false;
+  }
+  if (canLink) packetRefuses(() => link, 'a link to a file outside the folder stops the packet');
 } finally {
   if (packetRoot) rmSync(packetRoot, { recursive: true, force: true });
   rmSync(sourceRoot, { recursive: true, force: true });

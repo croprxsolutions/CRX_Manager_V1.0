@@ -33,37 +33,36 @@ find tests/e2e -name "*.spec.ts" -o -name "*.test.ts" 2>/dev/null | wc -l
 Keep changing counts in the reference documents that own them:
 
 - Page count: `docs/reference/pages-routes.md`
-- Migration count and inventory: `docs/reference/migration-history.md`
+- Migration inventory: `docs/reference/migration-history.md` (frozen) and `docs/reference/migrations.d/`
 - RPC/trigger counts: `docs/reference/rpc-functions.md`
 - Table/schema counts: `docs/reference/database-schema.md`
 - Test counts: `TESTING.md` when that file makes an explicit current claim
 
 Do not add these counts to `AGENTS.md` or `CLAUDE.md`; both are always-loaded guidance and should remain stable. Run `npm run check:agent-guidance` to enforce that boundary.
 
-## Step 3: Check migration-history.md
+## Step 3: Check migration records
 
-Read `docs/reference/migration-history.md`. Then list all actual migration files:
+Records live in `docs/reference/migrations.d/` (one file per migration; see its README), with older
+migrations in the frozen `docs/reference/migration-history.md`. List all actual migration files:
 
 ```bash
 ls supabase/migrations/
 ```
 
-Compare the lists. If any migration file exists on disk but is NOT in the migration history
-table, add a new row. The filename gives the timestamp and a slug, and that is **all** it gives.
+Compare the lists. If any migration file has no record, add its record file. The filename gives
+the timestamp and a slug, and that is **all** it gives.
 
 **Never infer applied/planned/rolled-back status from a filename.** A file on disk proves only
 that the migration was written. To state whether it is live, check the live database read-only
 (Supabase MCP `list_migrations` on project `rhyzpcqhnizqbxphqdkr`) and record what you actually
-observed. If you did not check, write the row with the status left explicitly unknown rather
-than guessing — a fabricated "applied" row is worse than a blank one.
+observed. If you did not check, write the record starting `**STATUS UNKNOWN.**` rather
+than guessing — a fabricated "applied" record is worse than a blank one.
 
-Every migration needs exactly **one** table row whose second cell is its version: `check:docs`
-fails a migration from 2026-09-15 on with no row or with two. Update a row's status in place;
-never add a second row for the same migration. The file merges with git's union driver
-(2026-10-29), so if a main merge leaves two versions of one row or line, reconcile them into one.
-The title carries no count. Give a new row the next number, but refer to migrations by version or
-file name, since two PRs can take the same number. A new live capture goes at the top with its UTC
-time; captures may sit in any order, so the newest timestamp is the latest evidence.
+Every migration needs exactly **one** record: `check:docs` fails a migration from 2026-09-15 on
+with none or two, and fails a new row or live capture in the frozen file. Update a record's status
+in place; never add a second one for the same migration. Refer to migrations by version or file
+name. A new live capture goes in its migration's record file, below the first paragraph, with its
+UTC time. A capture with no single migration goes in the PR's `docs/changelog.d/` note.
 
 **Manual docs' "Last verified" line** (`docs/manual/*.md`) is one short line, at most 200
 characters: the date (America/Chicago) and the scope you re-checked, e.g. "for the migration ledger
@@ -149,7 +148,7 @@ After all checks, print a summary table:
 | Edge Functions     | XX        | XX     | OK / UPDATED |
 | Test files         | XX        | XX     | OK / UPDATED |
 | E2E test files     | XX        | XX     | OK / UPDATED (vs TESTING.md) |
-| migration-history  | —         | —      | OK / X entries added |
+| migration records  | —         | —      | OK / X records added |
 | pages-routes       | —         | —      | OK / X entries added |
 | database-schema    | —         | —      | OK / X tables added |
 | rpc-functions      | —         | —      | OK / X functions added |

@@ -55,8 +55,8 @@ Migrations are SQL files in `supabase/migrations/`. An agent applies them throug
 pass — not by `npx supabase db push`, and not through the MCP `apply_migration` tool, which
 cannot pass the apply guard. The full sequence, including which migrations wait for Mason's
 own approval, is in `DEPLOYMENT.md` and `.claude/commands/ship.md` Step 5. Record each
-change in a new `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` entry and in
-`docs/reference/migration-history.md`.
+change in a new `docs/changelog.d/<YYYY-MM-DD>-<slug>.md` entry and in its
+`docs/reference/migrations.d/<migration name>.md` record.
 
 ### 2.3 Edge Function deploy
 
@@ -386,7 +386,7 @@ See §3.2 — write a forward-fix migration, never edit history.
 | `docs/workflows/SAFE_DEVELOPMENT_RULES.md` | Mandatory pre-commit safety checklist |
 | `docs/workflows/DATABASE_CHANGE_CHECKLIST.md` | Step-by-step for schema changes |
 | `docs/changelog.d/` | One file per change (new entries); `docs/CHANGELOG.md` is the history up to 2026-08-26 |
-| `docs/reference/migration-history.md` | Every migration with description |
+| `docs/reference/migrations.d/` and the frozen `docs/reference/migration-history.md` | Every migration with description |
 | `docs/reference/rpc-functions.md` | All RPCs + signatures |
 | `docs/reference/database-schema.md` | All tables + RLS matrix |
 | `docs/audits/` | Codex audit findings (current and past) |

@@ -3,7 +3,7 @@
 // Run: node .claude/hooks/worktree-awareness-lib.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -25,6 +25,7 @@ import {
   isCodexImportDirtLine, classifyDirt, shortWorktreeName, describeDirt,
   formatSiblingReport, groupUnknownReasons,
 } from "./worktree-awareness-lib.mjs";
+import { MIGRATION_HISTORY_FILE, MIGRATION_RECORDS_DIR, combineMigrationHistory, combinedMigrationHistoryAtRev } from "./migration-records-lib.mjs";
 
 let pass = 0;
 function ok(cond, msg) { assert.ok(cond, msg); pass++; }
@@ -656,7 +657,12 @@ const readCanonicalBlob = (repoPath) => {
 // because the correct pin is still sitting unstaged on disk. Read the history
 // through the same index-first reader so pre-commit validates the commit being
 // created, not a mix of staged and working-tree bytes.
-const historyText = readCanonicalBlob("docs/reference/migration-history.md");
+const stagedRecordPaths = execFileSync("git", ["ls-files", "--", MIGRATION_RECORDS_DIR], { cwd: repoRoot, encoding: "utf8" })
+  .split("\n").filter(Boolean);
+const historyText = combineMigrationHistory(
+  readCanonicalBlob(MIGRATION_HISTORY_FILE),
+  stagedRecordPaths.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), text: readCanonicalBlob(p) })),
+);
 ok(typeof historyText === "string", "migration history is readable from the index or HEAD, not only from the working tree");
 const currentCrossReference = validateParkedMigrationCrossReferences(
   repoMigrationPaths,
@@ -690,6 +696,67 @@ eq(periodCloseMatches.length, 1, "period-close migration has one stable-suffix m
 const periodCloseCandidate = readCanonicalBlob(periodCloseMatches[0]);
 ok(typeof periodCloseCandidate === "string", "period-close candidate SQL is readable from the index or HEAD");
 ok(/check_period_open[\s\S]*?SET search_path = ''[\s\S]*?FROM public\.accounting_periods/.test(periodCloseCandidate), "period-close candidate deliberately hardens check_period_open to an empty search path while retaining schema-qualified body references");
+
+// One-file-per-migration records reach every parser as ordinary rows.
+{
+  const name = "20261102090000_example.sql";
+  const pin = "a".repeat(64);
+  const candidate = `**LOCAL CANDIDATE — NOT APPLIED.** PR #1: \`${name}\` (SQL sha256: \`${pin}\`).\n\nNote naming \`20261102090100_other.sql\`.\n`;
+  const combined = combineMigrationHistory("# frozen\n", [
+    { name: "README.md", text: "how to" },
+    { name: "20261102090000_example.md", text: candidate.replace(/\n/g, "\r\n") },
+  ]);
+  const parsed = localCandidateMigrationPathsFromHistory(combined);
+  eq([parsed.state, [...parsed.paths]], ["known", [`supabase/migrations/${name}`]], "a candidate record is a candidate; its later notes cannot trip the one-filename rule");
+  eq(parsed.sha256ByPath.get(`supabase/migrations/${name}`), pin, "a candidate record keeps its SQL pin");
+  const applied = combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text: `**APPLIED LIVE 2026-11-02.** \`${name}\`.\n` }]);
+  eq(localCandidateMigrationPathsFromHistory(applied).paths.size, 0, "rewriting the record to applied clears the candidate");
+  const header = validateParkedMigrationCrossReferences([`supabase/migrations/${name}`], applied, () => "-- STATUS: NOT APPLIED\nSELECT 1;\n");
+  eq(header.state, "known", "a stale parked header self-clears against an applied record");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "notes.md", text: "x" }]), /must be named after its migration/, "a misnamed record is refused, not skipped");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text: " \n" }]), /is empty/, "an empty record is refused");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md" }]), /is unreadable/, "an unreadable record is refused");
+  const refused = (text, pattern, message) => assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "20261102090000_example.md", text }]), pattern, message);
+  refused(`**LOCAL CANDIDATE**\n\nNOT APPLIED \`${name}\`\n`, /must start with its status/, "a candidate status split into the notes is refused, not hidden from the scan");
+  refused(`Pending. **LOCAL CANDIDATE — NOT APPLIED.** \`${name}\`\n`, /must start with its status/, "a status buried in prose is refused");
+  refused(`**PENDING APPLY.** \`${name}\`\n`, /must start with its status/, "a status the parked scan cannot see is refused");
+  refused("**LOCAL CANDIDATE — NOT APPLIED.** Pin below.\n\n`20261102090000_example.sql`\n", /must name/, "the file name must be in the first paragraph");
+  refused("**APPLIED LIVE.** `20261102090000_other.sql`\n", /must name/, "a record naming a different migration is refused");
+  assert.throws(() => combineMigrationHistory("# frozen\n", [{ name: "archive", text: "x" }]), /must be named after its migration/, "a subfolder is refused");
+
+  const recordPath = `${MIGRATION_RECORDS_DIR}/20261102090000_example.md`;
+  const git = () => `${recordPath}\n`;
+  const frozenBlob = [normRepoPath(MIGRATION_HISTORY_FILE), "# frozen\n"];
+  const atRev = combinedMigrationHistoryAtRev(git, "abc", () => new Map([frozenBlob, [normRepoPath(recordPath), candidate]]));
+  eq(localCandidateMigrationPathsFromHistory(atRev).paths.size, 1, "a commit's combined history includes its records");
+  assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => null), /unreadable/, "unreadable record blobs fail closed");
+  assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map()), /unreadable/, "a missing frozen blob fails closed");
+  assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map([frozenBlob])), /unreadable/, "a missing record blob fails closed");
+
+  // The mock above trusts its listing, so prove the real git listing against real commits.
+  const recordsRepo = mkdtempSync(path.join(tmpdir(), "crx-records-at-rev-"));
+  try {
+    const realGit = (args) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.test", ...args], { cwd: recordsRepo, encoding: "utf8" });
+    const commitAll = () => {
+      realGit(["add", "--", "."]);
+      return realGit(["commit-tree", realGit(["write-tree"]).trim(), "-m", "fixture"]).trim();
+    };
+    const readAt = (rev) => (paths) => new Map(paths.map((p) => [normRepoPath(p), realGit(["show", `${rev}:${p}`])]));
+    realGit(["init", "-q"]);
+    mkdirSync(path.join(recordsRepo, ...MIGRATION_RECORDS_DIR.split("/"), "archive"), { recursive: true });
+    writeFileSync(path.join(recordsRepo, ...MIGRATION_HISTORY_FILE.split("/")), "# frozen\n");
+    writeFileSync(path.join(recordsRepo, ...recordPath.split("/")), candidate);
+    const withRecord = commitAll();
+    eq(localCandidateMigrationPathsFromHistory(combinedMigrationHistoryAtRev(realGit, withRecord, readAt(withRecord))).paths.size, 1,
+      "a real commit's record reaches the parked scan through the non-recursive listing");
+    writeFileSync(path.join(recordsRepo, ...MIGRATION_RECORDS_DIR.split("/"), "archive", "20261102090100_hidden.md"), candidate);
+    const withSubfolder = commitAll();
+    assert.throws(() => combinedMigrationHistoryAtRev(realGit, withSubfolder, readAt(withSubfolder)), /must be named after its migration/,
+      "a record in a real commit's subfolder is refused");
+  } finally {
+    rmSync(recordsRepo, { recursive: true, force: true });
+  }
+}
 
 // Path normalization the count key depends on.
 eq(normRepoPath("Docs\\Audits\\A.SQL"), "docs/audits/a.sql", "backslashes, case and separators normalize");

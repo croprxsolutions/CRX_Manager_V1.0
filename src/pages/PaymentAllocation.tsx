@@ -24,14 +24,20 @@ import PageHeader from '../components/ui/PageHeader';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
+import { supabase, assertRpcResult, sanitizeError, hasRpcCode, rpcAuthErrorMessage, RpcErrorCodes } from '../lib/db';
+import {
+  DUPLICATE_CHECK_FAILED_MESSAGE,
+  PAYMENT_RETRY_REFUSED_MESSAGE,
+  duplicatePaymentMessage,
+  findDuplicatePayment,
+} from '../lib/paymentDuplicate';
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { formatCents as fmt } from '../lib/money';
-import type { PaymentAllocationEntry, PaymentAllocationResult, InvoiceType } from '../types';
+import type { DuplicatePayment, PaymentAllocationEntry, PaymentAllocationResult, InvoiceType } from '../types';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
 
@@ -73,6 +79,19 @@ interface CustomerOption {
   prepay_balance_cents: number;
 }
 
+/** What Apply Payment validated: the only values the duplicate check reads and the save sends. */
+interface PaymentEntry {
+  customerId: string;
+  cents: number;
+  method: string;
+  reference: string;
+  notes: string;
+  allocations: { invoice_id: string; amount_cents: number }[];
+}
+
+const prepayMessage = (cents: number): string =>
+  `No invoices allocated. ${fmt(cents)} will be added as prepay credit. Continue?`;
+
 /* ─── Component ────────────────────────────────────────────────────────── */
 
 export default function PaymentAllocation() {
@@ -109,8 +128,19 @@ export default function PaymentAllocation() {
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<PaymentAllocationResult | null>(null);
 
-  // Prepay confirmation modal
-  const [prepayConfirmOpen, setPrepayConfirmOpen] = useState(false);
+  // A refused edited retry: stays on screen until the next attempt, a toast is too short for it.
+  const [retryRefused, setRetryRefused] = useState(false);
+
+  // A payment waiting on the user's answer. Each holds what was validated, so the answer saves exactly that.
+  const [prepayPayment, setPrepayPayment] = useState<PaymentEntry | null>(null);
+  const [duplicatePayment, setDuplicatePayment] = useState<{ match: DuplicatePayment; payment: PaymentEntry } | null>(null);
+
+  // Leaving the page during the duplicate check drops the save.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   /* ── Customer search (typeahead) ─────────────────────────────────────── */
 
@@ -228,6 +258,7 @@ export default function PaymentAllocation() {
     setReferenceNumber('');
     setNotes('');
     setLastResult(null);
+    setRetryRefused(false);
   }, []);
 
   /* ── Allocation helpers ────────────────────────────────────────────── */
@@ -312,39 +343,63 @@ export default function PaymentAllocation() {
       toast('error', 'Some allocations exceed invoice balances');
       return;
     }
+    const payment: PaymentEntry = {
+      customerId: selectedCustomer.id,
+      cents: checkCents,
+      method: paymentMethod,
+      reference: referenceNumber,
+      notes,
+      allocations: invoices
+        .filter((inv) => inv.allocated_cents > 0)
+        .map((inv) => ({
+          invoice_id: inv.invoice_id,
+          amount_cents: inv.allocated_cents,
+        })),
+    };
+    setRetryRefused(false);
+    setSubmitting(true);
+    let match: DuplicatePayment | null;
+    try {
+      match = await findDuplicatePayment(payment.customerId, payment.cents, payment.reference);
+    } catch (err: unknown) {
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'duplicate_payment_check' } });
+      if (mountedRef.current) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
+      setSubmitting(false);
+      return;
+    }
+    if (!mountedRef.current) return;
+    setSubmitting(false);
+    if (match) {
+      setDuplicatePayment({ match, payment });
+      return;
+    }
     // Confirm if 100% of check goes to prepay (no invoice allocations)
-    if (!hasAllocations && remaining > 0) {
-      setPrepayConfirmOpen(true);
+    if (payment.allocations.length === 0) {
+      setPrepayPayment(payment);
       return;
     }
 
-    executeSubmit();
+    void executeSubmit(payment);
   };
 
-  const executeSubmit = async () => {
-    if (!selectedCustomer || !profile) return;
-    setPrepayConfirmOpen(false);
+  const executeSubmit = async (payment: PaymentEntry) => {
+    if (!profile) return;
+    setPrepayPayment(null);
+    setDuplicatePayment(null);
     if (invoicesNotReady) {
       toast('error', 'Wait for the open invoices to load before applying the check.');
       return;
     }
     setSubmitting(true);
     try {
-      const allocations = invoices
-        .filter((inv) => inv.allocated_cents > 0)
-        .map((inv) => ({
-          invoice_id: inv.invoice_id,
-          amount_cents: inv.allocated_cents,
-        }));
-
       const idemKey = allocatePaymentIdem.getKey();
       const { data, error } = await supabase.rpc('allocate_payment', {
-        p_customer_id: selectedCustomer.id,
-        p_total_cents: checkCents,
-        p_allocations: allocations,
-        p_payment_method: paymentMethod,
-        p_reference_number: referenceNumber || undefined,
-        p_notes: notes || undefined,
+        p_customer_id: payment.customerId,
+        p_total_cents: payment.cents,
+        p_allocations: payment.allocations,
+        p_payment_method: payment.method,
+        p_reference_number: payment.reference || undefined,
+        p_notes: payment.notes || undefined,
         p_performed_by: profile.id,
         p_idempotency_key: idemKey,
       });
@@ -361,7 +416,8 @@ export default function PaymentAllocation() {
       toast('success', parts.join('. '));
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'allocate_payment' } });
-      toast('error', sanitizeError(err));
+      if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH)) setRetryRefused(true);
+      else toast('error', rpcAuthErrorMessage(err) ?? sanitizeError(err));
     }
     setSubmitting(false);
   };
@@ -431,12 +487,14 @@ export default function PaymentAllocation() {
                     type="text"
                     placeholder="Search by name or account #..."
                     value={customerSearch}
+                    disabled={submitting}
                     onChange={(e) => {
                       setCustomerSearch(e.target.value);
                       if (selectedCustomer) {
                         setSelectedCustomer(null);
                         setInvoices([]);
                         setLastResult(null);
+                        setRetryRefused(false);
                       }
                     }}
                     className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -444,6 +502,7 @@ export default function PaymentAllocation() {
                   {selectedCustomer && (
                     <button
                       onClick={clearCustomer}
+                      disabled={submitting}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                       aria-label="Clear customer"
                     >
@@ -492,6 +551,7 @@ export default function PaymentAllocation() {
                 <label className="block text-sm font-medium text-nav-dark mb-1">Method</label>
                 <select
                   value={paymentMethod}
+                  disabled={submitting}
                   onChange={(e) => setPaymentMethod(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
@@ -511,6 +571,7 @@ export default function PaymentAllocation() {
                   type="text"
                   placeholder="Check # or ref..."
                   value={referenceNumber}
+                  disabled={submitting}
                   onChange={(e) => setReferenceNumber(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
@@ -524,6 +585,7 @@ export default function PaymentAllocation() {
                 type="text"
                 placeholder="Optional payment notes..."
                 value={notes}
+                disabled={submitting}
                 onChange={(e) => setNotes(e.target.value)}
                 className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               />
@@ -542,6 +604,7 @@ export default function PaymentAllocation() {
                       type="text"
                       placeholder="0.00"
                       value={checkAmountInput}
+                      disabled={submitting}
                       onChange={(e) => setCheckAmountInput(e.target.value)}
                       aria-invalid={checkAmountRefused}
                       className={`w-full pl-10 pr-3 py-3 text-lg font-semibold bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green ${checkAmountRefused ? 'border-red-400' : 'border-gray-200'}`}
@@ -560,7 +623,7 @@ export default function PaymentAllocation() {
                     size="sm"
                     icon={<Zap className="w-4 h-4" />}
                     onClick={handleAutoAllocate}
-                    disabled={checkCents <= 0 || invoices.length === 0}
+                    disabled={submitting || checkCents <= 0 || invoices.length === 0}
                   >
                     Auto-Allocate
                   </Button>
@@ -570,7 +633,7 @@ export default function PaymentAllocation() {
                     icon={<RotateCcw className="w-4 h-4" />}
                     onClick={handleClearAllocations}
                     showChevron={false}
-                    disabled={!hasAllocations}
+                    disabled={submitting || !hasAllocations}
                   >
                     Clear
                   </Button>
@@ -644,6 +707,7 @@ export default function PaymentAllocation() {
                                     type="text"
                                     value={inv.allocated_cents > 0 ? toDollarDisplay(inv.allocated_cents) : ''}
                                     placeholder="0.00"
+                                    disabled={submitting}
                                     onChange={(e) => {
                                       const cents = parseDollarsToCents(e.target.value);
                                       // null = a third decimal digit. Refuse the keystroke rather than
@@ -673,6 +737,10 @@ export default function PaymentAllocation() {
                 )}
               </div>
             </Card>
+          )}
+
+          {retryRefused && (
+            <p role="alert" className="text-sm text-red-600">{PAYMENT_RETRY_REFUSED_MESSAGE}</p>
           )}
 
           {/* Summary Bar */}
@@ -735,12 +803,28 @@ export default function PaymentAllocation() {
       )}
 
       <ConfirmModal
-        open={prepayConfirmOpen}
-        onClose={() => setPrepayConfirmOpen(false)}
-        onConfirm={executeSubmit}
+        open={prepayPayment !== null}
+        onClose={() => setPrepayPayment(null)}
+        onConfirm={() => { if (prepayPayment) void executeSubmit(prepayPayment); }}
         title="Full Prepay Credit"
-        message={`No invoices allocated. ${fmt(checkCents)} will be added as prepay credit. Continue?`}
+        message={prepayPayment ? prepayMessage(prepayPayment.cents) : ''}
         confirmLabel="Continue"
+        variant="warning"
+      />
+
+      {/* One warning covers both questions: a second modal in the same spot would catch a double tap. */}
+      <ConfirmModal
+        open={duplicatePayment !== null}
+        onClose={() => setDuplicatePayment(null)}
+        onConfirm={() => { if (duplicatePayment) void executeSubmit(duplicatePayment.payment); }}
+        title="Possible Duplicate Payment"
+        message={duplicatePayment
+          ? [
+              duplicatePaymentMessage(duplicatePayment.match, duplicatePayment.payment.cents),
+              ...(duplicatePayment.payment.allocations.length === 0 ? [prepayMessage(duplicatePayment.payment.cents)] : []),
+            ].join(' ')
+          : ''}
+        confirmLabel="Record Anyway"
         variant="warning"
       />
     </div>

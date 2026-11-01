@@ -156,6 +156,11 @@ describe('sanitizeError', () => {
     expect(actor).toContain('Nothing was changed');
     expect(actor).toContain('another user');
     expect(actor).toContain('Reload');
+    // The raw text carries the key; the first attempt committed, so "nothing changed" would be false.
+    const edited = sanitizeError({ message: 'IDEMPOTENCY_ARGUMENT_MISMATCH: key allocate_payment:u:1 was already used for different allocate_payment arguments' });
+    expect(edited).toContain('earlier attempt');
+    expect(edited).toContain('may have saved');
+    expect(edited).not.toMatch(/allocate_payment|IDEMPOTENCY/);
     for (const token of ['IDEMPOTENCY_RECEIPT_MISSING', 'IDEMPOTENCY_RESULT_INVALID']) {
       const receipt = sanitizeError(token);
       expect(receipt).toContain('Nothing was changed now');

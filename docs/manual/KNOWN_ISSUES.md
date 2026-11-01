@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-10-30 for the quote cost-visibility rules only (main `1567b768` + local replay, not live); other evidence retains its stated dates.
+**Last verified:** 2026-11-01 for the quote price trail and expiry grant only (live reads after the apply); other evidence retains its stated dates.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 

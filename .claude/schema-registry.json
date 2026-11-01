@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-10-30",
+    "generated_at": "2026-11-01",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261029143642",
+    "migrations_high_water": "20261031221306",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -458,6 +458,16 @@
       "20261027080300_notification_sender_recorded",
       "20261027080400_any_rep_converts_booking",
       "20261028185500_order_edit_and_number_concurrency",
+      "20261029090000_quote_accepted_requires_order",
+      "20261029100000_booking_season_end_expiry",
+      "20261029110000_booking_over_draw",
+      "20261029120000_booking_price_override",
+      "20261029160000_cap_order_invoices_at_delivered",
+      "20261029160100_driver_delivery_issue_notifications",
+      "20261029160150_retire_allocate_payment_old_overload",
+      "20261029160200_chicago_payment_business_date",
+      "20261029160300_document_numbers_chicago_year",
+      "20261030090000_quote_cost_alerts",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1444,6 +1454,7 @@
     "purchase_order_item_cost_changes",
     "purchase_order_items",
     "quote_items",
+    "quote_price_changes",
     "quote_sections",
     "quote_versions",
     "rate_limit_log",
@@ -4268,6 +4279,24 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "quote_price_changes",
+      "constraint": "quote_price_changes_changed",
+      "def": "CHECK ((new_price_cents <> old_price_cents))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "quote_price_changes",
+      "constraint": "quote_price_changes_confirmation_pair",
+      "def": "CHECK (((grower_confirmed_by IS NULL) = (grower_confirmed_at IS NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "quote_price_changes",
+      "constraint": "quote_price_changes_raise_confirmed",
+      "def": "CHECK (((new_price_cents < old_price_cents) OR (grower_confirmed_by IS NOT NULL)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "quote_product_draws",
       "constraint": "quote_product_draws_quantity_drawn_check",
       "def": "CHECK ((quantity_drawn >= (0)::numeric))",
@@ -6130,6 +6159,20 @@
         "is_system",
         "created_at",
         "updated_at"
+      ]
+    },
+    "quote_price_changes": {
+      "no_default": [
+        "quote_id",
+        "quote_item_id",
+        "product_id",
+        "old_price_cents",
+        "new_price_cents",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "changed_at"
       ]
     },
     "quote_product_draws": {
@@ -8608,6 +8651,18 @@
       "created_by",
       "created_at",
       "updated_at"
+    ],
+    "quote_price_changes": [
+      "id",
+      "quote_id",
+      "quote_item_id",
+      "product_id",
+      "old_price_cents",
+      "new_price_cents",
+      "changed_by",
+      "changed_at",
+      "grower_confirmed_by",
+      "grower_confirmed_at"
     ],
     "quote_product_draws": [
       "id",

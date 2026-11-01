@@ -2,7 +2,7 @@
  * InvoiceDetail.test.tsx — Tests for the invoice detail/edit page
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { sanitizeError } from '../lib/errorSanitizer';
 
@@ -82,6 +82,7 @@ vi.mock('../lib/db', () => ({
     const message = e instanceof Error ? e.message : String((e as { message?: unknown } | null)?.message ?? '');
     return message === code || message.startsWith(`${code}:`) || message.startsWith(`${code} `);
   },
+  rpcAuthErrorMessage: () => null,
   RpcErrorCodes: new Proxy({}, { get: (_target, name) => name }),
 }));
 
@@ -674,6 +675,234 @@ describe('InvoiceDetail — cutover refusal retries', () => {
     const calls = mockRpc.mock.calls.filter(([name]) => name === 'save_invoice');
     expect(calls).toHaveLength(4);
     expect(calls[3][1]).toEqual(calls[0][1]);
+  });
+});
+
+describe('InvoiceDetail — Record Payment duplicate and retry warnings', () => {
+  const invoice = {
+    id: 'inv-pay', invoice_number: 'INV-PAY', invoice_type: 'chemical_sale', status: 'posted',
+    customer_id: 'cust-1', invoice_date: '2026-09-13', payment_terms: 'Net 30', due_date: null,
+    total_amount_cents: 50000, balance_cents: 50000, created_at: '2026-09-13T00:00:00Z',
+  };
+  const existing = { id: 'p1', reference_number: '1234', check_number: null, payment_date: '2026-10-05' };
+  const paid = { allocation_set_id: 's1', total_allocated_cents: 50000, prepay_created_cents: 0, invoices_paid: 1 };
+  const payCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'allocate_payment');
+
+  function tables(allocationSets: { data: unknown; error: unknown }) {
+    mockFrom.mockImplementation((table: string) => buildChain(
+      table === 'allocation_sets' ? allocationSets : { data: table === 'invoices' ? invoice : [], error: null },
+    ));
+  }
+
+  async function submitPayment() {
+    renderInvoiceDetail('inv-pay');
+    fireEvent.click(await screen.findByRole('button', { name: /Record Payment/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Record Payment' });
+    fireEvent.change(within(dialog).getByLabelText('Reference # (optional)'), { target: { value: '1234' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Record Payment/ }));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intentKeys.clear();
+    nextIntentKey.value = 0;
+    mockRpc.mockImplementation(() => Promise.resolve({ data: paid, error: null }));
+  });
+
+  it('warns on a matching payment, and Record Anyway saves it once', async () => {
+    tables({ data: [existing], error: null });
+    await submitPayment();
+
+    await screen.findByText('Possible Duplicate Payment');
+    expect(screen.queryByRole('dialog', { name: 'Record Payment' })).not.toBeInTheDocument();
+    expect(payCalls()).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Record Anyway/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Payment of $500.00 recorded'));
+    expect(payCalls()).toHaveLength(1);
+    expect(payCalls()[0][1]).toMatchObject({ p_total_cents: 50000, p_reference_number: '1234', p_payment_method: 'check' });
+  });
+
+  it('locks the form during the check, and leaving the invoice drops the save', async () => {
+    let finishCheck: (result: { data: unknown; error: unknown }) => void = () => undefined;
+    const held = new Promise<{ data: unknown; error: unknown }>((resolve) => { finishCheck = resolve; });
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain({ data: table === 'invoices' ? invoice : [], error: null });
+      if (table === 'allocation_sets') chain.then = held.then.bind(held);
+      return chain;
+    });
+    await submitPayment();
+
+    const dialog = await screen.findByRole('dialog', { name: 'Record Payment' });
+    await waitFor(() => expect(within(dialog).getByLabelText('Reference # (optional)')).toBeDisabled());
+    expect(within(dialog).getByLabelText('Amount ($)')).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: /^Cancel/ })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: 'Record Payment' })).toBeInTheDocument();
+
+    cleanup();
+    await act(async () => { finishCheck({ data: [], error: null }); await held; });
+    expect(payCalls()).toHaveLength(0);
+  });
+
+  function holdSave() {
+    let finishSave: (result: { data: unknown; error: unknown }) => void = () => undefined;
+    const heldSave = new Promise<{ data: unknown; error: unknown }>((resolve) => { finishSave = resolve; });
+    mockRpc.mockImplementation((name: string) => (name === 'allocate_payment' ? heldSave : Promise.resolve({ data: paid, error: null })));
+    return { heldSave, finish: (result: { data: unknown; error: unknown }) => finishSave(result) };
+  }
+  const refused = { data: null, error: { message: 'IDEMPOTENCY_ARGUMENT_MISMATCH: key k was already used for different allocate_payment arguments' } };
+
+  it('the form can close during the save, and the retry after a lost reply keeps its key', async () => {
+    tables({ data: [], error: null });
+    const save = holdSave();
+    await submitPayment();
+    await waitFor(() => expect(payCalls()).toHaveLength(1));
+
+    const dialog = screen.getByRole('dialog', { name: 'Record Payment' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /^Cancel/ })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Cancel/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Record Payment' })).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Record Payment/ })).toBeDisabled();
+
+    await act(async () => { save.finish({ data: null, error: { message: 'Failed to fetch' } }); await save.heldSave; });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Record Payment/ })).toBeEnabled());
+    mockRpc.mockImplementation(() => Promise.resolve({ data: paid, error: null }));
+    fireEvent.click(screen.getByRole('button', { name: /Record Payment/ }));
+    const reopened = await screen.findByRole('dialog', { name: 'Record Payment' });
+    fireEvent.click(within(reopened).getByRole('button', { name: /Record Payment/ }));
+
+    await waitFor(() => expect(payCalls()).toHaveLength(2));
+    expect(payCalls()[1][1].p_idempotency_key).toBe(payCalls()[0][1].p_idempotency_key);
+  });
+
+  it('a refusal that lands after the form closed reopens it with the message', async () => {
+    tables({ data: [], error: null });
+    const save = holdSave();
+    await submitPayment();
+    await waitFor(() => expect(payCalls()).toHaveLength(1));
+    const dialog = screen.getByRole('dialog', { name: 'Record Payment' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: /^Cancel/ })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Cancel/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Record Payment' })).not.toBeInTheDocument());
+
+    await act(async () => { save.finish(refused); await save.heldSave; });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Check Payment History, or ask an admin to');
+  });
+
+  describe('moving to another invoice', () => {
+    const invoiceB = { ...invoice, id: 'inv-b', invoice_number: 'INV-B', customer_id: 'cust-2', balance_cents: 9000 };
+
+    function tablesForTwoInvoices(allocationSets: Record<string, unknown>) {
+      mockFrom.mockImplementation((table: string) => {
+        const chain = table === 'allocation_sets' ? allocationSets : buildChain({ data: table === 'invoices' ? invoice : [], error: null });
+        if (table === 'invoices') {
+          let wanted = invoice;
+          chain.eq = (column: string, value: string) => {
+            if (column === 'id' && value === 'inv-b') wanted = invoiceB;
+            return chain;
+          };
+          chain.single = () => Promise.resolve({ data: wanted, error: null });
+          chain.maybeSingle = chain.single;
+        }
+        return chain;
+      });
+    }
+
+    async function startOnInvoiceA() {
+      render(
+        <MemoryRouter initialEntries={['/invoices/inv-pay']}>
+          <Link to="/invoices/inv-b">Invoice B</Link>
+          <Routes>
+            <Route path="/invoices/:id" element={<InvoiceDetail />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      fireEvent.click(await screen.findByRole('button', { name: /Record Payment/ }));
+      const dialog = await screen.findByRole('dialog', { name: 'Record Payment' });
+      fireEvent.change(within(dialog).getByLabelText('Reference # (optional)'), { target: { value: '1234' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: /Record Payment/ }));
+    }
+
+    it('clears a waiting warning, so its Record Anyway can never reach the next invoice', async () => {
+      tablesForTwoInvoices(buildChain({ data: [existing], error: null }));
+      await startOnInvoiceA();
+      await screen.findByText('Possible Duplicate Payment');
+
+      fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
+      // The loading spinner hides everything for a moment, so wait for invoice B itself.
+      await waitFor(() => expect(screen.getAllByText('INV-B').length).toBeGreaterThan(0));
+      expect(screen.queryByText('Possible Duplicate Payment')).not.toBeInTheDocument();
+      expect(payCalls()).toHaveLength(0);
+    });
+
+    it('drops the save and closes the form when the move happens during the check', async () => {
+      let finishCheck: (result: { data: unknown; error: unknown }) => void = () => undefined;
+      const held = new Promise<{ data: unknown; error: unknown }>((resolve) => { finishCheck = resolve; });
+      const heldChain = buildChain({ data: [], error: null });
+      heldChain.then = held.then.bind(held);
+      tablesForTwoInvoices(heldChain);
+      await startOnInvoiceA();
+      await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Record Payment' })).getByLabelText('Reference # (optional)')).toBeDisabled());
+
+      fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Record Payment' })).not.toBeInTheDocument());
+      await act(async () => { finishCheck({ data: [], error: null }); await held; });
+      expect(payCalls()).toHaveLength(0);
+      expect(screen.queryByText('Possible Duplicate Payment')).not.toBeInTheDocument();
+    });
+
+    async function moveDuringSave() {
+      tablesForTwoInvoices(buildChain({ data: [], error: null }));
+      const save = holdSave();
+      await startOnInvoiceA();
+      await waitFor(() => expect(payCalls()).toHaveLength(1));
+      fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
+      await waitFor(() => expect(screen.getAllByText('INV-B').length).toBeGreaterThan(0));
+      return save;
+    }
+
+    it('a save that finishes after the move reports itself and leaves the next invoice alone', async () => {
+      const save = await moveDuringSave();
+      expect(screen.getByRole('button', { name: /Record Payment/ })).toBeDisabled();
+      await act(async () => { save.finish({ data: paid, error: null }); await save.heldSave; });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Payment of $500.00 recorded'));
+      await waitFor(() => expect(screen.getByRole('button', { name: /Record Payment/ })).toBeEnabled());
+      expect(screen.getAllByText('INV-B').length).toBeGreaterThan(0);
+    });
+
+    it('a refusal that lands after the move is a message, not a form on the next invoice', async () => {
+      const save = await moveDuringSave();
+      await act(async () => { save.finish(refused); await save.heldSave; });
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('may have saved')));
+      expect(screen.queryByRole('dialog', { name: 'Record Payment' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('Cancel returns to the filled-in form with nothing saved', async () => {
+    tables({ data: [existing], error: null });
+    await submitPayment();
+    await screen.findByText('Possible Duplicate Payment');
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Record Payment' });
+    expect(within(dialog).getByLabelText('Reference # (optional)')).toHaveValue('1234');
+    expect(payCalls()).toHaveLength(0);
+  });
+
+  it('a failed duplicate check saves nothing', async () => {
+    tables({ data: null, error: { message: 'read failed' } });
+    await submitPayment();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This attempt was not saved')));
+    expect(payCalls()).toHaveLength(0);
+  });
+
+  it('a refused edited retry stays in the form and points the user at Payment History', async () => {
+    tables({ data: [], error: null });
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_ARGUMENT_MISMATCH: key k was already used for different allocate_payment arguments' } }));
+    await submitPayment();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Check Payment History, or ask an admin to');
+    expect(mockToast).not.toHaveBeenCalled();
   });
 });
 

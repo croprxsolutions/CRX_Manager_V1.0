@@ -181,7 +181,7 @@ Migrations `20260714220000` through `20260714224000` preserve existing public si
 - `delete_invoices(p_invoice_ids, p_performed_by, p_idempotency_key)` → integer — **admin-only** soft-delete of draft/unposted/voided invoices (posted/paid/overdue skipped); writes an `invoice_deleted` financial_audit_log row per invoice; idempotent; strict-actor. Replaces the raw UI `.update({deleted_at})` (nightly-debug #9). Gate matches the invoices RLS (`is_admin()`). **U8 (2026-07-06):** also cancels+zeroes a deleted job invoice's pending commission(s) and releases the stranded job.
 - `record_invoice_payment()` — record payment against a specific invoice
 - ~~`record_payment()`~~ — **DROPPED 2026-06-08** (migration `20260608145944`, audit AW-3): deprecated + unreachable; use `allocate_payment` / `record_invoice_payment` instead
-- `allocate_payment()` — allocate/re-allocate payment amounts across invoices
+- `allocate_payment()` — allocate/re-allocate payment amounts across invoices. An over-balance allocation is refused with the amounts in dollars; a same-key retry with different details raises `IDEMPOTENCY_ARGUMENT_MISMATCH`, and only after the first attempt committed, so the pages tell the user to check Payment History
 - `void_payment(p_allocation_set_id, p_reason, p_performed_by, p_idempotency_key)` → jsonb — admin-only, strict-actor. Reverses a recorded payment/allocation set, re-opening the affected invoices' balances and reversing any overpayment prepay credit.
 - `unapply_credit_memo(p_credit_memo_id, p_reason, p_performed_by, p_idempotency_key)` → jsonb — admin-only, strict-actor. Un-applies a credit memo from the invoices it was applied to, restoring their balances.
 

@@ -96,3 +96,39 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
   await expect(page.getByRole('spinbutton', { name: `Tier 1 price for ${productName}` })).toBeVisible();
   await page.screenshot({ path: 'scripts/local-app/.state/pm2-list.png' });
 });
+
+test('moving between products keeps Stay and Leave honest', async ({ page }) => {
+  await signIn(page);
+  const run = Date.now();
+  const [first, second] = [`Route One ${run} (invented)`, `Route Two ${run} (invented)`];
+  const ids: string[] = await page.evaluate(async (names) => {
+    const path = '/src/lib/db.ts';
+    const { supabase } = await import(/* @vite-ignore */ path);
+    const rows = names.map((product_name) => ({ product_name, product_form: 'liquid' }));
+    const { data, error } = await supabase.from('products').insert(rows).select('id, product_name');
+    if (error) throw new Error(error.message);
+    return names.map((name) => data.find((row: { product_name: string }) => row.product_name === name).id);
+  }, [first, second]);
+
+  await page.goto(`/products/${ids[0]}`);
+  await expect(page.getByLabel(/product name/i)).toHaveValue(first);
+  // An in-app move, so the same router carries it, as the search box does.
+  await page.evaluate((id) => {
+    window.history.pushState({}, '', `/products/${id}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, ids[1]);
+  await expect(page.getByLabel(/product name/i)).toHaveValue(second);
+
+  await page.getByLabel('SKU').fill('UNSAVED-SKU');
+  await page.goBack();
+  await page.getByRole('button', { name: 'Stay' }).click();
+  await expect(page.getByLabel(/product name/i)).toHaveValue(second);
+  await expect(page.getByLabel('SKU')).toHaveValue('UNSAVED-SKU');
+
+  await page.goBack();
+  await page.getByRole('button', { name: 'Leave' }).click();
+  await expect(page.getByLabel(/product name/i)).toHaveValue(first);
+  await expect(page.getByLabel('SKU')).toHaveValue('');
+  await page.goto('/products');
+  await expect(page.getByRole('button', { name: 'Stay' })).toHaveCount(0);
+});

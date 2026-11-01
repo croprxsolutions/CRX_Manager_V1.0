@@ -308,7 +308,7 @@ Two things sit outside the block and differ by target:
       FROM public.delivery_external_billings b
       LEFT JOIN public.deliveries d ON d.id = b.delivery_id
       LEFT JOIN public.orders o ON o.id = d.order_id
-     WHERE b.reason LIKE 'Billed outside CRX in Chem Man (spring 2026%'
+     WHERE b.reason = 'Billed outside CRX in Chem Man (spring 2026, before CRX invoicing was in use); owner confirmed 2026-10-07'
   ), release_expected (order_id, product_id, quantity) AS (
     SELECT o.id, oi.product_id, sum(oi.quantity_remaining)
       FROM public.order_items oi
@@ -337,15 +337,18 @@ Two things sit outside the block and differ by target:
          - ROUND(COALESCE(cost_per_unit, 0) * COALESCE(total_units_needed, 0), 2))
   UNION ALL
   SELECT 'spring deliveries billed in Chem Man',
-         (SELECT count(*) FROM chem_man_recorded) = 53
+         (SELECT count(*) FROM chem_man_listed) = 53
+         AND (SELECT count(*) FROM chem_man_recorded) = 53
          AND NOT EXISTS (SELECT * FROM chem_man_listed EXCEPT SELECT * FROM chem_man_recorded)
+         AND NOT EXISTS (SELECT * FROM chem_man_recorded EXCEPT SELECT * FROM chem_man_listed)
   UNION ALL
   SELECT 'deleted-order reservations released',
          (SELECT count(*) FROM release_expected) = 32
          AND (SELECT count(DISTINCT product_id) FROM release_expected) = 28
          AND (SELECT sum(quantity) FROM release_expected) = 4643.1
          AND (SELECT count(*) FROM release_recorded) = 32
-         AND NOT EXISTS (SELECT * FROM release_expected EXCEPT SELECT * FROM release_recorded);
+         AND NOT EXISTS (SELECT * FROM release_expected EXCEPT SELECT * FROM release_recorded)
+         AND NOT EXISTS (SELECT * FROM release_recorded EXCEPT SELECT * FROM release_expected);
   ```
 
   The test copy has no business rows, so this order has only been run on an empty

@@ -150,17 +150,21 @@ assert.equal(
 // The data proof must name the same deliveries the migration recorded, or a typo in the
 // README would refuse a good restore or, worse, stop checking a real delivery.
 const listedDeliveries = (text) =>
-  [...text.matchAll(/\('(DEL-\d{5})', '(ORD-\d{4}-\d{4})'\)/g)]
+  [...text.replace(/--.*$/gm, '').matchAll(/\('(DEL-\d{5})', '(ORD-\d{4}-\d{4})'\)/g)]
     .map((match) => `${match[1]} ${match[2]}`)
     .sort();
-const migrationDeliveries = listedDeliveries(
-  readFileSync(
-    path.join(root, 'supabase', 'migrations', '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql'),
-    'utf8',
-  ),
+const migrationText = readFileSync(
+  path.join(root, 'supabase', 'migrations', '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql'),
+  'utf8',
 );
+const migrationDeliveries = listedDeliveries(migrationText);
 assert.equal(migrationDeliveries.length, 53, 'the migration lists 53 deliveries');
 const readme = readFileSync(path.join(root, 'supabase', 'baselines', 'README.md'), 'utf8');
+assert.equal(
+  readme.includes(`b.reason = ${migrationText.match(/'Billed outside CRX[^']*'/)[0]}`),
+  true,
+  'the README data proof must look for the exact reason the migration recorded',
+);
 const proofListStart = readme.indexOf('WITH chem_man_listed');
 const proofListEnd = readme.indexOf('chem_man_recorded AS', proofListStart);
 assert.equal(proofListStart >= 0 && proofListEnd > proofListStart, true, 'the data proof delivery list not found');

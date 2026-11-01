@@ -107,8 +107,9 @@ export function assertLocalState(state) {
   if (!/^[0-9a-f]{64}$/.test(state.LOCAL_JWT_SECRET ?? '')) {
     throw new Refused('LOCAL_JWT_SECRET is not a secret this test app generated.');
   }
-  for (const name of ['LOCAL_ANON_KEY', 'LOCAL_SERVICE_KEY']) {
-    if (jwtPayload(state[name])?.iss !== ISSUER || looksLive(state[name]) || !signedBy(state.LOCAL_JWT_SECRET, state[name])) {
+  for (const [name, role] of [['LOCAL_ANON_KEY', 'anon'], ['LOCAL_SERVICE_KEY', 'service_role']]) {
+    const payload = jwtPayload(state[name]);
+    if (payload?.iss !== ISSUER || payload.role !== role || looksLive(state[name]) || !signedBy(state.LOCAL_JWT_SECRET, state[name])) {
       throw new Refused(`${name} is not a key this test app generated.`);
     }
   }
@@ -134,7 +135,7 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
   let source = '';
   try {
     // A cold Vite can take this long on its first module. Timing out still refuses.
-    const response = await fetchFn(`${APP_URL}/src/lib/db.ts`, { signal: AbortSignal.timeout(60000) });
+    const response = await fetchFn(`${APP_URL}/src/lib/db.ts`, { redirect: 'manual', signal: AbortSignal.timeout(60000) });
     source = response.ok ? await response.text() : '';
   } catch {
     source = '';
@@ -148,7 +149,8 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
   const ours = served.VITE_SUPABASE_URL === API_URL
     && Boolean(anonKey) && served.VITE_SUPABASE_ANON_KEY === anonKey
     && !served.VITE_MAPBOX_TOKEN
-    && !served.VITE_SENTRY_DSN;
+    && !served.VITE_SENTRY_DSN
+    && Object.keys(served).filter((key) => key.startsWith('VITE_')).length === 4;
   if (!ours) throw new Refused(`An unknown frontend is running on port ${APP_PORT}. Stop it first.`);
 }
 

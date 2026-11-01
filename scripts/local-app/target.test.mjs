@@ -18,6 +18,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(HERE, 'app.mjs');
 const PROD_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
 const PROD_DB = 'postgresql://postgres:x@db.rhyzpcqhnizqbxphqdkr.supabase.co:5432/postgres';
+// Everything below assumes a shell with nothing live in it, the Docker calls here included.
+assertCleanEnvironment();
+
 const COMMANDS = ['rebuild', 'seed', 'start', 'frontend', 'stop', 'status', 'test'];
 
 const PASSWORD = '0123456789abcdef0123456789abcdef';
@@ -93,6 +96,7 @@ describe('saved settings', () => {
     ['another port', { LOCAL_API_PORT: '54321' }],
     ['a live key', { LOCAL_SERVICE_KEY: liveKey }],
     ['a live anon key', { LOCAL_ANON_KEY: liveKey }],
+    ['the service key in the place of the browser key', { LOCAL_ANON_KEY: localKey('service_role') }],
     ['a key that is not a token', { LOCAL_ANON_KEY: 'x' }],
     ['a key claiming to be local that another secret signed', { LOCAL_SERVICE_KEY: signed('cd'.repeat(32), { iss: ISSUER, role: 'service_role' }) }],
     ['a test email carrying SQL', { LOCAL_TEST_EMAIL: "x'; DROP TABLE y; --" }],
@@ -110,6 +114,13 @@ describe('running frontend', () => {
   it('is fine when nothing is running', async () => {
     await assert.doesNotReject(assertFrontendIsOurs(localKey('anon'), { isOpen: async () => false, fetchFn: async () => assert.fail('must not fetch') }));
   });
+  it('never follows a redirect away from the app', async () => {
+    const fetchFn = async (_, options) => {
+      assert.equal(options.redirect, 'manual');
+      return new Response(null, { status: 302, headers: { Location: PROD_URL } });
+    };
+    await assert.rejects(assertFrontendIsOurs(localKey('anon'), { isOpen: portOpen, fetchFn }), Refused);
+  });
   it('accepts the test app', async () => {
     await assert.doesNotReject(assertFrontendIsOurs(localKey('anon'), { isOpen: portOpen, fetchFn: servedBy(viteModule(ourEnv)) }));
   });
@@ -117,6 +128,7 @@ describe('running frontend', () => {
     ['one wired to production', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_URL: PROD_URL }))],
     ['one using a live key', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_ANON_KEY: liveKey }))],
     ['a look-alike with a key of its own', servedBy(viteModule({ ...ourEnv, VITE_SUPABASE_ANON_KEY: jwt({ iss: ISSUER, role: 'anon' }) }))],
+    ['one with an extra setting from a .env file', servedBy(viteModule({ ...ourEnv, VITE_SERVICE_ROLE_KEY: 'x' }))],
     ['one with map calls switched on', servedBy(viteModule({ ...ourEnv, VITE_MAPBOX_TOKEN: 'pk.x' }))],
     ['one with error reporting switched on', servedBy(viteModule({ ...ourEnv, VITE_SENTRY_DSN: 'https://a@b.ingest.sentry.io/1' }))],
     ['a built site', servedBy('<html></html>')],
@@ -169,11 +181,16 @@ describe('every command refuses before it changes anything', () => {
   const NO_ROUTE_DB = 'postgresql://postgres:x@db.rhyzpcqhnizqbxphqdkr.supabase.co.invalid:5432/postgres';
   // What identifies a container and its last start, so any restart or replacement shows.
   const containers = () => {
-    const ids = spawnSync('docker', ['ps', '-aq', '--filter', 'label=com.docker.compose.project=crx-local-app'], { encoding: 'utf8' }).stdout.trim();
+    const docker = (args) => {
+      const result = spawnSync('docker', args, { encoding: 'utf8' });
+      assert.equal(result.status, 0, 'These tests need Docker running.');
+      return result.stdout;
+    };
+    const ids = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project=crx-local-app']).trim();
     const label = ['--filter', 'label=com.docker.compose.project=crx-local-app', '--format', '{{.Name}}'];
-    const others = ['volume', 'network'].map((kind) => spawnSync('docker', [kind, 'ls', ...label], { encoding: 'utf8' }).stdout).join();
+    const others = ['volume', 'network'].map((kind) => docker([kind, 'ls', ...label])).join();
     if (!ids) return others;
-    return others + spawnSync('docker', ['inspect', '-f', '{{.Id}} {{.State.Status}} {{.State.StartedAt}}', ...ids.split(/\s+/)], { encoding: 'utf8' }).stdout;
+    return others + docker(['inspect', '-f', '{{.Id}} {{.State.Status}} {{.State.StartedAt}}', ...ids.split(/\s+/)]);
   };
 
   function refused(command, { state = goodState(), env = {} }) {

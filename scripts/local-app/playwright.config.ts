@@ -31,6 +31,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // A dead proxy for everything but this computer, so a stray request cannot leave, IP addresses included.
     proxy: { server: 'http://127.0.0.1:9', bypass: '127.0.0.1' },
+    launchOptions: { args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] },
   },
   webServer: {
     command: 'node scripts/local-app/app.mjs frontend',

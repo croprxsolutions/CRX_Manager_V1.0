@@ -6,6 +6,8 @@ import appConfig from '../../vite.config.ts';
 export default mergeConfig(appConfig, {
   root: fileURLToPath(new URL('../..', import.meta.url)),
   cacheDir: fileURLToPath(new URL('./.state/vite', import.meta.url)),
+  // An empty folder, so a checkout's .env files are never loaded at all.
+  envDir: fileURLToPath(new URL('./.state/no-env', import.meta.url)),
   // Vite serves the whole checkout, so keep the local keys and any private data out of its reach.
   server: { fs: { deny: ['**/.state/**', '**/backups/**', '**/*.dump', '**/docs/claude-memory/**'] } },
   plugins: [{

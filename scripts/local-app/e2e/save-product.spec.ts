@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { API_URL } from '../target.mjs';
+import { API_URL, APP_URL } from '../target.mjs';
 
 test('nobody can sign themselves up', async ({ request }) => {
   const response = await request.post(`${API_URL}/auth/v1/signup`, {
@@ -66,5 +66,5 @@ test('signs in, saves a test product, and the save survives a reload, on localho
   await page.screenshot({ path: 'scripts/local-app/.state/proof.png' });
   console.warn(`hosts seen: ${[...hosts].join(', ')}`);
   expect(hosts.size).toBeGreaterThan(0);
-  expect([...hosts].filter((host) => !host.startsWith('127.0.0.1:'))).toEqual([]);
+  expect([...hosts].sort()).toEqual([new URL(API_URL).host, new URL(APP_URL).host].sort());
 });

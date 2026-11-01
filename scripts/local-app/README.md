@@ -33,8 +33,8 @@ line. `.state/build.json` holds the full list.
   another machine, a frontend on port 5199 that is not wired to this test copy, a stack of the same name
   from somewhere else, and a gateway published beyond loopback. `target.mjs` holds the checks.
 - **Commands pass on no credentials.** Child programs get a short list of variables, not the whole shell.
-- **The frontend overrides a checkout's `.env`.** It sets the Supabase address and key itself, and sets the
-  Mapbox and Sentry values empty.
+- **The frontend never reads a checkout's `.env`.** It sets the Supabase address and key itself, and sets
+  the Mapbox and Sentry values empty.
 - **The services have no way out.** They sit on a Docker network with no route off it, and `rebuild`
   checks that. Only the gateway has a second network, and it publishes only to `127.0.0.1`.
 - **The browser cannot leave.** The Playwright config sends everything but `127.0.0.1` to a dead proxy, IP

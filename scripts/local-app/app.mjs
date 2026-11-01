@@ -189,6 +189,9 @@ AS $live_crlf_close$${body}$live_crlf_close$;\n${sql}`;
 function pushPostBaselineMigrations(state) {
   const files = text(run(process.execPath, ['scripts/list-post-baseline-migrations.mjs'])).split(/\r?\n/).filter(Boolean);
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));
+  // The password travels in the environment so it never shows in a process list.
+  const urlWithoutPassword = state.LOCAL_DB_URL.replace(`:${state.LOCAL_DB_PASSWORD}@`, '@');
+  const env = childEnv({ PGPASSWORD: state.LOCAL_DB_PASSWORD });
   try {
     mkdirSync(path.join(workdir, 'supabase', 'migrations'), { recursive: true });
     // Not `supabase init`: CLI 2.109.1 writes a [local_smtp] block it then refuses to parse.
@@ -204,13 +207,13 @@ function pushPostBaselineMigrations(state) {
     const ledgerFile = (name) => `${name.slice(0, 14)}_${name}`;
     const push = (names) => {
       for (const name of names) writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(name)), migrationBytes(`supabase/migrations/${name}`));
-      const db = ['--workdir', workdir, 'db', 'push', '--db-url', state.LOCAL_DB_URL, '--include-all'];
-      const dry = run('supabase', [...db, '--dry-run']);
+      const db = ['--workdir', workdir, 'db', 'push', '--db-url', urlWithoutPassword, '--include-all'];
+      const dry = run('supabase', [...db, '--dry-run'], { env });
       const planned = [...`${dry.stdout}${dry.stderr}`.matchAll(/\d{14}_\S+\.sql/g)].map(([name]) => name);
       if (planned.join() !== names.map(ledgerFile).join()) {
         throw new Error(`The push plan differs from the approved list (${planned.length} vs ${names.length}). Nothing was pushed.`);
       }
-      if (names.length) run('supabase', db, { input: 'y\n' });
+      if (names.length) run('supabase', db, { input: 'y\n', env });
     };
     // One-shot data fixes target live rows and are withheld from the plan. This database has no
     // business rows to correct, so each is recorded as done at its place in the order: later
@@ -224,7 +227,7 @@ function pushPostBaselineMigrations(state) {
       push(names.slice(done, next));
       done = next;
       writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(`${stem}.sql`)), '');
-      run('supabase', ['--workdir', workdir, 'migration', 'repair', stem.slice(0, 14), '--status', 'applied', '--db-url', state.LOCAL_DB_URL]);
+      run('supabase', ['--workdir', workdir, 'migration', 'repair', stem.slice(0, 14), '--status', 'applied', '--db-url', urlWithoutPassword], { env });
     }
     push(names.slice(done));
   } finally {
@@ -259,6 +262,7 @@ async function rebuild() {
   await preflight({ needState: false });
   stopFrontend();
   const state = readState() ?? createState();
+  rmSync(BUILD_FILE, { force: true });
   compose(['down', '-v', '--remove-orphans']);
   await startDatabase(state);
   await startServices(state);
@@ -275,9 +279,15 @@ async function rebuild() {
   await startServices(state);
   await seed(state);
   const ledgerRows = scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;');
-  const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), builtAt: new Date().toISOString(), ledgerRows, migrations };
+  const uncommittedChanges = text(run('git', ['status', '--porcelain'])) !== '';
+  const build = { commit: text(run('git', ['rev-parse', 'HEAD'])), uncommittedChanges, builtAt: new Date().toISOString(), ledgerRows, migrations };
   writeFileSync(BUILD_FILE, JSON.stringify(build, null, 2));
-  console.log(`Rebuilt from ${build.commit}: ${migrations.length} migrations pushed, ${ledgerRows} ledger rows.`);
+  console.log(`Rebuilt from ${describeBuild(build)}.`);
+}
+
+function describeBuild(build) {
+  const source = build.uncommittedChanges ? `${build.commit} plus uncommitted changes` : build.commit;
+  return `${source}: ${build.migrations.length} migrations, ${build.ledgerRows} ledger rows`;
 }
 
 // The sealed services, the database among them, must have no way out, or a stray job could reach
@@ -308,6 +318,7 @@ const VITE = ['node_modules/vite/bin/vite.js', '--config', 'scripts/local-app/vi
 
 async function start() {
   const state = await preflight();
+  if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
   await startDatabase(state);
   await startServices(state);
   if (!(await portIsOpen(APP_PORT))) {
@@ -324,7 +335,10 @@ async function frontend() {
 }
 
 async function test() {
-  await preflight();
+  const state = await preflight();
+  if (!existsSync(BUILD_FILE)) throw new Refused('The last rebuild did not finish. Run: node scripts/local-app/app.mjs rebuild');
+  await startDatabase(state);
+  await startServices(state);
   run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts'], { stdio: 'inherit' });
 }
 
@@ -334,7 +348,7 @@ async function status() {
   console.log(text(compose(['ps', '--format', '{{.Service}} {{.Status}}'])) || 'The back end is stopped.');
   if (existsSync(BUILD_FILE)) {
     const build = JSON.parse(readFileSync(BUILD_FILE, 'utf8'));
-    console.log(`Built ${build.builtAt} from ${build.commit}: ${build.migrations.length} migrations, ${build.ledgerRows} ledger rows`);
+    console.log(`Built ${build.builtAt} from ${describeBuild(build)}`);
   }
 }
 

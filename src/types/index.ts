@@ -2282,23 +2282,25 @@ export interface DetailedStatementItem {
 
 export interface AllocationSet {
   id: string;
-  entity_type: 'order' | 'invoice';
+  entity_type: 'order' | 'invoice' | 'payment';
   entity_id: string;
   version: number;
   created_by: string | null;
   is_active: boolean;
   notes: string | null;
   customer_id: string | null;
-  total_payment_cents: number;
-  total_allocated_cents: number;
+  total_payment_cents: number | null;
+  total_allocated_cents: number | null;
   payment_method: string | null;
   reference_number: string | null;
   check_number: string | null;
   payment_date: string | null;
   season: number | null;
   created_at: string;
-  updated_at: string;
+  updated_at: string | null;
 }
+
+export type InvoiceLineAllocation = Database['public']['Tables']['invoice_line_allocations']['Row'];
 
 export interface PrepayCredit {
   id: string;

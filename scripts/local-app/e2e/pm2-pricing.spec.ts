@@ -84,6 +84,7 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
 
   // Opening and saving a product whose margins set its prices changes no price.
   await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.getByText(/product (saved|updated)/i).first()).toBeVisible();
   await page.reload();
   expect(await dbRow(page, id)).toEqual(saved);
 

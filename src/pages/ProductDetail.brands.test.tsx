@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import type { Product } from '../types';
 
 const H = vi.hoisted(() => ({
-  product: {} as Product,
+  product: {} as Product | null,
   routeId: 'product-1',
   invoke: vi.fn(),
   rpc: vi.fn(),
@@ -86,7 +86,7 @@ vi.mock('../lib/db', () => {
   }
 
   const from = vi.fn((table: string) => table === 'products'
-    ? chainable({ data: [H.product], error: null })
+    ? chainable({ data: H.product ? [H.product] : [], error: null })
     : chainable({ data: [], error: null }));
 
   return {
@@ -168,10 +168,9 @@ describe('ProductDetail brands section', () => {
     expect(await screen.findByTestId('brands-section')).toHaveTextContent('product-1: Test Herbicide');
   });
 
-  it('withholds the brands section while the loaded product is a different one than the page', async () => {
-    // The page moved to product-2 but the only product on hand is still product-1: its name must
-    // never reach product-2's brand section, where a name suggestion could be saved to the wrong product.
+  it('withholds the brands section when the requested product is missing', async () => {
     H.routeId = 'product-2';
+    H.product = null;
     render(<ProductDetail />);
     expect(await screen.findByText('Product not found')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('Test Herbicide')).not.toBeInTheDocument();

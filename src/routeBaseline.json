@@ -1183,7 +1183,7 @@
       "url": "/products/id-123",
       "pageKey": "products",
       "page": {
-        "type": "lazy pages/ProductDetail"
+        "type": "lazy components/ProductDetailRoute"
       },
       "access": {
         "admin": "/products/id-123 shows /products/:id",

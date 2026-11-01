@@ -31,6 +31,7 @@ import {
   defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
+  pricingMarginTextIsValid,
   previewProductPricingChanges,
   sha256Hex,
   type PricingAcknowledgement,
@@ -638,8 +639,8 @@ export default function Products() {
               const field = `tier${tier}_margin_percent` as const;
               const stored = original[`tier${tier}_margin` as const];
               const value = inputDecimal(fields[field] ?? storedMarginPercent(stored));
-              if (value === null) {
-                throw new Error(`Enter all three margins for ${original.product_name}.`);
+              if (value === null || !pricingMarginTextIsValid(value)) {
+                throw new Error(`Enter each net margin for ${original.product_name} as a plain number below 100.`);
               }
               row[field] = value;
             }

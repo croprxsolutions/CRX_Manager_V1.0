@@ -60,6 +60,10 @@ export function formatPricingMarginPercent(value: number): string {
   return (value * 100).toFixed(8).replace(/\.?0+$/, '');
 }
 
+export function pricingMarginTextIsValid(text: string): boolean {
+  return /^[0-9]+([.][0-9]+)?$/.test(text) && Number(text) < 100;
+}
+
 export function assertPricingPreviewRowsSafe(
   rows: ReadonlyArray<{
     pricing_mode: PricingMode | '';

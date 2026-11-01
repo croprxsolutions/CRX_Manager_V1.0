@@ -21,6 +21,7 @@ import {
   defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
+  pricingMarginTextIsValid,
   previewProductPricingChanges,
   sha256Hex,
 } from './productPricing';
@@ -152,6 +153,16 @@ describe('formatPricingMarginPercent', () => {
 
   it('rejects non-finite values before they reach the pricing RPC', () => {
     expect(() => formatPricingMarginPercent(Number.NaN)).toThrow('finite number');
+  });
+});
+
+describe('pricingMarginTextIsValid', () => {
+  it.each(['25', '22.5', '0', '99.99'])('accepts %s', (text) => {
+    expect(pricingMarginTextIsValid(text)).toBe(true);
+  });
+
+  it.each(['.5', '100', '1e1', ''])('rejects %s', (text) => {
+    expect(pricingMarginTextIsValid(text)).toBe(false);
   });
 });
 

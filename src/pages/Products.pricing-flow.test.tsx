@@ -139,6 +139,20 @@ vi.mock('../components/ui/EditableDataTable', () => ({
       >
         Test inline pricing save
       </button>
+      {['.5', '100', '1e1', ''].map((margin) => (
+        <button key={margin} disabled={data.length === 0} onClick={() => void onSave(new Map([[
+          data[0].id,
+          {
+            pricing_mode: 'margin_driven',
+            current_cost: '50',
+            tier1_margin_percent: margin,
+            tier2_margin_percent: '15',
+            tier3_margin_percent: '10',
+          },
+        ]])).catch(() => {})}>
+          Test invalid margin {margin || 'empty'}
+        </button>
+      ))}
       {[null, ''].map((cost, index) => (
         <button key={index} disabled={data.length === 0} onClick={() => void onSave(new Map([[
           data[0].id, { pricing_mode: 'price_driven', current_cost: cost },
@@ -251,6 +265,17 @@ describe('Products governed inline pricing flow', () => {
         tier3_price: '55.56',
       })],
     })));
+  });
+
+  it.each(['.5', '100', '1e1', ''])('refuses invalid margin %s before the reason dialog', async (margin) => {
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: `Test invalid margin ${margin || 'empty'}` }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error', `Enter each net margin for ${product.product_name} as a plain number below 100.`,
+    ));
+    expect(screen.queryByLabelText('Source (supplier, document, date)')).not.toBeInTheDocument();
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
 
   it('opens a margins-only row in margin-driven mode', async () => {

@@ -65,12 +65,14 @@
 - **Keep awake:** granted until the session goes idle.
 - **Test app:** stopped frontend, database built from `bfcb38d7c` (Wave 1's #1255) with 172 migrations. Shared with the landing session; take turns, never rebuild over its work.
 - **Staleness check:** commits since 2026-10-29 on the watched screens: `fa0fafaef` (#1248), `b0142dfa7` (#1247), `c57abe6d6` (#1245), `2ff06c483` (#1243). None does a Wave 2 package. No package is REFUTED by the staleness check.
+- **Baseline:** typecheck, build and lint passed. Vitest: 6,917 passed, 1 failed, 123 skipped; the failure was `csvExport`, from my switching the tree while it ran, and that file passed 22 of 22 alone.
+- **Wave 1 landing:** #1250, #1252 and #1255 all merged during the run, so every Wave 1 PR is on `main` from `906032b34`.
 
 ## Wave 2 packages
 
 | Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
 |---|---|---|---|---|---|---|---|---|
-| WP-PM-12a Change history | ⬜ | | | | | | | |
+| WP-PM-12a Change history | DRAFT, CI and CodeRabbit pending | `pm/wp-pm-12a-change-history` | [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266) | Codex Sol xhigh, 2 rounds | 1 round: MED refuted, LOW deferred | compliance, RLS, drift: fixed in round 2; H2 kept as a gate | Mason-gated, `20261102100000`, not applied | clean on `2bb7bfdfb` |
 | WP-PM-3 Turning products off | ⬜ | | | | | | | |
 | WP-PM-8 Setup checks | ⬜ | | | | | | | |
 | WP-PM-9 Forms, units, containers | ⬜ | | | | | | | |
@@ -83,3 +85,6 @@
 | WP-PM-12b Corrections | ⬜ | | | | | | | |
 
 ## Wave 2 proof
+
+**WP-PM-12a Change history** (head `2bb7bfdfb`, test app rebuilt from that commit, 173 migrations, 1,090 ledger rows). The refuse-to-truncate trigger trips the owner-approval classifier, a false positive that stays in place, so the live apply needs Mason's own approval.
+PROOF — Ran: real-schema proof on `cca8a88d8`; full Vitest, code-health, check:docs and test:agent-workflows on `cca8a88d8`; after merging main, typecheck, 9 targeted test files and the 20 test-app browser tests on `2bb7bfdfb`; lint on `cca8a88d8`. · Saw: `PRODUCT_CHANGE_HISTORY_PROOF_PASS`; 6,964 tests passed, 123 skipped, none failed; 177 targeted passed; 20 of 20 browser tests passed, including a saved signal word showing the staff member's name after reload. · Not verified: the full suite and the database proof were not rerun after the #1255 merge; no dedicated proof for multi-row update, product-delete refusal, `use_timing` rewrite or trigger order; Vercel preview click-through owed to a Mason session.

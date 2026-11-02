@@ -11,9 +11,10 @@
 -- quantity_available + (counted - expected). A delivery or receipt made while the count was open
 -- changed quantity_available AND is already in what the warehouse counted, so it landed twice.
 --
--- 1. Freeze. A BEFORE UPDATE trigger on inventory refuses any change to quantity_available (or to
---    product_id, which would swap the counted product; no app path edits it, and location changes
---    are already refused by guard_inventory_location_change) of an
+-- 1. Freeze. A BEFORE UPDATE trigger on inventory refuses any change to quantity_available, or to
+--    product_id or location (which would swap the counted product or move the row out of the
+--    counted warehouse; no app path edits them, and guard_inventory_location_change lets an empty
+--    row move), of an
 --    inventory row (one product at one location) that is a line of an in_progress cycle count,
 --    with INVENTORY_FROZEN_FOR_CYCLE_COUNT naming the product, location and count. Every stock
 --    path writes that column (receiving and quick receive, receipt reversal, delivery complete /
@@ -21,9 +22,11 @@
 --    trigger covers them all, including ones added later. quantity_prebooked-only changes (taking
 --    or editing orders) and holds (which never touch inventory) are not frozen: they do not change
 --    on-hand stock, so they cannot affect the count, and Mason froze shipping and receiving only.
---    The count's own completion is exempt through a transaction-local setting that
---    complete_cycle_count sets to that count's id; any OTHER open count on the same row still
---    refuses. Reversing a completed count is not exempt from a different, still-open count on the
+--    The count's own completion is exempt through a marker row in the private table
+--    cycle_count_applying that complete_cycle_count writes for that count and this transaction
+--    only and deletes before it returns. No role can read or write that table (RLS deny-all, no
+--    grants), so unlike a session setting a caller cannot claim the exemption. Any OTHER open
+--    count on the same row still refuses. Reversing a completed count is not exempt from a different, still-open count on the
 --    same row, because that reversal would be double-counted by the open count.
 --
 -- 2. Atomic start. New create_cycle_count(p_warehouse, p_notes, p_idempotency_key) numbers the
@@ -64,6 +67,7 @@
 --
 -- Rollback (new reviewed migration): DROP TRIGGER trg_freeze_inventory_during_cycle_count ON
 -- public.inventory; DROP FUNCTION public._freeze_inventory_during_cycle_count_20261102();
+-- DROP TABLE public.cycle_count_applying (after complete_cycle_count is restored);
 -- DROP INDEX public.cycle_counts_one_open_per_warehouse;
 -- DROP TRIGGER trg_guard_cycle_count_status ON public.cycle_counts;
 -- DROP TRIGGER trg_guard_cycle_count_insert ON public.cycle_counts;
@@ -93,6 +97,9 @@ BEGIN
      OR to_regprocedure('public._guard_open_cycle_count_items_20261102()') IS NOT NULL THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_PREFLIGHT: a count-table guard already exists';
   END IF;
+  IF to_regclass('public.cycle_count_applying') IS NOT NULL THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_PREFLIGHT: cycle_count_applying already exists';
+  END IF;
   IF EXISTS (SELECT 1 FROM public.cycle_counts WHERE status = 'in_progress') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_PREFLIGHT: a cycle count is open; finish or cancel it before applying';
   END IF;
@@ -101,6 +108,18 @@ $preflight$;
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The freeze.
+-- The count complete_cycle_count is applying in this transaction. It writes the row before applying
+-- and deletes it after, so no row ever commits; no role can read or write the table directly.
+CREATE TABLE public.cycle_count_applying (
+  txid bigint PRIMARY KEY,
+  cycle_count_id uuid NOT NULL
+);
+ALTER TABLE public.cycle_count_applying OWNER TO postgres;
+ALTER TABLE public.cycle_count_applying ENABLE ROW LEVEL SECURITY;
+CREATE POLICY cycle_count_applying_no_direct_access ON public.cycle_count_applying
+  FOR ALL TO authenticated, anon USING (false) WITH CHECK (false);
+REVOKE ALL ON TABLE public.cycle_count_applying FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
 CREATE FUNCTION public._freeze_inventory_during_cycle_count_20261102()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -116,13 +135,14 @@ BEGIN
     JOIN public.cycle_counts cc ON cc.id = cci.cycle_count_id
    WHERE cci.inventory_id = NEW.id
      AND cc.status = 'in_progress'
-     AND cc.id::text IS DISTINCT FROM NULLIF(current_setting('crx.cycle_count_applying', true), '')
+     AND NOT EXISTS (SELECT 1 FROM public.cycle_count_applying a
+                      WHERE a.txid = txid_current() AND a.cycle_count_id = cc.id)
    ORDER BY cc.count_number
    LIMIT 1;
   IF FOUND THEN
-    SELECT product_name INTO v_product FROM public.products WHERE id = NEW.product_id;
+    SELECT product_name INTO v_product FROM public.products WHERE id = OLD.product_id;
     RAISE EXCEPTION 'INVENTORY_FROZEN_FOR_CYCLE_COUNT: % at % is being counted in cycle count %. Shipping and receiving for it are paused until that count is completed or cancelled.',
-      COALESCE(v_product, NEW.product_id::text), NEW.location, v_count_number;
+      COALESCE(v_product, OLD.product_id::text), OLD.location, v_count_number;
   END IF;
   RETURN NEW;
 END;
@@ -132,10 +152,11 @@ REVOKE ALL ON FUNCTION public._freeze_inventory_during_cycle_count_20261102()
   FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 CREATE TRIGGER trg_freeze_inventory_during_cycle_count
-  BEFORE UPDATE OF quantity_available, product_id ON public.inventory
+  BEFORE UPDATE OF quantity_available, product_id, location ON public.inventory
   FOR EACH ROW
   WHEN (OLD.quantity_available IS DISTINCT FROM NEW.quantity_available
-        OR OLD.product_id IS DISTINCT FROM NEW.product_id)
+        OR OLD.product_id IS DISTINCT FROM NEW.product_id
+        OR OLD.location IS DISTINCT FROM NEW.location)
   EXECUTE FUNCTION public._freeze_inventory_during_cycle_count_20261102();
 
 -- One open count per warehouse, enforced for every write path (admins can still insert
@@ -166,7 +187,8 @@ BEGIN
     RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: the warehouse of cycle count % cannot change.', OLD.count_number;
   END IF;
   IF OLD.status = 'in_progress' AND NEW.status = 'completed'
-     AND NEW.id::text IS DISTINCT FROM NULLIF(current_setting('crx.cycle_count_applying', true), '') THEN
+     AND NOT EXISTS (SELECT 1 FROM public.cycle_count_applying a
+                      WHERE a.txid = txid_current() AND a.cycle_count_id = NEW.id) THEN
     RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: cycle count % can only be completed with Complete Count, which applies it.', OLD.count_number;
   END IF;
   IF OLD.status = 'cancelled' OR (OLD.status = 'completed' AND NEW.status <> 'cancelled') THEN
@@ -429,9 +451,9 @@ BEGIN
   END IF;
 
   -- The freeze trigger lets this count's own adjustments through, and only those.
-  PERFORM set_config('crx.cycle_count_applying', p_cycle_count_id::text, true);
+  INSERT INTO public.cycle_count_applying (txid, cycle_count_id) VALUES (txid_current(), p_cycle_count_id);
   PERFORM public._complete_cycle_count_impl(p_cycle_count_id, v_actor, p_idempotency_key);
-  PERFORM set_config('crx.cycle_count_applying', '', true);
+  DELETE FROM public.cycle_count_applying WHERE txid = txid_current();
 
   UPDATE public.idempotency_keys
      SET result = jsonb_build_object(
@@ -461,6 +483,13 @@ BEGIN
                   AND tgname = 'trg_guard_open_cycle_count_items' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: a count-table guard trigger is missing or disabled';
   END IF;
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.cycle_count_applying'::regclass)
+     OR (SELECT count(*) FROM pg_policy WHERE polrelid = 'public.cycle_count_applying'::regclass) <> 1
+     OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role', 'metabase_ro']) r,
+                              unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN']) pr
+                 WHERE has_table_privilege(r, 'public.cycle_count_applying', pr)) THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: cycle_count_applying is reachable directly';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_index x
                   WHERE x.indexrelid = to_regclass('public.cycle_counts_one_open_per_warehouse')
                     AND x.indisunique AND x.indisvalid AND x.indrelid = 'public.cycle_counts'::regclass) THEN
@@ -472,7 +501,8 @@ BEGIN
   END IF;
   IF has_function_privilege('anon', 'public.complete_cycle_count(uuid,uuid,text,bigint)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.complete_cycle_count(uuid,uuid,text,bigint)', 'EXECUTE')
-     OR NOT has_function_privilege('service_role', 'public.complete_cycle_count(uuid,uuid,text,bigint)', 'EXECUTE') THEN
+     OR NOT has_function_privilege('service_role', 'public.complete_cycle_count(uuid,uuid,text,bigint)', 'EXECUTE')
+     OR has_function_privilege('metabase_ro', 'public.complete_cycle_count(uuid,uuid,text,bigint)', 'EXECUTE') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: EXECUTE grants on complete_cycle_count moved';
   END IF;
   IF has_function_privilege('anon', 'public.create_cycle_count(text,text,text)', 'EXECUTE')

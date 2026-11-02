@@ -6,7 +6,7 @@
 DO $smoke$
 DECLARE
   v_admin uuid;
-  p1 uuid; p2 uuid; i1 uuid; i2 uuid; i3 uuid;
+  p1 uuid; p2 uuid; p3 uuid; i1 uuid; i2 uuid; i3 uuid; i4 uuid;
   r jsonb; v_cc uuid; v_cc2 uuid; v_item uuid; v_rev bigint;
 BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1;
@@ -19,11 +19,14 @@ BEGIN
   INSERT INTO public.inventory (product_id, location, quantity_available) VALUES (p1, 'Main Warehouse', 10) RETURNING id INTO i1;
   INSERT INTO public.inventory (product_id, location, quantity_available) VALUES (p2, 'Main Warehouse', 4.125) RETURNING id INTO i2;
   INSERT INTO public.inventory (product_id, location, quantity_available) VALUES (p1, '[SMOKE] Overflow', 3) RETURNING id INTO i3;
+  -- An empty row: the older location guard lets an empty row move, so only the freeze holds it.
+  INSERT INTO public.products (product_name, is_active) VALUES ('[SMOKE] freeze C', true) RETURNING id INTO p3;
+  INSERT INTO public.inventory (product_id, location, quantity_available) VALUES (p3, 'Main Warehouse', 0) RETURNING id INTO i4;
 
   -- (a) one call starts the count and snapshots every Main Warehouse row.
   r := public.create_cycle_count('Main Warehouse', NULL, 'smoke-freeze-a');
   v_cc := (r ->> 'cycle_count_id')::uuid;
-  IF (r ->> 'item_count')::int IS DISTINCT FROM 2
+  IF (r ->> 'item_count')::int IS DISTINCT FROM 3
      OR (SELECT expected_qty FROM public.cycle_count_items WHERE cycle_count_id = v_cc AND inventory_id = i1) IS DISTINCT FROM 10::numeric
      OR (SELECT status FROM public.cycle_counts WHERE id = v_cc) IS DISTINCT FROM 'in_progress' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (a) create_cycle_count did not snapshot the warehouse: %', r;
@@ -109,6 +112,43 @@ BEGIN
     IF SQLERRM NOT LIKE 'INVENTORY_FROZEN_FOR_CYCLE_COUNT:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (c) %', SQLERRM; END IF;
   END;
   BEGIN
+    UPDATE public.inventory SET location = '[SMOKE] Overflow' WHERE id = i4;
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) an empty counted row moved to another warehouse during the count';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVENTORY_FROZEN_FOR_CYCLE_COUNT: [SMOKE] freeze C at Main Warehouse%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (c) %', SQLERRM; END IF;
+  END;
+  -- A caller-set session setting (the old exemption) claims nothing.
+  PERFORM set_config('crx.cycle_count_applying', v_cc::text, true);
+  BEGIN
+    UPDATE public.inventory SET quantity_available = quantity_available + 1 WHERE id = i1;
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) a caller-set setting unfroze a counted row';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVENTORY_FROZEN_FOR_CYCLE_COUNT:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (c) %', SQLERRM; END IF;
+  END;
+  BEGIN
+    UPDATE public.cycle_counts SET status = 'completed' WHERE id = v_cc;
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) a caller-set setting let an open count be marked completed directly';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (c) %', SQLERRM; END IF;
+  END;
+  PERFORM set_config('crx.cycle_count_applying', '', true);
+  -- No app role can write the completion marker itself.
+  BEGIN
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.cycle_count_applying (txid, cycle_count_id) VALUES (txid_current(), v_cc);
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) authenticated wrote the completion marker';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    SET LOCAL ROLE service_role;
+    INSERT INTO public.cycle_count_applying (txid, cycle_count_id) VALUES (txid_current(), v_cc);
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) service_role wrote the completion marker';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  IF current_user <> session_user OR EXISTS (SELECT 1 FROM public.cycle_count_applying) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) the role probe leaked: %', current_user;
+  END IF;
+  BEGIN
     UPDATE public.inventory SET quantity_available = quantity_available - 1 WHERE id = i2;
     RAISE EXCEPTION 'SMOKE_FAIL: (c) a direct stock write during the count was accepted';
   EXCEPTION WHEN OTHERS THEN
@@ -148,7 +188,7 @@ BEGIN
        WHERE product_id = p1 AND transaction_type = 'adjusted' AND quantity = -2 AND notes LIKE 'Cycle count CC-%') <> 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (d) the count wrote no single -2 adjustment';
   END IF;
-  IF COALESCE(current_setting('crx.cycle_count_applying', true), '') <> '' THEN
+  IF EXISTS (SELECT 1 FROM public.cycle_count_applying) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (d) the completion exemption outlived the completion';
   END IF;
 

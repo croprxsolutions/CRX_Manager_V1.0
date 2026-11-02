@@ -46,7 +46,7 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate changes.
-const TOUCHED = /FUNCTION\s+(public\.)?"?(complete_cycle_count|create_cycle_count|_complete_cycle_count_impl|_freeze_inventory_during_cycle_count_20261102|_guard_cycle_count_status_20261102|_guard_open_cycle_count_items_20261102)\b|trg_freeze_inventory_during_cycle_count|trg_guard_cycle_count_status|trg_guard_cycle_count_insert|trg_guard_open_cycle_count_items/i;
+const TOUCHED = /FUNCTION\s+(public\.)?"?(complete_cycle_count|create_cycle_count|_complete_cycle_count_impl|_freeze_inventory_during_cycle_count_20261102|_guard_cycle_count_status_20261102|_guard_open_cycle_count_items_20261102)\b|trg_freeze_inventory_during_cycle_count|trg_guard_cycle_count_status|trg_guard_cycle_count_insert|trg_guard_open_cycle_count_items|cycle_count_applying/i;
 const PINS = {
   'public.complete_cycle_count(uuid,uuid,text,bigint)': 'ad7249f15027bd75084cb0cfbf8b6bab',
 };
@@ -260,6 +260,11 @@ function security() {
     'create_cycle_count(text,text,text)|f|t|f|t|search_path=public, pg_temp|postgres',
   ]);
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_freeze_inventory_during_cycle_count' AND tgrelid = 'public.inventory'::regclass;"), 'O');
+  // The completion marker table: RLS on, one deny-all policy, no privileges for any app role.
+  assert.equal(scalar(`SELECT relrowsecurity::text || '|' || (SELECT count(*) FROM pg_policy WHERE polrelid = c.oid) || '|' ||
+      (SELECT count(*) FROM unnest(ARRAY['anon','authenticated','service_role','metabase_ro']) r,
+         unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) pr WHERE has_table_privilege(r, c.oid, pr))
+    FROM pg_class c WHERE c.oid = 'public.cycle_count_applying'::regclass;`), 'true|1|0');
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_guard_cycle_count_status' AND tgrelid = 'public.cycle_counts'::regclass;"), 'O');
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_guard_cycle_count_insert' AND tgrelid = 'public.cycle_counts'::regclass;"), 'O');
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_guard_open_cycle_count_items' AND tgrelid = 'public.cycle_count_items'::regclass;"), 'O');

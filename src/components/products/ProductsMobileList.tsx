@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { DollarSign, Search } from 'lucide-react';
 import type { MobileProduct } from '../../types';
 import { formatUSD } from '../../lib/money';
 import { matchesProductSearch } from '../../lib/productSearch';
@@ -20,6 +20,8 @@ type Props = {
   onVendorFilterChange: (value: string) => void;
   onStatusFilterChange: (value: 'active' | 'inactive' | 'all') => void;
   onOpenProduct: (product: MobileProduct) => void;
+  /** Left out for anyone who may not change prices. */
+  onChangePrice?: (product: MobileProduct) => void;
   loadError?: boolean;
   onRetry?: () => void;
 };
@@ -39,6 +41,7 @@ export default function ProductsMobileList({
   onVendorFilterChange,
   onStatusFilterChange,
   onOpenProduct,
+  onChangePrice,
   loadError = false,
   onRetry,
 }: Props) {
@@ -80,7 +83,7 @@ export default function ProductsMobileList({
               resetVisibleCount();
             }}
             aria-label="Filter by category"
-            className="min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+            className="min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-base focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
           >
             <option value="">All Categories</option>
             {categories.map((category) => (
@@ -94,7 +97,7 @@ export default function ProductsMobileList({
               resetVisibleCount();
             }}
             aria-label="Filter by vendor"
-            className="min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+            className="min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-base focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
           >
             <option value="">All Vendors</option>
             {vendors.map((vendor) => (
@@ -108,7 +111,7 @@ export default function ProductsMobileList({
               resetVisibleCount();
             }}
             aria-label="Filter by status"
-            className="col-span-2 min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+            className="col-span-2 min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-base focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
           >
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
@@ -128,11 +131,11 @@ export default function ProductsMobileList({
         <>
           <div className="space-y-3">
             {filteredProducts.slice(0, visibleCount).map((product) => (
+              <div key={product.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
               <button
-                key={product.id}
                 type="button"
                 onClick={() => onOpenProduct(product)}
-                className="block min-h-[44px] w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-card transition-colors hover:bg-crx-green-tint focus:outline-none focus:ring-2 focus:ring-crx-green/40"
+                className="block min-h-[44px] w-full p-4 text-left transition-colors hover:bg-crx-green-tint focus:outline-none focus:ring-2 focus:ring-inset focus:ring-crx-green/40"
               >
                 <div className="flex min-w-0 items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -159,6 +162,21 @@ export default function ProductsMobileList({
                   </div>
                 </dl>
               </button>
+              {onChangePrice && (
+                <div className="border-t border-gray-100 p-2">
+                  <Button
+                    variant="ghost"
+                    showChevron={false}
+                    icon={<DollarSign className="h-4 w-4" />}
+                    aria-label={`Change price of ${product.product_name}`}
+                    className="min-h-11 w-full"
+                    onClick={() => onChangePrice(product)}
+                  >
+                    Change price
+                  </Button>
+                </div>
+              )}
+              </div>
             ))}
           </div>
           {visibleCount < filteredProducts.length && (

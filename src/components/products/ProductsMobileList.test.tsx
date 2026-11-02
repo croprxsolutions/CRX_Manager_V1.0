@@ -58,6 +58,7 @@ function renderList(
     loadError?: boolean;
     onRetry?: () => void;
     onOpenProduct?: (product: MobileProduct) => void;
+    onChangePrice?: (product: MobileProduct) => void;
   } = {},
 ) {
   return render(
@@ -72,6 +73,7 @@ function renderList(
       onCategoryFilterChange={vi.fn()}
       onStatusFilterChange={vi.fn()}
       onOpenProduct={options.onOpenProduct ?? vi.fn()}
+      onChangePrice={options.onChangePrice}
       loadError={options.loadError}
       onRetry={options.onRetry}
     />
@@ -79,6 +81,21 @@ function renderList(
 }
 
 describe('ProductsMobileList', () => {
+  it('offers Change price beside the card only when the caller allows it', () => {
+    const product = createProduct('1');
+    const onOpenProduct = vi.fn();
+    const onChangePrice = vi.fn();
+    const { unmount } = renderList([product], { onOpenProduct, onChangePrice });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change price of Product 1' }));
+    expect(onChangePrice).toHaveBeenCalledWith(product);
+    expect(onOpenProduct).not.toHaveBeenCalled();
+
+    unmount();
+    renderList([product]);
+    expect(screen.queryByRole('button', { name: /Change price/ })).not.toBeInTheDocument();
+  });
+
   it('shows product identity, category, tier prices, and status, and opens on tap', () => {
     const product = createProduct('1', { is_active: false });
     const onOpenProduct = vi.fn();

@@ -790,6 +790,690 @@
         "public._apply_prepay_to_invoice_replay_impl_20261015(p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid, p_idempotency_key text)": "fb2d491e40711c44b1769031957390b2",
         "public.apply_prepay_to_invoice(p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid, p_idempotency_key text)": "a528b93f615452f1cbff855e85c4e524"
       }
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "_enforce_billed_job_immutability()#d83bb01af0b5",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE today. Callable by: not callable / trigger; see note on the service-fee grant. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "apply_product_cost_basis_change_set(p_change_set_id uuid, p_request_fingerprint text, p_performed_by uuid, p_idempotency_key text)#a8e7aab2f077",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "approve_pricing_change_set(p_change_set_id uuid, p_request_fingerprint text, p_acknowledgements jsonb, p_source_file jsonb, p_performed_by uuid, p_idempotency_key text)#7458a6453a43",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "approve_supplier_price_import(p_import_id uuid, p_row_ids uuid[], p_performed_by uuid, p_idempotency_key text)#2355bf78b904",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "batch_apply_prepayments(p_allocations jsonb, p_performed_by uuid, p_idempotency_key text)#e58baf407597",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: per function; ids, counts, payment cents. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "batch_cancel_deliveries(p_delivery_ids uuid[], p_cancel_reason text, p_performed_by uuid, p_idempotency_key text)#5431b1ec5371",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "batch_post_invoices(p_invoices jsonb, p_idempotency_key text)#f5baf826e203",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "batch_void_invoices(p_invoice_ids uuid[], p_void_reason text, p_performed_by uuid, p_idempotency_key text)#7cd2534a1388",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "bulk_import_order(p_order_number text, p_customer_id uuid, p_status text, p_total_price numeric, p_total_cost numeric, p_total_profit numeric, p_total_margin_pct numeric, p_order_date date, p_items jsonb, p_notes text, p_idempotency_key text)#8648c0bd24cf",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep / admin; no cost in reply, errors or feed. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "cancel_delivery(p_delivery_id uuid, p_cancel_reason text, p_performed_by uuid, p_idempotency_key text)#1ab13f4ffe01",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "cancel_order(p_order_id uuid, p_performed_by uuid, p_idempotency_key text)#a07fe05c4646",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "close_quote_as_applied(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#713b54fec909",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "close_quote_as_short(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#598ae3dba2b6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "commit_label_draft(p_draft_id uuid, p_decision text, p_signal_word text, p_rei_hours integer, p_phi_days integer, p_epa_registration text, p_max_label_rate numeric, p_max_label_rate_unit text, p_force_overwrite boolean, p_idempotency_key text)#b8728d4a48e6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)#cdc5f8bf5d2f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "consolidate_draft_invoices(p_order_id uuid, p_performed_by uuid, p_idempotency_key text)#fd088061300b",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "convert_quote_to_order(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text, p_expected_row_version bigint, p_below_cost_reason text)#2b3546ca46f7",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "correct_supplier_price_observation(p_observation_id uuid, p_corrected_cost text, p_reason text, p_performed_by uuid, p_idempotency_key text)#e127be5f12f7",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_application_record_from_blend_ticket(p_blend_ticket_id uuid, p_performed_by uuid, p_idempotency_key text)#c1463ec13bbb",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_direct_order(p_customer_id uuid, p_order_date date, p_order_name text, p_notes text, p_items jsonb, p_performed_by uuid, p_idempotency_key text, p_customer_po_number text)#4728e5291e3e",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_invoice_for_unbilled_delivery(p_delivery_id uuid, p_performed_by uuid, p_idempotency_key text)#b76edacd7539",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_invoice_from_blend_ticket(p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text, p_below_cost_reason text, p_approved_zero_lines jsonb)#c5403690c583",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost set server-side or stripped; version hash excludes cost columns. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_invoice_from_order(p_order_id uuid, p_salesman_id uuid, p_invoice_type text, p_idempotency_key text)#cdc5f8bf5d2f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_job_from_quote_section(p_quote_id uuid, p_section_id uuid, p_performed_by uuid, p_idempotency_key text)#eb07ae27c616",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_planned_holds(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#8576a87b83c6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: per function; ids, counts, payment cents. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_pricing_workbook_export(p_product_ids uuid[], p_performed_by uuid, p_idempotency_key text)#be77d14de685",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_quick_delivery(p_customer_id uuid, p_items jsonb, p_driver_id uuid, p_scheduled_date date, p_delivery_notes text, p_performed_by uuid, p_idempotency_key text, p_skip_invoice boolean)#151e8e13b10a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_quote_from_template(p_template_id uuid, p_customer_id uuid, p_performed_by uuid, p_idempotency_key text)#e55f0d24000f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_quote_version(p_quote_id uuid, p_performed_by uuid, p_method text, p_idempotency_key text, p_expected_row_version bigint)#0eb99adda4aa",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_rush_order(p_customer_id uuid, p_items jsonb, p_notes text, p_customer_po_number text, p_performed_by uuid, p_idempotency_key text)#c1174ec958ed",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_split_invoices_from_order(p_order_id uuid, p_salesman_id uuid, p_invoice_type text, p_idempotency_key text)#cdc5f8bf5d2f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_vendor_bill(p_vendor_id uuid, p_purchase_order_id uuid, p_bill_number text, p_bill_date date, p_due_date date, p_payment_terms text, p_subtotal_cents bigint, p_adjustment_cents bigint, p_notes text, p_idempotency_key text, p_confirm_po_overage boolean, p_po_overage_reason text)#abaa8b3b5909",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "dashboard_summary()#a1d0d6656420",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "delete_invoices(p_invoice_ids uuid[], p_performed_by uuid, p_idempotency_key text)#71f7af2070f4",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "draw_down_quote(p_quote_id uuid, p_draws jsonb, p_performed_by uuid, p_idempotency_key text, p_below_cost_reason text)#d71ca280c47f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "duplicate_quote(p_source_quote_id uuid, p_performed_by uuid, p_idempotency_key text, p_below_cost_reason text)#f197c7ef384f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "enforce_invoice_draft_on_insert()#0d0206126c58",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE today. Callable by: not callable / trigger; see note on the service-fee grant. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "financial_dashboard_summary()#d90523f12239",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "generate_batch_statements(p_as_of_date date, p_performed_by uuid, p_mode text, p_idempotency_key text)#fbfac6de6a4e",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "generate_finance_charges(p_as_of_date date, p_performed_by uuid, p_customer_ids uuid[], p_idempotency_key text)#9b6ee8bd5628",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_admin_cost_fields(p_table text, p_ids uuid[])#c4c1d07cec57",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_ar_reminder_candidates()#455c317c31b6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_batch_year_end_summaries(p_customer_ids uuid[], p_season integer)#eb9e7941f940",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; its \"cost\" key is sale revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_bottom_line_pnl(p_start_date date, p_end_date date)#3be09b824753",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_chemical_history(p_product_id uuid, p_start_date date, p_end_date date)#95cd66d02f28",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; purchase price hidden from non-admins (see note on free text). The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_customer_delivery_remainders(p_customer_id uuid)#0a52a4abc0f4",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_customer_year_end_summary(p_customer_id uuid, p_season integer)#311bcce647cf",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; its \"cost\" key is sale revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_dashboard_action_items(p_limit integer)#bcf3a996bde4",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_detailed_statement_data(p_customer_id uuid, p_as_of_date date, p_mode text)#b5944d47a482",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_dispatch_stock_status(p_job_ids uuid[])#f53d6ece72f1",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_expiring_planned_holds(p_days_ahead integer, p_idempotency_key text)#79cac3527289",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_field_profitability(p_season text)#e2b81b20f3cf",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_gross_sales_report(p_start_date date, p_end_date date, p_group_by text)#f1c8f6e04cfd",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_inventory_cost_report()#ced9748b018e",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_inventory_forecast(p_months_ahead integer)#aa4113fa31e1",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_inventory_position()#c95f13a315a4",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_job_inventory_shortfalls(p_days_ahead integer)#ab2a2e4f5246",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_monthly_summary(p_period_start date, p_period_end date)#4d5de755b0e0",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_product_cost_basis_workspace(p_product_id uuid)#cc4a4a5b09cf",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_product_price_history(p_product_id uuid)#1c16dd229936",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_profitability_report(p_group_by text, p_start_date date, p_end_date date)#36446ce36edb",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_program_completion(p_season integer)#0a1b57ccaf79",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_quote_cost_alerts(p_quote_id uuid)#da8f8f8ae67c",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; yes/no flags only. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_quote_versions(p_quote_id uuid)#0119a21f7ff3",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; snapshot cleaned of every cost/profit/margin key for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_receiving_log(p_limit integer, p_offset integer, p_vendor text, p_condition text, p_received_by uuid, p_date_from date, p_date_to date)#f125bf7fc492",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_sales_detail_report(p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#8b3b385b7fc5",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#b6b85b4f888a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_season_comparison(p_season_a integer, p_season_b integer)#9f565f9edb0c",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_supplier_market_evidence(p_product_ids uuid[])#9fe1b04da452",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_supplier_price_import(p_import_id uuid)#b02d7008183b",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_supplier_pricing_workspace(p_product_id uuid, p_vendor_id uuid)#446fb50b334b",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_supplier_quote_sheet(p_vendor_id uuid)#136c44edfbb3",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "invoice_postable_version(p_invoice invoices_postable)#4fd87ee75eea",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost set server-side or stripped; version hash excludes cost columns. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "issue_return_credit(p_return_id uuid, p_actor_id uuid, p_idempotency_key text)#ef9420dd1bf6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "match_quick_receive_items(p_items jsonb, p_vendor text)#1a8222036abc",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; cost removed for non-admins; two yes/no hints (known, KI-74). The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "operational_dashboard_summary()#6b9bf0917749",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "post_invoice(p_invoice_id uuid, p_expected_version text, p_idempotency_key text)#d6cb019b026d",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "post_invoice_group(p_invoice_group_id uuid, p_performed_by uuid, p_expected_versions jsonb, p_idempotency_key text)#e1370fa821f1",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "preview_product_cost_basis_changes(p_source text, p_export_id uuid, p_rows jsonb, p_performed_by uuid, p_idempotency_key text)#34b54c80b695",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "price_order(p_order_id uuid, p_items jsonb, p_performed_by uuid, p_idempotency_key text)#e30b5ac35f49",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "reject_supplier_price_import(p_import_id uuid, p_reason text, p_performed_by uuid, p_idempotency_key text)#4d78085eb476",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "restore_quote_version(p_quote_id uuid, p_version_id uuid, p_performed_by uuid, p_idempotency_key text, p_expected_row_version bigint, p_below_cost_reason text)#88015c1d24bc",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "reverse_receiving_record(p_record_id uuid, p_reason text, p_performed_by uuid, p_idempotency_key text)#1bff6ef57969",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "revert_quote_status(p_quote_id uuid, p_reason text, p_performed_by uuid, p_idempotency_key text)#ef2ce94813a9",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "rollover_quote_to_season(p_quote_id uuid, p_new_season integer, p_performed_by uuid, p_idempotency_key text)#8871c95c0de9",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_field_app_invoice(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)#e943c9134b4c",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_field_app_split_invoice(p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)#c37469c2442f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_invoice(p_invoice jsonb, p_items jsonb, p_idempotency_key text)#02769900f2c6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost set server-side or stripped; version hash excludes cost columns. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_job(p_job_id uuid, p_job_payload jsonb, p_fields jsonb, p_chemicals jsonb, p_performed_by uuid, p_idempotency_key text)#1edc96f91273",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_purchase_order(p_po_id uuid, p_po_payload jsonb, p_items jsonb, p_performed_by uuid, p_idempotency_key text)#16a1051dfc60",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; non-admin cost input dropped; reply is ids only. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_quote(p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text)#efa3e50c027f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost stripped from every reply (stored retry record unreadable). The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "save_quote_template(p_quote_id uuid, p_template_name text, p_description text, p_performed_by uuid, p_idempotency_key text)#9095b352d7d8",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "set_product_margin_floors(p_items jsonb, p_reason text, p_performed_by uuid, p_idempotency_key text)#105f2ce037f8",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "set_purchase_order_item_costs(p_po_id uuid, p_items jsonb, p_reason text, p_performed_by uuid, p_idempotency_key text)#75b16cb91ce3",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "stage_offline_action(p_client_action_id uuid, p_operation text, p_entity_id uuid, p_schema_version integer, p_client_created_at timestamp with time zone, p_payload jsonb, p_idempotency_key text, p_entity_snapshot_at timestamp with time zone)#5d563d86f67d",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "stage_supplier_price_import(p_vendor_id uuid, p_document_date date, p_ingestion_method text, p_format_version text, p_source_document_path text, p_source_document_name text, p_source_document_mime text, p_rows jsonb, p_performed_by uuid, p_idempotency_key text)#b95f0201fe6a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "start_and_complete_delivery(p_delivery_id uuid, p_signed_by text, p_delivered_on date, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_evidence text, p_evidence_ref text)#761172995a6c",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "transfer_invoice_to_job(p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text)#15b3e534fcbf",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "transfer_job_to_invoice(p_job_id uuid, p_performed_by uuid, p_idempotency_key text)#ae179305f5fe",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "trg_recalc_order_totals()#ab939bdd503a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: trigger / not callable; write only to locked columns or unreadable tables. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "unpost_invoice_group(p_invoice_group_id uuid, p_performed_by uuid, p_idempotency_key text)#37603b49e8f4",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "update_order_items(p_order_id uuid, p_items jsonb, p_performed_by uuid, p_idempotency_key text, p_expected_row_version bigint)#820dafe4034a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: admin or rep; ids, counts, revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "update_vendor_bill(p_bill_id uuid, p_subtotal_cents bigint, p_adjustment_cents bigint, p_bill_date date, p_due_date date, p_notes text, p_idempotency_key text, p_confirm_po_overage boolean, p_po_overage_reason text)#1919b619d45f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); feed text carries counts or no numbers; vendor-bill reason noted above. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "upsert_product_brand(p_product_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_idempotency_key text)#e0294655888a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep / admin; no cost in reply, errors or feed. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "void_invoice(p_invoice_id uuid, p_void_reason text, p_idempotency_key text)#0b8ca40c0dfc",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: per function; ids, counts, payment cents. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "void_invoice_group(p_invoice_group_id uuid, p_void_reason text, p_idempotency_key text)#6b5b89ab170a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "void_order(p_order_id uuid, p_performed_by uuid, p_reason text, p_idempotency_key text)#2b9ad8a5c69f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "void_payment(p_allocation_set_id uuid, p_reason text, p_performed_by uuid, p_idempotency_key text)#0d41405c59e6",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: per function; ids, counts, payment cents. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_job_proof_data(p_job_id uuid, p_customer_id uuid)#3a3abcd3a1cd",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Flagged only by the aggregated-row rule; every row it aggregates is built field by field and names no cost, profit or margin field. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_dispatch_board_jobs(p_applicator_id uuid, p_status text, p_start_date date, p_end_date date)#e0d182eb25be",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102120000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "process_offline_action(p_client_action_id uuid, p_idempotency_key text)#ab2afbf41040",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102120000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "manual_inventory_add(p_product_id uuid, p_location text, p_quantity numeric, p_unit_size text, p_performed_by uuid, p_notes text, p_unit_cost numeric, p_idempotency_key text, p_reorder_point numeric, p_min_stock_level numeric)#0442c6956d55",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102120000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "create_order_from_blend_ticket(p_blend_ticket_id uuid, p_order_number text, p_order_date date, p_notes text, p_performed_by uuid, p_idempotency_key text)#ecf2a442f889",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102120000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "complete_job(p_job_id uuid, p_applied_info jsonb, p_performed_by uuid, p_idempotency_key text)#ccbfe1cea7a0",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102120000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "dated": "2026-11-02"
     }
   ]
 }

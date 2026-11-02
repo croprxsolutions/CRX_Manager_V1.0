@@ -64,9 +64,10 @@ describe('send-email content and replay contracts (audit findings 7 and 8)', () 
     expect(source).toContain('noticeRow.notification_type !== jobNoticeType');
   });
 
-  it('stores and looks up the idempotency key only in its caller + type + record scope', () => {
-    expect(source).toContain('`${caller.id}:${email_type}:${recordRef}:${idempotency_key}`');
-    expect(source).toContain('.eq("idempotency_key", scopedIdempotencyKey)');
+  it('scopes the idempotency key to type + record, honours legacy rows, and refuses a mismatched reuse', () => {
+    expect(source).toContain('`${email_type}:${recordRef}:${idempotency_key}`');
+    expect(source).toContain('.in("idempotency_key", [scopedIdempotencyKey, idempotency_key])');
+    expect(source).toContain('existing.email_type !== email_type || existing.customer_id !== (customer_id ?? null)');
     expect(source).toContain('idempotency_key: scopedIdempotencyKey,');
     expect(source).not.toContain('.from("email_log")\n        .select("id, resend_message_id, status")\n        .eq("idempotency_key", idempotency_key)');
   });

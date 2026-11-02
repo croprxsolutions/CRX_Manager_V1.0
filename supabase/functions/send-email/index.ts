@@ -36,9 +36,9 @@ import { attachmentProblem, emailContentProblem } from "../_shared/emailContentG
 //      reminders are about the customer's account). The caller still writes the
 //      HTML, so _shared/emailContentGate.ts refuses anything beyond plain
 //      formatting, and attachments must be PDFs (audit finding 7, 2026-11-02).
-//   7. The idempotency key is scoped to caller + email_type + record, so one
-//      user's guessable key can never replay or block another's email (audit
-//      finding 8, 2026-11-02).
+//   7. The idempotency key is scoped to email_type + record, so a reused key
+//      can never replay or block a different email; a key already used for a
+//      different email is refused (audit finding 8, 2026-11-02).
 // =============================================================================
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -590,21 +590,26 @@ Deno.serve(async (req: Request) => {
 
     // 9. Idempotency replay — return cached success if we've already sent
     //    successfully under this key.
-    //    The stored key is scoped to caller + type + record (audit finding 8):
-    //    another user's guessable key can neither replay nor block this send.
+    //    The stored key is scoped to type + record (audit finding 8), and is
+    //    shared by every caller so a second staff member cannot re-send the
+    //    same email. Rows written before this change hold the raw key; they
+    //    still count, but only for the same email_type and customer.
     let emailLogId: string | null = null;
     const scopedIdempotencyKey = idempotency_key
-      ? `${caller.id}:${email_type}:${recordRef}:${idempotency_key}`
+      ? `${email_type}:${recordRef}:${idempotency_key}`
       : null;
 
     if (scopedIdempotencyKey) {
-      const { data: existing, error: existingErr } = await adminClient
+      const { data: keyRows, error: existingErr } = await adminClient
         .from("email_log")
-        .select("id, resend_message_id, status")
-        .eq("idempotency_key", scopedIdempotencyKey)
-        .maybeSingle();
+        .select("id, resend_message_id, status, email_type, customer_id, idempotency_key")
+        .in("idempotency_key", [scopedIdempotencyKey, idempotency_key]);
       if (existingErr) {
         return jsonResponse({ error: `Idempotency lookup failed: ${existingErr.message}` }, 503);
+      }
+      const existing = keyRows?.find((row) => row.idempotency_key === scopedIdempotencyKey) ?? keyRows?.[0];
+      if (existing && (existing.email_type !== email_type || existing.customer_id !== (customer_id ?? null))) {
+        return jsonResponse({ error: "This idempotency_key was already used for a different email" }, 409);
       }
 
       if (existing && existing.status === "sent") {
@@ -655,6 +660,7 @@ Deno.serve(async (req: Request) => {
           status: "pending",
           resend_message_id: null,
           error_message: null,
+          idempotency_key: scopedIdempotencyKey,
           recipient_email: to,
           subject,
           html_body: html,

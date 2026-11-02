@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = `crx-return-credit-${process.pid}-${Date.now().toString(36)}`;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
-const EXTENSIONS = path.join(ROOT, 'supabase', 'baselines', '20260727174805_extensions.sql');
+const BASELINE = path.join(ROOT, 'supabase', 'baselines');
+const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(ROOT, 'supabase', 'migrations', '20260812130145_bind_return_receipts_to_intent_and_restore_overdue.sql');
 const QUOTE_TRUST_PREREQUISITE = path.join(ROOT, 'supabase', 'migrations', '20260826220000_quote_version_restore_trust_boundary.sql');
 const REPORT_CANDIDATE = path.join(ROOT, 'supabase', 'migrations', '20260827041000_align_recognized_invoice_report_statuses.sql');
@@ -24,7 +25,16 @@ const FORWARD_COMPATIBILITY_REPLAY = [
 const SMOKE = path.join(ROOT, 'scripts', 'smoke', 'smoke-return-credit-chain.sql');
 const PREDICATE = path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'return-credit-intent-binding.sql');
 const LIFECYCLE_PREDICATE = path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'returns-lifecycle-rpc-owned.sql');
-const LIVE_SCHEMA = path.join(ROOT, '.claude', 'session-state', 'section08-live-schema.sql');
+// Same skips as the other real-schema provers.
+const PARKED = new Set([
+  '20260914100700_customer_document_bytes_server_only.sql',
+  '20261015230000_staff_photo_storage_access.sql',
+  '20261016030000_staff_photo_buckets_private.sql',
+]);
+const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
+  + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
+  + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
+  + '  )::uuid\n';
 
 function docker(args, options = {}) {
   const result = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 80 * 1024 * 1024, ...options });
@@ -107,33 +117,52 @@ function waitForDatabase() {
   }
   throw new Error(`disposable PostgreSQL failed readiness: ${docker(['logs', NAME], { allowFailure: true }).stderr}`);
 }
-function sanitizeCliOutput(value) {
-  let safe = String(value || '');
-  for (const secret of [process.env.SUPABASE_ACCESS_TOKEN, process.env.SUPABASE_DB_PASSWORD]) {
-    if (secret) safe = safe.split(secret).join('[REDACTED]');
-  }
-  return safe
-    .replace(/(postgres(?:ql)?:\/\/[^:\s/]+:)[^@\s]+@/gi, '$1[REDACTED]@')
-    .replace(/\b(?:sbp|sb_secret)_[A-Za-z0-9._-]+\b/g, '[REDACTED]')
-    .slice(0, 4000);
+function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+function restoreLiveCrLfCloseRemainder() {
+  const source = lf(path.join(MIGRATIONS, '20260721014858_20260721010000_govern_invoice_order_money_lifecycle.sql'));
+  const needle = 'CREATE FUNCTION public._close_undelivered_order_remainder_20260718(';
+  assert.equal(source.split(needle).length - 1, 1, 'close-remainder definition is ambiguous');
+  const start = source.indexOf(needle);
+  const tag = /\$([A-Za-z_]*)\$/.exec(source.slice(start));
+  const bodyStart = start + tag.index + tag[0].length;
+  const body = source.slice(bodyStart, source.indexOf(tag[0], bodyStart)).replace(/\n/g, '\r\n');
+  psql(`CREATE OR REPLACE FUNCTION public._close_undelivered_order_remainder_20260718(p_order_id uuid, p_actor uuid)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+    AS $live_crlf_close$${body}$live_crlf_close$;`);
 }
-function refreshLiveSchema() {
-  const commonDir = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd: ROOT, encoding: 'utf8' });
-  if (commonDir.status !== 0) throw new Error(`cannot locate linked checkout: ${commonDir.stderr}`);
-  const linkedRoot = path.dirname(path.resolve(ROOT, commonDir.stdout.trim()));
-  // `supabase db dump --file` appends when the target already exists. Replace
-  // the disposable snapshot so an interrupted/repeated proof cannot replay a
-  // duplicated schema and report a false database failure.
-  mkdirSync(path.dirname(LIVE_SCHEMA), { recursive: true });
-  rmSync(LIVE_SCHEMA, { force: true });
-  const dump = spawnSync(
-    'supabase',
-    ['db', 'dump', '--linked', '--workdir', linkedRoot, '--schema', 'public,auth', '--file', LIVE_SCHEMA, '--keep-comments'],
-    { cwd: ROOT, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
-  );
-  if (dump.status !== 0) {
-    throw new Error(`fresh read-only live schema dump failed: ${sanitizeCliOutput(dump.stderr || dump.stdout)}`);
+// The candidates are applied live and later migrations carry their own proofs, so the schema is the
+// 2026-07-27 baseline plus every post-baseline migration that sorts before REPORT_CANDIDATE, the first
+// candidate this proof applies itself; the earlier candidate and helper guard are then already installed.
+function buildBaselineSchema() {
+  for (const name of ['extensions', 'acl_lockdown', 'platform_overlay', 'cron_jobs', 'migration_history']) copy(path.join(BASELINE, `20260727174805_${name}.sql`), `${name}.sql`);
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  if (schema.status !== 0) throw new Error(schema.stderr.toString());
+  applyStandalone('extensions.sql');
+  psql(schema.stdout.toString());
+  psql(`CREATE SCHEMA IF NOT EXISTS storage;
+    CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
+    CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
+    GRANT USAGE ON SCHEMA storage TO postgres;
+    GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
+  psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
+  for (const name of ['acl_lockdown', 'platform_overlay', 'cron_jobs', 'migration_history']) applyStandalone(`${name}.sql`, name === 'platform_overlay' ? 'supabase_admin' : 'postgres');
+  psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
+  const listed = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  if (listed.status !== 0) throw new Error(listed.stderr);
+  const all = listed.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
+  const at = all.indexOf(REPORT_CANDIDATE);
+  assert.ok(at >= 0, 'the report candidate must be selected for post-baseline replay');
+  for (const file of all.slice(0, at)) {
+    const base = path.basename(file);
+    if (PARKED.has(base)) continue;
+    if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
+    try { psql(`BEGIN;\n${lf(file)}\nCOMMIT;`); } catch (e) { throw new Error(`source replay failed at ${base}:\n${e.message}`); }
+    psql(`INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+      VALUES ('${base.slice(0, 14)}', '${base.slice(0, -4)}', ARRAY[]::text[]) ON CONFLICT (version) DO NOTHING;`);
   }
+  console.log(`[prover] replayed the post-baseline migrations before ${path.basename(REPORT_CANDIDATE)}`);
 }
 function forwardReplayState(migration) {
   const name = path.basename(migration);
@@ -753,21 +782,12 @@ try {
     assert.ok(readFileSync(migration, 'utf8').length > 0, `forward replay migration is missing: ${path.basename(migration)}`);
   }
   assert.match(readFileSync(SMOKE, 'utf8'), /SMOKE_PASS_ROLLBACK/, 'canonical smoke lacks its rollback marker');
-  refreshLiveSchema();
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   waitForDatabase();
   wait(2000);
   waitForDatabase();
 
-  assert.ok(existsSync(LIVE_SCHEMA), 'fresh read-only live schema dump is required at .claude/session-state/section08-live-schema.sql');
-  copy(EXTENSIONS, 'extensions.sql');
-  apply('extensions.sql');
-  psql('DROP SCHEMA auth CASCADE;', { user: 'supabase_admin' });
-  psql('DROP SCHEMA public CASCADE;');
-  const liveSchema = readFileSync(LIVE_SCHEMA, 'utf8')
-    .replace(/OWNER TO "[^"]+";/g, 'OWNER TO postgres;')
-    .replace(/FOR ROLE "[^"]+"/g, 'FOR ROLE "postgres"');
-  psql(liveSchema);
+  buildBaselineSchema();
   const predicate = readFileSync(PREDICATE, 'utf8').trim().replace(/;$/, '');
   const preApplyViolations = psqlValue(`SELECT count(*) FROM (${predicate}) AS violations;`);
   const wasAlreadyInstalled = preApplyViolations === '0';
@@ -3070,7 +3090,7 @@ try {
   assert.equal(psqlValue("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key LIKE 'smk-rcc-%';"), '0', 'receipt residue remained');
   assert.deepEqual([...completedProofs].sort(), [...expectedProofs].sort(), 'proof marker set does not match the mutant and direct-branch proofs that actually completed');
   const passMarker = wasAlreadyInstalled ? 'RETURN_CREDIT_POSTAPPLY_LIVE_PASS' : 'RETURN_CREDIT_REAL_SCHEMA_PASS';
-  console.log(`${passMarker} source=fresh-live-read-only-schema candidate_migrations=${migrations.length} proofs=${[...completedProofs].join(',')} smoke=SMOKE_PASS_ROLLBACK residue=0`);
+  console.log(`${passMarker} source=baseline-replay-before-report-candidate candidate_migrations=${migrations.length} proofs=${[...completedProofs].join(',')} smoke=SMOKE_PASS_ROLLBACK residue=0`);
 } catch (error) {
   console.error(`RETURN_CREDIT_REAL_SCHEMA_FAIL ${error.stack ?? error.message}`);
   process.exitCode = 1;

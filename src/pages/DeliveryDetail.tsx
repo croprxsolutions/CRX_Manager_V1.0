@@ -2488,6 +2488,7 @@ export default function DeliveryDetail() {
               size="sm"
               icon={<FileText className="w-4 h-4" />}
               onClick={() => navigate(`/invoices/${autoInvoiceId}`)}
+              showChevron
             >
               View Invoice
             </Button>

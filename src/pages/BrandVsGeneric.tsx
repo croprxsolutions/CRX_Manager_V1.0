@@ -590,7 +590,7 @@ export default function BrandVsGeneric() {
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
                 placeholder="Optional notes for the sales team..."
-                className="w-full px-3 py-2.5 text-sm text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150"
+                className="w-full px-3 py-2.5 text-sm text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150"
               />
             </div>
 

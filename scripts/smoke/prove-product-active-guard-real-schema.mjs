@@ -34,7 +34,7 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
-const TOUCHED = /product_active_guard|write_product_active_guard|set_product_active|preview_product_active_change|guard_product_deactivation|guard_inactive_product_line|guard_order_reopen_inactive_product|_get_inventory_position_cost_impl_20261019|_get_inventory_cost_report_cost_impl_20261019|get_inventory_cost_report/;
+const TOUCHED = /product_active_guard|write_product_active_guard|set_product_active|preview_product_active_change|guard_product_deactivation|guard_inactive_product_line|guard_inactive_manual_hold|guard_order_reopen_inactive_product|_get_inventory_position_cost_impl_20261019|_get_inventory_cost_report_cost_impl_20261019|get_inventory_cost_report/;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -511,6 +511,23 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${idemProduct}'
     AND field_name = 'is_active';`), '1', 'replay must not make a second write');
 
+  const holdProduct = product('[PROVER] PM3 Manual Hold');
+  psql(`INSERT INTO public.inventory(product_id, location, quantity_available)
+    VALUES ('${holdProduct}', 'Main Warehouse', 10);`);
+  const holdCall = (key) => `SELECT public.create_inventory_hold('${holdProduct}',
+    (SELECT id FROM public.customers LIMIT 1), 2, 'manual', NULL, 'PM3 proof',
+    '${ADMIN}', false, NULL, '${key}');`;
+  const createdHold = withActor(ADMIN, holdCall('pm3-hold-before-off'));
+  assert.match(createdHold.stdout, /hold_id/);
+  const holdId = scalar(`SELECT id FROM public.inventory_holds
+    WHERE product_id = '${holdProduct}' AND hold_type = 'manual';`);
+  turn(holdProduct, false, 'pm3-turn-off-hold');
+  assert.equal(withActor(ADMIN, holdCall('pm3-hold-before-off')).stdout, createdHold.stdout,
+    'an exact retry must replay its saved result after deactivation');
+  denied(ADMIN, holdCall('pm3-hold-after-off'), /PRODUCT_INACTIVE:.*PM3 Manual Hold/);
+  withActor(ADMIN, `SELECT public.release_inventory_hold('${holdId}', '${ADMIN}', 'pm3-release-after-off');`);
+  assert.equal(scalar(`SELECT is_active FROM public.inventory_holds WHERE id = '${holdId}';`), 'f');
+
   // Delivery reversals restore each line before they recalculate the order status.
   // A completed inactive line with no remaining quantity must not block an
   // active-only sibling delivery correction.
@@ -558,7 +575,7 @@ try {
   seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0 WHERE id = '${inactiveVoid.lineId}';`);
   const inactiveDelivery = seedDelivery(inactiveVoid.orderId, inactiveVoid.lineId, idemProduct, 281);
   denied(ADMIN, `SELECT public.void_delivery('${inactiveDelivery}', 'PM3 reversal', '${ADMIN}', 'pm3-void-inactive');`,
-    /PRODUCT_INACTIVE:.*reactivate.*reopening order/);
+    /PRODUCT_INACTIVE:.*PM3 Idempotency/);
   assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${inactiveDelivery}';`), 'completed');
 
   const openVoid = seedOrderLine(idemProduct, 'PM3-OPEN-VOID', 'partially_fulfilled', 285);
@@ -568,11 +585,14 @@ try {
       quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
     VALUES ('${openVoid.orderId}', '${p}', 'Active remaining', 2, 1, 1, 2, 1);`);
   const openInactiveDelivery = seedDelivery(openVoid.orderId, openVoid.lineId, idemProduct, 286);
-  withActor(ADMIN, `SELECT public.void_delivery('${openInactiveDelivery}', 'PM3 open correction',
-    '${ADMIN}', 'pm3-void-open-inactive');`);
-  assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${openVoid.lineId}';`), '1');
+  denied(ADMIN, `SELECT public.void_delivery('${openInactiveDelivery}', 'PM3 open correction',
+    '${ADMIN}', 'pm3-void-open-inactive');`, /PRODUCT_INACTIVE:.*PM3 Idempotency/);
+  assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${openVoid.lineId}';`), '0');
   assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${openVoid.orderId}';`), 'partially_fulfilled');
-  assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${openInactiveDelivery}';`), 'voided');
+  assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${openInactiveDelivery}';`), 'completed');
+  const alreadyOpen = seedOrderLine(idemProduct, 'PM3-LOWER-OPEN', 'partially_fulfilled', 288);
+  psql(`UPDATE public.order_items SET quantity_remaining = 0.5 WHERE id = '${alreadyOpen.lineId}';`);
+  assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${alreadyOpen.lineId}';`), '0.5');
 
   const cancelledInactiveOrder = seedOrderLine(idemProduct, 'PM3-CANCEL-ORDER', 'confirmed', 282);
   withActor(ADMIN, `SELECT public.cancel_order('${cancelledInactiveOrder.orderId}', '${ADMIN}', 'pm3-cancel-order');`);

@@ -5,8 +5,8 @@
 --   uninvoiced fulfilled order lines, and open purchase orders prevent deactivation.
 --   Quotes, quote templates, stock, crop programs and scheduled jobs are review warnings.
 --   A delivered line with no completed delivery item is unknown and prevents deactivation.
---   Reopening into confirmed or partially_fulfilled is refused only when an inactive
---   product has quantity_remaining > 0 after the delivery correction restores quantities.
+--   A turned-off order line cannot regain positive remaining quantity, even when
+--   its order is already partially fulfilled. New manual holds are also refused.
 --   Purchase-order receipt reversal is not guarded: stock correction must remain possible.
 --   Retired stock with a nonzero balance remains in inventory and increases the admin
 --   inventory value by that stock's cost.
@@ -18,7 +18,7 @@
 -- ACCESS CHANGE: the two review RPCs are admin-only; direct status changes require
 --   a signed-in admin. A database job without a signed-in actor is refused.
 --   No existing table access rule changes.
--- ROLLBACK (reviewed migration): remove the five triggers and their functions.
+-- ROLLBACK (reviewed migration): remove the six triggers and their functions.
 -- ORDERING: apply after WP-PM-12a and every older pending migration; recheck the ledger.
 SET LOCAL lock_timeout = '5s';
 CREATE TEMP TABLE product_active_guard_tx ON COMMIT DROP AS
@@ -36,8 +36,9 @@ BEGIN
   IF to_regprocedure('public._product_active_review(uuid[])') IS NOT NULL
      OR to_regprocedure('public.preview_product_active_change(uuid[],boolean)') IS NOT NULL
      OR to_regprocedure('public.set_product_active(uuid[],boolean,text,text)') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
-                AND tgname = 'trigger_a_guard_product_deactivation') THEN
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE
+                (tgrelid = 'public.products'::regclass AND tgname = 'trigger_a_guard_product_deactivation')
+                OR (tgrelid = 'public.inventory_holds'::regclass AND tgname = 'trigger_b_guard_inactive_manual_hold')) THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_ACTIVE_GUARD_ALREADY_EXISTS';
   END IF;
   IF to_regprocedure('public._delivery_invoice_overbilling(uuid)') IS NULL
@@ -294,7 +295,14 @@ BEGIN
   -- Retained lines may decrease or edit other fields. An increase is a new sale.
   -- New lines and product swaps reach the same locked product check below.
   IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
-    IF TG_TABLE_NAME IN ('order_items', 'quote_items') THEN
+    IF TG_TABLE_NAME = 'order_items' THEN
+      -- A void/cancel can reopen a fully delivered line without changing the order status.
+      IF COALESCE(OLD.quantity_remaining, 0) <= 0 AND COALESCE(NEW.quantity_remaining, 0) > 0 THEN
+        NULL; -- Continue to the locked product check.
+      ELSIF COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
+        RETURN NEW;
+      END IF;
+    ELSIF TG_TABLE_NAME = 'quote_items' THEN
       IF COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
         RETURN NEW;
       END IF;
@@ -315,12 +323,33 @@ END;
 $function$;
 ALTER FUNCTION public.guard_inactive_product_line() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.guard_inactive_product_line() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
-CREATE TRIGGER trigger_a_guard_inactive_order_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed ON public.order_items
+CREATE TRIGGER trigger_a_guard_inactive_order_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed, quantity_remaining ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
 CREATE TRIGGER trigger_a_guard_inactive_quote_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed ON public.quote_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
 CREATE TRIGGER trigger_a_guard_inactive_po_item BEFORE INSERT OR UPDATE OF product_id, quantity_ordered ON public.purchase_order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
+
+CREATE FUNCTION public.guard_inactive_manual_hold() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE v_active boolean; v_name text;
+BEGIN
+  -- Quote and job holds may still be resynced for allowed parent records.
+  IF NEW.hold_type IS DISTINCT FROM 'manual' THEN RETURN NEW; END IF;
+  SELECT is_active, product_name INTO v_active, v_name FROM public.products
+    WHERE id = NEW.product_id FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND: %', NEW.product_id; END IF;
+  IF NOT v_active THEN
+    RAISE EXCEPTION 'PRODUCT_INACTIVE: % is turned off; an admin must reactivate it first', v_name;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.guard_inactive_manual_hold() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_inactive_manual_hold() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+-- PostgreSQL orders same-kind triggers by name: the existing intent guard runs first.
+CREATE TRIGGER trigger_b_guard_inactive_manual_hold BEFORE INSERT ON public.inventory_holds
+  FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_manual_hold();
 
 CREATE FUNCTION public.guard_order_reopen_inactive_product() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
@@ -561,13 +590,18 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgenabled = 'O'
        AND tgname IN ('trigger_a_guard_product_deactivation', 'trigger_a_guard_inactive_order_item',
         'trigger_a_guard_inactive_quote_item', 'trigger_a_guard_inactive_po_item',
-        'trigger_z_guard_order_reopen_inactive_product')) <> 5 THEN
+        'trigger_z_guard_order_reopen_inactive_product', 'trigger_b_guard_inactive_manual_hold')) <> 6 THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: triggers';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.orders'::regclass
     AND tgname = 'trigger_z_guard_order_reopen_inactive_product' AND tgenabled = 'O'
     AND tgfoid = 'public.guard_order_reopen_inactive_product()'::regprocedure) THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: order trigger';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.inventory_holds'::regclass
+    AND tgname = 'trigger_b_guard_inactive_manual_hold' AND tgenabled = 'O'
+    AND tgfoid = 'public.guard_inactive_manual_hold()'::regprocedure) THEN
+    RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: hold trigger';
   END IF;
   IF has_function_privilege('anon', 'public.preview_product_active_change(uuid[],boolean)', 'EXECUTE')
     OR has_function_privilege('anon', 'public.set_product_active(uuid[],boolean,text,text)', 'EXECUTE')
@@ -577,7 +611,8 @@ BEGIN
     OR has_function_privilege('metabase_ro', 'public.set_product_active(uuid[],boolean,text,text)', 'EXECUTE')
     OR EXISTS (SELECT 1 FROM unnest(ARRAY[
       'public._product_active_review(uuid[])', 'public.guard_product_deactivation()',
-      'public.guard_inactive_product_line()', 'public.guard_order_reopen_inactive_product()',
+      'public.guard_inactive_product_line()', 'public.guard_inactive_manual_hold()',
+      'public.guard_order_reopen_inactive_product()',
       'public._get_inventory_position_cost_impl_20261019()',
       'public._get_inventory_cost_report_cost_impl_20261019()']) AS f(signature),
       unnest(ARRAY['anon', 'authenticated', 'service_role', 'metabase_ro']) AS r(role)
@@ -591,7 +626,7 @@ BEGIN
        IS DISTINCT FROM '22c79c8cc58d2e575ca353511e38c291'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.guard_inactive_product_line()'::regprocedure)
-       IS DISTINCT FROM '9b5ff9a3182969f9f13f3e0411edd7ac' THEN
+       IS DISTINCT FROM '6164651cbc549e459d7bedd8cf32abc7' THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: guards';
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc

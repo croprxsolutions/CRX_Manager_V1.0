@@ -233,10 +233,12 @@ export function sanitizeError(error: unknown): string {
         : 'An unexpected error occurred';
 
   if (/^PRODUCT_INACTIVE(?::|$)/.test(message)) {
-    return 'This product is turned off. Ask an admin to reactivate it before adding it to a new sale.';
+    return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
+      || 'This product is turned off. Ask an admin to reactivate it.';
   }
   if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
-    return 'This product still has an open order, unbilled delivery, or open purchase order. Resolve it and review again.';
+    return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
+      || 'This product cannot be turned off while required work is open. Review its blockers.';
   }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
     return 'Product details changed since the review. Review the selection again.';

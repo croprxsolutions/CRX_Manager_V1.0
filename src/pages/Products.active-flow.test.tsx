@@ -77,7 +77,7 @@ describe('product active review flow', () => {
     await loaded();
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
     expect(await screen.findByText('Test Chemical: order PM3-OPEN')).toBeInTheDocument();
-    expect(screen.getByRole('dialog')).not.toHaveTextContent('Confirm');
+    expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 

@@ -18,7 +18,18 @@
 -- ACCESS CHANGE: the two review RPCs are admin-only; direct status changes require
 --   a signed-in admin. A database job without a signed-in actor is refused.
 --   No existing table access rule changes.
--- ROLLBACK (reviewed migration): remove the six triggers and their functions.
+-- ROLLBACK (new reviewed migration): drop triggers trigger_a_guard_product_deactivation,
+--   trigger_a_guard_inactive_order_item, trigger_a_guard_inactive_quote_item,
+--   trigger_a_guard_inactive_po_item, trigger_b_guard_inactive_manual_hold,
+--   trigger_z_guard_order_reopen_inactive_product; then drop their functions
+--   guard_product_deactivation(), guard_inactive_product_line(),
+--   guard_inactive_manual_hold(), guard_order_reopen_inactive_product().
+--   Drop RPCs preview_product_active_change(uuid[],boolean) and
+--   set_product_active(uuid[],boolean,text,text), plus helper _product_active_review(uuid[]).
+--   Restore the three inventory bodies to the preflight-pinned md5s:
+--   _get_inventory_position_cost_impl_20261019() ae638950347495d311e4e386a9353362;
+--   _get_inventory_cost_report_cost_impl_20261019() ae5899cb4c27fe0ea28a39ced278265b;
+--   get_inventory_cost_report() 2fdd283e39482add63e075ab84a7e52d.
 -- ORDERING: apply after WP-PM-12a and every older pending migration; recheck the ledger.
 SET LOCAL lock_timeout = '5s';
 CREATE TEMP TABLE product_active_guard_tx ON COMMIT DROP AS

@@ -40,7 +40,7 @@ import { dirname, join } from 'node:path';
 import * as ts from 'typescript';
 
 // -------------------------------------------------------------------------
-// Checked-in live snapshot — verified 2026-10-26, 731 public functions, plus 14 added by hand:
+// Checked-in live snapshot — verified 2026-10-26, 731 public functions, plus 19 added by hand:
 // the 2 margin-floor functions (20261025210000), customer_credit_exposure (20261027030000), the
 // 4 price-sheet functions (20261027050000) and the 4 that 20261027060000 adds (applied before
 // its PR merges; the merge gates require the apply first), and get_quote_cost_alerts (20261030090000,

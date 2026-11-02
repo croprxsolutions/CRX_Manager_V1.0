@@ -48,6 +48,7 @@ DECLARE
   v_key_prefix text := 'gauntlet-' || gen_random_uuid()::text;
   v_location text := '[E2E] gauntlet ' || gen_random_uuid()::text;
   v_result jsonb;
+  v_pricing jsonb;
   v_replay jsonb;
   v_order_id uuid;
   v_order_item_id uuid;
@@ -112,26 +113,6 @@ BEGIN
          ) IS NOT NULL
    ORDER BY created_at
    LIMIT 1;
-  SELECT id, product_name, inventory_unit
-    INTO v_product2, v_product2_name, v_inventory_unit2
-    FROM public.products
-   WHERE is_active = true
-     AND id <> v_product
-     AND NOT EXISTS (
-       SELECT 1 FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
-       WHERE oi.product_id = products.id AND o.deleted_at IS NULL)
-     AND NOT EXISTS (
-       SELECT 1 FROM public.purchase_order_items poi JOIN public.purchase_orders po ON po.id = poi.purchase_order_id
-       WHERE poi.product_id = products.id AND po.status IN ('draft', 'submitted', 'partially_received'))
-     AND NULLIF(btrim(inventory_unit), '') IS NOT NULL
-     AND public.field_app_priced_quantity(
-           1,
-           public.normalize_rate_unit(inventory_unit),
-           public.normalize_rate_unit(inventory_unit),
-           product_form
-         ) IS NOT NULL
-   ORDER BY created_at
-   LIMIT 1;
   SELECT c.id, c.commission_amount INTO v_commission, v_commission_amount
     FROM public.commissions c
    WHERE c.status = 'pending'
@@ -146,7 +127,7 @@ BEGIN
 
   IF v_admin IS NULL OR v_sales IS NULL OR v_sales2 IS NULL OR v_applicator IS NULL
      OR v_customer IS NULL OR v_customer2 IS NULL OR v_field IS NULL
-     OR v_product IS NULL OR v_product2 IS NULL OR v_commission IS NULL THEN
+     OR v_product IS NULL OR v_commission IS NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL(setup): required active role/customer/product/unbatched commission fixture missing';
   END IF;
 
@@ -155,6 +136,29 @@ BEGIN
     json_build_object('sub', v_admin, 'role', 'authenticated')::text,
     true
   );
+
+  -- A private product avoids depending on an unused catalog row in a mature database.
+  -- Pricing must follow the governed path; the terminal exception rolls all of this back.
+  INSERT INTO public.products (product_name, unit_size, inventory_unit, product_form)
+  SELECT '[E2E] gauntlet fixture ' || v_key_prefix, unit_size, inventory_unit, product_form
+    FROM public.products WHERE id = v_product
+  RETURNING id, product_name, inventory_unit
+    INTO v_product2, v_product2_name, v_inventory_unit2;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object(
+      'product_id', v_product2, 'row_version', 1, 'pricing_mode', 'price_driven',
+      'new_cost', '6.00', 'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00'
+    )), v_admin, v_key_prefix || '-fixture-pricing-preview');
+  IF v_pricing->>'status' IS DISTINCT FROM 'previewed'
+     OR (v_pricing->>'apply_allowed')::boolean IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'SMOKE_FAIL(setup): fixture pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set(
+    (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+    v_admin, v_key_prefix || '-fixture-pricing-apply');
+  IF (SELECT current_cost FROM public.products WHERE id = v_product2) IS DISTINCT FROM 6.00::numeric THEN
+    RAISE EXCEPTION 'SMOKE_FAIL(setup): fixture pricing apply failed';
+  END IF;
 
   -- Central key-only replay protection: same-operation replay succeeds through
   -- check_idempotency, cross-operation reuse fails, a direct duplicate insert

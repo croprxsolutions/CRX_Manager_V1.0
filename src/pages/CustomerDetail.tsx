@@ -205,8 +205,13 @@ export default function CustomerDetail() {
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
+  // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
+  const loadedCustomerRef = useRef<typeof customer | null>(null);
+  const loadedAddressesRef = useRef<typeof addresses | null>(null);
   const suppressDirtyUntilReloadSettlesRef = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
 
   // The tab loader below guards its writes with a sequence number, but the PRIMARY
   // record needs the same discipline and did not have it. The per-customer reads
@@ -239,7 +244,9 @@ export default function CustomerDetail() {
       toast('error', 'Failed to load addresses');
       return false;
     }
-    setAddresses((data || []) as Partial<CustomerAddress>[]);
+    const loadedAddresses = (data || []) as Partial<CustomerAddress>[];
+    loadedAddressesRef.current = loadedAddresses;
+    setAddresses(loadedAddresses);
     return true;
   }, [id, toast]);
 
@@ -295,11 +302,13 @@ export default function CustomerDetail() {
     const loadedAddresses = (addressesRes.data || []) as Partial<CustomerAddress>[];
     // Install the complete, validated snapshot atomically from React's event
     // batch. There is no intermediate empty-address or partially-updated form.
+    loadedCustomerRef.current = loadedCustomer;
     setCustomer(loadedCustomer);
     customerRowVersionRef.current = finalRowVersion;
     loadedDefaultSplitRef.current = loadedCustomer.default_commission_split ?? null;
     defaultSplitTouchedRef.current = false;
     setCrops((loadedCustomer.crops ?? []) as CropValue[]);
+    loadedAddressesRef.current = loadedAddresses;
     setAddresses(loadedAddresses);
     setParentName('');
     setLoading(false);
@@ -340,6 +349,7 @@ export default function CustomerDetail() {
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
+    if (customer === loadedCustomerRef.current && addresses === loadedAddressesRef.current) return;
     setIsDirty(true);
   }, [customer, addresses]);
 
@@ -992,9 +1002,12 @@ export default function CustomerDetail() {
           currentValue: customer.default_commission_split ?? null,
         });
         defaultSplitTouchedRef.current = false;
+        // What was just saved is the new baseline: the address re-read below is not an edit.
+        loadedCustomerRef.current = customer;
         setIsDirty(false);
         if (isNew) {
           if (rowVersionResult.kind !== 'recovery') toast('success', 'Customer created');
+          skipUnsavedPromptRef.current = true;
           navigate(`/customers/${result.customer_id}`, { replace: true });
         } else {
           if (rowVersionResult.kind !== 'recovery') toast('success', 'Customer updated');
@@ -1188,7 +1201,8 @@ export default function CustomerDetail() {
       )}
 
       {(tab === 'info' || isNew) && (
-        <div className="space-y-4">
+        <fieldset disabled={isNew && saving} className="min-w-0 space-y-4">
+          {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
           {/* key remounts on customer switch — in-flight loads/mutations from the previous customer must never write into this one's view (Sol 2.G r2) */}
           {/* interactionRefresh in the key: logging a call remounts the prep card so "Last conversation" is never stale (Sol final gauntlet) */}
           {!isNew && id && <CustomerPrepCard key={`${id}:${interactionRefresh}`} customerId={id} />}
@@ -1436,7 +1450,7 @@ export default function CustomerDetail() {
               onCreateTask={() => setQuickTaskOpen(true)}
             />
           )}
-        </div>
+        </fieldset>
       )}
 
       {tab === 'contacts' && !isNew && id && profile && (

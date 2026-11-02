@@ -1517,7 +1517,7 @@ git() { return 0; }
   assert(ci.includes('name: Publish exact full-CI proof'), 'a successful full PR run must publish an exact base/head proof artifact');
   assert(ci.includes('crx-full-ci-proof-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}'), 'full proof artifact name must bind both event SHAs');
   const ciCheckoutBlocks = ci.split('uses: actions/checkout@v7').slice(1);
-  assert.equal(ciCheckoutBlocks.length, 9, 'CI checkout count changed; review least-privilege settings');
+  assert.equal(ciCheckoutBlocks.length, 10, 'CI checkout count changed; review least-privilege settings');
   for (const block of ciCheckoutBlocks) {
     const checkout = block.slice(0, block.indexOf('\n      - name:'));
     assert(checkout.includes('persist-credentials: false'), 'every CI checkout must drop the GitHub token');

@@ -2,7 +2,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratchHookEnvironment } from "./git-test-env.mjs";
 
@@ -56,6 +58,50 @@ assert.match(compact, /never coerce null to 0 on a saved or authoritative path/)
 assert.match(compact, /Mason cannot read code or safely review a diff/);
 
 assert.equal(runRaw("{"), "");
+
+// Guards loaded from another folder: warn only when that folder's guards differ from origin/main.
+const scratch = mkdtempSync(path.join(tmpdir(), "session-reminder-"));
+try {
+  const guardsRepo = path.join(scratch, "old-checkout");
+  const sessionRepo = path.join(scratch, "worktree");
+  const scratchHook = path.join(guardsRepo, ".claude", "hooks", "session-context-reminder.mjs");
+  const env = scratchHookEnvironment(scratch);
+  const git = (cwd, ...args) => {
+    const result = spawnSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd, env, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  mkdirSync(path.dirname(scratchHook), { recursive: true });
+  mkdirSync(sessionRepo);
+  cpSync(hookPath, scratchHook);
+  git(guardsRepo, "init", "-q");
+  git(sessionRepo, "init", "-q");
+  git(guardsRepo, "add", ".");
+  git(guardsRepo, "commit", "-qm", "old guards");
+  const oldCommit = git(guardsRepo, "rev-parse", "HEAD");
+  writeFileSync(path.join(guardsRepo, ".claude", "hooks", "newer-guard.mjs"), "// newer\n");
+  git(guardsRepo, "add", ".");
+  git(guardsRepo, "commit", "-qm", "newer guard");
+  git(guardsRepo, "update-ref", "refs/remotes/origin/main", "HEAD");
+  git(guardsRepo, "reset", "-q", "--hard", oldCommit);
+
+  const reminder = (cwd) => {
+    const result = spawnSync(process.execPath, [scratchHook], { env, input: JSON.stringify({ source: "startup", cwd }), encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "", "the warning check must not emit hidden errors");
+    return JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+  };
+
+  assert.match(reminder(sessionRepo), /WARNING: this session's guards and skills run from .*old-checkout, not this worktree/);
+  assert.match(reminder(sessionRepo), /Follow the gate anyway/);
+  assert.doesNotMatch(reminder(guardsRepo), /WARNING/, "guards loaded from the session's own folder are not this problem");
+  assert.doesNotMatch(reminder(path.join(scratch, "missing")), /WARNING/, "a bad cwd stays silent");
+
+  git(guardsRepo, "update-ref", "refs/remotes/origin/main", oldCommit);
+  assert.doesNotMatch(reminder(sessionRepo), /WARNING/, "another folder with current guards is fine");
+} finally {
+  rmSync(scratch, { recursive: true, force: true });
+}
 
 // Codex path: the real manifest entry, through the real adapter, from the repo root.
 const codexHooks = JSON.parse(readFileSync(new URL("../../.codex/hooks.json", import.meta.url), "utf8")).hooks;

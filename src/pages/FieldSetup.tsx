@@ -244,7 +244,11 @@ function FieldSetupPage() {
   // Track dirty state
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
+  const loadedFieldRef = useRef<typeof field | null>(null);
+  const loadedSplitsRef = useRef<typeof billingSplits | null>(null);
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
   const [postSaveNavTarget, setPostSaveNavTarget] = useState<string | null>(null);
@@ -257,6 +261,7 @@ function FieldSetupPage() {
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
+    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current) return;
     setIsDirty(true);
   }, [field, billingSplits]);
 
@@ -289,7 +294,8 @@ function FieldSetupPage() {
     }
     if (data) {
       const { customer: _customer, ...fieldRow } = data;
-      setField(fieldRow as Partial<Field>);
+      loadedFieldRef.current = fieldRow as Partial<Field>;
+      setField(loadedFieldRef.current);
       loadedOverrideRef.current = (fieldRow as Partial<Field>).override_acres ?? null;
       loadedHadBoundaryRef.current = (fieldRow as Partial<Field>).measured_acres != null; // A1 backfilled measured for every boundaried field
       setHasSavedBoundary(loadedHadBoundaryRef.current);
@@ -381,8 +387,7 @@ function FieldSetupPage() {
       if (defaults && defaults.length > 0) setBillingOpen(true);
       // Always replace the splits, even with none: Save sends this whole list, so splits left over
       // from another field (or an earlier read) must never stay on screen.
-      setBillingSplits(
-        (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
+      const loadedSplits: BillingSplit[] = (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
           customer_id: d.customer_id,
           customer_name: d.customer?.farm_name || 'Unknown',
           split_pct: Number(d.split_pct),
@@ -390,11 +395,15 @@ function FieldSetupPage() {
           notes: d.notes || '',
           price_override_cents: d.price_override_cents ?? null,
           pricing_note: d.pricing_note || '',
-        }))
-      );
+        }));
+      loadedSplitsRef.current = loadedSplits;
+      setBillingSplits(loadedSplits);
     } else {
       // No such field: show "Field not found", never the form of the field open before.
-      setField({});
+      loadedFieldRef.current = {};
+      loadedSplitsRef.current = [];
+      setField(loadedFieldRef.current);
+      setBillingSplits(loadedSplitsRef.current);
     }
     setLoadError(false);
     setLoading(false);
@@ -666,15 +675,21 @@ function FieldSetupPage() {
             loadedOverrideRef.current = field.override_acres ?? null;
           } catch (ovError) {
             Sentry.captureException(ovError instanceof Error ? ovError : new Error(String(ovError)), { tags: { source: 'critical_action', action: 'set_field_override_acres' } });
-            toast('error', 'Field saved but the billable-acres override could not be applied. Please retry.');
+            toast('error', isNew
+              ? `Field saved but the ${field.override_acres} acres to bill could not be applied. Please enter them again and save.`
+              : 'Field saved but the billable-acres override could not be applied. Please retry.');
             persistError = true;
           }
         }
 
         if (persistError) {
-          // Keep the form dirty so the user retries. For a brand-new field still navigate to
-          // the created record so a retry edits it instead of creating a duplicate.
-          if (isNew && savedFieldId) navigate(`/fields/${savedFieldId}`, { replace: true });
+          // An existing field stays dirty so the user retries. A brand-new field moves to the created
+          // record so a retry edits it: Stay on /fields/new would create a second field, so the real
+          // unsaved-changes prompt must not stop this move. That page reloads from the database.
+          if (isNew && savedFieldId) {
+            skipUnsavedPromptRef.current = true;
+            navigate(`/fields/${savedFieldId}`, { replace: true });
+          }
           setSaving(false);
           return;
         }

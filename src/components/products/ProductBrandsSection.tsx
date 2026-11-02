@@ -6,6 +6,7 @@ import Card, { CardHeader } from '../ui/Card';
 import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import Select from '../ui/Select';
+import EpaLabelLink from './EpaLabelLink';
 import ProductSearchPicker from './ProductSearchPicker';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
@@ -471,7 +472,10 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
               {brands.map((brand) => (
                 <tr key={brand.id} className="border-b last:border-0">
                   <td className="py-2 pr-3 font-medium text-nav-dark">{brand.brand_name}</td>
-                  <td className="py-2 pr-3">{brand.epa_registration ?? <span className="text-secondary">None</span>}</td>
+                  <td className="py-2 pr-3">
+                    <div>{brand.epa_registration ?? <span className="text-secondary">None</span>}</div>
+                    <EpaLabelLink epaRegistration={brand.epa_registration} />
+                  </td>
                   <td className="py-2 pr-3">{brand.manufacturer ?? '—'}</td>
                   <td className="py-2 pr-3">{rupLabel(brand.is_rup)}</td>
                   <td className="py-2 pr-3">{brand.signal_word ?? '—'}</td>

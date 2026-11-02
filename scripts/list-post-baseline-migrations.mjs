@@ -74,9 +74,7 @@ if (includeOneShot && repairPlan) {
 
 if (repairPlan) {
   for (const name of quarantined) {
-    console.log(
-      `supabase migration repair ${name.slice(0, 14)} --status applied --db-url "$DATABASE_URL"`,
-    );
+    console.log(name.slice(0, -4));
   }
 } else {
   for (const name of includeOneShot ? pending : replay) {
@@ -94,16 +92,17 @@ if (quarantined.length > 0) {
   }
   process.stderr.write(
     repairPlan
-      ? '  Run this plan only AFTER independently proving the restored data already\n' +
-        '  contains every correction. It records the skipped versions so a later\n' +
-        '  unfiltered push cannot rediscover them.\n\n'
+      ? '  Nothing here needs running. The push in supabase/baselines/README.md records\n' +
+        '  each of these at its place in the order, under this whole name, without\n' +
+        '  running it. Then run that README\'s data proof before opening the target.\n\n'
       : includeOneShot
         ? '  Replaying these rewrites rows on THIS database. Only do it against a ledger\n' +
           '  you have proven matches the population the migration was approved against.\n\n'
         : '  These edited data, not schema. After a restore the corrected values come back\n' +
           '  with the DATA restore. Pass --include-one-shot only after proving the target\n' +
-          '  population matches the one each migration was approved against. After the\n' +
-          '  filtered push and data proof, run --one-shot-repair-plan so the skipped\n' +
-          '  versions cannot be rediscovered by a later unfiltered push.\n\n',
+          '  population matches the one each migration was approved against. Otherwise the\n' +
+          '  push in supabase/baselines/README.md records each of these at its place in the\n' +
+          '  order, under its whole name, without running it. Then run that README\'s data\n' +
+          '  proof before opening the target.\n\n',
   );
 }

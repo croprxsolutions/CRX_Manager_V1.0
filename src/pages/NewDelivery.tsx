@@ -122,7 +122,9 @@ export default function NewDelivery() {
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
-  const blocker = useUnsavedChanges(isDirty);
+  // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
+  const skipUnsavedPromptRef = useRef(false);
+  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
 
   const fetchDrivers = useCallback(async () => {
     // PR-07 follow-up: driver picker only uses d.id + d.full_name + d.role; safe via view.
@@ -495,6 +497,7 @@ export default function NewDelivery() {
       await notifyDriverAssigned(selectedDriverId, deliveryNumber, custName, scheduledDate, deliveryId);
     }
 
+    skipUnsavedPromptRef.current = true;
     navigate(`/deliveries/${deliveryId}`);
   };
 
@@ -508,6 +511,8 @@ export default function NewDelivery() {
         Back to Deliveries
       </button>
 
+      {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
       <Card>
         <h2 className="text-xl font-semibold font-heading text-nav-dark mb-6">
           Schedule Delivery
@@ -716,6 +721,7 @@ export default function NewDelivery() {
           )}
         </Card>
       )}
+      </fieldset>
 
       <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={() => navigate('/deliveries')}>

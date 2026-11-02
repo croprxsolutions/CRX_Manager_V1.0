@@ -60,6 +60,11 @@ fi
 
 echo "Validating staged SQL migrations..."
 
+# A newly added migration must not reuse a version stamp from another worktree.
+if ! node "$(dirname "$0")/check-migration-stamp-collision.mjs"; then
+  VIOLATIONS=$((VIOLATIONS + 1))
+fi
+
 for file in $STAGED_SQL; do
   # Allow explicit exemptions for fix migrations (e.g., idempotency repair scripts
   # that must reference wrong patterns in replace() calls)

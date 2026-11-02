@@ -430,6 +430,18 @@ export interface ProductBrand {
   updated_at: string;
 }
 
+export interface ProductChangeHistoryEntry {
+  id: number;
+  product_id: string;
+  change_type: 'created' | 'updated';
+  field_name: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by: string | null;
+  changed_by_name: string | null;
+  changed_at: string;
+}
+
 export interface ProductSupplierLink {
   id: string;
   product_id: string;

@@ -11,6 +11,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
+import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
@@ -685,6 +686,7 @@ export default function ProductDetail() {
 
       await saveExistingProductDetails();
       await fetchProduct();
+      setPriceHistoryReloadToken((current) => current + 1);
       setIsDirty(false);
       toast('success', 'Product updated');
       logActivity({ event: 'product_updated', description: `Product ${product.product_name} updated`, performedBy: profile!.id, entityType: 'product', entityId: id });
@@ -1795,6 +1797,7 @@ export default function ProductDetail() {
               </Card>
               </PhoneSection>
             )}
+            <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
           </div>
         )}
       </div>

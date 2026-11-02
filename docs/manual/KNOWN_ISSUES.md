@@ -40,7 +40,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
-margin: the table-level lock is live since 2026-10-25; the server-function audit is still owed), KI-10 (about 69 functions still replay a saved answer on the retry
+margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
+migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone), KI-18 (UTC/browser-clock season can
 suppress the pre-harvest safety warning).
 
@@ -80,8 +81,8 @@ click-through as an applicator was done. Part B also widened `_can_see_field` to
 so the earlier gap where an applicator sent to one field of a split job got no weather centroid on Job Detail
 should be gone (not checked in the app; 0 split assignments live, 2026-10-22).
 
-### KI-02 — Product cost and margin: server functions not yet fully audited
-**MED · PARTIAL · security/money · follow-up audit unassigned**
+### KI-02 — Product cost and margin: server functions audited and fixed live 2026-11-02
+**MED · PARTIAL · security/money · fix migration `20261102200000` live 2026-11-02; retiring `admin_set_application_service_cost` remains**
 Mason decided cost and margin are admin-only. Screens and report functions were changed (migrations
 `20261019010000`, `20261019230000`) and purchase-order cost is locked (`20261021140000`, `20261021141000`,
 PR #980). **The column lock is live:** `20261022101000_cost_columns_admin_only` (PR #1089, applied 2026-10-25
@@ -94,14 +95,14 @@ Two residuals stay accepted by Mason (2026-10-21): commission amount and rate to
 refusals let a rep narrow a cost by trial and error. Includes the older sub-items "reps can recover
 application-service cost" and "retire the old `admin_set_application_service_cost` function" (no caller left in
 `src/`; no DROP migration exists).
-Still open (Mason, 2026-10-25, kept out of the column lock): column grants cannot limit owner-rights (SECURITY
-DEFINER) functions. The 45 signed-in-executable ones whose body names a cost field were read live on 2026-10-25,
-but 22 more that reach cost only through inner helper functions (`create_quote_version`, `save_invoice`,
-`price_order`, `save_job` and others) are not yet traced, nor are definer functions that serialize a whole row to
-JSON (`to_jsonb`/`row_to_json`), and nothing re-checks function bodies after a later change. Owed: audit those call
-chains, and add a standing DB invariant sweep that flags any signed-in-executable function returning cost, profit or
-margin to a non-admin. The same follow-up makes the cost-lock proof script record each ledger-only migration once
-(CodeRabbit, PR #1089).
+**Function audit done 2026-11-02** (the report is published once the screen change is deployed, as `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
+signed-in-executable owner-rights (SECURITY DEFINER) function that names cost, reaches it through an inner helper, or
+turns a cost-bearing row into JSON was traced live. Migration `20261102200000_cost_definer_leaks_closed` changes the ones
+that need it so only admins get cost (real-schema proof
+`scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs`); **applied live 2026-11-02 18:39 UTC (12:39 PM Central), ledger `20261102183928`; read-only post-apply check and sweep clean**. The standing sweep
+`cost-exposure-review` now flags any new or changed function that names cost, and the cost-lock proof records each
+ledger-only migration once (CodeRabbit, PR #1089). Decided by Mason 2026-11-02: existing inventory notes stay as they
+are; no new note gets a cost.
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**
@@ -114,6 +115,9 @@ the `invoice_shares_insert` policy (checked live 2026-10-13: no ownership test);
 on other reps' invoices, and payments and prepay/credit application stay open to reps. Any rep can
 still change a commission split on a job, quote or order (only the customer default is protected). Any rep can
 also roll over any rep's quote.
+The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
+Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
+with a below-cost line always fails, so that job is billed by hand.
 
 ### KI-04 — Connected tools with no permission rule run without a prompt
 **LOW · FIXED 2026-11-02 (residual accepted) · tooling-guards/security**
@@ -597,8 +601,11 @@ edge function** (the live function answers "Unknown email_type: purchase_order")
   ticket) means these should be widened to the dispatch route too; not built.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)
-**HIGH/MED · OPEN · security/money · Mason**
-`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).
+**MED · PARTIAL · security/money · Mason**
+~~`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).~~
+**Settled by the 2026-11-02 audit (KI-02):** `blend_recipe_items` cost was closed by the column lock; field billing,
+delivery and offline sync give an applicator or driver no cost; the remaining dispatch path is covered by
+`20261102200000` (live 2026-11-02).
 Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals which open PO line is cheaper
 (MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
 posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in

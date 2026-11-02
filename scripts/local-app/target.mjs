@@ -37,7 +37,7 @@ const LIVE_VALUE = [
  * Escaped, because a bracket or parenthesis left in the path would stop the pattern matching at all.
  */
 export function denyInsideCheckout(root, folder) {
-  const escaped = root.replaceAll('\\', '/').replace(/\/+$/, '').replace(/[$^*+?()[\]{}!|]/g, '\\$&');
+  const escaped = root.replaceAll('\\', '/').replace(/\/+$/, '').replace(/[\\$^*+?()[\]{}!|]/g, '\\$&');
   return `${escaped}/**/${folder}/**`;
 }
 

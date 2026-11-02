@@ -12,7 +12,7 @@ environment safety, and production readiness.
 `protect-main` ruleset, so **direct pushes to `main` are impossible for everyone** — Claude,
 Codex, and Mason alike. The landing path is:
 
-**push a branch → open a DRAFT PR → finish required checks → freeze the candidate → mark the PR
+**push a branch → open the PR (a DRAFT only when it touches a Sol-list file) → finish required checks → freeze the candidate → mark a draft
 ready (CodeRabbit, advisory since 2026-10-19, makes no automatic reviews since 2026-10-21; a
 money or Mason-named PR gets one requested full review; fix or refute any comments that arrive
 before the merge, but do not wait for a review nobody requested) → exact-SHA Sol proof → merge with
@@ -127,10 +127,10 @@ Report the largest JS chunks. Warn if any single chunk is > 500KB.
 If ready, state the remaining landing steps explicitly — this skill does **not** land anything:
 
 1. Push the **branch** (never `main` — the `protect-main` ruleset rejects it).
-2. Open the PR as a **draft**.
+2. Open the PR: **ready** when it touches no file on `docs/reference/sol-required-paths.md`, otherwise as a **draft** (Mason, 2026-11-02).
 3. Finish implementation, bring the branch up to date, and wait for required checks;
    **Vercel is a required check**.
-4. Once required checks are green, freeze the candidate, record its head SHA, and mark the PR
+4. Once required checks are green, freeze the candidate, record its head SHA, and mark a draft PR
    ready. CodeRabbit is **advisory** since 2026-10-19 (Mason) and never submits APPROVED or
    CHANGES_REQUESTED. Since 2026-10-21 it makes no automatic reviews: marking ready starts none,
    and it reviews only when an agent posts `@coderabbitai full review` on a money or Mason-named PR. GitHub's `protect-main`

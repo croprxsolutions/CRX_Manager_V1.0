@@ -114,3 +114,37 @@ PROOF — Ran: real-schema proof, full Vitest, typecheck, build, lint, code-heal
 **WP-PM-3 round 6 (Mason approved, 2026-11-02 ~07:10) → DRAFTED [#1276](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1276).** It added a database guard on new manual holds and refused a void or cancel that raises a turned-off line's remaining from zero. Commit `86d88007f` includes origin/main. PROOF: Ran the real-schema proof, full Vitest, typecheck, build, lint, code-health, check:docs, test:agent-workflows and all 25 browser tests on `86d88007f`. Saw `PRODUCT_ACTIVE_GUARD_PROOF_PASS`, 7,016 tests passed with none failing, and 25 of 25 browser tests passed. **Sol clean on `86d88007f`.** Luna HIGH refuted: an already-positive remaining on a turned-off line may rise, because the rule bars reopening from zero, and only rows that existed before this change can hold one. Luna's MED, both LOWs and the Claude reviewers' findings are named in the PR body. No reviewer found a BLOCKER. The compliance HIGH is a named exception: the confirmation is built on `Modal` because `ConfirmModal` cannot list products. `needs-coderabbit` was added and a full review requested.
 
 **WP-PM-3 after the PR opened (2026-11-02):** CI fix `f72262b5c`: the record's pin now uses the standard `SQL sha256:` form, and the workflow map was refreshed. CodeRabbit raised 10 comments, all answered and resolved in one push. Six were fixed by Codex in `32612c593`. Two were on #1266's files and left alone; #1266 merged at 14:41 UTC. Two were deferred to KNOWN_ISSUES. I then merged main (#1266 landed) as `666267e45`. PROOF: Ran Vitest (7,018 passed, none failed), typecheck, lint, check:docs and the worktree-awareness guard test on `666267e45`; all passed. Codex ran the product-active proof on `32612c593` and saw `PRODUCT_ACTIVE_GUARD_PROOF_PASS`. **Owed:** exact-head Sol on the current head, after the Codex GitHub App review of that push. The Sol on `86d88007f` was clean, but `32612c593` touched the migration.
+
+---
+
+# Wave 2, attempt 2
+
+**Run:** Wave 2, attempt 2 (the rest of Wave 2, after Mason's new go on 2026-11-02). **Started:** 2026-11-02 12:32 America/Chicago. **Hard wrap:** 20:32; no new package after 18:32; closeout by 19:47.
+**Coordinator branch:** `loop/product-master-w2-r2-2026-11-02`, ledger and morning report copied forward from `origin/loop/product-master-w2-r1-2026-11-01` (`9afa6e718`, the same content as `main`). **Build worktree:** `C:\CRX_PMBuild_w2r2` (this run's stand-in for `C:\CRX_PMBuild`, which belongs to the session landing #1276). **Base:** `origin/main` at `517b2607c`.
+
+## Wave 2 attempt 2 Step 0
+
+- **Plan on main:** section 4a and the wave table are present on `origin/main`.
+- **Context size:** `autoCompactWindow` is 800000, no `modelSettings` override.
+- **Validator:** MISSION DOC OK; one expected warning: `C:\CRX_PMBuild` is on `pm/wp-pm-3-turn-off-safely`, owned by the #1276 landing session. Not touched.
+- **State re-verified:** #1266 merged (`04633757c`) and #1272 merged (`c4b507d8f`); both migrations are in the live ledger. #1276 is open, not draft, head `3e8d91260`, owned by another session; no remaining package depends on PM-3.
+- **Docker:** 29.5.3 answers; `postgres:17` pulled. **Codex:** codex-cli 0.165.0; wrapper self-test in `C:\CRX_PMBuild_w2r2` wrote the token file, then it was deleted.
+- **Keep awake:** granted until the session goes idle.
+- **Schema registry:** refreshed read-only from live (6 introspection queries). Live high-water `20261102174004`; one applied name added (`20261102140000_completed_delivery_cancel_requires_void`); no other section changed. Left uncommitted in the coordinator worktree for Mason, as the skill requires.
+- **Staleness check** (commits on `origin/main` since 2026-10-29 touching the watched screens, `Combobox` or `src/components/products/`): beyond Wave 1 and Wave 2 attempt 1, there are #1267 (one-customer sales sheet), #1271 (phone product editing with a quick reviewed price change), #1273 (blank missing prices in exports) and #1282 (form errors and focus). Each is checked against the packages it may touch at grounding: #1271 and #1273 against PM-7 and PM-6b. No package is REFUTED at Step 0.
+
+## Wave 2 attempt 2 packages
+
+| Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
+|---|---|---|---|---|---|---|---|---|
+| WP-PM-9 Forms, units, containers | ⬜ | | | | | | | |
+| DM-0 Data hygiene | ⬜ | | | | | | | |
+| WP-PM-5 Use Timing | ⬜ | | | | | | | |
+| WP-PM-6a Unit audit | ⬜ | | | | | | | |
+| WP-PM-6b New-product flow, Duplicate 💲 | ⬜ | | | | | | | |
+| WP-PM-7 One cost path, tier order 💲 | ⬜ | | | | | | | |
+| WP-PM-15a Vendor proposals 💲 | ⬜ | | | | | | | |
+| WP-PM-12b Corrections | ⬜ | | | | | | | |
+| WP-PM-8b Incomplete badge, near-match warnings, rate help | ⬜ | | | | | | | |
+
+## Wave 2 attempt 2 proof

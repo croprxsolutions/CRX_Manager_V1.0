@@ -26,8 +26,10 @@ DECLARE
   v_admin   uuid; v_appl uuid; v_forged uuid := gen_random_uuid();
   v_sfx     text := substr(gen_random_uuid()::text,1,8);
   v_cust_a  uuid; v_cust_b uuid;
-  v_grp     uuid := gen_random_uuid();
-  v_grp2    uuid := gen_random_uuid();
+  v_grp     uuid;
+  v_grp2    uuid;
+  v_grp3    uuid;
+  v_field   uuid; v_prod uuid; v_pricing jsonb; v_d_total bigint;
   v_inv_a   uuid; v_inv_b uuid;       -- happy group
   v_inv_c   uuid; v_inv_d uuid;       -- all-or-nothing group (d gets paid)
   v_aset    uuid;
@@ -42,13 +44,58 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
 
+  -- Posted split groups come only from the real split save, posted through post_invoice_group,
+  -- with the product's cost set through the governed pricing path.
+  INSERT INTO products (product_name, unit_size, product_form)
+    VALUES ('[SMOKE] UPG Prod '||v_sfx, 'GL', 'liquid') RETURNING id INTO v_prod;
+  v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object(
+      'product_id', v_prod, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prod),
+      'pricing_mode', 'price_driven', 'new_cost', '1.00',
+      'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+      'change_reason', '[SMOKE] UPG cost fixture', 'price_source', '[SMOKE] UPG',
+      'basis_type', 'manual_override', 'basis_source', 'product_page',
+      'basis_reason', '[SMOKE] UPG cost fixture', 'basis_selection', false)),
+    v_admin, '[SMOKE] upg-price-preview-'||v_sfx);
+  PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                  'reason', '[SMOKE] acknowledged'))
+                FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+    NULL, v_admin, '[SMOKE] upg-price-approve-'||v_sfx);
+  PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, '[SMOKE] upg-price-apply-'||v_sfx);
+  INSERT INTO fields (customer_id, field_name, crop_type, total_acres)
+    VALUES (v_cust_a, '[SMOKE] UPG Field '||v_sfx, 'corn', 40) RETURNING id INTO v_field;
+  INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary)
+    VALUES (v_field, v_cust_a, 50, true), (v_field, v_cust_b, 50, false);
+  FOR v_n IN 1..3 LOOP
+    v_res := save_field_app_invoice(NULL,
+      jsonb_build_object('invoice_date', CURRENT_DATE::text, 'header_notes', '[SMOKE] UPG group '||v_n),
+      jsonb_build_array(jsonb_build_object(
+        'field_id', v_field, 'map_number', 1, 'total_acres', 40, 'planted_acres', NULL,
+        'applied_acres', 40, 'crop_type', NULL, 'wind_direction', NULL, 'sort_order', 0)),
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_prod, 'description', '[SMOKE] UPG Chem', 'quantity', 0, 'unit_size', 'GL',
+        'unit_price_cents', 1000 * v_n, 'cost_cents', 100, 'sort_order', 0, 'rate_per_acre', 0.1,
+        'rate_unit', 'GL', 'manual_override', true)),
+      v_admin, NULL, '[SMOKE] upg-save-'||v_n||'-'||v_sfx);
+    v_aset := (v_res->>'invoice_group_id')::uuid;
+    IF v_aset IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: the split save made no invoice group: %', v_res; END IF;
+    PERFORM post_invoice_group(v_aset, v_admin,
+      (SELECT jsonb_object_agg(i.id, public._invoice_post_version(i.id)) FROM invoices i
+        WHERE i.invoice_group_id = v_aset AND i.deleted_at IS NULL),
+      '[SMOKE] upg-post-'||v_n||'-'||v_sfx);
+    IF v_n = 1 THEN v_grp := v_aset; ELSIF v_n = 2 THEN v_grp2 := v_aset; ELSE v_grp3 := v_aset; END IF;
+  END LOOP;
+  SELECT id INTO v_inv_a FROM invoices WHERE invoice_group_id = v_grp  AND customer_id = v_cust_a;
+  SELECT id INTO v_inv_b FROM invoices WHERE invoice_group_id = v_grp  AND customer_id = v_cust_b;
+  SELECT id INTO v_inv_c FROM invoices WHERE invoice_group_id = v_grp2 AND customer_id = v_cust_a;
+  SELECT id, total_amount_cents INTO v_inv_d, v_d_total FROM invoices WHERE invoice_group_id = v_grp2 AND customer_id = v_cust_b;
+  IF (SELECT count(*) FROM invoices WHERE invoice_group_id IN (v_grp, v_grp2, v_grp3) AND status = 'posted') <> 6 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: expected three posted two-member groups';
+  END IF;
+
   -- ── HAPPY GROUP: two members sharing invoice_group_id, both posted ─────────
-  INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by, invoice_group_id)
-    VALUES ('[SMOKE] UPG-A-'||v_sfx, v_cust_a, 'field_application', 'draft', CURRENT_DATE, 120000, v_admin, v_grp) RETURNING id INTO v_inv_a;
-  INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by, invoice_group_id)
-    VALUES ('[SMOKE] UPG-B-'||v_sfx, v_cust_b, 'field_application', 'draft', CURRENT_DATE, 80000, v_admin, v_grp) RETURNING id INTO v_inv_b;
-  PERFORM post_invoice(v_inv_a, public._invoice_post_version(v_inv_a), '[SMOKE] upg-a-post-'||v_sfx);
-  PERFORM post_invoice(v_inv_b, public._invoice_post_version(v_inv_b), '[SMOKE] upg-b-post-'||v_sfx);
 
   v_res := unpost_invoice_group(v_grp, v_admin, '[SMOKE] upg-unpost-'||v_sfx);
   IF (v_res->>'success')::boolean IS NOT TRUE THEN RAISE EXCEPTION 'SMOKE_FAIL: group unpost did not succeed'; END IF;
@@ -62,25 +109,19 @@ BEGIN
   IF v_n <> 2 THEN RAISE EXCEPTION 'SMOKE_FAIL: expected 2 invoice_unposted audit rows, got %', v_n; END IF;
 
   -- ── ALL-OR-NOTHING: one member paid -> whole call RAISES, nothing changes ──
-  INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by, invoice_group_id)
-    VALUES ('[SMOKE] UPG-C-'||v_sfx, v_cust_a, 'field_application', 'draft', CURRENT_DATE, 60000, v_admin, v_grp2) RETURNING id INTO v_inv_c;
-  INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by, invoice_group_id)
-    VALUES ('[SMOKE] UPG-D-'||v_sfx, v_cust_b, 'field_application', 'draft', CURRENT_DATE, 40000, v_admin, v_grp2) RETURNING id INTO v_inv_d;
-  PERFORM post_invoice(v_inv_c, public._invoice_post_version(v_inv_c), '[SMOKE] upg-c-post-'||v_sfx);
-  PERFORM post_invoice(v_inv_d, public._invoice_post_version(v_inv_d), '[SMOKE] upg-d-post-'||v_sfx);
   -- Apply money to D so it cannot be unposted.
   INSERT INTO allocation_sets (entity_type, entity_id, version, is_active, customer_id, total_payment_cents, total_allocated_cents)
-    VALUES ('payment', gen_random_uuid(), 1, true, v_cust_b, 40000, 40000) RETURNING id INTO v_aset;
+    VALUES ('payment', gen_random_uuid(), 1, true, v_cust_b, v_d_total, v_d_total) RETURNING id INTO v_aset;
   INSERT INTO invoice_line_allocations (allocation_set_id, bill_to_customer_id, split_percentage, amount_cents, invoice_id)
-    VALUES (v_aset, v_cust_b, 100, 40000, v_inv_d);
-  UPDATE invoices SET paid_amount_cents = 40000 WHERE id=v_inv_d;
+    VALUES (v_aset, v_cust_b, 100, v_d_total, v_inv_d);
+  UPDATE invoices SET paid_amount_cents = v_d_total WHERE id=v_inv_d;
 
   BEGIN
-    PERFORM unpost_invoice_group(v_grp2, v_admin, NULL);
+    PERFORM unpost_invoice_group(v_grp2, v_admin, '[SMOKE] upg-paid-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: group with a paid member was unposted (not all-or-nothing)';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF SQLERRM NOT LIKE '%payments, prepay, or write-offs%' THEN
+    IF SQLERRM NOT LIKE '%payments, prepay, write-offs, or applied credit%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: all-or-nothing raised the WRONG error: %', SQLERRM;
     END IF;
   END;
@@ -93,7 +134,7 @@ BEGIN
   -- ── ROLE GATE: applicator denied (group stays posted) ─────────────────────
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_appl, 'role','authenticated')::text, true);
   BEGIN
-    PERFORM unpost_invoice_group(v_grp2, v_appl, NULL);
+    PERFORM unpost_invoice_group(v_grp2, v_appl, '[SMOKE] upg-appl-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: applicator was allowed to unpost a group';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -107,7 +148,7 @@ BEGIN
   -- ── ACTOR: forged performer raises ACTOR_MISMATCH ─────────────────────────
   -- Re-post the happy group's members would be needed; instead use the still-posted grp2.
   BEGIN
-    PERFORM unpost_invoice_group(v_grp2, v_forged, NULL);
+    PERFORM unpost_invoice_group(v_grp2, v_forged, '[SMOKE] upg-forged-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: forged actor allowed';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -122,22 +163,13 @@ BEGIN
   -- same-group replay still works:
   v_res := unpost_invoice_group(v_grp, v_admin, '[SMOKE] upg-unpost-'||v_sfx);
   IF (v_res->>'invoice_group_id') <> v_grp::text THEN RAISE EXCEPTION 'SMOKE_FAIL: same-group replay returned wrong group'; END IF;
-  DECLARE
-    v_grp3  uuid := gen_random_uuid();
-    v_inv_e uuid; v_inv_f uuid;
   BEGIN
-    INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by, invoice_group_id)
-      VALUES ('[SMOKE] UPG-E-'||v_sfx, v_cust_a, 'field_application', 'draft', CURRENT_DATE, 30000, v_admin, v_grp3) RETURNING id INTO v_inv_e;
-    INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by, invoice_group_id)
-      VALUES ('[SMOKE] UPG-F-'||v_sfx, v_cust_b, 'field_application', 'draft', CURRENT_DATE, 20000, v_admin, v_grp3) RETURNING id INTO v_inv_f;
-    PERFORM post_invoice(v_inv_e, public._invoice_post_version(v_inv_e), '[SMOKE] upg-e-post-'||v_sfx);
-    PERFORM post_invoice(v_inv_f, public._invoice_post_version(v_inv_f), '[SMOKE] upg-f-post-'||v_sfx);
     BEGIN
       PERFORM unpost_invoice_group(v_grp3, v_admin, '[SMOKE] upg-unpost-'||v_sfx);  -- v_grp's key!
       RAISE EXCEPTION 'SMOKE_FAIL: cross-group key replay silently returned (wrong-group success)';
     EXCEPTION WHEN OTHERS THEN
       IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-      IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REUSED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: cross-group replay wrong error: %', SQLERRM; END IF;
+      IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REUSED%' AND SQLERRM NOT LIKE 'IDEMPOTENCY_INTENT_MISMATCH%' THEN RAISE EXCEPTION 'SMOKE_FAIL: cross-group replay wrong error: %', SQLERRM; END IF;
     END;
     -- v_grp3 must be UNTOUCHED (still posted) — the blind replay did NOT unpost it.
     SELECT count(*) INTO v_n FROM invoices WHERE invoice_group_id=v_grp3 AND status='posted';

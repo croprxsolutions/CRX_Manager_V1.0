@@ -192,7 +192,11 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // OTHER site; 'recovery' excuses only the binding-rejection reset, which classify() verifies on
   // its own line.
   'src/pages/Deliveries.tsx': ['recovery'],
-  'src/pages/FieldApplicationInvoice.tsx': ['throw-on-error'],
+  // Replay-binding batch 4a (20261102180000): the save's intent/actor recovery reset inside the
+  // `if (error && !earlierSave)` branch that then rethrows; the other reset is throw-on-error.
+  'src/pages/FieldApplicationInvoice.tsx': ['throw-on-error', 'recovery'],
+  // Replay-binding batch 4a: create_rebate_claim's intent/actor recovery reset inside `if (error)`.
+  'src/pages/Rebates.tsx': ['recovery'],
   'src/pages/Fields.tsx': ['throw-on-error'],
   // Two DIFFERENT sites, two different reasons. The post-call reset is throw-on-error;
   // the one in the catch is a getIdempotencyBindingRejection recovery. Before that

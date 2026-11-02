@@ -130,6 +130,15 @@ function addRequest(request) {
   collectedRequestKeys.add(key);
   requests.push(request);
 }
+// Arming GitHub auto-merge is Mason's own click in the app (Mason, 2026-11-02):
+// GitHub then waits only for its required checks, not this gate's Sol proof or
+// review checks, so an agent may turn auto-merge off but never on.
+if (/set_auto_merge$/i.test(toolName) && toolInput.enabled !== false) {
+  deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app. An agent may turn it off, or merge itself through `gh pr merge` once every gate passes.");
+}
+if (typeof toolInput.command === "string" && /enablePullRequestAutoMerge/i.test(toolInput.command)) {
+  deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app; the GraphQL enablePullRequestAutoMerge mutation is refused for agents.");
+}
 if (GITHUB_MERGE_TOOL.test(toolName)) {
   requests.push(mcpMergeRequest(toolInput));
 } else if (typeof toolInput.command === "string" && toolInput.command) {

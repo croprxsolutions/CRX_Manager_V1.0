@@ -85,7 +85,8 @@
 > change (the block above, Mason 2026-10-07), which still needs every other gate here. Every agent merge must
 > carry `--match-head-commit <the head the gate checked>` (put it before any free-text `--body`), so GitHub refuses a
 > head that moved in between; REST and connector merges cannot carry it and are refused. `--auto` into `main` is
-> refused outright; `--admin` and `CHANGES_REQUESTED` still are. A repeated StatusContext counts its WORSE state. (2) `migration-apply-lib.mjs` applies its former
+> refused outright, and since 2026-11-02 so is an agent arming auto-merge any other way (the app's `set_auto_merge` tool,
+> GraphQL `enablePullRequestAutoMerge`); only Mason arms it, from the app; `--admin` and `CHANGES_REQUESTED` still are. A repeated StatusContext counts its WORSE state. (2) `migration-apply-lib.mjs` applies its former
 > hands-free-only proof set (content binding, both reviewer names, fresh content-bound Sol proof) in EVERY session,
 > and refuses DESTRUCTIVE, data-overwriting and access-changing SQL for agents in every session with no agent
 > override (an agent-passed approval flag cannot prove Mason approved that exact migration; `apply-migration-file.mjs`

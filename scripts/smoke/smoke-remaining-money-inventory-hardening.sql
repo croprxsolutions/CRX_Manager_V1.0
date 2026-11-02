@@ -33,8 +33,10 @@ BEGIN
 
   INSERT INTO customers (farm_name)
   VALUES ('[SMOKE] Voided Sales ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO products (product_name, category, current_cost)
-  VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide', 40)
+  -- Pricing-free shell (a priced products INSERT is refused since the Phase 1a
+  -- cutover); the chain's cost lives on its order and PO lines.
+  INSERT INTO products (product_name, category)
+  VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide')
   RETURNING id INTO v_product;
   INSERT INTO orders (
     order_number, customer_id, salesman_id, order_date, status,

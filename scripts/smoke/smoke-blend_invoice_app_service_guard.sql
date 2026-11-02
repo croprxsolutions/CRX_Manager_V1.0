@@ -23,8 +23,8 @@
 --  (a) NO-SERVICE PATH (the main path; on live TODAY this exact call raises
 --      55000 'record "v_app_service" is not yet assigned'): completed+approved
 --      ticket, application_service_id NULL, one field (10 ac), one chem line
---      (rate 2/ac, tier1 $10.00, current_cost 12.34) -> invoice MUST be
---      created: draft field_application, total 20000, cost 24680, EXACTLY one
+--      (rate 2/ac, tier1 $10.00, current_cost 8.00) -> invoice MUST be
+--      created: draft field_application, total 20000, cost 16000, EXACTLY one
 --      line, ZERO is_application_fee lines (guard correctly off), no
 --      application_service_id on the invoice, ticket flips to billed.
 --  (b) WITH-SERVICE PATH (guard passes through): same chem fixture shape plus
@@ -38,7 +38,7 @@
 --      (description = service name, quantity/acres 10, unit_price_cents 850,
 --      extended = safe_cents_qty(850,10) = 8500, cost = safe_cents_qty(300,10)
 --      = 3000, sort_order 9999, rate_unit 'acre', is_application_fee true,
---      price_source 'tier'); header totals 28500/27680 and
+--      price_source 'tier'); header totals 28500/19000 and
 --      invoices.application_service_id stamped; ticket flips to billed.
 --  (b2) PRESERVED-SEMANTICS REGRESSION CHECK: an ACTIVE service row with NULL
 --      vehicle_id/created_by fails the composite test, so live silently
@@ -52,10 +52,10 @@
 -- Expected money math (bigint cents end to end):
 --   chem qty   = rate 2/ac * 10 share acres       = 20 units
 --   chem price = tier1 ($10.00 * 100, tier path)  = 1000 c/unit -> ext 20000
---   chem cost  = ROUND(12.34 * 100) = 1234 c/unit -> 24680
+--   chem cost  = ROUND(8.00 * 100) = 800 c/unit -> 16000 (kept under the $10 price so no below-cost reason is needed)
 --   fee  ext   = safe_cents_qty(850, 10)          = 8500   (path b only)
 --   fee  cost  = safe_cents_qty(300, 10)          = 3000   (path b only)
---   invoice b  = 28500 total / 27680 cost
+--   invoice b  = 28500 total / 19000 cost
 --
 -- Fixture notes (live-catalog-validated at draft time):
 -- * application_services: only "name" is NOT NULL without a default; no CHECK
@@ -96,6 +96,7 @@ DECLARE
   v_res_c       jsonb;
   v_res2        jsonb;
   v_suffix      text := substr(md5(random()::text), 1, 8);
+  v_pricing     jsonb;
   v_idem_a      text;
   v_idem_b      text;
   v_idem_c      text;
@@ -128,9 +129,24 @@ BEGIN
   VALUES (v_customer_id, '[SMOKE] Field ' || v_suffix, 10)
   RETURNING id INTO v_field_id;
 
-  INSERT INTO products (product_name, current_cost, tier1_price, unit_size, rate_unit)
-  VALUES ('[SMOKE] AppSvc Guard Product ' || v_suffix, 12.34, 10, '2.5 GAL', 'oz/ac')
+  -- Pricing-free shell, then cost/price through the governed preview/apply
+  -- path (a priced products INSERT is refused since the Phase 1a cutover).
+  INSERT INTO products (product_name, unit_size, rate_unit, inventory_unit)
+  VALUES ('[SMOKE] AppSvc Guard Product ' || v_suffix, '2.5 GAL', 'oz/ac', 'oz')
   RETURNING id INTO v_product_id;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_product_id, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '8.00',
+      'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT current_cost FROM products WHERE id = v_product_id) IS DISTINCT FROM 8.00 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set current_cost';
+  END IF;
 
   INSERT INTO vehicles (vehicle_name, vehicle_type)
   VALUES ('[SMOKE] Rig ' || v_suffix, 'ground')
@@ -158,9 +174,9 @@ BEGIN
   VALUES (v_ticket_a, v_field_id, v_customer_id, 10);
 
   INSERT INTO blend_ticket_products (
-    blend_ticket_id, product_id, product_name, quantity, rate_per_acre, sequence_order
+    blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, sequence_order
   ) VALUES (
-    v_ticket_a, v_product_id, '[SMOKE] BTP-A ' || v_suffix, 20, 2, 1
+    v_ticket_a, v_product_id, '[SMOKE] BTP-A ' || v_suffix, 20, 'oz', 2, 1
   );
 
   v_idem_a := '[SMOKE]-idem-a-' || v_suffix;
@@ -188,7 +204,7 @@ BEGIN
      OR v_inv.blend_ticket_id <> v_ticket_a
      OR v_inv.application_service_id IS NOT NULL
      OR v_inv.total_amount_cents <> 20000
-     OR COALESCE(v_inv.total_cost_cents, -1) <> 24680 THEN
+     OR COALESCE(v_inv.total_cost_cents, -1) <> 16000 THEN
     RAISE EXCEPTION 'SMOKE_FAIL(a): invoice header wrong: status=% type=% svc=% total=% cost=%',
       v_inv.status, v_inv.invoice_type, v_inv.application_service_id,
       v_inv.total_amount_cents, v_inv.total_cost_cents;
@@ -226,9 +242,9 @@ BEGIN
   VALUES (v_ticket_b, v_field_id, v_customer_id, 10);
 
   INSERT INTO blend_ticket_products (
-    blend_ticket_id, product_id, product_name, quantity, rate_per_acre, sequence_order
+    blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, sequence_order
   ) VALUES (
-    v_ticket_b, v_product_id, '[SMOKE] BTP-B ' || v_suffix, 20, 2, 1
+    v_ticket_b, v_product_id, '[SMOKE] BTP-B ' || v_suffix, 20, 'oz', 2, 1
   );
 
   v_idem_b := '[SMOKE]-idem-b-' || v_suffix;
@@ -245,7 +261,7 @@ BEGIN
      OR v_inv.blend_ticket_id <> v_ticket_b
      OR v_inv.application_service_id IS DISTINCT FROM v_svc_id
      OR v_inv.total_amount_cents <> 28500
-     OR COALESCE(v_inv.total_cost_cents, -1) <> 27680 THEN
+     OR COALESCE(v_inv.total_cost_cents, -1) <> 19000 THEN
     RAISE EXCEPTION 'SMOKE_FAIL(b): invoice header wrong: status=% type=% svc=% total=% cost=%',
       v_inv.status, v_inv.invoice_type, v_inv.application_service_id,
       v_inv.total_amount_cents, v_inv.total_cost_cents;
@@ -263,7 +279,7 @@ BEGIN
      OR v_item.quantity <> 20
      OR v_item.unit_price_cents <> 1000
      OR v_item.extended_cents <> 20000
-     OR v_item.cost_cents <> 1234 THEN
+     OR v_item.cost_cents <> 800 THEN
     RAISE EXCEPTION 'SMOKE_FAIL(b): chem line wrong: qty=% price=% ext=% cost=%',
       v_item.quantity, v_item.unit_price_cents, v_item.extended_cents, v_item.cost_cents;
   END IF;
@@ -319,9 +335,9 @@ BEGIN
   VALUES (v_ticket_c, v_field_id, v_customer_id, 10);
 
   INSERT INTO blend_ticket_products (
-    blend_ticket_id, product_id, product_name, quantity, rate_per_acre, sequence_order
+    blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, sequence_order
   ) VALUES (
-    v_ticket_c, v_product_id, '[SMOKE] BTP-C ' || v_suffix, 20, 2, 1
+    v_ticket_c, v_product_id, '[SMOKE] BTP-C ' || v_suffix, 20, 'oz', 2, 1
   );
 
   v_idem_c := '[SMOKE]-idem-c-' || v_suffix;

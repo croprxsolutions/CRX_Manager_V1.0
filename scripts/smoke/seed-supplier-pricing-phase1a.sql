@@ -1,4 +1,5 @@
 \set ON_ERROR_STOP on
+-- smoke-allow-priced-product-insert: seeds pre-cutover priced Products in the disposable proof database; the 20260718190000 cutover is applied after this file.
 SELECT set_config('request.jwt.claim.sub', '', false);
 
 -- Seed the existing live-shaped records while the additive bootstrap remains

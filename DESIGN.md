@@ -128,7 +128,7 @@ A warm neutral base carrying a single deep green.
 ### Primary
 - **CRX Field Green** (crx-green): the only brand colour. Primary buttons, active tab underline and text, active workspace pill, the sidebar's active marker, focus rings (at 20-30% opacity) and the light accent word in headings. White text on it reads at 5.33:1; it reads at 4.97:1 on the cream page.
 - **Field Green Deep** (crx-green-hover): hover and pressed state of green surfaces only.
-- **Field Green Bright** (crx-green-on-dark, #28A26A, the original brand green): green text, icons, markers, borders and focus rings that sit on a dark surface (the sidebar, the dark dispatch and field screens, the driver delivery view, the dark panel of the sign-in pages). It reads at 4.2:1 on Charcoal and 4.5-6.2:1 on the slate and gray dark screens, where crx-green would fall to 2.5-3.4:1. Green buttons with white text stay crx-green even on dark screens.
+- **Field Green Bright** (crx-green-on-dark, #28A26A, the original brand green): green text, icons, markers, borders and focus rings that sit on a dark surface (the sidebar, the dark dispatch and field screens, the driver delivery view, the dark panel of the sign-in pages). It reads at 4.2:1 on Charcoal and 4.5-6.2:1 on the slate and gray dark screens, where crx-green would fall to 2.5-3.4:1. On Charcoal, or on a green-tinted dark fill, it clears the 3:1 bar for icons, markers and large or bold text but not 4.5:1 for small text; small labels there stay white or light gray. Green buttons with white text stay crx-green even on dark screens.
 - **Green Wash** (crx-green-light): background behind green text, such as the active tab's count bubble (4.75:1).
 - **Green Mist** (crx-green-tint): faint selected-row or highlighted-panel wash.
 
@@ -248,6 +248,6 @@ Use toasts for results and errors, `ConfirmModal` for every confirmation, `Modal
 - About 57 files use raw Tailwind `green-*` / `emerald-*` classes where crx-green is meant.
 - About a dozen component and page files type hex colours directly, mostly maps and charts.
 - Three tab mechanisms coexist: `Tabs`, the `WorkspaceTabs` link bar, and hand-rolled tab buttons on about seven pages.
-- Map layers (Mapbox paint in `src/components/map/` and `src/components/fields/ImportPreviewMap.tsx`) need literal hex colours; they repeat crx-green's value and must change with it.
+- Map layers (Mapbox paint in `src/components/map/` and `src/components/fields/ImportPreviewMap.tsx`) need literal hex colours. They sit on dark satellite imagery, so they repeat crx-green-on-dark (#28A26A), not crx-green, and must change with that token.
 - The Dispatch Board, Field View and the driver delivery view are full dark screens (slate/gray), an exception to the light theme kept for outdoor and in-cab use.
 - The phone bottom nav uses 10px labels; don't use text that small elsewhere.

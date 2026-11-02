@@ -39,7 +39,7 @@ export default function ImportPreviewMap({
           id="import-preview-fill"
           type="fill"
           paint={{
-            'fill-color': '#1A7A50',
+            'fill-color': '#28A26A',
             'fill-opacity': 0.2,
           }}
         />
@@ -47,7 +47,7 @@ export default function ImportPreviewMap({
           id="import-preview-outline"
           type="line"
           paint={{
-            'line-color': '#1A7A50',
+            'line-color': '#28A26A',
             'line-width': 2,
           }}
         />

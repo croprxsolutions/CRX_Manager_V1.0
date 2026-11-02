@@ -127,7 +127,7 @@ export default function FieldBoundaryLayer({
         id="field-boundaries-fill"
         type="fill"
         paint={{
-          'fill-color': ['case', ['get', 'selected'], '#f59e0b', ['get', 'hovered'], '#2563eb', '#1A7A50'],
+          'fill-color': ['case', ['get', 'selected'], '#f59e0b', ['get', 'hovered'], '#2563eb', '#28A26A'],
           // Phase 6: selected fields render at higher opacity so the user can see
           // which ones are picked at a glance — without losing the unselected ones.
           'fill-opacity': ['case', ['get', 'selected'], 0.6, ['get', 'hovered'], 0.4, 0.18],
@@ -137,7 +137,7 @@ export default function FieldBoundaryLayer({
         id="field-boundaries-outline"
         type="line"
         paint={{
-          'line-color': ['case', ['get', 'selected'], '#b45309', ['get', 'hovered'], '#1d4ed8', '#1A7A50'],
+          'line-color': ['case', ['get', 'selected'], '#b45309', ['get', 'hovered'], '#1d4ed8', '#28A26A'],
           'line-width': ['case', ['get', 'selected'], 3, ['get', 'hovered'], 3, 2],
         }}
       />

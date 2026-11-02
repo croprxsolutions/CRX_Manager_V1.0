@@ -194,7 +194,7 @@ Products, Customers, Jobs, Quotes, PurchaseOrders, BlendTickets, Orders, Vehicle
 - Primary green: `crx-green` (#1A7A50; hover `crx-green-hover` #166340). Deepened from #28A26A on 2026-11-02 (Mason's choice) so white button text and green text on cream pass the 4.5:1 contrast minimum.
 - On dark backgrounds (sidebar, Dispatch Board, Field View, the driver delivery view, the sign-in pages' dark panel), green text, icons, markers, borders and focus rings use `crx-green-on-dark` (#28A26A, the original green); the deep green is too dark to read there. Green buttons with white text stay `bg-crx-green` everywhere.
 - Use `bg-crx-green`, `text-crx-green`, `border-crx-green`, etc. Never use Tailwind's stock `green-*` / `emerald-*` for brand meaning; those are only for "success" status colours.
-- Name colours by token, never by hex code. Hex codes belong only in `src/index.css` (`@theme`) and `src/lib/pdfTheme.ts` (PDFs). Map libraries that need a literal colour are the one exception; keep them in step with the token.
+- Name colours by token, never by hex code. Hex codes belong only in `src/index.css` (`@theme`) and `src/lib/pdfTheme.ts` (PDFs). Map libraries that need a literal colour are the one exception: field outlines sit on dark satellite imagery, so they use the on-dark green (#28A26A); keep them in step with that token.
 - The full brand rulebook (colours, type, spacing, components) is `DESIGN.md` at the repository root.
 
 ### Icons: Lucide React only

@@ -133,8 +133,8 @@ export default function DrawControl({
             type: 'fill',
             filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
             paint: {
-              'fill-color': '#1A7A50',
-              'fill-outline-color': '#1A7A50',
+              'fill-color': '#28A26A',
+              'fill-outline-color': '#28A26A',
               'fill-opacity': 0.2,
             },
           },
@@ -144,35 +144,35 @@ export default function DrawControl({
             type: 'line',
             filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#1A7A50', 'line-width': 2 },
+            paint: { 'line-color': '#28A26A', 'line-width': 2 },
           },
           // Polygon stroke (static)
           {
             id: 'gl-draw-polygon-fill-static',
             type: 'fill',
             filter: ['all', ['==', '$type', 'Polygon'], ['==', 'mode', 'static']],
-            paint: { 'fill-color': '#1A7A50', 'fill-outline-color': '#1A7A50', 'fill-opacity': 0.15 },
+            paint: { 'fill-color': '#28A26A', 'fill-outline-color': '#28A26A', 'fill-opacity': 0.15 },
           },
           {
             id: 'gl-draw-polygon-stroke-static',
             type: 'line',
             filter: ['all', ['==', '$type', 'Polygon'], ['==', 'mode', 'static']],
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#1A7A50', 'line-width': 2 },
+            paint: { 'line-color': '#28A26A', 'line-width': 2 },
           },
           // Vertex points
           {
             id: 'gl-draw-point',
             type: 'circle',
             filter: ['all', ['==', '$type', 'Point'], ['==', 'meta', 'vertex']],
-            paint: { 'circle-radius': 5, 'circle-color': '#1A7A50' },
+            paint: { 'circle-radius': 5, 'circle-color': '#28A26A' },
           },
           // Midpoints
           {
             id: 'gl-draw-point-mid',
             type: 'circle',
             filter: ['all', ['==', '$type', 'Point'], ['==', 'meta', 'midpoint']],
-            paint: { 'circle-radius': 3, 'circle-color': '#1A7A50' },
+            paint: { 'circle-radius': 3, 'circle-color': '#28A26A' },
           },
         ],
       }),

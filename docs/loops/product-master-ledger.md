@@ -73,7 +73,7 @@
 | Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
 |---|---|---|---|---|---|---|---|---|
 | WP-PM-12a Change history | DRAFT, CI and CodeRabbit pending | `pm/wp-pm-12a-change-history` | [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266) | Codex Sol xhigh, 2 rounds | 1 round: MED refuted, LOW deferred | compliance, RLS, drift: fixed in round 2; H2 kept as a gate | Mason-gated, `20261102100000`, not applied | clean on `2bb7bfdfb` |
-| WP-PM-3 Turning products off | Building, round 2 | `pm/wp-pm-3-turn-off-safely`, stacks on #1266 at `2bb7bfdfb` | | Codex Sol xhigh | | | routine expected, `20261102101000`, not applied | |
+| WP-PM-3 Turning products off | PARKED: Sol HIGH after the 3rd round | `pm/wp-pm-3-turn-off-safely` at `c13fa0298`, local only in `C:\CRX_PMBuild` | none | Codex Sol xhigh, 3 rounds, plus Claude test/docs fixes | 2 rounds: HIGH fixed; MEDs refuted or deferred | compliance, drift, RLS: all BLOCKER/HIGH fixed, re-review confirmed | routine, `20261102101000`, not applied | BLOCKERS on `c13fa0298`: one HIGH |
 | WP-PM-8 Setup checks | ⬜ | | | | | | | |
 | WP-PM-9 Forms, units, containers | ⬜ | | | | | | | |
 | DM-0 Data hygiene | ⬜ | | | | | | | |
@@ -92,3 +92,12 @@ PROOF — Ran: real-schema proof on `cca8a88d8`; full Vitest, code-health, check
 **WP-PM-12a CodeRabbit:** one review, one comment, refuted on the thread with no new commit: the two named scripts replay migrations only up to an earlier point, so they never meet this one. Sol stays clean on the PR head.
 
 **WP-PM-3 deviation from §6:** round 1 ended at 23:33 on `Selected model is at capacity`. §6 says a Codex API error parks the package and ends the run early. I judged one capacity message a passing condition, kept the same model, and ran one more round. A second Codex error ends the run as §6 says.
+
+**WP-PM-3 Turning products off: PARKED** (§6: the package failed review after 3 build rounds). Branch `pm/wp-pm-3-turn-off-safely` at `c13fa0298` stays on this computer, not pushed: the push gate needs a clean Sol.
+- **Sol's position (HIGH):** the line guard skips an update that keeps the same product, so `update_order_items` can raise the ordered quantity of a turned-off product on an existing line. That is a new sale on an open order.
+- **The build's position:** the round-3 design keeps held lines editable on purpose, because one live open order holds a turned-off product. It refused only new lines and swaps.
+- **Recommendation:** one more round. The guard should refuse an increase in `order_items.total_units_needed`, `quote_items.total_units_needed` or `purchase_order_items.quantity_ordered` for a turned-off product, and still allow decreases and other edits. It should not watch `quantity_remaining`, so a voided delivery still restores quantities. Add a proof case, then rerun Sol and open the draft PR. Mason approves that fourth round.
+- **Owed even after the fix:** the preflight should pin the live bodies of the three re-created inventory functions (re-review MED), and three behaviours need Mason's confirmation (in `C:\Users\Mason\AppData\Local\Temp\claude\…\scratchpad\pr-3.md`; copied into the morning report).
+PROOF — Ran: real-schema proof on `7d24b839a`; full Vitest, build, lint, code-health, check:docs and test:agent-workflows on `7d24b839a`; after merging main, the related Vitest, lint, build and check:docs, and all 24 test-app browser tests on `c13fa0298`. · Saw: `PRODUCT_ACTIVE_GUARD_PROOF_PASS`; 6,996 tests passed, 123 skipped, none failed; 24 of 24 browser tests passed, including the row button refusing with the order named, a confirmed stock warning and a reactivation; Sol `BLOCKERS` with the HIGH above. · Not verified: the quantity-increase path; Vercel preview.
+
+**WP-PM-8 split** (mission §1, too big for one pass): **8a**, the database checks, category list and product-page validation, builds now. **8b**, the incomplete badge and filter, the near-match warnings and the rate help text, follows. Read-only live counts, 604 products: 16 rows need cleanup, listed privately in `Products\Product Master review\` in Mason's vault.

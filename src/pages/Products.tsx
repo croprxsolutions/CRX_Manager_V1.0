@@ -20,7 +20,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
-import { exportToCSV, fmtCSV } from '../lib/csvExport';
+import { exportToCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { formatUSD as fmt } from '../lib/money';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
@@ -123,10 +123,6 @@ function inputDecimal(value: unknown): string | null {
 
 function storedMarginPercent(value: number | null | undefined): string | null {
   return value == null ? null : formatPricingMarginPercent(value);
-}
-
-function formatProductMoneyCSV(value: unknown): string {
-  return value == null ? '' : fmtCSV(value);
 }
 
 /** A tier's net margin under its price; red with "under floor" when below the product's floor. */
@@ -321,7 +317,7 @@ export default function Products() {
       ...INTERNAL_IDENTITY_COLUMNS,
       ...priceCols,
       { key: 'is_active', header: 'Status', format: (v: unknown) => v ? 'Active' : 'Inactive' },
-    ], showCostMargin ? 'products-internal' : 'products');
+    ], 'products-internal');
     toast('success', `Exported ${rows.length} product(s) to CSV`);
   };
 
@@ -365,7 +361,7 @@ export default function Products() {
             { header: 'T3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
           ];
       await downloadReportPdf({
-        title: showCostMarginPdf ? 'Products — Internal' : 'Products',
+        title: 'Products — Internal',
         subtitle: `${rows.length} product(s) selected`,
         columns: [...basePdfCols, ...pricePdfCols, { header: 'Status', key: 'is_active', format: (v) => v ? 'Active' : 'Inactive' }],
         data: pdfData as unknown as Record<string, unknown>[],

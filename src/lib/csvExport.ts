@@ -66,6 +66,11 @@ export function fmtCSV(n: unknown): string {
   return `$${num.toFixed(2)}`;
 }
 
+/** Like fmtCSV, but a missing price stays blank instead of a false $0.00. */
+export function formatProductMoneyCSV(value: unknown): string {
+  return value == null ? '' : fmtCSV(value);
+}
+
 /**
  * Format a date string for CSV export.
  */

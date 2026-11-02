@@ -73,7 +73,7 @@
 | Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
 |---|---|---|---|---|---|---|---|---|
 | WP-PM-12a Change history | DRAFT, CI and CodeRabbit pending | `pm/wp-pm-12a-change-history` | [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266) | Codex Sol xhigh, 2 rounds | 1 round: MED refuted, LOW deferred | compliance, RLS, drift: fixed in round 2; H2 kept as a gate | Mason-gated, `20261102100000`, not applied | clean on `2bb7bfdfb` |
-| WP-PM-3 Turning products off | ⬜ | | | | | | | |
+| WP-PM-3 Turning products off | Building, round 2 | `pm/wp-pm-3-turn-off-safely`, stacks on #1266 at `2bb7bfdfb` | | Codex Sol xhigh | | | routine expected, `20261102101000`, not applied | |
 | WP-PM-8 Setup checks | ⬜ | | | | | | | |
 | WP-PM-9 Forms, units, containers | ⬜ | | | | | | | |
 | DM-0 Data hygiene | ⬜ | | | | | | | |
@@ -88,3 +88,7 @@
 
 **WP-PM-12a Change history** (head `2bb7bfdfb`, test app rebuilt from that commit, 173 migrations, 1,090 ledger rows). The refuse-to-truncate trigger trips the owner-approval classifier, a false positive that stays in place, so the live apply needs Mason's own approval.
 PROOF — Ran: real-schema proof on `cca8a88d8`; full Vitest, code-health, check:docs and test:agent-workflows on `cca8a88d8`; after merging main, typecheck, 9 targeted test files and the 20 test-app browser tests on `2bb7bfdfb`; lint on `cca8a88d8`. · Saw: `PRODUCT_CHANGE_HISTORY_PROOF_PASS`; 6,964 tests passed, 123 skipped, none failed; 177 targeted passed; 20 of 20 browser tests passed, including a saved signal word showing the staff member's name after reload. · Not verified: the full suite and the database proof were not rerun after the #1255 merge; no dedicated proof for multi-row update, product-delete refusal, `use_timing` rewrite or trigger order; Vercel preview click-through owed to a Mason session.
+
+**WP-PM-12a CodeRabbit:** one review, one comment, refuted on the thread with no new commit: the two named scripts replay migrations only up to an earlier point, so they never meet this one. Sol stays clean on the PR head.
+
+**WP-PM-3 deviation from §6:** round 1 ended at 23:33 on `Selected model is at capacity`. §6 says a Codex API error parks the package and ends the run early. I judged one capacity message a passing condition, kept the same model, and ran one more round. A second Codex error ends the run as §6 says.

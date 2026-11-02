@@ -279,9 +279,11 @@ the exact-SHA proof JSON the push guard wants;
 
 *Primary signal — the wrapper's own refusal.* It writes the proof JSON **only** on a terminal
 `CODEX_PROOF_VERDICT: CLEAN`, and mints nothing on `BLOCKERS`, on a duplicate token (treated as
-diff-injected), or on a worktree that was dirty or moved mid-review. So it prints
-`… (verdict: clean, head <sha>, base <sha>)` or it prints why it refused. **No proof file for the
-current HEAD = no pass**, regardless of exit status.
+diff-injected), on a worktree or HEAD that was dirty or moved mid-review, or if `origin/main`
+rewound or moved sideways. If `origin/main` only moved forward, it keeps the clean review, bound to
+the base the review started from, and says so; a push of that head then needs `origin/main` merged
+in and `--carry-forward`. So it prints `… (verdict: clean, head <sha>, base <sha>)` or it prints why
+it refused. **No proof file for the current HEAD = no pass**, regardless of exit status.
 
 *Secondary sanity check on the capture* — match `CLEAN` specifically, never the bare token:
 

@@ -130,8 +130,9 @@ review against `origin/main`, or fall back to `/codex-cross-review` — never su
 
 **A zero exit code is not a verdict — and neither is the bare token, which also spells
 `BLOCKERS`.** The gate is the proof file: the wrapper mints it *only* on a terminal
-`CODEX_PROOF_VERDICT: CLEAN` and refuses on `BLOCKERS`, on a duplicate token, or on a worktree
-that moved mid-review. **No proof for the current HEAD = not passed.** As a secondary check on
+`CODEX_PROOF_VERDICT: CLEAN` and refuses on `BLOCKERS`, on a duplicate token, on a worktree that
+moved mid-review, or on an `origin/main` that moved anywhere but forward (a forward move keeps the
+proof, bound to the starting base). **No proof for the current HEAD = not passed.** As a secondary check on
 the capture, match `CLEAN` specifically:
 
 ```bash

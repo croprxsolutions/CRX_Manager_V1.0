@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Pre-commit (via scripts/validate-sql.sh): refuse a newly ADDED migration whose
-// 14-digit version stamp is already used by a different file in another local
-// worktree of this repo. Parallel sessions picked the same stamp twice on
+// 14-digit version stamp is already used by a different file in this or any
+// other local worktree of this repo. Parallel sessions picked the same stamp twice on
 // 2026-11-02; the apply-time ordering re-check catches it far later.
 // An identical file (same name, same content) elsewhere is fine — that is the
 // same migration checked out twice, e.g. one already on main.
@@ -37,7 +37,7 @@ if (mine.length === 0) process.exit(0);
 const self = normPath(top.trim());
 let collisions = 0;
 for (const wt of parseWorktreePorcelain(porcelain)) {
-  if (normPath(wt.path) === self) continue;
+  const isSelf = normPath(wt.path) === self;
   const dir = join(wt.path, DIR);
   if (!existsSync(dir)) continue; // pruned/missing worktree
   const files = readdirSync(dir);
@@ -45,7 +45,8 @@ for (const wt of parseWorktreePorcelain(porcelain)) {
     const stamp = m.name.slice(0, 14);
     for (const f of files) {
       if (!f.startsWith(stamp + "_") || !f.endsWith(".sql")) continue;
-      if (f === m.name && lf(readFileSync(join(dir, f), "utf8")) === m.content) continue;
+      // Own copy on disk may differ from the index (partial staging), so skip it by name.
+      if (f === m.name && (isSelf || lf(readFileSync(join(dir, f), "utf8")) === m.content)) continue;
       console.log(`BLOCKED: ${DIR}/${m.name}`);
       console.log(`  Version stamp ${stamp} is already used by ${f} in worktree ${wt.path}`);
       console.log("  Pick a new, later stamp (rename the file) before committing.");

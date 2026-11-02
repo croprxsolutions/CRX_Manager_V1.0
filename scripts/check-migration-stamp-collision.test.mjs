@@ -77,6 +77,15 @@ try {
   assert.equal(r.status, 0, "identical file in both worktrees must pass\n" + r.stdout + r.stderr);
   pass++;
 
+  // Two new files sharing a stamp in the same commit collide too (Luna review).
+  git(b, "reset", "-q");
+  write(b, "20261102250000_one.sql", "select 1;\n");
+  write(b, "20261102250000_two.sql", "select 2;\n");
+  git(b, "add", "supabase/migrations/20261102250000_one.sql", "supabase/migrations/20261102250000_two.sql");
+  r = validate(b);
+  assert.notEqual(r.status, 0, "same stamp twice in one commit must block\n" + r.stdout);
+  pass++;
+
   // A modified (not newly added) migration is not stamp-checked.
   git(b, "reset", "-q");
   write(a, "20260101000000_other.sql", "select 'x';\n");

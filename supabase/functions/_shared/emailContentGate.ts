@@ -44,8 +44,9 @@ const COMMENT = /<!--[^<>[\]]*-->/y;
 // attributes, so this parse and a mail client's parse always agree.
 const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[\t\n\f\r ]+[a-zA-Z-]+(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"[^"<>]*"|'[^'<>]*'))?)*)[\t\n\f\r ]*\/?>/y;
 const ATTRIBUTE = /([a-zA-Z-]+)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'))?/g;
-// Entities and quotes are refused outright: a mail client decodes them before CSS.
-const UNSAFE_STYLE = /url|image|expression|@import|javascript|\\|&|"|'/i;
+// Entities, quotes and comments are refused outright: a mail client decodes or
+// strips them before reading the CSS.
+const UNSAFE_STYLE = /url|image|expression|@import|javascript|\\|&|"|'|\/\*/i;
 
 function urlProblem(value: string): string | null {
   // escapeHtml turns & into &amp;; any other entity could hide a scheme.
@@ -110,9 +111,9 @@ export function attachmentProblem(filename: unknown, content: unknown): string |
   if (typeof filename !== "string" || !/^[^\\/:*?"<>|\u0000-\u001f]{1,150}\.pdf$/i.test(filename)) {
     return "Each attachment must be a PDF with a plain file name";
   }
-  // "%PDF" encodes to "JVBER" in base64. Only the file type is checked: a valid
+  // "%PDF-" encodes to "JVBERi0" in base64. Only the file type is checked: a valid
   // PDF can say anything, so parsing it deeper would add no safety.
-  if (typeof content !== "string" || !content.startsWith("JVBER") || !/^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
+  if (typeof content !== "string" || !content.startsWith("JVBERi0") ||!/^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
     return "Each attachment must be a base64 PDF";
   }
   return null;

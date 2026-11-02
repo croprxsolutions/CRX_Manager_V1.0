@@ -120,7 +120,7 @@ describe('emailContentProblem refuses anything beyond plain formatting', () => {
   });
 
   it('refuses entities, quotes and image functions in a style', () => {
-    for (const style of ['color:&#114;ed', 'color:&lt;', 'font-family:\'x\'', 'background-image:none', 'background:url']) {
+    for (const style of ['color:&#114;ed', 'color:&lt;', 'font-family:\'x\'', 'background-image:none', 'background:url', 'background:u/**/rl(x)']) {
       expect(emailContentProblem(ok, `<p style="${style}">x</p>`)).not.toBeNull();
     }
   });
@@ -141,6 +141,7 @@ describe('attachmentProblem', () => {
     expect(attachmentProblem('../x.pdf', 'JVBERi0x')).not.toBeNull();
     expect(attachmentProblem('x.pdf', 'PGh0bWw+')).not.toBeNull();
     expect(attachmentProblem('x.pdf', 'JVBERi0x\n<html>')).not.toBeNull();
+    expect(attachmentProblem('x.pdf', 'JVBERA==')).not.toBeNull();
     expect(attachmentProblem(undefined, 'JVBERi0x')).not.toBeNull();
   });
 });

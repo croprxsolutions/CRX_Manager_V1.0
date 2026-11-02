@@ -1,7 +1,22 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import EditableDataTable from './EditableDataTable';
 import type { EditableColumn } from './EditableDataTable';
+
+const { blockState, mockReset, mockUseUnsavedChanges } = vi.hoisted(() => {
+  const state = { value: 'unblocked' as 'blocked' | 'unblocked' };
+  const reset = vi.fn(() => { state.value = 'unblocked'; });
+  const createBlocker = () => ({ state: state.value, reset, proceed: vi.fn() });
+  return {
+    blockState: state,
+    mockReset: reset,
+    mockUseUnsavedChanges: vi.fn((_isDirty: boolean) => createBlocker()),
+  };
+});
+
+vi.mock('../../hooks/useUnsavedChanges', () => ({
+  useUnsavedChanges: mockUseUnsavedChanges,
+}));
 
 // ── Test data fixtures ──────────────────────────────────────────────
 interface TestProduct extends Record<string, unknown> {
@@ -35,8 +50,22 @@ const columns: EditableColumn<TestProduct>[] = [
   { key: 'active', header: 'Active', editable: true, editType: 'toggle' as const },
 ];
 
+const createManyRows = (count: number): TestProduct[] => Array.from({ length: count }, (_, index) => ({
+  id: String(index + 1),
+  name: `Product ${index + 1}`,
+  price: (index + 1) * 10,
+  category: 'Seeds',
+  active: true,
+}));
+
 // ── 1. Rendering ────────────────────────────────────────────────────
 describe('EditableDataTable', () => {
+  beforeEach(() => {
+    blockState.value = 'unblocked';
+    mockReset.mockClear();
+    mockUseUnsavedChanges.mockClear();
+  });
+
   describe('Rendering', () => {
     it('renders table with column headers', () => {
       render(<EditableDataTable data={testData} columns={columns} rowKey="id" />);
@@ -261,6 +290,132 @@ describe('EditableDataTable', () => {
 
   // ── 5. Edit Mode ────────────────────────────────────────────────────
   describe('Edit Mode', () => {
+    it('limits edit mode to 50 rows per page and restores all rows outside edit mode', () => {
+      const data = createManyRows(120);
+      const { rerender } = render(
+        <EditableDataTable data={data} columns={columns} rowKey="id" canEdit />
+      );
+
+      fireEvent.click(screen.getByText('Edit'));
+      expect(screen.getAllByRole('textbox')).toHaveLength(50);
+      expect(screen.getAllByRole('spinbutton')).toHaveLength(50);
+      expect(screen.getAllByRole('combobox')).toHaveLength(50);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(50);
+      expect(screen.getByText('Showing 1–50 of 120')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('Cancel'));
+      rerender(<EditableDataTable data={data} columns={columns} rowKey="id" canEdit />);
+      expect(screen.getAllByRole('row')).toHaveLength(121);
+    });
+
+    it('moves between edit pages and preserves and saves dirty rows from both pages', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <EditableDataTable
+          data={createManyRows(120)}
+          columns={columns}
+          rowKey="id"
+          canEdit
+          onSave={onSave}
+        />
+      );
+
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.change(screen.getByDisplayValue('Product 1'), { target: { value: 'Changed Product 1' } });
+      fireEvent.click(screen.getByText('Next'));
+      expect(screen.getByText('Showing 51–100 of 120')).toBeInTheDocument();
+      expect(screen.getByText('1 unsaved not shown')).toBeInTheDocument();
+      fireEvent.change(screen.getByDisplayValue('Product 51'), { target: { value: 'Changed Product 51' } });
+      fireEvent.click(screen.getByText('Previous'));
+      expect(screen.getByDisplayValue('Changed Product 1')).toBeInTheDocument();
+      expect(screen.getByText('Showing 1–50 of 120')).toBeInTheDocument();
+      fireEvent.click(screen.getByText(/Save \(2\)/));
+
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+      const changes = onSave.mock.calls[0][0] as Map<string, Record<string, unknown>>;
+      expect(changes.get('1')).toEqual({ name: 'Changed Product 1' });
+      expect(changes.get('51')).toEqual({ name: 'Changed Product 51' });
+    });
+
+    it('resets edit pagination when search changes or the filtered count changes', () => {
+      const data = createManyRows(120);
+      const props = {
+        data,
+        columns,
+        rowKey: 'id' as const,
+        canEdit: true,
+        searchable: true,
+        searchKeys: ['name'],
+      };
+      const { rerender } = render(<EditableDataTable {...props} />);
+
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.click(screen.getByText('Next'));
+      fireEvent.click(screen.getByText('Next'));
+      expect(screen.getByText('Showing 101–120 of 120')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search...' }), { target: { value: 'Product' } });
+      expect(screen.getByText('Showing 1–50 of 120')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('Next'));
+      fireEvent.click(screen.getByText('Next'));
+      rerender(<EditableDataTable {...props} data={data.slice(0, 55)} />);
+      expect(screen.getByText('Showing 1–50 of 55')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Product 1')).toBeInTheDocument();
+    });
+
+    it('resets edit pagination to the first page when sorting changes', () => {
+      render(
+        <EditableDataTable data={createManyRows(120)} columns={columns} rowKey="id" canEdit />
+      );
+
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.click(screen.getByText('Next'));
+      expect(screen.getByText('Showing 51–100 of 120')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Sort by Name' }));
+
+      expect(screen.getByText('Showing 1–50 of 120')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Product 1')).toBeInTheDocument();
+    });
+
+    it('calls the unsaved changes hook with true only when edit mode has dirty rows', () => {
+      render(<EditableDataTable data={testData} columns={columns} rowKey="id" canEdit />);
+      expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(false);
+
+      fireEvent.click(screen.getByText('Edit'));
+      expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(false);
+      fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Edited Product A' } });
+      expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(true);
+
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Discard edits' }));
+      expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(false);
+      expect(mockUseUnsavedChanges.mock.calls.map(([isDirty]) => isDirty)).toContain(true);
+    });
+
+    it('resets a navigation block that starts while a save is in progress', async () => {
+      let finishSave: (() => void) | undefined;
+      const onSave = vi.fn(() => new Promise<void>((resolve) => { finishSave = resolve; }));
+      const props = { data: testData, columns, rowKey: 'id' as const, canEdit: true, onSave };
+      const { rerender } = render(<EditableDataTable {...props} />);
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Edited Product A' } });
+
+      fireEvent.click(screen.getByText(/Save \(1\)/));
+      await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+
+      blockState.value = 'blocked';
+      rerender(<EditableDataTable {...props} />);
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Leave' })).toBeDisabled();
+      finishSave?.();
+
+      await waitFor(() => expect(mockReset).toHaveBeenCalledTimes(1));
+      rerender(<EditableDataTable {...props} />);
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+
     it('preserves an exact decimal string without converting through Number', async () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
       const decimalColumns: EditableColumn<TestProduct>[] = [{
@@ -445,14 +600,16 @@ describe('EditableDataTable', () => {
 
     it('will not save edits once a failed load hides the rows (PR #1043 review)', () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
-      const props = { data: testData, columns, rowKey: 'id' as const, canEdit: true, onSave };
-      const { rerender } = render(<EditableDataTable {...props} />);
+      const props = { data: createManyRows(60), columns, rowKey: 'id' as const, canEdit: true, onSave };
+      const { rerender, container } = render(<EditableDataTable {...props} />);
       fireEvent.click(screen.getByText('Edit'));
-      fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Product A Modified' } });
+      fireEvent.change(screen.getByDisplayValue('Product 1'), { target: { value: 'Changed Product 1' } });
+      expect(container.querySelector('[aria-label="Edit table pagination"]')).toBeInTheDocument();
 
       rerender(<EditableDataTable {...props} loadError />);
 
       expect(screen.getByRole('alert')).toHaveTextContent('This list could not be loaded');
+      expect(container.querySelector('[aria-label="Edit table pagination"]')).not.toBeInTheDocument();
       const saveBtn = screen.getByText(/Save/).closest('button')!;
       expect(saveBtn).toBeDisabled();
       fireEvent.click(saveBtn);
@@ -651,11 +808,79 @@ describe('EditableDataTable', () => {
       expect(screen.getByText(/Save \(1\)/)).toBeInTheDocument();
 
       fireEvent.click(screen.getByText('Cancel'));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard edits' }));
       // Re-enter edit mode
       fireEvent.click(screen.getByText('Edit'));
       // Save should be clean (no dirty count)
       expect(screen.getByText('Save')).toBeInTheDocument();
       expect(screen.queryByText(/Save \(\d+\)/)).not.toBeInTheDocument();
+    });
+
+    it('asks before discarding dirty rows and Stay preserves them', () => {
+      render(<EditableDataTable data={testData} columns={columns} rowKey="id" canEdit />);
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Changed A' } });
+
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(screen.getByText('Discard edits to 1 row?')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+
+      expect(screen.queryByText('Discard edits to 1 row?')).not.toBeInTheDocument();
+      expect(screen.getByDisplayValue('Changed A')).toBeInTheDocument();
+      expect(screen.getByText('Save (1)')).toBeInTheDocument();
+    });
+
+    it('cancels immediately without a confirmation when there are no edits', () => {
+      render(<EditableDataTable data={testData} columns={columns} rowKey="id" canEdit />);
+      fireEvent.click(screen.getByText('Edit'));
+
+      fireEvent.click(screen.getByText('Cancel'));
+
+      expect(screen.queryByText('Discard edits?')).not.toBeInTheDocument();
+      expect(screen.getByText('Edit')).toBeInTheDocument();
+    });
+
+    it('notifies the parent when edit mode starts and ends', () => {
+      const onEditModeChange = vi.fn();
+      render(
+        <EditableDataTable
+          data={testData}
+          columns={columns}
+          rowKey="id"
+          canEdit
+          onEditModeChange={onEditModeChange}
+        />
+      );
+
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.click(screen.getByText('Cancel'));
+
+      expect(onEditModeChange.mock.calls).toEqual([[true], [false]]);
+    });
+
+    it('reports the end of edit mode to the latest callback when unmounted mid-edit', () => {
+      const firstCallback = vi.fn();
+      const latestCallback = vi.fn();
+      const props = { data: testData, columns, rowKey: 'id' as const, canEdit: true };
+      const { rerender, unmount } = render(<EditableDataTable {...props} onEditModeChange={firstCallback} />);
+
+      fireEvent.click(screen.getByText('Edit'));
+      rerender(<EditableDataTable {...props} onEditModeChange={latestCallback} />);
+      unmount();
+
+      expect(firstCallback.mock.calls).toEqual([[true]]);
+      expect(latestCallback.mock.calls).toEqual([[false]]);
+    });
+
+    it('stays quiet on unmount when not editing', () => {
+      const onEditModeChange = vi.fn();
+      const { unmount } = render(
+        <EditableDataTable data={testData} columns={columns} rowKey="id" canEdit onEditModeChange={onEditModeChange} />
+      );
+
+      unmount();
+
+      expect(onEditModeChange).not.toHaveBeenCalled();
     });
   });
 

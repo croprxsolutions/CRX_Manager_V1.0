@@ -1,7 +1,12 @@
-import { useState, useMemo, useCallback, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, type ReactNode } from 'react';
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, Pencil, X, Save } from 'lucide-react';
 import EmptyState, { LoadFailedState } from './EmptyState';
 import Button from './Button';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import ConfirmModal from './ConfirmModal';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
+
+const EDIT_PAGE_SIZE = 50;
 
 export interface EditableColumn<T> {
   key: string;
@@ -38,6 +43,8 @@ interface EditableDataTableProps<T> {
   searchable?: boolean;
   searchPlaceholder?: string;
   searchKeys?: string[];
+  /** Optional row matcher for pages that share search rules across multiple layouts. */
+  searchMatcher?: (row: T, search: string) => boolean;
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -54,8 +61,83 @@ interface EditableDataTableProps<T> {
   onSave?: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
   /** Whether edit mode is available */
   canEdit?: boolean;
+  /** Called when inline editing starts or ends. */
+  onEditModeChange?: (editing: boolean) => void;
   /** Extra actions to render next to the Edit/Save buttons */
   headerActions?: ReactNode;
+}
+
+function OtherPageUnsavedCount({ count }: { count: number }) {
+  if (count === 0) return null;
+  return <span className="text-xs text-amber-700" role="status">{count} unsaved not shown</span>;
+}
+
+function isNavigationBlocked(blocker: ReturnType<typeof useUnsavedChanges>): boolean {
+  return blocker.state === 'blocked';
+}
+
+function resetBlockerWhenClean(
+  dirtyCount: number,
+  blocker: ReturnType<typeof useUnsavedChanges>,
+): void {
+  if (dirtyCount === 0 && blocker.state === 'blocked') blocker.reset?.();
+}
+
+function requestEditCancel(
+  dirtyCount: number,
+  cancelEdit: () => void,
+  openConfirmation: () => void,
+): void {
+  if (dirtyCount > 0) openConfirmation();
+  else cancelEdit();
+}
+
+function discardRowsMessage(count: number): string {
+  return `Discard edits to ${count} ${count === 1 ? 'row' : 'rows'}?`;
+}
+
+function countDirtyRowsOffPage(
+  editing: boolean,
+  dirtyRows: Map<string, Record<string, unknown>>,
+  currentPageIds: Set<string>,
+): number {
+  if (!editing) return 0;
+  return [...dirtyRows.keys()].filter((id) => !currentPageIds.has(id)).length;
+}
+
+function EditPagination({
+  editing,
+  loadError,
+  total,
+  page,
+  maxPage,
+  onPrevious,
+  onNext,
+}: {
+  editing: boolean;
+  loadError: boolean;
+  total: number;
+  page: number;
+  maxPage: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (!editing || loadError || total <= EDIT_PAGE_SIZE) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Edit table pagination">
+      <span className="text-sm text-secondary">
+        Showing {page * EDIT_PAGE_SIZE + 1}–{Math.min((page + 1) * EDIT_PAGE_SIZE, total)} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button variant="secondary" size="sm" onClick={onPrevious} disabled={page === 0}>
+          Previous
+        </Button>
+        <Button variant="secondary" size="sm" onClick={onNext} disabled={page === maxPage}>
+          Next
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,6 +148,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
   searchable = false,
   searchPlaceholder = 'Search...',
   searchKeys = [],
+  searchMatcher,
   onRowClick,
   emptyTitle = 'No data found',
   emptyDescription,
@@ -76,27 +159,46 @@ export default function EditableDataTable<T extends Record<string, any>>({
   onRetry,
   onSave,
   canEdit = false,
+  onEditModeChange,
   headerActions,
 }: EditableDataTableProps<T>) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [editMode, setEditMode] = useState(false);
+  const [editPage, setEditPage] = useState(0);
   const [dirtyRows, setDirtyRows] = useState<Map<string, Record<string, unknown>>>(new Map());
   const [saving, setSaving] = useState(false);
+  const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
 
   const dirtyCount = dirtyRows.size;
+  const editExitRef = useRef({ editMode, onEditModeChange });
+  editExitRef.current = { editMode, onEditModeChange };
+
+  // A table can vanish mid-edit (a tab change or remount); the parent must not stay in edit layout.
+  useEffect(() => () => {
+    if (editExitRef.current.editMode) editExitRef.current.onEditModeChange?.(false);
+  }, []);
+  const blocker = useUnsavedChanges(editMode && dirtyCount > 0);
+
+  useEffect(() => {
+    resetBlockerWhenClean(dirtyCount, blocker);
+  }, [blocker, dirtyCount]);
 
   const filtered = useMemo(() => {
     let result = data;
-    if (search && searchKeys.length > 0) {
-      const lower = search.toLowerCase();
-      result = result.filter((row) =>
-        searchKeys.some((key) => {
-          const val = row[key];
-          return val != null && String(val).toLowerCase().includes(lower);
-        })
-      );
+    if (search) {
+      if (searchMatcher) {
+        result = result.filter((row) => searchMatcher(row, search));
+      } else if (searchKeys.length > 0) {
+        const lower = search.toLowerCase();
+        result = result.filter((row) =>
+          searchKeys.some((key) => {
+            const val = row[key];
+            return val != null && String(val).toLowerCase().includes(lower);
+          })
+        );
+      }
     }
     if (sortKey) {
       result = [...result].sort((a, b) => {
@@ -112,9 +214,26 @@ export default function EditableDataTable<T extends Record<string, any>>({
       });
     }
     return result;
-  }, [data, search, searchKeys, sortKey, sortDir]);
+  }, [data, search, searchKeys, searchMatcher, sortKey, sortDir]);
+
+  const maxEditPage = Math.max(0, Math.ceil(filtered.length / EDIT_PAGE_SIZE) - 1);
+  const currentEditPage = Math.min(editPage, maxEditPage);
+
+  useEffect(() => {
+    setEditPage(0);
+  }, [filtered.length]);
+
+  const pageRows = useMemo(() => {
+    if (!editMode) return filtered;
+    const from = currentEditPage * EDIT_PAGE_SIZE;
+    return filtered.slice(from, from + EDIT_PAGE_SIZE);
+  }, [currentEditPage, editMode, filtered]);
+
+  const currentPageIds = new Set(pageRows.map((row) => String(row[rowKey])));
+  const otherPageDirtyCount = countDirtyRowsOffPage(editMode, dirtyRows, currentPageIds);
 
   const toggleSort = (key: string) => {
+    setEditPage(0);
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -159,12 +278,20 @@ export default function EditableDataTable<T extends Record<string, any>>({
 
   const handleEnterEdit = () => {
     setEditMode(true);
+    onEditModeChange?.(true);
+    setEditPage(0);
     setDirtyRows(new Map());
   };
 
   const handleCancelEdit = () => {
     setEditMode(false);
     setDirtyRows(new Map());
+    setCancelConfirmationOpen(false);
+    onEditModeChange?.(false);
+  };
+
+  const handleRequestCancelEdit = () => {
+    requestEditCancel(dirtyCount, handleCancelEdit, () => setCancelConfirmationOpen(true));
   };
 
   const handleSave = async () => {
@@ -176,6 +303,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
       if (shouldCloseEditMode !== false) {
         setEditMode(false);
         setDirtyRows(new Map());
+        onEditModeChange?.(false);
       }
     } catch {
       // parent handles error toast
@@ -271,7 +399,10 @@ export default function EditableDataTable<T extends Record<string, any>>({
               <input
                 type="text"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setEditPage(0);
+                }}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg
@@ -284,7 +415,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
         </div>
 
         {/* Edit mode controls */}
-        <div className="flex gap-2 items-center shrink-0">
+        <div className="flex flex-wrap gap-2 items-center shrink-0">
           {headerActions}
           {canEdit && !editMode && !loadError && (
             <Button
@@ -302,20 +433,23 @@ export default function EditableDataTable<T extends Record<string, any>>({
                 variant="ghost"
                 size="sm"
                 icon={<X className="w-4 h-4" />}
-                onClick={handleCancelEdit}
+                onClick={handleRequestCancelEdit}
                 disabled={saving}
               >
                 Cancel
               </Button>
-              <Button
-                size="sm"
-                icon={<Save className="w-4 h-4" />}
-                onClick={handleSave}
-                loading={saving}
-                disabled={dirtyCount === 0 || loadError}
-              >
-                Save{dirtyCount > 0 ? ` (${dirtyCount})` : ''}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  icon={<Save className="w-4 h-4" />}
+                  onClick={handleSave}
+                  loading={saving}
+                  disabled={dirtyCount === 0 || loadError}
+                >
+                  Save{dirtyCount > 0 ? ` (${dirtyCount})` : ''}
+                </Button>
+                <OtherPageUnsavedCount count={otherPageDirtyCount} />
+              </div>
             </>
           )}
         </div>
@@ -373,7 +507,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row) => {
+              {pageRows.map((row) => {
                 const id = String(row[rowKey]);
                 const isDirty = dirtyRows.has(id);
                 return (
@@ -406,6 +540,31 @@ export default function EditableDataTable<T extends Record<string, any>>({
           </fieldset>
         </div>
       )}
+      <EditPagination
+        editing={editMode}
+        loadError={loadError}
+        total={filtered.length}
+        page={currentEditPage}
+        maxPage={maxEditPage}
+        onPrevious={() => setEditPage((page) => Math.max(0, page - 1))}
+        onNext={() => setEditPage((page) => Math.min(maxEditPage, page + 1))}
+      />
+      <UnsavedChangesModal
+        open={isNavigationBlocked(blocker)}
+        disableLeave={saving}
+        onStay={() => blocker.reset?.()}
+        onLeave={() => blocker.proceed?.()}
+      />
+      <ConfirmModal
+        open={cancelConfirmationOpen}
+        onClose={() => setCancelConfirmationOpen(false)}
+        onConfirm={handleCancelEdit}
+        title="Discard edits?"
+        message={discardRowsMessage(dirtyCount)}
+        confirmLabel="Discard edits"
+        cancelLabel="Stay"
+        variant="warning"
+      />
     </div>
   );
 }

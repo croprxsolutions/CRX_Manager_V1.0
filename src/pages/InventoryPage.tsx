@@ -186,6 +186,7 @@ export default function InventoryPage() {
   const [receivePOsFailed, setReceivePOsFailed] = useState(false);
   const [locationFilter, setLocationFilter] = useState('');
   const [mobileSearch, setMobileSearch] = useState('');
+  const [isEditingInventory, setIsEditingInventory] = useState(false);
   const [locations, setLocations] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'inventory' | 'forecast'>('inventory');
   const [forecastData, setForecastData] = useState<Array<{
@@ -1617,7 +1618,7 @@ export default function InventoryPage() {
       )}
 
       <Card padding={false}>
-        <div className="border-b border-gray-100 p-3 md:hidden">
+        <div className={isEditingInventory ? 'hidden' : 'border-b border-gray-100 p-3 md:hidden'}>
           <label htmlFor="inventory-mobile-search" className="sr-only">Search products</label>
           <input
             id="inventory-mobile-search"
@@ -1650,27 +1651,29 @@ export default function InventoryPage() {
         </div>
 
         {inventoryFailed ? (
-          <div className="md:hidden">
+          <div className={isEditingInventory ? 'hidden' : 'md:hidden'}>
             <LoadFailedState onRetry={() => { setLoading(true); fetchInventory(); }} />
           </div>
         ) : (
-        <InventoryPositionMobileCards
-          rows={mobileFiltered}
-          isAdmin={isAdmin}
-          selectedIds={selectedIds}
-          onToggleSelect={toggleSelect}
-          onViewHistory={(row) => {
-            setLedgerProductId(row.product_id);
-            setLedgerProductName(row.product_name);
-            setLedgerOpen(true);
-          }}
-          onReceive={openReceiveModal}
-          onAdjust={openAdjustModal}
-          onDelete={handleDelete}
-        />
+        <div className={isEditingInventory ? 'hidden' : 'md:hidden'}>
+          <InventoryPositionMobileCards
+            rows={mobileFiltered}
+            isAdmin={isAdmin}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            onViewHistory={(row) => {
+              setLedgerProductId(row.product_id);
+              setLedgerProductName(row.product_name);
+              setLedgerOpen(true);
+            }}
+            onReceive={openReceiveModal}
+            onAdjust={openAdjustModal}
+            onDelete={handleDelete}
+          />
+        </div>
         )}
 
-        <div className="hidden p-5 md:block">
+        <div className={isEditingInventory ? 'block p-5' : 'hidden p-5 md:block'}>
           <EditableDataTable<InventoryRow>
             key={productIdFilter ?? 'all'}
             data={filtered}
@@ -1685,6 +1688,7 @@ export default function InventoryPage() {
             loadError={inventoryFailed}
             onRetry={() => { setLoading(true); fetchInventory(); }}
             canEdit={isAdmin}
+            onEditModeChange={setIsEditingInventory}
             onSave={handleBulkSave}
             filters={
               <div className="flex gap-2 items-center flex-wrap">

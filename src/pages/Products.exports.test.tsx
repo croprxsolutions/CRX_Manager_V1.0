@@ -86,6 +86,15 @@ vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ role: mocks.role, profile: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } }),
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('../hooks/useUnsavedChanges', () => ({
+  useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
+}));
+vi.mock('../components/products/ProductsMobileList', async () => {
+  const actual = await vi.importActual<typeof import('../components/products/ProductsMobileList')>(
+    '../components/products/ProductsMobileList',
+  );
+  return { ...actual, default: () => null };
+});
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/csvExport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/csvExport')>()),
@@ -138,6 +147,22 @@ describe('Products list and exports', () => {
     fireEvent.change(status, { target: { value: 'all' } });
     expect(screen.getByText('Active Product')).toBeInTheDocument();
     expect(screen.getByText('Inactive Product')).toBeInTheDocument();
+  });
+
+  it('shows the table layout at every width while inline editing', async () => {
+    await loadProducts();
+    const mobileLayout = screen.getByTestId('products-mobile-layout');
+    const tableLayout = screen.getByTestId('products-table-layout');
+
+    expect(mobileLayout).toHaveClass('md:hidden');
+    expect(mobileLayout).not.toHaveClass('hidden');
+    expect(tableLayout).toHaveClass('hidden', 'md:block');
+
+    fireEvent.click(screen.getByText('Edit'));
+
+    expect(mobileLayout).toHaveClass('hidden');
+    expect(tableLayout).toHaveClass('block');
+    expect(tableLayout).not.toHaveClass('hidden');
   });
 
   it('exports only active rows to customer CSV and PDF even when All is selected', async () => {

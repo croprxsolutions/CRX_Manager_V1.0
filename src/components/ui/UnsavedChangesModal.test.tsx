@@ -18,6 +18,18 @@ describe('UnsavedChangesModal', () => {
     expect(screen.getByText(/unsaved changes that will be lost/i)).toBeInTheDocument();
   });
 
+  it('renders through a hidden wrapper directly under document.body', () => {
+    const { container } = render(
+      <div className="hidden md:block">
+        <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
+      </div>
+    );
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog.parentElement).toBe(document.body);
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
   it('has role="alertdialog" and aria-modal="true"', () => {
     render(
       <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
@@ -32,6 +44,13 @@ describe('UnsavedChangesModal', () => {
     );
     expect(screen.getByText('Leave')).toBeInTheDocument();
     expect(screen.getByText('Stay')).toBeInTheDocument();
+  });
+
+  it('disables Leave while a save is in progress', () => {
+    render(
+      <UnsavedChangesModal open={true} disableLeave onStay={() => {}} onLeave={() => {}} />
+    );
+    expect(screen.getByRole('button', { name: 'Leave' })).toBeDisabled();
   });
 
   it('uses a full-height mobile panel with a separate action bar', () => {

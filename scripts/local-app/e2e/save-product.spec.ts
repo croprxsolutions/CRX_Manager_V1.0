@@ -57,7 +57,7 @@ test('signs in, saves a test product, and the save survives a reload, on localho
   }).toPass();
 
   await page.reload();
-  await page.getByPlaceholder(/search/i).first().fill(name);
+  await page.getByPlaceholder(/search/i).filter({ visible: true }).first().fill(name);
   await expect(page.getByText(name).first()).toBeVisible();
 
   await page.getByText(name).first().click();

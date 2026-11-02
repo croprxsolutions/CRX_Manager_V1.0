@@ -5,6 +5,10 @@ import { IDBFactory } from 'fake-indexeddb';
 import InventoryPage from './InventoryPage';
 import type { InventoryPositionRow } from '../types';
 
+vi.mock('../hooks/useUnsavedChanges', () => ({
+  useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
+}));
+
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),

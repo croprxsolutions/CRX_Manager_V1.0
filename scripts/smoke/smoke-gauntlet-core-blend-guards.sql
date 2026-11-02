@@ -46,7 +46,8 @@ DECLARE
   v_ocr_queue_id uuid;
   v_ocr_lease uuid := gen_random_uuid();
   v_key_prefix text := 'gauntlet-' || gen_random_uuid()::text;
-  v_location text := '[E2E] gauntlet ' || gen_random_uuid()::text;
+  -- Receiving accepts only Main Warehouse until stock transfers exist (KI-85, 20261102180000).
+  v_location text := 'Main Warehouse';
   v_result jsonb;
   v_replay jsonb;
   v_order_id uuid;
@@ -64,8 +65,6 @@ DECLARE
   v_quantity numeric;
   v_updated_at timestamptz;
 BEGIN
-  -- Receiving accepts only an active warehouse (KI-85, 20261102180000).
-  INSERT INTO public.warehouses (name, is_active) VALUES (v_location, true);
   SELECT id INTO v_admin
     FROM public.profiles
    WHERE role = 'admin' AND is_active = true

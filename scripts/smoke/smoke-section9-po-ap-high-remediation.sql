@@ -49,9 +49,6 @@ DECLARE
   v_due_date date;
   v_suffix text := substr(md5(random()::text), 1, 8);
 BEGIN
-  -- Receiving accepts only an active warehouse (KI-85, 20261102180000).
-  INSERT INTO public.warehouses (name, is_active) VALUES ('Secondary Warehouse', true)
-  ON CONFLICT (name) DO UPDATE SET is_active = true;
   SELECT id INTO v_admin
   FROM public.profiles
   WHERE role = 'admin' AND is_active = true
@@ -109,7 +106,7 @@ BEGIN
   INTO v_secondary_before
   FROM public.inventory
   WHERE product_id = v_product
-    AND location = 'Secondary Warehouse';
+    AND location = 'Main Warehouse';
   v_secondary_before := COALESCE(v_secondary_before, 0);
 
   v_vendor_name := '[SMOKE] Section 9 Vendor ' || v_suffix;
@@ -184,11 +181,36 @@ BEGIN
       v_actual;
   END IF;
 
+  -- KI-85 (20261102180000): receiving accepts only Main Warehouse until stock
+  -- transfers exist, even when another warehouse row is active.
+  INSERT INTO public.warehouses (name, is_active) VALUES ('Secondary Warehouse', true)
+  ON CONFLICT (name) DO UPDATE SET is_active = true;
+  BEGIN
+    PERFORM public.receive_po_items(
+      jsonb_build_array(jsonb_build_object(
+        'po_item_id', v_po_item,
+        'quantity', 5,
+        'storage_location', 'Secondary Warehouse',
+        'condition', 'good'
+      )),
+      v_admin,
+      'smk-s9-receive-secondary-' || v_suffix,
+      false
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: receipt into a non-Main warehouse succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'UNKNOWN_STORAGE_LOCATION%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong non-Main receipt error: %', v_err;
+    END IF;
+  END;
+
   v_result := public.receive_po_items(
     jsonb_build_array(jsonb_build_object(
       'po_item_id', v_po_item,
       'quantity', 5,
-      'storage_location', 'Secondary Warehouse',
+      'storage_location', 'Main Warehouse',
       'condition', 'good'
     )),
     v_admin,
@@ -206,7 +228,7 @@ BEGIN
       jsonb_build_array(jsonb_build_object(
         'po_item_id', v_po_item,
         'quantity', 4,
-        'storage_location', 'Secondary Warehouse',
+        'storage_location', 'Main Warehouse',
         'condition', 'good'
       )),
       v_admin,
@@ -227,7 +249,7 @@ BEGIN
   WHERE product_id = v_product AND location = 'Main Warehouse';
   SELECT quantity_available INTO v_secondary_after
   FROM public.inventory
-  WHERE product_id = v_product AND location = 'Secondary Warehouse';
+  WHERE product_id = v_product AND location = 'Main Warehouse';
   IF v_actual IS DISTINCT FROM v_baseline + 7
      OR v_secondary_after IS DISTINCT FROM v_secondary_before + 5 THEN
     RAISE EXCEPTION
@@ -244,7 +266,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object(
       'po_item_id', v_po_item,
       'quantity', 5,
-      'storage_location', 'Secondary Warehouse',
+      'storage_location', 'Main Warehouse',
       'condition', 'good'
     )),
     v_admin,
@@ -260,7 +282,7 @@ BEGIN
       jsonb_build_array(jsonb_build_object(
         'po_item_id', v_po_item,
         'quantity', 4,
-        'storage_location', 'Secondary Warehouse',
+        'storage_location', 'Main Warehouse',
         'condition', 'good'
       )),
       v_admin,
@@ -276,7 +298,7 @@ BEGIN
     END IF;
   END;
   IF (SELECT quantity_available FROM public.inventory
-      WHERE product_id = v_product AND location = 'Secondary Warehouse')
+      WHERE product_id = v_product AND location = 'Main Warehouse')
        IS DISTINCT FROM v_secondary_before + 5 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: changed receiving retry leaked inventory';
   END IF;
@@ -334,7 +356,7 @@ BEGIN
   WHERE product_id = v_product AND location = 'Main Warehouse';
   SELECT quantity_available INTO v_secondary_after
   FROM public.inventory
-  WHERE product_id = v_product AND location = 'Secondary Warehouse';
+  WHERE product_id = v_product AND location = 'Main Warehouse';
   IF v_actual IS DISTINCT FROM v_baseline + 14
      OR v_secondary_after IS DISTINCT FROM v_secondary_before THEN
     RAISE EXCEPTION

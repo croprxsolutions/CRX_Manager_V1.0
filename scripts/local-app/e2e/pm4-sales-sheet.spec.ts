@@ -30,8 +30,8 @@ async function addProducts(page: Page) {
 }
 
 async function chooseFilters(page: Page, status: string) {
-  await page.getByLabel('Filter by category').selectOption(category);
-  await page.getByLabel('Filter by status').selectOption(status);
+  await page.getByLabel('Filter by category').filter({ visible: true }).selectOption(category);
+  await page.getByLabel('Filter by status').filter({ visible: true }).selectOption(status);
 }
 
 async function download(page: Page, section: 'PDF' | 'CSV', item: string): Promise<Download> {
@@ -58,12 +58,12 @@ test('the sales sheet leaves out inactive products and internal fields, whatever
   await addProducts(page);
   await page.goto('/products');
 
-  await page.getByLabel('Filter by category').selectOption(category);
+  await page.getByLabel('Filter by category').filter({ visible: true }).selectOption(category);
   await expect(page.getByRole('cell', { name: inactiveName })).toHaveCount(0);
-  await page.getByLabel('Filter by status').selectOption('inactive');
-  await expect(page.getByText(inactiveName).first()).toBeVisible();
-  await page.getByLabel('Filter by status').selectOption('all');
-  await expect(page.getByText(inactiveName).first()).toBeVisible();
+  await page.getByLabel('Filter by status').filter({ visible: true }).selectOption('inactive');
+  await expect(page.getByText(inactiveName).filter({ visible: true }).first()).toBeVisible();
+  await page.getByLabel('Filter by status').filter({ visible: true }).selectOption('all');
+  await expect(page.getByText(inactiveName).filter({ visible: true }).first()).toBeVisible();
   await page.screenshot({ path: 'scripts/local-app/.state/pm4-list.png' });
 
   await chooseFilters(page, 'all');
@@ -96,10 +96,10 @@ test('search finds a product by EPA number, and Details adds the compliance colu
   await signIn(page);
   await addProducts(page);
   await page.goto('/products');
-  await page.getByPlaceholder('Search products...').fill(epa);
-  await expect(page.getByText(`Quoted" ${run}`).first()).toBeVisible();
-  await page.getByPlaceholder('Search products...').fill(`Maker ${run}`);
-  await expect(page.getByText(`Quoted" ${run}`).first()).toBeVisible();
+  await page.getByPlaceholder('Search products...').filter({ visible: true }).fill(epa);
+  await expect(page.getByText(`Quoted" ${run}`).filter({ visible: true }).first()).toBeVisible();
+  await page.getByPlaceholder('Search products...').filter({ visible: true }).fill(`Maker ${run}`);
+  await expect(page.getByText(`Quoted" ${run}`).filter({ visible: true }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   await expect(page.getByRole('columnheader', { name: 'Signal Word' })).toBeVisible();

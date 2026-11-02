@@ -30,7 +30,7 @@ test('edit mode shows a page of rows, keeps edits across pages, and warns before
   await addProducts(page, prefix, 60);
 
   await page.goto('/products');
-  await page.getByLabel('Filter by category').selectOption(prefix);
+  await page.getByLabel('Filter by category').filter({ visible: true }).selectOption(prefix);
   await expect(page.getByText(`${prefix} 060`)).toBeVisible();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
@@ -44,13 +44,13 @@ test('edit mode shows a page of rows, keeps edits across pages, and warns before
   await expect(page.getByText('1 unsaved on other pages')).toBeVisible();
   await page.screenshot({ path: 'scripts/local-app/.state/pm11b-edit-page-2.png' });
 
-  await page.getByRole('link', { name: /inventory/i }).first().click();
+  await page.getByText('Supplier Pricing').first().click();
   await page.getByRole('button', { name: 'Stay' }).click();
   await expect(page).toHaveURL(/\/products$/);
   await page.getByRole('button', { name: 'Previous' }).click();
   await expect(firstName).toHaveValue(`${prefix} edited`);
 
-  await page.getByRole('link', { name: /inventory/i }).first().click();
+  await page.getByText('Supplier Pricing').first().click();
   await page.getByRole('button', { name: 'Leave' }).click();
   await expect(page).toHaveURL(/\/inventory/);
 });

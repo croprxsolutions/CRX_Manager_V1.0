@@ -135,7 +135,7 @@ for (const pushCmd of pushCommands) {
     deny("CODEX GATE: force-pushing any branch rewrites shared history and requires Mason's explicit approval. Use a normal push or a compensating commit.");
   }
 
-  const pushRepoDir = gitPushCwd(pushCmd, projectDir);
+  const pushRepoDir = gitPushCwd(pushCmd, projectDir, cmd);
   let branch = "";
   try {
     branch = git(["rev-parse", "--abbrev-ref", "HEAD"], pushRepoDir);

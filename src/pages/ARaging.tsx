@@ -1037,8 +1037,10 @@ export default function ARaging() {
                 searchable
                 searchPlaceholder="Search customers..."
                 searchKeys={['farm_name']}
-                emptyTitle="No outstanding receivables"
-                emptyDescription="All customer balances are current."
+                emptyTitle={agingUnavailable.length > 0 ? 'No balances can be shown for this date' : 'No outstanding receivables'}
+                emptyDescription={agingUnavailable.length > 0
+                  ? 'Every customer with a balance on this date is listed above as one that cannot be shown.'
+                  : 'All customer balances are current.'}
               />
             </div>
           </Card>

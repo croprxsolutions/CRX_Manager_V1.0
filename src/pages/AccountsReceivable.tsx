@@ -106,7 +106,8 @@ export default function AccountsReceivable() {
     };
   }, [summaryAttempt]);
 
-  const net = owed !== null ? owed - prepay - openCredit : null;
+  // A Total Owed that leaves customers out cannot give a true net position (KI-95).
+  const net = owed !== null && owedExcluded === 0 ? owed - prepay - openCredit : null;
 
   return (
     <div className="space-y-4">
@@ -152,10 +153,19 @@ export default function AccountsReceivable() {
           </Card>
           <Card>
             <p className="text-[11px] font-medium text-secondary uppercase tracking-wide">Net Position</p>
-            <p className={`text-2xl font-semibold font-heading mt-1 ${(net ?? 0) > 0 ? 'text-red-600' : 'text-crx-green'}`}>
-              {formatUSD(net ?? 0)}
-            </p>
-            <p className="text-xs text-secondary mt-1">true exposure = owed minus unused prepay & credit</p>
+            {net === null ? (
+              <>
+                <p className="text-2xl font-semibold font-heading mt-1 text-secondary">Not available</p>
+                <p className="text-xs text-amber-700 mt-1">Total Owed leaves out {owedExcluded} customer{owedExcluded === 1 ? '' : 's'}, so the net can't be worked out</p>
+              </>
+            ) : (
+              <>
+                <p className={`text-2xl font-semibold font-heading mt-1 ${net > 0 ? 'text-red-600' : 'text-crx-green'}`}>
+                  {formatUSD(net)}
+                </p>
+                <p className="text-xs text-secondary mt-1">true exposure = owed minus unused prepay & credit</p>
+              </>
+            )}
           </Card>
         </div>
       )}

@@ -88,9 +88,26 @@ describe('AR Aging with a customer that cannot be shown as of the date', () => {
     expect(screen.queryByText(/not shown/)).toBeNull();
   });
 
-  it("the Accounts Receivable strip says Total Owed excludes them", async () => {
+  it('when every customer is flagged, the empty table does not say balances are current', async () => {
+    H.functions.get_ar_aging = H.functions.get_ar_aging.slice(2);
+    render(<MemoryRouter><ARaging /></MemoryRouter>);
+    await screen.findByRole('alert');
+    expect(await screen.findByText('No balances can be shown for this date')).toBeTruthy();
+    expect(screen.queryByText('All customer balances are current.')).toBeNull();
+  });
+
+  it("the Accounts Receivable strip says Total Owed excludes them and gives no net position", async () => {
     render(<MemoryRouter initialEntries={['/?tab=payments']}><AccountsReceivable /></MemoryRouter>);
     expect(await screen.findByText(/Excludes 1 customer that can't be shown for today/)).toBeTruthy();
     expect(screen.getAllByText('$125.00').length).toBeGreaterThan(0);
+    expect(screen.getByText('Not available')).toBeTruthy();
+    expect(screen.queryByText(/true exposure/)).toBeNull();
+  });
+
+  it('the strip still gives a net position when no customer is flagged', async () => {
+    H.functions.get_ar_aging = H.functions.get_ar_aging.slice(0, 2);
+    render(<MemoryRouter initialEntries={['/?tab=payments']}><AccountsReceivable /></MemoryRouter>);
+    expect(await screen.findByText(/true exposure/)).toBeTruthy();
+    expect(screen.queryByText('Not available')).toBeNull();
   });
 });

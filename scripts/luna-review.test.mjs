@@ -2,7 +2,10 @@
 // Tests for the advisory Luna review (scripts/luna-review.mjs): model routing and void detection.
 // Run: node scripts/luna-review.test.mjs
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import {
   EXIT_CLEAN,
@@ -17,6 +20,7 @@ import {
   parseArgs,
   runLunaReview,
 } from "./luna-review.mjs";
+import { fixedGitExecutable } from "./write-codex-push-proof.mjs";
 
 const canary = "CRXDIFF-TEST";
 const banner = (model) => `OpenAI Codex v0.166\n--------\nmodel: ${model}\nreasoning effort: xhigh\n--------\nuser\n`;
@@ -97,15 +101,26 @@ const clean = runLunaReview({
 });
 assert.equal(clean.outcome, "clean");
 
-// End to end on this checkout: the real void exits "did not run" and says so.
+// End to end in a throwaway repo (CI's own HEAD is a merge commit with no diff): the real void
+// exits "did not run" and says so.
+const repo = mkdtempSync(path.join(tmpdir(), "crx-luna-test-"));
+const gitIn = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", ...gitArgs], { cwd: repo });
+gitIn("init", "-q");
+writeFileSync(path.join(repo, "a.txt"), "one\n");
+gitIn("add", "a.txt");
+gitIn("commit", "-q", "-m", "one");
 const printed = [];
 const realLog = console.log;
+const realCwd = process.cwd();
 console.log = (line = "") => printed.push(line);
+process.chdir(repo);
 const voidExit = main(["--commit", "HEAD"], {
   resolveCodex: () => "codex-stub",
   spawn: () => ({ status: 1, stdout: "", stderr: banner(LUNA_MODEL) + realVoidTail }),
 });
+process.chdir(realCwd);
 console.log = realLog;
+rmSync(repo, { recursive: true, force: true });
 assert.equal(voidExit, EXIT_DID_NOT_RUN);
 assert.match(printed.join("\n"), /DID NOT RUN.*NOT A REVIEW AND NOT A CLEAN RESULT/);
 assert.match(printed.join("\n"), /max_output_tokens/);

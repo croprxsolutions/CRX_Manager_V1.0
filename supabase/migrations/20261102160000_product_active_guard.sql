@@ -317,8 +317,8 @@ BEGIN
   -- New lines and product swaps reach the same locked product check below.
   IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
     IF TG_TABLE_NAME = 'order_items' THEN
-      -- A void/cancel can reopen a fully delivered line without changing the order status.
-      IF COALESCE(OLD.quantity_remaining, 0) <= 0 AND COALESCE(NEW.quantity_remaining, 0) > 0 THEN
+      -- Any rise in remaining (a void/cancel reopen or a direct edit) frees units to deliver.
+      IF COALESCE(NEW.quantity_remaining, 0) > COALESCE(OLD.quantity_remaining, 0) THEN
         NULL; -- Continue to the locked product check.
       ELSIF COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
         RETURN NEW;
@@ -648,7 +648,7 @@ BEGIN
        IS DISTINCT FROM '22c79c8cc58d2e575ca353511e38c291'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.guard_inactive_product_line()'::regprocedure)
-       IS DISTINCT FROM '6164651cbc549e459d7bedd8cf32abc7' THEN
+       IS DISTINCT FROM '0b5e96c6d3bcb1c114ff997f69116da6' THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: guards';
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc

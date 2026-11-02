@@ -633,6 +633,9 @@ try {
   const alreadyOpen = seedOrderLine(idemProduct, 'PM3-LOWER-OPEN', 'partially_fulfilled', 288);
   psql(`UPDATE public.order_items SET quantity_remaining = 0.5 WHERE id = '${alreadyOpen.lineId}';`);
   assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${alreadyOpen.lineId}';`), '0.5');
+  denied(ADMIN, `UPDATE public.order_items SET quantity_remaining = 1 WHERE id = '${alreadyOpen.lineId}';`,
+    /PRODUCT_INACTIVE:.*PM3 Idempotency/, 'postgres');
+  assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${alreadyOpen.lineId}';`), '0.5');
 
   const cancelledInactiveOrder = seedOrderLine(idemProduct, 'PM3-CANCEL-ORDER', 'confirmed', 282);
   withActor(ADMIN, `SELECT public.cancel_order('${cancelledInactiveOrder.orderId}', '${ADMIN}', 'pm3-cancel-order');`);

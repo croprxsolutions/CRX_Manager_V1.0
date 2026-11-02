@@ -190,8 +190,10 @@ export function isDefinitiveRpcRejection(error: unknown): boolean {
  *             for THIS request, but an earlier one may have.
  *
  * In every case the database performed no work for the current request, and the
- * key can never succeed again — so the caller must reset it. Leaving a
- * 'receipt' key in place traps the operator in an unfixable retry loop.
+ * key can never succeed again. Money callers (replay-binding batches 1 and 4a)
+ * still retire it only on 'intent' or 'actor': on 'receipt' an earlier attempt
+ * under the key may have committed, so they keep it rather than risk repeating
+ * that work, and a page reload is the way out. Other callers reset on any refusal.
  */
 export type IdempotencyBindingRejection = 'intent' | 'actor' | 'receipt';
 

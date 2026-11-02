@@ -105,6 +105,21 @@ export interface Product {
   updated_at: string;
 }
 
+export type MobileProduct = Pick<
+  Product,
+  | 'id'
+  | 'product_name'
+  | 'sku'
+  | 'category'
+  | 'vendor'
+  | 'manufacturer'
+  | 'epa_registration'
+  | 'tier1_price'
+  | 'tier2_price'
+  | 'tier3_price'
+  | 'is_active'
+>;
+
 // ─── EPA PPLS Lookup ────────────────────────────────────────────────────────
 // Keep this shape in sync with supabase/functions/epa-lookup/logic.ts.
 

@@ -8,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import BulkProductImport from '../components/products/BulkProductImport';
+import ProductsMobileList from '../components/products/ProductsMobileList';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
@@ -71,6 +72,7 @@ import {
   type SetMarginFloorsResult,
 } from '../lib/marginFloors';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { matchesProductSearch } from '../lib/productSearch';
 
 const INLINE_PRICING_FIELDS = new Set([
   'pricing_mode',
@@ -165,6 +167,7 @@ export default function Products() {
   const [applyingPricing, setApplyingPricing] = useState(false);
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
+  const [isEditingProducts, setIsEditingProducts] = useState(false);
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
@@ -1120,11 +1123,13 @@ export default function Products() {
           <>
           {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
           {canBulkAction && !loadError && (
-            <BulkActionBar
-              selectedCount={selectedCount}
-              actions={bulkActions}
-              onDeselectAll={clearSelection}
-            />
+            <div className="hidden md:block">
+              <BulkActionBar
+                selectedCount={selectedCount}
+                actions={bulkActions}
+                onDeselectAll={clearSelection}
+              />
+            </div>
           )}
           <div className="flex flex-wrap gap-2">
           {/* Download All dropdown. Exports wait while a failed load hides the rows: they would
@@ -1166,7 +1171,7 @@ export default function Products() {
             )}
           </div>
           {isAdmin && (
-            <>
+            <div className="hidden flex-wrap items-center gap-2 md:flex">
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}
@@ -1212,18 +1217,42 @@ export default function Products() {
               >
                 Import Products
               </Button>
-              <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/products/new')}>
-                Add Product
-              </Button>
-            </>
+            </div>
           )}
           </div>
+          {isAdmin && (
+            <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/products/new')}>
+              Add Product
+            </Button>
+          )}
           </>
         )}
       />
 
       <Card padding={false}>
-        <div className="p-5">
+        <div
+          data-testid="products-mobile-layout"
+          className={isEditingProducts ? 'hidden' : 'md:hidden'}
+        >
+          <ProductsMobileList
+            products={products}
+            categories={categories}
+            vendors={vendors}
+            categoryFilter={categoryFilter}
+            vendorFilter={vendorFilter}
+            statusFilter={statusFilter}
+            onCategoryFilterChange={setCategoryFilter}
+            onVendorFilterChange={setVendorFilter}
+            onStatusFilterChange={setStatusFilter}
+            onOpenProduct={(product) => navigate(`/products/${product.id}`)}
+            loadError={loadError}
+            onRetry={retryProducts}
+          />
+        </div>
+        <div
+          data-testid="products-table-layout"
+          className={isEditingProducts ? 'block p-5' : 'hidden p-5 md:block'}
+        >
           <EditableDataTable<ProductListRow>
             key={tableRevision}
             data={filtered}
@@ -1231,7 +1260,7 @@ export default function Products() {
             rowKey="id"
             searchable
             searchPlaceholder="Search products..."
-            searchKeys={['product_name', 'sku', 'category', 'vendor', 'manufacturer', 'epa_registration']}
+            searchMatcher={matchesProductSearch}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
             emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
             emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}
@@ -1246,6 +1275,7 @@ export default function Products() {
             loadError={loadError}
             onRetry={retryProducts}
             canEdit={isAdmin}
+            onEditModeChange={setIsEditingProducts}
             onSave={handleBulkSave}
             headerActions={(
               <>

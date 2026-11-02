@@ -76,6 +76,15 @@ vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ role: 'admin', profile: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', full_name: 'Test Admin' } }),
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('../hooks/useUnsavedChanges', () => ({
+  useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
+}));
+vi.mock('../components/products/ProductsMobileList', async () => {
+  const actual = await vi.importActual<typeof import('../components/products/ProductsMobileList')>(
+    '../components/products/ProductsMobileList',
+  );
+  return { ...actual, default: () => null };
+});
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import Products from './Products';

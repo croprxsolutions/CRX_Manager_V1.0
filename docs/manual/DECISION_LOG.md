@@ -14,7 +14,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision:** The pricing mode is not stored, so a product opens price-driven when all three prices are saved, even if margins are saved too; margin-driven when it has no prices and all three margins; and with no mode otherwise.
 
-**Why.** This is WP-PM-2 option a of the build sheet, as the mission's Wave 1 scope sets it. Prices are the customer-facing number, and this default changes nothing until someone edits. A partly priced product, or one with neither, opens with no mode, so someone chooses before a cost change can rewrite a saved price. Option b, storing the last-used mode, needs a column and a grant on `products`, which is a Mason-gated migration.
+**Why.** Prices are the number customers see, so this default changes nothing until someone edits. A product with only some prices, or with neither prices nor margins, opens with no mode, so someone has to choose before a cost change can rewrite a saved price. Remembering the last mode used would need a change to the live database that Mason would have to approve, so it stayed out of this work.
 
 **What this forbids/implies:** a cost change on a product whose margins used to set its prices now starts on "keep prices", so its margins move unless someone switches the mode. The preview still shows every result before Apply. A change to this default is a new entry here.
 

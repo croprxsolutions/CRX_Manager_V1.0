@@ -1,0 +1,3 @@
+## 2026-11-02 - Product use timings
+
+Local WP-PM-5 candidate: Herbicide and Foliar Fertilizer products can hold several use timing codes. The product screen uses category-specific checkboxes and asks before a category change clears timings. Bulk import and the pricing workbook continue to use semicolon-separated timing labels through a database compatibility trigger. The migration backfills existing single values and adds an option table with read-only access for signed-in staff. This migration is Mason-gated because it adds column grants on the existing `products` table. No live apply or deployment is part of this work package.

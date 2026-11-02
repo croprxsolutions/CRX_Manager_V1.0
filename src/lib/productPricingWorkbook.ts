@@ -542,6 +542,11 @@ export async function generateProductPricingWorkbook(
     worksheet.addRow(PRICING_WORKBOOK_HEADERS.map((header) => row[header]));
   }
   stylePricingWorksheet(worksheet, pricingExport.rows.length);
+  const useTimingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
+  for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
+    const cell = worksheet.getCell(row, useTimingColumn);
+    cell.note = 'For several use timings, separate labels with a semicolon (;).';
+  }
   // This is a usability guard only. The preview RPC revalidates every protected
   // value against its retained server manifest; Excel protection is not security.
   await worksheet.protect('crx-phase2-layout', {

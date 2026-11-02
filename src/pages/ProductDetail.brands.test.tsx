@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Product } from '../types';
 
 const H = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ const H = vi.hoisted(() => ({
   logActivity: vi.fn(),
   resetDraftKey: vi.fn(),
   brandSection: vi.fn(),
+  savedPayload: null as Record<string, unknown> | null,
 }));
 
 function baseProduct(overrides: Partial<Product> = {}): Product {
@@ -20,6 +21,7 @@ function baseProduct(overrides: Partial<Product> = {}): Product {
     product_name: 'Test Herbicide',
     sku: 'TEST-1',
     category: 'Herbicide',
+    use_timings: [],
     vendor: 'Test Vendor',
     manufacturer: 'Current Manufacturer',
     container_size: 2.5,
@@ -89,12 +91,18 @@ vi.mock('../lib/db', () => {
     ? chainable({ data: H.product ? [H.product] : [], error: null })
     : chainable({ data: [], error: null }));
 
+  const updateProduct = vi.fn((payload: Record<string, unknown>) => {
+    H.savedPayload = payload;
+    H.product = { ...H.product!, ...payload } as Product;
+    return chainable({ data: [{ id: H.product.id }], error: null });
+  });
+
   return {
     supabase: {
       from,
       functions: { invoke: H.invoke },
     },
-    supabaseUntyped: { rpc: H.rpc },
+    supabaseUntyped: { rpc: H.rpc, from: () => ({ update: updateProduct }) },
     assertRpcResult: (data: unknown) => {
       if (data == null) throw new Error('RPC returned no data');
       return data;
@@ -141,6 +149,24 @@ vi.mock('../lib/activityLogger', () => ({
   logActivity: H.logActivity,
 }));
 
+vi.mock('../lib/productSetup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productSetup')>()),
+  listProductCategories: async () => [
+    { name: 'Herbicide', is_active: true, sort_order: 10 },
+    { name: 'Foliar Fertilizer', is_active: true, sort_order: 20 },
+    { name: 'Insecticide', is_active: true, sort_order: 30 },
+  ],
+}));
+
+vi.mock('../lib/productUseTimings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productUseTimings')>()),
+  listProductUseTimingOptions: async () => [
+    { code: 'pre_emerge_corn', label: 'Pre-Emerge Corn', category: 'Herbicide', is_active: true, sort_order: 20 },
+    { code: 'post_emerge_soybeans', label: 'Post-Emerge Soybeans', category: 'Herbicide', is_active: true, sort_order: 60 },
+    { code: 'foliar', label: 'Foliar', category: 'Foliar Fertilizer', is_active: true, sort_order: 90 },
+  ],
+}));
+
 // Supplier evidence has its own focused tests. Keep this suite scoped to the
 // EPA draft mutation so its assertions are not polluted by the history read.
 vi.mock('../components/products/ProductPriceHistory', () => ({
@@ -161,6 +187,7 @@ describe('ProductDetail brands section', () => {
     vi.clearAllMocks();
     H.routeId = 'product-1';
     H.product = baseProduct();
+    H.savedPayload = null;
   });
 
   it('shows the brands section for the product that loaded, with its saved name', async () => {
@@ -176,5 +203,38 @@ describe('ProductDetail brands section', () => {
     expect(screen.queryByDisplayValue('Test Herbicide')).not.toBeInTheDocument();
     expect(screen.queryByTestId('brands-section')).not.toBeInTheDocument();
     expect(H.brandSection).not.toHaveBeenCalled();
+  });
+
+  it('saves two timing codes and shows both after reload', async () => {
+    const first = render(<ProductDetail />);
+    const group = await screen.findByRole('group', { name: 'Use Timing' });
+    expect(within(group).queryByRole('checkbox', { name: 'Foliar' })).toBeNull();
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Post-Emerge Soybeans' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn', 'post_emerge_soybeans']));
+    expect(H.savedPayload).not.toHaveProperty('use_timing');
+    first.unmount();
+    render(<ProductDetail />);
+    const reloaded = await screen.findByRole('group', { name: 'Use Timing' });
+    expect(within(reloaded).getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
+    expect(within(reloaded).getByRole('checkbox', { name: 'Post-Emerge Soybeans' })).toBeChecked();
+  });
+
+  it('cancels or confirms clearing timings on a category change', async () => {
+    H.product = baseProduct({ use_timings: ['pre_emerge_corn'] });
+    render(<ProductDetail />);
+    const category = await screen.findByRole('combobox', { name: 'Category' });
+    fireEvent.change(category, { target: { value: 'Insecticide' } });
+    expect(screen.getByText('This product has use timings. Changing the category clears them.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(category).toHaveValue('Herbicide');
+    expect(within(screen.getByRole('group', { name: 'Use Timing' })).getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
+    fireEvent.change(category, { target: { value: 'Insecticide' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Change Category' }));
+    expect(category).toHaveValue('Insecticide');
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.use_timings).toEqual([]));
+    expect(H.savedPayload?.category).toBe('Insecticide');
   });
 });

@@ -1785,6 +1785,20 @@ export function parseRawDiff(stdout) {
   return entries;
 }
 
+// The base a clean review's proof may be bound to, or null to refuse. Both status
+// reads must SUCCEED and be clean, and HEAD must be an unchanged 40-hex sha. A
+// failed git status (STATUS_UNAVAILABLE sentinel) makes worktreeIsClean false, so
+// it can never be mistaken for a clean tree. origin/main may stay put or move
+// forward, the same as it moving a minute after the review; the result is always
+// the START base, because the review covered baseBefore...HEAD and nothing newer.
+// A rewind, a sideways move or a failed git check refuses.
+export function reviewProofBase({ root, headBefore, headAfter, baseBefore, baseAfter, cleanBefore, cleanAfter }) {
+  if (!cleanBefore || !cleanAfter || headAfter !== headBefore) return null;
+  if (![headAfter, baseBefore, baseAfter].every((sha) => CARRY_SHA_RE.test(String(sha || "")))) return null;
+  if (baseAfter === baseBefore) return baseBefore;
+  return gitOk(["merge-base", "--is-ancestor", baseBefore, baseAfter], root) ? baseBefore : null;
+}
+
 function gitChangedEntries(fromRef, toRef, cwd) {
   const result = runTrustedGit(
     ["diff", "--raw", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", fromRef, toRef],
@@ -2233,28 +2247,21 @@ export function run(argv = process.argv.slice(2)) {
   const cleanAfter = worktreeIsClean(root);
   const verdict = codexReviewProofVerdict({ status: result.status, stdout: result.stdout });
 
-  // Both status reads must SUCCEED and be clean, and HEAD must be an unchanged
-  // 40-hex sha. A failed git status (STATUS_UNAVAILABLE sentinel) makes
-  // worktreeIsClean false, so it can never be mistaken for a clean tree.
-  // origin/main must also be an unchanged 40-hex sha: the proof records the base
-  // it was reviewed against, and if the base shifted mid-review the review no
-  // longer describes origin/main...HEAD, so mint nothing.
-  const contextStable =
-    headAfter &&
-    headAfter === headBefore &&
-    /^[0-9a-f]{40}$/i.test(headAfter) &&
-    baseAfter &&
-    baseAfter === baseBefore &&
-    /^[0-9a-f]{40}$/i.test(baseAfter) &&
-    cleanBefore &&
-    cleanAfter;
+  const proofBase = reviewProofBase({ root, headBefore, headAfter, baseBefore, baseAfter, cleanBefore, cleanAfter });
 
-  if (verdict && contextStable) {
-    const proofPath = writeCodexPushProof({ root, headSha: headAfter, baseSha: baseAfter, verdict });
+  if (verdict && proofBase) {
+    const proofPath = writeCodexPushProof({ root, headSha: headAfter, baseSha: proofBase, verdict });
     process.stdout.write(
-      `Codex push proof written to ${proofPath} (verdict: ${verdict}, head ${headAfter}, base ${baseAfter}, ` +
+      `Codex push proof written to ${proofPath} (verdict: ${verdict}, head ${headAfter}, base ${proofBase}, ` +
       `reviewer binary ${codexRun.codexBin}${codexRun.fallbackUsed ? " — sandbox-startup fallback" : ""}).\n`,
     );
+    if (baseAfter !== proofBase) {
+      process.stdout.write(
+        `origin/main moved forward during the review (now ${baseAfter}). The clean review is kept, bound to the base it ` +
+        "started from, so the merge gates accept it. If this head still needs a push, the push gate wants the exact base: " +
+        "merge origin/main into the branch and run this script with --carry-forward.\n",
+      );
+    }
     return 0;
   }
 
@@ -2266,8 +2273,9 @@ export function run(argv = process.argv.slice(2)) {
     );
   } else {
     process.stderr.write(
-      "Codex returned clean, but the worktree/HEAD/origin-main was dirty or moved during the review, so the proof " +
-      "cannot be bound to a stable commit + base. Commit or stash your changes on a clean tree (and re-fetch if origin/main moved), then re-run.\n",
+      "Codex returned clean, but the worktree or HEAD was dirty or moved during the review, or origin/main moved " +
+      "anywhere but forward, so the proof cannot be bound to a stable commit + base. Commit or stash your changes on " +
+      "a clean tree (and re-fetch if origin/main moved), then re-run.\n",
     );
   }
   return 1;

@@ -4,6 +4,7 @@
 //   - schema-registry.json BEHIND registry-relevant migrations on disk
 //     (schema-neutral cron/data-only migrations do not create a false alarm)
 //   - Uncommitted files from a prior session
+//   - core.hooksPath pointing anywhere but this checkout's .husky
 //   - Weekly DB backup missing or stale. Two evidence sources, newest wins:
 //     backups/LATEST-OK.json (stamped by a locally-run scripts/backup-db.mjs)
 //     and the "Off-site DB backup" GitHub Actions workflow in
@@ -263,6 +264,26 @@ try {
     );
   }
 } catch { /* ignore */ }
+
+// ─── CHECK 3 — commit/push guards come from THIS checkout ─────────────────
+// A core.hooksPath pointing at another checkout runs that checkout's (older)
+// guards with no error; on 2026-11-01 four worktrees ran guards 30 commits stale
+// and only agent-health noticed. Same rule as agent-health, run every session.
+// Imported lazily so a broken import only skips this check, not the others.
+try {
+  execFileSync("git", ["-C", projectDir, "rev-parse", "--is-inside-work-tree"], {
+    timeout: 5000, stdio: ["ignore", "ignore", "ignore"],
+  });
+  const { checkGitHooksInstalled } = await import("../../scripts/agent-health-check.mjs");
+  const hooks = checkGitHooksInstalled(projectDir);
+  if (hooks.status === "FAIL") {
+    warnings.push(
+      `🛡 Commit/push guards are NOT this checkout's: ${hooks.note}\n` +
+      `   Fix: git config --worktree --unset core.hooksPath (a per-worktree override is the usual cause);\n` +
+      `   if npm run agent-health still fails, run git config core.hooksPath .husky.`
+    );
+  }
+} catch { /* not a git checkout, or git unavailable */ }
 
 // ─── CHECK 4 — weekly DB backup freshness ─────────────────────────────────
 // Two evidence sources, newest wins:
